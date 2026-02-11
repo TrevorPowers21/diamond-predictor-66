@@ -183,7 +183,9 @@ Deno.serve(async (req) => {
     const token = await getGoogleAccessToken();
     let result: Record<string, unknown> = {};
 
-    if (action === "import_players") {
+    if (action === "discover") {
+      result = await discoverSheets(token, spreadsheet_id);
+    } else if (action === "import_players") {
       result = await importPlayers(db, token, spreadsheet_id, players_range || "Players!A:N");
     } else if (action === "import_stats") {
       result = await importStats(db, token, spreadsheet_id, stats_range || "Stats!A:AE");
@@ -200,7 +202,7 @@ Deno.serve(async (req) => {
       const s = await exportStats(db, token, spreadsheet_id, stats_range || "Stats!A:AE");
       result = { players: p, stats: s };
     } else {
-      throw new Error(`Unknown action: ${action}. Use import_players, import_stats, export_players, export_stats, import_all, or export_all`);
+      throw new Error(`Unknown action: ${action}`);
     }
 
     return new Response(JSON.stringify({ success: true, ...result }), {
@@ -390,4 +392,38 @@ async function exportStats(
 
   await writeSheet(token, spreadsheetId, range, [header, ...rows]);
   return { exported: stats.length };
+}
+
+// ── Discover sheets ─────────────────────────────────────────────────
+async function discoverSheets(
+  token: string,
+  spreadsheetId: string
+) {
+  // Get spreadsheet metadata (sheet names)
+  const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`;
+  const metaRes = await fetch(metaUrl, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!metaRes.ok) throw new Error(`Failed to read spreadsheet: ${await metaRes.text()}`);
+  const meta = await metaRes.json();
+
+  const sheetNames: string[] = meta.sheets.map(
+    (s: { properties: { title: string } }) => s.properties.title
+  );
+
+  // Read first 2 rows (header + sample) from each sheet
+  const sheets: Record<string, { headers: string[]; sample: string[] }> = {};
+  for (const name of sheetNames) {
+    try {
+      const rows = await readSheet(token, spreadsheetId, `'${name}'!1:2`);
+      sheets[name] = {
+        headers: rows[0] ?? [],
+        sample: rows[1] ?? [],
+      };
+    } catch {
+      sheets[name] = { headers: [], sample: [] };
+    }
+  }
+
+  return { sheets };
 }
