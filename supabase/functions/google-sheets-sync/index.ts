@@ -229,6 +229,14 @@ Deno.serve(async (req) => {
       const r = await importNilValuation(db, token, spreadsheet_id, body.returner_tab || "Returner NIL Valuation", "returner", body.season || 2025);
       const c = await importTcuValuation(db, token, spreadsheet_id, body.tcu_tab || "TCU Player Valuation", body.season || 2025);
       result = { transfer_nil: t, returner_nil: r, tcu_nil: c };
+    } else if (action === "import_returner_power_rating") {
+      result = await importOffensivePowerRating(db, token, spreadsheet_id, body.tab || "Returner Offensive Power Rating", "returner", body.season || 2025);
+    } else if (action === "import_transfer_power_rating") {
+      result = await importOffensivePowerRating(db, token, spreadsheet_id, body.tab || "Transfer Offensive Power Rating", "transfer", body.season || 2025);
+    } else if (action === "import_power_rating_all") {
+      const r = await importOffensivePowerRating(db, token, spreadsheet_id, body.returner_tab || "Returner Offensive Power Rating", "returner", body.season || 2025);
+      const t = await importOffensivePowerRating(db, token, spreadsheet_id, body.transfer_tab || "Transfer Offensive Power Rating", "transfer", body.season || 2025);
+      result = { returner_power: r, transfer_power: t };
     } else {
       throw new Error(`Unknown action: ${action}`);
     }
@@ -1034,4 +1042,119 @@ async function importTcuValuation(
   }
 
   return { imported, skipped };
+}
+
+// ── Import Offensive Power Rating (conference-level → player) ────────
+async function importOffensivePowerRating(
+  db: ReturnType<typeof createClient>,
+  token: string,
+  spreadsheetId: string,
+  tab: string,
+  modelType: string,
+  season: number
+) {
+  const rows = await readSheet(token, spreadsheetId, `'${tab}'!A1:K200`);
+  if (rows.length < 4) return { imported: 0, message: "Not enough rows" };
+
+  // Row 1 (index 0): header labels (Avg. Exit Velo, Barrel%, Whiff%, Chase%, SDs)
+  // Row 2 (index 1): NCAA averages for those metrics
+  // Row 3 (index 2): Column headers: Team(0), Avg Exit Velocity(1), Barrel%(2),
+  //   Whiff%(3), Chase%(4), EV Score(5), Barrel Score(6), Whiff% Score(7),
+  //   Chase% Score(8), Offensive Power Rating(9), Power Rating(10)
+  // Row 4+ (index 3+): Conference data
+
+  // Build conference → scores map
+  const confMap = new Map<string, {
+    ev_score: number | null;
+    barrel_score: number | null;
+    whiff_score: number | null;
+    chase_score: number | null;
+    power_rating_score: number | null;
+    power_rating_plus: number | null;
+  }>();
+
+  for (let i = 3; i < rows.length; i++) {
+    const row = rows[i];
+    const rawConf = row[0]?.trim();
+    if (!rawConf) continue;
+
+    // Strip year prefix (e.g., "25 ACC" → "ACC")
+    const conf = rawConf.replace(/^\d+\s+/, "");
+
+    confMap.set(conf.toLowerCase(), {
+      ev_score: parseFloat(row[5]) || null,
+      barrel_score: parseFloat(row[6]) || null,
+      whiff_score: parseFloat(row[7]) || null,
+      chase_score: parseFloat(row[8]) || null,
+      power_rating_score: parseFloat(row[9]) || null,
+      power_rating_plus: parseFloat(row[10]) || null,
+    });
+  }
+
+  // Get all player predictions for this model type + season
+  const { data: predictions } = await db
+    .from("player_predictions")
+    .select("id, player_id")
+    .eq("model_type", modelType)
+    .eq("season", season);
+
+  if (!predictions || predictions.length === 0) {
+    return { imported: 0, skipped: 0, message: "No predictions found for this model type" };
+  }
+
+  // Get player conferences/teams
+  const playerIds = predictions.map((p: { player_id: string }) => p.player_id);
+  const { data: players } = await db
+    .from("players")
+    .select("id, conference, team")
+    .in("id", playerIds);
+
+  const playerConfMap = new Map<string, string>();
+  for (const p of players || []) {
+    // Use conference if available, otherwise try to extract from team
+    const conf = p.conference || p.team || "";
+    playerConfMap.set(p.id, conf.toLowerCase());
+  }
+
+  let imported = 0;
+  let skipped = 0;
+
+  for (const pred of predictions) {
+    const confKey = playerConfMap.get(pred.player_id);
+    if (!confKey) { skipped++; continue; }
+
+    // Try exact match, then partial match
+    let scores = confMap.get(confKey);
+    if (!scores) {
+      // Try partial matching (e.g., player conf "SEC" matches "sec")
+      for (const [key, val] of confMap) {
+        if (key.includes(confKey) || confKey.includes(key)) {
+          scores = val;
+          break;
+        }
+      }
+    }
+
+    if (!scores) { skipped++; continue; }
+
+    const update: Record<string, unknown> = {};
+    if (scores.ev_score != null) update.ev_score = scores.ev_score;
+    if (scores.barrel_score != null) update.barrel_score = scores.barrel_score;
+    if (scores.whiff_score != null) update.whiff_score = scores.whiff_score;
+    if (scores.chase_score != null) update.chase_score = scores.chase_score;
+    if (scores.power_rating_score != null) update.power_rating_score = scores.power_rating_score;
+    if (scores.power_rating_plus != null) update.power_rating_plus = scores.power_rating_plus;
+
+    if (Object.keys(update).length === 0) { skipped++; continue; }
+
+    const { error } = await db.from("player_predictions").update(update).eq("id", pred.id);
+    if (error) {
+      console.error(`Failed to update power rating for pred ${pred.id}:`, error.message);
+      skipped++;
+    } else {
+      imported++;
+    }
+  }
+
+  return { imported, skipped, conferences_found: confMap.size };
 }
