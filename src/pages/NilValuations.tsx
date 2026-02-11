@@ -8,11 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { DollarSign, ArrowUpDown, Search, TrendingUp, BarChart3, Users } from "lucide-react";
+import { DollarSign, ArrowUpDown, Search, TrendingUp, BarChart3 } from "lucide-react";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell } from "recharts";
 
-type SortKey = "name" | "estimated_value" | "offensive_effectiveness" | "raa" | "rar" | "owar";
+type SortKey = "name" | "estimated_value" | "p_avg" | "p_obp" | "p_slg" | "p_wrc_plus" | "owar";
 type SortDir = "asc" | "desc";
 
 interface NilPlayer {
@@ -26,16 +26,14 @@ interface NilPlayer {
   class_year: string | null;
   estimated_value: number | null;
   offensive_effectiveness: number | null;
-  model_version: string | null;
   component_breakdown: {
-    model_type?: string;
-    variant?: string;
-    off_value?: number;
-    raa?: number;
-    rar?: number;
-    replacement_runs?: number;
     ncaa_owar?: number;
   } | null;
+  // prediction stats
+  p_avg: number | null;
+  p_obp: number | null;
+  p_slg: number | null;
+  p_wrc_plus: number | null;
 }
 
 const dollarFormat = (v: number | null | undefined) => {
@@ -49,6 +47,11 @@ const compactDollar = (v: number) => {
   return `$${v.toFixed(0)}`;
 };
 
+const statFmt = (v: number | null | undefined, decimals = 3) => {
+  if (v == null) return "—";
+  return v.toFixed(decimals);
+};
+
 export default function NilValuations() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("estimated_value");
@@ -57,29 +60,48 @@ export default function NilValuations() {
   const { data: players = [], isLoading } = useQuery({
     queryKey: ["nil-valuations"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Fetch NIL valuations
+      const { data: nilData, error: nilError } = await supabase
         .from("nil_valuations")
         .select(`
           *,
           players!inner(id, first_name, last_name, team, conference, position, class_year)
         `);
+      if (nilError) throw nilError;
 
-      if (error) throw error;
+      // Fetch predictions for these players (regular variant)
+      const playerIds = (nilData || []).map((r: any) => r.player_id);
+      const { data: predData } = await supabase
+        .from("player_predictions")
+        .select("player_id, p_avg, p_obp, p_slg, p_wrc_plus")
+        .eq("variant", "regular")
+        .in("player_id", playerIds);
 
-      return (data || []).map((row: any) => ({
-        id: row.id,
-        player_id: row.player_id,
-        first_name: row.players.first_name,
-        last_name: row.players.last_name,
-        team: row.players.team,
-        conference: row.players.conference,
-        position: row.players.position,
-        class_year: row.players.class_year,
-        estimated_value: row.estimated_value,
-        offensive_effectiveness: row.offensive_effectiveness,
-        model_version: row.model_version,
-        component_breakdown: row.component_breakdown as NilPlayer["component_breakdown"],
-      })) as NilPlayer[];
+      const predMap = new Map<string, { p_avg: number | null; p_obp: number | null; p_slg: number | null; p_wrc_plus: number | null }>();
+      (predData || []).forEach((p: any) => {
+        predMap.set(p.player_id, { p_avg: p.p_avg, p_obp: p.p_obp, p_slg: p.p_slg, p_wrc_plus: p.p_wrc_plus });
+      });
+
+      return (nilData || []).map((row: any) => {
+        const pred = predMap.get(row.player_id);
+        return {
+          id: row.id,
+          player_id: row.player_id,
+          first_name: row.players.first_name,
+          last_name: row.players.last_name,
+          team: row.players.team,
+          conference: row.players.conference,
+          position: row.players.position,
+          class_year: row.players.class_year,
+          estimated_value: row.estimated_value,
+          offensive_effectiveness: row.offensive_effectiveness,
+          component_breakdown: row.component_breakdown as NilPlayer["component_breakdown"],
+          p_avg: pred?.p_avg ?? null,
+          p_obp: pred?.p_obp ?? null,
+          p_slg: pred?.p_slg ?? null,
+          p_wrc_plus: pred?.p_wrc_plus ?? null,
+        };
+      }) as NilPlayer[];
     },
   });
 
@@ -90,8 +112,7 @@ export default function NilValuations() {
       list = list.filter(
         (p) =>
           `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
-          (p.team || "").toLowerCase().includes(q) ||
-          (p.model_version || "").toLowerCase().includes(q)
+          (p.team || "").toLowerCase().includes(q)
       );
     }
     list.sort((a, b) => {
@@ -102,13 +123,7 @@ export default function NilValuations() {
       }
       let aVal: number;
       let bVal: number;
-      if (sortKey === "raa") {
-        aVal = a.component_breakdown?.raa ?? -999;
-        bVal = b.component_breakdown?.raa ?? -999;
-      } else if (sortKey === "rar") {
-        aVal = a.component_breakdown?.rar ?? -999;
-        bVal = b.component_breakdown?.rar ?? -999;
-      } else if (sortKey === "owar") {
+      if (sortKey === "owar") {
         aVal = a.component_breakdown?.ncaa_owar ?? -999;
         bVal = b.component_breakdown?.ncaa_owar ?? -999;
       } else {
@@ -247,7 +262,7 @@ export default function NilValuations() {
         {/* Table */}
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="text-base">Valuations</CardTitle>
+            <CardTitle className="text-base">NIL Valuation</CardTitle>
             <div className="relative w-full sm:w-64">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -273,25 +288,33 @@ export default function NilValuations() {
                       <TableHead>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <span className="cursor-help"><SortButton label="OE" sortKeyVal="offensive_effectiveness" /></span>
+                            <span className="cursor-help"><SortButton label="pAVG" sortKeyVal="p_avg" /></span>
                           </TooltipTrigger>
-                          <TooltipContent><p className="text-xs">Offensive Effectiveness — 100 = league avg</p></TooltipContent>
+                          <TooltipContent><p className="text-xs">Predicted Batting Average</p></TooltipContent>
                         </Tooltip>
                       </TableHead>
                       <TableHead>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <span className="cursor-help"><SortButton label="RAA" sortKeyVal="raa" /></span>
+                            <span className="cursor-help"><SortButton label="pOBP" sortKeyVal="p_obp" /></span>
                           </TooltipTrigger>
-                          <TooltipContent><p className="text-xs">Runs Above Average</p></TooltipContent>
+                          <TooltipContent><p className="text-xs">Predicted On-Base Percentage</p></TooltipContent>
                         </Tooltip>
                       </TableHead>
                       <TableHead>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <span className="cursor-help"><SortButton label="RAR" sortKeyVal="rar" /></span>
+                            <span className="cursor-help"><SortButton label="pSLG" sortKeyVal="p_slg" /></span>
                           </TooltipTrigger>
-                          <TooltipContent><p className="text-xs">Runs Above Replacement</p></TooltipContent>
+                          <TooltipContent><p className="text-xs">Predicted Slugging Percentage</p></TooltipContent>
+                        </Tooltip>
+                      </TableHead>
+                      <TableHead>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-help"><SortButton label="wRC+" sortKeyVal="p_wrc_plus" /></span>
+                          </TooltipTrigger>
+                          <TooltipContent><p className="text-xs">Weighted Runs Created Plus — 100 = league avg</p></TooltipContent>
                         </Tooltip>
                       </TableHead>
                       <TableHead>
@@ -302,7 +325,6 @@ export default function NilValuations() {
                           <TooltipContent><p className="text-xs">Offensive Wins Above Replacement (NCAA scale)</p></TooltipContent>
                         </Tooltip>
                       </TableHead>
-                      <TableHead>Model</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -322,21 +344,19 @@ export default function NilValuations() {
                             </Badge>
                           </TableCell>
                           <TableCell className="font-mono text-sm">
-                            {p.offensive_effectiveness != null ? Math.round(p.offensive_effectiveness) : "—"}
+                            {statFmt(p.p_avg)}
                           </TableCell>
                           <TableCell className="font-mono text-sm">
-                            {cb?.raa != null ? cb.raa.toFixed(1) : "—"}
+                            {statFmt(p.p_obp)}
                           </TableCell>
                           <TableCell className="font-mono text-sm">
-                            {cb?.rar != null ? cb.rar.toFixed(1) : "—"}
+                            {statFmt(p.p_slg)}
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {p.p_wrc_plus != null ? Math.round(p.p_wrc_plus).toString() : "—"}
                           </TableCell>
                           <TableCell className="font-mono text-sm">
                             {cb?.ncaa_owar != null ? cb.ncaa_owar.toFixed(2) : "—"}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="secondary" className="text-[10px]">
-                              {p.model_version || "—"}
-                            </Badge>
                           </TableCell>
                         </TableRow>
                       );
