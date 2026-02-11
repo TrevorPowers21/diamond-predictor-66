@@ -90,10 +90,12 @@ export default function ReturningPlayers() {
   const [sortKey, setSortKey] = useState<SortKey>("p_ops");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
+  const [statusFilter, setStatusFilter] = useState<"active" | "departed" | "all">("active");
+
   const { data: players = [], isLoading } = useQuery({
-    queryKey: ["returning-players", variant],
+    queryKey: ["returning-players", variant, statusFilter],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("player_predictions")
         .select(`
           *,
@@ -102,6 +104,11 @@ export default function ReturningPlayers() {
         .eq("model_type", "returner")
         .eq("variant", variant);
 
+      if (statusFilter !== "all") {
+        query = query.eq("status", statusFilter);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
 
       return (data || []).map((row: any) => ({
@@ -248,15 +255,27 @@ export default function ReturningPlayers() {
             <h2 className="text-2xl font-bold tracking-tight">Returning Players</h2>
             <p className="text-muted-foreground">Projected production for returning roster players</p>
           </div>
-          <Select value={variant} onValueChange={(v) => setVariant(v as "regular" | "xstats")}>
-            <SelectTrigger className="w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="regular">Regular Stats</SelectItem>
-              <SelectItem value="xstats">xStats</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex gap-2">
+            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "active" | "departed" | "all")}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="departed">Departed</SelectItem>
+                <SelectItem value="all">All</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={variant} onValueChange={(v) => setVariant(v as "regular" | "xstats")}>
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="regular">Regular Stats</SelectItem>
+                <SelectItem value="xstats">xStats</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         {/* Summary cards */}
