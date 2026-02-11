@@ -71,12 +71,12 @@ export default function DataSync() {
     { key: "import_returner_predictions", label: "Import Returner Predictions", icon: Download, desc: "Pull returner equation weights + player predictions" },
     { key: "import_transfer_predictions", label: "Import Transfer Predictions", icon: Download, desc: "Pull transfer equation weights + player predictions" },
     { key: "import_predictions_all", label: "Import All Predictions", icon: Download, desc: "Pull both returner + transfer predictions" },
+    { key: "import_conference_stats", label: "Import Conference Stats", icon: Download, desc: "Pull '25 conference stats+ data" },
+    { key: "import_park_factors", label: "Import Park Factors", icon: Download, desc: "Pull park factor+ full season data" },
     { key: "import_players", label: "Import Players", icon: Download, desc: "Pull player roster from sheet" },
     { key: "import_stats", label: "Import Stats", icon: Download, desc: "Pull season stats from sheet" },
-    { key: "import_all", label: "Import All Legacy", icon: Download, desc: "Pull players + stats at once" },
     { key: "export_players", label: "Export Players", icon: Upload, desc: "Push players to sheet" },
     { key: "export_stats", label: "Export Stats", icon: Upload, desc: "Push stats to sheet" },
-    { key: "export_all", label: "Export All", icon: Upload, desc: "Push all data to sheet" },
   ];
 
   return (

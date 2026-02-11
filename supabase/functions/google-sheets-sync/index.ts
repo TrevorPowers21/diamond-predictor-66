@@ -214,6 +214,10 @@ Deno.serve(async (req) => {
       const r = await importReturnerPredictions(db, token, spreadsheet_id, body.returner_tab || "Returner Prediction Equation", body.season || 2025);
       const t = await importTransferPredictions(db, token, spreadsheet_id, body.transfer_tab || "Transfer Prediction Equation", body.season || 2025);
       result = { returner: r, transfer: t };
+    } else if (action === "import_conference_stats") {
+      result = await importConferenceStats(db, token, spreadsheet_id, body.tab || "'25 Conference Stats+", body.season || 2025);
+    } else if (action === "import_park_factors") {
+      result = await importParkFactors(db, token, spreadsheet_id, body.tab || "Park Factor+ Full Season", body.season || 2025);
     } else {
       throw new Error(`Unknown action: ${action}`);
     }
@@ -692,4 +696,177 @@ async function importTransferPredictions(
   }
 
   return { imported, skipped, config_imported: configImported };
+}
+
+// ── Import conference stats ──────────────────────────────────────────
+async function importConferenceStats(
+  db: ReturnType<typeof createClient>,
+  token: string,
+  spreadsheetId: string,
+  tab: string,
+  season: number
+) {
+  const rows = await readSheet(token, spreadsheetId, `${tab}!A1:AC200`);
+  if (rows.length < 2) return { imported: 0, message: "No data rows" };
+
+  // Row 1 (index 0) is headers:
+  // Team(0), AVG(1), OBP(2), SLG(3), OPS(4), ISO(5), WRC(6),
+  // EV Score(7), Barrel Score(8), Whiff% Score(9), Chase% Score(10),
+  // Offensive Power Rating(11), AVG+(12), OBP+(13), SLG+(14), OPS+(15),
+  // ISO+(16), WRC+(17), Power Rating+(18), Stuff+(19), ""(20),
+  // OFF Value(21), RAA(22), Replacement Runs(23), RAR(24),
+  // NCAA oWAR(25), Conference oWAR(26), NIL Valuation(27)
+
+  let imported = 0;
+  let skipped = 0;
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const conference = row[0]?.trim();
+    if (!conference) { skipped++; continue; }
+
+    // Store in power_ratings table (conference-level data)
+    const powerRating = parseFloat(row[11]) || null;
+    const rating = parseFloat(row[18]) || null; // Power Rating+
+
+    const record = {
+      conference,
+      season,
+      rating: rating ?? 100,
+      rank: null as number | null,
+      strength_of_schedule: null as number | null,
+      notes: JSON.stringify({
+        avg: parseFloat(row[1]) || null,
+        obp: parseFloat(row[2]) || null,
+        slg: parseFloat(row[3]) || null,
+        ops: parseFloat(row[4]) || null,
+        iso: parseFloat(row[5]) || null,
+        wrc: parseFloat(row[6]) || null,
+        ev_score: parseFloat(row[7]) || null,
+        barrel_score: parseFloat(row[8]) || null,
+        whiff_score: parseFloat(row[9]) || null,
+        chase_score: parseFloat(row[10]) || null,
+        offensive_power_rating: powerRating,
+        avg_plus: parseFloat(row[12]) || null,
+        obp_plus: parseFloat(row[13]) || null,
+        slg_plus: parseFloat(row[14]) || null,
+        ops_plus: parseFloat(row[15]) || null,
+        iso_plus: parseFloat(row[16]) || null,
+        wrc_plus: parseFloat(row[17]) || null,
+        stuff_plus: parseFloat(row[19]) || null,
+        off_value: parseFloat(row[21]) || null,
+        raa: parseFloat(row[22]) || null,
+        replacement_runs: parseFloat(row[23]) || null,
+        rar: parseFloat(row[24]) || null,
+        ncaa_owar: parseFloat(row[25]) || null,
+        conference_owar: parseFloat(row[26]) || null,
+        nil_valuation: row[27] || null,
+      }),
+    };
+
+    // Upsert by conference + season
+    const { data: existing } = await db
+      .from("power_ratings")
+      .select("id")
+      .eq("conference", conference)
+      .eq("season", season)
+      .maybeSingle();
+
+    if (existing) {
+      const { error } = await db.from("power_ratings").update(record).eq("id", existing.id);
+      if (error) { console.error(`Failed to update ${conference}:`, error.message); skipped++; continue; }
+    } else {
+      const { error } = await db.from("power_ratings").insert(record);
+      if (error) { console.error(`Failed to insert ${conference}:`, error.message); skipped++; continue; }
+    }
+    imported++;
+  }
+
+  return { imported, skipped };
+}
+
+// ── Import park factors ──────────────────────────────────────────────
+async function importParkFactors(
+  db: ReturnType<typeof createClient>,
+  token: string,
+  spreadsheetId: string,
+  tab: string,
+  season: number
+) {
+  const rows = await readSheet(token, spreadsheetId, `'${tab}'!A1:AF400`);
+  if (rows.length < 3) return { imported: 0, message: "No data rows" };
+
+  // Row 1 (index 0): NCAA averages at cols 7-12
+  // Row 2 (index 1): Headers
+  // Row 3+ (index 2+): Data
+  // Layout per row:
+  //   A-F (0-5): Home hitting — team, BA, OBP, SLG, OPS, ISO
+  //   G (6): empty
+  //   H-M (7-12): Away/pitching — team, BA, OBP, SLG, OPS, ISO
+  //   N (13): empty
+  //   O-AF (14-31): Park factors — team(14), Home AVG+(15), Pitching AVG+(16),
+  //     AVG+ Impact(17), Home OBP+(18), Pitching OBP+(19), OBP+ Impact(20),
+  //     Home SLG+(21), Pitching SLG+(22), SLG+ Impact(23),
+  //     Home OPS+(24), Pitching OPS+(25), OPS Impact(26),
+  //     Home ISO+(27), Pitching ISO+(28), ISO Impact(29),
+  //     Park Factor WRC(30), Park Factor+ WRC+(31)
+
+  // Delete existing park factors for this season, then batch insert
+  await db.from("park_factors").delete().eq("season", season);
+
+  const records: Record<string, unknown>[] = [];
+
+  for (let i = 2; i < rows.length; i++) {
+    const row = rows[i];
+    const team = row[0]?.trim() || row[14]?.trim();
+    if (!team) continue;
+
+    const overallFactor = parseFloat(row[30]) || null;
+    const overallFactorPlus = parseFloat(row[31]) || null;
+
+    const detail: Record<string, unknown> = {
+      home_avg: parseFloat(row[1]) || null,
+      home_obp: parseFloat(row[2]) || null,
+      home_slg: parseFloat(row[3]) || null,
+      away_avg: parseFloat(row[8]) || null,
+      away_obp: parseFloat(row[9]) || null,
+      away_slg: parseFloat(row[10]) || null,
+      home_avg_plus: parseFloat(row[15]) || null,
+      pitching_avg_plus: parseFloat(row[16]) || null,
+      home_obp_plus: parseFloat(row[18]) || null,
+      pitching_obp_plus: parseFloat(row[19]) || null,
+      home_slg_plus: parseFloat(row[21]) || null,
+      pitching_slg_plus: parseFloat(row[22]) || null,
+      home_ops_plus: parseFloat(row[24]) || null,
+      pitching_ops_plus: parseFloat(row[25]) || null,
+      home_iso_plus: parseFloat(row[27]) || null,
+      pitching_iso_plus: parseFloat(row[28]) || null,
+      park_factor_wrc_plus: overallFactorPlus,
+    };
+
+    records.push({
+      team,
+      season,
+      overall_factor: overallFactor ? overallFactor / 100 : 1.0,
+      hits_factor: parseFloat(row[17]) ? parseFloat(row[17]) / 100 : null,
+      bb_factor: parseFloat(row[20]) ? parseFloat(row[20]) / 100 : null,
+      hr_factor: parseFloat(row[29]) ? parseFloat(row[29]) / 100 : null,
+      runs_factor: parseFloat(row[26]) ? parseFloat(row[26]) / 100 : null,
+      venue_name: JSON.stringify(detail),
+    });
+  }
+
+  // Batch insert in chunks of 50
+  let imported = 0;
+  for (let i = 0; i < records.length; i += 50) {
+    const chunk = records.slice(i, i + 50);
+    const { error } = await db.from("park_factors").insert(chunk);
+    if (error) {
+      console.error(`Batch insert failed at offset ${i}:`, error.message);
+    } else {
+      imported += chunk.length;
+    }
+  }
+
+  return { imported, skipped: rows.length - 2 - records.length };
 }
