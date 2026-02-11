@@ -205,17 +205,18 @@ Deno.serve(async (req) => {
           created++;
         }
 
-        // Build prediction
-        const ba = parseNum(cols[baIdx]);
-        const obp = parseNum(cols[obpIdx]);
-        const slg = parseNum(cols[slgIdx]);
-        const ev = parseNum(cols[evIdx]);
-        const barrel = parsePercent(cols[barrelIdx]);
-        const miss = parsePercent(cols[missIdx]);
-        const chase = parsePercent(cols[chaseIdx]);
+        // Build prediction - only include fields present in the CSV
+        const ba = baIdx !== -1 ? parseNum(cols[baIdx]) : undefined;
+        const obp = obpIdx !== -1 ? parseNum(cols[obpIdx]) : undefined;
+        const slg = slgIdx !== -1 ? parseNum(cols[slgIdx]) : undefined;
+        const ev = evIdx !== -1 ? parseNum(cols[evIdx]) : undefined;
+        const barrel = barrelIdx !== -1 ? parsePercent(cols[barrelIdx]) : undefined;
+        const miss = missIdx !== -1 ? parsePercent(cols[missIdx]) : undefined;
+        const chase = chaseIdx !== -1 ? parsePercent(cols[chaseIdx]) : undefined;
 
         const classTransition = deriveClassTransition(classYear);
 
+        // Always-present keys for upsert conflict resolution
         const predRecord: Record<string, unknown> = {
           player_id: playerId,
           model_type,
@@ -224,19 +225,22 @@ Deno.serve(async (req) => {
           status: "active",
           class_transition: classTransition,
           dev_aggressiveness: 0.5,
-          from_avg: ba,
-          from_obp: obp,
-          from_slg: slg,
-          ev_score: ev,
-          barrel_score: barrel,
-          whiff_score: miss,
-          chase_score: chase,
-          p_avg: ba,
-          p_obp: obp,
-          p_slg: slg,
-          p_ops: obp != null && slg != null ? Math.round((obp + slg) * 1000) / 1000 : null,
-          p_iso: ba != null && slg != null ? Math.round((slg - ba) * 1000) / 1000 : null,
         };
+
+        // Only set stat fields if that column existed in the CSV
+        if (ba !== undefined) { predRecord.from_avg = ba; predRecord.p_avg = ba; }
+        if (obp !== undefined) { predRecord.from_obp = obp; predRecord.p_obp = obp; }
+        if (slg !== undefined) { predRecord.from_slg = slg; predRecord.p_slg = slg; }
+        if (ev !== undefined) predRecord.ev_score = ev;
+        if (barrel !== undefined) predRecord.barrel_score = barrel;
+        if (miss !== undefined) predRecord.whiff_score = miss;
+        if (chase !== undefined) predRecord.chase_score = chase;
+        if (obp !== undefined && slg !== undefined) {
+          predRecord.p_ops = obp != null && slg != null ? Math.round((obp + slg) * 1000) / 1000 : null;
+        }
+        if (ba !== undefined && slg !== undefined) {
+          predRecord.p_iso = ba != null && slg != null ? Math.round((slg - ba) * 1000) / 1000 : null;
+        }
 
         importedPlayerIds.add(playerId);
 
