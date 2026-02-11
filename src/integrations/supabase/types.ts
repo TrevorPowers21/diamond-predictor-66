@@ -106,6 +106,36 @@ export type Database = {
         }
         Relationships: []
       }
+      model_config: {
+        Row: {
+          config_key: string
+          config_value: number
+          created_at: string
+          id: string
+          model_type: string
+          season: number
+          updated_at: string
+        }
+        Insert: {
+          config_key: string
+          config_value: number
+          created_at?: string
+          id?: string
+          model_type: string
+          season?: number
+          updated_at?: string
+        }
+        Update: {
+          config_key?: string
+          config_value?: number
+          created_at?: string
+          id?: string
+          model_type?: string
+          season?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       nil_valuations: {
         Row: {
           component_breakdown: Json | null
@@ -194,6 +224,128 @@ export type Database = {
           venue_name?: string | null
         }
         Relationships: []
+      }
+      player_predictions: {
+        Row: {
+          barrel_score: number | null
+          chase_score: number | null
+          class_transition: string | null
+          created_at: string
+          dev_aggressiveness: number | null
+          ev_score: number | null
+          from_avg: number | null
+          from_avg_plus: number | null
+          from_obp: number | null
+          from_obp_plus: number | null
+          from_park_factor: number | null
+          from_slg: number | null
+          from_slg_plus: number | null
+          from_stuff_plus: number | null
+          id: string
+          model_type: string
+          p_avg: number | null
+          p_iso: number | null
+          p_obp: number | null
+          p_ops: number | null
+          p_slg: number | null
+          p_wrc: number | null
+          p_wrc_plus: number | null
+          player_id: string
+          power_rating_plus: number | null
+          power_rating_score: number | null
+          season: number
+          to_avg_plus: number | null
+          to_obp_plus: number | null
+          to_park_factor: number | null
+          to_slg_plus: number | null
+          to_stuff_plus: number | null
+          updated_at: string
+          variant: string
+          whiff_score: number | null
+        }
+        Insert: {
+          barrel_score?: number | null
+          chase_score?: number | null
+          class_transition?: string | null
+          created_at?: string
+          dev_aggressiveness?: number | null
+          ev_score?: number | null
+          from_avg?: number | null
+          from_avg_plus?: number | null
+          from_obp?: number | null
+          from_obp_plus?: number | null
+          from_park_factor?: number | null
+          from_slg?: number | null
+          from_slg_plus?: number | null
+          from_stuff_plus?: number | null
+          id?: string
+          model_type: string
+          p_avg?: number | null
+          p_iso?: number | null
+          p_obp?: number | null
+          p_ops?: number | null
+          p_slg?: number | null
+          p_wrc?: number | null
+          p_wrc_plus?: number | null
+          player_id: string
+          power_rating_plus?: number | null
+          power_rating_score?: number | null
+          season?: number
+          to_avg_plus?: number | null
+          to_obp_plus?: number | null
+          to_park_factor?: number | null
+          to_slg_plus?: number | null
+          to_stuff_plus?: number | null
+          updated_at?: string
+          variant?: string
+          whiff_score?: number | null
+        }
+        Update: {
+          barrel_score?: number | null
+          chase_score?: number | null
+          class_transition?: string | null
+          created_at?: string
+          dev_aggressiveness?: number | null
+          ev_score?: number | null
+          from_avg?: number | null
+          from_avg_plus?: number | null
+          from_obp?: number | null
+          from_obp_plus?: number | null
+          from_park_factor?: number | null
+          from_slg?: number | null
+          from_slg_plus?: number | null
+          from_stuff_plus?: number | null
+          id?: string
+          model_type?: string
+          p_avg?: number | null
+          p_iso?: number | null
+          p_obp?: number | null
+          p_ops?: number | null
+          p_slg?: number | null
+          p_wrc?: number | null
+          p_wrc_plus?: number | null
+          player_id?: string
+          power_rating_plus?: number | null
+          power_rating_score?: number | null
+          season?: number
+          to_avg_plus?: number | null
+          to_obp_plus?: number | null
+          to_park_factor?: number | null
+          to_slg_plus?: number | null
+          to_stuff_plus?: number | null
+          updated_at?: string
+          variant?: string
+          whiff_score?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "player_predictions_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       players: {
         Row: {

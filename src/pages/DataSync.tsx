@@ -13,13 +13,16 @@ type SyncResult = {
   imported?: number;
   exported?: number;
   skipped?: number;
+  config_imported?: number;
   error?: string;
   players?: { imported?: number; skipped?: number; exported?: number };
   stats?: { imported?: number; skipped?: number; exported?: number };
+  returner?: { imported?: number; skipped?: number; config_imported?: number };
+  transfer?: { imported?: number; skipped?: number; config_imported?: number };
 };
 
 export default function DataSync() {
-  const [spreadsheetId, setSpreadsheetId] = useState("");
+  const [spreadsheetId, setSpreadsheetId] = useState("1UwtImwQ74ThQlMJizsqMSp6b4tG39uXuiI8nrQ46ZAE");
   const [playersRange, setPlayersRange] = useState("Players!A:N");
   const [statsRange, setStatsRange] = useState("Stats!A:AE");
   const [loading, setLoading] = useState<string | null>(null);
@@ -65,9 +68,12 @@ export default function DataSync() {
   };
 
   const actions = [
+    { key: "import_returner_predictions", label: "Import Returner Predictions", icon: Download, desc: "Pull returner equation weights + player predictions" },
+    { key: "import_transfer_predictions", label: "Import Transfer Predictions", icon: Download, desc: "Pull transfer equation weights + player predictions" },
+    { key: "import_predictions_all", label: "Import All Predictions", icon: Download, desc: "Pull both returner + transfer predictions" },
     { key: "import_players", label: "Import Players", icon: Download, desc: "Pull player roster from sheet" },
     { key: "import_stats", label: "Import Stats", icon: Download, desc: "Pull season stats from sheet" },
-    { key: "import_all", label: "Import All", icon: Download, desc: "Pull players + stats at once" },
+    { key: "import_all", label: "Import All Legacy", icon: Download, desc: "Pull players + stats at once" },
     { key: "export_players", label: "Export Players", icon: Upload, desc: "Push players to sheet" },
     { key: "export_stats", label: "Export Stats", icon: Upload, desc: "Push stats to sheet" },
     { key: "export_all", label: "Export All", icon: Upload, desc: "Push all data to sheet" },
@@ -166,6 +172,7 @@ export default function DataSync() {
                   {lastResult.error && <p className="text-destructive">{lastResult.error}</p>}
                   {lastResult.imported !== undefined && <p>Imported: {lastResult.imported}</p>}
                   {lastResult.exported !== undefined && <p>Exported: {lastResult.exported}</p>}
+                  {lastResult.config_imported !== undefined && <p>Config weights imported: {lastResult.config_imported}</p>}
                   {lastResult.skipped !== undefined && lastResult.skipped > 0 && (
                     <p className="text-muted-foreground">Skipped: {lastResult.skipped}</p>
                   )}
@@ -174,6 +181,12 @@ export default function DataSync() {
                   )}
                   {lastResult.stats && (
                     <p>Stats — imported: {lastResult.stats.imported ?? lastResult.stats.exported ?? 0}, skipped: {lastResult.stats.skipped ?? 0}</p>
+                  )}
+                  {lastResult.returner && (
+                    <p>Returner — imported: {lastResult.returner.imported ?? 0}, skipped: {lastResult.returner.skipped ?? 0}, config: {lastResult.returner.config_imported ?? 0}</p>
+                  )}
+                  {lastResult.transfer && (
+                    <p>Transfer — imported: {lastResult.transfer.imported ?? 0}, skipped: {lastResult.transfer.skipped ?? 0}, config: {lastResult.transfer.config_imported ?? 0}</p>
                   )}
                 </div>
               </div>

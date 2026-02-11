@@ -206,6 +206,14 @@ Deno.serve(async (req) => {
       const p = await exportPlayers(db, token, spreadsheet_id, players_range || "Players!A:N");
       const s = await exportStats(db, token, spreadsheet_id, stats_range || "Stats!A:AE");
       result = { players: p, stats: s };
+    } else if (action === "import_returner_predictions") {
+      result = await importReturnerPredictions(db, token, spreadsheet_id, body.tab || "Returner Prediction Equation", body.season || 2025);
+    } else if (action === "import_transfer_predictions") {
+      result = await importTransferPredictions(db, token, spreadsheet_id, body.tab || "Transfer Prediction Equation", body.season || 2025);
+    } else if (action === "import_predictions_all") {
+      const r = await importReturnerPredictions(db, token, spreadsheet_id, body.returner_tab || "Returner Prediction Equation", body.season || 2025);
+      const t = await importTransferPredictions(db, token, spreadsheet_id, body.transfer_tab || "Transfer Prediction Equation", body.season || 2025);
+      result = { returner: r, transfer: t };
     } else {
       throw new Error(`Unknown action: ${action}`);
     }
@@ -431,4 +439,257 @@ async function discoverSheets(
   }
 
   return { sheets };
+}
+
+// ── Helper: find or create player by name ────────────────────────────
+async function findOrCreatePlayer(
+  db: ReturnType<typeof createClient>,
+  rawName: string
+): Promise<{ id: string; cleanName: string } | null> {
+  // Clean name: remove xstats suffix, conference info in parens
+  let cleanName = rawName.replace(/\s*xstats$/i, "").replace(/\s*\(.*\)$/, "").trim();
+  if (!cleanName) return null;
+
+  const parts = cleanName.split(/\s+/);
+  if (parts.length < 2) return null;
+
+  const firstName = parts[0];
+  const lastName = parts.slice(1).join(" ");
+
+  // Try to find existing player
+  const { data: existing } = await db
+    .from("players")
+    .select("id")
+    .eq("first_name", firstName)
+    .eq("last_name", lastName)
+    .maybeSingle();
+
+  if (existing) return { id: existing.id, cleanName };
+
+  // Create player
+  const { data: created, error } = await db
+    .from("players")
+    .insert({ first_name: firstName, last_name: lastName })
+    .select("id")
+    .single();
+
+  if (error) {
+    console.error(`Failed to create player ${cleanName}:`, error.message);
+    return null;
+  }
+
+  return { id: created.id, cleanName };
+}
+
+// ── Import returner predictions ──────────────────────────────────────
+async function importReturnerPredictions(
+  db: ReturnType<typeof createClient>,
+  token: string,
+  spreadsheetId: string,
+  tab: string,
+  season: number
+) {
+  const rows = await readSheet(token, spreadsheetId, `'${tab}'!A1:V200`);
+  if (rows.length < 5) return { imported: 0, message: "Not enough rows" };
+
+  // Row 3 (index 2) has the config weights
+  const configRow = rows[2];
+  // Weights are at indices 12-21
+  const weightKeys = [
+    "pitching_weight_avg_obp", "pitching_weight_slg", "conference_weight",
+    "park_weight_avg_obp", "park_weight_slg", "power_rating_weight",
+    "ncaa_avg", "ncaa_obp", "ncaa_slg", "ncaa_power_rating"
+  ];
+  const weightIndices = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
+
+  let configImported = 0;
+  for (let i = 0; i < weightKeys.length; i++) {
+    const val = parseFloat(configRow[weightIndices[i]]);
+    if (isNaN(val)) continue;
+
+    const { error } = await db.from("model_config").upsert({
+      model_type: "returner",
+      config_key: weightKeys[i],
+      config_value: val,
+      season,
+    }, { onConflict: "model_type,config_key,season" });
+
+    if (!error) configImported++;
+  }
+
+  // Dev aggressiveness from row 2 (index 1): indices 6,7,8 = conservative, expected, aggressive
+  const devRow = rows[1];
+  const devKeys = ["dev_aggressiveness_conservative", "dev_aggressiveness_expected", "dev_aggressiveness_aggressive"];
+  for (let i = 0; i < 3; i++) {
+    const val = parseFloat(devRow[6 + i]);
+    if (isNaN(val)) continue;
+    await db.from("model_config").upsert({
+      model_type: "returner",
+      config_key: devKeys[i],
+      config_value: val,
+      season,
+    }, { onConflict: "model_type,config_key,season" });
+    configImported++;
+  }
+
+  // Player data starts at row 4 (index 3) which is headers, row 5+ (index 4+) is data
+  // Headers: Player Name(0), Player AVG(1), OBP(2), SLG(3), Class Transition(4),
+  // Dev Aggressiveness(5), EV Score(6), Barrel%(7), Whiff%(8), Chase%(9),
+  // Power Rating Score(10), Power Rating+(11), pAVG(12), pOBP(13), pSLG(14),
+  // pOPS(15), pISO(16), pWRC(17), pWRC+(18)
+
+  let imported = 0;
+  let skipped = 0;
+
+  for (let i = 4; i < rows.length; i++) {
+    const row = rows[i];
+    const rawName = row[0]?.trim();
+    if (!rawName) { skipped++; continue; }
+
+    const player = await findOrCreatePlayer(db, rawName);
+    if (!player) { skipped++; continue; }
+
+    const isXstats = /xstats$/i.test(rawName);
+    const variant = isXstats ? "xstats" : "regular";
+
+    const record = {
+      player_id: player.id,
+      model_type: "returner",
+      variant,
+      season,
+      from_avg: parseFloat(row[1]) || null,
+      from_obp: parseFloat(row[2]) || null,
+      from_slg: parseFloat(row[3]) || null,
+      class_transition: row[4] || null,
+      dev_aggressiveness: parseFloat(row[5]) ?? null,
+      ev_score: parseFloat(row[6]) || null,
+      barrel_score: parseFloat(row[7]) || null,
+      whiff_score: parseFloat(row[8]) || null,
+      chase_score: parseFloat(row[9]) || null,
+      power_rating_score: parseFloat(row[10]) || null,
+      power_rating_plus: parseFloat(row[11]) || null,
+      p_avg: parseFloat(row[12]) || null,
+      p_obp: parseFloat(row[13]) || null,
+      p_slg: parseFloat(row[14]) || null,
+      p_ops: parseFloat(row[15]) || null,
+      p_iso: parseFloat(row[16]) || null,
+      p_wrc: parseFloat(row[17]) || null,
+      p_wrc_plus: parseFloat(row[18]) || null,
+    };
+
+    const { error } = await db.from("player_predictions").upsert(record, {
+      onConflict: "player_id,model_type,variant,season",
+    });
+
+    if (error) {
+      console.error(`Failed to upsert prediction for ${rawName}:`, error.message);
+      skipped++;
+    } else {
+      imported++;
+    }
+  }
+
+  return { imported, skipped, config_imported: configImported };
+}
+
+// ── Import transfer predictions ──────────────────────────────────────
+async function importTransferPredictions(
+  db: ReturnType<typeof createClient>,
+  token: string,
+  spreadsheetId: string,
+  tab: string,
+  season: number
+) {
+  const rows = await readSheet(token, spreadsheetId, `'${tab}'!A1:Z200`);
+  if (rows.length < 4) return { imported: 0, message: "Not enough rows" };
+
+  // Row 2 (index 1) has weights at indices 20-25
+  const configRow = rows[1];
+  const weightKeys = [
+    "pitching_weight_avg_obp", "pitching_weight_slg", "conference_weight",
+    "park_weight_avg_obp", "park_weight_slg", "power_rating_weight"
+  ];
+
+  let configImported = 0;
+  for (let i = 0; i < weightKeys.length; i++) {
+    const val = parseFloat(configRow[20 + i]);
+    if (isNaN(val)) continue;
+    const { error } = await db.from("model_config").upsert({
+      model_type: "transfer",
+      config_key: weightKeys[i],
+      config_value: val,
+      season,
+    }, { onConflict: "model_type,config_key,season" });
+    if (!error) configImported++;
+  }
+
+  // Row 3 (index 2) is headers, row 4+ (index 3+) is data
+  // Headers: Player Name(0), AVG(1), OBP(2), SLG(3),
+  // From AVG+(4), From OBP+(5), From SLG+(6),
+  // To AVG+(7), To OBP+(8), To SLG+(9),
+  // From Stuff+(10), To Stuff+(11),
+  // From Park Factor(12), To Park Factor(13),
+  // EV Score(14), Barrel%(15), Whiff%(16), Chase%(17),
+  // Power Rating Score(18), Power Rating+(19),
+  // pAVG(20), pOBP(21), pSLG(22), pOPS(23), pISO(24), pWRC(25)
+
+  let imported = 0;
+  let skipped = 0;
+
+  for (let i = 3; i < rows.length; i++) {
+    const row = rows[i];
+    const rawName = row[0]?.trim();
+    if (!rawName) { skipped++; continue; }
+
+    const player = await findOrCreatePlayer(db, rawName);
+    if (!player) { skipped++; continue; }
+
+    const isXstats = /xstats$/i.test(rawName);
+    const variant = isXstats ? "xstats" : "regular";
+
+    const record = {
+      player_id: player.id,
+      model_type: "transfer",
+      variant,
+      season,
+      from_avg: parseFloat(row[1]) || null,
+      from_obp: parseFloat(row[2]) || null,
+      from_slg: parseFloat(row[3]) || null,
+      from_avg_plus: parseFloat(row[4]) || null,
+      from_obp_plus: parseFloat(row[5]) || null,
+      from_slg_plus: parseFloat(row[6]) || null,
+      to_avg_plus: parseFloat(row[7]) || null,
+      to_obp_plus: parseFloat(row[8]) || null,
+      to_slg_plus: parseFloat(row[9]) || null,
+      from_stuff_plus: parseFloat(row[10]) || null,
+      to_stuff_plus: parseFloat(row[11]) || null,
+      from_park_factor: parseFloat(row[12]) || null,
+      to_park_factor: parseFloat(row[13]) || null,
+      ev_score: parseFloat(row[14]) || null,
+      barrel_score: parseFloat(row[15]) || null,
+      whiff_score: parseFloat(row[16]) || null,
+      chase_score: parseFloat(row[17]) || null,
+      power_rating_score: parseFloat(row[18]) || null,
+      power_rating_plus: parseFloat(row[19]) || null,
+      p_avg: parseFloat(row[20]) || null,
+      p_obp: parseFloat(row[21]) || null,
+      p_slg: parseFloat(row[22]) || null,
+      p_ops: parseFloat(row[23]) || null,
+      p_iso: parseFloat(row[24]) || null,
+      p_wrc: parseFloat(row[25]) || null,
+    };
+
+    const { error } = await db.from("player_predictions").upsert(record, {
+      onConflict: "player_id,model_type,variant,season",
+    });
+
+    if (error) {
+      console.error(`Failed to upsert transfer prediction for ${rawName}:`, error.message);
+      skipped++;
+    } else {
+      imported++;
+    }
+  }
+
+  return { imported, skipped, config_imported: configImported };
 }
