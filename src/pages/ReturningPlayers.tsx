@@ -138,17 +138,18 @@ export default function ReturningPlayers() {
 
   const updateDevAgg = useMutation({
     mutationFn: async ({ predictionId, value }: { predictionId: string; value: number }) => {
-      const { error } = await supabase
-        .from("player_predictions")
-        .update({ dev_aggressiveness: value })
-        .eq("id", predictionId);
+      const { data, error } = await supabase.functions.invoke("recalculate-prediction", {
+        body: { prediction_id: predictionId, dev_aggressiveness: value },
+      });
       if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["returning-players"] });
-      toast.success("Dev confidence updated");
+      toast.success(`Recalculated — pOPS: ${data?.prediction?.p_ops?.toFixed(3) ?? "?"}, wRC+: ${data?.prediction?.p_wrc_plus ?? "?"}`);
     },
-    onError: (e) => toast.error(`Failed to update: ${e.message}`),
+    onError: (e) => toast.error(`Failed to recalculate: ${e.message}`),
   });
 
   const filtered = useMemo(() => {
