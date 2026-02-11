@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const db = createClient(supabaseUrl, serviceKey);
 
-    const { csv_data, model_type = "returner", season = 2025 } = await req.json();
+    const { csv_data, model_type = "returner", season = 2025, mark_missing_departed = false } = await req.json();
 
     if (!csv_data || typeof csv_data !== "string") {
       return new Response(
@@ -138,6 +138,8 @@ Deno.serve(async (req) => {
     let matched = 0;
     let skipped = 0;
     let predictions_created = 0;
+    let departed_count = 0;
+    const importedPlayerIds = new Set<string>();
     const errors: string[] = [];
 
     // Process in batches
@@ -219,6 +221,7 @@ Deno.serve(async (req) => {
           model_type,
           variant: "regular",
           season,
+          status: "active",
           class_transition: classTransition,
           dev_aggressiveness: 0.5,
           from_avg: ba,
@@ -228,13 +231,14 @@ Deno.serve(async (req) => {
           barrel_score: barrel,
           whiff_score: miss,
           chase_score: chase,
-          // Predicted stats will start as from stats (no growth applied yet)
           p_avg: ba,
           p_obp: obp,
           p_slg: slg,
           p_ops: obp != null && slg != null ? Math.round((obp + slg) * 1000) / 1000 : null,
           p_iso: ba != null && slg != null ? Math.round((slg - ba) * 1000) / 1000 : null,
         };
+
+        importedPlayerIds.add(playerId);
 
         const { error: predErr } = await db
           .from("player_predictions")
@@ -250,12 +254,42 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Mark missing players as departed if requested
+    if (mark_missing_departed && importedPlayerIds.size > 0) {
+      // Get all active predictions for this model_type/season/variant
+      const { data: allPreds } = await db
+        .from("player_predictions")
+        .select("id, player_id")
+        .eq("model_type", model_type)
+        .eq("variant", "regular")
+        .eq("season", season)
+        .eq("status", "active");
+
+      const toDepart = (allPreds || []).filter(
+        (p: { id: string; player_id: string }) => !importedPlayerIds.has(p.player_id)
+      );
+
+      if (toDepart.length > 0) {
+        const departIds = toDepart.map((p: { id: string }) => p.id);
+        // Update in chunks of 100
+        for (let i = 0; i < departIds.length; i += 100) {
+          const chunk = departIds.slice(i, i + 100);
+          await db
+            .from("player_predictions")
+            .update({ status: "departed" })
+            .in("id", chunk);
+        }
+        departed_count = toDepart.length;
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         players_matched: matched,
         players_created: created,
         predictions_created,
+        departed: departed_count,
         skipped,
         total_rows: dataRows.length,
         errors: errors.slice(0, 20),

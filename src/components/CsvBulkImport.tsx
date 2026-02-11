@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -12,6 +13,7 @@ type ImportResult = {
   players_matched?: number;
   players_created?: number;
   predictions_created?: number;
+  departed?: number;
   skipped?: number;
   total_rows?: number;
   errors?: string[];
@@ -21,6 +23,7 @@ type ImportResult = {
 export default function CsvBulkImport() {
   const [file, setFile] = useState<File | null>(null);
   const [modelType, setModelType] = useState<"returner" | "transfer">("returner");
+  const [markDeparted, setMarkDeparted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -61,6 +64,7 @@ export default function CsvBulkImport() {
           csv_data: csvText,
           model_type: modelType,
           season: 2025,
+          mark_missing_departed: markDeparted,
         },
       });
 
@@ -141,7 +145,18 @@ export default function CsvBulkImport() {
                     <SelectItem value="returner">Returner</SelectItem>
                     <SelectItem value="transfer">Transfer</SelectItem>
                   </SelectContent>
-                </Select>
+              </Select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={markDeparted}
+                  onCheckedChange={setMarkDeparted}
+                  id="mark-departed"
+                />
+                <Label htmlFor="mark-departed" className="text-sm cursor-pointer">
+                  Mark missing players as departed
+                </Label>
               </div>
 
               <Button
@@ -182,6 +197,9 @@ export default function CsvBulkImport() {
                 {result.players_matched !== undefined && <p>Players matched: {result.players_matched}</p>}
                 {result.players_created !== undefined && <p>Players created: {result.players_created}</p>}
                 {result.predictions_created !== undefined && <p>Predictions created: {result.predictions_created}</p>}
+                {result.departed !== undefined && result.departed > 0 && (
+                  <p className="text-[hsl(var(--warning))]">Players marked departed: {result.departed}</p>
+                )}
                 {result.skipped !== undefined && result.skipped > 0 && (
                   <p className="text-muted-foreground">Skipped: {result.skipped}</p>
                 )}

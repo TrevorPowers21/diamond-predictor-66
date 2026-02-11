@@ -254,6 +254,7 @@ export type Database = {
           power_rating_plus: number | null
           power_rating_score: number | null
           season: number
+          status: string
           to_avg_plus: number | null
           to_obp_plus: number | null
           to_park_factor: number | null
@@ -291,6 +292,7 @@ export type Database = {
           power_rating_plus?: number | null
           power_rating_score?: number | null
           season?: number
+          status?: string
           to_avg_plus?: number | null
           to_obp_plus?: number | null
           to_park_factor?: number | null
@@ -328,6 +330,7 @@ export type Database = {
           power_rating_plus?: number | null
           power_rating_score?: number | null
           season?: number
+          status?: string
           to_avg_plus?: number | null
           to_obp_plus?: number | null
           to_park_factor?: number | null
