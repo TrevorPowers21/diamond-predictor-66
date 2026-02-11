@@ -218,6 +218,17 @@ Deno.serve(async (req) => {
       result = await importConferenceStats(db, token, spreadsheet_id, body.tab || "'25 Conference Stats+", body.season || 2025);
     } else if (action === "import_park_factors") {
       result = await importParkFactors(db, token, spreadsheet_id, body.tab || "Park Factor+ Full Season", body.season || 2025);
+    } else if (action === "import_nil_transfer") {
+      result = await importNilValuation(db, token, spreadsheet_id, body.tab || "Transfer NIL Valuation", "transfer", body.season || 2025);
+    } else if (action === "import_nil_returner") {
+      result = await importNilValuation(db, token, spreadsheet_id, body.tab || "Returner NIL Valuation", "returner", body.season || 2025);
+    } else if (action === "import_nil_tcu") {
+      result = await importTcuValuation(db, token, spreadsheet_id, body.tab || "TCU Player Valuation", body.season || 2025);
+    } else if (action === "import_nil_all") {
+      const t = await importNilValuation(db, token, spreadsheet_id, body.transfer_tab || "Transfer NIL Valuation", "transfer", body.season || 2025);
+      const r = await importNilValuation(db, token, spreadsheet_id, body.returner_tab || "Returner NIL Valuation", "returner", body.season || 2025);
+      const c = await importTcuValuation(db, token, spreadsheet_id, body.tcu_tab || "TCU Player Valuation", body.season || 2025);
+      result = { transfer_nil: t, returner_nil: r, tcu_nil: c };
     } else {
       throw new Error(`Unknown action: ${action}`);
     }
@@ -869,4 +880,157 @@ async function importParkFactors(
   }
 
   return { imported, skipped: rows.length - 2 - records.length };
+}
+
+// ── Parse dollar value string ────────────────────────────────────────
+function parseDollar(val: string | undefined): number | null {
+  if (!val) return null;
+  const cleaned = val.replace(/[$,\s]/g, "");
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? null : num;
+}
+
+// ── Import NIL Valuation (Transfer or Returner) ─────────────────────
+async function importNilValuation(
+  db: ReturnType<typeof createClient>,
+  token: string,
+  spreadsheetId: string,
+  tab: string,
+  modelType: string,
+  season: number
+) {
+  const rows = await readSheet(token, spreadsheetId, `'${tab}'!A1:J100`);
+  if (rows.length < 2) return { imported: 0, message: "No data rows" };
+
+  // Row 1 (index 0): Headers
+  // Player Name(0), pWRC+(1), OFF Value(2), RAA(3), Replacement Runs(4),
+  // RAR(5), NCAA oWAR(6), Conference oWAR(7), NIL Valuation(8)
+
+  let imported = 0;
+  let skipped = 0;
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const rawName = row[0]?.trim();
+    if (!rawName || rawName === "#N/A") { skipped++; continue; }
+
+    const player = await findOrCreatePlayer(db, rawName);
+    if (!player) { skipped++; continue; }
+
+    const nilValue = parseDollar(row[8]);
+    const wrcPlus = parseFloat(row[1]);
+    if (isNaN(wrcPlus)) { skipped++; continue; }
+
+    const offValue = parseFloat(row[2]) || null;
+    const raa = parseFloat(row[3]) || null;
+    const replacementRuns = parseFloat(row[4]) || null;
+    const rar = parseFloat(row[5]) || null;
+    const ncaaOwar = parseFloat(row[6]) || null;
+
+    const breakdown = {
+      model_type: modelType,
+      variant: /xstats$/i.test(rawName) ? "xstats" : "regular",
+      off_value: offValue,
+      raa,
+      replacement_runs: replacementRuns,
+      rar,
+      ncaa_owar: ncaaOwar,
+    };
+
+    // Upsert into nil_valuations
+    const { data: existing } = await db
+      .from("nil_valuations")
+      .select("id")
+      .eq("player_id", player.id)
+      .eq("season", season)
+      .eq("model_version", `${modelType}_${breakdown.variant}`)
+      .maybeSingle();
+
+    const record = {
+      player_id: player.id,
+      season,
+      estimated_value: nilValue,
+      offensive_effectiveness: wrcPlus,
+      model_version: `${modelType}_${breakdown.variant}`,
+      component_breakdown: breakdown,
+    };
+
+    if (existing) {
+      await db.from("nil_valuations").update(record).eq("id", existing.id);
+    } else {
+      await db.from("nil_valuations").insert(record);
+    }
+    imported++;
+  }
+
+  return { imported, skipped };
+}
+
+// ── Import TCU Player Valuation ──────────────────────────────────────
+async function importTcuValuation(
+  db: ReturnType<typeof createClient>,
+  token: string,
+  spreadsheetId: string,
+  tab: string,
+  season: number
+) {
+  const rows = await readSheet(token, spreadsheetId, `'${tab}'!A1:J100`);
+  if (rows.length < 2) return { imported: 0, message: "No data rows" };
+
+  // Headers: Player Name(0), pAVG(1), pOBP(2), pSLG(3), pOPS(4),
+  // pISO(5), pWRC(6), pWRC+(7), NIL Valuation(8)
+
+  let imported = 0;
+  let skipped = 0;
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const rawName = row[0]?.trim();
+    if (!rawName) { skipped++; continue; }
+
+    const player = await findOrCreatePlayer(db, rawName);
+    if (!player) { skipped++; continue; }
+
+    const isXstats = /xstats$/i.test(rawName);
+    const variant = isXstats ? "xstats" : "regular";
+    const nilValue = parseDollar(row[8]);
+    const wrcPlus = parseFloat(row[7]) || null;
+
+    const breakdown = {
+      model_type: "tcu_valuation",
+      variant,
+      p_avg: parseFloat(row[1]) || null,
+      p_obp: parseFloat(row[2]) || null,
+      p_slg: parseFloat(row[3]) || null,
+      p_ops: parseFloat(row[4]) || null,
+      p_iso: parseFloat(row[5]) || null,
+      p_wrc: parseFloat(row[6]) || null,
+    };
+
+    const { data: existing } = await db
+      .from("nil_valuations")
+      .select("id")
+      .eq("player_id", player.id)
+      .eq("season", season)
+      .eq("model_version", `tcu_${variant}`)
+      .maybeSingle();
+
+    const record = {
+      player_id: player.id,
+      season,
+      estimated_value: nilValue,
+      offensive_effectiveness: wrcPlus,
+      model_version: `tcu_${variant}`,
+      component_breakdown: breakdown,
+    };
+
+    if (existing) {
+      await db.from("nil_valuations").update(record).eq("id", existing.id);
+    } else {
+      await db.from("nil_valuations").insert(record);
+    }
+    imported++;
+  }
+
+  return { imported, skipped };
 }

@@ -19,6 +19,9 @@ type SyncResult = {
   stats?: { imported?: number; skipped?: number; exported?: number };
   returner?: { imported?: number; skipped?: number; config_imported?: number };
   transfer?: { imported?: number; skipped?: number; config_imported?: number };
+  transfer_nil?: { imported?: number; skipped?: number };
+  returner_nil?: { imported?: number; skipped?: number };
+  tcu_nil?: { imported?: number; skipped?: number };
 };
 
 export default function DataSync() {
@@ -73,6 +76,10 @@ export default function DataSync() {
     { key: "import_predictions_all", label: "Import All Predictions", icon: Download, desc: "Pull both returner + transfer predictions" },
     { key: "import_conference_stats", label: "Import Conference Stats", icon: Download, desc: "Pull '25 conference stats+ data" },
     { key: "import_park_factors", label: "Import Park Factors", icon: Download, desc: "Pull park factor+ full season data" },
+    { key: "import_nil_transfer", label: "Import Transfer NIL", icon: Download, desc: "Pull transfer NIL valuations" },
+    { key: "import_nil_returner", label: "Import Returner NIL", icon: Download, desc: "Pull returner NIL valuations" },
+    { key: "import_nil_tcu", label: "Import TCU Valuation", icon: Download, desc: "Pull TCU player valuations" },
+    { key: "import_nil_all", label: "Import All NIL", icon: Download, desc: "Pull all NIL valuations at once" },
     { key: "import_players", label: "Import Players", icon: Download, desc: "Pull player roster from sheet" },
     { key: "import_stats", label: "Import Stats", icon: Download, desc: "Pull season stats from sheet" },
     { key: "export_players", label: "Export Players", icon: Upload, desc: "Push players to sheet" },
@@ -187,6 +194,15 @@ export default function DataSync() {
                   )}
                   {lastResult.transfer && (
                     <p>Transfer — imported: {lastResult.transfer.imported ?? 0}, skipped: {lastResult.transfer.skipped ?? 0}, config: {lastResult.transfer.config_imported ?? 0}</p>
+                  )}
+                  {lastResult.transfer_nil && (
+                    <p>Transfer NIL — imported: {lastResult.transfer_nil.imported ?? 0}, skipped: {lastResult.transfer_nil.skipped ?? 0}</p>
+                  )}
+                  {lastResult.returner_nil && (
+                    <p>Returner NIL — imported: {lastResult.returner_nil.imported ?? 0}, skipped: {lastResult.returner_nil.skipped ?? 0}</p>
+                  )}
+                  {lastResult.tcu_nil && (
+                    <p>TCU NIL — imported: {lastResult.tcu_nil.imported ?? 0}, skipped: {lastResult.tcu_nil.skipped ?? 0}</p>
                   )}
                 </div>
               </div>
