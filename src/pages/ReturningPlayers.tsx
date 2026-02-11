@@ -152,6 +152,22 @@ export default function ReturningPlayers() {
     onError: (e) => toast.error(`Failed to recalculate: ${e.message}`),
   });
 
+  const updateClassTransition = useMutation({
+    mutationFn: async ({ predictionId, value }: { predictionId: string; value: string }) => {
+      const { data, error } = await supabase.functions.invoke("recalculate-prediction", {
+        body: { prediction_id: predictionId, class_transition: value },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["returning-players"] });
+      toast.success(`Class updated — pOPS: ${data?.prediction?.p_ops?.toFixed(3) ?? "?"}, wRC+: ${data?.prediction?.p_wrc_plus ?? "?"}`);
+    },
+    onError: (e) => toast.error(`Failed to update class: ${e.message}`),
+  });
+
   const filtered = useMemo(() => {
     let list = players;
     if (search) {
@@ -365,9 +381,10 @@ export default function ReturningPlayers() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="secondary" className="text-xs font-mono">
-                              {classTransitionLabel[pred.class_transition || ""] || pred.class_transition || "—"}
-                            </Badge>
+                            <ClassTransitionSelector
+                              value={pred.class_transition || "SJ"}
+                              onChange={(v) => updateClassTransition.mutate({ predictionId: p.prediction_id, value: v })}
+                            />
                           </TableCell>
                           <TableCell>
                             <DevConfidenceSelector
@@ -419,6 +436,30 @@ export default function ReturningPlayers() {
         </Card>
       </div>
     </DashboardLayout>
+  );
+}
+
+const CLASS_OPTIONS = [
+  { value: "FS", label: "FR → SO" },
+  { value: "SJ", label: "SO → JR" },
+  { value: "JS", label: "JR → SR" },
+  { value: "GR", label: "Graduate" },
+] as const;
+
+function ClassTransitionSelector({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="h-7 w-[100px] text-xs font-mono px-2">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {CLASS_OPTIONS.map((opt) => (
+          <SelectItem key={opt.value} value={opt.value} className="text-xs font-mono">
+            {opt.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

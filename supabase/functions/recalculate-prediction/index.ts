@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
 
-    const { prediction_id, dev_aggressiveness } = await req.json();
+    const { prediction_id, dev_aggressiveness, class_transition } = await req.json();
 
     if (!prediction_id) {
       return new Response(
@@ -46,9 +46,16 @@ Deno.serve(async (req) => {
       );
     }
 
-    if (![0, 0.5, 1].includes(dev_aggressiveness)) {
+    if (dev_aggressiveness !== undefined && ![0, 0.5, 1].includes(dev_aggressiveness)) {
       return new Response(
         JSON.stringify({ error: "dev_aggressiveness must be 0.0, 0.5, or 1.0" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (class_transition !== undefined && !["FS", "SJ", "JS", "GR"].includes(class_transition)) {
+      return new Response(
+        JSON.stringify({ error: "class_transition must be FS, SJ, JS, or GR" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -88,8 +95,8 @@ Deno.serve(async (req) => {
       if (row.config_key === "park_weight_slg") powerWeight = Number(row.config_value);
     }
 
-    const ct = pred.class_transition || "SJ";
-    const devAgg = dev_aggressiveness;
+    const ct = class_transition || pred.class_transition || "SJ";
+    const devAgg = dev_aggressiveness ?? pred.dev_aggressiveness ?? 0;
     const bases = CLASS_BASES[ct] || CLASS_BASES.GR;
     const fromAvg = Number(pred.from_avg) || 0;
     const fromObp = Number(pred.from_obp) || 0;
@@ -133,6 +140,7 @@ Deno.serve(async (req) => {
     const { error: updateErr } = await supabase
       .from("player_predictions")
       .update({
+        class_transition: ct,
         dev_aggressiveness: devAgg,
         p_avg: pAvg,
         p_obp: pObp,
