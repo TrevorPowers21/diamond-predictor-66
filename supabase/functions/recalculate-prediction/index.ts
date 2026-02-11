@@ -10,16 +10,16 @@ const corsHeaders = {
  * Class transition base growth rates (from the Google Sheet IFS).
  */
 const CLASS_BASES: Record<string, { avg: number; obp: number; slg: number }> = {
-  FS: { avg: 0.03, obp: 0.045, slg: 0.06 },
-  SJ: { avg: 0.02, obp: 0.03, slg: 0.035 },
-  JS: { avg: 0.015, obp: 0.02, slg: 0.02 },
-  GR: { avg: 0.01, obp: 0.01, slg: 0.01 },
+  FS: { avg: 0.02, obp: 0.03, slg: 0.04 },
+  SJ: { avg: 0.01, obp: 0.02, slg: 0.02 },
+  JS: { avg: 0.00, obp: 0.00, slg: 0.00 },
+  GR: { avg: 0.00, obp: 0.00, slg: 0.00 },
 };
 
 /**
  * Dev aggressiveness coefficients per stat (multiplied by dev_agg value).
  */
-const DEV_COEFFS = { avg: 0.06, obp: 0.08, slg: 0.1 };
+const DEV_COEFFS = { avg: 0.02, obp: 0.03, slg: 0.04 };
 
 /**
  * Dampening divisors per stat — controls how quickly growth tapers

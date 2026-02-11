@@ -15,6 +15,7 @@ type SyncResult = {
   exported?: number;
   skipped?: number;
   config_imported?: number;
+  conferences_found?: number;
   error?: string;
   players?: { imported?: number; skipped?: number; exported?: number };
   stats?: { imported?: number; skipped?: number; exported?: number };
@@ -23,6 +24,8 @@ type SyncResult = {
   transfer_nil?: { imported?: number; skipped?: number };
   returner_nil?: { imported?: number; skipped?: number };
   tcu_nil?: { imported?: number; skipped?: number };
+  returner_power?: { imported?: number; skipped?: number; conferences_found?: number };
+  transfer_power?: { imported?: number; skipped?: number; conferences_found?: number };
 };
 
 export default function DataSync() {
@@ -75,6 +78,9 @@ export default function DataSync() {
     { key: "import_returner_predictions", label: "Import Returner Predictions", icon: Download, desc: "Pull returner equation weights + player predictions" },
     { key: "import_transfer_predictions", label: "Import Transfer Predictions", icon: Download, desc: "Pull transfer equation weights + player predictions" },
     { key: "import_predictions_all", label: "Import All Predictions", icon: Download, desc: "Pull both returner + transfer predictions" },
+    { key: "import_returner_power_rating", label: "Import Returner Power Rating", icon: Download, desc: "Pull returner offensive power ratings by conference" },
+    { key: "import_transfer_power_rating", label: "Import Transfer Power Rating", icon: Download, desc: "Pull transfer offensive power ratings by conference" },
+    { key: "import_power_rating_all", label: "Import All Power Ratings", icon: Download, desc: "Pull both returner + transfer power ratings" },
     { key: "import_conference_stats", label: "Import Conference Stats", icon: Download, desc: "Pull '25 conference stats+ data" },
     { key: "import_park_factors", label: "Import Park Factors", icon: Download, desc: "Pull park factor+ full season data" },
     { key: "import_nil_transfer", label: "Import Transfer NIL", icon: Download, desc: "Pull transfer NIL valuations" },
@@ -183,6 +189,7 @@ export default function DataSync() {
                   {lastResult.imported !== undefined && <p>Imported: {lastResult.imported}</p>}
                   {lastResult.exported !== undefined && <p>Exported: {lastResult.exported}</p>}
                   {lastResult.config_imported !== undefined && <p>Config weights imported: {lastResult.config_imported}</p>}
+                  {lastResult.conferences_found !== undefined && <p>Conferences found: {lastResult.conferences_found}</p>}
                   {lastResult.skipped !== undefined && lastResult.skipped > 0 && (
                     <p className="text-muted-foreground">Skipped: {lastResult.skipped}</p>
                   )}
@@ -206,6 +213,12 @@ export default function DataSync() {
                   )}
                   {lastResult.tcu_nil && (
                     <p>TCU NIL — imported: {lastResult.tcu_nil.imported ?? 0}, skipped: {lastResult.tcu_nil.skipped ?? 0}</p>
+                  )}
+                  {lastResult.returner_power && (
+                    <p>Returner Power Rating — imported: {lastResult.returner_power.imported ?? 0}, skipped: {lastResult.returner_power.skipped ?? 0}, conferences: {lastResult.returner_power.conferences_found ?? 0}</p>
+                  )}
+                  {lastResult.transfer_power && (
+                    <p>Transfer Power Rating — imported: {lastResult.transfer_power.imported ?? 0}, skipped: {lastResult.transfer_power.skipped ?? 0}, conferences: {lastResult.transfer_power.conferences_found ?? 0}</p>
                   )}
                 </div>
               </div>
