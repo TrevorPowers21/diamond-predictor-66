@@ -615,7 +615,7 @@ async function importTransferPredictions(
   tab: string,
   season: number
 ) {
-  const rows = await readSheet(token, spreadsheetId, `'${tab}'!A1:Z200`);
+  const rows = await readSheet(token, spreadsheetId, `'${tab}'!A1:AA200`);
   if (rows.length < 4) return { imported: 0, message: "Not enough rows" };
 
   // Row 2 (index 1) has weights at indices 20-25
@@ -692,6 +692,7 @@ async function importTransferPredictions(
       p_ops: parseFloat(row[23]) || null,
       p_iso: parseFloat(row[24]) || null,
       p_wrc: parseFloat(row[25]) || null,
+      p_wrc_plus: parseFloat(row[26]) || null,
     };
 
     const { error } = await db.from("player_predictions").upsert(record, {
