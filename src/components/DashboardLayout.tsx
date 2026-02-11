@@ -14,6 +14,7 @@ import {
   Menu,
   X,
   FileSpreadsheet,
+  Scale,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -23,6 +24,7 @@ const navItems = [
   { label: "Returning Players", href: "/dashboard/returning", icon: Activity },
   { label: "NIL Valuations", href: "/dashboard/nil", icon: DollarSign },
   { label: "Compare", href: "/dashboard/compare", icon: GitCompare },
+  { label: "Dev Weights", href: "/dashboard/dev-weights", icon: Scale },
   { label: "Data Sync", href: "/dashboard/sync", icon: FileSpreadsheet },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
