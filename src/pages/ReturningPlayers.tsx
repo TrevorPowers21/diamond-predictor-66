@@ -6,17 +6,20 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { useQuery } from "@tanstack/react-query";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Users, TrendingUp, TrendingDown, ArrowUpDown, Search, BarChart3, Activity } from "lucide-react";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell } from "recharts";
+import { toast } from "sonner";
 
 type SortKey = "name" | "p_ops" | "p_avg" | "p_slg" | "p_obp" | "p_iso" | "p_wrc_plus" | "power_rating_plus" | "class_transition";
 type SortDir = "asc" | "desc";
 
 interface ReturnerPlayer {
   id: string;
+  prediction_id: string;
   first_name: string;
   last_name: string;
   team: string | null;
@@ -81,6 +84,7 @@ const classTransitionLabel: Record<string, string> = {
 };
 
 export default function ReturningPlayers() {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [variant, setVariant] = useState<"regular" | "xstats">("regular");
   const [sortKey, setSortKey] = useState<SortKey>("p_ops");
@@ -102,6 +106,7 @@ export default function ReturningPlayers() {
 
       return (data || []).map((row: any) => ({
         id: row.players.id,
+        prediction_id: row.id,
         first_name: row.players.first_name,
         last_name: row.players.last_name,
         team: row.players.team,
@@ -129,6 +134,21 @@ export default function ReturningPlayers() {
         },
       })) as ReturnerPlayer[];
     },
+  });
+
+  const updateDevAgg = useMutation({
+    mutationFn: async ({ predictionId, value }: { predictionId: string; value: number }) => {
+      const { error } = await supabase
+        .from("player_predictions")
+        .update({ dev_aggressiveness: value })
+        .eq("id", predictionId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["returning-players"] });
+      toast.success("Dev confidence updated");
+    },
+    onError: (e) => toast.error(`Failed to update: ${e.message}`),
   });
 
   const filtered = useMemo(() => {
@@ -311,6 +331,16 @@ export default function ReturningPlayers() {
                     <TableRow>
                       <TableHead className="min-w-[160px]"><SortButton label="Player" sortKeyVal="name" /></TableHead>
                       <TableHead><SortButton label="Year" sortKeyVal="class_transition" /></TableHead>
+                      <TableHead className="min-w-[120px]">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-help font-medium text-muted-foreground">Dev Confidence</span>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-[220px]">
+                            <p className="text-xs">Coach's confidence in player development. 0.0 = no growth, 0.5 = moderate, 1.0 = full confidence. Impacts projected stats.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TableHead>
                       <TableHead>Prior</TableHead>
                       <TableHead><SortButton label="pAVG" sortKeyVal="p_avg" /></TableHead>
                       <TableHead><SortButton label="pOBP" sortKeyVal="p_obp" /></TableHead>
@@ -337,6 +367,12 @@ export default function ReturningPlayers() {
                             <Badge variant="secondary" className="text-xs font-mono">
                               {classTransitionLabel[pred.class_transition || ""] || pred.class_transition || "—"}
                             </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <DevConfidenceSelector
+                              value={pred.dev_aggressiveness ?? 0}
+                              onChange={(v) => updateDevAgg.mutate({ predictionId: p.prediction_id, value: v })}
+                            />
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                             {statFormat(pred.from_avg)}/{statFormat(pred.from_obp)}/{statFormat(pred.from_slg)}
@@ -391,5 +427,45 @@ function ScoutBadge({ label, value }: { label: string; value: number }) {
     <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${tier}`} title={`${label}: ${value}`}>
       {label} {value}
     </span>
+  );
+}
+
+const DEV_OPTIONS = [
+  { value: 0, label: "0.0", desc: "No development expected" },
+  { value: 0.5, label: "0.5", desc: "Moderate growth" },
+  { value: 1, label: "1.0", desc: "Full confidence" },
+] as const;
+
+function DevConfidenceSelector({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex gap-0.5">
+      {DEV_OPTIONS.map((opt) => {
+        const isActive = value === opt.value;
+        return (
+          <Tooltip key={opt.value}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => onChange(opt.value)}
+                className={`rounded px-2 py-1 text-xs font-mono font-semibold transition-colors ${
+                  isActive
+                    ? opt.value === 0
+                      ? "bg-destructive/15 text-destructive"
+                      : opt.value === 0.5
+                      ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]"
+                      : "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                }`}
+              >
+                {opt.label}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              <p className="text-xs">{opt.desc}</p>
+            </TooltipContent>
+          </Tooltip>
+        );
+      })}
+    </div>
   );
 }
