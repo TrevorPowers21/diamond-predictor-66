@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.3";
+import { decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -6,15 +7,32 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+function toBase64Url(input: string | Uint8Array): string {
+  let b64: string;
+  if (typeof input === "string") {
+    b64 = btoa(unescape(encodeURIComponent(input)));
+  } else {
+    let binary = "";
+    for (let i = 0; i < input.length; i++) {
+      binary += String.fromCharCode(input[i]);
+    }
+    b64 = btoa(binary);
+  }
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 // ── Google Auth ──────────────────────────────────────────────────────
 async function getGoogleAccessToken(): Promise<string> {
   const email = Deno.env.get("GOOGLE_SERVICE_ACCOUNT_EMAIL")!;
   const rawKey = Deno.env.get("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY")!;
 
+  console.log("Key starts with:", rawKey?.substring(0, 30));
+  console.log("Key length:", rawKey?.length);
+
   // Build JWT
   const now = Math.floor(Date.now() / 1000);
-  const header = btoa(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const payload = btoa(
+  const header = toBase64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const payload = toBase64Url(
     JSON.stringify({
       iss: email,
       scope: "https://www.googleapis.com/auth/spreadsheets",
@@ -26,12 +44,18 @@ async function getGoogleAccessToken(): Promise<string> {
 
   const unsignedToken = `${header}.${payload}`;
 
-  // Import the private key
+  // Import the private key — handle both literal \n and real newlines
   const pem = rawKey
+    .replace(/\\n/g, "\n")
     .replace(/-----BEGIN PRIVATE KEY-----/, "")
     .replace(/-----END PRIVATE KEY-----/, "")
-    .replace(/\n/g, "");
-  const binaryDer = Uint8Array.from(atob(pem), (c) => c.charCodeAt(0));
+    .replace(/[\n\r\s]/g, "");
+
+  console.log("PEM cleaned length:", pem.length);
+  console.log("PEM first 20 chars:", pem.substring(0, 20));
+
+  // Decode base64 PEM to binary using Deno std
+  const binaryDer = decodeBase64(pem);
 
   const cryptoKey = await crypto.subtle.importKey(
     "pkcs8",
@@ -47,10 +71,7 @@ async function getGoogleAccessToken(): Promise<string> {
     new TextEncoder().encode(unsignedToken)
   );
 
-  const sig = btoa(String.fromCharCode(...new Uint8Array(signature)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  const sig = toBase64Url(new Uint8Array(signature));
 
   const jwt = `${header}.${payload}.${sig}`;
 
