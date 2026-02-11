@@ -185,6 +185,11 @@ Deno.serve(async (req) => {
 
     if (action === "discover") {
       result = await discoverSheets(token, spreadsheet_id);
+    } else if (action === "read_raw") {
+      const range = body.range;
+      if (!range) throw new Error("range is required for read_raw");
+      const rows = await readSheet(token, spreadsheet_id, range);
+      result = { rows: rows.slice(0, body.max_rows || 20) };
     } else if (action === "import_players") {
       result = await importPlayers(db, token, spreadsheet_id, players_range || "Players!A:N");
     } else if (action === "import_stats") {
