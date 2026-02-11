@@ -14,6 +14,286 @@ export type Database = {
   }
   public: {
     Tables: {
+      conference_adjusted_stats: {
+        Row: {
+          adj_batting_avg: number | null
+          adj_era: number | null
+          adj_on_base_pct: number | null
+          adj_ops: number | null
+          adj_slugging_pct: number | null
+          adj_whip: number | null
+          created_at: string
+          id: string
+          park_factor_applied: number | null
+          player_id: string
+          power_rating_applied: number | null
+          season: number
+          updated_at: string
+        }
+        Insert: {
+          adj_batting_avg?: number | null
+          adj_era?: number | null
+          adj_on_base_pct?: number | null
+          adj_ops?: number | null
+          adj_slugging_pct?: number | null
+          adj_whip?: number | null
+          created_at?: string
+          id?: string
+          park_factor_applied?: number | null
+          player_id: string
+          power_rating_applied?: number | null
+          season: number
+          updated_at?: string
+        }
+        Update: {
+          adj_batting_avg?: number | null
+          adj_era?: number | null
+          adj_on_base_pct?: number | null
+          adj_ops?: number | null
+          adj_slugging_pct?: number | null
+          adj_whip?: number | null
+          created_at?: string
+          id?: string
+          park_factor_applied?: number | null
+          player_id?: string
+          power_rating_applied?: number | null
+          season?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_adjusted_stats_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      developmental_weights: {
+        Row: {
+          created_at: string
+          from_class: string
+          id: string
+          notes: string | null
+          position: string
+          stat_category: string
+          to_class: string
+          updated_at: string
+          weight: number
+        }
+        Insert: {
+          created_at?: string
+          from_class: string
+          id?: string
+          notes?: string | null
+          position: string
+          stat_category?: string
+          to_class: string
+          updated_at?: string
+          weight?: number
+        }
+        Update: {
+          created_at?: string
+          from_class?: string
+          id?: string
+          notes?: string | null
+          position?: string
+          stat_category?: string
+          to_class?: string
+          updated_at?: string
+          weight?: number
+        }
+        Relationships: []
+      }
+      nil_valuations: {
+        Row: {
+          component_breakdown: Json | null
+          created_at: string
+          estimated_value: number | null
+          id: string
+          model_version: string | null
+          offensive_effectiveness: number | null
+          player_id: string
+          season: number
+          updated_at: string
+        }
+        Insert: {
+          component_breakdown?: Json | null
+          created_at?: string
+          estimated_value?: number | null
+          id?: string
+          model_version?: string | null
+          offensive_effectiveness?: number | null
+          player_id: string
+          season: number
+          updated_at?: string
+        }
+        Update: {
+          component_breakdown?: Json | null
+          created_at?: string
+          estimated_value?: number | null
+          id?: string
+          model_version?: string | null
+          offensive_effectiveness?: number | null
+          player_id?: string
+          season?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nil_valuations_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      park_factors: {
+        Row: {
+          bb_factor: number | null
+          created_at: string
+          doubles_factor: number | null
+          hits_factor: number | null
+          hr_factor: number | null
+          id: string
+          overall_factor: number
+          runs_factor: number | null
+          season: number
+          team: string
+          updated_at: string
+          venue_name: string | null
+        }
+        Insert: {
+          bb_factor?: number | null
+          created_at?: string
+          doubles_factor?: number | null
+          hits_factor?: number | null
+          hr_factor?: number | null
+          id?: string
+          overall_factor?: number
+          runs_factor?: number | null
+          season: number
+          team: string
+          updated_at?: string
+          venue_name?: string | null
+        }
+        Update: {
+          bb_factor?: number | null
+          created_at?: string
+          doubles_factor?: number | null
+          hits_factor?: number | null
+          hr_factor?: number | null
+          id?: string
+          overall_factor?: number
+          runs_factor?: number | null
+          season?: number
+          team?: string
+          updated_at?: string
+          venue_name?: string | null
+        }
+        Relationships: []
+      }
+      players: {
+        Row: {
+          class_year: string | null
+          conference: string | null
+          created_at: string
+          first_name: string
+          handedness: string | null
+          headshot_url: string | null
+          height_inches: number | null
+          high_school: string | null
+          home_state: string | null
+          id: string
+          last_name: string
+          notes: string | null
+          portal_entry_date: string | null
+          position: string | null
+          team: string | null
+          transfer_portal: boolean
+          updated_at: string
+          weight: number | null
+        }
+        Insert: {
+          class_year?: string | null
+          conference?: string | null
+          created_at?: string
+          first_name: string
+          handedness?: string | null
+          headshot_url?: string | null
+          height_inches?: number | null
+          high_school?: string | null
+          home_state?: string | null
+          id?: string
+          last_name: string
+          notes?: string | null
+          portal_entry_date?: string | null
+          position?: string | null
+          team?: string | null
+          transfer_portal?: boolean
+          updated_at?: string
+          weight?: number | null
+        }
+        Update: {
+          class_year?: string | null
+          conference?: string | null
+          created_at?: string
+          first_name?: string
+          handedness?: string | null
+          headshot_url?: string | null
+          height_inches?: number | null
+          high_school?: string | null
+          home_state?: string | null
+          id?: string
+          last_name?: string
+          notes?: string | null
+          portal_entry_date?: string | null
+          position?: string | null
+          team?: string | null
+          transfer_portal?: boolean
+          updated_at?: string
+          weight?: number | null
+        }
+        Relationships: []
+      }
+      power_ratings: {
+        Row: {
+          conference: string
+          created_at: string
+          id: string
+          notes: string | null
+          rank: number | null
+          rating: number
+          season: number
+          strength_of_schedule: number | null
+          updated_at: string
+        }
+        Insert: {
+          conference: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          rank?: number | null
+          rating?: number
+          season: number
+          strength_of_schedule?: number | null
+          updated_at?: string
+        }
+        Update: {
+          conference?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          rank?: number | null
+          rating?: number
+          season?: number
+          strength_of_schedule?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -40,6 +320,122 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      season_stats: {
+        Row: {
+          at_bats: number | null
+          batting_avg: number | null
+          caught_stealing: number | null
+          created_at: string
+          doubles: number | null
+          earned_runs: number | null
+          era: number | null
+          games: number | null
+          hit_by_pitch: number | null
+          hits: number | null
+          hits_allowed: number | null
+          home_runs: number | null
+          id: string
+          innings_pitched: number | null
+          losses: number | null
+          on_base_pct: number | null
+          ops: number | null
+          pitch_strikeouts: number | null
+          pitch_walks: number | null
+          player_id: string
+          rbi: number | null
+          runs: number | null
+          sac_flies: number | null
+          saves: number | null
+          season: number
+          slugging_pct: number | null
+          stolen_bases: number | null
+          strikeouts: number | null
+          triples: number | null
+          updated_at: string
+          walks: number | null
+          whip: number | null
+          wins: number | null
+        }
+        Insert: {
+          at_bats?: number | null
+          batting_avg?: number | null
+          caught_stealing?: number | null
+          created_at?: string
+          doubles?: number | null
+          earned_runs?: number | null
+          era?: number | null
+          games?: number | null
+          hit_by_pitch?: number | null
+          hits?: number | null
+          hits_allowed?: number | null
+          home_runs?: number | null
+          id?: string
+          innings_pitched?: number | null
+          losses?: number | null
+          on_base_pct?: number | null
+          ops?: number | null
+          pitch_strikeouts?: number | null
+          pitch_walks?: number | null
+          player_id: string
+          rbi?: number | null
+          runs?: number | null
+          sac_flies?: number | null
+          saves?: number | null
+          season: number
+          slugging_pct?: number | null
+          stolen_bases?: number | null
+          strikeouts?: number | null
+          triples?: number | null
+          updated_at?: string
+          walks?: number | null
+          whip?: number | null
+          wins?: number | null
+        }
+        Update: {
+          at_bats?: number | null
+          batting_avg?: number | null
+          caught_stealing?: number | null
+          created_at?: string
+          doubles?: number | null
+          earned_runs?: number | null
+          era?: number | null
+          games?: number | null
+          hit_by_pitch?: number | null
+          hits?: number | null
+          hits_allowed?: number | null
+          home_runs?: number | null
+          id?: string
+          innings_pitched?: number | null
+          losses?: number | null
+          on_base_pct?: number | null
+          ops?: number | null
+          pitch_strikeouts?: number | null
+          pitch_walks?: number | null
+          player_id?: string
+          rbi?: number | null
+          runs?: number | null
+          sac_flies?: number | null
+          saves?: number | null
+          season?: number
+          slugging_pct?: number | null
+          stolen_bases?: number | null
+          strikeouts?: number | null
+          triples?: number | null
+          updated_at?: string
+          walks?: number | null
+          whip?: number | null
+          wins?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "season_stats_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {
