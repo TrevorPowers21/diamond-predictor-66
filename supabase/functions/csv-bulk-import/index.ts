@@ -100,7 +100,22 @@ Deno.serve(async (req) => {
     // Determine first/last name columns
     const firstNameIdx = colMap["playerfirstname"] ?? colMap["firstname"] ?? colMap["first_name"] ?? colMap["first name"] ?? -1;
     const lastNameIdx = colMap["player"] ?? colMap["lastname"] ?? colMap["last_name"] ?? colMap["last name"] ?? -1;
-    const fullNameIdx = colMap["playerfullname"] ?? colMap["formattedname"] ?? colMap["full_name"] ?? colMap["name"] ?? -1;
+    let fullNameIdx = colMap["playerfullname"] ?? colMap["formattedname"] ?? colMap["full_name"] ?? colMap["name"] ?? -1;
+
+    // Fallback: if no name columns found, check if "team" column contains player names (power rating CSV format)
+    if (firstNameIdx === -1 && fullNameIdx === -1) {
+      const teamColIdx = colMap["team"] ?? 0;
+      // Check a few data rows to see if they look like player names (contain a space, no leading digits)
+      let looksLikeNames = 0;
+      for (let i = 1; i < Math.min(lines.length, 10); i++) {
+        const testCols = parseCsvLine(lines[i]);
+        const val = (testCols[teamColIdx] || "").trim();
+        if (val && /^[A-Z][a-z]+ [A-Z]/.test(val)) looksLikeNames++;
+      }
+      if (looksLikeNames >= 2) {
+        fullNameIdx = teamColIdx;
+      }
+    }
 
     if (firstNameIdx === -1 && fullNameIdx === -1) {
       return new Response(
@@ -109,16 +124,19 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Stat columns
+    // Stat columns - support both standard and power rating CSV formats
     const baIdx = colMap["ba"] ?? colMap["batting_avg"] ?? colMap["avg"] ?? -1;
     const obpIdx = colMap["obp"] ?? colMap["on_base_pct"] ?? -1;
     const slgIdx = colMap["slg"] ?? colMap["slugging_pct"] ?? -1;
-    const evIdx = colMap["exitvel"] ?? colMap["exit_vel"] ?? colMap["ev"] ?? -1;
-    const barrelIdx = colMap["barrel%"] ?? colMap["barrel_pct"] ?? colMap["barrel"] ?? -1;
-    const missIdx = colMap["miss%"] ?? colMap["whiff%"] ?? colMap["miss_pct"] ?? colMap["whiff_pct"] ?? -1;
-    const chaseIdx = colMap["chase%"] ?? colMap["chase_pct"] ?? colMap["chase"] ?? -1;
+    const evIdx = colMap["exitvel"] ?? colMap["exit_vel"] ?? colMap["ev"] ?? colMap["ev score"] ?? -1;
+    const barrelIdx = colMap["barrel%"] ?? colMap["barrel_pct"] ?? colMap["barrel"] ?? colMap["barrel score"] ?? -1;
+    const missIdx = colMap["miss%"] ?? colMap["whiff%"] ?? colMap["miss_pct"] ?? colMap["whiff_pct"] ?? colMap["whiff% score"] ?? -1;
+    const chaseIdx = colMap["chase%"] ?? colMap["chase_pct"] ?? colMap["chase"] ?? colMap["chase% score"] ?? colMap["chase score"] ?? -1;
+    const powerRatingScoreIdx = colMap["offensive power rating"] ?? colMap["power_rating_score"] ?? -1;
+    const powerRatingPlusIdx = colMap["power rating"] ?? colMap["power rating+"] ?? colMap["power_rating_plus"] ?? -1;
     const posIdx = colMap["pos"] ?? colMap["position"] ?? -1;
-    const teamIdx = colMap["newestteamname"] ?? colMap["team"] ?? -1;
+    // Don't use "team" column for team if it's being used as the name column
+    const teamIdx = (fullNameIdx === (colMap["team"] ?? 0)) ? -1 : (colMap["newestteamname"] ?? colMap["team"] ?? -1);
     const teamAbbrIdx = colMap["newestteamabbrevname"] ?? colMap["team_abbr"] ?? -1;
     const batsIdx = colMap["batshand"] ?? colMap["handedness"] ?? colMap["bats"] ?? -1;
     const classIdx = colMap["class_year"] ?? colMap["class"] ?? colMap["year"] ?? colMap["eligibility"] ?? -1;
@@ -167,6 +185,12 @@ Deno.serve(async (req) => {
 
         if (!firstName || !lastName) { skipped++; continue; }
 
+        // Skip rows that are clearly not player names (conference rows, aggregates, blank names)
+        const fullNameRaw = `${firstName} ${lastName}`;
+        if (/^\d{2}\s/.test(fullNameRaw) || /^(Max|Min|NCAA|Pac)$/i.test(firstName)) { skipped++; continue; }
+        // Skip xstats duplicate rows
+        if (lastName.endsWith("xstats")) { skipped++; continue; }
+
         const matchKey = `${firstName.toLowerCase()}|${lastName.toLowerCase()}`;
         let playerId: string;
         let classYear: string | null = classIdx !== -1 ? cols[classIdx] || null : null;
@@ -213,7 +237,8 @@ Deno.serve(async (req) => {
         const barrel = barrelIdx !== -1 ? parsePercent(cols[barrelIdx]) : undefined;
         const miss = missIdx !== -1 ? parsePercent(cols[missIdx]) : undefined;
         const chase = chaseIdx !== -1 ? parsePercent(cols[chaseIdx]) : undefined;
-
+        const prScore = powerRatingScoreIdx !== -1 ? parseNum(cols[powerRatingScoreIdx]) : undefined;
+        const prPlus = powerRatingPlusIdx !== -1 ? parseNum(cols[powerRatingPlusIdx]) : undefined;
         const classTransition = deriveClassTransition(classYear);
 
         // Always-present keys for upsert conflict resolution
@@ -235,6 +260,8 @@ Deno.serve(async (req) => {
         if (barrel !== undefined) predRecord.barrel_score = barrel;
         if (miss !== undefined) predRecord.whiff_score = miss;
         if (chase !== undefined) predRecord.chase_score = chase;
+        if (prScore !== undefined) predRecord.power_rating_score = prScore;
+        if (prPlus !== undefined) predRecord.power_rating_plus = prPlus;
         if (obp !== undefined && slg !== undefined) {
           predRecord.p_ops = obp != null && slg != null ? Math.round((obp + slg) * 1000) / 1000 : null;
         }
