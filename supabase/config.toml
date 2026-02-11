@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.recalculate-prediction]
 verify_jwt = false
+
+[functions.csv-bulk-import]
+verify_jwt = false

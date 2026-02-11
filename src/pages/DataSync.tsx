@@ -1,5 +1,6 @@
 import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
+import CsvBulkImport from "@/components/CsvBulkImport";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,6 +94,8 @@ export default function DataSync() {
           <h2 className="text-2xl font-bold tracking-tight">Google Sheets Sync</h2>
           <p className="text-muted-foreground">Import player data from or export to your Google Sheets.</p>
         </div>
+        {/* CSV Bulk Import */}
+        <CsvBulkImport />
 
         <Card>
           <CardHeader>
