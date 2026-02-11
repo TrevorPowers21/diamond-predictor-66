@@ -23,11 +23,14 @@ function toBase64Url(input: string | Uint8Array): string {
 
 // ── Google Auth ──────────────────────────────────────────────────────
 async function getGoogleAccessToken(): Promise<string> {
-  const email = Deno.env.get("GOOGLE_SERVICE_ACCOUNT_EMAIL")!;
-  const rawKey = Deno.env.get("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY")!;
+  const jsonStr = Deno.env.get("GOOGLE_SERVICE_ACCOUNT_JSON");
+  if (!jsonStr) throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON secret is not set");
 
-  console.log("Key starts with:", rawKey?.substring(0, 30));
-  console.log("Key length:", rawKey?.length);
+  const sa = JSON.parse(jsonStr);
+  const email = sa.client_email;
+  const rawKey = sa.private_key;
+
+  if (!email || !rawKey) throw new Error("Invalid service account JSON: missing client_email or private_key");
 
   // Build JWT
   const now = Math.floor(Date.now() / 1000);
@@ -50,9 +53,6 @@ async function getGoogleAccessToken(): Promise<string> {
     .replace(/-----BEGIN PRIVATE KEY-----/, "")
     .replace(/-----END PRIVATE KEY-----/, "")
     .replace(/[\n\r\s]/g, "");
-
-  console.log("PEM cleaned length:", pem.length);
-  console.log("PEM first 20 chars:", pem.substring(0, 20));
 
   // Decode base64 PEM to binary using Deno std
   const binaryDer = decodeBase64(pem);
