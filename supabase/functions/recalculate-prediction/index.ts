@@ -6,12 +6,26 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// Default developmental class weights (used when developmental_weights table is empty)
-const DEFAULT_CLASS_WEIGHTS: Record<string, number> = {
-  FS: 1.06, // FR → SO: biggest developmental jump
-  SJ: 1.04, // SO → JR: moderate growth
-  JS: 1.02, // JR → SR: marginal gains
-  GR: 1.01, // Graduate: minimal change
+/**
+ * Class transition growth ranges from the Google Sheet equation.
+ * Dev aggressiveness (0.0 / 0.5 / 1.0) interpolates within the range:
+ *   0.0 = no additional developmental boost (predictions stay stable)
+ *   0.5 = expected growth (midpoint of the range delta)
+ *   1.0 = aggressive growth (full range delta applied)
+ *
+ * The "range" is the difference between the high and low multipliers.
+ * At dev_agg=0, predictions are unchanged. At dev_agg=X, each stat
+ * gets multiplied by (1 + range * X).
+ */
+const CLASS_GROWTH_RANGES: Record<string, { avg: number; obp: number; slg: number }> = {
+  // FR → SO: AVG ×(1.02–1.04), OBP ×(1.03–1.06), SLG ×(1.04–1.08)
+  FS: { avg: 0.02, obp: 0.03, slg: 0.04 },
+  // SO → JR: AVG ×(1.01–1.03), OBP ×(1.02–1.04), SLG ×(1.02–1.05)
+  SJ: { avg: 0.02, obp: 0.02, slg: 0.03 },
+  // JR → SR: AVG ×(1.00–1.02), OBP ×(1.00–1.03), SLG ×(1.00–1.03)
+  JS: { avg: 0.02, obp: 0.03, slg: 0.03 },
+  // Graduate: no growth expected
+  GR: { avg: 0, obp: 0, slg: 0 },
 };
 
 Deno.serve(async (req) => {
@@ -40,10 +54,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 1. Fetch the prediction + player info
+    // Fetch the current prediction
     const { data: pred, error: predErr } = await supabase
       .from("player_predictions")
-      .select("*, players!inner(id, team, conference, position, class_year)")
+      .select("*")
       .eq("id", prediction_id)
       .single();
 
@@ -54,129 +68,64 @@ Deno.serve(async (req) => {
       );
     }
 
-    const player = pred.players as any;
     const classTransition = pred.class_transition || "SJ";
+    const oldDevAgg = Number(pred.dev_aggressiveness) || 0;
+    const newDevAgg = dev_aggressiveness;
+    const ranges = CLASS_GROWTH_RANGES[classTransition] || CLASS_GROWTH_RANGES.GR;
 
-    // 2. Fetch model config
+    // Compute the base predictions (what stats are at dev_agg=0)
+    // by reversing the old dev_agg adjustment
+    const oldAvgFactor = 1 + ranges.avg * oldDevAgg;
+    const oldObpFactor = 1 + ranges.obp * oldDevAgg;
+    const oldSlgFactor = 1 + ranges.slg * oldDevAgg;
+
+    const baseAvg = Number(pred.p_avg) / oldAvgFactor;
+    const baseObp = Number(pred.p_obp) / oldObpFactor;
+    const baseSlg = Number(pred.p_slg) / oldSlgFactor;
+
+    // Apply the new dev_agg adjustment
+    const newAvgFactor = 1 + ranges.avg * newDevAgg;
+    const newObpFactor = 1 + ranges.obp * newDevAgg;
+    const newSlgFactor = 1 + ranges.slg * newDevAgg;
+
+    const pAvg = round3(baseAvg * newAvgFactor);
+    const pObp = round3(baseObp * newObpFactor);
+    const pSlg = round3(baseSlg * newSlgFactor);
+    const pOps = round3(pObp + pSlg);
+    const pIso = round3(pSlg - pAvg);
+
+    // Recalculate wRC+ (OPS-based approximation, same as sheet)
+    // Fetch NCAA averages from model_config
     const { data: configRows } = await supabase
       .from("model_config")
       .select("config_key, config_value")
       .eq("model_type", "returner")
-      .eq("season", pred.season);
+      .eq("season", pred.season)
+      .in("config_key", ["ncaa_obp", "ncaa_slg"]);
 
-    const config: Record<string, number> = {};
+    let ncaaObp = 0.385;
+    let ncaaSlg = 0.442;
     for (const row of configRows || []) {
-      config[row.config_key] = Number(row.config_value);
+      if (row.config_key === "ncaa_obp") ncaaObp = Number(row.config_value);
+      if (row.config_key === "ncaa_slg") ncaaSlg = Number(row.config_value);
     }
 
-    const ncaaAvg = config.ncaa_avg ?? 0.28;
-    const ncaaObp = config.ncaa_obp ?? 0.385;
-    const ncaaSlg = config.ncaa_slg ?? 0.442;
-    const conferenceWeight = config.conference_weight ?? 0.7;
-    const parkWeightAvgObp = config.park_weight_avg_obp ?? 0.2;
-    const parkWeightSlg = config.park_weight_slg ?? 0.4;
-    const powerRatingWeight = config.power_rating_weight ?? 0.5;
-    const ncaaPowerRating = config.ncaa_power_rating ?? 100;
-
-    // 3. Fetch developmental weight from table (override defaults if populated)
-    let classWeight = DEFAULT_CLASS_WEIGHTS[classTransition] ?? 1.03;
-
-    const { data: devWeights } = await supabase
-      .from("developmental_weights")
-      .select("weight")
-      .eq("from_class", classTransition.substring(0, 2) === "FS" ? "FR" :
-           classTransition.substring(0, 2) === "SJ" ? "SO" :
-           classTransition.substring(0, 2) === "JS" ? "JR" : "Graduate")
-      .eq("to_class", classTransition.substring(1, 2) === "S" && classTransition === "FS" ? "SO" :
-           classTransition === "SJ" ? "JR" :
-           classTransition === "JS" ? "SR" : "Graduate")
-      .eq("stat_category", "overall")
-      .limit(1);
-
-    if (devWeights && devWeights.length > 0) {
-      classWeight = Number(devWeights[0].weight);
-    }
-
-    // 4. Fetch park factor for player's team
-    let parkFactor = 1.0;
-    if (player.team) {
-      const { data: parkData } = await supabase
-        .from("park_factors")
-        .select("overall_factor")
-        .eq("team", player.team)
-        .eq("season", pred.season)
-        .limit(1);
-
-      if (parkData && parkData.length > 0) {
-        parkFactor = Number(parkData[0].overall_factor);
-      }
-    }
-
-    // 5. Fetch power rating for player's conference
-    let powerRating = ncaaPowerRating;
-    if (player.conference) {
-      const { data: prData } = await supabase
-        .from("power_ratings")
-        .select("rating")
-        .eq("conference", player.conference)
-        .eq("season", pred.season)
-        .limit(1);
-
-      if (prData && prData.length > 0) {
-        powerRating = Number(prData[0].rating);
-      }
-    }
-
-    // 6. Calculate predictions
-    // Prior stats
-    const fromAvg = Number(pred.from_avg) || ncaaAvg;
-    const fromObp = Number(pred.from_obp) || ncaaObp;
-    const fromSlg = Number(pred.from_slg) || ncaaSlg;
-
-    // Dev aggressiveness scales the developmental adjustment
-    // At 0.0: no developmental boost (class weight = 1.0)
-    // At 0.5: half the developmental boost
-    // At 1.0: full developmental boost
-    const effectiveClassWeight = 1.0 + (classWeight - 1.0) * dev_aggressiveness;
-
-    // Power rating adjustment (conference strength relative to NCAA average)
-    const powerRatingPlus = Math.round((powerRating / ncaaPowerRating) * 100);
-    const powerAdj = 1.0 + (powerRating / ncaaPowerRating - 1.0) * powerRatingWeight;
-
-    // Park factor adjustment (inverse: high park factor means inflate stats less)
-    const parkAdjAvgObp = 1.0 + (1.0 / parkFactor - 1.0) * parkWeightAvgObp;
-    const parkAdjSlg = 1.0 + (1.0 / parkFactor - 1.0) * parkWeightSlg;
-
-    // Conference adjustment
-    const confAdj = 1.0 + (powerRating / ncaaPowerRating - 1.0) * conferenceWeight;
-
-    // Projected stats
-    const pAvg = clamp(fromAvg * effectiveClassWeight * parkAdjAvgObp * confAdj, 0.100, 0.450);
-    const pObp = clamp(fromObp * effectiveClassWeight * parkAdjAvgObp * confAdj, 0.150, 0.600);
-    const pSlg = clamp(fromSlg * effectiveClassWeight * parkAdjSlg * confAdj * powerAdj, 0.150, 0.900);
-    const pOps = pObp + pSlg;
-    const pIso = pSlg - pAvg;
-
-    // wRC+ approximation: (pOPS / ncaaOPS) * 100, adjusted
     const ncaaOps = ncaaObp + ncaaSlg;
     const pWrcPlus = Math.round((pOps / ncaaOps) * 100);
+    const pWrc = round3(pOps * 0.44);
 
-    // wRC raw approximation
-    const pWrc = pOps * 0.44; // simplified wRC scaling
-
-    // 7. Update the prediction
+    // Update the prediction
     const { error: updateErr } = await supabase
       .from("player_predictions")
       .update({
-        dev_aggressiveness,
-        p_avg: round3(pAvg),
-        p_obp: round3(pObp),
-        p_slg: round3(pSlg),
-        p_ops: round3(pOps),
-        p_iso: round3(pIso),
-        p_wrc: round3(pWrc),
+        dev_aggressiveness: newDevAgg,
+        p_avg: pAvg,
+        p_obp: pObp,
+        p_slg: pSlg,
+        p_ops: pOps,
+        p_iso: pIso,
+        p_wrc: pWrc,
         p_wrc_plus: pWrcPlus,
-        power_rating_plus: powerRatingPlus,
       })
       .eq("id", prediction_id);
 
@@ -192,17 +141,16 @@ Deno.serve(async (req) => {
       JSON.stringify({
         success: true,
         prediction: {
-          dev_aggressiveness,
-          p_avg: round3(pAvg),
-          p_obp: round3(pObp),
-          p_slg: round3(pSlg),
-          p_ops: round3(pOps),
-          p_iso: round3(pIso),
-          p_wrc: round3(pWrc),
+          dev_aggressiveness: newDevAgg,
+          p_avg: pAvg,
+          p_obp: pObp,
+          p_slg: pSlg,
+          p_ops: pOps,
+          p_iso: pIso,
+          p_wrc: pWrc,
           p_wrc_plus: pWrcPlus,
-          power_rating_plus: powerRatingPlus,
-          effective_class_weight: round3(effectiveClassWeight),
-          park_factor: parkFactor,
+          class_transition: classTransition,
+          growth_ranges: ranges,
         },
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -215,10 +163,6 @@ Deno.serve(async (req) => {
     );
   }
 });
-
-function clamp(val: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, val));
-}
 
 function round3(val: number): number {
   return Math.round(val * 1000) / 1000;
