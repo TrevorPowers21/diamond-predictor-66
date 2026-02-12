@@ -469,7 +469,6 @@ async function findOrCreatePlayer(
   db: ReturnType<typeof createClient>,
   rawName: string
 ): Promise<{ id: string; cleanName: string } | null> {
-  // Clean name: remove xstats suffix, conference info in parens
   let cleanName = rawName.replace(/\s*xstats$/i, "").replace(/\s*\(.*\)$/, "").trim();
   if (!cleanName) return null;
 
@@ -479,7 +478,6 @@ async function findOrCreatePlayer(
   const firstName = parts[0];
   const lastName = parts.slice(1).join(" ");
 
-  // Try to find existing player
   const { data: existing } = await db
     .from("players")
     .select("id")
@@ -489,7 +487,6 @@ async function findOrCreatePlayer(
 
   if (existing) return { id: existing.id, cleanName };
 
-  // Create player
   const { data: created, error } = await db
     .from("players")
     .insert({ first_name: firstName, last_name: lastName })
@@ -502,6 +499,62 @@ async function findOrCreatePlayer(
   }
 
   return { id: created.id, cleanName };
+}
+
+// ── Helper: bulk load all players into a name→id map ─────────────────
+async function loadPlayerCache(db: ReturnType<typeof createClient>): Promise<Map<string, string>> {
+  const cache = new Map<string, string>();
+  let offset = 0;
+  const pageSize = 1000;
+  while (true) {
+    const { data } = await db
+      .from("players")
+      .select("id, first_name, last_name")
+      .range(offset, offset + pageSize - 1);
+    if (!data || data.length === 0) break;
+    for (const p of data) {
+      cache.set(`${p.first_name}|||${p.last_name}`.toLowerCase(), p.id);
+    }
+    offset += pageSize;
+    if (data.length < pageSize) break;
+  }
+  return cache;
+}
+
+// ── Helper: resolve player from cache or create ──────────────────────
+async function resolvePlayer(
+  db: ReturnType<typeof createClient>,
+  rawName: string,
+  cache: Map<string, string>
+): Promise<{ id: string; variant: string } | null> {
+  let cleanName = rawName.replace(/\s*xstats$/i, "").replace(/\s*\(.*\)$/, "").trim();
+  if (!cleanName) return null;
+
+  const parts = cleanName.split(/\s+/);
+  if (parts.length < 2) return null;
+
+  const firstName = parts[0];
+  const lastName = parts.slice(1).join(" ");
+  const key = `${firstName}|||${lastName}`.toLowerCase();
+  const variant = /xstats$/i.test(rawName) ? "xstats" : "regular";
+
+  let id = cache.get(key);
+  if (id) return { id, variant };
+
+  // Create player if not in cache
+  const { data: created, error } = await db
+    .from("players")
+    .insert({ first_name: firstName, last_name: lastName })
+    .select("id")
+    .single();
+
+  if (error) {
+    console.error(`Failed to create player ${cleanName}:`, error.message);
+    return null;
+  }
+
+  cache.set(key, created.id);
+  return { id: created.id, variant };
 }
 
 // ── Import returner predictions ──────────────────────────────────────
@@ -561,24 +614,26 @@ async function importReturnerPredictions(
   // Power Rating Score(10), Power Rating+(11), pAVG(12), pOBP(13), pSLG(14),
   // pOPS(15), pISO(16), pWRC(17), pWRC+(18)
 
+  // Pre-load player cache for fast lookups
+  const playerCache = await loadPlayerCache(db);
+
   let imported = 0;
   let skipped = 0;
+  const batch: Record<string, unknown>[] = [];
+  const BATCH_SIZE = 200;
 
   for (let i = 4; i < rows.length; i++) {
     const row = rows[i];
     const rawName = row[0]?.trim();
     if (!rawName) { skipped++; continue; }
 
-    const player = await findOrCreatePlayer(db, rawName);
+    const player = await resolvePlayer(db, rawName, playerCache);
     if (!player) { skipped++; continue; }
 
-    const isXstats = /xstats$/i.test(rawName);
-    const variant = isXstats ? "xstats" : "regular";
-
-    const record = {
+    batch.push({
       player_id: player.id,
       model_type: "returner",
-      variant,
+      variant: player.variant,
       season,
       from_avg: parseFloat(row[1]) || null,
       from_obp: parseFloat(row[2]) || null,
@@ -598,17 +653,32 @@ async function importReturnerPredictions(
       p_iso: parseFloat(row[16]) || null,
       p_wrc: parseFloat(row[17]) || null,
       p_wrc_plus: parseFloat(row[18]) || null,
-    };
-
-    const { error } = await db.from("player_predictions").upsert(record, {
-      onConflict: "player_id,model_type,variant,season",
     });
 
+    if (batch.length >= BATCH_SIZE) {
+      const { error } = await db.from("player_predictions").upsert(batch, {
+        onConflict: "player_id,model_type,variant,season",
+      });
+      if (error) {
+        console.error(`Batch upsert error:`, error.message);
+        skipped += batch.length;
+      } else {
+        imported += batch.length;
+      }
+      batch.length = 0;
+    }
+  }
+
+  // Flush remaining
+  if (batch.length > 0) {
+    const { error } = await db.from("player_predictions").upsert(batch, {
+      onConflict: "player_id,model_type,variant,season",
+    });
     if (error) {
-      console.error(`Failed to upsert prediction for ${rawName}:`, error.message);
-      skipped++;
+      console.error(`Batch upsert error:`, error.message);
+      skipped += batch.length;
     } else {
-      imported++;
+      imported += batch.length;
     }
   }
 
@@ -646,34 +716,26 @@ async function importTransferPredictions(
     if (!error) configImported++;
   }
 
-  // Row 3 (index 2) is headers, row 4+ (index 3+) is data
-  // Headers: Player Name(0), AVG(1), OBP(2), SLG(3),
-  // From AVG+(4), From OBP+(5), From SLG+(6),
-  // To AVG+(7), To OBP+(8), To SLG+(9),
-  // From Stuff+(10), To Stuff+(11),
-  // From Park Factor(12), To Park Factor(13),
-  // EV Score(14), Barrel%(15), Whiff%(16), Chase%(17),
-  // Power Rating Score(18), Power Rating+(19),
-  // pAVG(20), pOBP(21), pSLG(22), pOPS(23), pISO(24), pWRC(25)
+  // Pre-load player cache for fast lookups
+  const playerCache = await loadPlayerCache(db);
 
   let imported = 0;
   let skipped = 0;
+  const batch: Record<string, unknown>[] = [];
+  const BATCH_SIZE = 200;
 
   for (let i = 3; i < rows.length; i++) {
     const row = rows[i];
     const rawName = row[0]?.trim();
     if (!rawName) { skipped++; continue; }
 
-    const player = await findOrCreatePlayer(db, rawName);
+    const player = await resolvePlayer(db, rawName, playerCache);
     if (!player) { skipped++; continue; }
 
-    const isXstats = /xstats$/i.test(rawName);
-    const variant = isXstats ? "xstats" : "regular";
-
-    const record = {
+    batch.push({
       player_id: player.id,
       model_type: "transfer",
-      variant,
+      variant: player.variant,
       season,
       from_avg: parseFloat(row[1]) || null,
       from_obp: parseFloat(row[2]) || null,
@@ -701,17 +763,32 @@ async function importTransferPredictions(
       p_iso: parseFloat(row[24]) || null,
       p_wrc: parseFloat(row[25]) || null,
       p_wrc_plus: parseFloat(row[26]) || null,
-    };
-
-    const { error } = await db.from("player_predictions").upsert(record, {
-      onConflict: "player_id,model_type,variant,season",
     });
 
+    if (batch.length >= BATCH_SIZE) {
+      const { error } = await db.from("player_predictions").upsert(batch, {
+        onConflict: "player_id,model_type,variant,season",
+      });
+      if (error) {
+        console.error(`Batch upsert error:`, error.message);
+        skipped += batch.length;
+      } else {
+        imported += batch.length;
+      }
+      batch.length = 0;
+    }
+  }
+
+  // Flush remaining
+  if (batch.length > 0) {
+    const { error } = await db.from("player_predictions").upsert(batch, {
+      onConflict: "player_id,model_type,variant,season",
+    });
     if (error) {
-      console.error(`Failed to upsert transfer prediction for ${rawName}:`, error.message);
-      skipped++;
+      console.error(`Batch upsert error:`, error.message);
+      skipped += batch.length;
     } else {
-      imported++;
+      imported += batch.length;
     }
   }
 
