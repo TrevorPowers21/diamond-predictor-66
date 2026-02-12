@@ -512,7 +512,7 @@ async function importReturnerPredictions(
   tab: string,
   season: number
 ) {
-  const rows = await readSheet(token, spreadsheetId, `'${tab}'!A1:V200`);
+  const rows = await readSheet(token, spreadsheetId, `'${tab}'!A1:V2500`);
   if (rows.length < 5) return { imported: 0, message: "Not enough rows" };
 
   // Row 3 (index 2) has the config weights
@@ -623,7 +623,7 @@ async function importTransferPredictions(
   tab: string,
   season: number
 ) {
-  const rows = await readSheet(token, spreadsheetId, `'${tab}'!A1:AA200`);
+  const rows = await readSheet(token, spreadsheetId, `'${tab}'!A1:AA2500`);
   if (rows.length < 4) return { imported: 0, message: "Not enough rows" };
 
   // Row 2 (index 1) has weights at indices 20-25
