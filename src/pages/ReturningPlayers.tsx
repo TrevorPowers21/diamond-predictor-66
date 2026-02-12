@@ -95,23 +95,35 @@ export default function ReturningPlayers() {
   const { data: players = [], isLoading } = useQuery({
     queryKey: ["returning-players", variant, statusFilter],
     queryFn: async () => {
-      let query = supabase
-        .from("player_predictions")
-        .select(`
-          *,
-          players!inner(id, first_name, last_name, team, conference, position, class_year)
-        `)
-        .eq("model_type", "returner")
-        .eq("variant", variant);
+      // Fetch all rows using pagination to bypass the 1000-row default limit
+      let allData: any[] = [];
+      let from = 0;
+      const PAGE_SIZE = 1000;
+      
+      while (true) {
+        let query = supabase
+          .from("player_predictions")
+          .select(`
+            *,
+            players!inner(id, first_name, last_name, team, conference, position, class_year)
+          `)
+          .eq("model_type", "returner")
+          .eq("variant", variant)
+          .range(from, from + PAGE_SIZE - 1);
 
-      if (statusFilter !== "all") {
-        query = query.eq("status", statusFilter);
+        if (statusFilter !== "all") {
+          query = query.eq("status", statusFilter);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+        
+        allData = allData.concat(data || []);
+        if (!data || data.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
-
-      return (data || []).map((row: any) => ({
+      return (allData || []).map((row: any) => ({
         id: row.players.id,
         prediction_id: row.id,
         first_name: row.players.first_name,

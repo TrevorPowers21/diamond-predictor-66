@@ -185,9 +185,12 @@ Deno.serve(async (req) => {
 
         if (!firstName || !lastName) { skipped++; continue; }
 
-        // Skip rows that are clearly not player names (conference rows, aggregates, blank names)
-        const fullNameRaw = `${firstName} ${lastName}`;
-        if (/^\d{2}\s/.test(fullNameRaw) || /^(Max|Min|NCAA|Pac)$/i.test(firstName)) { skipped++; continue; }
+        // Skip rows that are clearly not player names (conference aggregates, summary rows)
+        const fullNameRaw = `${firstName} ${lastName}`.trim();
+        // Only skip if first name is exactly a known summary/aggregate keyword
+        if (/^(Max|Min|NCAA|Average|Total|Mean|Median|Sum|Count|Grand)$/i.test(firstName.trim())) { skipped++; continue; }
+        // Skip conference aggregate rows like "25 ACC", "25 Big 12" (start with 2-digit number + space + conference)
+        if (/^\d{2,4}\s+(ACC|SEC|Big|Pac|AAC|Sun|Mountain|WCC|MWC|WAC|MAAC|MAC|CAA|OVC|Southland|SWAC|MEAC|NEC|America|Atlantic|Colonial|Horizon|Ivy|Metro|Missouri|Ohio|Patriot|Southern|Summit|West)/i.test(fullNameRaw)) { skipped++; continue; }
         // Skip xstats duplicate rows
         if (lastName.endsWith("xstats")) { skipped++; continue; }
 
