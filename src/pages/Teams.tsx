@@ -17,6 +17,7 @@ interface Team {
   name: string;
   conference: string | null;
   division: string | null;
+  park_factor: number | null;
 }
 
 const CONFERENCES = [
@@ -271,6 +272,7 @@ export default function Teams() {
                     <TableRow>
                       <TableHead className="min-w-[250px]">Team</TableHead>
                       <TableHead className="min-w-[180px]">Conference</TableHead>
+                      <TableHead className="min-w-[100px] text-center">Park Factor</TableHead>
                       <TableHead className="w-[100px]">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -287,6 +289,11 @@ export default function Teams() {
                           ) : (
                             team.name
                           )}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-sm tabular-nums">
+                            {(team.park_factor ?? 1.000).toFixed(3)}
+                          </span>
                         </TableCell>
                         <TableCell>
                           {editingId === team.id ? (

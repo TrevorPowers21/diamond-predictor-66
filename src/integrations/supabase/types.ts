@@ -680,6 +680,7 @@ export type Database = {
           division: string | null
           id: string
           name: string
+          park_factor: number | null
           updated_at: string
         }
         Insert: {
@@ -688,6 +689,7 @@ export type Database = {
           division?: string | null
           id?: string
           name: string
+          park_factor?: number | null
           updated_at?: string
         }
         Update: {
@@ -696,6 +698,7 @@ export type Database = {
           division?: string | null
           id?: string
           name?: string
+          park_factor?: number | null
           updated_at?: string
         }
         Relationships: []
