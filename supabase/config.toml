@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.scrape-64analytics]
 verify_jwt = false
+
+[functions.update-player-teams]
+verify_jwt = false

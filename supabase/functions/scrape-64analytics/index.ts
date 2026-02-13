@@ -16,27 +16,26 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { startPage = 1, endPage = 222 } = await req.json().catch(() => ({}));
+    const { startPage = 1, endPage = 222, mode = "update_2025" } = await req.json().catch(() => ({}));
 
-    // 1. Load all returning players (transfer_portal = false)
-    console.log("Loading returning players from database...");
+    // 1. Load all players
+    console.log("Loading players from database...");
     let allPlayers: any[] = [];
     let from = 0;
     const PAGE_SIZE = 1000;
     while (true) {
       const { data, error } = await supabase
         .from("players")
-        .select("id, first_name, last_name, position, team")
-        .eq("transfer_portal", false)
+        .select("id, first_name, last_name, position, team, transfer_portal")
         .range(from, from + PAGE_SIZE - 1);
       if (error) throw error;
       allPlayers = allPlayers.concat(data || []);
       if (!data || data.length < PAGE_SIZE) break;
       from += PAGE_SIZE;
     }
-    console.log(`Loaded ${allPlayers.length} returning players`);
+    console.log(`Loaded ${allPlayers.length} players`);
 
-    // Build lookup map: "firstname lastname" -> player record
+    // Build lookup map: "firstname lastname" -> player records
     const playerMap = new Map<string, any[]>();
     for (const p of allPlayers) {
       const key = `${p.first_name.trim().toLowerCase()} ${p.last_name.trim().toLowerCase()}`;
@@ -50,7 +49,7 @@ Deno.serve(async (req) => {
     const updates: { id: string; position: string; team: string }[] = [];
 
     const actualEnd = Math.min(endPage, 222);
-    console.log(`Scraping pages ${startPage} to ${actualEnd}...`);
+    console.log(`Scraping pages ${startPage} to ${actualEnd} (mode: ${mode})...`);
 
     for (let page = startPage; page <= actualEnd; page++) {
       try {
@@ -63,20 +62,17 @@ Deno.serve(async (req) => {
         const html = await resp.text();
 
         // Parse table rows from HTML
-        // Each row has: Name, Team, Conference, Class, Pos, Transfer, Previous Team
+        // Columns: Name(0), Team(1), Conference(2), Class(3), Pos(4), Transfer(5), Previous Team(6)
         const rowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
         const rows = html.match(rowRegex) || [];
 
         for (const row of rows) {
-          // Skip header rows
           if (row.includes("<th")) continue;
 
-          // Extract cells
           const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
           const cells: string[] = [];
           let cellMatch;
           while ((cellMatch = cellRegex.exec(row)) !== null) {
-            // Strip HTML tags to get text content
             const text = cellMatch[1]
               .replace(/<[^>]+>/g, " ")
               .replace(/\s+/g, " ")
@@ -84,33 +80,41 @@ Deno.serve(async (req) => {
             cells.push(text);
           }
 
-          if (cells.length < 5) continue;
+          if (cells.length < 7) continue;
 
           const name = cells[0].trim();
-          const team = cells[1].trim();
+          const currentTeam = cells[1].trim();
           const pos = cells[4].trim();
+          const isTransfer = cells[5].trim().toLowerCase();
+          const previousTeam = cells[6].trim().replace(/^--$/, "").replace(/^-$/, "");
 
           if (!name || !pos) continue;
-
           totalScraped++;
 
-          // Match against our players
           const nameLower = name.toLowerCase();
           const matched = playerMap.get(nameLower);
+          if (!matched) continue;
 
-          if (matched) {
-            for (const player of matched) {
-              updates.push({ id: player.id, position: pos, team });
-            }
-            totalMatched += matched.length;
+          // Determine the 2025 team:
+          // If player transferred (has a previous team), use previous team as their 2025 team
+          // If player didn't transfer, use current team as their 2025 team
+          let team2025: string;
+          if (previousTeam && previousTeam !== "" && previousTeam !== "--") {
+            team2025 = previousTeam; // They transferred, so their 2025 team is the previous one
+          } else {
+            team2025 = currentTeam; // Didn't transfer, current = 2025 team
           }
+
+          for (const player of matched) {
+            updates.push({ id: player.id, position: pos, team: team2025 });
+          }
+          totalMatched += matched.length;
         }
 
         if (page % 20 === 0) {
           console.log(`Scraped page ${page}/${actualEnd}, matched so far: ${totalMatched}`);
         }
 
-        // Small delay to be respectful
         if (page < actualEnd) {
           await new Promise((r) => setTimeout(r, 100));
         }
@@ -123,19 +127,15 @@ Deno.serve(async (req) => {
 
     // 3. Batch update matched players
     let updated = 0;
-    const BATCH = 200;
-    for (let i = 0; i < updates.length; i += BATCH) {
-      const batch = updates.slice(i, i + BATCH);
-      for (const u of batch) {
-        const { error } = await supabase
-          .from("players")
-          .update({ position: u.position, team: u.team })
-          .eq("id", u.id);
-        if (error) {
-          console.error(`Update failed for ${u.id}:`, error.message);
-        } else {
-          updated++;
-        }
+    for (const u of updates) {
+      const { error } = await supabase
+        .from("players")
+        .update({ position: u.position, team: u.team })
+        .eq("id", u.id);
+      if (error) {
+        console.error(`Update failed for ${u.id}:`, error.message);
+      } else {
+        updated++;
       }
     }
 
