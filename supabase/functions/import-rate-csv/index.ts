@@ -23,22 +23,49 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const db = createClient(supabaseUrl, supabaseKey);
 
-    const body = await req.json();
-    
-    // Accept compact format: array of [firstName, lastName, pos, team, batsHand, throwsHand, age]
-    const { players: playerData } = body;
-    if (!playerData || !Array.isArray(playerData)) throw new Error("Provide players array");
+    const body = await req.json().catch(() => ({}));
+    const { storagePath = "rate-import.csv" } = body;
 
-    const csvRows = playerData.map((p: any[]) => ({
-      firstName: p[0],
-      lastName: p[1], 
-      pos: p[2],
-      team: p[3],
-      batsHand: p[4],
-      throwsHand: p[5],
-      age: p[6] ? parseInt(p[6]) : null,
-    }));
-    console.log(`Received ${csvRows.length} player rows`);
+    // Download CSV from storage bucket
+    const { data: fileData, error: dlError } = await db.storage.from("imports").download(storagePath);
+    if (dlError) throw new Error(`Download failed: ${dlError.message}`);
+    const rawCsv = await fileData.text();
+    console.log(`Downloaded CSV: ${rawCsv.length} chars`);
+
+    // Parse CSV
+    const lines = rawCsv.split("\n").filter((l: string) => l.trim());
+    const headers = lines[0].split(",");
+    
+    const colIdx = {
+      playerFirstName: headers.indexOf("playerFirstName"),
+      player: headers.indexOf("player"),
+      pos: headers.indexOf("pos"),
+      newestTeamLocation: headers.indexOf("newestTeamLocation"),
+      batsHand: headers.indexOf("batsHand"),
+      throwsHand: headers.indexOf("throwsHand"),
+      age: headers.indexOf("Age"),
+    };
+    console.log("Column indices:", colIdx);
+
+    interface CsvRow { firstName: string; lastName: string; pos: string; team: string; batsHand: string; throwsHand: string; age: number | null }
+    const csvRows: CsvRow[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cells = lines[i].split(",");
+      if (cells.length < 15) continue;
+      
+      const firstName = (cells[colIdx.playerFirstName] || "").trim();
+      const lastName = (cells[colIdx.player] || "").trim();
+      const pos = (cells[colIdx.pos] || "").trim();
+      const team = (cells[colIdx.newestTeamLocation] || "").trim();
+      const batsHand = (cells[colIdx.batsHand] || "").trim();
+      const throwsHand = (cells[colIdx.throwsHand] || "").trim();
+      const ageStr = (cells[colIdx.age] || "").trim();
+      const age = ageStr ? parseInt(ageStr) : null;
+
+      if (!firstName || !lastName) continue;
+      csvRows.push({ firstName, lastName, pos, team, batsHand, throwsHand, age });
+    }
+    console.log(`Parsed ${csvRows.length} CSV rows`);
 
     // Load all players
     let allPlayers: any[] = [];
@@ -63,10 +90,10 @@ Deno.serve(async (req) => {
       playerMap.get(key)!.push(p);
     }
 
-    // Match and update
+    // Match and build updates
     let matched = 0;
-    let updated = 0;
-    let unmatched: string[] = [];
+    const unmatched: string[] = [];
+    const updateBatch: { id: string; data: Record<string, any> }[] = [];
 
     for (const row of csvRows) {
       const key = normalizeName(row.firstName, row.lastName);
@@ -79,26 +106,34 @@ Deno.serve(async (req) => {
 
       for (const player of players) {
         const updates: Record<string, any> = {};
-        
-        // Always update team from CSV (this is 2025 data)
         if (row.team) updates.team = row.team;
         if (row.pos) updates.position = row.pos;
-        if (row.age != null && !isNaN(row.age)) updates.age = row.age;
+        if (row.age != null && !isNaN(row.age) && row.age > 0) updates.age = row.age;
         if (row.batsHand) updates.bats_hand = row.batsHand;
         if (row.throwsHand) updates.throws_hand = row.throwsHand;
-
         if (Object.keys(updates).length > 0) {
-          const { error } = await db.from("players").update(updates).eq("id", player.id);
-          if (error) {
-            console.error(`Update failed for ${player.id}:`, error.message);
-          } else {
-            updated++;
-          }
+          updateBatch.push({ id: player.id, data: updates });
         }
       }
     }
 
-    console.log(`Matched: ${matched}, Updated: ${updated}, Unmatched: ${unmatched.length}`);
+    console.log(`Matched: ${matched}, Updates queued: ${updateBatch.length}, Unmatched: ${unmatched.length}`);
+
+    // Execute updates in parallel batches of 50
+    let updated = 0;
+    const BATCH = 50;
+    for (let i = 0; i < updateBatch.length; i += BATCH) {
+      const chunk = updateBatch.slice(i, i + BATCH);
+      const results = await Promise.all(
+        chunk.map(u => db.from("players").update(u.data).eq("id", u.id))
+      );
+      for (const r of results) {
+        if (!r.error) updated++;
+      }
+      if ((i + BATCH) % 500 === 0) console.log(`Updated ${updated}/${updateBatch.length}...`);
+    }
+
+    console.log(`Updated ${updated} players`);
 
     return new Response(JSON.stringify({
       success: true,
@@ -106,7 +141,7 @@ Deno.serve(async (req) => {
       matched,
       updated,
       unmatchedCount: unmatched.length,
-      unmatchedSample: unmatched.slice(0, 30),
+      unmatchedSample: unmatched.slice(0, 50),
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
