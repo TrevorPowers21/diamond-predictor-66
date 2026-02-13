@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { Link } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -326,7 +327,7 @@ export default function TransferPortal() {
                       return (
                         <TableRow key={`${p.id}-${pred.variant}`}>
                           <TableCell>
-                            <div className="font-medium">{p.first_name} {p.last_name}</div>
+                            <Link to={`/dashboard/player/${p.id}`} className="font-medium hover:text-primary hover:underline transition-colors">{p.first_name} {p.last_name}</Link>
                             <div className="text-xs text-muted-foreground">
                               {[p.position, p.team, p.class_year].filter(Boolean).join(" · ") || "—"}
                             </div>

@@ -15,6 +15,7 @@ import DataSync from "./pages/DataSync";
 import DevWeights from "./pages/DevWeights";
 import NilValuations from "./pages/NilValuations";
 import PlayerComparison from "./pages/PlayerComparison";
+import PlayerProfile from "./pages/PlayerProfile";
 import Teams from "./pages/Teams";
 
 const queryClient = new QueryClient();
@@ -37,6 +38,7 @@ const App = () => (
             <Route path="/dashboard/nil" element={<ProtectedRoute><NilValuations /></ProtectedRoute>} />
             <Route path="/dashboard/compare" element={<ProtectedRoute><PlayerComparison /></ProtectedRoute>} />
             <Route path="/dashboard/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
+            <Route path="/dashboard/player/:id" element={<ProtectedRoute><PlayerProfile /></ProtectedRoute>} />
             <Route path="/dashboard/*" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
