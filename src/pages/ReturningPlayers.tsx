@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -473,7 +474,9 @@ export default function ReturningPlayers() {
                       return (
                         <TableRow key={p.prediction_id}>
                           <TableCell className="font-medium whitespace-nowrap">
-                            {p.first_name} {p.last_name}
+                            <Link to={`/dashboard/player/${p.id}`} className="hover:text-primary hover:underline transition-colors">
+                              {p.first_name} {p.last_name}
+                            </Link>
                             {p.team && <span className="ml-1 text-xs text-muted-foreground">({p.team})</span>}
                           </TableCell>
                           <TableCell>
