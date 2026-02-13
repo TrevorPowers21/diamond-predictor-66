@@ -38,13 +38,13 @@ type EditFields = Omit<ConferenceStat, "id" | "created_at" | "updated_at">;
 
 const NUM_FIELDS: (keyof EditFields)[] = [
   "avg", "obp", "slg", "ops", "iso", "wrc",
-  "avg_plus", "obp_plus", "slg_plus", "ops_plus", "iso_plus", "wrc_plus",
+  "avg_plus", "obp_plus", "slg_plus", "ops_plus", "iso_plus", "wrc_plus", "stuff_plus",
 ];
 
 const LABELS: Record<string, string> = {
   avg: "AVG", obp: "OBP", slg: "SLG", ops: "OPS", iso: "ISO", wrc: "WRC",
   avg_plus: "AVG+", obp_plus: "OBP+", slg_plus: "SLG+",
-  ops_plus: "OPS+", iso_plus: "ISO+", wrc_plus: "WRC+",
+  ops_plus: "OPS+", iso_plus: "ISO+", wrc_plus: "WRC+", stuff_plus: "Stuff+",
 };
 
 export default function ConferenceStatsTable() {
