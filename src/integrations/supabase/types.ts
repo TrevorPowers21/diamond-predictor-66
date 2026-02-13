@@ -592,6 +592,33 @@ export type Database = {
           },
         ]
       }
+      teams: {
+        Row: {
+          conference: string | null
+          created_at: string
+          division: string | null
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          conference?: string | null
+          created_at?: string
+          division?: string | null
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          conference?: string | null
+          created_at?: string
+          division?: string | null
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
