@@ -37,11 +37,13 @@ type EditFields = Omit<ConferenceStat, "id" | "created_at" | "updated_at">;
 
 const NUM_FIELDS: (keyof EditFields)[] = [
   "avg", "obp", "slg", "ops", "iso", "wrc",
+  "offensive_power_rating",
   "avg_plus", "obp_plus", "slg_plus", "ops_plus", "iso_plus", "wrc_plus", "stuff_plus",
 ];
 
 const LABELS: Record<string, string> = {
   avg: "AVG", obp: "OBP", slg: "SLG", ops: "OPS", iso: "ISO", wrc: "WRC",
+  offensive_power_rating: "PWR",
   avg_plus: "AVG+", obp_plus: "OBP+", slg_plus: "SLG+",
   ops_plus: "OPS+", iso_plus: "ISO+", wrc_plus: "WRC+", stuff_plus: "Stuff+",
 };
@@ -93,10 +95,15 @@ export default function ConferenceStatsTable() {
     onError: (e) => toast.error(`Failed: ${e.message}`),
   });
 
-  const filtered = useMemo(() => {
-    if (!search) return stats;
-    const q = search.toLowerCase();
-    return stats.filter((s) => s.conference.toLowerCase().includes(q));
+  const { ncaaRow, filtered } = useMemo(() => {
+    let list = stats;
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter((s) => s.conference.toLowerCase().includes(q));
+    }
+    const ncaa = list.find((s) => s.conference.toLowerCase().includes("ncaa"));
+    const rest = list.filter((s) => !s.conference.toLowerCase().includes("ncaa"));
+    return { ncaaRow: ncaa || null, filtered: rest };
   }, [stats, search]);
 
   const startEdit = (stat: ConferenceStat) => {
@@ -118,6 +125,72 @@ export default function ConferenceStatsTable() {
     if (val === null || val === undefined) return "—";
     return isPlus ? val.toFixed(0) : val.toFixed(3);
   };
+
+  const renderRow = (stat: ConferenceStat, pinned = false) => (
+    <TableRow key={stat.id} className={pinned ? "bg-muted/50 font-semibold sticky bottom-0 z-10 border-t-2 border-primary/20" : ""}>
+      <TableCell className={`font-medium sticky left-0 z-10 ${pinned ? "bg-muted/50" : "bg-background"}`}>
+        {editingId === stat.id ? (
+          <Input
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            className="h-7 w-full max-w-[160px] text-xs"
+          />
+        ) : (
+          stat.conference
+        )}
+      </TableCell>
+      {NUM_FIELDS.map((f) => (
+        <TableCell key={f} className="text-center">
+          {editingId === stat.id ? (
+            <Input
+              type="number"
+              step={f.includes("plus") || f === "offensive_power_rating" ? "1" : "0.001"}
+              value={editData[f] ?? ""}
+              onChange={(e) => handleFieldChange(f, e.target.value)}
+              className="h-7 w-[70px] text-center text-xs"
+            />
+          ) : (
+            <span className="text-sm tabular-nums">
+              {fmt(stat[f] as number | null, f.includes("plus") || f === "offensive_power_rating")}
+            </span>
+          )}
+        </TableCell>
+      ))}
+      <TableCell>
+        {editingId === stat.id ? (
+          <div className="flex gap-1">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7"
+              onClick={() => updateStat.mutate({ id: stat.id, updates: { ...editData, conference: editName } })}
+            >
+              <Check className="h-3.5 w-3.5 text-primary" />
+            </Button>
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingId(null)}>
+              <X className="h-3.5 w-3.5 text-destructive" />
+            </Button>
+          </div>
+        ) : (
+          <div className="flex gap-1">
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEdit(stat)}>
+              <Edit2 className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7"
+              onClick={() => {
+                if (confirm(`Delete stats for "${stat.conference}"?`)) deleteStat.mutate(stat.id);
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+            </Button>
+          </div>
+        )}
+      </TableCell>
+    </TableRow>
+  );
 
   return (
     <Card>
@@ -141,7 +214,7 @@ export default function ConferenceStatsTable() {
       <CardContent className="p-0">
         {isLoading ? (
           <div className="flex items-center justify-center py-16 text-muted-foreground">Loading…</div>
-        ) : filtered.length === 0 ? (
+        ) : filtered.length === 0 && !ncaaRow ? (
           <div className="flex items-center justify-center py-16 text-muted-foreground">
             No conference stats found. Run "Import Conference Stats" from Data Sync.
           </div>
@@ -158,71 +231,8 @@ export default function ConferenceStatsTable() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((stat) => (
-                  <TableRow key={stat.id}>
-                    <TableCell className="font-medium sticky left-0 bg-background z-10">
-                      {editingId === stat.id ? (
-                        <Input
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          className="h-7 w-full max-w-[160px] text-xs"
-                        />
-                      ) : (
-                        stat.conference
-                      )}
-                    </TableCell>
-                    {NUM_FIELDS.map((f) => (
-                      <TableCell key={f} className="text-center">
-                        {editingId === stat.id ? (
-                          <Input
-                            type="number"
-                            step={f.includes("plus") ? "1" : "0.001"}
-                            value={editData[f] ?? ""}
-                            onChange={(e) => handleFieldChange(f, e.target.value)}
-                            className="h-7 w-[70px] text-center text-xs"
-                          />
-                        ) : (
-                          <span className="text-sm tabular-nums">
-                            {fmt(stat[f] as number | null, f.includes("plus"))}
-                          </span>
-                        )}
-                      </TableCell>
-                    ))}
-                    <TableCell>
-                      {editingId === stat.id ? (
-                        <div className="flex gap-1">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-7 w-7"
-                            onClick={() => updateStat.mutate({ id: stat.id, updates: { ...editData, conference: editName } })}
-                          >
-                            <Check className="h-3.5 w-3.5 text-primary" />
-                          </Button>
-                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingId(null)}>
-                            <X className="h-3.5 w-3.5 text-destructive" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex gap-1">
-                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEdit(stat)}>
-                            <Edit2 className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-7 w-7"
-                            onClick={() => {
-                              if (confirm(`Delete stats for "${stat.conference}"?`)) deleteStat.mutate(stat.id);
-                            }}
-                          >
-                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                          </Button>
-                        </div>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {filtered.map((stat) => renderRow(stat))}
+                {ncaaRow && renderRow(ncaaRow, true)}
               </TableBody>
             </Table>
           </div>
