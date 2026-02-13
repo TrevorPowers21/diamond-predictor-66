@@ -49,6 +49,7 @@ export default function ConferenceStatsTable() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
   const [editData, setEditData] = useState<Partial<EditFields>>({});
 
   const { data: stats = [], isLoading } = useQuery({
@@ -99,6 +100,7 @@ export default function ConferenceStatsTable() {
 
   const startEdit = (stat: ConferenceStat) => {
     setEditingId(stat.id);
+    setEditName(stat.conference);
     const fields: Record<string, number | null> = {};
     NUM_FIELDS.forEach((f) => { fields[f] = stat[f] as number | null; });
     setEditData(fields);
@@ -158,7 +160,15 @@ export default function ConferenceStatsTable() {
                 {filtered.map((stat) => (
                   <TableRow key={stat.id}>
                     <TableCell className="font-medium sticky left-0 bg-background z-10">
-                      {stat.conference}
+                      {editingId === stat.id ? (
+                        <Input
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="h-7 w-full max-w-[160px] text-xs"
+                        />
+                      ) : (
+                        stat.conference
+                      )}
                     </TableCell>
                     {NUM_FIELDS.map((f) => (
                       <TableCell key={f} className="text-center">
@@ -184,7 +194,7 @@ export default function ConferenceStatsTable() {
                             size="icon"
                             variant="ghost"
                             className="h-7 w-7"
-                            onClick={() => updateStat.mutate({ id: stat.id, updates: editData })}
+                            onClick={() => updateStat.mutate({ id: stat.id, updates: { ...editData, conference: editName } })}
                           >
                             <Check className="h-3.5 w-3.5 text-primary" />
                           </Button>
