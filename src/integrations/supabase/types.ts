@@ -70,6 +70,81 @@ export type Database = {
           },
         ]
       }
+      conference_stats: {
+        Row: {
+          avg: number | null
+          avg_plus: number | null
+          barrel_score: number | null
+          chase_score: number | null
+          conference: string
+          created_at: string
+          ev_score: number | null
+          id: string
+          iso: number | null
+          iso_plus: number | null
+          obp: number | null
+          obp_plus: number | null
+          offensive_power_rating: number | null
+          ops: number | null
+          ops_plus: number | null
+          season: number
+          slg: number | null
+          slg_plus: number | null
+          updated_at: string
+          whiff_score: number | null
+          wrc: number | null
+          wrc_plus: number | null
+        }
+        Insert: {
+          avg?: number | null
+          avg_plus?: number | null
+          barrel_score?: number | null
+          chase_score?: number | null
+          conference: string
+          created_at?: string
+          ev_score?: number | null
+          id?: string
+          iso?: number | null
+          iso_plus?: number | null
+          obp?: number | null
+          obp_plus?: number | null
+          offensive_power_rating?: number | null
+          ops?: number | null
+          ops_plus?: number | null
+          season: number
+          slg?: number | null
+          slg_plus?: number | null
+          updated_at?: string
+          whiff_score?: number | null
+          wrc?: number | null
+          wrc_plus?: number | null
+        }
+        Update: {
+          avg?: number | null
+          avg_plus?: number | null
+          barrel_score?: number | null
+          chase_score?: number | null
+          conference?: string
+          created_at?: string
+          ev_score?: number | null
+          id?: string
+          iso?: number | null
+          iso_plus?: number | null
+          obp?: number | null
+          obp_plus?: number | null
+          offensive_power_rating?: number | null
+          ops?: number | null
+          ops_plus?: number | null
+          season?: number
+          slg?: number | null
+          slg_plus?: number | null
+          updated_at?: string
+          whiff_score?: number | null
+          wrc?: number | null
+          wrc_plus?: number | null
+        }
+        Relationships: []
+      }
       developmental_weights: {
         Row: {
           created_at: string

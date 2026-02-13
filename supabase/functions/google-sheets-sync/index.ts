@@ -796,13 +796,48 @@ async function importConferenceStats(
 
   let imported = 0;
   let skipped = 0;
+  let confStatsImported = 0;
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
     const conference = row[0]?.trim();
     if (!conference) { skipped++; continue; }
 
-    // Store in power_ratings table (conference-level data)
+    // ── 1. Upsert into conference_stats (dedicated columns) ──
+    const confStatsRecord = {
+      conference,
+      season,
+      avg: parseFloat(row[1]) || null,
+      obp: parseFloat(row[2]) || null,
+      slg: parseFloat(row[3]) || null,
+      ops: parseFloat(row[4]) || null,
+      iso: parseFloat(row[5]) || null,
+      wrc: parseFloat(row[6]) || null,
+      // H-L stored for future pitching use
+      ev_score: parseFloat(row[7]) || null,
+      barrel_score: parseFloat(row[8]) || null,
+      whiff_score: parseFloat(row[9]) || null,
+      chase_score: parseFloat(row[10]) || null,
+      offensive_power_rating: parseFloat(row[11]) || null,
+      // M-R: critical plus-stats for transfer portal equation
+      avg_plus: parseFloat(row[12]) || null,
+      obp_plus: parseFloat(row[13]) || null,
+      slg_plus: parseFloat(row[14]) || null,
+      ops_plus: parseFloat(row[15]) || null,
+      iso_plus: parseFloat(row[16]) || null,
+      wrc_plus: parseFloat(row[17]) || null,
+    };
+
+    const { error: csError } = await db.from("conference_stats").upsert(confStatsRecord, {
+      onConflict: "conference,season",
+    });
+    if (csError) {
+      console.error(`conference_stats upsert failed for ${conference}:`, csError.message);
+    } else {
+      confStatsImported++;
+    }
+
+    // ── 2. Keep power_ratings in sync (legacy) ──
     const powerRating = parseFloat(row[11]) || null;
     const rating = parseFloat(row[18]) || null; // Power Rating+
 
@@ -841,7 +876,6 @@ async function importConferenceStats(
       }),
     };
 
-    // Upsert by conference + season
     const { data: existing } = await db
       .from("power_ratings")
       .select("id")
@@ -859,7 +893,7 @@ async function importConferenceStats(
     imported++;
   }
 
-  return { imported, skipped };
+  return { imported, skipped, conference_stats_imported: confStatsImported };
 }
 
 // ── Import park factors ──────────────────────────────────────────────
