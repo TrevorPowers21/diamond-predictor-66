@@ -1,0 +1,1 @@
+ALTER TABLE public.conference_stats ADD COLUMN power_rating_plus NUMERIC;
