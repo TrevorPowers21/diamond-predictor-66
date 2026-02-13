@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Search, Building2, Edit2, Check, X, Plus } from "lucide-react";
+import { Search, Building2, Edit2, Check, X, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 interface Team {
@@ -32,6 +32,7 @@ export default function Teams() {
   const [confFilter, setConfFilter] = useState<string>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editConf, setEditConf] = useState("");
+  const [editName, setEditName] = useState("");
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamConf, setNewTeamConf] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
@@ -57,18 +58,30 @@ export default function Teams() {
     },
   });
 
-  const updateConference = useMutation({
-    mutationFn: async ({ id, conference }: { id: string; conference: string }) => {
+  const updateTeam = useMutation({
+    mutationFn: async ({ id, name, conference }: { id: string; name: string; conference: string }) => {
       const { error } = await supabase
         .from("teams")
-        .update({ conference })
+        .update({ name, conference })
         .eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["teams"] });
       setEditingId(null);
-      toast.success("Conference updated");
+      toast.success("Team updated");
+    },
+    onError: (e) => toast.error(`Failed: ${e.message}`),
+  });
+
+  const deleteTeam = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("teams").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["teams"] });
+      toast.success("Team deleted");
     },
     onError: (e) => toast.error(`Failed: ${e.message}`),
   });
@@ -126,10 +139,11 @@ export default function Teams() {
   const startEdit = (team: Team) => {
     setEditingId(team.id);
     setEditConf(team.conference || "");
+    setEditName(team.name);
   };
 
   const saveEdit = (id: string) => {
-    updateConference.mutate({ id, conference: editConf });
+    updateTeam.mutate({ id, name: editName, conference: editConf });
   };
 
   return (
@@ -262,7 +276,17 @@ export default function Teams() {
                   <TableBody>
                     {filtered.map((team) => (
                       <TableRow key={team.id}>
-                        <TableCell className="font-medium">{team.name}</TableCell>
+                        <TableCell className="font-medium">
+                          {editingId === team.id ? (
+                            <Input
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value)}
+                              className="h-8 w-full max-w-[280px]"
+                            />
+                          ) : (
+                            team.name
+                          )}
+                        </TableCell>
                         <TableCell>
                           {editingId === team.id ? (
                             <Select value={editConf} onValueChange={setEditConf}>
@@ -294,9 +318,21 @@ export default function Teams() {
                               </Button>
                             </div>
                           ) : (
-                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEdit(team)}>
-                              <Edit2 className="h-3.5 w-3.5" />
-                            </Button>
+                            <div className="flex gap-1">
+                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEdit(team)}>
+                                <Edit2 className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7"
+                                onClick={() => {
+                                  if (confirm(`Delete "${team.name}"?`)) deleteTeam.mutate(team.id);
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                              </Button>
+                            </div>
                           )}
                         </TableCell>
                       </TableRow>
