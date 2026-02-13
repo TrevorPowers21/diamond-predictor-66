@@ -271,8 +271,8 @@ export default function Teams() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="min-w-[250px]">Team</TableHead>
-                      <TableHead className="min-w-[180px]">Conference</TableHead>
                       <TableHead className="min-w-[100px] text-center">Park Factor</TableHead>
+                      <TableHead className="min-w-[180px]">Conference</TableHead>
                       <TableHead className="w-[100px]">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -292,7 +292,7 @@ export default function Teams() {
                         </TableCell>
                         <TableCell className="text-center">
                           <span className="text-sm tabular-nums">
-                            {(team.park_factor ?? 1.000).toFixed(3)}
+                            {Math.round((team.park_factor ?? 1.000) * 100)}
                           </span>
                         </TableCell>
                         <TableCell>
