@@ -87,6 +87,7 @@ export type Database = {
           offensive_power_rating: number | null
           ops: number | null
           ops_plus: number | null
+          power_rating_plus: number | null
           season: number
           slg: number | null
           slg_plus: number | null
@@ -112,6 +113,7 @@ export type Database = {
           offensive_power_rating?: number | null
           ops?: number | null
           ops_plus?: number | null
+          power_rating_plus?: number | null
           season: number
           slg?: number | null
           slg_plus?: number | null
@@ -137,6 +139,7 @@ export type Database = {
           offensive_power_rating?: number | null
           ops?: number | null
           ops_plus?: number | null
+          power_rating_plus?: number | null
           season?: number
           slg?: number | null
           slg_plus?: number | null
