@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -91,6 +91,41 @@ export default function ReturningPlayers() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const [statusFilter, setStatusFilter] = useState<"active" | "departed" | "all">("active");
+
+  // Sticky scrollbar refs & sync
+  const scrollbarRef = useRef<HTMLDivElement>(null);
+  const scrollbarInnerRef = useRef<HTMLDivElement>(null);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const isSyncing = useRef(false);
+
+  useEffect(() => {
+    const table = tableContainerRef.current;
+    const inner = scrollbarInnerRef.current;
+    if (!table || !inner) return;
+    const sync = () => { inner.style.width = `${table.scrollWidth}px`; };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(table);
+    return () => ro.disconnect();
+  });
+
+  const handleScrollbarScroll = useCallback(() => {
+    if (isSyncing.current) return;
+    isSyncing.current = true;
+    if (tableContainerRef.current && scrollbarRef.current) {
+      tableContainerRef.current.scrollLeft = scrollbarRef.current.scrollLeft;
+    }
+    requestAnimationFrame(() => { isSyncing.current = false; });
+  }, []);
+
+  const handleTableScroll = useCallback(() => {
+    if (isSyncing.current) return;
+    isSyncing.current = true;
+    if (scrollbarRef.current && tableContainerRef.current) {
+      scrollbarRef.current.scrollLeft = tableContainerRef.current.scrollLeft;
+    }
+    requestAnimationFrame(() => { isSyncing.current = false; });
+  }, []);
 
   const { data: players = [], isLoading } = useQuery({
     queryKey: ["returning-players", variant, statusFilter],
@@ -373,7 +408,13 @@ export default function ReturningPlayers() {
             ) : filtered.length === 0 ? (
               <div className="flex items-center justify-center py-16 text-muted-foreground">No players found</div>
             ) : (
-              <div className="overflow-x-auto overflow-y-visible">
+              <>
+                <div
+                  ref={tableContainerRef}
+                  onScroll={handleTableScroll}
+                  className="overflow-x-auto overflow-y-visible [&::-webkit-scrollbar]:hidden"
+                  style={{ scrollbarWidth: 'none' }}
+                >
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -384,76 +425,67 @@ export default function ReturningPlayers() {
                           <TooltipTrigger asChild>
                             <span className="cursor-help font-medium text-muted-foreground">Dev Confidence</span>
                           </TooltipTrigger>
-                          <TooltipContent className="max-w-[220px]">
-                            <p className="text-xs">Coach's confidence in player development. 0.0 = no growth, 0.5 = moderate, 1.0 = full confidence. Impacts projected stats.</p>
+                          <TooltipContent side="top" className="max-w-xs">
+                            <p className="text-xs">Adjusts the developmental weight applied to projections. 0 = no growth, 0.5 = moderate, 1.0 = full confidence.</p>
                           </TooltipContent>
                         </Tooltip>
                       </TableHead>
-                      <TableHead>Prior</TableHead>
-                      <TableHead><SortButton label="pAVG" sortKeyVal="p_avg" /></TableHead>
-                      <TableHead><SortButton label="pOBP" sortKeyVal="p_obp" /></TableHead>
-                      <TableHead><SortButton label="pSLG" sortKeyVal="p_slg" /></TableHead>
-                      <TableHead><SortButton label="pOPS" sortKeyVal="p_ops" /></TableHead>
-                      <TableHead><SortButton label="pISO" sortKeyVal="p_iso" /></TableHead>
-                      <TableHead><SortButton label="wRC+" sortKeyVal="p_wrc_plus" /></TableHead>
-                      <TableHead><SortButton label="PWR+" sortKeyVal="power_rating_plus" /></TableHead>
-                      <TableHead>Scouting</TableHead>
+                      <TableHead className="text-right"><SortButton label="Prev AVG" sortKeyVal="p_avg" /></TableHead>
+                      <TableHead className="text-right"><SortButton label="Prev OBP" sortKeyVal="p_obp" /></TableHead>
+                      <TableHead className="text-right"><SortButton label="Prev SLG" sortKeyVal="p_slg" /></TableHead>
+                      <TableHead className="text-right"><SortButton label="pAVG" sortKeyVal="p_avg" /></TableHead>
+                      <TableHead className="text-right"><SortButton label="pOBP" sortKeyVal="p_obp" /></TableHead>
+                      <TableHead className="text-right"><SortButton label="pSLG" sortKeyVal="p_slg" /></TableHead>
+                      <TableHead className="text-right"><SortButton label="pOPS" sortKeyVal="p_ops" /></TableHead>
+                      <TableHead className="text-right"><SortButton label="pISO" sortKeyVal="p_iso" /></TableHead>
+                      <TableHead className="text-right"><SortButton label="pWRC+" sortKeyVal="p_wrc_plus" /></TableHead>
+                      <TableHead className="text-right"><SortButton label="PWR+" sortKeyVal="power_rating_plus" /></TableHead>
+                      <TableHead className="text-center min-w-[180px]">Scout Grades</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filtered.map((p) => {
                       const pred = p.prediction;
                       return (
-                        <TableRow key={`${p.id}-${pred.variant}`}>
-                          <TableCell>
-                            <div className="font-medium">{p.first_name} {p.last_name}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {[p.position, p.team].filter(Boolean).join(" · ") || "—"}
-                            </div>
+                        <TableRow key={p.prediction_id}>
+                          <TableCell className="font-medium whitespace-nowrap">
+                            {p.first_name} {p.last_name}
+                            {p.team && <span className="ml-1 text-xs text-muted-foreground">({p.team})</span>}
                           </TableCell>
                           <TableCell>
                             <ClassTransitionSelector
-                              value={pred.class_transition || "SJ"}
+                              value={pred.class_transition || "FS"}
                               onChange={(v) => updateClassTransition.mutate({ predictionId: p.prediction_id, value: v })}
                             />
                           </TableCell>
                           <TableCell>
                             <DevConfidenceSelector
-                              value={pred.dev_aggressiveness ?? 0}
+                              value={pred.dev_aggressiveness ?? 1}
                               onChange={(v) => updateDevAgg.mutate({ predictionId: p.prediction_id, value: v })}
                             />
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                            {statFormat(pred.from_avg)}/{statFormat(pred.from_obp)}/{statFormat(pred.from_slg)}
+                          <TableCell className="text-right font-mono text-xs text-muted-foreground">{statFormat(pred.from_avg)}</TableCell>
+                          <TableCell className="text-right font-mono text-xs text-muted-foreground">{statFormat(pred.from_obp)}</TableCell>
+                          <TableCell className="text-right font-mono text-xs text-muted-foreground">{statFormat(pred.from_slg)}</TableCell>
+                          <TableCell className={`text-right font-mono text-sm font-semibold ${deltaColor(pred.from_avg, pred.p_avg)}`}>
+                            {statFormat(pred.p_avg)}<DeltaIndicator from={pred.from_avg} to={pred.p_avg} />
                           </TableCell>
-                          <TableCell className={deltaColor(pred.from_avg, pred.p_avg)}>
-                            {statFormat(pred.p_avg)}
-                            <DeltaIndicator from={pred.from_avg} to={pred.p_avg} />
+                          <TableCell className={`text-right font-mono text-sm font-semibold ${deltaColor(pred.from_obp, pred.p_obp)}`}>
+                            {statFormat(pred.p_obp)}<DeltaIndicator from={pred.from_obp} to={pred.p_obp} />
                           </TableCell>
-                          <TableCell className={deltaColor(pred.from_obp, pred.p_obp)}>
-                            {statFormat(pred.p_obp)}
-                            <DeltaIndicator from={pred.from_obp} to={pred.p_obp} />
+                          <TableCell className={`text-right font-mono text-sm font-semibold ${deltaColor(pred.from_slg, pred.p_slg)}`}>
+                            {statFormat(pred.p_slg)}<DeltaIndicator from={pred.from_slg} to={pred.p_slg} />
                           </TableCell>
-                          <TableCell className={deltaColor(pred.from_slg, pred.p_slg)}>
-                            {statFormat(pred.p_slg)}
-                            <DeltaIndicator from={pred.from_slg} to={pred.p_slg} />
-                          </TableCell>
-                          <TableCell className="font-semibold">
-                            {statFormat(pred.p_ops)}
-                          </TableCell>
-                          <TableCell>{statFormat(pred.p_iso)}</TableCell>
-                          <TableCell>
-                            <span className={`font-mono font-semibold ${(pred.p_wrc_plus ?? 0) >= 120 ? "text-[hsl(var(--success))]" : (pred.p_wrc_plus ?? 0) < 90 ? "text-destructive" : "text-foreground"}`}>
-                              {pctFormat(pred.p_wrc_plus)}
-                            </span>
-                          </TableCell>
-                          <TableCell className="font-mono text-sm">{pctFormat(pred.power_rating_plus)}</TableCell>
-                          <TableCell>
-                            <div className="flex gap-1">
+                          <TableCell className="text-right font-mono text-sm font-bold">{statFormat(pred.p_ops)}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{statFormat(pred.p_iso)}</TableCell>
+                          <TableCell className="text-right font-mono text-sm font-bold">{pctFormat(pred.p_wrc_plus)}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{pctFormat(pred.power_rating_plus)}</TableCell>
+                          <TableCell className="text-center">
+                            <div className="flex gap-1 justify-center flex-wrap">
                               {pred.ev_score != null && <ScoutBadge label="EV" value={pred.ev_score} />}
-                              {pred.barrel_score != null && <ScoutBadge label="BBL" value={pred.barrel_score} />}
-                              {pred.whiff_score != null && <ScoutBadge label="WH" value={pred.whiff_score} />}
-                              {pred.chase_score != null && <ScoutBadge label="CH" value={pred.chase_score} />}
+                              {pred.barrel_score != null && <ScoutBadge label="Brl" value={pred.barrel_score} />}
+                              {pred.whiff_score != null && <ScoutBadge label="Whf" value={pred.whiff_score} />}
+                              {pred.chase_score != null && <ScoutBadge label="Chs" value={pred.chase_score} />}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -461,7 +493,16 @@ export default function ReturningPlayers() {
                     })}
                   </TableBody>
                 </Table>
-              </div>
+                </div>
+                <div
+                  ref={scrollbarRef}
+                  onScroll={handleScrollbarScroll}
+                  className="sticky bottom-0 z-10 overflow-x-auto overflow-y-hidden bg-background border-t border-border"
+                  style={{ height: 16 }}
+                >
+                  <div ref={scrollbarInnerRef} style={{ height: 1 }} />
+                </div>
+              </>
             )}
           </CardContent>
         </Card>
