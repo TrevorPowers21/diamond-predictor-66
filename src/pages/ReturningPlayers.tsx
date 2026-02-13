@@ -92,12 +92,36 @@ export default function ReturningPlayers() {
 
   const [statusFilter, setStatusFilter] = useState<"active" | "departed" | "all">("active");
 
-  // Sticky scrollbar refs & sync
+  // Fixed scrollbar refs & sync
   const scrollbarRef = useRef<HTMLDivElement>(null);
   const scrollbarInnerRef = useRef<HTMLDivElement>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const isSyncing = useRef(false);
+  const [showFixedScrollbar, setShowFixedScrollbar] = useState(false);
+  const [scrollbarPos, setScrollbarPos] = useState({ left: 0, width: 0 });
 
+  // Track table visibility and position
+  useEffect(() => {
+    const el = tableContainerRef.current;
+    if (!el) return;
+    const updatePos = () => {
+      const rect = el.getBoundingClientRect();
+      setScrollbarPos({ left: rect.left, width: rect.width });
+    };
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        setShowFixedScrollbar(entry.isIntersecting);
+        if (entry.isIntersecting) updatePos();
+      },
+      { threshold: 0 }
+    );
+    obs.observe(el);
+    window.addEventListener('resize', updatePos);
+    updatePos();
+    return () => { obs.disconnect(); window.removeEventListener('resize', updatePos); };
+  });
+
+  // Sync scrollbar width
   useEffect(() => {
     const table = tableContainerRef.current;
     const inner = scrollbarInnerRef.current;
@@ -494,14 +518,20 @@ export default function ReturningPlayers() {
                   </TableBody>
                 </Table>
                 </div>
-                <div
-                  ref={scrollbarRef}
-                  onScroll={handleScrollbarScroll}
-                  className="sticky bottom-0 z-10 overflow-x-auto overflow-y-hidden bg-background border-t border-border"
-                  style={{ height: 16 }}
-                >
-                  <div ref={scrollbarInnerRef} style={{ height: 1 }} />
-                </div>
+                {showFixedScrollbar && (
+                  <div
+                    ref={scrollbarRef}
+                    onScroll={handleScrollbarScroll}
+                    className="fixed bottom-0 z-50 overflow-x-auto overflow-y-hidden bg-background/95 backdrop-blur border-t border-border"
+                    style={{
+                      height: 18,
+                      left: scrollbarPos.left,
+                      width: scrollbarPos.width || '100%',
+                    }}
+                  >
+                    <div ref={scrollbarInnerRef} style={{ height: 1 }} />
+                  </div>
+                )}
               </>
             )}
           </CardContent>
