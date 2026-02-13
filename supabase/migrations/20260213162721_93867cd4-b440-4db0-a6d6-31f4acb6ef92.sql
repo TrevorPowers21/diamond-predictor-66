@@ -1,0 +1,1 @@
+ALTER TABLE public.conference_stats ADD COLUMN stuff_plus NUMERIC;
