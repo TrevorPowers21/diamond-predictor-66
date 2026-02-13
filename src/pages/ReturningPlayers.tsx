@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Users, TrendingUp, TrendingDown, ArrowUpDown, Search, BarChart3, Activity } from "lucide-react";
+import { Users, TrendingUp, TrendingDown, ArrowUpDown, Search, BarChart3, Activity, Pencil, Save, X } from "lucide-react";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell } from "recharts";
 import { toast } from "sonner";
@@ -92,6 +92,8 @@ export default function ReturningPlayers() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const [statusFilter, setStatusFilter] = useState<"active" | "departed" | "all">("active");
+  const [bulkEditMode, setBulkEditMode] = useState(false);
+  const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string; position?: string }>>({});
 
   // Fixed scrollbar refs & sync
   const scrollbarRef = useRef<HTMLDivElement>(null);
@@ -246,6 +248,35 @@ export default function ReturningPlayers() {
     },
     onError: (e) => toast.error(`Failed to update class: ${e.message}`),
   });
+
+  const bulkSave = useMutation({
+    mutationFn: async () => {
+      const entries = Object.entries(editedPlayers);
+      if (entries.length === 0) return;
+      const results = await Promise.all(
+        entries.map(([playerId, data]) =>
+          supabase.from("players").update(data).eq("id", playerId)
+        )
+      );
+      const errors = results.filter((r) => r.error);
+      if (errors.length > 0) throw new Error(`${errors.length} updates failed`);
+      return entries.length;
+    },
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ["returning-players"] });
+      setEditedPlayers({});
+      setBulkEditMode(false);
+      toast.success(`Updated ${count} player(s)`);
+    },
+    onError: (e) => toast.error(`Bulk save failed: ${e.message}`),
+  });
+
+  const handleEditField = (playerId: string, field: "team" | "position", value: string) => {
+    setEditedPlayers((prev) => ({
+      ...prev,
+      [playerId]: { ...prev[playerId], [field]: value || null },
+    }));
+  };
 
   const filtered = useMemo(() => {
     let list = players;
@@ -416,7 +447,42 @@ export default function ReturningPlayers() {
         {/* Table */}
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="text-base">Player Projections</CardTitle>
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-base">Player Projections</CardTitle>
+              {bulkEditMode ? (
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="h-7 text-xs"
+                    onClick={() => bulkSave.mutate()}
+                    disabled={Object.keys(editedPlayers).length === 0 || bulkSave.isPending}
+                  >
+                    <Save className="h-3 w-3 mr-1" />
+                    Save {Object.keys(editedPlayers).length > 0 ? `(${Object.keys(editedPlayers).length})` : ""}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs"
+                    onClick={() => { setBulkEditMode(false); setEditedPlayers({}); }}
+                  >
+                    <X className="h-3 w-3 mr-1" />
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  onClick={() => setBulkEditMode(true)}
+                >
+                  <Pencil className="h-3 w-3 mr-1" />
+                  Bulk Edit
+                </Button>
+              )}
+            </div>
             <div className="relative w-full sm:w-64">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -444,6 +510,8 @@ export default function ReturningPlayers() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="min-w-[160px]"><SortButton label="Player" sortKeyVal="name" /></TableHead>
+                      <TableHead className="min-w-[120px]">Team</TableHead>
+                      <TableHead className="min-w-[80px]">Pos</TableHead>
                       <TableHead><SortButton label="Year" sortKeyVal="class_transition" /></TableHead>
                       <TableHead className="min-w-[120px]">
                         <Tooltip>
@@ -477,7 +545,36 @@ export default function ReturningPlayers() {
                             <Link to={`/dashboard/player/${p.id}`} className="hover:text-primary hover:underline transition-colors">
                               {p.first_name} {p.last_name}
                             </Link>
-                            {p.team && <span className="ml-1 text-xs text-muted-foreground">({p.team})</span>}
+                          </TableCell>
+                          <TableCell>
+                            {bulkEditMode ? (
+                              <Input
+                                className="h-7 w-[130px] text-xs"
+                                defaultValue={editedPlayers[p.id]?.team ?? p.team ?? ""}
+                                placeholder="Team"
+                                onBlur={(e) => {
+                                  const val = e.target.value.trim();
+                                  if (val !== (p.team ?? "")) handleEditField(p.id, "team", val);
+                                }}
+                              />
+                            ) : (
+                              <span className="text-xs text-muted-foreground">{p.team || "—"}</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {bulkEditMode ? (
+                              <Input
+                                className="h-7 w-[70px] text-xs"
+                                defaultValue={editedPlayers[p.id]?.position ?? p.position ?? ""}
+                                placeholder="Pos"
+                                onBlur={(e) => {
+                                  const val = e.target.value.trim();
+                                  if (val !== (p.position ?? "")) handleEditField(p.id, "position", val);
+                                }}
+                              />
+                            ) : (
+                              <span className="text-xs text-muted-foreground">{p.position || "—"}</span>
+                            )}
                           </TableCell>
                           <TableCell>
                             <ClassTransitionSelector
