@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.csv-bulk-import]
 verify_jwt = false
+
+[functions.scrape-64analytics]
+verify_jwt = false
