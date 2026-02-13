@@ -18,16 +18,19 @@ Deno.serve(async (req) => {
 
     const { startPage = 1, endPage = 222, mode = "update_2025" } = await req.json().catch(() => ({}));
 
-    // 1. Load all players
+    // 1. Load players (only those missing team if mode is fill_missing)
     console.log("Loading players from database...");
     let allPlayers: any[] = [];
     let from = 0;
     const PAGE_SIZE = 1000;
     while (true) {
-      const { data, error } = await supabase
+      let query = supabase
         .from("players")
-        .select("id, first_name, last_name, position, team, transfer_portal")
-        .range(from, from + PAGE_SIZE - 1);
+        .select("id, first_name, last_name, position, team, transfer_portal");
+      if (mode === "fill_missing") {
+        query = query.is("team", null);
+      }
+      const { data, error } = await query.range(from, from + PAGE_SIZE - 1);
       if (error) throw error;
       allPlayers = allPlayers.concat(data || []);
       if (!data || data.length < PAGE_SIZE) break;
@@ -35,10 +38,22 @@ Deno.serve(async (req) => {
     }
     console.log(`Loaded ${allPlayers.length} players`);
 
-    // Build lookup map: "firstname lastname" -> player records
+    // Normalize name for matching: strip suffixes, periods, extra spaces
+    function normalizeName(first: string, last: string): string {
+      let f = first.trim().toLowerCase()
+        .replace(/[.''\-]/g, "")  // strip apostrophes, periods, hyphens
+        .replace(/\s+/g, " ");
+      let l = last.trim().toLowerCase()
+        .replace(/\s+(jr\.?|sr\.?|iii|ii|iv|v|2nd year)$/i, "")
+        .replace(/[.''\-]/g, "")  // strip apostrophes, periods, hyphens
+        .replace(/\s+/g, " ");
+      return `${f} ${l}`;
+    }
+
+    // Build lookup map: normalized "firstname lastname" -> player records
     const playerMap = new Map<string, any[]>();
     for (const p of allPlayers) {
-      const key = `${p.first_name.trim().toLowerCase()} ${p.last_name.trim().toLowerCase()}`;
+      const key = normalizeName(p.first_name, p.last_name);
       if (!playerMap.has(key)) playerMap.set(key, []);
       playerMap.get(key)!.push(p);
     }
@@ -91,7 +106,12 @@ Deno.serve(async (req) => {
           if (!name || !pos) continue;
           totalScraped++;
 
-          const nameLower = name.toLowerCase();
+          // Normalize scraped name: split into first/last, strip suffixes/periods
+          const nameParts = name.split(/\s+/);
+          if (nameParts.length < 2) continue;
+          const scrapedFirst = nameParts[0];
+          const scrapedLast = nameParts.slice(1).join(" ");
+          const nameLower = normalizeName(scrapedFirst, scrapedLast);
           const matched = playerMap.get(nameLower);
           if (!matched) continue;
 
@@ -116,7 +136,7 @@ Deno.serve(async (req) => {
         }
 
         if (page < actualEnd) {
-          await new Promise((r) => setTimeout(r, 100));
+          await new Promise((r) => setTimeout(r, 50));
         }
       } catch (e) {
         console.error(`Error on page ${page}:`, e);
