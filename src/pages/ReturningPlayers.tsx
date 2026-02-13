@@ -94,6 +94,7 @@ export default function ReturningPlayers() {
   const [statusFilter, setStatusFilter] = useState<"active" | "departed" | "all">("active");
   const [bulkEditMode, setBulkEditMode] = useState(false);
   const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string; position?: string }>>({});
+  const [showMissingOnly, setShowMissingOnly] = useState(false);
 
   // Fixed scrollbar refs & sync
   const scrollbarRef = useRef<HTMLDivElement>(null);
@@ -280,6 +281,9 @@ export default function ReturningPlayers() {
 
   const filtered = useMemo(() => {
     let list = players;
+    if (showMissingOnly) {
+      list = list.filter((p) => !p.team);
+    }
     if (search) {
       const q = search.toLowerCase();
       list = list.filter(
@@ -308,7 +312,7 @@ export default function ReturningPlayers() {
       return sortDir === "asc" ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
     });
     return list;
-  }, [players, search, sortKey, sortDir]);
+  }, [players, search, sortKey, sortDir, showMissingOnly]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -358,7 +362,15 @@ export default function ReturningPlayers() {
             <h2 className="text-2xl font-bold tracking-tight">Returning Players</h2>
             <p className="text-muted-foreground">Projected production for returning roster players</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              size="sm"
+              variant={showMissingOnly ? "default" : "outline"}
+              className="h-9 text-xs"
+              onClick={() => setShowMissingOnly(!showMissingOnly)}
+            >
+              {showMissingOnly ? "Show All" : "Missing Teams"}
+            </Button>
             <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "active" | "departed" | "all")}>
               <SelectTrigger className="w-32">
                 <SelectValue />
