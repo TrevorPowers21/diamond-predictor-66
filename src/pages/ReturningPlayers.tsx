@@ -373,7 +373,7 @@ export default function ReturningPlayers() {
             ) : filtered.length === 0 ? (
               <div className="flex items-center justify-center py-16 text-muted-foreground">No players found</div>
             ) : (
-              <div className="overflow-auto max-h-[60vh]">
+              <div className="overflow-x-auto overflow-y-visible">
                 <Table>
                   <TableHeader>
                     <TableRow>
