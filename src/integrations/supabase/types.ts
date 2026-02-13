@@ -90,6 +90,7 @@ export type Database = {
           season: number
           slg: number | null
           slg_plus: number | null
+          stuff_plus: number | null
           updated_at: string
           whiff_score: number | null
           wrc: number | null
@@ -114,6 +115,7 @@ export type Database = {
           season: number
           slg?: number | null
           slg_plus?: number | null
+          stuff_plus?: number | null
           updated_at?: string
           whiff_score?: number | null
           wrc?: number | null
@@ -138,6 +140,7 @@ export type Database = {
           season?: number
           slg?: number | null
           slg_plus?: number | null
+          stuff_plus?: number | null
           updated_at?: string
           whiff_score?: number | null
           wrc?: number | null

@@ -826,6 +826,7 @@ async function importConferenceStats(
       ops_plus: parseFloat(row[15]) || null,
       iso_plus: parseFloat(row[16]) || null,
       wrc_plus: parseFloat(row[17]) || null,
+      stuff_plus: parseFloat(row[18]) || null,
     };
 
     const { error: csError } = await db.from("conference_stats").upsert(confStatsRecord, {
