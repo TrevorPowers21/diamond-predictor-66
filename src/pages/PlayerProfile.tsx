@@ -164,6 +164,9 @@ export default function PlayerProfile() {
       conference: player.conference || "",
       class_year: player.class_year || "",
       handedness: player.handedness || "",
+      bats_hand: (player as any).bats_hand || "",
+      throws_hand: (player as any).throws_hand || "",
+      age: (player as any).age || "",
       height_inches: player.height_inches || "",
       weight: player.weight || "",
       home_state: player.home_state || "",
@@ -178,7 +181,7 @@ export default function PlayerProfile() {
     for (const [key, val] of Object.entries(editForm)) {
       if (val === "") {
         updates[key] = null;
-      } else if (key === "height_inches" || key === "weight") {
+      } else if (key === "height_inches" || key === "weight" || key === "age") {
         updates[key] = val ? Number(val) : null;
       } else {
         updates[key] = val;
@@ -284,20 +287,37 @@ export default function PlayerProfile() {
                       <Input value={editForm.conference} onChange={(e) => setEditForm({ ...editForm, conference: e.target.value })} className="h-8 text-sm" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <Label className="text-xs">Class Year</Label>
                       <Input value={editForm.class_year} onChange={(e) => setEditForm({ ...editForm, class_year: e.target.value })} className="h-8 text-sm" />
                     </div>
                     <div>
-                      <Label className="text-xs">Handedness</Label>
-                      <Select value={editForm.handedness || "none"} onValueChange={(v) => setEditForm({ ...editForm, handedness: v === "none" ? "" : v })}>
+                      <Label className="text-xs">Age</Label>
+                      <Input type="number" value={editForm.age} onChange={(e) => setEditForm({ ...editForm, age: e.target.value })} className="h-8 text-sm" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs">Bats</Label>
+                      <Select value={editForm.bats_hand || "none"} onValueChange={(v) => setEditForm({ ...editForm, bats_hand: v === "none" ? "" : v })}>
                         <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">—</SelectItem>
                           <SelectItem value="R">Right</SelectItem>
                           <SelectItem value="L">Left</SelectItem>
                           <SelectItem value="S">Switch</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Throws</Label>
+                      <Select value={editForm.throws_hand || "none"} onValueChange={(v) => setEditForm({ ...editForm, throws_hand: v === "none" ? "" : v })}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">—</SelectItem>
+                          <SelectItem value="R">Right</SelectItem>
+                          <SelectItem value="L">Left</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -331,7 +351,9 @@ export default function PlayerProfile() {
                   <InfoRow label="Conference" value={player.conference} />
                   <InfoRow label="Position" value={player.position} />
                   <InfoRow label="Class Year" value={player.class_year} />
-                  <InfoRow label="Handedness" value={player.handedness === "R" ? "Right" : player.handedness === "L" ? "Left" : player.handedness === "S" ? "Switch" : player.handedness} />
+                  <InfoRow label="Age" value={(player as any).age?.toString()} />
+                  <InfoRow label="Bats" value={(player as any).bats_hand === "R" ? "Right" : (player as any).bats_hand === "L" ? "Left" : (player as any).bats_hand === "S" ? "Switch" : (player as any).bats_hand} />
+                  <InfoRow label="Throws" value={(player as any).throws_hand === "R" ? "Right" : (player as any).throws_hand === "L" ? "Left" : (player as any).throws_hand} />
                   <InfoRow label="Height" value={formatHeight(player.height_inches)} />
                   <InfoRow label="Weight" value={player.weight ? `${player.weight} lbs` : null} />
                   <InfoRow label="Home State" value={player.home_state} />

@@ -433,6 +433,8 @@ export type Database = {
       }
       players: {
         Row: {
+          age: number | null
+          bats_hand: string | null
           class_year: string | null
           conference: string | null
           created_at: string
@@ -448,11 +450,14 @@ export type Database = {
           portal_entry_date: string | null
           position: string | null
           team: string | null
+          throws_hand: string | null
           transfer_portal: boolean
           updated_at: string
           weight: number | null
         }
         Insert: {
+          age?: number | null
+          bats_hand?: string | null
           class_year?: string | null
           conference?: string | null
           created_at?: string
@@ -468,11 +473,14 @@ export type Database = {
           portal_entry_date?: string | null
           position?: string | null
           team?: string | null
+          throws_hand?: string | null
           transfer_portal?: boolean
           updated_at?: string
           weight?: number | null
         }
         Update: {
+          age?: number | null
+          bats_hand?: string | null
           class_year?: string | null
           conference?: string | null
           created_at?: string
@@ -488,6 +496,7 @@ export type Database = {
           portal_entry_date?: string | null
           position?: string | null
           team?: string | null
+          throws_hand?: string | null
           transfer_portal?: boolean
           updated_at?: string
           weight?: number | null
