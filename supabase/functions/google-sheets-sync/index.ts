@@ -619,8 +619,7 @@ async function importReturnerPredictions(
 
   let imported = 0;
   let skipped = 0;
-  const batch: Record<string, unknown>[] = [];
-  const BATCH_SIZE = 200;
+  const allRecords = new Map<string, Record<string, unknown>>();
 
   for (let i = 4; i < rows.length; i++) {
     const row = rows[i];
@@ -630,7 +629,9 @@ async function importReturnerPredictions(
     const player = await resolvePlayer(db, rawName, playerCache);
     if (!player) { skipped++; continue; }
 
-    batch.push({
+    // Use composite key to deduplicate — last occurrence wins
+    const dedupeKey = `${player.id}|${player.variant}`;
+    allRecords.set(dedupeKey, {
       player_id: player.id,
       model_type: "returner",
       variant: player.variant,
@@ -654,31 +655,21 @@ async function importReturnerPredictions(
       p_wrc: parseFloat(row[17]) || null,
       p_wrc_plus: parseFloat(row[18]) || null,
     });
-
-    if (batch.length >= BATCH_SIZE) {
-      const { error } = await db.from("player_predictions").upsert(batch, {
-        onConflict: "player_id,model_type,variant,season",
-      });
-      if (error) {
-        console.error(`Batch upsert error:`, error.message);
-        skipped += batch.length;
-      } else {
-        imported += batch.length;
-      }
-      batch.length = 0;
-    }
   }
 
-  // Flush remaining
-  if (batch.length > 0) {
-    const { error } = await db.from("player_predictions").upsert(batch, {
+  // Batch upsert deduplicated records
+  const BATCH_SIZE = 200;
+  const records = Array.from(allRecords.values());
+  for (let start = 0; start < records.length; start += BATCH_SIZE) {
+    const chunk = records.slice(start, start + BATCH_SIZE);
+    const { error } = await db.from("player_predictions").upsert(chunk, {
       onConflict: "player_id,model_type,variant,season",
     });
     if (error) {
       console.error(`Batch upsert error:`, error.message);
-      skipped += batch.length;
+      skipped += chunk.length;
     } else {
-      imported += batch.length;
+      imported += chunk.length;
     }
   }
 
@@ -721,8 +712,7 @@ async function importTransferPredictions(
 
   let imported = 0;
   let skipped = 0;
-  const batch: Record<string, unknown>[] = [];
-  const BATCH_SIZE = 200;
+  const allRecords = new Map<string, Record<string, unknown>>();
 
   for (let i = 3; i < rows.length; i++) {
     const row = rows[i];
@@ -732,7 +722,8 @@ async function importTransferPredictions(
     const player = await resolvePlayer(db, rawName, playerCache);
     if (!player) { skipped++; continue; }
 
-    batch.push({
+    const dedupeKey = `${player.id}|${player.variant}`;
+    allRecords.set(dedupeKey, {
       player_id: player.id,
       model_type: "transfer",
       variant: player.variant,
@@ -764,31 +755,20 @@ async function importTransferPredictions(
       p_wrc: parseFloat(row[25]) || null,
       p_wrc_plus: parseFloat(row[26]) || null,
     });
-
-    if (batch.length >= BATCH_SIZE) {
-      const { error } = await db.from("player_predictions").upsert(batch, {
-        onConflict: "player_id,model_type,variant,season",
-      });
-      if (error) {
-        console.error(`Batch upsert error:`, error.message);
-        skipped += batch.length;
-      } else {
-        imported += batch.length;
-      }
-      batch.length = 0;
-    }
   }
 
-  // Flush remaining
-  if (batch.length > 0) {
-    const { error } = await db.from("player_predictions").upsert(batch, {
+  const BATCH_SIZE = 200;
+  const records = Array.from(allRecords.values());
+  for (let start = 0; start < records.length; start += BATCH_SIZE) {
+    const chunk = records.slice(start, start + BATCH_SIZE);
+    const { error } = await db.from("player_predictions").upsert(chunk, {
       onConflict: "player_id,model_type,variant,season",
     });
     if (error) {
       console.error(`Batch upsert error:`, error.message);
-      skipped += batch.length;
+      skipped += chunk.length;
     } else {
-      imported += batch.length;
+      imported += chunk.length;
     }
   }
 
