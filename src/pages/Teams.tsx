@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
+import ConferenceStatsTable from "@/components/ConferenceStatsTable";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
@@ -343,6 +344,9 @@ export default function Teams() {
             )}
           </CardContent>
         </Card>
+
+        {/* Conference Stats */}
+        <ConferenceStatsTable />
       </div>
     </DashboardLayout>
   );
