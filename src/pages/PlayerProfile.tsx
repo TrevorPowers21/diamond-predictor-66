@@ -197,13 +197,25 @@ export default function PlayerProfile() {
   const { data: fromTeamData } = useQuery({
     queryKey: ["from-team-conference", player?.from_team],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const fromTeam = player!.from_team!;
+      // Handle "Unknown (Conference)" pattern
+      const unknownMatch = fromTeam.match(/^Unknown \((.+)\)$/);
+      if (unknownMatch) return { conference: unknownMatch[1] };
+      // Try exact match first
+      let { data } = await supabase
         .from("teams")
         .select("conference")
-        .eq("name", player!.from_team!)
-        .single();
-      if (error) return null;
-      return data;
+        .eq("name", fromTeam)
+        .maybeSingle();
+      if (data) return data;
+      // Try contains match (short name within full formal name)
+      const { data: fuzzy } = await supabase
+        .from("teams")
+        .select("conference")
+        .ilike("name", `%${fromTeam}%`)
+        .limit(1)
+        .maybeSingle();
+      return fuzzy;
     },
     enabled: !!player?.from_team && !!isTransferPortal,
   });
