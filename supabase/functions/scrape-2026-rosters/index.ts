@@ -62,26 +62,42 @@ Deno.serve(async (req) => {
       // Strip parenthetical state/location suffixes like "(NY)", "(MN)", "(FL)", "(Minn.)"
       t = t.replace(/\s*\([^)]*\)\s*/g, " ").trim();
       
-      // Strip "university of" prefix
+      // Strip "university of" prefix and trailing "university"
       t = t.replace(/^university of\s+/i, "").trim();
+      t = t.replace(/\s+university$/i, "").trim();
 
-      // Common abbreviation mappings - order matters, do "st." last
+      // State abbreviation expansions
+      t = t.replace(/\bky\.\s*/g, "kentucky ");
+      t = t.replace(/\bmich\.\s*/g, "michigan ");
+      t = t.replace(/\bla\.\s*/g, "louisiana ");
+      t = t.replace(/\bga\.\s*/g, "georgia ");
+      t = t.replace(/\bfla\.\s*/g, "florida ");
+      t = t.replace(/\bill\.\s*/g, "illinois ");
+      t = t.replace(/\bala\.\s*/g, "alabama ");
+      t = t.replace(/\bmiss\.\s*/g, "mississippi ");
+      t = t.replace(/\btenn\.\s*/g, "tennessee ");
+      t = t.replace(/\bconn\.\s*/g, "connecticut ");
+      t = t.replace(/\bminn\.\s*/g, "minnesota ");
+
+      // Direction abbreviations
       t = t.replace(/\bso\.\s*/g, "southern ");
       t = t.replace(/\bno\.\s*/g, "northern ");
-      t = t.replace(/\be\.\s*/g, "eastern ");
-      t = t.replace(/\bw\.\s*/g, "western ");
-      t = t.replace(/\bse\b\s*/g, "southeast ");
-      t = t.replace(/\bsw\b\s*/g, "southwest ");
-      t = t.replace(/\bne\b\s*/g, "northeast ");
-      t = t.replace(/\bnw\b\s*/g, "northwest ");
-      // "St." at end of word or before space = "State"
-      // But "St." before a name (like "St. John's") = "saint"
-      // Heuristic: if "st." is at the end, it's "state"; otherwise "saint"
+      t = t.replace(/\bn\.c\.\s*/g, "north carolina ");
+      t = t.replace(/\bs\.c\.\s*/g, "south carolina ");
+
+      // "St." handling: at end = "state", otherwise = "saint"
       t = t.replace(/\bst\.\s*$/g, "state");
       t = t.replace(/\bst\.\s+/g, "saint ");
 
-      // Known aliases
+      // "U." = "university" (for "Southern U." → "southern university")
+      t = t.replace(/\bu\.\s*$/g, "university");
+
+      // Known aliases (applied after basic expansions, before punctuation removal)
+      // Remove punctuation first for cleaner matching
+      let cleaned = t.replace(/[.''\-&]/g, " ").replace(/\s+/g, " ").trim();
+
       const aliases: Record<string, string> = {
+        // Major acronyms
         "usc": "southern california",
         "ole miss": "mississippi",
         "umass": "massachusetts",
@@ -101,17 +117,53 @@ Deno.serve(async (req) => {
         "uab": "alabama birmingham",
         "ualr": "arkansas little rock",
         "liu": "long island",
+        "pitt": "pittsburgh",
+        "nc state": "north carolina state",
+        // Regional state university aliases
+        "etsu": "east tennessee state",
+        "mtsu": "middle tennessee state",
+        "utrgv": "ut rio grande valley",
+        "umes": "maryland eastern shore",
+        "csun": "cal state northridge",
+        "csu northridge": "cal state northridge",
+        "cal saint fullerton": "cal state fullerton",
+        "csu fullerton": "cal state fullerton",
+        "csu bakersfield": "cal state bakersfield",
+        // Southern/small schools
         "siue": "southern illinois edwardsville",
         "siu": "southern illinois",
         "niu": "northern illinois",
         "uic": "illinois chicago",
-        "csun": "cal state northridge",
-        "pitt": "pittsburgh",
         "army west point": "army",
         "nicholls": "nicholls state",
+        "sam houston": "sam houston state",
+        "south carolina upstate": "usc upstate",
+        "usc upstate": "usc upstate",
+        "southern university": "southern",
+        "southern": "southern",
+        // Conference name variants
+        "queens charlotte": "queens",
+        "queens university of charlotte": "queens",
+        "north carolina at": "north carolina at",
+        "nc a t": "north carolina a t",
+        "north carolina a t": "north carolina a t",
+        "texas a m corpus christi": "texas a m corpus christi",
+        "a m corpus christi": "texas a m corpus christi",
+        "unc wilmington": "north carolina wilmington",
+        "unc greensboro": "north carolina greensboro",
+        "unc asheville": "north carolina asheville",
+        "ut rio grande valley": "texas rio grande valley",
+        "utrgv": "texas rio grande valley",
+        "western kentucky": "western kentucky",
+        "western michigan": "western michigan",
+        "western georgia": "west georgia",
+        "west georgia": "west georgia",
+        "southeastern louisiana": "southeastern louisiana",
+        "miami ohio": "miami ohio",
+        "miami": "miami florida",
+        "south fla": "south florida",
+        "south florida": "south florida",
       };
-      // Remove punctuation before alias lookup
-      let cleaned = t.replace(/[.''\-]/g, "").replace(/\s+/g, " ").trim();
       if (aliases[cleaned]) cleaned = aliases[cleaned];
       return cleaned;
     }
