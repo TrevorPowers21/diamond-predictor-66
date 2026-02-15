@@ -53,20 +53,27 @@ Deno.serve(async (req) => {
     // Normalize team names so "Kansas St." matches "Kansas State", etc.
     function normalizeTeam(team: string): string {
       let t = team.trim()
-        // Decode HTML entities
-        .replace(/&#39;/g, "'")
+        // Decode HTML entities - &amp; FIRST so &amp;#39; becomes &#39; then decoded
         .replace(/&amp;/g, "&")
+        .replace(/&#39;/g, "'")
         .replace(/&quot;/g, '"')
         .toLowerCase();
       
-      // Strip parenthetical state/location suffixes like "(NY)", "(MN)", "(FL)", "(Minn.)"
-      t = t.replace(/\s*\([^)]*\)\s*/g, " ").trim();
+      // Convert parenthetical state codes to words BEFORE stripping
+      const stateMap: Record<string, string> = {
+        "fl": "florida", "oh": "ohio", "ny": "new york", "mn": "minnesota",
+        "pa": "pennsylvania", "tx": "texas", "ca": "california", "il": "illinois",
+      };
+      t = t.replace(/\s*\(([^)]*)\)\s*/g, (_, code) => {
+        const mapped = stateMap[code.trim().toLowerCase()];
+        return mapped ? ` ${mapped} ` : " ";
+      }).trim();
       
       // Strip "university of" prefix and trailing "university"
       t = t.replace(/^university of\s+/i, "").trim();
       t = t.replace(/\s+university$/i, "").trim();
 
-      // State abbreviation expansions
+      // State/direction abbreviation expansions
       t = t.replace(/\bky\.\s*/g, "kentucky ");
       t = t.replace(/\bmich\.\s*/g, "michigan ");
       t = t.replace(/\bla\.\s*/g, "louisiana ");
@@ -78,8 +85,14 @@ Deno.serve(async (req) => {
       t = t.replace(/\btenn\.\s*/g, "tennessee ");
       t = t.replace(/\bconn\.\s*/g, "connecticut ");
       t = t.replace(/\bminn\.\s*/g, "minnesota ");
-
-      // Direction abbreviations
+      t = t.replace(/\bcaro\.\s*/g, "carolina ");
+      t = t.replace(/\bind\.\s*/g, "indiana ");
+      t = t.replace(/\bval\.\s*/g, "valley ");
+      t = t.replace(/\bark\.\s*/g, "arkansas ");
+      t = t.replace(/\bcol\.\s*/g, "college ");
+      t = t.replace(/\bmo\.\s*/g, "missouri ");
+      t = t.replace(/\bwis\.\s*/g, "wisconsin ");
+      t = t.replace(/\bneb\.\s*/g, "nebraska ");
       t = t.replace(/\bso\.\s*/g, "southern ");
       t = t.replace(/\bno\.\s*/g, "northern ");
       t = t.replace(/\bn\.c\.\s*/g, "north carolina ");
@@ -89,11 +102,10 @@ Deno.serve(async (req) => {
       t = t.replace(/\bst\.\s*$/g, "state");
       t = t.replace(/\bst\.\s+/g, "saint ");
 
-      // "U." = "university" (for "Southern U." → "southern university")
+      // "U." = "university"
       t = t.replace(/\bu\.\s*$/g, "university");
 
-      // Known aliases (applied after basic expansions, before punctuation removal)
-      // Remove punctuation first for cleaner matching
+      // Remove punctuation for cleaner matching
       let cleaned = t.replace(/[.''\-&]/g, " ").replace(/\s+/g, " ").trim();
 
       const aliases: Record<string, string> = {
@@ -122,7 +134,8 @@ Deno.serve(async (req) => {
         // Regional state university aliases
         "etsu": "east tennessee state",
         "mtsu": "middle tennessee state",
-        "utrgv": "ut rio grande valley",
+        "utrgv": "texas rio grande valley",
+        "ut rio grande valley": "texas rio grande valley",
         "umes": "maryland eastern shore",
         "csun": "cal state northridge",
         "csu northridge": "cal state northridge",
@@ -131,6 +144,8 @@ Deno.serve(async (req) => {
         "csu bakersfield": "cal state bakersfield",
         // Southern/small schools
         "siue": "southern illinois edwardsville",
+        "siu edwardsville": "southern illinois edwardsville",
+        "southern illinois edwardsville": "southern illinois edwardsville",
         "siu": "southern illinois",
         "niu": "northern illinois",
         "uic": "illinois chicago",
@@ -144,7 +159,6 @@ Deno.serve(async (req) => {
         // Conference name variants
         "queens charlotte": "queens",
         "queens university of charlotte": "queens",
-        "north carolina at": "north carolina at",
         "nc a t": "north carolina a t",
         "north carolina a t": "north carolina a t",
         "texas a m corpus christi": "texas a m corpus christi",
@@ -152,8 +166,6 @@ Deno.serve(async (req) => {
         "unc wilmington": "north carolina wilmington",
         "unc greensboro": "north carolina greensboro",
         "unc asheville": "north carolina asheville",
-        "ut rio grande valley": "texas rio grande valley",
-        "utrgv": "texas rio grande valley",
         "western kentucky": "western kentucky",
         "western michigan": "western michigan",
         "western georgia": "west georgia",
@@ -163,6 +175,199 @@ Deno.serve(async (req) => {
         "miami": "miami florida",
         "south fla": "south florida",
         "south florida": "south florida",
+        // === NEW: false-positive fixes ===
+        // Southeast Missouri State
+        "southeast missouri state": "southeast missouri state",
+        "southeast missouri": "southeast missouri state",
+        "semo": "southeast missouri state",
+        // Grambling
+        "grambling": "grambling state",
+        "grambling state": "grambling state",
+        // McNeese
+        "mcneese": "mcneese state",
+        "mcneese state": "mcneese state",
+        // Stephen F. Austin
+        "sfa": "stephen f austin",
+        "stephen f austin": "stephen f austin",
+        "stephen f austin state": "stephen f austin",
+        // Penn vs Penn State
+        "penn": "pennsylvania",
+        "pennsylvania": "pennsylvania",
+        "penn state": "penn state",
+        // FDU
+        "fdu": "fairleigh dickinson",
+        "fairleigh dickinson": "fairleigh dickinson",
+        // ULM
+        "ulm": "louisiana monroe",
+        "louisiana monroe": "louisiana monroe",
+        // UIW
+        "uiw": "incarnate word",
+        "incarnate word": "incarnate word",
+        // UNO
+        "uno": "new orleans",
+        "new orleans": "new orleans",
+        // UMKC
+        "umkc": "kansas city",
+        "kansas city": "kansas city",
+        // Prairie View
+        "prairie view": "prairie view a m",
+        "prairie view a m": "prairie view a m",
+        "pvamu": "prairie view a m",
+        // Alcorn
+        "alcorn": "alcorn state",
+        "alcorn state": "alcorn state",
+        // Coppin
+        "coppin": "coppin state",
+        "coppin state": "coppin state",
+        // Morgan
+        "morgan": "morgan state",
+        "morgan state": "morgan state",
+        // Norfolk
+        "norfolk": "norfolk state",
+        "norfolk state": "norfolk state",
+        // Savannah
+        "savannah": "savannah state",
+        "savannah state": "savannah state",
+        // Delaware State
+        "delaware state": "delaware state",
+        "del state": "delaware state",
+        // Jackson State
+        "jackson state": "jackson state",
+        "jackson": "jackson state",
+        // Alabama State
+        "alabama state": "alabama state",
+        // Southeast Louisiana => southeastern louisiana
+        "se louisiana": "southeastern louisiana",
+        // Tarleton
+        "tarleton": "tarleton state",
+        "tarleton state": "tarleton state",
+        // Cal Baptist => california baptist
+        "cal baptist": "california baptist",
+        "california baptist": "california baptist",
+        "cbu": "california baptist",
+        // Central Connecticut
+        "ccsu": "central connecticut state",
+        "central connecticut": "central connecticut state",
+        "central connecticut state": "central connecticut state",
+        // Sacred Heart
+        "sacred heart": "sacred heart",
+        "shu": "sacred heart",
+        // Stony Brook
+        "stony brook": "stony brook",
+        // NJIT
+        "njit": "njit",
+        // LIU Brooklyn
+        "liu brooklyn": "long island",
+        // Southern Miss
+        "southern miss": "southern mississippi",
+        "southern mississippi": "southern mississippi",
+        // App State
+        "app state": "appalachian state",
+        "appalachian state": "appalachian state",
+        // Coastal Carolina
+        "coastal carolina": "coastal carolina",
+        "coastal": "coastal carolina",
+        // Gardner-Webb
+        "gardner webb": "gardner webb",
+        // UNI
+        "uni": "northern iowa",
+        "northern iowa": "northern iowa",
+        // IUPUI / IU Indy
+        "iupui": "iupui",
+        "iu indianapolis": "iupui",
+        // IPFW / Purdue Fort Wayne
+        "purdue fort wayne": "purdue fort wayne",
+        "ipfw": "purdue fort wayne",
+        // UT Martin
+        "ut martin": "tennessee martin",
+        "tennessee martin": "tennessee martin",
+        // UT Arlington
+        "ut arlington": "texas arlington",
+        "uta": "texas arlington",
+        "texas arlington": "texas arlington",
+        // UMBC
+        "umbc": "maryland baltimore county",
+        // Central Arkansas
+        "uca": "central arkansas",
+        "central arkansas": "central arkansas",
+        // Lamar
+        "lamar": "lamar",
+        // Abilene Christian
+        "acu": "abilene christian",
+        "abilene christian": "abilene christian",
+        // Oral Roberts
+        "oru": "oral roberts",
+        "oral roberts": "oral roberts",
+        // LMU / Loyola Marymount
+        "lmu": "loyola marymount",
+        "loyola marymount": "loyola marymount",
+        // UNCW
+        "uncw": "north carolina wilmington",
+        // UNCA
+        "unca": "north carolina asheville",
+        // UNCG
+        "uncg": "north carolina greensboro",
+        // Fort Wayne
+        "fort wayne": "purdue fort wayne",
+        // Illinois Chicago
+        "illinois chicago": "illinois chicago",
+        // UL Monroe
+        "ul monroe": "louisiana monroe",
+        // Mississippi Valley State
+        "mississippi valley state": "mississippi valley state",
+        // Arkansas Pine Bluff
+        "arkansas pine bluff": "arkansas pine bluff",
+        // College of Charleston
+        "college of charleston": "college of charleston",
+        // Miami Florida vs Miami Ohio
+        "miami florida": "miami florida",
+        "miami ohio": "miami ohio",
+        // North Alabama
+        "north alabama": "north alabama",
+        // San Diego State (distinct from San Diego)
+        "san diego state": "san diego state",
+        "san diego": "san diego",
+        // Long Beach State
+        "long beach state": "long beach state",
+        // Mount Saint Marys
+        "mount saint marys": "mount saint marys",
+        // Saint Johns
+        "saint johns": "saint johns",
+        "saint johns new york": "saint johns",
+        // Cal Poly
+        "cal poly": "cal poly",
+        // Sacramento State
+        "sacramento state": "sacramento state",
+        "sac state": "sacramento state",
+        // Weber State
+        "weber state": "weber state",
+        // Utah Tech
+        "utah tech": "utah tech",
+        // Utah Valley
+        "utah valley": "utah valley",
+        // Partial state name expansions (after abbreviation expansion)
+        "middle tennessee": "middle tennessee state",
+        "middle tennessee state": "middle tennessee state",
+        "mississippi valley": "mississippi valley state",
+        "mississippi valley state": "mississippi valley state",
+        "southeast missouri": "southeast missouri state",
+        "southeast missouri state": "southeast missouri state",
+        "eastern kentucky": "eastern kentucky",
+        "eastern illinois": "eastern illinois",
+        "eastern michigan": "eastern michigan",
+        "western carolina": "western carolina",
+        "southern indiana": "southern indiana",
+        "southern ind": "southern indiana",
+        "northern kentucky": "northern kentucky",
+        // St. Thomas disambiguation
+        "saint thomas minnesota": "saint thomas",
+        "saint thomas": "saint thomas",
+        // CSU Fullerton normalization
+        "csu fullerton": "cal state fullerton",
+        "cal state fullerton": "cal state fullerton",
+        // UMass Lowell
+        "umass lowell": "umass lowell",
+        "massachusetts lowell": "umass lowell",
       };
       if (aliases[cleaned]) cleaned = aliases[cleaned];
       return cleaned;
