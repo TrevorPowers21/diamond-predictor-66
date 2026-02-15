@@ -11,16 +11,36 @@ interface FilePlayer {
   lastName: string;
   team2025: string;
   position: string;
+  batsHand: string;
+  throwsHand: string;
+  age: number;
+  ab: number;
+  ba: number;
+  obp: number;
+  slg: number;
+  ops: number;
+  iso: number;
 }
 
 function parseMarkdownTable(raw: string): FilePlayer[] {
   const lines = raw.split("\n").filter(l => l.trim().startsWith("|") && !l.includes("---"));
   if (lines.length < 2) return [];
   const header = lines[0].split("|").map(s => s.trim()).filter(Boolean);
-  const firstNameIdx = header.findIndex(h => h.toLowerCase() === "playerfirstname");
-  const lastNameIdx = header.findIndex(h => h.toLowerCase() === "player");
-  const teamIdx = header.findIndex(h => h.toLowerCase() === "newestteamlocation");
-  const posIdx = header.findIndex(h => h.toLowerCase() === "pos");
+  const idx = (name: string) => header.findIndex(h => h.toLowerCase() === name.toLowerCase());
+  const firstNameIdx = idx("playerfirstname");
+  const lastNameIdx = idx("player");
+  const teamIdx = idx("newestteamlocation");
+  const posIdx = idx("pos");
+  const batsIdx = idx("batshand");
+  const throwsIdx = idx("throwshand");
+  const ageIdx = idx("age");
+  const abIdx = idx("ab");
+  const baIdx = idx("ba");
+  const obpIdx = idx("obp");
+  const slgIdx = idx("slg");
+  const opsIdx = idx("ops");
+  const isoIdx = idx("iso");
+
   if (firstNameIdx < 0 || lastNameIdx < 0 || teamIdx < 0) throw new Error("Missing columns");
   const players: FilePlayer[] = [];
   for (let i = 1; i < lines.length; i++) {
@@ -29,8 +49,22 @@ function parseMarkdownTable(raw: string): FilePlayer[] {
     const firstName = cols[firstNameIdx];
     const lastName = cols[lastNameIdx];
     const team2025 = cols[teamIdx];
-    const position = posIdx >= 0 ? cols[posIdx] : "";
-    if (firstName && lastName && team2025) players.push({ firstName, lastName, team2025, position });
+    if (!firstName || !lastName || !team2025) continue;
+    players.push({
+      firstName,
+      lastName,
+      team2025,
+      position: posIdx >= 0 ? cols[posIdx] : "",
+      batsHand: batsIdx >= 0 ? cols[batsIdx] : "",
+      throwsHand: throwsIdx >= 0 ? cols[throwsIdx] : "",
+      age: ageIdx >= 0 ? parseInt(cols[ageIdx]) || 0 : 0,
+      ab: abIdx >= 0 ? parseInt(cols[abIdx]) || 0 : 0,
+      ba: baIdx >= 0 ? parseFloat(cols[baIdx]) || 0 : 0,
+      obp: obpIdx >= 0 ? parseFloat(cols[obpIdx]) || 0 : 0,
+      slg: slgIdx >= 0 ? parseFloat(cols[slgIdx]) || 0 : 0,
+      ops: opsIdx >= 0 ? parseFloat(cols[opsIdx]) || 0 : 0,
+      iso: isoIdx >= 0 ? parseFloat(cols[isoIdx]) || 0 : 0,
+    });
   }
   return players;
 }
@@ -44,11 +78,102 @@ Deno.serve(async (req) => {
     const db = createClient(supabaseUrl, supabaseKey);
 
     const body = await req.json().catch(() => ({}));
-    const action = body.action || "reconcile";
+    const action = body.action || "populate_stats";
     const dryRun = body.dryRun === true;
 
+    if (action === "populate_stats") {
+      // Load the parsed stats file from storage
+      const { data: fileData, error: fileError } = await db.storage.from("imports").download("2025-transfer-stats.txt");
+      if (fileError) throw new Error(`Storage error: ${fileError.message}`);
+      const rawText = await fileData.text();
+      const filePlayers = parseMarkdownTable(rawText);
+      console.log(`Parsed ${filePlayers.length} players from file`);
+
+      // Get all transfer portal players with their active transfer predictions
+      let allTransfers: any[] = [];
+      let from = 0;
+      const PAGE = 1000;
+      while (true) {
+        const { data, error } = await db.from("players")
+          .select("id, first_name, last_name, team, from_team, conference")
+          .eq("transfer_portal", true)
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        allTransfers = allTransfers.concat(data || []);
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+      }
+      console.log(`Found ${allTransfers.length} transfer portal players`);
+
+      const normalize = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
+      const playerMap = new Map<string, any[]>();
+      for (const p of allTransfers) {
+        const key = normalize(p.first_name) + "|" + normalize(p.last_name);
+        if (!playerMap.has(key)) playerMap.set(key, []);
+        playerMap.get(key)!.push(p);
+      }
+
+      let matched = 0;
+      let skipped = 0;
+      const actions: string[] = [];
+      const updates: Promise<any>[] = [];
+
+      for (const fp of filePlayers) {
+        const key = normalize(fp.firstName) + "|" + normalize(fp.lastName);
+        const matches = playerMap.get(key);
+        if (!matches || matches.length !== 1) { skipped++; continue; }
+        const player = matches[0];
+
+        matched++;
+        actions.push(`MATCH: ${fp.firstName} ${fp.lastName} → BA:${fp.ba} OBP:${fp.obp} SLG:${fp.slg} OPS:${fp.ops}`);
+
+        if (!dryRun) {
+          // Update player metadata
+          const playerUpdate: any = {};
+          if (fp.batsHand && fp.batsHand !== "0") playerUpdate.bats_hand = fp.batsHand;
+          if (fp.throwsHand && fp.throwsHand !== "0") playerUpdate.throws_hand = fp.throwsHand;
+          if (fp.age > 0) playerUpdate.age = fp.age;
+          if (fp.position) playerUpdate.position = fp.position;
+          if (Object.keys(playerUpdate).length > 0) {
+            updates.push(db.from("players").update(playerUpdate).eq("id", player.id));
+          }
+
+          // Update transfer prediction with actual 2025 stats
+          // Put actual stats in both from_* (prior) and p_* (displayed) fields
+          updates.push(
+            db.from("player_predictions").update({
+              from_avg: fp.ba,
+              from_obp: fp.obp,
+              from_slg: fp.slg,
+              p_avg: fp.ba,
+              p_obp: fp.obp,
+              p_slg: fp.slg,
+              p_ops: fp.ops,
+              p_iso: fp.iso,
+            })
+            .eq("player_id", player.id)
+            .eq("model_type", "transfer")
+            .eq("season", 2025)
+            .eq("status", "active")
+          );
+
+          // Batch execute every 50
+          if (updates.length >= 50) {
+            await Promise.all(updates.splice(0, 50));
+          }
+        }
+      }
+
+      // Flush remaining
+      if (updates.length > 0) await Promise.all(updates);
+
+      return new Response(JSON.stringify({ success: true, dryRun, matched, skipped, total: filePlayers.length, actions: actions.slice(0, 50) }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (action === "flag_unflagged") {
-      // Find NOT_FLAGGED players and flag them as transfers
+      // Original flag_unflagged logic preserved
       const { data: fileData, error: fileError } = await db.storage.from("imports").download("2025-teams-parsed.txt");
       if (fileError) throw new Error(`Storage error: ${fileError.message}`);
       const rawText = await fileData.text();
@@ -118,7 +243,7 @@ Deno.serve(async (req) => {
         const matches = playerMap.get(key);
         if (!matches || matches.length !== 1) continue;
         const player = matches[0];
-        if (player.transfer_portal) continue; // already flagged
+        if (player.transfer_portal) continue;
 
         const fileTeamNorm = normalizeTeam(fp.team2025);
         const currentTeamNorm = normalizeTeam(player.team || "");
@@ -136,14 +261,12 @@ Deno.serve(async (req) => {
               conference: destConf,
             }).eq("id", player.id);
 
-            // Mark returner prediction as departed
             await db.from("player_predictions")
               .update({ status: "departed" })
               .eq("player_id", player.id)
               .eq("model_type", "returner")
               .eq("season", 2025);
 
-            // Create transfer prediction if none exists
             const { data: existing } = await db.from("player_predictions")
               .select("id")
               .eq("player_id", player.id)

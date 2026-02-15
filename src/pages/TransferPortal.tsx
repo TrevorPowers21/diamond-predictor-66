@@ -201,7 +201,7 @@ export default function TransferPortal() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-2xl font-bold tracking-tight">Transfer Portal</h2>
-            <p className="text-muted-foreground">Predicted post-transition performance for portal entrants</p>
+            <p className="text-muted-foreground">2025 season statistics for portal entrants</p>
           </div>
           <Select value={variant} onValueChange={(v) => setVariant(v as "regular" | "xstats")}>
             <SelectTrigger className="w-40">
@@ -228,7 +228,7 @@ export default function TransferPortal() {
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Avg Predicted OPS</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Avg OPS</CardTitle>
               <BarChart3 className="h-4 w-4 text-accent" />
             </CardHeader>
             <CardContent>
@@ -238,7 +238,7 @@ export default function TransferPortal() {
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Top Projected Player</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Top Player</CardTitle>
               <TrendingUp className="h-4 w-4 text-green-500" />
             </CardHeader>
             <CardContent>
@@ -246,7 +246,7 @@ export default function TransferPortal() {
                 {topPlayer ? `${topPlayer.first_name} ${topPlayer.last_name}` : "—"}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                {topPlayer ? `pOPS: ${statFormat(topPlayer.prediction.p_ops)}` : "No data"}
+                {topPlayer ? `OPS: ${statFormat(topPlayer.prediction.p_ops)}` : "No data"}
               </p>
             </CardContent>
           </Card>
@@ -256,8 +256,8 @@ export default function TransferPortal() {
         {chartData.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Top 10 Projected OPS</CardTitle>
-              <CardDescription>Predicted post-transition OPS for top portal players</CardDescription>
+              <CardTitle className="text-base">Top 10 by OPS</CardTitle>
+              <CardDescription>2025 season OPS for top portal players</CardDescription>
             </CardHeader>
             <CardContent>
               <ChartContainer config={chartConfig} className="h-[280px]">
@@ -280,7 +280,7 @@ export default function TransferPortal() {
         {/* Table */}
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="text-base">Player Predictions</CardTitle>
+            <CardTitle className="text-base">Player Stats</CardTitle>
             <div className="relative w-full sm:w-64">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -293,7 +293,7 @@ export default function TransferPortal() {
           </CardHeader>
           <CardContent className="p-0">
             {isLoading ? (
-              <div className="flex items-center justify-center py-16 text-muted-foreground">Loading predictions…</div>
+              <div className="flex items-center justify-center py-16 text-muted-foreground">Loading stats…</div>
             ) : filtered.length === 0 ? (
               <div className="flex items-center justify-center py-16 text-muted-foreground">No players found</div>
             ) : (
@@ -303,11 +303,11 @@ export default function TransferPortal() {
                     <TableRow>
                       <TableHead className="min-w-[160px]"><SortButton label="Player" sortKeyVal="name" /></TableHead>
                       <TableHead>Prior</TableHead>
-                      <TableHead><SortButton label="pAVG" sortKeyVal="p_avg" /></TableHead>
-                      <TableHead><SortButton label="pOBP" sortKeyVal="p_obp" /></TableHead>
-                      <TableHead><SortButton label="pSLG" sortKeyVal="p_slg" /></TableHead>
-                      <TableHead><SortButton label="pOPS" sortKeyVal="p_ops" /></TableHead>
-                      <TableHead><SortButton label="pISO" sortKeyVal="p_iso" /></TableHead>
+                      <TableHead><SortButton label="AVG" sortKeyVal="p_avg" /></TableHead>
+                      <TableHead><SortButton label="OBP" sortKeyVal="p_obp" /></TableHead>
+                      <TableHead><SortButton label="SLG" sortKeyVal="p_slg" /></TableHead>
+                      <TableHead><SortButton label="OPS" sortKeyVal="p_ops" /></TableHead>
+                      <TableHead><SortButton label="ISO" sortKeyVal="p_iso" /></TableHead>
                       <TableHead>Park Δ</TableHead>
                       <TableHead>Stuff Δ</TableHead>
                       <TableHead><SortButton label="PWR+" sortKeyVal="power_rating_plus" /></TableHead>
