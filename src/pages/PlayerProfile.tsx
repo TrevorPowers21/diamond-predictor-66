@@ -194,6 +194,20 @@ export default function PlayerProfile() {
   const xstatsPred = predictions.find((p) => p.variant === "xstats");
   const isTransferPortal = player?.transfer_portal && predictions.some((p) => p.model_type === "transfer");
 
+  const { data: fromTeamData } = useQuery({
+    queryKey: ["from-team-conference", player?.from_team],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("teams")
+        .select("conference")
+        .eq("name", player!.from_team!)
+        .single();
+      if (error) return null;
+      return data;
+    },
+    enabled: !!player?.from_team && !!isTransferPortal,
+  });
+
   if (isLoading) {
     return (
       <DashboardLayout>
@@ -382,6 +396,7 @@ export default function PlayerProfile() {
                   <CardContent className="pt-4 pb-3">
                     <div className="text-xs font-medium text-muted-foreground">2025 Team</div>
                     <div className={`text-lg font-bold mt-1 ${player.from_team ? "" : "text-muted-foreground"}`}>{player.from_team || "TBD"}</div>
+                    {fromTeamData?.conference && <div className="text-xs text-muted-foreground">{fromTeamData.conference}</div>}
                   </CardContent>
                 </Card>
                 <Card>
