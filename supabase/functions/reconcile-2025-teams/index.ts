@@ -16,18 +16,12 @@ interface FilePlayer {
 function parseMarkdownTable(raw: string): FilePlayer[] {
   const lines = raw.split("\n").filter(l => l.trim().startsWith("|") && !l.includes("---"));
   if (lines.length < 2) return [];
-  
-  // First line is header
   const header = lines[0].split("|").map(s => s.trim()).filter(Boolean);
   const firstNameIdx = header.findIndex(h => h.toLowerCase() === "playerfirstname");
-  const lastNameIdx = header.findIndex(h => h.toLowerCase() === "player"); // "player" column is last name
+  const lastNameIdx = header.findIndex(h => h.toLowerCase() === "player");
   const teamIdx = header.findIndex(h => h.toLowerCase() === "newestteamlocation");
   const posIdx = header.findIndex(h => h.toLowerCase() === "pos");
-  
-  if (firstNameIdx < 0 || lastNameIdx < 0 || teamIdx < 0) {
-    throw new Error(`Could not find columns: firstName=${firstNameIdx}, lastName=${lastNameIdx}, team=${teamIdx}`);
-  }
-  
+  if (firstNameIdx < 0 || lastNameIdx < 0 || teamIdx < 0) throw new Error("Missing columns");
   const players: FilePlayer[] = [];
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split("|").map(s => s.trim()).filter(Boolean);
@@ -36,9 +30,7 @@ function parseMarkdownTable(raw: string): FilePlayer[] {
     const lastName = cols[lastNameIdx];
     const team2025 = cols[teamIdx];
     const position = posIdx >= 0 ? cols[posIdx] : "";
-    if (firstName && lastName && team2025) {
-      players.push({ firstName, lastName, team2025, position });
-    }
+    if (firstName && lastName && team2025) players.push({ firstName, lastName, team2025, position });
   }
   return players;
 }
@@ -51,183 +43,116 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const db = createClient(supabaseUrl, supabaseKey);
 
-    const body = await req.json();
-    let filePlayers: FilePlayer[];
-    
-    if (body.rawTable) {
-      filePlayers = parseMarkdownTable(body.rawTable);
-    } else if (body.players) {
-      filePlayers = body.players;
-    } else {
-      throw new Error("Provide 'rawTable' (markdown) or 'players' (JSON array)");
-    }
-    
-    if (!filePlayers.length) throw new Error("No player data parsed");
-
-    // Dry run mode - just report what would happen
+    const body = await req.json().catch(() => ({}));
+    const action = body.action || "reconcile";
     const dryRun = body.dryRun === true;
 
-    // Load all players from DB
-    let allPlayers: any[] = [];
-    let from = 0;
-    const PAGE = 1000;
-    while (true) {
-      const { data, error } = await db.from("players").select("id, first_name, last_name, team, conference, from_team, transfer_portal")
-        .range(from, from + PAGE - 1);
-      if (error) throw error;
-      allPlayers = allPlayers.concat(data || []);
-      if (!data || data.length < PAGE) break;
-      from += PAGE;
-    }
+    if (action === "flag_unflagged") {
+      // Find NOT_FLAGGED players and flag them as transfers
+      const { data: fileData, error: fileError } = await db.storage.from("imports").download("2025-teams-parsed.txt");
+      if (fileError) throw new Error(`Storage error: ${fileError.message}`);
+      const rawText = await fileData.text();
+      const filePlayers = parseMarkdownTable(rawText);
 
-    // Load teams lookup
-    let allTeams: any[] = [];
-    from = 0;
-    while (true) {
-      const { data, error } = await db.from("teams").select("name, conference").range(from, from + PAGE - 1);
-      if (error) throw error;
-      allTeams = allTeams.concat(data || []);
-      if (!data || data.length < PAGE) break;
-      from += PAGE;
-    }
-
-    const teamConfMap: Record<string, string> = {};
-    for (const t of allTeams) {
-      if (t.conference) teamConfMap[t.name.toLowerCase()] = t.conference;
-    }
-
-    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
-    const playerMap = new Map<string, any[]>();
-    for (const p of allPlayers) {
-      const key = normalize(p.first_name) + "|" + normalize(p.last_name);
-      if (!playerMap.has(key)) playerMap.set(key, []);
-      playerMap.get(key)!.push(p);
-    }
-
-    const normalizeTeam = (t: string) => t.toLowerCase()
-      .replace(/university|college|of|the/gi, "")
-      .replace(/[^a-z\s]/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    const stats = {
-      totalFileRows: filePlayers.length,
-      matched: 0,
-      unmatched: 0,
-      fromTeamFilled: 0,
-      revertedToReturner: 0,
-      confirmedTransferNotFlagged: 0,
-      alreadyCorrect: 0,
-      ambiguousSkipped: 0,
-    };
-    const actions: string[] = [];
-    const unmatchedNames: string[] = [];
-
-    for (const fp of filePlayers) {
-      const key = normalize(fp.firstName) + "|" + normalize(fp.lastName);
-      const matches = playerMap.get(key);
-
-      if (!matches || matches.length === 0) {
-        stats.unmatched++;
-        if (unmatchedNames.length < 50) unmatchedNames.push(`${fp.firstName} ${fp.lastName} (${fp.team2025})`);
-        continue;
+      let allPlayers: any[] = [];
+      let from = 0;
+      const PAGE = 1000;
+      while (true) {
+        const { data, error } = await db.from("players").select("id, first_name, last_name, team, conference, from_team, transfer_portal")
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        allPlayers = allPlayers.concat(data || []);
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
       }
 
-      let player = matches[0];
-      if (matches.length > 1) {
+      let allTeams: any[] = [];
+      from = 0;
+      while (true) {
+        const { data, error } = await db.from("teams").select("name, conference").range(from, from + PAGE - 1);
+        if (error) throw error;
+        allTeams = allTeams.concat(data || []);
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+      }
+      const teamConfMap: Record<string, string> = {};
+      for (const t of allTeams) { if (t.conference) teamConfMap[t.name.toLowerCase()] = t.conference; }
+
+      const normalize = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
+      const playerMap = new Map<string, any[]>();
+      for (const p of allPlayers) {
+        const key = normalize(p.first_name) + "|" + normalize(p.last_name);
+        if (!playerMap.has(key)) playerMap.set(key, []);
+        playerMap.get(key)!.push(p);
+      }
+      const normalizeTeam = (t: string) => t.toLowerCase().replace(/university|college|of|the/gi, "").replace(/[^a-z\s]/g, "").replace(/\s+/g, " ").trim();
+
+      let flagged = 0;
+      const actions: string[] = [];
+
+      for (const fp of filePlayers) {
+        const key = normalize(fp.firstName) + "|" + normalize(fp.lastName);
+        const matches = playerMap.get(key);
+        if (!matches || matches.length !== 1) continue;
+        const player = matches[0];
+        if (player.transfer_portal) continue; // already flagged
+
         const fileTeamNorm = normalizeTeam(fp.team2025);
-        const exact = matches.find(m =>
-          normalizeTeam(m.team || "").includes(fileTeamNorm) ||
-          fileTeamNorm.includes(normalizeTeam(m.team || "")) ||
-          normalizeTeam(m.from_team || "").includes(fileTeamNorm) ||
-          fileTeamNorm.includes(normalizeTeam(m.from_team || ""))
-        );
-        if (exact) {
-          player = exact;
-        } else {
-          stats.ambiguousSkipped++;
-          if (actions.length < 100) actions.push(`AMBIGUOUS: ${fp.firstName} ${fp.lastName} - ${matches.length} DB matches, file says ${fp.team2025}`);
-          continue;
-        }
-      }
+        const currentTeamNorm = normalizeTeam(player.team || "");
+        const sameTeam = currentTeamNorm === fileTeamNorm || currentTeamNorm.includes(fileTeamNorm) || fileTeamNorm.includes(currentTeamNorm);
 
-      stats.matched++;
-      const fileTeamNorm = normalizeTeam(fp.team2025);
-      const currentTeamNorm = normalizeTeam(player.team || "");
-
-      // Check if same team (player stayed)
-      const sameTeam = currentTeamNorm === fileTeamNorm ||
-        currentTeamNorm.includes(fileTeamNorm) ||
-        fileTeamNorm.includes(currentTeamNorm);
-
-      if (sameTeam) {
-        if (player.transfer_portal) {
-          // WRONG - revert to returner
+        if (!sameTeam && player.team && fp.team2025) {
+          flagged++;
+          const destConf = teamConfMap[player.team?.toLowerCase() || ""] || player.conference;
+          actions.push(`FLAG: ${fp.firstName} ${fp.lastName} from ${fp.team2025} → ${player.team} (conf: ${destConf})`);
+          
           if (!dryRun) {
-            const conf = teamConfMap[player.team?.toLowerCase() || ""] || player.conference;
             await db.from("players").update({
-              transfer_portal: false,
-              from_team: null,
-              conference: conf,
+              transfer_portal: true,
+              from_team: fp.team2025,
+              conference: destConf,
             }).eq("id", player.id);
 
-            // Fix predictions
+            // Mark returner prediction as departed
             await db.from("player_predictions")
               .update({ status: "departed" })
               .eq("player_id", player.id)
-              .eq("model_type", "transfer")
-              .eq("season", 2025);
-
-            await db.from("player_predictions")
-              .update({ status: "active" })
-              .eq("player_id", player.id)
               .eq("model_type", "returner")
               .eq("season", 2025);
-          }
-          stats.revertedToReturner++;
-          actions.push(`REVERT: ${fp.firstName} ${fp.lastName} → returner at ${player.team}`);
-        } else {
-          stats.alreadyCorrect++;
-        }
-      } else {
-        // Different team = transfer
-        if (player.transfer_portal) {
-          if (!player.from_team || player.from_team.startsWith("Unknown")) {
-            if (!dryRun) {
-              await db.from("players").update({
-                from_team: fp.team2025,
-                conference: teamConfMap[player.team?.toLowerCase() || ""] || player.conference,
-              }).eq("id", player.id);
+
+            // Create transfer prediction if none exists
+            const { data: existing } = await db.from("player_predictions")
+              .select("id")
+              .eq("player_id", player.id)
+              .eq("model_type", "transfer")
+              .eq("season", 2025)
+              .limit(1);
+
+            if (!existing?.length) {
+              await db.from("player_predictions").insert({
+                player_id: player.id,
+                model_type: "transfer",
+                season: 2025,
+                variant: "regular",
+                status: "active",
+              });
             }
-            stats.fromTeamFilled++;
-            actions.push(`FILL: ${fp.firstName} ${fp.lastName} from_team=${fp.team2025} → ${player.team}`);
-          } else {
-            stats.alreadyCorrect++;
           }
-        } else {
-          stats.confirmedTransferNotFlagged++;
-          actions.push(`NOT_FLAGGED: ${fp.firstName} ${fp.lastName} was at ${fp.team2025} now at ${player.team}`);
         }
       }
+
+      return new Response(JSON.stringify({ success: true, dryRun, flagged, actions }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    return new Response(JSON.stringify({
-      success: true,
-      dryRun,
-      stats,
-      actions: actions.slice(0, 80),
-      unmatchedSample: unmatchedNames.slice(0, 50),
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    return new Response(JSON.stringify({ success: false, error: "Unknown action" }), {
+      status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
     console.error("Error:", error);
-    return new Response(JSON.stringify({
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
-    }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    return new Response(JSON.stringify({ success: false, error: error instanceof Error ? error.message : "Unknown" }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
