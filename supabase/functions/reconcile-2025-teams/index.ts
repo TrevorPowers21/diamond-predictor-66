@@ -172,6 +172,111 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "populate_scouting") {
+      // Load the power ratings CSV from storage
+      const { data: fileData, error: fileError } = await db.storage.from("imports").download("2025-power-ratings.csv");
+      if (fileError) throw new Error(`Storage error: ${fileError.message}`);
+      const rawText = await fileData.text();
+      const lines = rawText.split("\n");
+
+      // Parse CSV: skip header rows (conferences, max/min), player rows start after "Min" row
+      // Format: Name, AvgEV, Barrel%, Whiff%, Chase%, EVScore(F), BarrelScore(G), WhiffScore(H), ChaseScore(I), OffPwrRating(J), PwrRating(K)
+      interface ScoutRow { name: string; variant: string; evScore: number; barrelScore: number; whiffScore: number; chaseScore: number; offPwrRating: number; pwrRating: number; }
+      const scoutRows: ScoutRow[] = [];
+      let pastMin = false;
+      for (const line of lines) {
+        const cols = line.split(",").map(s => s.trim());
+        if (!cols[0]) continue;
+        if (cols[0] === "Min") { pastMin = true; continue; }
+        if (!pastMin) continue;
+        if (cols[0].startsWith("25 ") || cols[0] === "Max" || cols[0] === "NCAA") continue;
+        const name = cols[0];
+        const evScore = parseFloat(cols[5]) || 0;
+        const barrelScore = parseFloat(cols[6]) || 0;
+        const whiffScore = parseFloat(cols[7]) || 0;
+        const chaseScore = parseFloat(cols[8]) || 0;
+        const offPwrRating = parseFloat(cols[9]) || 0;
+        const pwrRating = parseFloat(cols[10]) || 0;
+        if (evScore === 0 && barrelScore <= 1 && offPwrRating === 0) continue;
+        const isXstats = name.toLowerCase().endsWith(" xstats");
+        const cleanName = isXstats ? name.replace(/ xstats$/i, "") : name;
+        scoutRows.push({ name: cleanName, variant: isXstats ? "xstats" : "regular", evScore, barrelScore, whiffScore, chaseScore, offPwrRating, pwrRating });
+      }
+      console.log(`Parsed ${scoutRows.length} scouting rows from CSV`);
+
+      // Load all transfer portal players
+      let allTransfers: any[] = [];
+      let from = 0;
+      const PAGE = 1000;
+      while (true) {
+        const { data, error } = await db.from("players")
+          .select("id, first_name, last_name")
+          .eq("transfer_portal", true)
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        allTransfers = allTransfers.concat(data || []);
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+      }
+      console.log(`Found ${allTransfers.length} transfer portal players`);
+
+      const normalize = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
+      const playerMap = new Map<string, any[]>();
+      for (const p of allTransfers) {
+        const key = normalize(p.first_name) + " " + normalize(p.last_name);
+        if (!playerMap.has(key)) playerMap.set(key, []);
+        playerMap.get(key)!.push(p);
+      }
+
+      let matched = 0;
+      let skipped = 0;
+      const actions: string[] = [];
+      const updates: Promise<any>[] = [];
+
+      for (const sr of scoutRows) {
+        // Parse first/last name from CSV name
+        const nameParts = sr.name.trim().split(/\s+/);
+        if (nameParts.length < 2) { skipped++; continue; }
+        const firstName = normalize(nameParts[0]);
+        const lastName = normalize(nameParts.slice(1).join(""));
+        const key = firstName + " " + lastName;
+        const matches = playerMap.get(key);
+        if (!matches || matches.length !== 1) { skipped++; continue; }
+        const player = matches[0];
+
+        matched++;
+        actions.push(`MATCH: ${sr.name} (${sr.variant}) → EV:${sr.evScore} BBL:${sr.barrelScore} WH:${sr.whiffScore} CH:${sr.chaseScore} OPR:${sr.offPwrRating} PWR+:${sr.pwrRating}`);
+
+        if (!dryRun) {
+          updates.push(
+            db.from("player_predictions").update({
+              ev_score: sr.evScore,
+              barrel_score: sr.barrelScore,
+              whiff_score: sr.whiffScore,
+              chase_score: sr.chaseScore,
+              power_rating_score: sr.offPwrRating,
+              power_rating_plus: sr.pwrRating,
+            })
+            .eq("player_id", player.id)
+            .eq("model_type", "transfer")
+            .eq("season", 2025)
+            .eq("variant", sr.variant)
+            .eq("status", "active")
+          );
+
+          if (updates.length >= 50) {
+            await Promise.all(updates.splice(0, 50));
+          }
+        }
+      }
+
+      if (updates.length > 0) await Promise.all(updates);
+
+      return new Response(JSON.stringify({ success: true, dryRun, matched, skipped, total: scoutRows.length, actions: actions.slice(0, 50) }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (action === "flag_unflagged") {
       // Original flag_unflagged logic preserved
       const { data: fileData, error: fileError } = await db.storage.from("imports").download("2025-teams-parsed.txt");
