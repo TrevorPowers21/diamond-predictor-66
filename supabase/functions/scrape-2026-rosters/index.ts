@@ -16,7 +16,7 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { startPage = 1, endPage = 222, dryRun = false } = await req.json().catch(() => ({}));
+    const { startPage = 1, endPage = 222, dryRun = false, skipDeparted = false, markDepartedOnly = false } = await req.json().catch(() => ({}));
 
     // 1. Load all active returning players (those with returner predictions, status=active)
     console.log("Loading active returning players...");
@@ -380,6 +380,30 @@ Deno.serve(async (req) => {
       playerMap.get(key)!.push(p);
     }
 
+    // markDepartedOnly mode: skip scraping, just mark all remaining active returner predictions as departed
+    if (markDepartedOnly) {
+      const predIds = returningPlayers.map((p: any) => p.id);
+      let departedCount = 0;
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < predIds.length; i += BATCH_SIZE) {
+        const batch = predIds.slice(i, i + BATCH_SIZE);
+        const { error } = await supabase
+          .from("player_predictions")
+          .update({ status: "departed" })
+          .in("id", batch);
+        if (error) {
+          console.error(`Error marking departed batch:`, error.message);
+        } else {
+          departedCount += batch.length;
+        }
+      }
+      console.log(`Marked ${departedCount} remaining predictions as departed`);
+      return new Response(
+        JSON.stringify({ success: true, markDepartedOnly: true, departedCount, totalRemaining: predIds.length }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // 2. Scrape 64analytics for 2026 roster data
     // Track which returning players we find on 64analytics
     const foundPlayerIds = new Set<string>();
@@ -400,8 +424,6 @@ Deno.serve(async (req) => {
         }
         const html = await resp.text();
 
-        // Parse table rows
-        // Columns: Name(0), Team(1), Conference(2), Class(3), Pos(4), Transfer(5), Previous Team(6)
         const rowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
         const rows = html.match(rowRegex) || [];
 
@@ -422,13 +444,12 @@ Deno.serve(async (req) => {
           if (cells.length < 5) continue;
 
           const name = cells[0].trim();
-          const currentTeam = cells[1].trim(); // This is the 2026 team on 64analytics
+          const currentTeam = cells[1].trim();
           const pos = cells[4].trim();
 
           if (!name || !currentTeam) continue;
           totalScraped++;
 
-          // Match against our returning players
           const nameParts = name.split(/\s+/);
           if (nameParts.length < 2) continue;
           const scrapedFirst = nameParts[0];
@@ -445,7 +466,6 @@ Deno.serve(async (req) => {
             const normalizedScrapedTeam = normalizeTeam(currentTeam);
 
             if (normalizedDbTeam && normalizedDbTeam !== normalizedScrapedTeam) {
-              // Player is on a different team → transfer
               transfers.push({
                 playerId,
                 predictionId: returner.id,
@@ -475,15 +495,6 @@ Deno.serve(async (req) => {
     console.log(`Found ${foundPlayerIds.size} returning players on 64analytics`);
     console.log(`Transfers detected: ${transfers.length}`);
 
-    // 3. Identify departed players (returning players NOT found on 64analytics)
-    const departedPredictions: string[] = [];
-    for (const p of returningPlayers) {
-      if (!foundPlayerIds.has(p.players.id)) {
-        departedPredictions.push(p.id);
-      }
-    }
-    console.log(`Players to mark as departed: ${departedPredictions.length}`);
-
     if (dryRun) {
       return new Response(
         JSON.stringify({
@@ -494,34 +505,41 @@ Deno.serve(async (req) => {
           foundOnRoster: foundPlayerIds.size,
           sameTeam: sameTeam.length,
           transfersDetected: transfers.length,
-          departedCount: departedPredictions.length,
           transfers: transfers.map(t => ({
             playerId: t.playerId,
             oldTeam: t.oldTeam,
             newTeam: t.newTeam,
           })),
-          departedSample: departedPredictions.slice(0, 20),
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-
-    // 4. Mark departed players
+    // 4. Mark departed players (skip if skipDeparted is true)
     let departedCount = 0;
-    const BATCH_SIZE = 100;
-    for (let i = 0; i < departedPredictions.length; i += BATCH_SIZE) {
-      const batch = departedPredictions.slice(i, i + BATCH_SIZE);
-      const { error } = await supabase
-        .from("player_predictions")
-        .update({ status: "departed" })
-        .in("id", batch);
-      if (error) {
-        console.error(`Error marking departed batch:`, error.message);
-      } else {
-        departedCount += batch.length;
+    if (!skipDeparted) {
+      const departedPredictions: string[] = [];
+      for (const p of returningPlayers) {
+        if (!foundPlayerIds.has(p.players.id)) {
+          departedPredictions.push(p.id);
+        }
       }
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < departedPredictions.length; i += BATCH_SIZE) {
+        const batch = departedPredictions.slice(i, i + BATCH_SIZE);
+        const { error } = await supabase
+          .from("player_predictions")
+          .update({ status: "departed" })
+          .in("id", batch);
+        if (error) {
+          console.error(`Error marking departed batch:`, error.message);
+        } else {
+          departedCount += batch.length;
+        }
+      }
+      console.log(`Marked ${departedCount} predictions as departed`);
+    } else {
+      console.log(`Skipping departed marking (skipDeparted=true)`);
     }
-    console.log(`Marked ${departedCount} predictions as departed`);
 
     // 5. Process transfers: move to portal
     let transferCount = 0;
