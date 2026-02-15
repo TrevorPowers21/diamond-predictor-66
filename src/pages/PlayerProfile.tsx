@@ -31,7 +31,7 @@ const computeDerived = (pred: { p_avg: number | null; p_obp: number | null; p_sl
   const ops = obp != null && slg != null ? obp + slg : null;
   const iso = slg != null && avg != null ? slg - avg : null;
   const wrcRaw = avg != null && obp != null && slg != null && iso != null
-    ? (0.45 * avg) + (0.3 * obp) + (0.15 * slg) + (0.1 * iso)
+    ? (0.45 * obp) + (0.3 * slg) + (0.15 * avg) + (0.1 * iso)
     : null;
   const wrcPlus = wrcRaw != null ? (wrcRaw / 0.364) * 100 : null;
   return { ops, iso, wrcPlus };
