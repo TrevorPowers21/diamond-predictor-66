@@ -85,7 +85,30 @@ Deno.serve(async (req) => {
         if (!playerMap.has(key)) playerMap.set(key, []);
         playerMap.get(key)!.push(p);
       }
-      const normalizeTeam = (t: string) => t.toLowerCase().replace(/university|college|of|the/gi, "").replace(/[^a-z\s]/g, "").replace(/\s+/g, " ").trim();
+      const teamAliases: Record<string, string> = {
+        "florida gulf coast": "fgcu",
+        "dallas baptist": "dbu",
+        "loyola marymount": "lmu ca",
+        "lmu (ca)": "lmu ca",
+        "central connecticut state": "central conn st",
+        "central conn. st.": "central conn st",
+        "southeastern louisiana": "southeastern la",
+        "southeastern la.": "southeastern la",
+        "stephen f. austin state": "sfa",
+        "stephen f austin": "sfa",
+        "ut arlington": "ut arlington",
+        "texas-arlington": "ut arlington",
+        "ut martin": "ut martin",
+        "tennessee-martin": "ut martin",
+        "mcneese state": "mcneese",
+        "utah tech": "utah tech",
+      };
+      const normalizeTeam = (t: string) => {
+        let n = t.toLowerCase().replace(/university|college|of|the/gi, "").replace(/[^a-z\s().]/g, "").replace(/\s+/g, " ").trim();
+        if (teamAliases[t.toLowerCase()]) return teamAliases[t.toLowerCase()];
+        n = n.replace(/[^a-z\s]/g, "").replace(/\s+/g, " ").trim();
+        return n;
+      };
 
       let flagged = 0;
       const actions: string[] = [];
