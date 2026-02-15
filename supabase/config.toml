@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.scrape-2026-rosters]
 verify_jwt = false
+
+[functions.check-departed-csv]
+verify_jwt = false
