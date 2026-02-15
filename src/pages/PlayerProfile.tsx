@@ -192,6 +192,7 @@ export default function PlayerProfile() {
 
   const regularPred = predictions.find((p) => p.variant === "regular");
   const xstatsPred = predictions.find((p) => p.variant === "xstats");
+  const isTransferPortal = player?.transfer_portal && predictions.some((p) => p.model_type === "transfer");
 
   if (isLoading) {
     return (
@@ -375,6 +376,24 @@ export default function PlayerProfile() {
           {/* Predictions & Scouting */}
           <div className="lg:col-span-2 space-y-6">
             {/* Predicted Stats */}
+            {isTransferPortal && (
+              <div className="grid grid-cols-2 gap-4">
+                <Card>
+                  <CardContent className="pt-4 pb-3">
+                    <div className="text-xs font-medium text-muted-foreground">2025 Team</div>
+                    <div className="text-lg font-bold mt-1 text-muted-foreground">TBD</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4 pb-3">
+                    <div className="text-xs font-medium text-muted-foreground">2026 Team</div>
+                    <div className="text-lg font-bold mt-1">{player.team || "Unknown"}</div>
+                    {player.conference && <div className="text-xs text-muted-foreground">{player.conference}</div>}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
             {(regularPred || xstatsPred) && (
               <Card>
                 <CardHeader>
