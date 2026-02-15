@@ -718,6 +718,21 @@ export type Database = {
         }
         Relationships: []
       }
+      temp_csv_players: {
+        Row: {
+          first_name: string
+          last_name: string
+        }
+        Insert: {
+          first_name: string
+          last_name: string
+        }
+        Update: {
+          first_name?: string
+          last_name?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
