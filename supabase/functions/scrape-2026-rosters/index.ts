@@ -16,7 +16,7 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { startPage = 1, endPage = 222, dryRun = false, skipDeparted = false, markDepartedOnly = false } = await req.json().catch(() => ({}));
+    const { startPage = 1, endPage = 222, dryRun = false, skipDeparted = false, markDepartedOnly = false, scrapeStartedAt = null } = await req.json().catch(() => ({}));
 
     // 1. Load all active returning players (those with returner predictions, status=active)
     console.log("Loading active returning players...");
@@ -380,26 +380,57 @@ Deno.serve(async (req) => {
       playerMap.get(key)!.push(p);
     }
 
-    // markDepartedOnly mode: skip scraping, just mark all remaining active returner predictions as departed
+    // markDepartedOnly mode: mark active returner predictions as departed
+    // ONLY if they weren't tagged (updated_at) during the scrape
     if (markDepartedOnly) {
-      const predIds = returningPlayers.map((p: any) => p.id);
-      let departedCount = 0;
-      const BATCH_SIZE = 100;
-      for (let i = 0; i < predIds.length; i += BATCH_SIZE) {
-        const batch = predIds.slice(i, i + BATCH_SIZE);
-        const { error } = await supabase
-          .from("player_predictions")
-          .update({ status: "departed" })
-          .in("id", batch);
-        if (error) {
-          console.error(`Error marking departed batch:`, error.message);
-        } else {
-          departedCount += batch.length;
-        }
+      if (!scrapeStartedAt) {
+        return new Response(
+          JSON.stringify({ success: false, error: "scrapeStartedAt is required for markDepartedOnly" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
+      // Find predictions that were NOT updated during the scrape (updated_at < scrapeStartedAt)
+      const untaggedPreds = returningPlayers.filter(
+        (p: any) => new Date(p.id ? p.id : 0) // dummy, we'll query directly
+      );
+      
+      // Query directly for predictions not recently updated
+      let departedCount = 0;
+      let offset = 0;
+      const PAGE_SIZE2 = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("player_predictions")
+          .select("id")
+          .eq("model_type", "returner")
+          .eq("variant", "regular")
+          .eq("status", "active")
+          .lt("updated_at", scrapeStartedAt)
+          .range(offset, offset + PAGE_SIZE2 - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        const ids = data.map((d: any) => d.id);
+        const BATCH_SIZE = 100;
+        for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+          const batch = ids.slice(i, i + BATCH_SIZE);
+          const { error: updateErr } = await supabase
+            .from("player_predictions")
+            .update({ status: "departed" })
+            .in("id", batch);
+          if (updateErr) {
+            console.error(`Error marking departed batch:`, updateErr.message);
+          } else {
+            departedCount += batch.length;
+          }
+        }
+        if (data.length < PAGE_SIZE2) break;
+        offset += PAGE_SIZE2;
+      }
+      
       console.log(`Marked ${departedCount} remaining predictions as departed`);
       return new Response(
-        JSON.stringify({ success: true, markDepartedOnly: true, departedCount, totalRemaining: predIds.length }),
+        JSON.stringify({ success: true, markDepartedOnly: true, departedCount }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -478,7 +509,7 @@ Deno.serve(async (req) => {
                 position: pos || returner.players.position || "",
               });
             } else {
-              sameTeam.push({ playerId });
+              sameTeam.push({ playerId, predictionId: returner.id });
             }
           }
         }
@@ -530,6 +561,25 @@ Deno.serve(async (req) => {
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // 3. Tag same-team matches by updating their updated_at timestamp
+    let taggedCount = 0;
+    const sameTeamIds = sameTeam.map(s => s.predictionId);
+    const TAG_BATCH = 100;
+    for (let i = 0; i < sameTeamIds.length; i += TAG_BATCH) {
+      const batch = sameTeamIds.slice(i, i + TAG_BATCH);
+      const { error } = await supabase
+        .from("player_predictions")
+        .update({ updated_at: new Date().toISOString() })
+        .in("id", batch);
+      if (error) {
+        console.error(`Error tagging same-team batch:`, error.message);
+      } else {
+        taggedCount += batch.length;
+      }
+    }
+    console.log(`Tagged ${taggedCount} same-team predictions`);
+
     // 4. Mark departed players (skip if skipDeparted is true)
     let departedCount = 0;
     if (!skipDeparted) {
