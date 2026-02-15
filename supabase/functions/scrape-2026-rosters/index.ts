@@ -408,6 +408,7 @@ Deno.serve(async (req) => {
     // Track which returning players we find on 64analytics
     const foundPlayerIds = new Set<string>();
     const transfers: { playerId: string; predictionId: string; oldTeam: string | null; newTeam: string; position: string }[] = [];
+    const unmatchedScrapedNames: { name: string; team: string; normalized: string }[] = [];
     const sameTeam: { playerId: string }[] = [];
 
     let totalScraped = 0;
@@ -456,7 +457,10 @@ Deno.serve(async (req) => {
           const scrapedLast = nameParts.slice(1).join(" ");
           const nameLower = normalizeName(scrapedFirst, scrapedLast);
           const matched = playerMap.get(nameLower);
-          if (!matched) continue;
+          if (!matched) {
+            unmatchedScrapedNames.push({ name, team: currentTeam, normalized: nameLower });
+            continue;
+          }
 
           for (const returner of matched) {
             const playerId = returner.players.id;
@@ -496,6 +500,16 @@ Deno.serve(async (req) => {
     console.log(`Transfers detected: ${transfers.length}`);
 
     if (dryRun) {
+      // Collect unmatched scraped names for debugging
+      const unmatchedNames: { name: string; team: string; normalized: string }[] = [];
+      // Re-scrape to collect unmatched (we already have the data from above, but let's track during scrape)
+      // Actually, let's track during the main loop - we need to modify the loop above
+      // For now, return what we have plus a sample of returner names for comparison
+      const sampleReturners = returningPlayers.slice(0, 20).map(p => ({
+        dbName: `${p.players.first_name} ${p.players.last_name}`,
+        normalized: normalizeName(p.players.first_name, p.players.last_name),
+        team: p.players.team,
+      }));
       return new Response(
         JSON.stringify({
           success: true,
@@ -510,6 +524,8 @@ Deno.serve(async (req) => {
             oldTeam: t.oldTeam,
             newTeam: t.newTeam,
           })),
+          unmatchedScraped: unmatchedScrapedNames.slice(0, 100),
+          sampleReturners,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
