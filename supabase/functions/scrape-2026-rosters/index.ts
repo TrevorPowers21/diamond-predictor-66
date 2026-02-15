@@ -1,0 +1,340 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+};
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    const { startPage = 1, endPage = 222, dryRun = false } = await req.json().catch(() => ({}));
+
+    // 1. Load all active returning players (those with returner predictions, status=active)
+    console.log("Loading active returning players...");
+    let returningPlayers: any[] = [];
+    let from = 0;
+    const PAGE_SIZE = 1000;
+    while (true) {
+      const { data, error } = await supabase
+        .from("player_predictions")
+        .select("id, player_id, players!inner(id, first_name, last_name, team, position, conference)")
+        .eq("model_type", "returner")
+        .eq("variant", "regular")
+        .eq("status", "active")
+        .range(from, from + PAGE_SIZE - 1);
+      if (error) throw error;
+      returningPlayers = returningPlayers.concat(data || []);
+      if (!data || data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+    console.log(`Loaded ${returningPlayers.length} active returning players`);
+
+    // Build lookup map: normalized name -> returning player records
+    function normalizeName(first: string, last: string): string {
+      let f = first.trim().toLowerCase()
+        .replace(/[.''\-]/g, "")
+        .replace(/\s+/g, " ");
+      let l = last.trim().toLowerCase()
+        .replace(/\s+(jr\.?|sr\.?|iii|ii|iv|v|2nd year)$/i, "")
+        .replace(/[.''\-]/g, "")
+        .replace(/\s+/g, " ");
+      return `${f} ${l}`;
+    }
+
+    // Normalize team names so "Kansas St." matches "Kansas State", etc.
+    function normalizeTeam(team: string): string {
+      let t = team.trim()
+        // Decode HTML entities
+        .replace(/&#39;/g, "'")
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .toLowerCase();
+      
+      // Strip parenthetical state/location suffixes like "(NY)", "(MN)", "(FL)", "(Minn.)"
+      t = t.replace(/\s*\([^)]*\)\s*/g, " ").trim();
+      
+      // Strip "university of" prefix
+      t = t.replace(/^university of\s+/i, "").trim();
+
+      // Common abbreviation mappings - order matters, do "st." last
+      t = t.replace(/\bso\.\s*/g, "southern ");
+      t = t.replace(/\bno\.\s*/g, "northern ");
+      t = t.replace(/\be\.\s*/g, "eastern ");
+      t = t.replace(/\bw\.\s*/g, "western ");
+      t = t.replace(/\bse\b\s*/g, "southeast ");
+      t = t.replace(/\bsw\b\s*/g, "southwest ");
+      t = t.replace(/\bne\b\s*/g, "northeast ");
+      t = t.replace(/\bnw\b\s*/g, "northwest ");
+      // "St." at end of word or before space = "State"
+      // But "St." before a name (like "St. John's") = "saint"
+      // Heuristic: if "st." is at the end, it's "state"; otherwise "saint"
+      t = t.replace(/\bst\.\s*$/g, "state");
+      t = t.replace(/\bst\.\s+/g, "saint ");
+
+      // Known aliases
+      const aliases: Record<string, string> = {
+        "usc": "southern california",
+        "ole miss": "mississippi",
+        "umass": "massachusetts",
+        "uconn": "connecticut",
+        "ucf": "central florida",
+        "unlv": "nevada las vegas",
+        "utsa": "texas san antonio",
+        "utep": "texas el paso",
+        "unc": "north carolina",
+        "lsu": "louisiana state",
+        "tcu": "texas christian",
+        "smu": "southern methodist",
+        "byu": "brigham young",
+        "vcu": "virginia commonwealth",
+        "fiu": "florida international",
+        "fau": "florida atlantic",
+        "uab": "alabama birmingham",
+        "ualr": "arkansas little rock",
+        "liu": "long island",
+        "siue": "southern illinois edwardsville",
+        "siu": "southern illinois",
+        "niu": "northern illinois",
+        "uic": "illinois chicago",
+        "csun": "cal state northridge",
+        "pitt": "pittsburgh",
+        "army west point": "army",
+        "nicholls": "nicholls state",
+      };
+      // Remove punctuation before alias lookup
+      let cleaned = t.replace(/[.''\-]/g, "").replace(/\s+/g, " ").trim();
+      if (aliases[cleaned]) cleaned = aliases[cleaned];
+      return cleaned;
+    }
+
+    const playerMap = new Map<string, any[]>();
+    for (const p of returningPlayers) {
+      const key = normalizeName(p.players.first_name, p.players.last_name);
+      if (!playerMap.has(key)) playerMap.set(key, []);
+      playerMap.get(key)!.push(p);
+    }
+
+    // 2. Scrape 64analytics for 2026 roster data
+    // Track which returning players we find on 64analytics
+    const foundPlayerIds = new Set<string>();
+    const transfers: { playerId: string; predictionId: string; oldTeam: string | null; newTeam: string; position: string }[] = [];
+    const sameTeam: { playerId: string }[] = [];
+
+    let totalScraped = 0;
+    const actualEnd = Math.min(endPage, 222);
+    console.log(`Scraping pages ${startPage} to ${actualEnd}...`);
+
+    for (let page = startPage; page <= actualEnd; page++) {
+      try {
+        const url = `https://www.64analytics.com/players?page=${page}&division=D-I&sport=Baseball`;
+        const resp = await fetch(url);
+        if (!resp.ok) {
+          console.error(`Page ${page} failed: ${resp.status}`);
+          continue;
+        }
+        const html = await resp.text();
+
+        // Parse table rows
+        // Columns: Name(0), Team(1), Conference(2), Class(3), Pos(4), Transfer(5), Previous Team(6)
+        const rowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
+        const rows = html.match(rowRegex) || [];
+
+        for (const row of rows) {
+          if (row.includes("<th")) continue;
+
+          const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+          const cells: string[] = [];
+          let cellMatch;
+          while ((cellMatch = cellRegex.exec(row)) !== null) {
+            const text = cellMatch[1]
+              .replace(/<[^>]+>/g, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+            cells.push(text);
+          }
+
+          if (cells.length < 5) continue;
+
+          const name = cells[0].trim();
+          const currentTeam = cells[1].trim(); // This is the 2026 team on 64analytics
+          const pos = cells[4].trim();
+
+          if (!name || !currentTeam) continue;
+          totalScraped++;
+
+          // Match against our returning players
+          const nameParts = name.split(/\s+/);
+          if (nameParts.length < 2) continue;
+          const scrapedFirst = nameParts[0];
+          const scrapedLast = nameParts.slice(1).join(" ");
+          const nameLower = normalizeName(scrapedFirst, scrapedLast);
+          const matched = playerMap.get(nameLower);
+          if (!matched) continue;
+
+          for (const returner of matched) {
+            const playerId = returner.players.id;
+            foundPlayerIds.add(playerId);
+
+            const normalizedDbTeam = normalizeTeam(returner.players.team || "");
+            const normalizedScrapedTeam = normalizeTeam(currentTeam);
+
+            if (normalizedDbTeam && normalizedDbTeam !== normalizedScrapedTeam) {
+              // Player is on a different team → transfer
+              transfers.push({
+                playerId,
+                predictionId: returner.id,
+                oldTeam: returner.players.team,
+                newTeam: currentTeam,
+                position: pos || returner.players.position || "",
+              });
+            } else {
+              sameTeam.push({ playerId });
+            }
+          }
+        }
+
+        if (page % 20 === 0) {
+          console.log(`Scraped page ${page}/${actualEnd}, found: ${foundPlayerIds.size}, transfers: ${transfers.length}`);
+        }
+
+        if (page < actualEnd) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      } catch (e) {
+        console.error(`Error on page ${page}:`, e);
+      }
+    }
+
+    console.log(`Scraping complete. Total scraped: ${totalScraped}`);
+    console.log(`Found ${foundPlayerIds.size} returning players on 64analytics`);
+    console.log(`Transfers detected: ${transfers.length}`);
+
+    // 3. Identify departed players (returning players NOT found on 64analytics)
+    const departedPredictions: string[] = [];
+    for (const p of returningPlayers) {
+      if (!foundPlayerIds.has(p.players.id)) {
+        departedPredictions.push(p.id);
+      }
+    }
+    console.log(`Players to mark as departed: ${departedPredictions.length}`);
+
+    if (dryRun) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          dryRun: true,
+          totalScraped,
+          totalReturningPlayers: returningPlayers.length,
+          foundOnRoster: foundPlayerIds.size,
+          sameTeam: sameTeam.length,
+          transfersDetected: transfers.length,
+          departedCount: departedPredictions.length,
+          transfers: transfers.map(t => ({
+            playerId: t.playerId,
+            oldTeam: t.oldTeam,
+            newTeam: t.newTeam,
+          })),
+          departedSample: departedPredictions.slice(0, 20),
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // 4. Mark departed players
+    let departedCount = 0;
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < departedPredictions.length; i += BATCH_SIZE) {
+      const batch = departedPredictions.slice(i, i + BATCH_SIZE);
+      const { error } = await supabase
+        .from("player_predictions")
+        .update({ status: "departed" })
+        .in("id", batch);
+      if (error) {
+        console.error(`Error marking departed batch:`, error.message);
+      } else {
+        departedCount += batch.length;
+      }
+    }
+    console.log(`Marked ${departedCount} predictions as departed`);
+
+    // 5. Process transfers: move to portal
+    let transferCount = 0;
+    for (const t of transfers) {
+      // Update player: set transfer_portal=true, from_team=old team, team=new team
+      const { error: playerErr } = await supabase
+        .from("players")
+        .update({
+          transfer_portal: true,
+          from_team: t.oldTeam,
+          team: t.newTeam,
+          position: t.position,
+        })
+        .eq("id", t.playerId);
+
+      if (playerErr) {
+        console.error(`Error updating player ${t.playerId}:`, playerErr.message);
+        continue;
+      }
+
+      // Change the returner prediction status to departed
+      const { error: predErr } = await supabase
+        .from("player_predictions")
+        .update({ status: "departed" })
+        .eq("id", t.predictionId);
+
+      if (predErr) {
+        console.error(`Error updating prediction for ${t.playerId}:`, predErr.message);
+      }
+
+      // Create a new transfer prediction with no stats (to be manually filled)
+      const { error: insertErr } = await supabase
+        .from("player_predictions")
+        .insert({
+          player_id: t.playerId,
+          model_type: "transfer",
+          variant: "regular",
+          status: "active",
+          season: 2025,
+        });
+
+      if (insertErr) {
+        console.error(`Error creating transfer prediction for ${t.playerId}:`, insertErr.message);
+      } else {
+        transferCount++;
+      }
+    }
+    console.log(`Processed ${transferCount} transfers to portal`);
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        totalScraped,
+        totalReturningPlayers: returningPlayers.length,
+        foundOnRoster: foundPlayerIds.size,
+        sameTeam: sameTeam.length,
+        departedCount,
+        transferCount,
+        pagesProcessed: actualEnd - startPage + 1,
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error:", error);
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+});
