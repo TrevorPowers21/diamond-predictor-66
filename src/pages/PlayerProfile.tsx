@@ -24,6 +24,19 @@ const pctFormat = (v: number | null | undefined) => {
   return Math.round(v).toString();
 };
 
+const computeDerived = (pred: { p_avg: number | null; p_obp: number | null; p_slg: number | null }) => {
+  const avg = pred.p_avg;
+  const obp = pred.p_obp;
+  const slg = pred.p_slg;
+  const ops = obp != null && slg != null ? obp + slg : null;
+  const iso = slg != null && avg != null ? slg - avg : null;
+  const wrcRaw = avg != null && obp != null && slg != null && iso != null
+    ? (0.45 * avg) + (0.3 * obp) + (0.15 * slg) + (0.1 * iso)
+    : null;
+  const wrcPlus = wrcRaw != null ? (wrcRaw / 0.364) * 100 : null;
+  return { ops, iso, wrcPlus };
+};
+
 const classTransitionLabel: Record<string, string> = {
   FS: "Freshman → Sophomore",
   SJ: "Sophomore → Junior",
@@ -439,18 +452,25 @@ export default function PlayerProfile() {
                           <StatRow label="AVG" from={regularPred.from_avg} predicted={regularPred.p_avg} />
                           <StatRow label="OBP" from={regularPred.from_obp} predicted={regularPred.p_obp} />
                           <StatRow label="SLG" from={regularPred.from_slg} predicted={regularPred.p_slg} />
-                          <div className="flex items-center justify-between py-2">
-                            <span className="text-sm font-semibold">OPS</span>
-                            <span className="text-sm font-mono font-bold">{statFormat(regularPred.p_ops)}</span>
-                          </div>
-                          <div className="flex items-center justify-between py-2">
-                            <span className="text-sm font-semibold">ISO</span>
-                            <span className="text-sm font-mono font-bold">{statFormat(regularPred.p_iso)}</span>
-                          </div>
-                          <div className="flex items-center justify-between py-2">
-                            <span className="text-sm font-semibold">wRC+</span>
-                            <span className="text-sm font-mono font-bold">{pctFormat(regularPred.p_wrc_plus)}</span>
-                          </div>
+                          {(() => {
+                            const d = computeDerived(regularPred);
+                            return (
+                              <>
+                                <div className="flex items-center justify-between py-2">
+                                  <span className="text-sm font-semibold">OPS</span>
+                                  <span className="text-sm font-mono font-bold">{statFormat(d.ops)}</span>
+                                </div>
+                                <div className="flex items-center justify-between py-2">
+                                  <span className="text-sm font-semibold">ISO</span>
+                                  <span className="text-sm font-mono font-bold">{statFormat(d.iso)}</span>
+                                </div>
+                                <div className="flex items-center justify-between py-2">
+                                  <span className="text-sm font-semibold">wRC+</span>
+                                  <span className="text-sm font-mono font-bold">{pctFormat(d.wrcPlus)}</span>
+                                </div>
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
                     )}
@@ -461,18 +481,25 @@ export default function PlayerProfile() {
                           <StatRow label="xAVG" from={xstatsPred.from_avg} predicted={xstatsPred.p_avg} />
                           <StatRow label="xOBP" from={xstatsPred.from_obp} predicted={xstatsPred.p_obp} />
                           <StatRow label="xSLG" from={xstatsPred.from_slg} predicted={xstatsPred.p_slg} />
-                          <div className="flex items-center justify-between py-2">
-                            <span className="text-sm font-semibold">xOPS</span>
-                            <span className="text-sm font-mono font-bold">{statFormat(xstatsPred.p_ops)}</span>
-                          </div>
-                          <div className="flex items-center justify-between py-2">
-                            <span className="text-sm font-semibold">xISO</span>
-                            <span className="text-sm font-mono font-bold">{statFormat(xstatsPred.p_iso)}</span>
-                          </div>
-                          <div className="flex items-center justify-between py-2">
-                            <span className="text-sm font-semibold">xWRC+</span>
-                            <span className="text-sm font-mono font-bold">{pctFormat(xstatsPred.p_wrc_plus)}</span>
-                          </div>
+                          {(() => {
+                            const d = computeDerived(xstatsPred);
+                            return (
+                              <>
+                                <div className="flex items-center justify-between py-2">
+                                  <span className="text-sm font-semibold">xOPS</span>
+                                  <span className="text-sm font-mono font-bold">{statFormat(d.ops)}</span>
+                                </div>
+                                <div className="flex items-center justify-between py-2">
+                                  <span className="text-sm font-semibold">xISO</span>
+                                  <span className="text-sm font-mono font-bold">{statFormat(d.iso)}</span>
+                                </div>
+                                <div className="flex items-center justify-between py-2">
+                                  <span className="text-sm font-semibold">xWRC+</span>
+                                  <span className="text-sm font-mono font-bold">{pctFormat(d.wrcPlus)}</span>
+                                </div>
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
                     )}
