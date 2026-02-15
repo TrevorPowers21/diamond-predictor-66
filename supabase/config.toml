@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.import-rate-csv]
 verify_jwt = false
+
+[functions.scrape-2026-rosters]
+verify_jwt = false

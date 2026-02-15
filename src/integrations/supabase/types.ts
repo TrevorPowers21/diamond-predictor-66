@@ -439,6 +439,7 @@ export type Database = {
           conference: string | null
           created_at: string
           first_name: string
+          from_team: string | null
           handedness: string | null
           headshot_url: string | null
           height_inches: number | null
@@ -462,6 +463,7 @@ export type Database = {
           conference?: string | null
           created_at?: string
           first_name: string
+          from_team?: string | null
           handedness?: string | null
           headshot_url?: string | null
           height_inches?: number | null
@@ -485,6 +487,7 @@ export type Database = {
           conference?: string | null
           created_at?: string
           first_name?: string
+          from_team?: string | null
           handedness?: string | null
           headshot_url?: string | null
           height_inches?: number | null

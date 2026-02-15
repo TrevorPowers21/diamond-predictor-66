@@ -381,7 +381,7 @@ export default function PlayerProfile() {
                 <Card>
                   <CardContent className="pt-4 pb-3">
                     <div className="text-xs font-medium text-muted-foreground">2025 Team</div>
-                    <div className="text-lg font-bold mt-1 text-muted-foreground">TBD</div>
+                    <div className={`text-lg font-bold mt-1 ${player.from_team ? "" : "text-muted-foreground"}`}>{player.from_team || "TBD"}</div>
                   </CardContent>
                 </Card>
                 <Card>
