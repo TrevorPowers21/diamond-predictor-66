@@ -32,18 +32,31 @@ Deno.serve(async (req) => {
     console.log(`CSV has ${lines.length} lines`);
 
     // Parse player names from CSV (col 4 = last name, col 5 = first name)
-    const csvPlayers = new Set<string>();
+    const csvPlayers: Array<{first_name: string, last_name: string}> = [];
     for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].split(",");
       if (cols.length < 6) continue;
       const lastName = cols[4]?.trim();
       const firstName = cols[5]?.trim();
-      if (lastName && firstName) {
-        csvPlayers.add(`${firstName.toLowerCase()}|${lastName.toLowerCase()}`);
+      if (lastName && firstName && lastName !== 'Average' && lastName !== 'Total') {
+        csvPlayers.push({ first_name: firstName.toLowerCase(), last_name: lastName.toLowerCase() });
       }
     }
 
-    console.log(`Parsed ${csvPlayers.size} unique players from CSV`);
+    console.log(`Parsed ${csvPlayers.length} players from CSV`);
+
+    // Load into temp_csv_players table
+    // Clear first
+    await supabase.from("temp_csv_players").delete().neq("first_name", "___impossible___");
+
+    // Insert in batches of 500
+    for (let i = 0; i < csvPlayers.length; i += 500) {
+      const batch = csvPlayers.slice(i, i + 500);
+      const { error } = await supabase.from("temp_csv_players").insert(batch);
+      if (error) throw new Error(`Insert batch error: ${error.message}`);
+    }
+
+    console.log(`Loaded ${csvPlayers.length} players into temp_csv_players`);
 
     // Get ALL departed returner predictions (paginate past 1000 limit)
     let allDeparted: any[] = [];
@@ -66,12 +79,13 @@ Deno.serve(async (req) => {
 
     console.log(`Found ${allDeparted.length} total departed returner predictions`);
 
-    // Find matches
+    // Find matches using the CSV set
+    const csvSet = new Set(csvPlayers.map(p => `${p.first_name}|${p.last_name}`));
     const matches: any[] = [];
     for (const pred of allDeparted) {
       const p = (pred as any).players;
       const key = `${p.first_name.toLowerCase()}|${p.last_name.toLowerCase()}`;
-      if (csvPlayers.has(key)) {
+      if (csvSet.has(key)) {
         matches.push({
           pred_id: pred.id,
           player_id: pred.player_id,
@@ -86,33 +100,26 @@ Deno.serve(async (req) => {
     console.log(`Found ${matches.length} departed players that appear in CSV`);
 
     if (fix && matches.length > 0) {
-      // Restore predictions to active in batches
-      const predIds = matches.map(m => m.pred_id);
-      for (let i = 0; i < predIds.length; i += 100) {
-        const batch = predIds.slice(i, i + 100);
-        const { error } = await supabase
-          .from("player_predictions")
-          .update({ status: "active" })
-          .in("id", batch);
-        if (error) throw error;
-      }
-
-      // Also fix xstats variants for the same players
+      // Restore ALL predictions for matched players (all variants)
       const playerIds = [...new Set(matches.map(m => m.player_id))];
+      let restored = 0;
       for (let i = 0; i < playerIds.length; i += 100) {
         const batch = playerIds.slice(i, i + 100);
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from("player_predictions")
           .update({ status: "active" })
           .in("player_id", batch)
           .eq("status", "departed")
-          .eq("model_type", "returner");
+          .eq("model_type", "returner")
+          .select("id");
         if (error) throw error;
+        restored += (data?.length || 0);
       }
 
       return new Response(JSON.stringify({
-        message: `Fixed ${matches.length} predictions (restored to active)`,
-        players: matches.map(m => `${m.first_name} ${m.last_name} (${m.team}) [${m.variant}]`),
+        message: `Fixed ${restored} predictions for ${playerIds.length} players (restored to active)`,
+        playerCount: playerIds.length,
+        predictionCount: restored,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -120,9 +127,10 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({
       message: `Found ${matches.length} departed players that appear in the CSV`,
-      csvPlayerCount: csvPlayers.size,
+      csvPlayerCount: csvPlayers.length,
       departedTotal: allDeparted.length,
-      matches: matches.map(m => `${m.first_name} ${m.last_name} (${m.team}) [${m.variant}]`),
+      matchCount: matches.length,
+      sampleMatches: matches.slice(0, 20).map(m => `${m.first_name} ${m.last_name} (${m.team}) [${m.variant}]`),
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
