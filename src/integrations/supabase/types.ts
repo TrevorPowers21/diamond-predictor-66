@@ -323,6 +323,7 @@ export type Database = {
           from_slg_plus: number | null
           from_stuff_plus: number | null
           id: string
+          locked: boolean
           model_type: string
           p_avg: number | null
           p_iso: number | null
@@ -361,6 +362,7 @@ export type Database = {
           from_slg_plus?: number | null
           from_stuff_plus?: number | null
           id?: string
+          locked?: boolean
           model_type: string
           p_avg?: number | null
           p_iso?: number | null
@@ -399,6 +401,7 @@ export type Database = {
           from_slg_plus?: number | null
           from_stuff_plus?: number | null
           id?: string
+          locked?: boolean
           model_type?: string
           p_avg?: number | null
           p_iso?: number | null
