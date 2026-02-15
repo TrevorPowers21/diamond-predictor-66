@@ -13,7 +13,7 @@ import { Users, TrendingUp, TrendingDown, ArrowUpDown, Search, BarChart3 } from 
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Cell } from "recharts";
 
-type SortKey = "name" | "p_ops" | "p_avg" | "p_slg" | "p_obp" | "p_iso" | "p_wrc_plus" | "power_rating_plus" | "ev_score" | "barrel_score";
+type SortKey = "name" | "p_ops" | "p_avg" | "p_slg" | "p_obp" | "p_iso" | "p_wrc_plus" | "power_rating_plus" | "power_rating_score" | "ev_score" | "barrel_score";
 type SortDir = "asc" | "desc";
 
 interface TransferPlayer {
@@ -40,6 +40,7 @@ interface TransferPlayer {
     from_stuff_plus: number | null;
     to_stuff_plus: number | null;
     power_rating_plus: number | null;
+    power_rating_score: number | null;
     ev_score: number | null;
     barrel_score: number | null;
     whiff_score: number | null;
@@ -121,6 +122,7 @@ export default function TransferPortal() {
           from_stuff_plus: row.from_stuff_plus,
           to_stuff_plus: row.to_stuff_plus,
           power_rating_plus: row.power_rating_plus,
+          power_rating_score: row.power_rating_score,
           ev_score: row.ev_score,
           barrel_score: row.barrel_score,
           whiff_score: row.whiff_score,
@@ -310,6 +312,7 @@ export default function TransferPortal() {
                       <TableHead><SortButton label="ISO" sortKeyVal="p_iso" /></TableHead>
                       <TableHead>Park Δ</TableHead>
                       <TableHead>Stuff Δ</TableHead>
+                      <TableHead><SortButton label="OPR" sortKeyVal="power_rating_score" /></TableHead>
                       <TableHead><SortButton label="PWR+" sortKeyVal="power_rating_plus" /></TableHead>
                       <TableHead>Scouting</TableHead>
                     </TableRow>
@@ -365,6 +368,7 @@ export default function TransferPortal() {
                               </Badge>
                             ) : "—"}
                           </TableCell>
+                          <TableCell className="font-mono text-sm">{pctFormat(pred.power_rating_score)}</TableCell>
                           <TableCell className="font-mono text-sm">{pctFormat(pred.power_rating_plus)}</TableCell>
                           <TableCell>
                             <div className="flex gap-1">
