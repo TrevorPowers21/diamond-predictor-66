@@ -24,10 +24,7 @@ const pctFormat = (v: number | null | undefined) => {
   return Math.round(v).toString();
 };
 
-const computeDerived = (pred: { p_avg: number | null; p_obp: number | null; p_slg: number | null }) => {
-  const avg = pred.p_avg;
-  const obp = pred.p_obp;
-  const slg = pred.p_slg;
+const computeDerived = (avg: number | null, obp: number | null, slg: number | null) => {
   const ops = obp != null && slg != null ? obp + slg : null;
   const iso = slg != null && avg != null ? slg - avg : null;
   const wrcRaw = avg != null && obp != null && slg != null && iso != null
@@ -453,20 +450,24 @@ export default function PlayerProfile() {
                           <StatRow label="OBP" from={regularPred.from_obp} predicted={regularPred.p_obp} />
                           <StatRow label="SLG" from={regularPred.from_slg} predicted={regularPred.p_slg} />
                           {(() => {
-                            const d = computeDerived(regularPred);
+                            const fromD = computeDerived(regularPred.from_avg, regularPred.from_obp, regularPred.from_slg);
+                            const toD = computeDerived(regularPred.p_avg, regularPred.p_obp, regularPred.p_slg);
                             return (
                               <>
+                                <StatRow label="OPS" from={fromD.ops} predicted={toD.ops} />
+                                <StatRow label="ISO" from={fromD.iso} predicted={toD.iso} />
                                 <div className="flex items-center justify-between py-2">
-                                  <span className="text-sm font-semibold">OPS</span>
-                                  <span className="text-sm font-mono font-bold">{statFormat(d.ops)}</span>
-                                </div>
-                                <div className="flex items-center justify-between py-2">
-                                  <span className="text-sm font-semibold">ISO</span>
-                                  <span className="text-sm font-mono font-bold">{statFormat(d.iso)}</span>
-                                </div>
-                                <div className="flex items-center justify-between py-2">
-                                  <span className="text-sm font-semibold">wRC+</span>
-                                  <span className="text-sm font-mono font-bold">{pctFormat(d.wrcPlus)}</span>
+                                  <span className="text-sm text-muted-foreground">wRC+</span>
+                                  <div className="flex items-center gap-4">
+                                    <span className="text-sm font-mono text-muted-foreground w-16 text-right">{pctFormat(fromD.wrcPlus)}</span>
+                                    <span className="text-xs text-muted-foreground">→</span>
+                                    <span className={`text-sm font-mono font-bold w-16 text-right ${fromD.wrcPlus != null && toD.wrcPlus != null ? (toD.wrcPlus - fromD.wrcPlus > 0.5 ? "text-[hsl(var(--success))]" : toD.wrcPlus - fromD.wrcPlus < -0.5 ? "text-destructive" : "text-muted-foreground") : ""}`}>
+                                      {pctFormat(toD.wrcPlus)}
+                                      {fromD.wrcPlus != null && toD.wrcPlus != null && Math.abs(toD.wrcPlus - fromD.wrcPlus) > 0.5 && (
+                                        toD.wrcPlus > fromD.wrcPlus ? <TrendingUp className="inline h-3 w-3 ml-1" /> : <TrendingDown className="inline h-3 w-3 ml-1" />
+                                      )}
+                                    </span>
+                                  </div>
                                 </div>
                               </>
                             );
@@ -482,20 +483,24 @@ export default function PlayerProfile() {
                           <StatRow label="xOBP" from={xstatsPred.from_obp} predicted={xstatsPred.p_obp} />
                           <StatRow label="xSLG" from={xstatsPred.from_slg} predicted={xstatsPred.p_slg} />
                           {(() => {
-                            const d = computeDerived(xstatsPred);
+                            const fromD = computeDerived(xstatsPred.from_avg, xstatsPred.from_obp, xstatsPred.from_slg);
+                            const toD = computeDerived(xstatsPred.p_avg, xstatsPred.p_obp, xstatsPred.p_slg);
                             return (
                               <>
+                                <StatRow label="xOPS" from={fromD.ops} predicted={toD.ops} />
+                                <StatRow label="xISO" from={fromD.iso} predicted={toD.iso} />
                                 <div className="flex items-center justify-between py-2">
-                                  <span className="text-sm font-semibold">xOPS</span>
-                                  <span className="text-sm font-mono font-bold">{statFormat(d.ops)}</span>
-                                </div>
-                                <div className="flex items-center justify-between py-2">
-                                  <span className="text-sm font-semibold">xISO</span>
-                                  <span className="text-sm font-mono font-bold">{statFormat(d.iso)}</span>
-                                </div>
-                                <div className="flex items-center justify-between py-2">
-                                  <span className="text-sm font-semibold">xWRC+</span>
-                                  <span className="text-sm font-mono font-bold">{pctFormat(d.wrcPlus)}</span>
+                                  <span className="text-sm text-muted-foreground">xWRC+</span>
+                                  <div className="flex items-center gap-4">
+                                    <span className="text-sm font-mono text-muted-foreground w-16 text-right">{pctFormat(fromD.wrcPlus)}</span>
+                                    <span className="text-xs text-muted-foreground">→</span>
+                                    <span className={`text-sm font-mono font-bold w-16 text-right ${fromD.wrcPlus != null && toD.wrcPlus != null ? (toD.wrcPlus - fromD.wrcPlus > 0.5 ? "text-[hsl(var(--success))]" : toD.wrcPlus - fromD.wrcPlus < -0.5 ? "text-destructive" : "text-muted-foreground") : ""}`}>
+                                      {pctFormat(toD.wrcPlus)}
+                                      {fromD.wrcPlus != null && toD.wrcPlus != null && Math.abs(toD.wrcPlus - fromD.wrcPlus) > 0.5 && (
+                                        toD.wrcPlus > fromD.wrcPlus ? <TrendingUp className="inline h-3 w-3 ml-1" /> : <TrendingDown className="inline h-3 w-3 ml-1" />
+                                      )}
+                                    </span>
+                                  </div>
                                 </div>
                               </>
                             );
