@@ -18,25 +18,27 @@ Deno.serve(async (req) => {
 
     const { startPage = 1, endPage = 222, dryRun = false, skipDeparted = false, markDepartedOnly = false, scrapeStartedAt = null } = await req.json().catch(() => ({}));
 
-    // 1. Load all active returning players (those with returner predictions, status=active)
-    console.log("Loading active returning players...");
+    // 1. Load ALL returning players (active + departed) for comprehensive matching
+    console.log("Loading all returning players (active + departed)...");
     let returningPlayers: any[] = [];
     let from = 0;
     const PAGE_SIZE = 1000;
     while (true) {
       const { data, error } = await supabase
         .from("player_predictions")
-        .select("id, player_id, players!inner(id, first_name, last_name, team, position, conference)")
+        .select("id, player_id, status, players!inner(id, first_name, last_name, team, position, conference)")
         .eq("model_type", "returner")
         .eq("variant", "regular")
-        .eq("status", "active")
+        .in("status", ["active", "departed"])
         .range(from, from + PAGE_SIZE - 1);
       if (error) throw error;
       returningPlayers = returningPlayers.concat(data || []);
       if (!data || data.length < PAGE_SIZE) break;
       from += PAGE_SIZE;
     }
-    console.log(`Loaded ${returningPlayers.length} active returning players`);
+    const activeCount = returningPlayers.filter((p: any) => p.status === "active").length;
+    const departedCount0 = returningPlayers.filter((p: any) => p.status === "departed").length;
+    console.log(`Loaded ${returningPlayers.length} returning players (${activeCount} active, ${departedCount0} departed)`);
 
     // Build lookup map: normalized name -> returning player records
     function normalizeName(first: string, last: string): string {
@@ -438,9 +440,11 @@ Deno.serve(async (req) => {
     // 2. Scrape 64analytics for 2026 roster data
     // Track which returning players we find on 64analytics
     const foundPlayerIds = new Set<string>();
-    const transfers: { playerId: string; predictionId: string; oldTeam: string | null; newTeam: string; position: string }[] = [];
-    const unmatchedScrapedNames: { name: string; team: string; normalized: string }[] = [];
-    const sameTeam: { playerId: string }[] = [];
+    const transfers: { playerId: string; predictionId: string; oldTeam: string | null; newTeam: string; position: string; prevTeamCol?: string }[] = [];
+    const unmatchedScrapedNames: { name: string; team: string; normalized: string; previousTeam?: string }[] = [];
+    const sameTeam: { playerId: string; predictionId: string }[] = [];
+    // Track scraped players with Previous Team for reverse-matching against departed
+    const scrapedTransfersWithPrev: { name: string; team: string; previousTeam: string; pos: string; normalized: string }[] = [];
 
     let totalScraped = 0;
     const actualEnd = Math.min(endPage, 222);
@@ -478,6 +482,9 @@ Deno.serve(async (req) => {
           const name = cells[0].trim();
           const currentTeam = cells[1].trim();
           const pos = cells[4].trim();
+          // Parse Previous Team column (cells[6]) - "--" means no previous team
+          const previousTeamRaw = cells.length >= 7 ? cells[6].trim() : "";
+          const previousTeam = (previousTeamRaw && previousTeamRaw !== "--" && previousTeamRaw !== "-") ? previousTeamRaw : "";
 
           if (!name || !currentTeam) continue;
           totalScraped++;
@@ -489,7 +496,11 @@ Deno.serve(async (req) => {
           const nameLower = normalizeName(scrapedFirst, scrapedLast);
           const matched = playerMap.get(nameLower);
           if (!matched) {
-            unmatchedScrapedNames.push({ name, team: currentTeam, normalized: nameLower });
+            unmatchedScrapedNames.push({ name, team: currentTeam, normalized: nameLower, previousTeam: previousTeam || undefined });
+            // Track unmatched players with a Previous Team for reverse lookup later
+            if (previousTeam) {
+              scrapedTransfersWithPrev.push({ name, team: currentTeam, previousTeam, pos, normalized: nameLower });
+            }
             continue;
           }
 
@@ -507,6 +518,7 @@ Deno.serve(async (req) => {
                 oldTeam: returner.players.team,
                 newTeam: currentTeam,
                 position: pos || returner.players.position || "",
+                prevTeamCol: previousTeam || undefined,
               });
             } else {
               sameTeam.push({ playerId, predictionId: returner.id });
@@ -531,22 +543,42 @@ Deno.serve(async (req) => {
     console.log(`Transfers detected: ${transfers.length}`);
 
     if (dryRun) {
-      // Collect unmatched scraped names for debugging
-      const unmatchedNames: { name: string; team: string; normalized: string }[] = [];
-      // Re-scrape to collect unmatched (we already have the data from above, but let's track during scrape)
-      // Actually, let's track during the main loop - we need to modify the loop above
-      // For now, return what we have plus a sample of returner names for comparison
-      const sampleReturners = returningPlayers.slice(0, 20).map(p => ({
-        dbName: `${p.players.first_name} ${p.players.last_name}`,
-        normalized: normalizeName(p.players.first_name, p.players.last_name),
-        team: p.players.team,
-      }));
+      // Reverse-match: check scraped players with Previous Team against our departed players
+      // Build a lookup of departed players by normalized team
+      const departedByTeam = new Map<string, any[]>();
+      for (const p of returningPlayers) {
+        if (p.status === "departed") {
+          const teamKey = normalizeTeam(p.players.team || "");
+          if (!departedByTeam.has(teamKey)) departedByTeam.set(teamKey, []);
+          departedByTeam.get(teamKey)!.push(p);
+        }
+      }
+      
+      // For unmatched scraped players with a Previous Team, check if their Previous Team
+      // matches a departed player's team (potential name mismatch transfers)
+      const potentialMissedTransfers: { scrapedName: string; scrapedTeam: string; previousTeam: string; normalizedPrev: string; matchedDeparted: string[] }[] = [];
+      for (const st of scrapedTransfersWithPrev) {
+        const normalizedPrev = normalizeTeam(st.previousTeam);
+        const departed = departedByTeam.get(normalizedPrev);
+        if (departed && departed.length > 0) {
+          potentialMissedTransfers.push({
+            scrapedName: st.name,
+            scrapedTeam: st.team,
+            previousTeam: st.previousTeam,
+            normalizedPrev,
+            matchedDeparted: departed.slice(0, 5).map((d: any) => `${d.players.first_name} ${d.players.last_name}`),
+          });
+        }
+      }
+
       return new Response(
         JSON.stringify({
           success: true,
           dryRun: true,
           totalScraped,
           totalReturningPlayers: returningPlayers.length,
+          activeReturners: activeCount,
+          departedReturners: departedCount0,
           foundOnRoster: foundPlayerIds.size,
           sameTeam: sameTeam.length,
           transfersDetected: transfers.length,
@@ -554,9 +586,11 @@ Deno.serve(async (req) => {
             playerId: t.playerId,
             oldTeam: t.oldTeam,
             newTeam: t.newTeam,
+            prevTeamCol: t.prevTeamCol,
           })),
-          unmatchedScraped: unmatchedScrapedNames.slice(0, 100),
-          sampleReturners,
+          scrapedPlayersWithPrevTeam: scrapedTransfersWithPrev.length,
+          potentialMissedTransfers: potentialMissedTransfers.slice(0, 50),
+          unmatchedScraped: unmatchedScrapedNames.slice(0, 50),
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
