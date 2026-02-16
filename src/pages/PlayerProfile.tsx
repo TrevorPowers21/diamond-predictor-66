@@ -88,6 +88,8 @@ export default function PlayerProfile() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, any>>({});
+  const [editingPrediction, setEditingPrediction] = useState(false);
+  const [predForm, setPredForm] = useState<{ class_transition: string; dev_aggressiveness: string }>({ class_transition: "", dev_aggressiveness: "0.5" });
 
   const { data: player, isLoading } = useQuery({
     queryKey: ["player-profile", id],
@@ -164,6 +166,25 @@ export default function PlayerProfile() {
     onError: (e) => toast.error(`Update failed: ${e.message}`),
   });
 
+  const updatePrediction = useMutation({
+    mutationFn: async ({ predictionIds, updates }: { predictionIds: string[]; updates: Record<string, any> }) => {
+      for (const predId of predictionIds) {
+        const { error } = await supabase
+          .from("player_predictions")
+          .update(updates)
+          .eq("id", predId);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["player-predictions", id] });
+      queryClient.invalidateQueries({ queryKey: ["returning-players"] });
+      toast.success("Prediction updated");
+      setEditingPrediction(false);
+    },
+    onError: (e) => toast.error(`Update failed: ${e.message}`),
+  });
+
   const startEdit = () => {
     if (!player) return;
     setEditForm({
@@ -203,6 +224,25 @@ export default function PlayerProfile() {
   const regularPred = predictions.find((p) => p.variant === "regular");
   const xstatsPred = predictions.find((p) => p.variant === "xstats");
   const isTransferPortal = player?.transfer_portal && predictions.some((p) => p.model_type === "transfer");
+  const isReturner = predictions.some((p) => p.model_type === "returner");
+
+  const startPredEdit = () => {
+    setPredForm({
+      class_transition: regularPred?.class_transition || "",
+      dev_aggressiveness: regularPred?.dev_aggressiveness?.toString() ?? "0.5",
+    });
+    setEditingPrediction(true);
+  };
+
+  const savePredEdit = () => {
+    const returnerPreds = predictions.filter((p) => p.model_type === "returner");
+    if (returnerPreds.length === 0) return;
+    const updates: Record<string, any> = {
+      class_transition: predForm.class_transition || null,
+      dev_aggressiveness: predForm.dev_aggressiveness !== "" ? Number(predForm.dev_aggressiveness) : null,
+    };
+    updatePrediction.mutate({ predictionIds: returnerPreds.map((p) => p.id), updates });
+  };
 
   const { data: fromTeamData } = useQuery({
     queryKey: ["from-team-conference", player?.from_team],
@@ -434,11 +474,57 @@ export default function PlayerProfile() {
             {(regularPred || xstatsPred) && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Predicted Stats</CardTitle>
-                  <CardDescription>
-                    {regularPred?.class_transition && classTransitionLabel[regularPred.class_transition]}
-                    {regularPred?.dev_aggressiveness != null && ` · Dev Confidence: ${regularPred.dev_aggressiveness}`}
-                  </CardDescription>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">Predicted Stats</CardTitle>
+                    {isReturner && !editingPrediction && (
+                      <Button variant="outline" size="sm" onClick={startPredEdit}>
+                        <Pencil className="mr-1 h-3 w-3" />Edit
+                      </Button>
+                    )}
+                    {editingPrediction && (
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setEditingPrediction(false)}>
+                          <X className="mr-1 h-3 w-3" />Cancel
+                        </Button>
+                        <Button size="sm" onClick={savePredEdit} disabled={updatePrediction.isPending}>
+                          <Save className="mr-1 h-3 w-3" />Save
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  {editingPrediction ? (
+                    <div className="flex items-center gap-4 mt-2">
+                      <div>
+                        <Label className="text-xs">Class Transition</Label>
+                        <Select value={predForm.class_transition || "none"} onValueChange={(v) => setPredForm({ ...predForm, class_transition: v === "none" ? "" : v })}>
+                          <SelectTrigger className="h-8 text-sm w-[180px]"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">—</SelectItem>
+                            <SelectItem value="FS">Freshman → Sophomore</SelectItem>
+                            <SelectItem value="SJ">Sophomore → Junior</SelectItem>
+                            <SelectItem value="JS">Junior → Senior</SelectItem>
+                            <SelectItem value="GR">Graduate</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Dev Confidence</Label>
+                        <Select value={predForm.dev_aggressiveness} onValueChange={(v) => setPredForm({ ...predForm, dev_aggressiveness: v })}>
+                          <SelectTrigger className="h-8 text-sm w-[160px]"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="0">0.0 — Stable</SelectItem>
+                            <SelectItem value="0.5">0.5 — Expected</SelectItem>
+                            <SelectItem value="1">1.0 — Aggressive</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  ) : (
+                    <CardDescription>
+                      {regularPred?.class_transition && classTransitionLabel[regularPred.class_transition]}
+                      {regularPred?.dev_aggressiveness != null && ` · Dev Confidence: ${regularPred.dev_aggressiveness}`}
+                    </CardDescription>
+                  )}
                 </CardHeader>
                 <CardContent>
                   <div className="grid gap-6 md:grid-cols-2">
