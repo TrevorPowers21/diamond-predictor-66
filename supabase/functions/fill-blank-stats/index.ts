@@ -144,6 +144,7 @@ Deno.serve(async (req) => {
 
     const fromUpdates: Array<{ predId: string; name: string; variant: string; modelType: string; fields: Record<string, number | null> }> = [];
     const predUpdates: Array<{ predId: string; name: string; variant: string; modelType: string; fields: Record<string, number | null> }> = [];
+    const toUnlock: string[] = [];
 
     for (const pred of allPredictions) {
       const p = pred as any;
@@ -151,6 +152,9 @@ Deno.serve(async (req) => {
       const key = `${normalizeName(player.first_name)}|${normalizeName(player.last_name)}|${p.variant}`;
       const csvMatch = csvLookup.get(key);
       if (!csvMatch) continue;
+
+      let needsFromFill = false;
+      let needsPredFill = false;
 
       // Fill from_avg/from_obp/from_slg if blank (for ALL players)
       const fromBlank = p.from_avg == null && p.from_obp == null && p.from_slg == null;
@@ -160,6 +164,7 @@ Deno.serve(async (req) => {
         if (csvMatch.from_obp != null) fields.from_obp = csvMatch.from_obp;
         if (csvMatch.from_slg != null) fields.from_slg = csvMatch.from_slg;
         if (Object.keys(fields).length > 0) {
+          needsFromFill = true;
           fromUpdates.push({
             predId: p.id,
             name: `${player.first_name} ${player.last_name}`,
@@ -183,6 +188,7 @@ Deno.serve(async (req) => {
           if (csvMatch.p_wrc != null) fields.p_wrc = csvMatch.p_wrc;
           if (csvMatch.p_wrc_plus != null) fields.p_wrc_plus = csvMatch.p_wrc_plus;
           if (Object.keys(fields).length > 0) {
+            needsPredFill = true;
             predUpdates.push({
               predId: p.id,
               name: `${player.first_name} ${player.last_name}`,
@@ -193,6 +199,10 @@ Deno.serve(async (req) => {
           }
         }
       }
+
+      if ((needsFromFill || needsPredFill) && p.locked) {
+        toUnlock.push(p.id);
+      }
     }
 
     if (dryRun) {
@@ -202,6 +212,7 @@ Deno.serve(async (req) => {
         predictionsChecked: allPredictions.length,
         fromStatsFills: fromUpdates.length,
         predStatsFills: predUpdates.length,
+        toUnlock: toUnlock.length,
         fromUpdates: fromUpdates.map((u) => ({ name: u.name, variant: u.variant, modelType: u.modelType, fields: u.fields })),
         predUpdates: predUpdates.map((u) => ({ name: u.name, variant: u.variant, modelType: u.modelType, fields: u.fields })),
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -216,18 +227,22 @@ Deno.serve(async (req) => {
 
     const results: string[] = [];
     const errors: string[] = [];
-    const skippedLocked: string[] = [];
+    const unlockedCount: number = toUnlock.length;
 
-    // Find locked prediction IDs
-    const lockedIds = new Set(allPredictions.filter((p: any) => p.locked).map((p: any) => p.id));
-
-    for (const [predId, fields] of merged) {
-      if (lockedIds.has(predId)) {
-        const pred = allPredictions.find((p: any) => p.id === predId);
-        const name = pred ? `${pred.players.first_name} ${pred.players.last_name}` : predId;
-        skippedLocked.push(name);
-        continue;
+    // First unlock those that need filling
+    if (toUnlock.length > 0) {
+      const { error: unlockErr } = await supabase
+        .from("player_predictions")
+        .update({ locked: false })
+        .in("id", toUnlock);
+      if (unlockErr) {
+        console.error("Unlock error:", unlockErr);
+        errors.push(`Failed to unlock batch: ${unlockErr.message}`);
       }
+    }
+
+    // Now update stats
+    for (const [predId, fields] of merged) {
       try {
         const { error } = await supabase
           .from("player_predictions")
@@ -243,9 +258,8 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({
       mode: "execute",
       filled: results.length,
-      skippedLocked: skippedLocked.length,
+      unlocked: unlockedCount,
       results,
-      skippedLocked_names: skippedLocked,
       errors,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
