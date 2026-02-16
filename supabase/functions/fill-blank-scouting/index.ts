@@ -114,7 +114,7 @@ Deno.serve(async (req) => {
       const { data: batch, error: batchErr } = await supabase
         .from("player_predictions")
         .select(`
-          id, player_id, variant, model_type, status,
+          id, player_id, variant, model_type, status, locked,
           ev_score, barrel_score, whiff_score, chase_score,
           power_rating_score, power_rating_plus,
           players!inner(id, first_name, last_name)
@@ -137,6 +137,7 @@ Deno.serve(async (req) => {
       modelType: string;
       fields: Record<string, number | null>;
     }> = [];
+    const toUnlock: string[] = [];
 
     for (const pred of allPredictions) {
       const p = pred as any;
@@ -170,6 +171,10 @@ Deno.serve(async (req) => {
         modelType: p.model_type,
         fields,
       });
+
+      if (p.locked) {
+        toUnlock.push(p.id);
+      }
     }
 
     if (dryRun) {
@@ -178,6 +183,7 @@ Deno.serve(async (req) => {
         csvPlayersParsed: csvPlayers.length,
         predictionsChecked: allPredictions.length,
         blankMatchesFound: updates.length,
+        toUnlock: toUnlock.length,
         updates: updates.map(u => ({
           name: u.name,
           variant: u.variant,
@@ -190,6 +196,19 @@ Deno.serve(async (req) => {
     // Execute updates
     const results: string[] = [];
     const errors: string[] = [];
+    const unlockedCount = toUnlock.length;
+
+    // First unlock those that need filling
+    if (toUnlock.length > 0) {
+      const { error: unlockErr } = await supabase
+        .from("player_predictions")
+        .update({ locked: false })
+        .in("id", toUnlock);
+      if (unlockErr) {
+        console.error("Unlock error:", unlockErr);
+        errors.push(`Failed to unlock batch: ${unlockErr.message}`);
+      }
+    }
 
     for (const u of updates) {
       try {
@@ -208,6 +227,7 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({
       mode: "execute",
       filled: results.length,
+      unlocked: unlockedCount,
       results,
       errors,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
