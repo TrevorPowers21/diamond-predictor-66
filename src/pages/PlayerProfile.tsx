@@ -41,6 +41,13 @@ const classTransitionLabel: Record<string, string> = {
   GR: "Graduate",
 };
 
+const classTransitionToYear: Record<string, string> = {
+  FS: "So",
+  SJ: "Jr",
+  JS: "Sr",
+  GR: "Gr",
+};
+
 function ScoutGrade({ label, value, fullLabel }: { label: string; value: number | null; fullLabel: string }) {
   if (value == null) return null;
   const tier =
@@ -241,6 +248,12 @@ export default function PlayerProfile() {
       class_transition: predForm.class_transition || null,
       dev_aggressiveness: predForm.dev_aggressiveness !== "" ? Number(predForm.dev_aggressiveness) : null,
     };
+    // Also update the player's class_year to match the transition target
+    if (predForm.class_transition && classTransitionToYear[predForm.class_transition]) {
+      supabase.from("players").update({ class_year: classTransitionToYear[predForm.class_transition] }).eq("id", id!).then(() => {
+        queryClient.invalidateQueries({ queryKey: ["player-profile", id] });
+      });
+    }
     updatePrediction.mutate({ predictionIds: returnerPreds.map((p) => p.id), updates });
   };
 
@@ -427,7 +440,11 @@ export default function PlayerProfile() {
                   <InfoRow label="Team" value={player.team} />
                   <InfoRow label="Conference" value={player.conference} />
                   <InfoRow label="Position" value={player.position} />
-                  <InfoRow label="Class Year" value={player.class_year} />
+                  <InfoRow label="Class Year" value={
+                    isReturner && regularPred?.class_transition
+                      ? classTransitionToYear[regularPred.class_transition] || player.class_year
+                      : player.class_year
+                  } />
                   <InfoRow label="Age" value={(player as any).age?.toString()} />
                   <InfoRow label="Bats" value={(player as any).bats_hand === "R" ? "Right" : (player as any).bats_hand === "L" ? "Left" : (player as any).bats_hand === "S" ? "Switch" : (player as any).bats_hand} />
                   <InfoRow label="Throws" value={(player as any).throws_hand === "R" ? "Right" : (player as any).throws_hand === "L" ? "Left" : (player as any).throws_hand} />
