@@ -81,6 +81,11 @@ Deno.serve(async (req) => {
       .from("player_predictions")
       .select(`
         id, player_id, variant, model_type, status, locked,
+        p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc, p_wrc_plus,
+        from_avg, from_obp, from_slg, ev_score, barrel_score,
+        whiff_score, chase_score, power_rating_plus, power_rating_score,
+        from_park_factor, from_stuff_plus, from_avg_plus, from_obp_plus,
+        from_slg_plus, dev_aggressiveness, class_transition,
         players!inner(id, first_name, last_name, team, conference, from_team)
       `)
       .eq("model_type", "returner")
@@ -176,7 +181,25 @@ Deno.serve(async (req) => {
 
         if (playerErr) throw playerErr;
 
-        // 2. Delete returner predictions
+        // 2. Snapshot locked stats from returner predictions before deleting
+        const statsByVariant = new Map<string, Record<string, unknown>>();
+        for (const pred of preds) {
+          const p = pred as any;
+          statsByVariant.set(p.variant, {
+            p_avg: p.p_avg, p_obp: p.p_obp, p_slg: p.p_slg, p_ops: p.p_ops,
+            p_iso: p.p_iso, p_wrc: p.p_wrc, p_wrc_plus: p.p_wrc_plus,
+            from_avg: p.from_avg, from_obp: p.from_obp, from_slg: p.from_slg,
+            ev_score: p.ev_score, barrel_score: p.barrel_score,
+            whiff_score: p.whiff_score, chase_score: p.chase_score,
+            power_rating_plus: p.power_rating_plus, power_rating_score: p.power_rating_score,
+            from_park_factor: p.from_park_factor, from_stuff_plus: p.from_stuff_plus,
+            from_avg_plus: p.from_avg_plus, from_obp_plus: p.from_obp_plus,
+            from_slg_plus: p.from_slg_plus, dev_aggressiveness: p.dev_aggressiveness,
+            class_transition: p.class_transition,
+          });
+        }
+
+        // 3. Delete returner predictions
         const { error: delErr } = await supabase
           .from("player_predictions")
           .delete()
@@ -184,8 +207,9 @@ Deno.serve(async (req) => {
 
         if (delErr) throw delErr;
 
-        // 3. Create blank transfer predictions
+        // 4. Create transfer predictions carrying over locked stats
         for (const variant of ["regular", "xstats"]) {
+          const stats = statsByVariant.get(variant) || {};
           const { error: insErr } = await supabase
             .from("player_predictions")
             .insert({
@@ -194,7 +218,8 @@ Deno.serve(async (req) => {
               variant,
               status: "active",
               season: 2025,
-              locked: false,
+              locked: true,
+              ...stats,
             });
 
           if (insErr) throw insErr;
