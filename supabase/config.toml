@@ -26,3 +26,12 @@ verify_jwt = false
 
 [functions.scan-silent-transfers]
 verify_jwt = false
+
+[functions.fill-blank-stats]
+verify_jwt = false
+
+[functions.fill-blank-scouting]
+verify_jwt = false
+
+[functions.reconcile-2025-teams]
+verify_jwt = false
