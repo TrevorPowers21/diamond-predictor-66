@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.check-departed-csv]
 verify_jwt = false
+
+[functions.scan-silent-transfers]
+verify_jwt = false

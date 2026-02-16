@@ -6,7 +6,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// Normalize team names for comparison
 function normalizeTeam(name: string | null): string {
   if (!name) return "";
   return name
@@ -26,6 +25,27 @@ function normalizeName(name: string): string {
   return name.toLowerCase().replace(/[^a-z]/g, "").trim();
 }
 
+// Parse pipe-delimited table text into player objects
+function parseRawText(text: string): Array<{ firstName: string; lastName: string; team: string }> {
+  const lines = text.split("\n").filter(l => l.trim().startsWith("|") && !l.includes("---"));
+  const players: Array<{ firstName: string; lastName: string; team: string }> = [];
+  
+  for (const line of lines) {
+    const cols = line.split("|").map(c => c.trim()).filter(c => c);
+    if (cols.length < 6) continue;
+    // Skip header row
+    if (cols[0] === "playerFullName") continue;
+    // cols: [playerFullName, player(lastName), playerFirstName, pos, newestTeamName, newestTeamLocation]
+    const lastName = cols[1];
+    const firstName = cols[2];
+    const team = cols[5]; // newestTeamLocation is the short name
+    if (firstName && lastName && team) {
+      players.push({ firstName, lastName, team });
+    }
+  }
+  return players;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -36,11 +56,14 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-    const { players: listPlayers, dryRun = true } = await req.json();
-    // listPlayers: array of { firstName, lastName, team }
+    const body = await req.json();
+    const { players: listPlayers, rawText, dryRun = true } = body;
 
-    if (!listPlayers || !Array.isArray(listPlayers)) {
-      return new Response(JSON.stringify({ error: "players array required" }), {
+    // Accept either structured players array or raw pipe-delimited text
+    const parsedPlayers = listPlayers || (rawText ? parseRawText(rawText) : null);
+
+    if (!parsedPlayers || !Array.isArray(parsedPlayers) || parsedPlayers.length === 0) {
+      return new Response(JSON.stringify({ error: "players array or rawText required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -48,31 +71,31 @@ Deno.serve(async (req) => {
 
     // Build lookup: normalized "first|last" → team from list
     const listLookup = new Map<string, string>();
-    for (const p of listPlayers) {
+    for (const p of parsedPlayers) {
       const key = `${normalizeName(p.firstName)}|${normalizeName(p.lastName)}`;
       listLookup.set(key, p.team);
     }
 
-    // Get all active returner predictions (both variants)
+    // Get all active returner predictions
     const { data: returners, error: retErr } = await supabase
       .from("player_predictions")
       .select(`
         id, player_id, variant, model_type, status, locked,
-        from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus,
-        ev_score, barrel_score, whiff_score, chase_score,
-        power_rating_score, power_rating_plus,
-        from_park_factor, to_park_factor, from_stuff_plus, to_stuff_plus,
-        from_avg_plus, from_obp_plus, from_slg_plus,
-        to_avg_plus, to_obp_plus, to_slg_plus,
-        dev_aggressiveness, class_transition,
-        players!inner(id, first_name, last_name, team, conference, position, class_year, from_team)
+        players!inner(id, first_name, last_name, team, conference, from_team)
       `)
       .eq("model_type", "returner")
       .eq("status", "active");
 
     if (retErr) throw retErr;
 
-    // Find mismatches
+    // Group predictions by player and find mismatches
+    const playerPreds = new Map<string, typeof returners>();
+    for (const r of returners || []) {
+      const pid = (r as any).players.id;
+      if (!playerPreds.has(pid)) playerPreds.set(pid, []);
+      playerPreds.get(pid)!.push(r);
+    }
+
     const mismatches: Array<{
       playerId: string;
       firstName: string;
@@ -82,25 +105,16 @@ Deno.serve(async (req) => {
       predictionIds: string[];
     }> = [];
 
-    // Group predictions by player
-    const playerPreds = new Map<string, typeof returners>();
-    for (const r of returners || []) {
-      const pid = (r as any).players.id;
-      if (!playerPreds.has(pid)) playerPreds.set(pid, []);
-      playerPreds.get(pid)!.push(r);
-    }
-
     for (const [playerId, preds] of playerPreds) {
       const player = (preds[0] as any).players;
       const key = `${normalizeName(player.first_name)}|${normalizeName(player.last_name)}`;
       
-      if (!listLookup.has(key)) continue; // Not on list, skip
+      if (!listLookup.has(key)) continue;
       
       const listTeam = listLookup.get(key)!;
       const dbTeam = player.team || "";
       
-      // Compare normalized team names
-      if (normalizeTeam(dbTeam) === normalizeTeam(listTeam)) continue; // Same team, skip
+      if (normalizeTeam(dbTeam) === normalizeTeam(listTeam)) continue;
       
       mismatches.push({
         playerId,
@@ -115,6 +129,8 @@ Deno.serve(async (req) => {
     if (dryRun) {
       return new Response(JSON.stringify({
         mode: "dry_run",
+        totalParsed: parsedPlayers.length,
+        returnersChecked: playerPreds.size,
         mismatchCount: mismatches.length,
         mismatches: mismatches.map(m => ({
           name: `${m.firstName} ${m.lastName}`,
@@ -130,18 +146,15 @@ Deno.serve(async (req) => {
     const results: string[] = [];
     const errors: string[] = [];
 
-    // Look up teams table for conference mapping
     const { data: allTeams } = await supabase.from("teams").select("name, conference");
     const teamConferenceMap = new Map<string, string>();
     for (const t of allTeams || []) {
       teamConferenceMap.set(normalizeTeam(t.name), t.conference || "");
-      // Also add exact name
       teamConferenceMap.set(t.name.toLowerCase(), t.conference || "");
     }
 
     for (const m of mismatches) {
       try {
-        // Find new conference from teams table
         let newConference = "";
         for (const [key, conf] of teamConferenceMap) {
           if (normalizeTeam(m.newTeam) === key || m.newTeam.toLowerCase() === key) {
@@ -155,8 +168,8 @@ Deno.serve(async (req) => {
           .from("players")
           .update({
             transfer_portal: true,
-            from_team: m.currentTeam,  // Lock in 2025 team
-            team: m.newTeam,           // Set 2026 destination
+            from_team: m.currentTeam,
+            team: m.newTeam,
             conference: newConference || null,
           })
           .eq("id", m.playerId);
@@ -171,7 +184,7 @@ Deno.serve(async (req) => {
 
         if (delErr) throw delErr;
 
-        // 3. Create blank transfer predictions (regular + xstats)
+        // 3. Create blank transfer predictions
         for (const variant of ["regular", "xstats"]) {
           const { error: insErr } = await supabase
             .from("player_predictions")
