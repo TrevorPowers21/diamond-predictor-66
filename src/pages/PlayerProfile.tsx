@@ -176,11 +176,15 @@ export default function PlayerProfile() {
   const updatePrediction = useMutation({
     mutationFn: async ({ predictionIds, updates }: { predictionIds: string[]; updates: Record<string, any> }) => {
       for (const predId of predictionIds) {
+        // Unlock first (trigger blocks changes when locked=true)
+        await supabase.from("player_predictions").update({ locked: false }).eq("id", predId);
         const { error } = await supabase
           .from("player_predictions")
           .update(updates)
           .eq("id", predId);
         if (error) throw error;
+        // Re-lock
+        await supabase.from("player_predictions").update({ locked: true }).eq("id", predId);
       }
     },
     onSuccess: () => {
