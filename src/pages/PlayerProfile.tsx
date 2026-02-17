@@ -183,6 +183,15 @@ export default function PlayerProfile() {
           .update(updates)
           .eq("id", predId);
         if (error) throw error;
+        // Recalculate predicted stats via edge function
+        const { error: recalcErr } = await supabase.functions.invoke("recalculate-prediction", {
+          body: {
+            prediction_id: predId,
+            dev_aggressiveness: updates.dev_aggressiveness,
+            class_transition: updates.class_transition,
+          },
+        });
+        if (recalcErr) console.error("Recalculation error:", recalcErr);
         // Re-lock
         await supabase.from("player_predictions").update({ locked: true }).eq("id", predId);
       }
@@ -190,7 +199,7 @@ export default function PlayerProfile() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["player-predictions", id] });
       queryClient.invalidateQueries({ queryKey: ["returning-players"] });
-      toast.success("Prediction updated");
+      toast.success("Prediction updated & recalculated");
       setEditingPrediction(false);
     },
     onError: (e) => toast.error(`Update failed: ${e.message}`),
