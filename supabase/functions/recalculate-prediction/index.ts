@@ -25,7 +25,7 @@ const DEV_COEFFS = { avg: 0.06, obp: 0.08, slg: 0.1 };
  * Dampening divisors per stat — controls how quickly growth tapers
  * as the player's current stat exceeds the NCAA baseline.
  */
-const DAMPENING_DIVISORS = { avg: 0.08, obp: 0.12, slg: 0.25 };
+const DAMPENING_DIVISORS = { avg: 0.1, obp: 0.16, slg: 0.3 };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -108,7 +108,7 @@ Deno.serve(async (req) => {
     function dampening(stat: number, ncaaBase: number, divisor: number): number {
       const prFactor = prPlus >= ncaaPR ? 1 : 1.1 - prPlus / ncaaPR;
       const raw = Math.max(0, (stat - ncaaBase) / divisor) * prFactor;
-      return 1 - Math.min(0.65, raw);
+      return 1 - Math.min(0.75, raw);
     }
 
     // Full formula: stat * (1 + (class_base + devAgg * dev_coeff) * dampening) * (1 + powerWeight * ((PR+ - 100)/100) * dampening)
