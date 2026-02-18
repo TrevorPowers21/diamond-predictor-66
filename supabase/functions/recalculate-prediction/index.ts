@@ -14,7 +14,7 @@ const CLASS_BASES: Record<string, { avg: number; obp: number; slg: number }> = {
 };
 
 const DEV_COEFFS = { avg: 0.06, obp: 0.08, slg: 0.1 };
-const DAMPENING_DIVISORS = { avg: 0.1, obp: 0.16, slg: 0.3 };
+const DAMPENING_DIVISORS = { avg: 0.1, obp: 0.085, slg: 0.3 };
 
 function round3(val: number): number {
   return Math.round(val * 1000) / 1000;
@@ -38,22 +38,29 @@ function recalc(pred: any, config: Config, overrides?: { dev_aggressiveness?: nu
   const fromSlg = Number(pred.from_slg) || 0;
   const prPlus = Number(pred.power_rating_plus) || 100;
 
-  function dampening(stat: number, ncaaBase: number, divisor: number): number {
+  // AVG/SLG dampening includes PR factor
+  function dampeningWithPR(stat: number, ncaaBase: number, divisor: number): number {
     const prFactor = prPlus >= config.ncaaPR ? 1 : 1.1 - prPlus / config.ncaaPR;
     const raw = Math.max(0, (stat - ncaaBase) / divisor) * prFactor;
     return 1 - Math.min(0.75, raw);
   }
 
-  function calcStat(fromStat: number, classBase: number, devCoeff: number, ncaaBase: number, divisor: number): number {
-    const d = dampening(fromStat, ncaaBase, divisor);
+  // OBP dampening has NO PR factor
+  function dampeningNoPR(stat: number, ncaaBase: number, divisor: number): number {
+    const raw = Math.max(0, (stat - ncaaBase) / divisor);
+    return 1 - Math.min(0.75, raw);
+  }
+
+  function calcStat(fromStat: number, classBase: number, devCoeff: number, ncaaBase: number, divisor: number, usePR: boolean): number {
+    const d = usePR ? dampeningWithPR(fromStat, ncaaBase, divisor) : dampeningNoPR(fromStat, ncaaBase, divisor);
     const growthAdj = 1 + (classBase + devAgg * devCoeff) * d;
     const powerAdj = 1 + config.powerWeight * ((prPlus - 100) / 100) * d;
     return fromStat * growthAdj * powerAdj;
   }
 
-  const pAvg = round3(calcStat(fromAvg, bases.avg, DEV_COEFFS.avg, config.ncaaAvg, DAMPENING_DIVISORS.avg));
-  const pObp = round3(calcStat(fromObp, bases.obp, DEV_COEFFS.obp, config.ncaaObp, DAMPENING_DIVISORS.obp));
-  const pSlg = round3(calcStat(fromSlg, bases.slg, DEV_COEFFS.slg, config.ncaaSlg, DAMPENING_DIVISORS.slg));
+  const pAvg = round3(calcStat(fromAvg, bases.avg, DEV_COEFFS.avg, config.ncaaAvg, DAMPENING_DIVISORS.avg, true));
+  const pObp = round3(calcStat(fromObp, bases.obp, DEV_COEFFS.obp, config.ncaaObp, DAMPENING_DIVISORS.obp, false));
+  const pSlg = round3(calcStat(fromSlg, bases.slg, DEV_COEFFS.slg, config.ncaaSlg, DAMPENING_DIVISORS.slg, true));
   const pOps = round3(pObp + pSlg);
   const pIso = round3(pSlg - pAvg);
   const pWrc = round3((0.45 * pObp) + (0.3 * pSlg) + (0.15 * pAvg) + (0.1 * pIso));
