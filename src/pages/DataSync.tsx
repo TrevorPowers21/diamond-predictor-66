@@ -74,6 +74,32 @@ export default function DataSync() {
     }
   };
 
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ updated: number; errors: number; total: number } | null>(null);
+
+  const runBulkRecalculate = async () => {
+    setBulkLoading(true);
+    setBulkResult(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+      const res = await supabase.functions.invoke("recalculate-prediction", {
+        body: { action: "bulk_recalculate" },
+      });
+      const result = res.data;
+      if (result?.success) {
+        setBulkResult({ updated: result.updated, errors: result.errors, total: result.total });
+        toast.success(`Recalculated ${result.updated} of ${result.total} returner predictions`);
+      } else {
+        toast.error(result?.error ?? "Bulk recalculation failed");
+      }
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
   const actions = [
     { key: "import_returner_predictions", label: "Import Returner Predictions", icon: Download, desc: "Pull returner equation weights + player predictions" },
     { key: "import_transfer_predictions", label: "Import Transfer Predictions", icon: Download, desc: "Pull transfer equation weights + player predictions" },
@@ -145,6 +171,29 @@ export default function DataSync() {
                 />
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-primary/30 col-span-full">
+          <CardContent className="flex flex-1 flex-col justify-between pt-6">
+            <div className="mb-4">
+              <div className="flex items-center gap-2 font-semibold">Bulk Recalculate Returner Predictions</div>
+              <p className="text-sm text-muted-foreground mt-1">Re-run the returning player formula on all active returner predictions using the latest equation.</p>
+            </div>
+            <Button
+              onClick={runBulkRecalculate}
+              disabled={bulkLoading || loading !== null}
+              variant="default"
+              className="w-full gap-2"
+            >
+              {bulkLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {bulkLoading ? "Recalculating…" : "Recalculate All Returners"}
+            </Button>
+            {bulkResult && (
+              <p className="text-sm text-muted-foreground mt-2">
+                Updated {bulkResult.updated} of {bulkResult.total} predictions{bulkResult.errors > 0 ? `, ${bulkResult.errors} errors` : ""}
+              </p>
+            )}
           </CardContent>
         </Card>
 
