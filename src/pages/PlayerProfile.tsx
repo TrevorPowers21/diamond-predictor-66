@@ -11,8 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, Pencil, Save, X, TrendingUp, TrendingDown } from "lucide-react";
+import { ArrowLeft, Pencil, Save, X, TrendingUp, TrendingDown, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -93,6 +94,8 @@ export default function PlayerProfile() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { hasRole } = useAuth();
+  const isAdmin = hasRole("admin");
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, any>>({});
   const [editingPrediction, setEditingPrediction] = useState(false);
@@ -154,6 +157,24 @@ export default function PlayerProfile() {
       return data;
     },
     enabled: !!id,
+  });
+
+  // Admin-only: fetch internal power ratings
+  const { data: internalRatings } = useQuery({
+    queryKey: ["player-internal-ratings", id],
+    queryFn: async () => {
+      const predIds = predictions.map((p) => p.id);
+      if (predIds.length === 0) return null;
+      const { data, error } = await supabase
+        .from("player_prediction_internals" as any)
+        .select("*")
+        .in("prediction_id", predIds)
+        .limit(1)
+        .maybeSingle();
+      if (error) return null;
+      return data as unknown as { avg_power_rating: number | null; obp_power_rating: number | null; slg_power_rating: number | null } | null;
+    },
+    enabled: !!id && isAdmin && predictions.length > 0,
   });
 
   const updatePlayer = useMutation({
@@ -645,6 +666,36 @@ export default function PlayerProfile() {
                     <ScoutGrade label="Whf" value={regularPred.whiff_score} fullLabel="Whiff Rate" />
                     <ScoutGrade label="Chs" value={regularPred.chase_score} fullLabel="Chase Rate" />
                   </div>
+                  {isAdmin && internalRatings && (internalRatings.avg_power_rating != null || internalRatings.obp_power_rating != null || internalRatings.slg_power_rating != null) && (
+                    <>
+                      <Separator className="my-4" />
+                      <div className="flex items-center gap-2 mb-3">
+                        <ShieldCheck className="h-4 w-4 text-primary" />
+                        <span className="text-sm font-semibold text-primary">Internal Power Ratings</span>
+                        <Badge variant="outline" className="text-xs">Admin Only</Badge>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        {internalRatings.avg_power_rating != null && (
+                          <div className="rounded-lg border border-border bg-muted/50 p-3">
+                            <div className="text-xs font-medium text-muted-foreground">AVG Power Rating</div>
+                            <div className="text-2xl font-bold font-mono mt-1">{internalRatings.avg_power_rating.toFixed(1)}</div>
+                          </div>
+                        )}
+                        {internalRatings.obp_power_rating != null && (
+                          <div className="rounded-lg border border-border bg-muted/50 p-3">
+                            <div className="text-xs font-medium text-muted-foreground">OBP Power Rating</div>
+                            <div className="text-2xl font-bold font-mono mt-1">{internalRatings.obp_power_rating.toFixed(1)}</div>
+                          </div>
+                        )}
+                        {internalRatings.slg_power_rating != null && (
+                          <div className="rounded-lg border border-border bg-muted/50 p-3">
+                            <div className="text-xs font-medium text-muted-foreground">SLG Power Rating</div>
+                            <div className="text-2xl font-bold font-mono mt-1">{internalRatings.slg_power_rating.toFixed(1)}</div>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </CardContent>
               </Card>
             )}
