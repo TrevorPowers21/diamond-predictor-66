@@ -6,6 +6,57 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// ── Recalculation constants (mirrored from recalculate-prediction) ──
+const CLASS_BASES: Record<string, { avg: number; obp: number; slg: number }> = {
+  FS: { avg: 0.03, obp: 0.045, slg: 0.06 },
+  SJ: { avg: 0.02, obp: 0.03, slg: 0.035 },
+  JS: { avg: 0.015, obp: 0.02, slg: 0.02 },
+  GR: { avg: 0.01, obp: 0.01, slg: 0.01 },
+};
+const DEV_COEFFS = { avg: 0.06, obp: 0.08, slg: 0.1 };
+const DAMPENING_DIVISORS = { avg: 0.1, obp: 0.085, slg: 0.3 };
+
+function round3(val: number): number {
+  return Math.round(val * 1000) / 1000;
+}
+
+interface ModelConfig {
+  ncaaAvg: number; ncaaObp: number; ncaaSlg: number;
+  ncaaPR: number; powerWeight: number; ncaaWrc: number;
+}
+
+function recalcPrediction(pred: any, config: ModelConfig) {
+  const ct = pred.class_transition || "SJ";
+  const devAgg = Number(pred.dev_aggressiveness) || 0;
+  const bases = CLASS_BASES[ct] || CLASS_BASES.GR;
+  const fromAvg = Number(pred.from_avg) || 0;
+  const fromObp = Number(pred.from_obp) || 0;
+  const fromSlg = Number(pred.from_slg) || 0;
+  const prPlus = Number(pred.power_rating_plus) || 100;
+
+  function dampeningWithPR(stat: number, ncaaBase: number, divisor: number): number {
+    const prFactor = prPlus >= config.ncaaPR ? 1 : 1.1 - prPlus / config.ncaaPR;
+    return 1 - Math.min(0.75, Math.max(0, (stat - ncaaBase) / divisor) * prFactor);
+  }
+  function dampeningNoPR(stat: number, ncaaBase: number, divisor: number): number {
+    return 1 - Math.min(0.75, Math.max(0, (stat - ncaaBase) / divisor));
+  }
+  function calcStat(fromStat: number, classBase: number, devCoeff: number, ncaaBase: number, divisor: number, usePR: boolean): number {
+    const d = usePR ? dampeningWithPR(fromStat, ncaaBase, divisor) : dampeningNoPR(fromStat, ncaaBase, divisor);
+    return fromStat * (1 + (classBase + devAgg * devCoeff) * d) * (1 + config.powerWeight * ((prPlus - 100) / 100) * d);
+  }
+
+  const pAvg = round3(calcStat(fromAvg, bases.avg, DEV_COEFFS.avg, config.ncaaAvg, DAMPENING_DIVISORS.avg, true));
+  const pObp = round3(calcStat(fromObp, bases.obp, DEV_COEFFS.obp, config.ncaaObp, DAMPENING_DIVISORS.obp, false));
+  const pSlg = round3(calcStat(fromSlg, bases.slg, DEV_COEFFS.slg, config.ncaaSlg, DAMPENING_DIVISORS.slg, true));
+  const pOps = round3(pObp + pSlg);
+  const pIso = round3(pSlg - pAvg);
+  const pWrc = round3((0.45 * pObp) + (0.3 * pSlg) + (0.15 * pAvg) + (0.1 * pIso));
+  const pWrcPlus = Math.round((pWrc / config.ncaaWrc) * 100);
+
+  return { p_avg: pAvg, p_obp: pObp, p_slg: pSlg, p_ops: pOps, p_iso: pIso, p_wrc: pWrc, p_wrc_plus: pWrcPlus };
+}
+
 function parseCsvLine(line: string): string[] {
   const result: string[] = [];
   let current = "";
@@ -47,6 +98,23 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── Load model config for recalculation ──
+    const { data: configRows } = await db
+      .from("model_config")
+      .select("config_key, config_value")
+      .eq("model_type", "returner")
+      .in("config_key", ["ncaa_avg", "ncaa_obp", "ncaa_slg", "ncaa_power_rating", "park_weight_slg", "ncaa_wrc"]);
+
+    const mConfig: ModelConfig = { ncaaAvg: 0.28, ncaaObp: 0.385, ncaaSlg: 0.442, ncaaPR: 100, powerWeight: 0.4, ncaaWrc: 0.364 };
+    for (const row of configRows || []) {
+      if (row.config_key === "ncaa_avg") mConfig.ncaaAvg = Number(row.config_value);
+      if (row.config_key === "ncaa_obp") mConfig.ncaaObp = Number(row.config_value);
+      if (row.config_key === "ncaa_slg") mConfig.ncaaSlg = Number(row.config_value);
+      if (row.config_key === "ncaa_power_rating") mConfig.ncaaPR = Number(row.config_value);
+      if (row.config_key === "park_weight_slg") mConfig.powerWeight = Number(row.config_value);
+      if (row.config_key === "ncaa_wrc") mConfig.ncaaWrc = Number(row.config_value);
+    }
+
     const lines = csv_content.split(/\r?\n/).filter((l: string) => l.trim());
     if (lines.length < 2) {
       return new Response(JSON.stringify({ error: "CSV needs header + data rows" }), {
@@ -63,7 +131,6 @@ Deno.serve(async (req) => {
     const lastNameIdx = colMap["player"] ?? colMap["lastname"] ?? colMap["last_name"] ?? colMap["last name"] ?? -1;
     let fullNameIdx = colMap["playerfullname"] ?? colMap["formattedname"] ?? colMap["full_name"] ?? colMap["name"] ?? colMap["team"] ?? -1;
 
-    // Only use "team" as full name if values look like player names
     if (fullNameIdx === (colMap["team"] ?? -1) && fullNameIdx !== -1) {
       let looksLikeNames = 0;
       for (let i = 1; i < Math.min(lines.length, 10); i++) {
@@ -105,20 +172,29 @@ Deno.serve(async (req) => {
       playerMap.set(normalizeName(p.first_name, p.last_name), p.id);
     }
 
-    // Load active predictions for model_type
-    const { data: preds } = await db
-      .from("player_predictions")
-      .select("id, player_id")
-      .eq("model_type", model_type)
-      .eq("status", "active")
-      .eq("variant", "regular");
+    // Load active predictions for model_type (full rows for recalc)
+    let allPreds: any[] = [];
+    let predFrom = 0;
+    while (true) {
+      const { data } = await db
+        .from("player_predictions")
+        .select("*")
+        .eq("model_type", model_type)
+        .eq("status", "active")
+        .eq("variant", "regular")
+        .range(predFrom, predFrom + PAGE - 1);
+      allPreds = allPreds.concat(data || []);
+      if (!data || data.length < PAGE) break;
+      predFrom += PAGE;
+    }
 
-    const predMap = new Map<string, string>();
-    for (const p of preds || []) {
-      predMap.set(p.player_id, p.id);
+    const predMap = new Map<string, any>();
+    for (const p of allPreds) {
+      predMap.set(p.player_id, p);
     }
 
     let imported = 0;
+    let recalculated = 0;
     let skipped = 0;
     const errors: string[] = [];
 
@@ -141,7 +217,6 @@ Deno.serve(async (req) => {
         }
 
         if (!firstName || !lastName) { skipped++; return; }
-        // Skip aggregate rows
         if (/^(Max|Min|NCAA|Average|Total|Mean|Median|Sum|Count|Grand)$/i.test(firstName.trim())) { skipped++; return; }
         if (/^\d{2,4}\s+(ACC|SEC|Big|Pac|AAC|Sun|Mountain|WCC|MWC)/i.test(`${firstName} ${lastName}`)) { skipped++; return; }
 
@@ -149,8 +224,8 @@ Deno.serve(async (req) => {
         const playerId = playerMap.get(key);
         if (!playerId) { skipped++; return; }
 
-        const predId = predMap.get(playerId);
-        if (!predId) { skipped++; return; }
+        const pred = predMap.get(playerId);
+        if (!pred) { skipped++; return; }
 
         const updates: Record<string, unknown> = {};
         if (prPlusIdx !== -1 && cols[prPlusIdx]) {
@@ -164,20 +239,29 @@ Deno.serve(async (req) => {
 
         if (Object.keys(updates).length === 0) { skipped++; return; }
 
-        // Unlock → update → re-lock pattern for locked predictions
-        await db.from("player_predictions").update({ locked: false }).eq("id", predId);
-        const { error } = await db.from("player_predictions").update({ ...updates, locked: true }).eq("id", predId);
+        // Merge updated PR into prediction for recalc
+        const mergedPred = { ...pred, ...updates };
+        const recalcResult = recalcPrediction(mergedPred, mConfig);
+
+        // Unlock → update with PR + recalculated stats → re-lock
+        await db.from("player_predictions").update({ locked: false }).eq("id", pred.id);
+        const { error } = await db.from("player_predictions").update({
+          ...updates,
+          ...recalcResult,
+          locked: true,
+        }).eq("id", pred.id);
 
         if (error) {
           errors.push(`${firstName} ${lastName}: ${error.message}`);
         } else {
           imported++;
+          recalculated++;
         }
       }));
     }
 
     return new Response(JSON.stringify({
-      success: true, imported, skipped, total: dataRows.length,
+      success: true, imported, recalculated, skipped, total: dataRows.length,
       errors: errors.length > 0 ? errors.slice(0, 20) : undefined,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
