@@ -6,15 +6,16 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const CLASS_BASES: Record<string, { avg: number; obp: number; slg: number }> = {
+// Defaults – overridden by model_config rows when available
+const DEFAULT_CLASS_BASES: Record<string, { avg: number; obp: number; slg: number }> = {
   FS: { avg: 0.03, obp: 0.045, slg: 0.06 },
   SJ: { avg: 0.02, obp: 0.03, slg: 0.035 },
   JS: { avg: 0.015, obp: 0.02, slg: 0.02 },
   GR: { avg: 0.01, obp: 0.01, slg: 0.01 },
 };
-
-const DEV_COEFFS = { avg: 0.06, obp: 0.08, slg: 0.1 };
-const DAMPENING_DIVISORS = { avg: 0.1, obp: 0.085, slg: 0.3 };
+const DEFAULT_DEV_COEFFS = { avg: 0.06, obp: 0.08, slg: 0.1 };
+const DEFAULT_DAMPENING_DIVISORS = { avg: 0.1, obp: 0.085, slg: 0.3 };
+const DEFAULT_WRC_WEIGHTS = { obp: 0.45, slg: 0.3, avg: 0.15, iso: 0.1 };
 
 function round3(val: number): number {
   return Math.round(val * 1000) / 1000;
@@ -27,30 +28,31 @@ interface Config {
   ncaaPR: number;
   powerWeight: number;
   ncaaWrc: number;
+  classBases: Record<string, { avg: number; obp: number; slg: number }>;
+  devCoeffs: { avg: number; obp: number; slg: number };
+  dampeningDivisors: { avg: number; obp: number; slg: number };
+  wrcWeights: { obp: number; slg: number; avg: number; iso: number };
 }
 
 function recalc(pred: any, config: Config, overrides?: { dev_aggressiveness?: number; class_transition?: string }) {
   const ct = overrides?.class_transition || pred.class_transition || "SJ";
   const devAgg = overrides?.dev_aggressiveness ?? pred.dev_aggressiveness ?? 0;
-  const bases = CLASS_BASES[ct] || CLASS_BASES.GR;
+  const bases = config.classBases[ct] || config.classBases.GR || DEFAULT_CLASS_BASES.GR;
   const fromAvg = Number(pred.from_avg) || 0;
   const fromObp = Number(pred.from_obp) || 0;
   const fromSlg = Number(pred.from_slg) || 0;
   const prPlus = Number(pred.power_rating_plus) || 100;
+  const dc = config.devCoeffs;
+  const dd = config.dampeningDivisors;
+  const ww = config.wrcWeights;
 
-  // AVG/SLG dampening includes PR factor
   function dampeningWithPR(stat: number, ncaaBase: number, divisor: number): number {
     const prFactor = prPlus >= config.ncaaPR ? 1 : 1.1 - prPlus / config.ncaaPR;
-    const raw = Math.max(0, (stat - ncaaBase) / divisor) * prFactor;
-    return 1 - Math.min(0.75, raw);
+    return 1 - Math.min(0.75, Math.max(0, (stat - ncaaBase) / divisor) * prFactor);
   }
-
-  // OBP dampening has NO PR factor
   function dampeningNoPR(stat: number, ncaaBase: number, divisor: number): number {
-    const raw = Math.max(0, (stat - ncaaBase) / divisor);
-    return 1 - Math.min(0.75, raw);
+    return 1 - Math.min(0.75, Math.max(0, (stat - ncaaBase) / divisor));
   }
-
   function calcStat(fromStat: number, classBase: number, devCoeff: number, ncaaBase: number, divisor: number, usePR: boolean): number {
     const d = usePR ? dampeningWithPR(fromStat, ncaaBase, divisor) : dampeningNoPR(fromStat, ncaaBase, divisor);
     const growthAdj = 1 + (classBase + devAgg * devCoeff) * d;
@@ -58,12 +60,12 @@ function recalc(pred: any, config: Config, overrides?: { dev_aggressiveness?: nu
     return fromStat * growthAdj * powerAdj;
   }
 
-  const pAvg = round3(calcStat(fromAvg, bases.avg, DEV_COEFFS.avg, config.ncaaAvg, DAMPENING_DIVISORS.avg, true));
-  const pObp = round3(calcStat(fromObp, bases.obp, DEV_COEFFS.obp, config.ncaaObp, DAMPENING_DIVISORS.obp, false));
-  const pSlg = round3(calcStat(fromSlg, bases.slg, DEV_COEFFS.slg, config.ncaaSlg, DAMPENING_DIVISORS.slg, true));
+  const pAvg = round3(calcStat(fromAvg, bases.avg, dc.avg, config.ncaaAvg, dd.avg, true));
+  const pObp = round3(calcStat(fromObp, bases.obp, dc.obp, config.ncaaObp, dd.obp, false));
+  const pSlg = round3(calcStat(fromSlg, bases.slg, dc.slg, config.ncaaSlg, dd.slg, true));
   const pOps = round3(pObp + pSlg);
   const pIso = round3(pSlg - pAvg);
-  const pWrc = round3((0.45 * pObp) + (0.3 * pSlg) + (0.15 * pAvg) + (0.1 * pIso));
+  const pWrc = round3((ww.obp * pObp) + (ww.slg * pSlg) + (ww.avg * pAvg) + (ww.iso * pIso));
   const pWrcPlus = Math.round((pWrc / config.ncaaWrc) * 100);
 
   return { p_avg: pAvg, p_obp: pObp, p_slg: pSlg, p_ops: pOps, p_iso: pIso, p_wrc: pWrc, p_wrc_plus: pWrcPlus, class_transition: ct, dev_aggressiveness: devAgg };
@@ -82,21 +84,51 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const { prediction_id, dev_aggressiveness, class_transition, action } = body;
 
-    // Fetch config
+    // Fetch all config for returner model
     const { data: configRows } = await supabase
       .from("model_config")
       .select("config_key, config_value")
-      .eq("model_type", "returner")
-      .in("config_key", ["ncaa_avg", "ncaa_obp", "ncaa_slg", "ncaa_power_rating", "park_weight_slg", "ncaa_wrc"]);
+      .eq("model_type", "returner");
 
-    const config: Config = { ncaaAvg: 0.28, ncaaObp: 0.385, ncaaSlg: 0.442, ncaaPR: 100, powerWeight: 0.4, ncaaWrc: 0.364 };
+    const config: Config = {
+      ncaaAvg: 0.28, ncaaObp: 0.385, ncaaSlg: 0.442, ncaaPR: 100, powerWeight: 0.4, ncaaWrc: 0.364,
+      classBases: { ...DEFAULT_CLASS_BASES },
+      devCoeffs: { ...DEFAULT_DEV_COEFFS },
+      dampeningDivisors: { ...DEFAULT_DAMPENING_DIVISORS },
+      wrcWeights: { ...DEFAULT_WRC_WEIGHTS },
+    };
     for (const row of configRows || []) {
-      if (row.config_key === "ncaa_avg") config.ncaaAvg = Number(row.config_value);
-      if (row.config_key === "ncaa_obp") config.ncaaObp = Number(row.config_value);
-      if (row.config_key === "ncaa_slg") config.ncaaSlg = Number(row.config_value);
-      if (row.config_key === "ncaa_power_rating") config.ncaaPR = Number(row.config_value);
-      if (row.config_key === "park_weight_slg") config.powerWeight = Number(row.config_value);
-      if (row.config_key === "ncaa_wrc") config.ncaaWrc = Number(row.config_value);
+      const k = row.config_key;
+      const v = Number(row.config_value);
+      if (k === "ncaa_avg") config.ncaaAvg = v;
+      else if (k === "ncaa_obp") config.ncaaObp = v;
+      else if (k === "ncaa_slg") config.ncaaSlg = v;
+      else if (k === "ncaa_power_rating") config.ncaaPR = v;
+      else if (k === "park_weight_slg") config.powerWeight = v;
+      else if (k === "ncaa_wrc") config.ncaaWrc = v;
+      // Class bases
+      else if (k.startsWith("class_base_")) {
+        const parts = k.replace("class_base_", "").split("_"); // e.g. ["fs","avg"]
+        const cls = parts[0].toUpperCase();
+        const stat = parts[1] as "avg" | "obp" | "slg";
+        if (!config.classBases[cls]) config.classBases[cls] = { avg: 0.01, obp: 0.01, slg: 0.01 };
+        config.classBases[cls][stat] = v;
+      }
+      // Dev coefficients
+      else if (k.startsWith("dev_coeff_")) {
+        const stat = k.replace("dev_coeff_", "") as "avg" | "obp" | "slg";
+        config.devCoeffs[stat] = v;
+      }
+      // Dampening divisors
+      else if (k.startsWith("dampening_divisor_")) {
+        const stat = k.replace("dampening_divisor_", "") as "avg" | "obp" | "slg";
+        config.dampeningDivisors[stat] = v;
+      }
+      // wRC weights
+      else if (k.startsWith("wrc_weight_")) {
+        const stat = k.replace("wrc_weight_", "") as "obp" | "slg" | "avg" | "iso";
+        config.wrcWeights[stat] = v;
+      }
     }
 
     // ─── BULK MODE ───
