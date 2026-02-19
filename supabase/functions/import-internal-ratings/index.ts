@@ -12,15 +12,26 @@ function parseCsv(text: string): { headers: string[]; rows: Record<string, strin
   const lines = allLines.slice(58);
   if (lines.length < 2) return { headers: [], rows: [] };
 
-  // Find the real header row: look for one containing "power rating" or "team"
-  let headerIdx = 0;
-  for (let i = 0; i < Math.min(lines.length, 10); i++) {
+  // Find the real header row: scan ALL rows for one containing "power rating"
+  let headerIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
     const lower = lines[i].toLowerCase();
-    if (lower.includes("power rating") || (lower.startsWith("team,") && lower.includes("score"))) {
+    if (lower.includes("power rating")) {
       headerIdx = i;
       break;
     }
   }
+  if (headerIdx === -1) {
+    // Fallback: look for "team" at start with a known column keyword
+    for (let i = 0; i < Math.min(lines.length, 20); i++) {
+      const lower = lines[i].toLowerCase();
+      if (lower.startsWith("team,") && lower.includes("score")) {
+        headerIdx = i;
+        break;
+      }
+    }
+  }
+  if (headerIdx === -1) return { headers: [], rows: [] };
 
   const headers = lines[headerIdx].split(",").map((h) => h.trim().toLowerCase().replace(/[^a-z0-9_+ ]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, ""));
   const rows: Record<string, string>[] = [];
