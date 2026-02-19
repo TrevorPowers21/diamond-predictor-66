@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import CsvBulkImport from "@/components/CsvBulkImport";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Download, Upload, RefreshCw, FileSpreadsheet, CheckCircle, AlertCircle } from "lucide-react";
+import { Download, Upload, RefreshCw, FileSpreadsheet, CheckCircle, AlertCircle, ShieldCheck } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
 type SyncResult = {
   success: boolean;
@@ -29,11 +30,43 @@ type SyncResult = {
 };
 
 export default function DataSync() {
+  const { hasRole } = useAuth();
+  const isAdmin = hasRole("admin");
   const [spreadsheetId, setSpreadsheetId] = useState("1UwtImwQ74ThQlMJizsqMSp6b4tG39uXuiI8nrQ46ZAE");
   const [playersRange, setPlayersRange] = useState("Players!A:N");
   const [statsRange, setStatsRange] = useState("Stats!A:AE");
   const [loading, setLoading] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<SyncResult | null>(null);
+
+  // Internal ratings import state
+  const internalFileRef = useRef<HTMLInputElement>(null);
+  const [internalLoading, setInternalLoading] = useState(false);
+  const [internalResult, setInternalResult] = useState<{ imported: number; skipped: number; total: number; errors?: string[] } | null>(null);
+
+  const handleInternalRatingsImport = async (file: File) => {
+    setInternalLoading(true);
+    setInternalResult(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+      const csvContent = await file.text();
+      const res = await supabase.functions.invoke("import-internal-ratings", {
+        body: { csv_content: csvContent },
+      });
+      const result = res.data;
+      if (result?.success) {
+        setInternalResult({ imported: result.imported, skipped: result.skipped, total: result.total, errors: result.errors });
+        toast.success(`Imported ${result.imported} of ${result.total} internal ratings`);
+      } else {
+        toast.error(result?.error ?? "Import failed");
+      }
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInternalLoading(false);
+      if (internalFileRef.current) internalFileRef.current.value = "";
+    }
+  };
 
   const runSync = async (action: string) => {
     if (!spreadsheetId.trim()) {
@@ -196,6 +229,56 @@ export default function DataSync() {
             )}
           </CardContent>
         </Card>
+
+        {isAdmin && (
+          <Card className="border-primary/30">
+            <CardContent className="pt-6">
+              <div className="mb-4">
+                <div className="flex items-center gap-2 font-semibold">
+                  <ShieldCheck className="h-4 w-4 text-primary" />
+                  Import Internal Power Ratings
+                  <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded">Admin Only</span>
+                </div>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Upload a CSV with player names and AVG/OBP/SLG power ratings. Matches by first &amp; last name to active predictions.
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Expected columns: <code className="bg-muted px-1 rounded">first_name, last_name, avg_power_rating, obp_power_rating, slg_power_rating</code>
+                </p>
+              </div>
+              <input
+                ref={internalFileRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleInternalRatingsImport(file);
+                }}
+              />
+              <Button
+                onClick={() => internalFileRef.current?.click()}
+                disabled={internalLoading}
+                className="w-full gap-2"
+              >
+                {internalLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {internalLoading ? "Importing…" : "Upload CSV"}
+              </Button>
+              {internalResult && (
+                <div className="text-sm mt-3 space-y-1">
+                  <p className="text-muted-foreground">
+                    Imported {internalResult.imported} of {internalResult.total} rows, skipped {internalResult.skipped}
+                  </p>
+                  {internalResult.errors && internalResult.errors.length > 0 && (
+                    <div className="text-destructive text-xs space-y-0.5">
+                      {internalResult.errors.map((e, i) => <p key={i}>{e}</p>)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {actions.map((a) => (
