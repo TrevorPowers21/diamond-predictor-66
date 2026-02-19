@@ -6,19 +6,30 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-function parseCsv(text: string): Record<string, string>[] {
+function parseCsv(text: string): { headers: string[]; rows: Record<string, string>[] } {
   const lines = text.trim().split("\n");
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_"));
+  if (lines.length < 2) return { headers: [], rows: [] };
+
+  // Find the real header row: look for one containing "power rating" or "team"
+  let headerIdx = 0;
+  for (let i = 0; i < Math.min(lines.length, 10); i++) {
+    const lower = lines[i].toLowerCase();
+    if (lower.includes("power rating") || (lower.startsWith("team,") && lower.includes("score"))) {
+      headerIdx = i;
+      break;
+    }
+  }
+
+  const headers = lines[headerIdx].split(",").map((h) => h.trim().toLowerCase().replace(/[^a-z0-9_+ ]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, ""));
   const rows: Record<string, string>[] = [];
-  for (let i = 1; i < lines.length; i++) {
+  for (let i = headerIdx + 1; i < lines.length; i++) {
     const vals = lines[i].split(",").map((v) => v.trim());
-    if (vals.length < 2) continue;
+    if (vals.length < 2 || !vals[0]) continue;
     const row: Record<string, string> = {};
     headers.forEach((h, idx) => { row[h] = vals[idx] || ""; });
     rows.push(row);
   }
-  return rows;
+  return { headers, rows };
 }
 
 Deno.serve(async (req) => {
@@ -39,7 +50,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const rows = parseCsv(csv_content);
+    const { headers: csvHeaders, rows } = parseCsv(csv_content);
     if (rows.length === 0) {
       return new Response(JSON.stringify({ error: "No data rows found in CSV" }), {
         status: 400,
@@ -54,20 +65,31 @@ Deno.serve(async (req) => {
 
     let firstNameCol = findCol(["first_name", "firstname", "playerfirstname"]);
     let lastNameCol = findCol(["last_name", "lastname", "playerlastname"]);
-    let fullNameCol = findCol(["full_name", "fullname", "name", "player", "formattedname"]);
+    let fullNameCol = findCol(["full_name", "fullname", "player", "formattedname"]);
 
-    // If no name columns found, check if the first column (possibly blank header) contains names
+    // "team" column often holds player full names in these CSVs
+    if (!firstNameCol && !fullNameCol) {
+      const teamCol = findCol(["team"]);
+      if (teamCol) {
+        // Verify it contains player-like names, not just conference labels
+        let looksLikeNames = 0;
+        for (const row of rows.slice(0, 50)) {
+          const val = (row[teamCol] || "").trim();
+          if (/^[A-Z][a-z]+ [A-Z]/.test(val) && !/^\d/.test(val)) looksLikeNames++;
+        }
+        if (looksLikeNames >= 3) fullNameCol = teamCol;
+      }
+    }
+
+    // Fallback: check first column for names regardless of header
     if (!firstNameCol && !fullNameCol) {
       const firstKey = keys[0];
-      // Check if first column values look like names (e.g., "John Smith")
       let looksLikeNames = 0;
-      for (let i = 0; i < Math.min(rows.length, 10); i++) {
-        const val = (rows[i][firstKey] || "").trim();
-        if (/^[A-Z][a-z]+ [A-Z]/.test(val)) looksLikeNames++;
+      for (const row of rows.slice(0, 50)) {
+        const val = (row[firstKey] || "").trim();
+        if (/^[A-Z][a-z]+ [A-Z]/.test(val) && !/^\d/.test(val)) looksLikeNames++;
       }
-      if (looksLikeNames >= 2) {
-        fullNameCol = firstKey;
-      }
+      if (looksLikeNames >= 3) fullNameCol = firstKey;
     }
 
     if (!firstNameCol && !fullNameCol) {
@@ -77,12 +99,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    const avgCol = findCol(["avg_power", "avg_pr", "avg_rating"]);
-    const obpCol = findCol(["obp_power", "obp_pr", "obp_rating"]);
-    const slgCol = findCol(["slg_power", "slg_pr", "slg_rating"]);
+    // Match power rating columns: "BA Power Rating" → "ba power rating", "OBP Power Rating+" → "obp power rating+"
+    const avgCol = findCol(["ba power rating", "avg_power", "avg_pr", "avg_rating"]);
+    const obpCol = findCol(["obp power rating", "obp_power", "obp_pr", "obp_rating"]);
+    const slgCol = findCol(["slg power rating", "slg_power", "slg_pr", "slg_rating"]);
 
     if (!avgCol && !obpCol && !slgCol) {
-      return new Response(JSON.stringify({ error: `Could not find any power rating columns. Headers found: ${keys.join(", ")}. Expected columns containing: avg_power, obp_power, slg_power (or avg_pr, obp_pr, slg_pr)` }), {
+      return new Response(JSON.stringify({ error: `Could not find any power rating columns. Headers found: ${keys.join(", ")}. Expected: "BA Power Rating", "OBP Power Rating+", "SLG Power Rating+" (or avg_power, obp_power, slg_power)` }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -115,7 +138,10 @@ Deno.serve(async (req) => {
       }
 
       if (!firstName || !lastName) { skipped++; continue; }
-      if (["average", "total", "team", "player", "max", "min", "ncaa", "mean", "median"].includes(firstName.toLowerCase())) { skipped++; continue; }
+      // Skip conference rows (e.g. "25 ACC"), aggregate rows, and xstats duplicates
+      if (/^\d{2,4}\s/.test(`${firstName} ${lastName}`)) { skipped++; continue; }
+      if (/xstats$/i.test(lastName)) { skipped++; continue; }
+      if (["average", "total", "team", "player", "max", "min", "ncaa", "mean", "median", "sum", "count", "grand"].includes(firstName.toLowerCase())) { skipped++; continue; }
 
       const key = `${firstName.toLowerCase()}|${lastName.toLowerCase()}`;
       const playerId = playerMap.get(key);
