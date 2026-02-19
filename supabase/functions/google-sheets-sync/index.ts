@@ -626,6 +626,22 @@ async function importReturnerPredictions(
   // Pre-load player cache for fast lookups
   const playerCache = await loadPlayerCache(db);
 
+  // Load transfer portal player IDs so we skip them
+  const transferPlayerIds = new Set<string>();
+  let tpOffset = 0;
+  while (true) {
+    const { data: tpData } = await db
+      .from("players")
+      .select("id")
+      .eq("transfer_portal", true)
+      .range(tpOffset, tpOffset + 999);
+    if (!tpData || tpData.length === 0) break;
+    for (const p of tpData) transferPlayerIds.add(p.id);
+    tpOffset += 1000;
+    if (tpData.length < 1000) break;
+  }
+  console.log(`Loaded ${transferPlayerIds.size} transfer portal players to exclude`);
+
   let imported = 0;
   let skipped = 0;
   const allRecords = new Map<string, Record<string, unknown>>();
@@ -637,6 +653,9 @@ async function importReturnerPredictions(
 
     const player = await resolvePlayer(db, rawName, playerCache);
     if (!player) { skipped++; continue; }
+
+    // Skip transfer portal players — they shouldn't get returner predictions
+    if (transferPlayerIds.has(player.id)) { skipped++; continue; }
 
     // Use composite key to deduplicate — last occurrence wins
     const dedupeKey = `${player.id}|${player.variant}`;
