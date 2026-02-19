@@ -315,7 +315,7 @@ export default function DataSync() {
             <div className="mb-4">
               <div className="flex items-center gap-2 font-semibold">
                 <Upload className="h-4 w-4 text-primary" />
-                Import Player Power Ratings (CSV)
+                All Power Ratings (CSV)
               </div>
               <p className="text-sm text-muted-foreground mt-1">
                 Upload a CSV with player names and power rating values to update existing returner predictions.
