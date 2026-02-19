@@ -41,6 +41,11 @@ export default function DataSync() {
   // Internal ratings import state
   const internalFileRef = useRef<HTMLInputElement>(null);
   const [internalLoading, setInternalLoading] = useState(false);
+
+  // Power ratings CSV import state
+  const powerRatingsFileRef = useRef<HTMLInputElement>(null);
+  const [powerRatingsLoading, setPowerRatingsLoading] = useState(false);
+  const [powerRatingsResult, setPowerRatingsResult] = useState<{ imported: number; skipped: number; total: number; errors?: string[] } | null>(null);
   const [internalResult, setInternalResult] = useState<{ imported: number; skipped: number; total: number; errors?: string[] } | null>(null);
 
   const handleInternalRatingsImport = async (file: File) => {
@@ -65,6 +70,31 @@ export default function DataSync() {
     } finally {
       setInternalLoading(false);
       if (internalFileRef.current) internalFileRef.current.value = "";
+    }
+  };
+
+  const handlePowerRatingsImport = async (file: File) => {
+    setPowerRatingsLoading(true);
+    setPowerRatingsResult(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+      const csvContent = await file.text();
+      const res = await supabase.functions.invoke("import-power-ratings-csv", {
+        body: { csv_content: csvContent, model_type: "returner" },
+      });
+      const result = res.data;
+      if (result?.success) {
+        setPowerRatingsResult({ imported: result.imported, skipped: result.skipped, total: result.total, errors: result.errors });
+        toast.success(`Imported ${result.imported} of ${result.total} power ratings`);
+      } else {
+        toast.error(result?.error ?? "Import failed");
+      }
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPowerRatingsLoading(false);
+      if (powerRatingsFileRef.current) powerRatingsFileRef.current.value = "";
     }
   };
 
@@ -279,6 +309,53 @@ export default function DataSync() {
             </CardContent>
           </Card>
         )}
+
+        <Card className="border-primary/30">
+          <CardContent className="pt-6">
+            <div className="mb-4">
+              <div className="flex items-center gap-2 font-semibold">
+                <Upload className="h-4 w-4 text-primary" />
+                Import Player Power Ratings (CSV)
+              </div>
+              <p className="text-sm text-muted-foreground mt-1">
+                Upload a CSV with player names and power rating values to update existing returner predictions.
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">
+                Expected columns: <code className="bg-muted px-1 rounded">first_name, last_name</code> (or <code className="bg-muted px-1 rounded">name</code>) + <code className="bg-muted px-1 rounded">Power Rating</code> and/or <code className="bg-muted px-1 rounded">Offensive Power Rating</code>
+              </p>
+            </div>
+            <input
+              ref={powerRatingsFileRef}
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handlePowerRatingsImport(file);
+              }}
+            />
+            <Button
+              onClick={() => powerRatingsFileRef.current?.click()}
+              disabled={powerRatingsLoading}
+              className="w-full gap-2"
+            >
+              {powerRatingsLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              {powerRatingsLoading ? "Importing…" : "Upload Power Ratings CSV"}
+            </Button>
+            {powerRatingsResult && (
+              <div className="text-sm mt-3 space-y-1">
+                <p className="text-muted-foreground">
+                  Imported {powerRatingsResult.imported} of {powerRatingsResult.total} rows, skipped {powerRatingsResult.skipped}
+                </p>
+                {powerRatingsResult.errors && powerRatingsResult.errors.length > 0 && (
+                  <div className="text-destructive text-xs space-y-0.5">
+                    {powerRatingsResult.errors.map((e, i) => <p key={i}>{e}</p>)}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {actions.map((a) => (
