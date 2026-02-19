@@ -7,12 +7,10 @@ const corsHeaders = {
 };
 
 function parseCsv(text: string): { headers: string[]; rows: Record<string, string>[] } {
-  const allLines = text.trim().split("\n");
-  // Skip the first 58 lines (metadata/junk rows) so header aligns to column U
-  const lines = allLines.slice(58);
+  const lines = text.trim().split("\n");
   if (lines.length < 2) return { headers: [], rows: [] };
 
-  // Find the real header row: scan ALL rows for one containing "power rating"
+  // Find the header row by scanning ALL lines for "power rating"
   let headerIdx = -1;
   for (let i = 0; i < lines.length; i++) {
     const lower = lines[i].toLowerCase();
@@ -23,7 +21,7 @@ function parseCsv(text: string): { headers: string[]; rows: Record<string, strin
   }
   if (headerIdx === -1) {
     // Fallback: look for "team" at start with a known column keyword
-    for (let i = 0; i < Math.min(lines.length, 20); i++) {
+    for (let i = 0; i < lines.length; i++) {
       const lower = lines[i].toLowerCase();
       if (lower.startsWith("team,") && lower.includes("score")) {
         headerIdx = i;
