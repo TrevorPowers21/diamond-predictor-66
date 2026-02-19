@@ -45,7 +45,7 @@ export default function DataSync() {
   // Power ratings CSV import state
   const powerRatingsFileRef = useRef<HTMLInputElement>(null);
   const [powerRatingsLoading, setPowerRatingsLoading] = useState(false);
-  const [powerRatingsResult, setPowerRatingsResult] = useState<{ imported: number; skipped: number; total: number; errors?: string[] } | null>(null);
+  const [powerRatingsResult, setPowerRatingsResult] = useState<{ imported: number; recalculated?: number; skipped: number; total: number; errors?: string[] } | null>(null);
   const [internalResult, setInternalResult] = useState<{ imported: number; skipped: number; total: number; errors?: string[] } | null>(null);
 
   const handleInternalRatingsImport = async (file: File) => {
@@ -85,8 +85,8 @@ export default function DataSync() {
       });
       const result = res.data;
       if (result?.success) {
-        setPowerRatingsResult({ imported: result.imported, skipped: result.skipped, total: result.total, errors: result.errors });
-        toast.success(`Imported ${result.imported} of ${result.total} power ratings`);
+        setPowerRatingsResult({ imported: result.imported, recalculated: result.recalculated, skipped: result.skipped, total: result.total, errors: result.errors });
+        toast.success(`Imported & recalculated ${result.recalculated} of ${result.total} power ratings`);
       } else {
         toast.error(result?.error ?? "Import failed");
       }
@@ -345,7 +345,7 @@ export default function DataSync() {
             {powerRatingsResult && (
               <div className="text-sm mt-3 space-y-1">
                 <p className="text-muted-foreground">
-                  Imported {powerRatingsResult.imported} of {powerRatingsResult.total} rows, skipped {powerRatingsResult.skipped}
+                  Imported {powerRatingsResult.imported} of {powerRatingsResult.total} rows, recalculated {powerRatingsResult.recalculated ?? 0} predictions, skipped {powerRatingsResult.skipped}
                 </p>
                 {powerRatingsResult.errors && powerRatingsResult.errors.length > 0 && (
                   <div className="text-destructive text-xs space-y-0.5">
