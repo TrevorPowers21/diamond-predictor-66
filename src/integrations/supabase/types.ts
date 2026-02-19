@@ -306,6 +306,44 @@ export type Database = {
         }
         Relationships: []
       }
+      player_prediction_internals: {
+        Row: {
+          avg_power_rating: number | null
+          created_at: string
+          id: string
+          obp_power_rating: number | null
+          prediction_id: string
+          slg_power_rating: number | null
+          updated_at: string
+        }
+        Insert: {
+          avg_power_rating?: number | null
+          created_at?: string
+          id?: string
+          obp_power_rating?: number | null
+          prediction_id: string
+          slg_power_rating?: number | null
+          updated_at?: string
+        }
+        Update: {
+          avg_power_rating?: number | null
+          created_at?: string
+          id?: string
+          obp_power_rating?: number | null
+          prediction_id?: string
+          slg_power_rating?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "player_prediction_internals_prediction_id_fkey"
+            columns: ["prediction_id"]
+            isOneToOne: true
+            referencedRelation: "player_predictions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       player_predictions: {
         Row: {
           barrel_score: number | null
