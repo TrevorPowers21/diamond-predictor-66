@@ -8,8 +8,8 @@ const corsHeaders = {
 
 function parseCsv(text: string): { headers: string[]; rows: Record<string, string>[] } {
   const allLines = text.trim().split("\n");
-  // Skip the first 57 lines (metadata/junk rows)
-  const lines = allLines.slice(57);
+  // Skip the first 58 lines (metadata/junk rows) so header aligns to column U
+  const lines = allLines.slice(58);
   if (lines.length < 2) return { headers: [], rows: [] };
 
   // Find the real header row: look for one containing "power rating" or "team"
