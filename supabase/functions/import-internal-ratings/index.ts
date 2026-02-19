@@ -102,9 +102,17 @@ Deno.serve(async (req) => {
     }
 
     // Match power rating columns: "BA Power Rating" → "ba power rating", "OBP Power Rating+" → "obp power rating+"
-    const avgCol = findCol(["ba power rating", "avg_power", "avg_pr", "avg_rating"]);
-    const obpCol = findCol(["obp power rating", "obp_power", "obp_pr", "obp_rating"]);
-    const slgCol = findCol(["slg power rating", "slg_power", "slg_pr", "slg_rating"]);
+    // Prefer the "+" columns (Column U) over the non-"+" ones (Column T)
+    const findColPlus = (plusPatterns: string[], fallbackPatterns: string[]) => {
+      // First try exact "+" column match
+      const plusMatch = keys.find((k) => plusPatterns.some((p) => k === p));
+      if (plusMatch) return plusMatch;
+      // Then fallback patterns
+      return keys.find((k) => fallbackPatterns.some((p) => k.includes(p)));
+    };
+    const avgCol = findColPlus(["ba power rating+"], ["avg_power", "avg_pr", "avg_rating"]);
+    const obpCol = findColPlus(["obp power rating+"], ["obp_power", "obp_pr", "obp_rating"]);
+    const slgCol = findColPlus(["slg power rating+"], ["slg_power", "slg_pr", "slg_rating"]);
 
     if (!avgCol && !obpCol && !slgCol) {
       return new Response(JSON.stringify({ error: `Could not find any power rating columns. Headers found: ${keys.join(", ")}. Expected: "BA Power Rating", "OBP Power Rating+", "SLG Power Rating+" (or avg_power, obp_power, slg_power)` }), {
