@@ -52,18 +52,34 @@ Deno.serve(async (req) => {
     const keys = Object.keys(sample);
     const findCol = (patterns: string[]) => keys.find((k) => patterns.some((p) => k.includes(p)));
 
-    const firstNameCol = findCol(["first_name", "first", "firstname"]);
-    const lastNameCol = findCol(["last_name", "last", "lastname"]);
-    const avgCol = findCol(["avg_power", "avg_pr", "avg_rating"]);
-    const obpCol = findCol(["obp_power", "obp_pr", "obp_rating"]);
-    const slgCol = findCol(["slg_power", "slg_pr", "slg_rating"]);
+    let firstNameCol = findCol(["first_name", "firstname", "playerfirstname"]);
+    let lastNameCol = findCol(["last_name", "lastname", "playerlastname"]);
+    let fullNameCol = findCol(["full_name", "fullname", "name", "player", "formattedname"]);
 
-    if (!firstNameCol || !lastNameCol) {
+    // If no name columns found, check if the first column (possibly blank header) contains names
+    if (!firstNameCol && !fullNameCol) {
+      const firstKey = keys[0];
+      // Check if first column values look like names (e.g., "John Smith")
+      let looksLikeNames = 0;
+      for (let i = 0; i < Math.min(rows.length, 10); i++) {
+        const val = (rows[i][firstKey] || "").trim();
+        if (/^[A-Z][a-z]+ [A-Z]/.test(val)) looksLikeNames++;
+      }
+      if (looksLikeNames >= 2) {
+        fullNameCol = firstKey;
+      }
+    }
+
+    if (!firstNameCol && !fullNameCol) {
       return new Response(JSON.stringify({ error: `Could not find name columns. Headers found: ${keys.join(", ")}` }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    const avgCol = findCol(["avg_power", "avg_pr", "avg_rating"]);
+    const obpCol = findCol(["obp_power", "obp_pr", "obp_rating"]);
+    const slgCol = findCol(["slg_power", "slg_pr", "slg_rating"]);
 
     if (!avgCol && !obpCol && !slgCol) {
       return new Response(JSON.stringify({ error: `Could not find any power rating columns. Headers found: ${keys.join(", ")}. Expected columns containing: avg_power, obp_power, slg_power (or avg_pr, obp_pr, slg_pr)` }), {
@@ -76,7 +92,6 @@ Deno.serve(async (req) => {
     const { data: players } = await supabase.from("players").select("id, first_name, last_name");
     if (!players) throw new Error("Failed to fetch players");
 
-    // Build lookup by normalized name
     const playerMap = new Map<string, string>();
     for (const p of players) {
       const key = `${p.first_name.toLowerCase().trim()}|${p.last_name.toLowerCase().trim()}`;
@@ -88,11 +103,19 @@ Deno.serve(async (req) => {
     const errors: string[] = [];
 
     for (const row of rows) {
-      const firstName = row[firstNameCol]?.trim();
-      const lastName = row[lastNameCol]?.trim();
+      let firstName = "", lastName = "";
+
+      if (firstNameCol && lastNameCol) {
+        firstName = row[firstNameCol]?.trim() || "";
+        lastName = row[lastNameCol]?.trim() || "";
+      } else if (fullNameCol !== undefined) {
+        const parts = (row[fullNameCol] || "").trim().split(/\s+/);
+        firstName = parts[0] || "";
+        lastName = parts.slice(1).join(" ") || "";
+      }
+
       if (!firstName || !lastName) { skipped++; continue; }
-      // Skip aggregate rows
-      if (["average", "total", "team", "player"].includes(firstName.toLowerCase())) { skipped++; continue; }
+      if (["average", "total", "team", "player", "max", "min", "ncaa", "mean", "median"].includes(firstName.toLowerCase())) { skipped++; continue; }
 
       const key = `${firstName.toLowerCase()}|${lastName.toLowerCase()}`;
       const playerId = playerMap.get(key);
