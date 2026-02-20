@@ -166,32 +166,34 @@ Deno.serve(async (req) => {
       const playerId = playerMap.get(key);
       if (!playerId) { skipped++; continue; }
 
-      // Find active prediction for this player
+      // Find ALL active predictions for this player (returner + transfer)
       const { data: preds } = await supabase
         .from("player_predictions")
         .select("id")
         .eq("player_id", playerId)
         .eq("status", "active")
-        .eq("variant", "regular")
-        .limit(1);
+        .eq("variant", "regular");
 
       if (!preds || preds.length === 0) { skipped++; continue; }
-      const predictionId = preds[0].id;
 
-      const upsertData: Record<string, any> = { prediction_id: predictionId };
-      if (avgCol && row[avgCol]) upsertData.avg_power_rating = parseFloat(row[avgCol]);
-      if (obpCol && row[obpCol]) upsertData.obp_power_rating = parseFloat(row[obpCol]);
-      if (slgCol && row[slgCol]) upsertData.slg_power_rating = parseFloat(row[slgCol]);
+      let anySuccess = false;
+      for (const pred of preds) {
+        const upsertData: Record<string, any> = { prediction_id: pred.id };
+        if (avgCol && row[avgCol]) upsertData.avg_power_rating = parseFloat(row[avgCol]);
+        if (obpCol && row[obpCol]) upsertData.obp_power_rating = parseFloat(row[obpCol]);
+        if (slgCol && row[slgCol]) upsertData.slg_power_rating = parseFloat(row[slgCol]);
 
-      const { error } = await supabase
-        .from("player_prediction_internals")
-        .upsert(upsertData, { onConflict: "prediction_id" });
+        const { error } = await supabase
+          .from("player_prediction_internals")
+          .upsert(upsertData, { onConflict: "prediction_id" });
 
-      if (error) {
-        errors.push(`${firstName} ${lastName}: ${error.message}`);
-      } else {
-        imported++;
+        if (error) {
+          errors.push(`${firstName} ${lastName}: ${error.message}`);
+        } else {
+          anySuccess = true;
+        }
       }
+      if (anySuccess) imported++; else skipped++;
     }
 
     return new Response(JSON.stringify({
