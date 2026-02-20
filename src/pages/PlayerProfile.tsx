@@ -651,7 +651,7 @@ export default function PlayerProfile() {
             )}
 
             {/* Scouting Grades */}
-            {regularPred && (regularPred.ev_score != null || regularPred.barrel_score != null || regularPred.whiff_score != null || regularPred.chase_score != null) && (
+            {regularPred && (regularPred.ev_score != null || regularPred.barrel_score != null || regularPred.whiff_score != null || regularPred.chase_score != null || (isAdmin && internalRatings && (internalRatings.avg_power_rating != null || internalRatings.obp_power_rating != null || internalRatings.slg_power_rating != null))) && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Scouting Grades</CardTitle>
