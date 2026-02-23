@@ -88,6 +88,7 @@ export default function ReturningPlayers() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [variant, setVariant] = useState<"regular" | "xstats">("regular");
+  const [positionFilter, setPositionFilter] = useState<string>("all");
   const [sortKey, setSortKey] = useState<SortKey>("p_ops");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -279,8 +280,16 @@ export default function ReturningPlayers() {
     }));
   };
 
+  const positions = useMemo(() => {
+    const set = new Set(players.map((p) => p.position).filter(Boolean) as string[]);
+    return Array.from(set).sort();
+  }, [players]);
+
   const filtered = useMemo(() => {
     let list = players;
+    if (positionFilter !== "all") {
+      list = list.filter((p) => p.position === positionFilter);
+    }
     if (showMissingOnly) {
       list = list.filter((p) => !p.team);
     }
@@ -312,7 +321,7 @@ export default function ReturningPlayers() {
       return sortDir === "asc" ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
     });
     return list;
-  }, [players, search, sortKey, sortDir, showMissingOnly]);
+  }, [players, search, sortKey, sortDir, showMissingOnly, positionFilter]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -371,6 +380,17 @@ export default function ReturningPlayers() {
             >
               {showMissingOnly ? "Show All" : "Missing Teams"}
             </Button>
+            <Select value={positionFilter} onValueChange={setPositionFilter}>
+              <SelectTrigger className="w-32">
+                <SelectValue placeholder="Position" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Positions</SelectItem>
+                {positions.map((pos) => (
+                  <SelectItem key={pos} value={pos}>{pos}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "active" | "departed" | "all")}>
               <SelectTrigger className="w-32">
                 <SelectValue />

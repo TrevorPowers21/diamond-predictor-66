@@ -81,6 +81,7 @@ const DeltaIndicator = ({ from, to }: { from: number | null; to: number | null }
 export default function TransferPortal() {
   const [search, setSearch] = useState("");
   const [variant, setVariant] = useState<"regular" | "xstats">("regular");
+  const [positionFilter, setPositionFilter] = useState<string>("all");
   const [sortKey, setSortKey] = useState<SortKey>("p_ops");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -133,8 +134,16 @@ export default function TransferPortal() {
     },
   });
 
+  const positions = useMemo(() => {
+    const set = new Set(players.map((p) => p.position).filter(Boolean) as string[]);
+    return Array.from(set).sort();
+  }, [players]);
+
   const filtered = useMemo(() => {
     let list = players;
+    if (positionFilter !== "all") {
+      list = list.filter((p) => p.position === positionFilter);
+    }
     if (search) {
       const q = search.toLowerCase();
       list = list.filter(
@@ -157,7 +166,7 @@ export default function TransferPortal() {
       return sortDir === "asc" ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
     });
     return list;
-  }, [players, search, sortKey, sortDir]);
+  }, [players, search, sortKey, sortDir, positionFilter]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -205,15 +214,28 @@ export default function TransferPortal() {
             <h2 className="text-2xl font-bold tracking-tight">Transfer Portal</h2>
             <p className="text-muted-foreground">2025 season statistics for portal entrants</p>
           </div>
-          <Select value={variant} onValueChange={(v) => setVariant(v as "regular" | "xstats")}>
-            <SelectTrigger className="w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="regular">Regular Stats</SelectItem>
-              <SelectItem value="xstats">xStats</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex gap-2 flex-wrap">
+            <Select value={positionFilter} onValueChange={setPositionFilter}>
+              <SelectTrigger className="w-32">
+                <SelectValue placeholder="Position" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Positions</SelectItem>
+                {positions.map((pos) => (
+                  <SelectItem key={pos} value={pos}>{pos}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={variant} onValueChange={(v) => setVariant(v as "regular" | "xstats")}>
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="regular">Regular Stats</SelectItem>
+                <SelectItem value="xstats">xStats</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         {/* Summary cards */}
