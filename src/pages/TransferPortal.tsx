@@ -214,28 +214,15 @@ export default function TransferPortal() {
             <h2 className="text-2xl font-bold tracking-tight">Transfer Portal</h2>
             <p className="text-muted-foreground">2025 season statistics for portal entrants</p>
           </div>
-          <div className="flex gap-2 flex-wrap">
-            <Select value={positionFilter} onValueChange={setPositionFilter}>
-              <SelectTrigger className="w-32">
-                <SelectValue placeholder="Position" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Positions</SelectItem>
-                {positions.map((pos) => (
-                  <SelectItem key={pos} value={pos}>{pos}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={variant} onValueChange={(v) => setVariant(v as "regular" | "xstats")}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="regular">Regular Stats</SelectItem>
-                <SelectItem value="xstats">xStats</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <Select value={variant} onValueChange={(v) => setVariant(v as "regular" | "xstats")}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="regular">Regular Stats</SelectItem>
+              <SelectItem value="xstats">xStats</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Summary cards */}
@@ -305,14 +292,27 @@ export default function TransferPortal() {
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle className="text-base">Player Stats</CardTitle>
-            <div className="relative w-full sm:w-64">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search players, teams..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-              />
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <Select value={positionFilter} onValueChange={setPositionFilter}>
+                <SelectTrigger className="w-32">
+                  <SelectValue placeholder="Position" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Positions</SelectItem>
+                  {positions.map((pos) => (
+                    <SelectItem key={pos} value={pos}>{pos}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search players, teams..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-0">
