@@ -380,17 +380,6 @@ export default function ReturningPlayers() {
             >
               {showMissingOnly ? "Show All" : "Missing Teams"}
             </Button>
-            <Select value={positionFilter} onValueChange={setPositionFilter}>
-              <SelectTrigger className="w-32">
-                <SelectValue placeholder="Position" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Positions</SelectItem>
-                {positions.map((pos) => (
-                  <SelectItem key={pos} value={pos}>{pos}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "active" | "departed" | "all")}>
               <SelectTrigger className="w-32">
                 <SelectValue />
@@ -515,14 +504,27 @@ export default function ReturningPlayers() {
                 </Button>
               )}
             </div>
-            <div className="relative w-full sm:w-64">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search players, teams..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-              />
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <Select value={positionFilter} onValueChange={setPositionFilter}>
+                <SelectTrigger className="w-32">
+                  <SelectValue placeholder="Position" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Positions</SelectItem>
+                  {positions.map((pos) => (
+                    <SelectItem key={pos} value={pos}>{pos}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search players, teams..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-0">
