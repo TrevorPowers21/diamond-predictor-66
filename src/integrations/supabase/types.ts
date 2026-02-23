@@ -726,6 +726,99 @@ export type Database = {
           },
         ]
       }
+      team_build_players: {
+        Row: {
+          build_id: string
+          created_at: string
+          custom_name: string | null
+          depth_order: number | null
+          id: string
+          nil_value: number | null
+          player_id: string | null
+          position_slot: string | null
+          production_notes: string | null
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          build_id: string
+          created_at?: string
+          custom_name?: string | null
+          depth_order?: number | null
+          id?: string
+          nil_value?: number | null
+          player_id?: string | null
+          position_slot?: string | null
+          production_notes?: string | null
+          source?: string
+          updated_at?: string
+        }
+        Update: {
+          build_id?: string
+          created_at?: string
+          custom_name?: string | null
+          depth_order?: number | null
+          id?: string
+          nil_value?: number | null
+          player_id?: string | null
+          position_slot?: string | null
+          production_notes?: string | null
+          source?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_build_players_build_id_fkey"
+            columns: ["build_id"]
+            isOneToOne: false
+            referencedRelation: "team_builds"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_build_players_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      team_builds: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          notes: string | null
+          season: number
+          team: string
+          total_budget: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name?: string
+          notes?: string | null
+          season?: number
+          team: string
+          total_budget?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          notes?: string | null
+          season?: number
+          team?: string
+          total_budget?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       teams: {
         Row: {
           conference: string | null

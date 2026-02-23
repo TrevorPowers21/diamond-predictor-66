@@ -16,6 +16,7 @@ import {
   FileSpreadsheet,
   Scale,
   Building2,
+  Hammer,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -26,6 +27,7 @@ const navItems = [
   { label: "NIL Valuations", href: "/dashboard/nil", icon: DollarSign },
   { label: "Compare", href: "/dashboard/compare", icon: GitCompare },
   { label: "Teams", href: "/dashboard/teams", icon: Building2 },
+  { label: "Team Builder", href: "/dashboard/team-builder", icon: Hammer },
   { label: "Data Sync", href: "/dashboard/sync", icon: FileSpreadsheet },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
