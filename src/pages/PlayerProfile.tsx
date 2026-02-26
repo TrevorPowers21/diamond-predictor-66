@@ -263,7 +263,6 @@ export default function PlayerProfile() {
   };
 
   const regularPred = predictions.find((p) => p.variant === "regular");
-  const xstatsPred = predictions.find((p) => p.variant === "xstats");
   const isTransferPortal = player?.transfer_portal && predictions.some((p) => p.model_type === "transfer");
   const isReturner = predictions.some((p) => p.model_type === "returner");
 
@@ -522,7 +521,7 @@ export default function PlayerProfile() {
               </div>
             )}
 
-            {(regularPred || xstatsPred) && (
+            {regularPred && (
               <Card>
                 <CardHeader>
                   <div className="flex items-center justify-between">
@@ -578,10 +577,9 @@ export default function PlayerProfile() {
                   )}
                 </CardHeader>
                 <CardContent>
-                  <div className="grid gap-6 md:grid-cols-2">
+                  <div>
                     {regularPred && (
                       <div>
-                        <h4 className="text-sm font-semibold mb-2">Regular Stats</h4>
                         <div className="divide-y divide-border">
                           <StatRow label="AVG" from={regularPred.from_avg} predicted={regularPred.p_avg} />
                           <StatRow label="OBP" from={regularPred.from_obp} predicted={regularPred.p_obp} />
@@ -595,39 +593,6 @@ export default function PlayerProfile() {
                                 <StatRow label="ISO" from={fromD.iso} predicted={toD.iso} />
                                 <div className="flex items-center justify-between py-2">
                                   <span className="text-sm text-muted-foreground">wRC+</span>
-                                  <div className="flex items-center gap-4">
-                                    <span className="text-sm font-mono text-muted-foreground w-16 text-right">{pctFormat(fromD.wrcPlus)}</span>
-                                    <span className="text-xs text-muted-foreground">→</span>
-                                    <span className={`text-sm font-mono font-bold w-16 text-right ${fromD.wrcPlus != null && toD.wrcPlus != null ? (toD.wrcPlus - fromD.wrcPlus > 0.5 ? "text-[hsl(var(--success))]" : toD.wrcPlus - fromD.wrcPlus < -0.5 ? "text-destructive" : "text-muted-foreground") : ""}`}>
-                                      {pctFormat(toD.wrcPlus)}
-                                      {fromD.wrcPlus != null && toD.wrcPlus != null && Math.abs(toD.wrcPlus - fromD.wrcPlus) > 0.5 && (
-                                        toD.wrcPlus > fromD.wrcPlus ? <TrendingUp className="inline h-3 w-3 ml-1" /> : <TrendingDown className="inline h-3 w-3 ml-1" />
-                                      )}
-                                    </span>
-                                  </div>
-                                </div>
-                              </>
-                            );
-                          })()}
-                        </div>
-                      </div>
-                    )}
-                    {xstatsPred && (
-                      <div>
-                        <h4 className="text-sm font-semibold mb-2">xStats</h4>
-                        <div className="divide-y divide-border">
-                          <StatRow label="xAVG" from={xstatsPred.from_avg} predicted={xstatsPred.p_avg} />
-                          <StatRow label="xOBP" from={xstatsPred.from_obp} predicted={xstatsPred.p_obp} />
-                          <StatRow label="xSLG" from={xstatsPred.from_slg} predicted={xstatsPred.p_slg} />
-                          {(() => {
-                            const fromD = computeDerived(xstatsPred.from_avg, xstatsPred.from_obp, xstatsPred.from_slg);
-                            const toD = computeDerived(xstatsPred.p_avg, xstatsPred.p_obp, xstatsPred.p_slg);
-                            return (
-                              <>
-                                <StatRow label="xOPS" from={fromD.ops} predicted={toD.ops} />
-                                <StatRow label="xISO" from={fromD.iso} predicted={toD.iso} />
-                                <div className="flex items-center justify-between py-2">
-                                  <span className="text-sm text-muted-foreground">xWRC+</span>
                                   <div className="flex items-center gap-4">
                                     <span className="text-sm font-mono text-muted-foreground w-16 text-right">{pctFormat(fromD.wrcPlus)}</span>
                                     <span className="text-xs text-muted-foreground">→</span>
