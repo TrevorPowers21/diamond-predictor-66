@@ -18,6 +18,7 @@ import PlayerComparison from "./pages/PlayerComparison";
 import PlayerProfile from "./pages/PlayerProfile";
 import Teams from "./pages/Teams";
 import TeamBuilder from "./pages/TeamBuilder";
+import AdminDashboard from "./pages/AdminDashboard";
 
 const queryClient = new QueryClient();
 
@@ -41,6 +42,7 @@ const App = () => (
             <Route path="/dashboard/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
             <Route path="/dashboard/player/:id" element={<ProtectedRoute><PlayerProfile /></ProtectedRoute>} />
             <Route path="/dashboard/team-builder" element={<ProtectedRoute><TeamBuilder /></ProtectedRoute>} />
+            <Route path="/dashboard/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
             <Route path="/dashboard/*" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>

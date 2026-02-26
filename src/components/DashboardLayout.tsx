@@ -17,6 +17,7 @@ import {
   Scale,
   Building2,
   Hammer,
+  ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -28,6 +29,7 @@ const navItems = [
   { label: "Compare", href: "/dashboard/compare", icon: GitCompare },
   { label: "Teams", href: "/dashboard/teams", icon: Building2 },
   { label: "Team Builder", href: "/dashboard/team-builder", icon: Hammer },
+  { label: "Admin", href: "/dashboard/admin", icon: ShieldCheck },
   { label: "Data Sync", href: "/dashboard/sync", icon: FileSpreadsheet },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
