@@ -1,0 +1,1 @@
+ALTER TABLE public.nil_valuations ADD COLUMN war numeric DEFAULT NULL;

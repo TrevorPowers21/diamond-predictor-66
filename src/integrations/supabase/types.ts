@@ -228,6 +228,7 @@ export type Database = {
           player_id: string
           season: number
           updated_at: string
+          war: number | null
         }
         Insert: {
           component_breakdown?: Json | null
@@ -239,6 +240,7 @@ export type Database = {
           player_id: string
           season: number
           updated_at?: string
+          war?: number | null
         }
         Update: {
           component_breakdown?: Json | null
@@ -250,6 +252,7 @@ export type Database = {
           player_id?: string
           season?: number
           updated_at?: string
+          war?: number | null
         }
         Relationships: [
           {

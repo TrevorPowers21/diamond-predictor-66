@@ -700,32 +700,36 @@ export default function PlayerProfile() {
               </Card>
             )}
 
-            {/* NIL Valuation */}
-            {nilValuation && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">NIL Valuation</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-6">
-                    <div>
-                      <div className="text-3xl font-bold text-[hsl(var(--success))]">
-                        ${nilValuation.estimated_value?.toLocaleString() ?? "—"}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Season {nilValuation.season} · {nilValuation.model_version && `v${nilValuation.model_version}`}
-                      </p>
+            {/* NIL Valuation & WAR */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">NIL Valuation & WAR</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-6">
+                  <div>
+                    <div className="text-3xl font-bold text-[hsl(var(--success))]">
+                      {nilValuation?.estimated_value != null
+                        ? `$${nilValuation.estimated_value.toLocaleString()}`
+                        : "—"}
                     </div>
-                    {nilValuation.offensive_effectiveness != null && (
-                      <div className="text-center">
-                        <div className="text-xl font-bold">{nilValuation.offensive_effectiveness.toFixed(3)}</div>
-                        <p className="text-xs text-muted-foreground">Offensive Effectiveness</p>
-                      </div>
-                    )}
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {nilValuation
+                        ? `Season ${nilValuation.season}${nilValuation.model_version ? ` · v${nilValuation.model_version}` : ""}`
+                        : "No valuation on file"}
+                    </p>
                   </div>
-                </CardContent>
-              </Card>
-            )}
+                  <div className="text-center">
+                    <div className="text-xl font-bold font-mono">
+                      {(nilValuation as any)?.war != null
+                        ? ((nilValuation as any).war as number).toFixed(1)
+                        : "—"}
+                    </div>
+                    <p className="text-xs text-muted-foreground">WAR</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* Season Stats */}
             {seasonStats.length > 0 && (
