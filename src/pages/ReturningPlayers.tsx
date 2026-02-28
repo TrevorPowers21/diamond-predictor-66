@@ -10,12 +10,32 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Users, TrendingUp, TrendingDown, ArrowUpDown, Search, BarChart3, Activity, Pencil, Save, X } from "lucide-react";
+import {
+  Users,
+  TrendingUp,
+  TrendingDown,
+  ArrowUpDown,
+  Search,
+  BarChart3,
+  Activity,
+  Pencil,
+  Save,
+  X,
+} from "lucide-react";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell } from "recharts";
 import { toast } from "sonner";
 
-type SortKey = "name" | "p_ops" | "p_avg" | "p_slg" | "p_obp" | "p_iso" | "p_wrc_plus" | "power_rating_plus" | "class_transition";
+type SortKey =
+  | "name"
+  | "p_ops"
+  | "p_avg"
+  | "p_slg"
+  | "p_obp"
+  | "p_iso"
+  | "p_wrc_plus"
+  | "power_rating_plus"
+  | "class_transition";
 type SortDir = "asc" | "desc";
 
 interface ReturnerPlayer {
@@ -118,12 +138,15 @@ export default function ReturningPlayers() {
         setShowFixedScrollbar(entry.isIntersecting);
         if (entry.isIntersecting) updatePos();
       },
-      { threshold: 0 }
+      { threshold: 0 },
     );
     obs.observe(el);
-    window.addEventListener('resize', updatePos);
+    window.addEventListener("resize", updatePos);
     updatePos();
-    return () => { obs.disconnect(); window.removeEventListener('resize', updatePos); };
+    return () => {
+      obs.disconnect();
+      window.removeEventListener("resize", updatePos);
+    };
   });
 
   // Sync scrollbar width
@@ -131,7 +154,9 @@ export default function ReturningPlayers() {
     const table = tableContainerRef.current;
     const inner = scrollbarInnerRef.current;
     if (!table || !inner) return;
-    const sync = () => { inner.style.width = `${table.scrollWidth}px`; };
+    const sync = () => {
+      inner.style.width = `${table.scrollWidth}px`;
+    };
     sync();
     const ro = new ResizeObserver(sync);
     ro.observe(table);
@@ -144,7 +169,9 @@ export default function ReturningPlayers() {
     if (tableContainerRef.current && scrollbarRef.current) {
       tableContainerRef.current.scrollLeft = scrollbarRef.current.scrollLeft;
     }
-    requestAnimationFrame(() => { isSyncing.current = false; });
+    requestAnimationFrame(() => {
+      isSyncing.current = false;
+    });
   }, []);
 
   const handleTableScroll = useCallback(() => {
@@ -153,7 +180,9 @@ export default function ReturningPlayers() {
     if (scrollbarRef.current && tableContainerRef.current) {
       scrollbarRef.current.scrollLeft = tableContainerRef.current.scrollLeft;
     }
-    requestAnimationFrame(() => { isSyncing.current = false; });
+    requestAnimationFrame(() => {
+      isSyncing.current = false;
+    });
   }, []);
 
   const { data: players = [], isLoading } = useQuery({
@@ -163,14 +192,16 @@ export default function ReturningPlayers() {
       let allData: any[] = [];
       let from = 0;
       const PAGE_SIZE = 1000;
-      
+
       while (true) {
         let query = supabase
           .from("player_predictions")
-          .select(`
+          .select(
+            `
             *,
             players!inner(id, first_name, last_name, team, conference, position, class_year)
-          `)
+          `,
+          )
           .eq("model_type", "returner")
           .eq("variant", variant)
           .range(from, from + PAGE_SIZE - 1);
@@ -181,7 +212,7 @@ export default function ReturningPlayers() {
 
         const { data, error } = await query;
         if (error) throw error;
-        
+
         allData = allData.concat(data || []);
         if (!data || data.length < PAGE_SIZE) break;
         from += PAGE_SIZE;
@@ -230,7 +261,9 @@ export default function ReturningPlayers() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["returning-players"] });
-      toast.success(`Recalculated — pOPS: ${data?.prediction?.p_ops?.toFixed(3) ?? "?"}, wRC+: ${data?.prediction?.p_wrc_plus ?? "?"}`);
+      toast.success(
+        `Recalculated — pOPS: ${data?.prediction?.p_ops?.toFixed(3) ?? "?"}, wRC+: ${data?.prediction?.p_wrc_plus ?? "?"}`,
+      );
     },
     onError: (e) => toast.error(`Failed to recalculate: ${e.message}`),
   });
@@ -246,7 +279,9 @@ export default function ReturningPlayers() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["returning-players"] });
-      toast.success(`Class updated — pOPS: ${data?.prediction?.p_ops?.toFixed(3) ?? "?"}, wRC+: ${data?.prediction?.p_wrc_plus ?? "?"}`);
+      toast.success(
+        `Class updated — pOPS: ${data?.prediction?.p_ops?.toFixed(3) ?? "?"}, wRC+: ${data?.prediction?.p_wrc_plus ?? "?"}`,
+      );
     },
     onError: (e) => toast.error(`Failed to update class: ${e.message}`),
   });
@@ -256,9 +291,7 @@ export default function ReturningPlayers() {
       const entries = Object.entries(editedPlayers);
       if (entries.length === 0) return;
       const results = await Promise.all(
-        entries.map(([playerId, data]) =>
-          supabase.from("players").update(data).eq("id", playerId)
-        )
+        entries.map(([playerId, data]) => supabase.from("players").update(data).eq("id", playerId)),
       );
       const errors = results.filter((r) => r.error);
       if (errors.length > 0) throw new Error(`${errors.length} updates failed`);
@@ -300,7 +333,7 @@ export default function ReturningPlayers() {
           `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
           (p.team || "").toLowerCase().includes(q) ||
           (p.conference || "").toLowerCase().includes(q) ||
-          (p.prediction.class_transition || "").toLowerCase().includes(q)
+          (p.prediction.class_transition || "").toLowerCase().includes(q),
       );
     }
     list.sort((a, b) => {
@@ -309,12 +342,16 @@ export default function ReturningPlayers() {
       if (sortKey === "name") {
         aVal = `${a.last_name} ${a.first_name}`;
         bVal = `${b.last_name} ${b.first_name}`;
-        return sortDir === "asc" ? (aVal as string).localeCompare(bVal as string) : (bVal as string).localeCompare(aVal as string);
+        return sortDir === "asc"
+          ? (aVal as string).localeCompare(bVal as string)
+          : (bVal as string).localeCompare(aVal as string);
       }
       if (sortKey === "class_transition") {
         aVal = a.prediction.class_transition || "";
         bVal = b.prediction.class_transition || "";
-        return sortDir === "asc" ? (aVal as string).localeCompare(bVal as string) : (bVal as string).localeCompare(aVal as string);
+        return sortDir === "asc"
+          ? (aVal as string).localeCompare(bVal as string)
+          : (bVal as string).localeCompare(aVal as string);
       }
       aVal = a.prediction[sortKey] ?? -999;
       bVal = b.prediction[sortKey] ?? -999;
@@ -325,13 +362,20 @@ export default function ReturningPlayers() {
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else { setSortKey(key); setSortDir("desc"); }
+    else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
   };
 
   // Summary stats
   const avgOps = players.length ? players.reduce((s, p) => s + (p.prediction.p_ops ?? 0), 0) / players.length : 0;
-  const avgWrcPlus = players.length ? players.reduce((s, p) => s + (p.prediction.p_wrc_plus ?? 0), 0) / players.length : 0;
-  const topPlayer = players.length ? [...players].sort((a, b) => (b.prediction.p_wrc_plus ?? 0) - (a.prediction.p_wrc_plus ?? 0))[0] : null;
+  const avgWrcPlus = players.length
+    ? players.reduce((s, p) => s + (p.prediction.p_wrc_plus ?? 0), 0) / players.length
+    : 0;
+  const topPlayer = players.length
+    ? [...players].sort((a, b) => (b.prediction.p_wrc_plus ?? 0) - (a.prediction.p_wrc_plus ?? 0))[0]
+    : null;
 
   // Chart data — top 10 by pWRC+
   const chartData = useMemo(() => {
@@ -411,7 +455,9 @@ export default function ReturningPlayers() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{players.length}</div>
-              <p className="text-xs text-muted-foreground mt-1">{variant === "xstats" ? "xStats" : "Regular"} variant</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {variant === "xstats" ? "xStats" : "Regular"} variant
+              </p>
             </CardContent>
           </Card>
           <Card>
@@ -434,7 +480,9 @@ export default function ReturningPlayers() {
                 {topPlayer ? `${topPlayer.first_name} ${topPlayer.last_name}` : "—"}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                {topPlayer ? `pWRC+: ${pctFormat(topPlayer.prediction.p_wrc_plus)} · ${classTransitionLabel[topPlayer.prediction.class_transition || ""] || topPlayer.prediction.class_transition || "—"}` : "No data"}
+                {topPlayer
+                  ? `pWRC+: ${pctFormat(topPlayer.prediction.p_wrc_plus)} · ${classTransitionLabel[topPlayer.prediction.class_transition || ""] || topPlayer.prediction.class_transition || "—"}`
+                  : "No data"}
               </p>
             </CardContent>
           </Card>
@@ -486,19 +534,17 @@ export default function ReturningPlayers() {
                     size="sm"
                     variant="ghost"
                     className="h-7 text-xs"
-                    onClick={() => { setBulkEditMode(false); setEditedPlayers({}); }}
+                    onClick={() => {
+                      setBulkEditMode(false);
+                      setEditedPlayers({});
+                    }}
                   >
                     <X className="h-3 w-3 mr-1" />
                     Cancel
                   </Button>
                 </div>
               ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs"
-                  onClick={() => setBulkEditMode(true)}
-                >
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setBulkEditMode(true)}>
                   <Pencil className="h-3 w-3 mr-1" />
                   Bulk Edit
                 </Button>
@@ -512,7 +558,9 @@ export default function ReturningPlayers() {
                 <SelectContent>
                   <SelectItem value="all">All Positions</SelectItem>
                   {positions.map((pos) => (
-                    <SelectItem key={pos} value={pos}>{pos}</SelectItem>
+                    <SelectItem key={pos} value={pos}>
+                      {pos}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -537,120 +585,173 @@ export default function ReturningPlayers() {
                 <div
                   ref={tableContainerRef}
                   onScroll={handleTableScroll}
-                  className="overflow-x-auto overflow-y-visible [&::-webkit-scrollbar]:hidden"
-                  style={{ scrollbarWidth: 'none' }}
+                  className="overflow-x-auto overflow-y-scroll [&::-webkit-scrollbar]:hidden"
+                  style={{ scrollbarWidth: "none" }}
                 >
-                <Table>
-                  <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
-                    <TableRow>
-                      <TableHead className="min-w-[160px]"><SortButton label="Player" sortKeyVal="name" /></TableHead>
-                      <TableHead className="min-w-[120px]">Team</TableHead>
-                      <TableHead className="min-w-[80px]">Pos</TableHead>
-                      <TableHead><SortButton label="Year" sortKeyVal="class_transition" /></TableHead>
-                      <TableHead className="min-w-[120px]">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="cursor-help font-medium text-muted-foreground">Dev Confidence</span>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-xs">
-                            <p className="text-xs">Adjusts the developmental weight applied to projections. 0 = no growth, 0.5 = moderate, 1.0 = full confidence.</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TableHead>
-                      <TableHead className="text-right"><SortButton label="Prev AVG" sortKeyVal="p_avg" /></TableHead>
-                      <TableHead className="text-right"><SortButton label="Prev OBP" sortKeyVal="p_obp" /></TableHead>
-                      <TableHead className="text-right"><SortButton label="Prev SLG" sortKeyVal="p_slg" /></TableHead>
-                      <TableHead className="text-right"><SortButton label="pAVG" sortKeyVal="p_avg" /></TableHead>
-                      <TableHead className="text-right"><SortButton label="pOBP" sortKeyVal="p_obp" /></TableHead>
-                      <TableHead className="text-right"><SortButton label="pSLG" sortKeyVal="p_slg" /></TableHead>
-                      <TableHead className="text-right"><SortButton label="pOPS" sortKeyVal="p_ops" /></TableHead>
-                      <TableHead className="text-right"><SortButton label="pISO" sortKeyVal="p_iso" /></TableHead>
-                      <TableHead className="text-right"><SortButton label="pWRC+" sortKeyVal="p_wrc_plus" /></TableHead>
-                      <TableHead className="text-right"><SortButton label="PWR+" sortKeyVal="power_rating_plus" /></TableHead>
-                      <TableHead className="text-center min-w-[180px]">Scout Grades</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtered.map((p) => {
-                      const pred = p.prediction;
-                      return (
-                        <TableRow key={p.prediction_id}>
-                          <TableCell className="font-medium whitespace-nowrap">
-                            <Link to={`/dashboard/player/${p.id}`} className="hover:text-primary hover:underline transition-colors">
-                              {p.first_name} {p.last_name}
-                            </Link>
-                          </TableCell>
-                          <TableCell>
-                            {bulkEditMode ? (
-                              <Input
-                                className="h-7 w-[130px] text-xs"
-                                defaultValue={editedPlayers[p.id]?.team ?? p.team ?? ""}
-                                placeholder="Team"
-                                onBlur={(e) => {
-                                  const val = e.target.value.trim();
-                                  if (val !== (p.team ?? "")) handleEditField(p.id, "team", val);
-                                }}
+                  <Table>
+                    <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
+                      <TableRow>
+                        <TableHead className="min-w-[160px]">
+                          <SortButton label="Player" sortKeyVal="name" />
+                        </TableHead>
+                        <TableHead className="min-w-[120px]">Team</TableHead>
+                        <TableHead className="min-w-[80px]">Pos</TableHead>
+                        <TableHead>
+                          <SortButton label="Year" sortKeyVal="class_transition" />
+                        </TableHead>
+                        <TableHead className="min-w-[120px]">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="cursor-help font-medium text-muted-foreground">Dev Confidence</span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-xs">
+                              <p className="text-xs">
+                                Adjusts the developmental weight applied to projections. 0 = no growth, 0.5 = moderate,
+                                1.0 = full confidence.
+                              </p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TableHead>
+                        <TableHead className="text-right">
+                          <SortButton label="Prev AVG" sortKeyVal="p_avg" />
+                        </TableHead>
+                        <TableHead className="text-right">
+                          <SortButton label="Prev OBP" sortKeyVal="p_obp" />
+                        </TableHead>
+                        <TableHead className="text-right">
+                          <SortButton label="Prev SLG" sortKeyVal="p_slg" />
+                        </TableHead>
+                        <TableHead className="text-right">
+                          <SortButton label="pAVG" sortKeyVal="p_avg" />
+                        </TableHead>
+                        <TableHead className="text-right">
+                          <SortButton label="pOBP" sortKeyVal="p_obp" />
+                        </TableHead>
+                        <TableHead className="text-right">
+                          <SortButton label="pSLG" sortKeyVal="p_slg" />
+                        </TableHead>
+                        <TableHead className="text-right">
+                          <SortButton label="pOPS" sortKeyVal="p_ops" />
+                        </TableHead>
+                        <TableHead className="text-right">
+                          <SortButton label="pISO" sortKeyVal="p_iso" />
+                        </TableHead>
+                        <TableHead className="text-right">
+                          <SortButton label="pWRC+" sortKeyVal="p_wrc_plus" />
+                        </TableHead>
+                        <TableHead className="text-right">
+                          <SortButton label="PWR+" sortKeyVal="power_rating_plus" />
+                        </TableHead>
+                        <TableHead className="text-center min-w-[180px]">Scout Grades</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filtered.map((p) => {
+                        const pred = p.prediction;
+                        return (
+                          <TableRow key={p.prediction_id}>
+                            <TableCell className="font-medium whitespace-nowrap">
+                              <Link
+                                to={`/dashboard/player/${p.id}`}
+                                className="hover:text-primary hover:underline transition-colors"
+                              >
+                                {p.first_name} {p.last_name}
+                              </Link>
+                            </TableCell>
+                            <TableCell>
+                              {bulkEditMode ? (
+                                <Input
+                                  className="h-7 w-[130px] text-xs"
+                                  defaultValue={editedPlayers[p.id]?.team ?? p.team ?? ""}
+                                  placeholder="Team"
+                                  onBlur={(e) => {
+                                    const val = e.target.value.trim();
+                                    if (val !== (p.team ?? "")) handleEditField(p.id, "team", val);
+                                  }}
+                                />
+                              ) : (
+                                <span className="text-xs text-muted-foreground">{p.team || "—"}</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {bulkEditMode ? (
+                                <Input
+                                  className="h-7 w-[70px] text-xs"
+                                  defaultValue={editedPlayers[p.id]?.position ?? p.position ?? ""}
+                                  placeholder="Pos"
+                                  onBlur={(e) => {
+                                    const val = e.target.value.trim();
+                                    if (val !== (p.position ?? "")) handleEditField(p.id, "position", val);
+                                  }}
+                                />
+                              ) : (
+                                <span className="text-xs text-muted-foreground">{p.position || "—"}</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <ClassTransitionSelector
+                                value={pred.class_transition || "FS"}
+                                onChange={(v) =>
+                                  updateClassTransition.mutate({ predictionId: p.prediction_id, value: v })
+                                }
                               />
-                            ) : (
-                              <span className="text-xs text-muted-foreground">{p.team || "—"}</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {bulkEditMode ? (
-                              <Input
-                                className="h-7 w-[70px] text-xs"
-                                defaultValue={editedPlayers[p.id]?.position ?? p.position ?? ""}
-                                placeholder="Pos"
-                                onBlur={(e) => {
-                                  const val = e.target.value.trim();
-                                  if (val !== (p.position ?? "")) handleEditField(p.id, "position", val);
-                                }}
+                            </TableCell>
+                            <TableCell>
+                              <DevConfidenceSelector
+                                value={pred.dev_aggressiveness ?? 1}
+                                onChange={(v) => updateDevAgg.mutate({ predictionId: p.prediction_id, value: v })}
                               />
-                            ) : (
-                              <span className="text-xs text-muted-foreground">{p.position || "—"}</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <ClassTransitionSelector
-                              value={pred.class_transition || "FS"}
-                              onChange={(v) => updateClassTransition.mutate({ predictionId: p.prediction_id, value: v })}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <DevConfidenceSelector
-                              value={pred.dev_aggressiveness ?? 1}
-                              onChange={(v) => updateDevAgg.mutate({ predictionId: p.prediction_id, value: v })}
-                            />
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs text-muted-foreground">{statFormat(pred.from_avg)}</TableCell>
-                          <TableCell className="text-right font-mono text-xs text-muted-foreground">{statFormat(pred.from_obp)}</TableCell>
-                          <TableCell className="text-right font-mono text-xs text-muted-foreground">{statFormat(pred.from_slg)}</TableCell>
-                          <TableCell className={`text-right font-mono text-sm font-semibold ${deltaColor(pred.from_avg, pred.p_avg)}`}>
-                            {statFormat(pred.p_avg)}<DeltaIndicator from={pred.from_avg} to={pred.p_avg} />
-                          </TableCell>
-                          <TableCell className={`text-right font-mono text-sm font-semibold ${deltaColor(pred.from_obp, pred.p_obp)}`}>
-                            {statFormat(pred.p_obp)}<DeltaIndicator from={pred.from_obp} to={pred.p_obp} />
-                          </TableCell>
-                          <TableCell className={`text-right font-mono text-sm font-semibold ${deltaColor(pred.from_slg, pred.p_slg)}`}>
-                            {statFormat(pred.p_slg)}<DeltaIndicator from={pred.from_slg} to={pred.p_slg} />
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-sm font-bold">{statFormat(pred.p_ops)}</TableCell>
-                          <TableCell className="text-right font-mono text-sm">{statFormat(pred.p_iso)}</TableCell>
-                          <TableCell className="text-right font-mono text-sm font-bold">{pctFormat(pred.p_wrc_plus)}</TableCell>
-                          <TableCell className="text-right font-mono text-sm">{pctFormat(pred.power_rating_plus)}</TableCell>
-                          <TableCell className="text-center">
-                            <div className="flex gap-1 justify-center flex-wrap">
-                              {pred.ev_score != null && <ScoutBadge label="EV" value={pred.ev_score} />}
-                              {pred.barrel_score != null && <ScoutBadge label="Brl" value={pred.barrel_score} />}
-                              {pred.whiff_score != null && <ScoutBadge label="Whf" value={pred.whiff_score} />}
-                              {pred.chase_score != null && <ScoutBadge label="Chs" value={pred.chase_score} />}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                              {statFormat(pred.from_avg)}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                              {statFormat(pred.from_obp)}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                              {statFormat(pred.from_slg)}
+                            </TableCell>
+                            <TableCell
+                              className={`text-right font-mono text-sm font-semibold ${deltaColor(pred.from_avg, pred.p_avg)}`}
+                            >
+                              {statFormat(pred.p_avg)}
+                              <DeltaIndicator from={pred.from_avg} to={pred.p_avg} />
+                            </TableCell>
+                            <TableCell
+                              className={`text-right font-mono text-sm font-semibold ${deltaColor(pred.from_obp, pred.p_obp)}`}
+                            >
+                              {statFormat(pred.p_obp)}
+                              <DeltaIndicator from={pred.from_obp} to={pred.p_obp} />
+                            </TableCell>
+                            <TableCell
+                              className={`text-right font-mono text-sm font-semibold ${deltaColor(pred.from_slg, pred.p_slg)}`}
+                            >
+                              {statFormat(pred.p_slg)}
+                              <DeltaIndicator from={pred.from_slg} to={pred.p_slg} />
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-sm font-bold">
+                              {statFormat(pred.p_ops)}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-sm">{statFormat(pred.p_iso)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm font-bold">
+                              {pctFormat(pred.p_wrc_plus)}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-sm">
+                              {pctFormat(pred.power_rating_plus)}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <div className="flex gap-1 justify-center flex-wrap">
+                                {pred.ev_score != null && <ScoutBadge label="EV" value={pred.ev_score} />}
+                                {pred.barrel_score != null && <ScoutBadge label="Brl" value={pred.barrel_score} />}
+                                {pred.whiff_score != null && <ScoutBadge label="Whf" value={pred.whiff_score} />}
+                                {pred.chase_score != null && <ScoutBadge label="Chs" value={pred.chase_score} />}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
                 </div>
                 {showFixedScrollbar && (
                   <div
@@ -660,7 +761,7 @@ export default function ReturningPlayers() {
                     style={{
                       height: 18,
                       left: scrollbarPos.left,
-                      width: scrollbarPos.width || '100%',
+                      width: scrollbarPos.width || "100%",
                     }}
                   >
                     <div ref={scrollbarInnerRef} style={{ height: 1 }} />
@@ -700,9 +801,17 @@ function ClassTransitionSelector({ value, onChange }: { value: string; onChange:
 }
 
 function ScoutBadge({ label, value }: { label: string; value: number }) {
-  const tier = value >= 80 ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]" : value >= 50 ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]" : "bg-destructive/15 text-destructive";
+  const tier =
+    value >= 80
+      ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]"
+      : value >= 50
+        ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]"
+        : "bg-destructive/15 text-destructive";
   return (
-    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${tier}`} title={`${label}: ${value}`}>
+    <span
+      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${tier}`}
+      title={`${label}: ${value}`}
+    >
       {label} {value}
     </span>
   );
@@ -730,8 +839,8 @@ function DevConfidenceSelector({ value, onChange }: { value: number; onChange: (
                     ? opt.value === 0
                       ? "bg-destructive/15 text-destructive"
                       : opt.value === 0.5
-                      ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]"
-                      : "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]"
+                        ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]"
+                        : "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]"
                     : "bg-muted text-muted-foreground hover:bg-muted/80"
                 }`}
               >
