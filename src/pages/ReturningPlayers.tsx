@@ -541,7 +541,7 @@ export default function ReturningPlayers() {
                   style={{ scrollbarWidth: 'none' }}
                 >
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
                     <TableRow>
                       <TableHead className="min-w-[160px]"><SortButton label="Player" sortKeyVal="name" /></TableHead>
                       <TableHead className="min-w-[120px]">Team</TableHead>
