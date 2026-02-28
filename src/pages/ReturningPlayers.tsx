@@ -585,8 +585,8 @@ export default function ReturningPlayers() {
                 <div
                   ref={tableContainerRef}
                   onScroll={handleTableScroll}
-                  className="overflow-x-auto [&::-webkit-scrollbar]:hidden"
-                  style={{ scrollbarWidth: "none", overflowY: "scroll" }}
+                  className="overflow-x-auto [&::-webkit-scrollbar]:hidden overflow-y-auto max-h-[70vh]"
+                  style={{ scrollbarWidth: "none" }}
                 >
                   <Table>
                     <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
