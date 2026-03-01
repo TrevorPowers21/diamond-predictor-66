@@ -591,7 +591,7 @@ export default function ReturningPlayers() {
                   <Table>
                     <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
                       <TableRow>
-                        <TableHead className="min-w-[160px]">
+                        <TableHead className="min-w-[160px] sticky left-0 z-30 bg-background">
                           <SortButton label="Player" sortKeyVal="name" />
                         </TableHead>
                         <TableHead className="min-w-[120px]">Team</TableHead>
@@ -650,7 +650,7 @@ export default function ReturningPlayers() {
                         const pred = p.prediction;
                         return (
                           <TableRow key={p.prediction_id}>
-                            <TableCell className="font-medium whitespace-nowrap">
+                            <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
                               <Link
                                 to={`/dashboard/player/${p.id}`}
                                 className="hover:text-primary hover:underline transition-colors"
