@@ -321,11 +321,11 @@ export default function TransferPortal() {
             ) : filtered.length === 0 ? (
               <div className="flex items-center justify-center py-16 text-muted-foreground">No players found</div>
             ) : (
-              <div className="overflow-auto">
+              <div className="overflow-auto max-h-[70vh]">
                 <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="min-w-[160px]"><SortButton label="Player" sortKeyVal="name" /></TableHead>
+                    <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
+                      <TableRow>
+                      <TableHead className="min-w-[160px] sticky left-0 z-30 bg-background"><SortButton label="Player" sortKeyVal="name" /></TableHead>
                       <TableHead>Prior</TableHead>
                       <TableHead><SortButton label="AVG" sortKeyVal="p_avg" /></TableHead>
                       <TableHead><SortButton label="OBP" sortKeyVal="p_obp" /></TableHead>
@@ -351,7 +351,7 @@ export default function TransferPortal() {
 
                       return (
                         <TableRow key={`${p.id}-${pred.variant}`}>
-                          <TableCell>
+                          <TableCell className="sticky left-0 z-10 bg-background">
                             <Link to={`/dashboard/player/${p.id}`} className="font-medium hover:text-primary hover:underline transition-colors">{p.first_name} {p.last_name}</Link>
                             <div className="text-xs text-muted-foreground">
                               {[p.position, p.team, p.class_year].filter(Boolean).join(" · ") || "—"}
