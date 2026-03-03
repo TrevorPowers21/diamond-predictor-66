@@ -220,7 +220,7 @@ export default function ConferenceStatsTable() {
         ) : (
           <div className="overflow-auto max-h-[60vh]">
             <Table>
-              <TableHeader>
+              <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
                 <TableRow>
                   <TableHead className="min-w-[160px] sticky left-0 bg-background z-10">Conference</TableHead>
                   {NUM_FIELDS.map((f) => (
