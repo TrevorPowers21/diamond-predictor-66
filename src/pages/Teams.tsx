@@ -268,7 +268,7 @@ export default function Teams() {
             ) : (
               <div className="overflow-auto max-h-[60vh]">
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
                     <TableRow>
                       <TableHead className="min-w-[250px]">Team</TableHead>
                       <TableHead className="min-w-[100px] text-center">Park Factor</TableHead>
