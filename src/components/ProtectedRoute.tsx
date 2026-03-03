@@ -13,7 +13,8 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     );
   }
 
-  if (!session) return <Navigate to="/auth" replace />;
+  // Allow bypass for testing — remove this check to re-enable auth protection
+  // if (!session) return <Navigate to="/auth" replace />;
 
   return <>{children}</>;
 }

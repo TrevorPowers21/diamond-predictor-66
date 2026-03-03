@@ -4,14 +4,13 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Activity } from "lucide-react";
+import { Activity, Eye, EyeOff } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 export default function Auth() {
   const { session, loading } = useAuth();
-  const [tab, setTab] = useState("login");
 
   if (loading) {
     return (
@@ -20,6 +19,8 @@ export default function Auth() {
       </div>
     );
   }
+
+  const navigate = useNavigate();
 
   if (session) return <Navigate to="/dashboard" replace />;
 
@@ -36,24 +37,17 @@ export default function Auth() {
 
         <Card className="border-border/50">
           <CardHeader className="pb-4">
-            <Tabs value={tab} onValueChange={setTab}>
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="login">Sign In</TabsTrigger>
-                <TabsTrigger value="signup">Sign Up</TabsTrigger>
-              </TabsList>
-              <TabsContent value="login">
-                <CardTitle className="text-lg">Welcome back</CardTitle>
-                <CardDescription>Sign in to your account</CardDescription>
-                <LoginForm />
-              </TabsContent>
-              <TabsContent value="signup">
-                <CardTitle className="text-lg">Create account</CardTitle>
-                <CardDescription>Get started with Diamond Analytics</CardDescription>
-                <SignUpForm onSuccess={() => setTab("login")} />
-              </TabsContent>
-            </Tabs>
+            <CardTitle className="text-lg">Welcome back</CardTitle>
+            <CardDescription>Sign in to your account</CardDescription>
+            <LoginForm />
           </CardHeader>
         </Card>
+
+        <div className="text-center">
+          <Button variant="ghost" className="text-muted-foreground text-sm" onClick={() => navigate("/dashboard")}>
+            Continue without signing in
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -64,6 +58,7 @@ function LoginForm() {
   const { toast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -84,52 +79,15 @@ function LoginForm() {
       </div>
       <div className="space-y-2">
         <Label htmlFor="login-password">Password</Label>
-        <Input id="login-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="••••••••" />
+        <div className="relative">
+          <Input id="login-password" type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="••••••••" className="pr-10" />
+          <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
       <Button type="submit" className="w-full" disabled={loading}>
         {loading ? "Signing in..." : "Sign In"}
-      </Button>
-    </form>
-  );
-}
-
-function SignUpForm({ onSuccess }: { onSuccess: () => void }) {
-  const { signUp } = useAuth();
-  const { toast } = useToast();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    const { error } = await signUp(email, password, displayName);
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Check your email", description: "We sent you a confirmation link." });
-      onSuccess();
-    }
-    setLoading(false);
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-      <div className="space-y-2">
-        <Label htmlFor="signup-name">Display Name</Label>
-        <Input id="signup-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Coach Smith" />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="signup-email">Email</Label>
-        <Input id="signup-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@example.com" />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="signup-password">Password</Label>
-        <Input id="signup-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="••••••••" minLength={6} />
-      </div>
-      <Button type="submit" className="w-full" disabled={loading}>
-        {loading ? "Creating account..." : "Create Account"}
       </Button>
     </form>
   );
