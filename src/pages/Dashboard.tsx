@@ -9,7 +9,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell } from "recharts";
 import { cn } from "@/lib/utils";
 
 export default function Dashboard() {
-  const { devBypassed } = useAuth();
+  const { devBypassed, disableDevBypass } = useAuth();
   const serviceKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
   const { data: stats } = useQuery({
     queryKey: ["dashboard-stats"],
@@ -80,8 +80,17 @@ export default function Dashboard() {
   return (
     <DashboardLayout>
       {devBypassed && !serviceKey && (
-        <div className="bg-yellow-100 border border-yellow-300 text-yellow-800 p-3 rounded mb-4">
-          Warning: Dev bypass active but no service role key provided. Data may be empty.
+        <div className="bg-yellow-100 border border-yellow-300 text-yellow-800 p-3 rounded mb-4 space-y-2">
+          <p>Warning: Dev bypass active but no service role key provided. Data may be empty.</p>
+          <button
+            className="text-sm text-blue-600 underline"
+            onClick={() => {
+              disableDevBypass();
+              window.location.href = '/auth';
+            }}
+          >
+            Return to login
+          </button>
         </div>
       )}
       <div className="space-y-6">
