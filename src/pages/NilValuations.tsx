@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useQuery } from "@tanstack/react-query";
@@ -11,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { DollarSign, ArrowUpDown, Search, TrendingUp, BarChart3 } from "lucide-react";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell } from "recharts";
+import { calcPlayerScore, calcProgramSpecificAllocation, DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE } from "@/lib/nilProgramSpecific";
 
 type SortKey = "name" | "estimated_value" | "p_avg" | "p_obp" | "p_slg" | "p_wrc_plus" | "owar";
 type SortDir = "asc" | "desc";
@@ -54,6 +56,10 @@ const statFmt = (v: number | null | undefined, decimals = 3) => {
 
 export default function NilValuations() {
   const [search, setSearch] = useState("");
+  const [teamFilter, setTeamFilter] = useState("");
+  const [consultationNilBudget, setConsultationNilBudget] = useState<number>(0);
+  const [programTierMultiplier, setProgramTierMultiplier] = useState<number>(1.2);
+  const [fallbackRosterTotalPlayerScore, setFallbackRosterTotalPlayerScore] = useState<number>(DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
   const [sortKey, setSortKey] = useState<SortKey>("estimated_value");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -115,6 +121,9 @@ export default function NilValuations() {
           (p.team || "").toLowerCase().includes(q)
       );
     }
+    if (teamFilter) {
+      list = list.filter((p) => (p.team || "") === teamFilter);
+    }
     list.sort((a, b) => {
       if (sortKey === "name") {
         const aVal = `${a.last_name} ${a.first_name}`;
@@ -133,7 +142,26 @@ export default function NilValuations() {
       return sortDir === "asc" ? aVal - bVal : bVal - aVal;
     });
     return list;
-  }, [players, search, sortKey, sortDir]);
+  }, [players, search, teamFilter, sortKey, sortDir]);
+
+  const teams = useMemo(() => {
+    return Array.from(new Set(players.map((p) => p.team).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
+  }, [players]);
+
+  const consultationRows = useMemo(() => {
+    return filtered.map((p) => {
+      const owar = p.component_breakdown?.ncaa_owar ?? 0;
+      const playerScore = calcPlayerScore({ owar, programTierMultiplier, position: p.position });
+      return {
+        ...p,
+        consultation_player_score: playerScore,
+      };
+    });
+  }, [filtered, programTierMultiplier]);
+
+  const totalRosterPlayerScore = useMemo(() => {
+    return consultationRows.reduce((sum, p) => sum + p.consultation_player_score, 0);
+  }, [consultationRows]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -193,6 +221,60 @@ export default function NilValuations() {
           <h2 className="text-2xl font-bold tracking-tight">NIL Valuations</h2>
           <p className="text-muted-foreground">Estimated dollar values based on offensive effectiveness</p>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Program-Specific NIL Equation</CardTitle>
+            <CardDescription>
+              Player Score = oWAR × PTM × PVF; Program NIL = (Player Score / Sum of Total Roster Player Score) × Team-Specific Total NIL Budget
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-4">
+            <div>
+              <Label className="text-xs mb-1 block">Team Filter</Label>
+              <Input
+                placeholder="Type team name..."
+                value={teamFilter}
+                onChange={(e) => setTeamFilter(e.target.value)}
+                list="nil-teams"
+              />
+              <datalist id="nil-teams">
+                {teams.map((team) => (
+                  <option key={team} value={team} />
+                ))}
+              </datalist>
+            </div>
+            <div>
+              <Label className="text-xs mb-1 block">Team-Specific Total NIL Budget ($)</Label>
+              <Input
+                type="number"
+                value={consultationNilBudget || ""}
+                onChange={(e) => setConsultationNilBudget(Number(e.target.value) || 0)}
+              />
+            </div>
+            <div>
+              <Label className="text-xs mb-1 block">Program Tier Multiplier (PTM)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={programTierMultiplier || ""}
+                onChange={(e) => setProgramTierMultiplier(Number(e.target.value) || 0)}
+              />
+            </div>
+            <div>
+              <Label className="text-xs mb-1 block">Total Roster Player Score (68 for future projections)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={fallbackRosterTotalPlayerScore || ""}
+                onChange={(e) => setFallbackRosterTotalPlayerScore(Number(e.target.value) || 0)}
+              />
+            </div>
+            <div className="md:col-span-4 text-xs text-muted-foreground">
+              Sum of Total Roster Player Score: <span className="font-mono text-foreground">{totalRosterPlayerScore.toFixed(2)}</span>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Summary cards */}
         <div className="grid gap-4 sm:grid-cols-3">
@@ -325,11 +407,19 @@ export default function NilValuations() {
                           <TooltipContent><p className="text-xs">Offensive Wins Above Replacement (NCAA scale)</p></TooltipContent>
                         </Tooltip>
                       </TableHead>
+                      <TableHead>Player Score</TableHead>
+                      <TableHead>Program NIL ($)</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filtered.map((p) => {
+                    {consultationRows.map((p) => {
                       const cb = p.component_breakdown;
+                      const consultationValue = calcProgramSpecificAllocation({
+                        playerScore: p.consultation_player_score,
+                        rosterTotalPlayerScore: totalRosterPlayerScore,
+                        nilBudget: consultationNilBudget,
+                        fallbackTotalPlayerScore: fallbackRosterTotalPlayerScore,
+                      });
                       return (
                         <TableRow key={p.id}>
                           <TableCell>
@@ -357,6 +447,14 @@ export default function NilValuations() {
                           </TableCell>
                           <TableCell className="font-mono text-sm">
                             {cb?.ncaa_owar != null ? cb.ncaa_owar.toFixed(2) : "—"}
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {p.consultation_player_score.toFixed(2)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="font-mono text-xs">
+                              {dollarFormat(Math.round(consultationValue))}
+                            </Badge>
                           </TableCell>
                         </TableRow>
                       );

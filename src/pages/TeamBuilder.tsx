@@ -13,6 +13,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Save, Trash2, Users, DollarSign, Search, X } from "lucide-react";
+import { calcPlayerScore, calcProgramSpecificAllocation, DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE } from "@/lib/nilProgramSpecific";
 
 const POSITION_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"] as const;
 const PITCHER_SLOTS = ["SP1", "SP2", "SP3", "SP4", "SP5", "RP1", "RP2", "RP3", "RP4", "CL"] as const;
@@ -43,6 +44,7 @@ type BuildPlayer = {
     p_wrc_plus: number | null;
   } | null;
   nilVal?: number | null;
+  nil_owar?: number | null;
 };
 
 export default function TeamBuilder() {
@@ -58,6 +60,8 @@ export default function TeamBuilder() {
   const [portalSearch, setPortalSearch] = useState("");
   const [showPortalSearch, setShowPortalSearch] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [programTierMultiplier, setProgramTierMultiplier] = useState<number>(1.2);
+  const [fallbackRosterTotalPlayerScore, setFallbackRosterTotalPlayerScore] = useState<number>(DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
 
   // Fetch teams
   const { data: teams = [] } = useQuery({
@@ -90,7 +94,7 @@ export default function TeamBuilder() {
         .select(`
           id, first_name, last_name, position, team, from_team,
           player_predictions!inner(p_avg, p_obp, p_slg, p_ops, p_wrc_plus, model_type, status),
-          nil_valuations(estimated_value)
+          nil_valuations(estimated_value, component_breakdown)
         `)
         .eq("team", selectedTeam)
         .eq("transfer_portal", false)
@@ -109,7 +113,7 @@ export default function TeamBuilder() {
         .select(`
           id, first_name, last_name, position, team, from_team,
           player_predictions(p_avg, p_obp, p_slg, p_ops, p_wrc_plus, model_type, status),
-          nil_valuations(estimated_value)
+          nil_valuations(estimated_value, component_breakdown)
         `)
         .eq("transfer_portal", true)
         .or(`first_name.ilike.%${portalSearch}%,last_name.ilike.%${portalSearch}%`)
@@ -142,7 +146,7 @@ export default function TeamBuilder() {
           .select(`
             id, first_name, last_name, position, team, from_team,
             player_predictions(p_avg, p_obp, p_slg, p_ops, p_wrc_plus, model_type, status),
-            nil_valuations(estimated_value)
+            nil_valuations(estimated_value, component_breakdown)
           `)
           .in("id", playerIds);
         (pData ?? []).forEach((p) => {
@@ -166,6 +170,7 @@ export default function TeamBuilder() {
             player: pd ? { first_name: pd.first_name, last_name: pd.last_name, position: pd.position, team: pd.team, from_team: pd.from_team } : null,
             prediction: activePred ?? null,
             nilVal: pd?.nil_valuations?.[0]?.estimated_value ?? null,
+            nil_owar: pd?.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
           };
         })
       );
@@ -189,6 +194,7 @@ export default function TeamBuilder() {
         player: { first_name: r.first_name, last_name: r.last_name, position: r.position, team: r.team, from_team: r.from_team },
         prediction: activePred ?? null,
         nilVal: r.nil_valuations?.[0]?.estimated_value ?? null,
+        nil_owar: r.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
       };
     });
     setRosterPlayers(mapped);
@@ -270,6 +276,7 @@ export default function TeamBuilder() {
       player: { first_name: player.first_name, last_name: player.last_name, position: player.position, team: player.team, from_team: player.from_team },
       prediction: activePred ?? null,
       nilVal: player.nil_valuations?.[0]?.estimated_value ?? null,
+      nil_owar: player.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
     };
     setRosterPlayers((prev) => [...prev, newP]);
     setPortalSearch("");
@@ -289,6 +296,7 @@ export default function TeamBuilder() {
       player: null,
       prediction: null,
       nilVal: null,
+      nil_owar: null,
     };
     setRosterPlayers((prev) => [...prev, newP]);
     setPortalSearch("");
@@ -317,6 +325,28 @@ export default function TeamBuilder() {
 
   const totalNil = rosterPlayers.reduce((sum, p) => sum + (p.nil_value || 0), 0);
   const budgetRemaining = totalBudget - totalNil;
+  const totalRosterPlayerScore = rosterPlayers.reduce((sum, p) => {
+    const playerScore = calcPlayerScore({
+      owar: p.nil_owar ?? 0,
+      programTierMultiplier,
+      position: p.position_slot || p.player?.position,
+    });
+    return sum + playerScore;
+  }, 0);
+  const totalProgramSpecificNil = rosterPlayers.reduce((sum, p) => {
+    const playerScore = calcPlayerScore({
+      owar: p.nil_owar ?? 0,
+      programTierMultiplier,
+      position: p.position_slot || p.player?.position,
+    });
+    const programNil = calcProgramSpecificAllocation({
+      playerScore,
+      rosterTotalPlayerScore: totalRosterPlayerScore,
+      nilBudget: totalBudget,
+      fallbackTotalPlayerScore: fallbackRosterTotalPlayerScore,
+    });
+    return sum + programNil;
+  }, 0);
 
   // Depth chart computation
   const depthChart = useMemo(() => {
@@ -341,7 +371,19 @@ export default function TeamBuilder() {
     setDirty(false);
   };
 
-  const renderPlayerRow = (p: BuildPlayer, idx: number, globalIdx: number) => (
+  const renderPlayerRow = (p: BuildPlayer, idx: number, globalIdx: number) => {
+    const playerScore = calcPlayerScore({
+      owar: p.nil_owar ?? 0,
+      programTierMultiplier,
+      position: p.position_slot || p.player?.position,
+    });
+    const programNil = calcProgramSpecificAllocation({
+      playerScore,
+      rosterTotalPlayerScore: totalRosterPlayerScore,
+      nilBudget: totalBudget,
+      fallbackTotalPlayerScore: fallbackRosterTotalPlayerScore,
+    });
+    return (
     <TableRow key={globalIdx}>
       <TableCell className="font-medium">
         <div className="flex items-center gap-2">
@@ -362,6 +404,8 @@ export default function TeamBuilder() {
       <TableCell>
         {p.prediction?.p_wrc_plus != null ? p.prediction.p_wrc_plus.toFixed(0) : "—"}
       </TableCell>
+      <TableCell className="font-mono text-xs">{playerScore.toFixed(2)}</TableCell>
+      <TableCell className="font-mono text-xs">${Math.round(programNil).toLocaleString()}</TableCell>
       <TableCell>
         <Input
           type="number"
@@ -407,7 +451,8 @@ export default function TeamBuilder() {
         </Button>
       </TableCell>
     </TableRow>
-  );
+    );
+  };
 
   return (
     <DashboardLayout>
@@ -463,8 +508,16 @@ export default function TeamBuilder() {
             </Select>
           </div>
           <div>
-            <Label className="text-xs mb-1 block">Total NIL Budget ($)</Label>
+            <Label className="text-xs mb-1 block">Team-Specific Total NIL Budget ($)</Label>
             <Input type="number" value={totalBudget || ""} onChange={(e) => { setTotalBudget(Number(e.target.value) || 0); setDirty(true); }} />
+          </div>
+          <div>
+            <Label className="text-xs mb-1 block">Program Tier Multiplier (PTM)</Label>
+            <Input type="number" step="0.01" value={programTierMultiplier || ""} onChange={(e) => setProgramTierMultiplier(Number(e.target.value) || 0)} />
+          </div>
+          <div>
+            <Label className="text-xs mb-1 block">Total Roster Player Score (68 for future projections)</Label>
+            <Input type="number" step="0.01" value={fallbackRosterTotalPlayerScore || ""} onChange={(e) => setFallbackRosterTotalPlayerScore(Number(e.target.value) || 0)} />
           </div>
         </div>
 
@@ -500,6 +553,47 @@ export default function TeamBuilder() {
             </CardContent>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Program-Specific NIL Equation</CardTitle>
+            <CardDescription>
+              Player Score = oWAR × PTM × PVF; Program NIL = (Player Score / Sum of Total Roster Player Score) × Team-Specific Total NIL Budget
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 text-sm md:flex-row md:items-center md:justify-between">
+            <div className="text-muted-foreground">
+              Total Roster Player Score: <span className="font-mono text-foreground">{totalRosterPlayerScore.toFixed(2)}</span>
+            </div>
+            <div className="text-muted-foreground">
+              Program-Specific NIL Total: <span className="font-mono text-foreground">${Math.round(totalProgramSpecificNil).toLocaleString()}</span>
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setRosterPlayers((prev) =>
+                  prev.map((p) => {
+                    const playerScore = calcPlayerScore({
+                      owar: p.nil_owar ?? 0,
+                      programTierMultiplier,
+                      position: p.position_slot || p.player?.position,
+                    });
+                    const programNil = calcProgramSpecificAllocation({
+                      playerScore,
+                      rosterTotalPlayerScore: totalRosterPlayerScore,
+                      nilBudget: totalBudget,
+                      fallbackTotalPlayerScore: fallbackRosterTotalPlayerScore,
+                    });
+                    return { ...p, nil_value: Math.round(programNil) };
+                  })
+                );
+                setDirty(true);
+              }}
+            >
+              Apply Program-Specific NIL to NIL ($) column
+            </Button>
+          </CardContent>
+        </Card>
 
         {/* Add portal player */}
         <Card>
@@ -566,6 +660,8 @@ export default function TeamBuilder() {
                       <TableHead>Pos</TableHead>
                       <TableHead>AVG/OBP/SLG</TableHead>
                       <TableHead>wRC+</TableHead>
+                      <TableHead>Player Score</TableHead>
+                      <TableHead>Program NIL ($)</TableHead>
                       <TableHead>NIL ($)</TableHead>
                       <TableHead>Slot</TableHead>
                       <TableHead>Depth</TableHead>
@@ -574,7 +670,7 @@ export default function TeamBuilder() {
                   </TableHeader>
                   <TableBody>
                     {positionPlayers.length === 0 ? (
-                      <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No position players added</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-8">No position players added</TableCell></TableRow>
                     ) : (
                       positionPlayers.map((p, i) => {
                         const globalIdx = rosterPlayers.indexOf(p);
@@ -599,6 +695,8 @@ export default function TeamBuilder() {
                       <TableHead>Pos</TableHead>
                       <TableHead>AVG/OBP/SLG</TableHead>
                       <TableHead>wRC+</TableHead>
+                      <TableHead>Player Score</TableHead>
+                      <TableHead>Program NIL ($)</TableHead>
                       <TableHead>NIL ($)</TableHead>
                       <TableHead>Slot</TableHead>
                       <TableHead>Depth</TableHead>
@@ -607,7 +705,7 @@ export default function TeamBuilder() {
                   </TableHeader>
                   <TableBody>
                     {pitchers.length === 0 ? (
-                      <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No pitchers added</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-8">No pitchers added</TableCell></TableRow>
                     ) : (
                       pitchers.map((p, i) => {
                         const globalIdx = rosterPlayers.indexOf(p);
