@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Activity } from "lucide-react";
+import { Activity, Eye, EyeOff } from "lucide-react";
 
 export default function Auth() {
   const { session, loading } = useAuth();
@@ -65,6 +65,10 @@ function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const navigate = useNavigate();
+
+  const bypassEnabled = import.meta.env.VITE_BYPASS_AUTH === 'true' || import.meta.env.MODE === 'development';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,11 +88,39 @@ function LoginForm() {
       </div>
       <div className="space-y-2">
         <Label htmlFor="login-password">Password</Label>
-        <Input id="login-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="••••••••" />
+        <div className="relative">
+          <Input
+            id="login-password"
+            type={showPassword ? "text" : "password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            placeholder="••••••••"
+          />
+          <button
+            type="button"
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            onClick={() => setShowPassword((s) => !s)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-neutral-700"
+          >
+            {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+          </button>
+        </div>
       </div>
       <Button type="submit" className="w-full" disabled={loading}>
         {loading ? "Signing in..." : "Sign In"}
       </Button>
+      {bypassEnabled && (
+        <div className="pt-2 text-center">
+          <button
+            type="button"
+            className="text-sm text-muted-foreground underline"
+            onClick={() => navigate('/dashboard')}
+          >
+            Skip login (dev)
+          </button>
+        </div>
+      )}
     </form>
   );
 }
