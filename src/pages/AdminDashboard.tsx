@@ -106,8 +106,6 @@ function EquationConstantsTab() {
     },
   });
 
-  if (isLoading) return <p className="text-muted-foreground py-8 text-center">Loading…</p>;
-
   const setEditable = (key: string, value: string) => {
     if (/^-?\d*\.?\d*$/.test(value)) {
       setEditableValues((prev) => ({ ...prev, [key]: value }));
@@ -183,6 +181,8 @@ function EquationConstantsTab() {
     </div>
     );
   };
+
+  if (isLoading) return <p className="text-muted-foreground py-8 text-center">Loading…</p>;
 
   return (
     <div className="space-y-6">
