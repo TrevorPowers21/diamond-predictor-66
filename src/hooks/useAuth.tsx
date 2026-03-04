@@ -14,6 +14,8 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   hasRole: (role: UserRole) => boolean;
   enableDevBypass: () => void;
+  disableDevBypass: () => void;
+  devBypassed: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -23,6 +25,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [roles, setRoles] = useState<UserRole[]>([]);
   const [loading, setLoading] = useState(true);
+  const [devBypassed, setDevBypassed] = useState(false);
 
   const fetchRoles = async (userId: string) => {
     const { data } = await supabase
@@ -35,6 +38,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    if (devBypassed) {
+      // skip subscription when bypassed
+      setLoading(false);
+      return;
+    }
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         setSession(session);
@@ -58,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [devBypassed]);
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -83,16 +92,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const hasRole = (role: UserRole) => roles.includes(role);
 
+  const disableDevBypass = () => {
+    setDevBypassed(false);
+    setSession(null);
+    setUser(null);
+    setRoles([]);
+    supabase.auth.signOut();
+  };
+
   const enableDevBypass = () => {
     const mockUser = { id: "dev-admin", email: "dev@local" } as unknown as User;
-    const mockSession = { user: mockUser } as unknown as Session;
+    const mockSession = { user: mockUser, access_token: "dev-token", refresh_token: "dev-refresh" } as unknown as Session;
     setSession(mockSession);
     setUser(mockUser);
     setRoles(["admin"] as UserRole[]);
+    setDevBypassed(true);
+    // if a service role key is available in env, use it for requests so RLS is bypassed
+    const serviceKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+    if (serviceKey) {
+      supabase.auth.setAuth(serviceKey);
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, roles, loading, signIn, signUp, signOut, hasRole, enableDevBypass }}>
+    <AuthContext.Provider value={{ session, user, roles, loading, signIn, signUp, signOut, hasRole, enableDevBypass, devBypassed }}>
       {children}
     </AuthContext.Provider>
   );
