@@ -27,4 +27,5 @@ Troubleshooting:
   * Ensure the dev server was restarted after code changes (hot reload may not pick up everything).
   * Verify `enableDevBypass()` sets `session` and that `devBypassed` is true in context (inspect via React DevTools).
   * If a Supabase query fails due to missing/invalid token, you may need to refresh or hardcode a valid token placeholder.
+  * You can also provide a service role key through `VITE_SUPABASE_SERVICE_ROLE_KEY` in your local `.env`; the bypass function will automatically use it for requests (***do not*** commit this key).
   * When in doubt, remove the bypass call temporarily and use a real account to narrow the issue.
