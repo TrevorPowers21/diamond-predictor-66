@@ -28,7 +28,13 @@ export default function Auth() {
       <div className="w-full max-w-md space-y-8">
         {devBypassed && (
           <div className="text-right">
-            <button onClick={disableDevBypass} className="text-xs text-red-500 underline">
+            <button
+              onClick={() => {
+                disableDevBypass();
+                window.location.reload();
+              }}
+              className="text-xs text-red-500 underline"
+            >
               Clear bypass
             </button>
           </div>
@@ -67,15 +73,12 @@ export default function Auth() {
 }
 
 function LoginForm() {
-  const { signIn, enableDevBypass } = useAuth();
+  const { signIn } = useAuth();
   const { toast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const navigate = useNavigate();
-
-  const bypassEnabled = true; // show the button during testing; remove before launch
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,17 +121,6 @@ function LoginForm() {
       <Button type="submit" className="w-full" disabled={loading}>
         {loading ? "Signing in..." : "Sign In"}
       </Button>
-      {bypassEnabled && (
-        <div className="pt-2 text-center">
-          <button
-            type="button"
-            className="text-sm text-muted-foreground underline"
-            onClick={() => { enableDevBypass(); navigate('/dashboard'); }}
-          >
-            Skip login (dev)
-          </button>
-        </div>
-      )}
     </form>
   );
 }
