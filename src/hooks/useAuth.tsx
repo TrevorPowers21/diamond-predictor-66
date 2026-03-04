@@ -13,6 +13,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, displayName?: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   hasRole: (role: UserRole) => boolean;
+  enableDevBypass: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -82,8 +83,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const hasRole = (role: UserRole) => roles.includes(role);
 
+  const enableDevBypass = () => {
+    const mockUser = { id: "dev-admin", email: "dev@local" } as unknown as User;
+    const mockSession = { user: mockUser } as unknown as Session;
+    setSession(mockSession);
+    setUser(mockUser);
+    setRoles(["admin"] as UserRole[]);
+  };
+
   return (
-    <AuthContext.Provider value={{ session, user, roles, loading, signIn, signUp, signOut, hasRole }}>
+    <AuthContext.Provider value={{ session, user, roles, loading, signIn, signUp, signOut, hasRole, enableDevBypass }}>
       {children}
     </AuthContext.Provider>
   );

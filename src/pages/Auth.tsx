@@ -60,7 +60,7 @@ export default function Auth() {
 }
 
 function LoginForm() {
-  const { signIn } = useAuth();
+  const { signIn, enableDevBypass } = useAuth();
   const { toast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -68,7 +68,7 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
 
-  const bypassEnabled = import.meta.env.VITE_BYPASS_AUTH === 'true' || import.meta.env.MODE === 'development';
+  const bypassEnabled = true; // show the button during testing; remove before launch
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,7 +116,7 @@ function LoginForm() {
           <button
             type="button"
             className="text-sm text-muted-foreground underline"
-            onClick={() => navigate('/dashboard')}
+            onClick={() => { enableDevBypass(); navigate('/dashboard'); }}
           >
             Skip login (dev)
           </button>
