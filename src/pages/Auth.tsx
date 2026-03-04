@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Activity, Eye, EyeOff } from "lucide-react";
 
 export default function Auth() {
-  const { session, loading } = useAuth();
+  const { session, loading, devBypassed, disableDevBypass } = useAuth();
   const [tab, setTab] = useState("login");
 
   if (loading) {
@@ -21,11 +21,18 @@ export default function Auth() {
     );
   }
 
-  if (session) return <Navigate to="/dashboard" replace />;
+  if (session && !devBypassed) return <Navigate to="/dashboard" replace />;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-md space-y-8">
+        {devBypassed && (
+          <div className="text-right">
+            <button onClick={disableDevBypass} className="text-xs text-red-500 underline">
+              Clear bypass
+            </button>
+          </div>
+        )}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-2 text-primary">
             <Activity className="h-8 w-8" />
