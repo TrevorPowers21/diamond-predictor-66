@@ -20,3 +20,11 @@ Safety notes:
 TODO (before launch):
 - [ ] Remove `enableDevBypass` usage and the skip-login UI.
 - [ ] Run full auth + RLS integration tests in staging.
+
+Troubleshooting:
+- If the app shows a blank page after clicking "Skip login (dev)":
+  * Open browser DevTools console and network tab; look for JS errors or failed requests.
+  * Ensure the dev server was restarted after code changes (hot reload may not pick up everything).
+  * Verify `enableDevBypass()` sets `session` and that `devBypassed` is true in context (inspect via React DevTools).
+  * If a Supabase query fails due to missing/invalid token, you may need to refresh or hardcode a valid token placeholder.
+  * When in doubt, remove the bypass call temporarily and use a real account to narrow the issue.
