@@ -57,14 +57,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     );
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchRoles(session.user.id);
-      }
-      setLoading(false);
-    });
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          fetchRoles(session.user.id);
+        }
+      })
+      .catch(() => {
+        // fail open to non-auth state instead of hanging in loading forever
+        setSession(null);
+        setUser(null);
+        setRoles([]);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
 
     return () => subscription.unsubscribe();
   }, [devBypassed]);
@@ -94,28 +103,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const disableDevBypass = () => {
     setDevBypassed(false);
-    setSession(null);
-    setUser(null);
-    setRoles([]);
-    supabase.auth.signOut();
   };
 
   const enableDevBypass = () => {
-    const mockUser = { id: "dev-admin", email: "dev@local" } as unknown as User;
-    const mockSession = { user: mockUser, access_token: "dev-token", refresh_token: "dev-refresh" } as unknown as Session;
-    setSession(mockSession);
-    setUser(mockUser);
-    setRoles(["admin"] as UserRole[]);
+    // simply mark bypass active; actual data requires service key in env
     setDevBypassed(true);
-    // if a service role key is available in env, use it for requests so RLS is bypassed
-    const serviceKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
-    if (serviceKey) {
-      supabase.auth.setAuth(serviceKey);
-    }
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, roles, loading, signIn, signUp, signOut, hasRole, enableDevBypass, devBypassed }}>
+    <AuthContext.Provider value={{ session, user, roles, loading, signIn, signUp, signOut, hasRole, enableDevBypass, disableDevBypass, devBypassed }}>
       {children}
     </AuthContext.Provider>
   );
