@@ -23,6 +23,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [roles, setRoles] = useState<UserRole[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const bypassEnabled = import.meta.env.VITE_BYPASS_AUTH === 'true' || import.meta.env.MODE === 'development';
+
   const fetchRoles = async (userId: string) => {
     const { data } = await supabase
       .from("user_roles")
@@ -34,6 +36,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    if (bypassEnabled) {
+      // Provide a mock admin session during development so protected queries return data
+      const mockUser = { id: "dev-admin", email: "dev@local" } as unknown as User;
+      const mockSession = { user: mockUser } as unknown as Session;
+      setSession(mockSession);
+      setUser(mockUser);
+      setRoles(["admin"] as UserRole[]);
+      setLoading(false);
+      return;
+    }
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         setSession(session);
