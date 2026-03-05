@@ -145,3 +145,21 @@ ProgramSpecificNIL = (PlayerScore / SumOfTotalRosterPlayerScore(~68 fallback)) Ã
   - Edit per-player dev aggressiveness.
   - Manually trigger full or partial recalculation.
   - Export predictions to CSV/Excel.
+
+---
+
+## Future Must-Dos (Post-CSV Automation)
+
+- Next session priority: Start with **Isolated Power Power Rating** and finish the full setup end-to-end (equation, inputs, NCAA averages, standard deviations, editable weights, and rating+).
+- Define a single source-of-truth schema for `players`, `teams`, `conference_stats`, `park_factors`, `power_ratings`, and `player_predictions` with canonical IDs and alias mapping.
+- Replace CSV uploads with automated data ingestors (API/scrape connectors) writing into staging tables first.
+- Add scheduled sync jobs (daily/weekly) with idempotent upserts.
+- Add validation gates before promotion from staging to production (required fields, ranges, duplicates, canonical team-name checks).
+- Automatically calculate and refresh all model standard deviations from full-system player data during data processing (with manual override retained in admin).
+- Pull score inputs as percentiles directly from TruMedia (or equivalent primary data source) instead of manually deriving percentile scores in the app.
+- Version equation constants/weights with effective dates and store version used for each prediction run.
+- Trigger automatic prediction recalculation after successful syncs (incremental first, full batch optional).
+- Separate environments (`dev`, `test`, `prod`) and keep `testing-trevor` pointed to test-only data sources.
+- Add admin override workflows with lock + reason + audit history so manual changes are traceable.
+- Add monitoring/alerts for sync failures, stale data, unresolved aliases, and abnormal row deltas.
+- Run parallel CSV vs automated pipeline validation during cutover, then retire CSV operations after parity.

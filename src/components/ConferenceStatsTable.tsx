@@ -135,7 +135,7 @@ export default function ConferenceStatsTable() {
             className="h-7 w-full max-w-[160px] text-xs"
           />
         ) : (
-          stat.conference
+          pinned ? "NCAA Average" : stat.conference
         )}
       </TableCell>
       {NUM_FIELDS.map((f) => (
@@ -195,9 +195,9 @@ export default function ConferenceStatsTable() {
     <Card>
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <CardTitle className="text-base">Conference Stats (2025)</CardTitle>
+          <CardTitle className="text-base">Conference Stats (NCAA)</CardTitle>
           <p className="text-sm text-muted-foreground mt-1">
-            Plus stats (AVG+ through WRC+) drive the transfer portal equation
+            Shared table for Teams and Admin. Plus stats (AVG+ through WRC+) drive the transfer portal equation.
           </p>
         </div>
         <div className="relative w-full sm:w-64">

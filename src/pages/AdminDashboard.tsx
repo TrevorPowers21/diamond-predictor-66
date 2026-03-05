@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/DashboardLayout";
+import ConferenceStatsTable from "@/components/ConferenceStatsTable";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -12,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Pencil, Save, X, RefreshCw, Scale, Sliders, Trophy, Plus, Trash2 } from "lucide-react";
+import { Pencil, RefreshCw, Scale, Sliders, Trophy, Plus, Trash2, Building2, Check, Edit2, Save, X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 
 // ─── Equation Constants Tab ───────────────────────────────────────────────────
@@ -84,6 +86,14 @@ function EquationConstantsTab() {
       if (!raw) return defaultEditableValues;
       const parsed = JSON.parse(raw) as Record<string, string>;
       const merged = { ...defaultEditableValues, ...parsed };
+      // Force latest OBP weight defaults into editable values so legacy local storage does not override them.
+      merged.obp_contact_pct_weight = defaultEditableValues.obp_contact_pct_weight;
+      merged.obp_line_drive_pct_weight = defaultEditableValues.obp_line_drive_pct_weight;
+      merged.obp_avg_exit_velocity_weight = defaultEditableValues.obp_avg_exit_velocity_weight;
+      merged.obp_pop_up_pct_weight = defaultEditableValues.obp_pop_up_pct_weight;
+      merged.obp_walk_pct_weight = defaultEditableValues.obp_walk_pct_weight;
+      merged.obp_chase_pct_weight = defaultEditableValues.obp_chase_pct_weight;
+      merged.obp_ncaa_avg_power_rating = defaultEditableValues.obp_ncaa_avg_power_rating;
       for (const [k, v] of Object.entries(merged)) {
         if (v === "") merged[k] = defaultEditableValues[k] ?? "";
       }
@@ -105,6 +115,18 @@ function EquationConstantsTab() {
       return data;
     },
   });
+  const { data: conferenceStats = [], isLoading: isConferenceStatsLoading } = useQuery({
+    queryKey: ["conference_stats_equation_sync"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("conference_stats")
+        .select("conference, avg, obp, iso, wrc")
+        .order("conference");
+      if (error) throw error;
+      return data;
+    },
+  });
+  const ncaaStats = conferenceStats.find((row) => (row.conference || "").toLowerCase().includes("ncaa"));
 
   const setEditable = (key: string, value: string) => {
     if (/^-?\d*\.?\d*$/.test(value)) {
@@ -181,8 +203,21 @@ function EquationConstantsTab() {
     </div>
     );
   };
+  const syncedField = (label: string, value: number | null | undefined, decimals = 3) => (
+    <div className="flex items-center justify-between gap-3">
+      <span>{label}</span>
+      <div className="relative">
+        <Input
+          type="text"
+          value={value == null ? "—" : Number(value).toFixed(decimals)}
+          readOnly
+          className="h-7 w-32 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+        />
+      </div>
+    </div>
+  );
 
-  if (isLoading) return <p className="text-muted-foreground py-8 text-center">Loading…</p>;
+  if (isLoading || isConferenceStatsLoading) return <p className="text-muted-foreground py-8 text-center">Loading…</p>;
 
   return (
     <div className="space-y-6">
@@ -224,9 +259,9 @@ function EquationConstantsTab() {
                 </div>
               </div>
               <div className={sectionPanelClass}>
-                {editableSectionHeader("r_ba")}
+                <p className={sectionHeadingClass}>NCAA Average</p>
                 <div className="space-y-1.5">
-                  {editableField("r_ba", "r_ncaa_avg_ba", "NCAA Avg BA")}
+                  {syncedField("NCAA Avg BA", ncaaStats?.avg, 3)}
                 </div>
               </div>
               <div className={sectionPanelClass}>
@@ -250,7 +285,7 @@ function EquationConstantsTab() {
           </div>
 
           <div>
-            <h4 className="font-semibold mb-4">On Base Percentage</h4>
+            <h4 className="font-semibold mb-4">On Base %</h4>
             <div className="bg-muted p-4 rounded-lg font-mono text-sm space-y-2">
               <div><span className="text-muted-foreground">Blended =</span> (LastOBP × (1 - PowerRatingWeight)) + (NCAAAvgOBP × (OBPPowerRating+ / NCAAAvgPowerRating) × PowerRatingWeight)</div>
               <div><span className="text-muted-foreground">Mult =</span> (1) + (ClassAdjustment) + (DevAggressiveness × 0.06)</div>
@@ -275,9 +310,9 @@ function EquationConstantsTab() {
                 </div>
               </div>
               <div className={sectionPanelClass}>
-                {editableSectionHeader("r_obp")}
+                <p className={sectionHeadingClass}>NCAA Average</p>
                 <div className="space-y-1.5">
-                  {editableField("r_obp", "r_ncaa_avg_obp", "NCAA Avg OBP")}
+                  {syncedField("NCAA Avg OBP", ncaaStats?.obp, 3)}
                 </div>
               </div>
               <div className={sectionPanelClass}>
@@ -301,7 +336,7 @@ function EquationConstantsTab() {
           </div>
 
           <div>
-            <h4 className="font-semibold mb-4">Slugging Percentage</h4>
+            <h4 className="font-semibold mb-4">Slugging %</h4>
             <div className="bg-muted p-4 rounded-lg font-mono text-sm space-y-2">
               <div><span className="text-muted-foreground">ProjectedSLG =</span> PredictedBA + PredictedISO</div>
             </div>
@@ -366,9 +401,9 @@ function EquationConstantsTab() {
                 </div>
               </div>
               <div className={sectionPanelClass}>
-                {editableSectionHeader("r_iso")}
+                <p className={sectionHeadingClass}>NCAA Average</p>
                 <div className="space-y-1.5">
-                  {editableField("r_iso", "r_ncaa_avg_iso", "NCAA Avg ISO")}
+                  {syncedField("NCAA Avg ISO", ncaaStats?.iso, 3)}
                 </div>
               </div>
               <div className={sectionPanelClass}>
@@ -433,9 +468,9 @@ function EquationConstantsTab() {
                 </div>
               </div>
               <div className={sectionPanelClass}>
-                {editableSectionHeader("r_wrc_plus")}
+                <p className={sectionHeadingClass}>NCAA Average</p>
                 <div className="space-y-1.5">
-                  {editableField("r_wrc_plus", "r_ncaa_avg_wrc", "NCAA Avg WRC")}
+                  {syncedField("NCAA Avg WRC", ncaaStats?.wrc, 3)}
                 </div>
               </div>
             </div>
@@ -468,7 +503,7 @@ function EquationConstantsTab() {
               <div className={sectionPanelClass}>
                 {editableSectionHeader("t_ba")}
                 <div className="space-y-1.5">
-                  {editableField("t_ba", "t_ba_ncaa_avg", "NCAA Avg Batting Average")}
+                  {syncedField("NCAA Avg Batting Average", ncaaStats?.avg, 3)}
                   {editableField("t_ba", "t_ba_power_weight", "Power Rating Weight")}
                   {editableField("t_ba", "t_ba_conference_weight", "Conference Weight")}
                   {editableField("t_ba", "t_ba_pitching_weight", "Pitching Weight")}
@@ -494,9 +529,9 @@ function EquationConstantsTab() {
           </div>
 
           <div>
-            <h4 className="font-semibold mb-4">On Base Percentage</h4>
+            <h4 className="font-semibold mb-4">On Base %</h4>
             <div className="bg-muted p-4 rounded-lg font-mono text-sm space-y-2">
-              <div><span className="text-muted-foreground">LastOBP =</span> LastOnBasePercentage</div>
+              <div><span className="text-muted-foreground">LastOBP =</span> LastOnBase%</div>
               <div><span className="text-muted-foreground">PowerAdj =</span> NCAAAvgOBP × (OBPPowerRating+ / 100)</div>
               <div><span className="text-muted-foreground">Blended =</span> (LastOBP × (1 - PowerRatingWeight)) + (PowerAdj × PowerRatingWeight)</div>
               <div><span className="text-muted-foreground">Multiplier =</span> (1 + (ConferenceWeight × ((ToOBP+ - FromOBP+) / 100))) - (PitchingWeight × ((ToStuff+ - FromStuff+) / 100)) + (ParkFactorWeight × ((ToParkFactor - FromParkFactor) / 100))</div>
@@ -512,7 +547,7 @@ function EquationConstantsTab() {
               <div className={sectionPanelClass}>
                 {editableSectionHeader("t_obp")}
                 <div className="space-y-1.5">
-                  {editableField("t_obp", "t_obp_ncaa_avg", "NCAA Avg OBP")}
+                  {syncedField("NCAA Avg OBP", ncaaStats?.obp, 3)}
                   {editableField("t_obp", "t_obp_power_weight", "Power Rating Weight")}
                   {editableField("t_obp", "t_obp_conference_weight", "Conference Weight")}
                   {editableField("t_obp", "t_obp_pitching_weight", "Pitching Weight")}
@@ -522,7 +557,7 @@ function EquationConstantsTab() {
               <div className={sectionPanelClass}>
                 <p className={sectionHeadingClass}>Player-Specific</p>
                 <div className="ml-2 space-y-0.5">
-                  <div>• Last On Base Percentage</div>
+                  <div>• Last On Base %</div>
                   <div>• OBP Power Rating +</div>
                 </div>
               </div>
@@ -538,7 +573,7 @@ function EquationConstantsTab() {
           </div>
 
           <div>
-            <h4 className="font-semibold mb-4">Slugging Percentage</h4>
+            <h4 className="font-semibold mb-4">Slugging %</h4>
             <div className="bg-muted p-4 rounded-lg font-mono text-sm space-y-2">
               <div><span className="text-muted-foreground">ProjectedSLG =</span> PredictedISO + PredictedBA</div>
             </div>
@@ -604,7 +639,7 @@ function EquationConstantsTab() {
               <div className={sectionPanelClass}>
                 {editableSectionHeader("t_iso")}
                 <div className="space-y-1.5">
-                  {editableField("t_iso", "t_iso_ncaa_avg", "NCAA Avg ISO")}
+                  {syncedField("NCAA Avg ISO", ncaaStats?.iso, 3)}
                   {editableField("t_iso", "t_iso_std_ncaa", "Std Dev NCAA ISO", "0.000001")}
                   {editableField("t_iso", "t_iso_std_power", "Std Dev ISO Power Rating")}
                   {editableField("t_iso", "t_iso_conference_weight", "Conference Weight")}
@@ -672,9 +707,9 @@ function EquationConstantsTab() {
                 </div>
               </div>
               <div className={sectionPanelClass}>
-                {editableSectionHeader("t_wrc_plus")}
+                <p className={sectionHeadingClass}>NCAA Average</p>
                 <div className="space-y-1.5">
-                  {editableField("t_wrc_plus", "t_wrc_plus_ncaa_avg", "NCAA Avg WRC")}
+                  {syncedField("NCAA Avg WRC", ncaaStats?.wrc, 3)}
                 </div>
               </div>
             </div>
@@ -828,140 +863,400 @@ function EquationConstantsTab() {
 // ─── Power Ratings Tab ────────────────────────────────────────────────────────
 
 function PowerRatingsTab() {
-  const queryClient = useQueryClient();
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editRating, setEditRating] = useState("");
-  const [search, setSearch] = useState("");
+  return <ConferenceStatsTable />;
+}
 
-  const { data: ratings = [], isLoading } = useQuery({
-    queryKey: ["power_ratings"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("power_ratings")
-        .select("*")
-        .order("rating", { ascending: false });
-      if (error) throw error;
-      return data;
-    },
+function AdminPowerRatingsTab() {
+  const [editableSections, setEditableSections] = useState<Record<string, boolean>>({});
+  const defaultEditableValues: Record<string, string> = {
+    ba_ncaa_contact_pct: "77.1",
+    ba_ncaa_line_drive_pct: "20.9",
+    ba_ncaa_avg_exit_velocity: "86.2",
+    ba_ncaa_pop_up_pct: "7.9",
+    ba_ncaa_avg_power_rating: "50",
+    obp_ncaa_avg_power_rating: "50",
+    iso_ncaa_avg_power_rating: "50",
+    obp_ncaa_contact_pct: "77.1",
+    obp_ncaa_line_drive_pct: "20.9",
+    obp_ncaa_avg_exit_velocity: "86.2",
+    obp_ncaa_pop_up_pct: "7.9",
+    obp_ncaa_walk_pct: "11.4",
+    obp_ncaa_chase_pct: "23.1",
+    iso_ncaa_ev_metric: "0.0",
+    iso_ncaa_barrel_metric: "0.0",
+    iso_ncaa_whiff_metric: "0.0",
+    iso_ncaa_chase_metric: "0.0",
+    ba_contact_pct_std_dev: "6.60",
+    ba_line_drive_pct_std_dev: "4.31",
+    ba_avg_exit_velocity_std_dev: "4.28",
+    ba_pop_up_pct_std_dev: "3.37",
+    obp_contact_pct_std_dev: "6.60",
+    obp_line_drive_pct_std_dev: "4.31",
+    obp_avg_exit_velocity_std_dev: "4.28",
+    obp_pop_up_pct_std_dev: "3.37",
+    obp_walk_pct_std_dev: "3.57",
+    obp_chase_pct_std_dev: "5.58",
+    iso_ev_std_dev: "1.0",
+    iso_barrel_std_dev: "1.0",
+    iso_whiff_std_dev: "1.0",
+    iso_chase_std_dev: "1.0",
+    ba_contact_pct_weight: "0.40",
+    ba_line_drive_pct_weight: "0.25",
+    ba_avg_exit_velocity_weight: "0.20",
+    ba_pop_up_pct_weight: "0.15",
+    obp_contact_pct_weight: "0.35",
+    obp_line_drive_pct_weight: "0.20",
+    obp_avg_exit_velocity_weight: "0.15",
+    obp_pop_up_pct_weight: "0.10",
+    obp_walk_pct_weight: "0.15",
+    obp_chase_pct_weight: "0.05",
+    iso_ev_weight: "0.45",
+    iso_barrel_weight: "0.40",
+    iso_whiff_weight: "0.10",
+    iso_chase_weight: "0.05",
+    overall_ba_weight: "0.30",
+    overall_obp_weight: "0.30",
+    overall_iso_weight: "0.25",
+    overall_contact_weight: "0.15",
+  };
+  const [editableValues, setEditableValues] = useState<Record<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem("admin_dashboard_power_equation_values_v3");
+      if (!raw) return defaultEditableValues;
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      const merged = { ...defaultEditableValues, ...parsed };
+      for (const [k, v] of Object.entries(merged)) {
+        if (v === "") merged[k] = defaultEditableValues[k] ?? "";
+      }
+      return merged;
+    } catch {
+      return defaultEditableValues;
+    }
   });
 
-  const updateMutation = useMutation({
-    mutationFn: async ({ id, rating }: { id: string; rating: number }) => {
-      const { error } = await supabase.from("power_ratings").update({ rating }).eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["power_ratings"] });
-      toast.success("Rating updated");
-      setEditingId(null);
-    },
-    onError: (e) => toast.error(e.message),
-  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("admin_dashboard_power_equation_values_v3", JSON.stringify(editableValues));
+    } catch {
+      // ignore storage errors
+    }
+  }, [editableValues]);
 
-  const filtered = search
-    ? ratings.filter((r) => r.conference.toLowerCase().includes(search.toLowerCase()))
-    : ratings;
+  const setEditable = (key: string, value: string) => {
+    if (/^-?\d*\.?\d*$/.test(value)) {
+      setEditableValues((prev) => ({ ...prev, [key]: value }));
+    }
+  };
 
-  if (isLoading) return <p className="text-muted-foreground py-8 text-center">Loading…</p>;
+  const toggleEditableSection = (sectionKey: string) => {
+    setEditableSections((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }));
+  };
+
+  const sectionHeadingClass = "text-[11px] uppercase tracking-wide font-semibold text-foreground";
+  const sectionPanelClass = "rounded-md border bg-background/60 p-3 space-y-2";
+  const editableSectionHeader = (sectionKey: string, title = "Editable (Admin UI)") => {
+    const isEditable = !!editableSections[sectionKey];
+    return (
+      <div className="flex items-center justify-between gap-2">
+        <p className={sectionHeadingClass}>{title}</p>
+        <Button
+          type="button"
+          size="sm"
+          variant={isEditable ? "secondary" : "outline"}
+          className="h-6 px-2 text-[11px]"
+          onClick={() => toggleEditableSection(sectionKey)}
+        >
+          {isEditable ? "Done" : "Edit"}
+        </Button>
+      </div>
+    );
+  };
+
+  const editableField = (sectionKey: string, key: string, label: string) => {
+    const isSectionEditable = !!editableSections[sectionKey];
+    return (
+      <div className="flex items-center justify-between gap-3">
+        <span>{label}</span>
+        <Input
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
+          spellCheck={false}
+          value={editableValues[key] ?? ""}
+          onChange={(e) => setEditable(key, e.target.value)}
+          readOnly={!isSectionEditable}
+          className="h-7 w-32 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+        />
+      </div>
+    );
+  };
+
+  const safeNumber = (value: string | undefined, fallback: number) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const baContactWeight = safeNumber(editableValues.ba_contact_pct_weight, 0.4);
+  const baLineDriveWeight = safeNumber(editableValues.ba_line_drive_pct_weight, 0.25);
+  const baAvgEVWeight = safeNumber(editableValues.ba_avg_exit_velocity_weight, 0.2);
+  const baPopUpWeight = safeNumber(editableValues.ba_pop_up_pct_weight, 0.15);
+  const obpContactWeight = safeNumber(editableValues.obp_contact_pct_weight, 0.35);
+  const obpLineDriveWeight = safeNumber(editableValues.obp_line_drive_pct_weight, 0.2);
+  const obpAvgEVWeight = safeNumber(editableValues.obp_avg_exit_velocity_weight, 0.15);
+  const obpPopUpWeight = safeNumber(editableValues.obp_pop_up_pct_weight, 0.1);
+  const obpWalkWeight = safeNumber(editableValues.obp_walk_pct_weight, 0.15);
+  const obpChaseWeight = safeNumber(editableValues.obp_chase_pct_weight, 0.05);
+  const isoEVWeight = safeNumber(editableValues.iso_ev_weight, 0.45);
+  const isoBarrelWeight = safeNumber(editableValues.iso_barrel_weight, 0.4);
+  const isoWhiffWeight = safeNumber(editableValues.iso_whiff_weight, 0.1);
+  const isoChaseWeight = safeNumber(editableValues.iso_chase_weight, 0.05);
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold">Conference Power Ratings</h3>
-          <p className="text-sm text-muted-foreground">{ratings.length} conferences loaded</p>
-        </div>
-        <Input
-          placeholder="Search conference…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-48"
-        />
+      <div>
+        <h3 className="text-lg font-semibold">Power Rating Equations</h3>
+        <p className="text-sm text-muted-foreground">Equation tables used to calculate component and overall offensive power ratings.</p>
       </div>
-      <Card>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>#</TableHead>
-                  <TableHead>Conference</TableHead>
-                  <TableHead className="text-right">Rating</TableHead>
-                  <TableHead>Season</TableHead>
-                  <TableHead className="text-right">AVG+</TableHead>
-                  <TableHead className="text-right">OBP+</TableHead>
-                  <TableHead className="text-right">SLG+</TableHead>
-                  <TableHead className="text-right">OPS+</TableHead>
-                  <TableHead className="text-right">wRC+</TableHead>
-                  <TableHead className="w-16" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((r, idx) => {
-                  let parsed: any = {};
-                  try {
-                    parsed = typeof r.notes === "string" ? JSON.parse(r.notes) : r.notes || {};
-                  } catch {}
 
-                  return (
-                    <TableRow key={r.id}>
-                      <TableCell className="text-muted-foreground text-xs">{idx + 1}</TableCell>
-                      <TableCell className="font-medium text-sm">{r.conference}</TableCell>
-                      <TableCell className="text-right">
-                        {editingId === r.id ? (
-                          <div className="flex items-center justify-end gap-1">
-                            <Input
-                              type="number"
-                              step="0.1"
-                              value={editRating}
-                              onChange={(e) => setEditRating(e.target.value)}
-                              className="w-20 h-7 text-sm"
-                            />
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => {
-                                const v = parseFloat(editRating);
-                                if (!isNaN(v)) updateMutation.mutate({ id: r.id, rating: v });
-                              }}
-                            >
-                              <Save className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingId(null)}>
-                              <X className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <span className="font-mono font-bold">{Number(r.rating).toFixed(0)}</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-xs">{r.season}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{parsed.avg_plus ?? "—"}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{parsed.obp_plus ?? "—"}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{parsed.slg_plus ?? "—"}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{parsed.ops_plus ?? "—"}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{parsed.wrc_plus ?? "—"}</TableCell>
-                      <TableCell>
-                        {editingId !== r.id && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => {
-                              setEditingId(r.id);
-                              setEditRating(r.rating.toString());
-                            }}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Batting Average Power Rating</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="bg-muted p-4 rounded-lg font-mono text-sm">
+            <div><span className="text-muted-foreground">BAPowerRating =</span> ({baContactWeight.toFixed(2)} × ContactScore) + ({baLineDriveWeight.toFixed(2)} × LineDriveScore) + ({baAvgEVWeight.toFixed(2)} × AverageExitVelocityScore) + ({baPopUpWeight.toFixed(2)} × PopUpScore)</div>
+            <div><span className="text-muted-foreground">BAPowerRating+ =</span> (BAPowerRating / NCAAAverageBAPowerRating) × 100</div>
+          </div>
+          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>Player-Specific Inputs</p>
+              <div className="ml-2 space-y-0.5">
+                <div>• Contact %</div>
+                <div>• Line Drive %</div>
+                <div>• Pop-Up %</div>
+                <div>• Average Exit Velocity</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              {editableSectionHeader("pr_ba")}
+              <div className="space-y-1.5">
+                {editableField("pr_ba", "ba_ncaa_avg_power_rating", "NCAA Average BA Power Rating")}
+                {editableField("pr_ba", "ba_contact_pct_weight", "Contact % Weight")}
+                {editableField("pr_ba", "ba_line_drive_pct_weight", "Line Drive % Weight")}
+                {editableField("pr_ba", "ba_avg_exit_velocity_weight", "Average Exit Velocity Weight")}
+                {editableField("pr_ba", "ba_pop_up_pct_weight", "Pop-Up % Weight")}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">On Base % Power Rating</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="bg-muted p-4 rounded-lg font-mono text-sm">
+            <div><span className="text-muted-foreground">OBPPowerRating =</span> ({obpContactWeight.toFixed(2)} × ContactScore) + ({obpLineDriveWeight.toFixed(2)} × LineDriveScore) + ({obpAvgEVWeight.toFixed(2)} × AverageExitVelocityScore) + ({obpPopUpWeight.toFixed(2)} × PopUpScore) + ({obpWalkWeight.toFixed(2)} × BB%Score) + ({obpChaseWeight.toFixed(2)} × ChaseScore)</div>
+            <div><span className="text-muted-foreground">OBPPowerRating+ =</span> (OBPPowerRating / NCAAAverageOBPPowerRating) × 100</div>
+          </div>
+          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>Player-Specific Inputs</p>
+              <div className="ml-2 space-y-0.5">
+                <div>• Contact %</div>
+                <div>• Line Drive %</div>
+                <div>• Average Exit Velocity</div>
+                <div>• Pop-Up %</div>
+                <div>• BB%</div>
+                <div>• Chase %</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              {editableSectionHeader("pr_obp")}
+              <div className="space-y-1.5">
+                {editableField("pr_obp", "obp_ncaa_avg_power_rating", "NCAA Average OBP Power Rating")}
+                {editableField("pr_obp", "obp_contact_pct_weight", "Contact % Weight")}
+                {editableField("pr_obp", "obp_line_drive_pct_weight", "Line Drive % Weight")}
+                {editableField("pr_obp", "obp_avg_exit_velocity_weight", "Average Exit Velocity Weight")}
+                {editableField("pr_obp", "obp_pop_up_pct_weight", "Pop-Up % Weight")}
+                {editableField("pr_obp", "obp_walk_pct_weight", "BB% Weight")}
+                {editableField("pr_obp", "obp_chase_pct_weight", "Chase % Weight")}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Isolated Power Power Rating</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="bg-muted p-4 rounded-lg font-mono text-sm">
+            <div><span className="text-muted-foreground">ISOPowerRating =</span> ({isoEVWeight.toFixed(2)} × EVScore) + ({isoBarrelWeight.toFixed(2)} × BarrelScore) + ({isoWhiffWeight.toFixed(2)} × WhiffScore) + ({isoChaseWeight.toFixed(2)} × ChaseScore)</div>
+            <div><span className="text-muted-foreground">ISOPowerRating+ =</span> (ISOPowerRating / NCAAAverageISOPowerRating) × 100</div>
+          </div>
+          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>Player-Specific Inputs</p>
+              <div className="ml-2 space-y-0.5">
+                <div>• EV Score</div>
+                <div>• Barrel Score</div>
+                <div>• Whiff Score</div>
+                <div>• Chase Score</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              {editableSectionHeader("pr_iso")}
+              <div className="space-y-1.5">
+                {editableField("pr_iso", "iso_ncaa_avg_power_rating", "NCAA Average ISO Power Rating")}
+                {editableField("pr_iso", "iso_ev_weight", "EV Weight")}
+                {editableField("pr_iso", "iso_barrel_weight", "Barrel Weight")}
+                {editableField("pr_iso", "iso_whiff_weight", "Whiff Weight")}
+                {editableField("pr_iso", "iso_chase_weight", "Chase Weight")}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Overall Power Rating</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="bg-muted p-4 rounded-lg font-mono text-sm">
+            <div><span className="text-muted-foreground">OverallPowerRating =</span> (BAPowerRating × BAWeight) + (OBPPowerRating × OBPWeight) + (ISOPowerRating × ISOWeight) + (ContactComponent × ContactWeight)</div>
+          </div>
+          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>Inputs</p>
+              <div className="ml-2 space-y-0.5">
+                <div>• BA Power Rating</div>
+                <div>• OBP Power Rating</div>
+                <div>• ISO Power Rating</div>
+                <div>• Contact Component</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              {editableSectionHeader("pr_overall")}
+              <div className="space-y-1.5">
+                {editableField("pr_overall", "overall_ba_weight", "BA Weight")}
+                {editableField("pr_overall", "overall_obp_weight", "OBP Weight")}
+                {editableField("pr_overall", "overall_iso_weight", "ISO Weight")}
+                {editableField("pr_overall", "overall_contact_weight", "Contact Weight")}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Score Equations Reference</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2 xl:grid-cols-3">
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>Batting Average Scores</p>
+              <div className="space-y-2 font-mono leading-relaxed">
+                <div className="rounded bg-background/70 px-2 py-1 break-words">ContactScore = NORM.DIST(Contact%, NCAAAverageContact%, Contact%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">LineDriveScore = NORM.DIST(LineDrive%, NCAAAverageLineDrive%, LineDrive%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">AverageExitVelocityScore = NORM.DIST(AverageExitVelocity, NCAAAverageExitVelocity, AverageExitVelocityStdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">PopUpScore = 100 - (NORM.DIST(PopUp%, NCAAAveragePopUp%, PopUp%StdDev, TRUE) × 100)</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>On Base % Scores</p>
+              <div className="space-y-2 font-mono leading-relaxed">
+                <div className="rounded bg-background/70 px-2 py-1 break-words">ContactScore = NORM.DIST(Contact%, NCAAAverageContact%, Contact%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">LineDriveScore = NORM.DIST(LineDrive%, NCAAAverageLineDrive%, LineDrive%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">AverageExitVelocityScore = NORM.DIST(AverageExitVelocity, NCAAAverageExitVelocity, AverageExitVelocityStdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">PopUpScore = 100 - (NORM.DIST(PopUp%, NCAAAveragePopUp%, PopUp%StdDev, TRUE) × 100)</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">BB%Score = NORM.DIST(BB%, NCAAAverageBB%, BB%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">ChaseScore = 100 - (NORM.DIST(Chase%, NCAAAverageChase%, Chase%StdDev, TRUE) × 100)</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>Isolated Power Scores</p>
+              <div className="space-y-2 font-mono leading-relaxed">
+                <div className="rounded bg-background/70 px-2 py-1 break-words">EVScore = NORM.DIST(EVMetric, NCAAAverageEVMetric, EVMetricStdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">BarrelScore = NORM.DIST(BarrelMetric, NCAAAverageBarrelMetric, BarrelMetricStdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">WhiffScore = 100 - (NORM.DIST(WhiffMetric, NCAAAverageWhiffMetric, WhiffMetricStdDev, TRUE) × 100)</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">ChaseScore = 100 - (NORM.DIST(ChaseMetric, NCAAAverageChaseMetric, ChaseMetricStdDev, TRUE) × 100)</div>
+              </div>
+            </div>
+          </div>
+
+          <div className={sectionPanelClass}>
+            {editableSectionHeader("pr_std_dev", "Standard Deviations (Editable, System-Wide)")}
+            <p className="text-[11px] text-muted-foreground">
+              Calculated across every player in this system. These are manual admin inputs until automated recalculation is added.
+            </p>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">Batting Average</p>
+                {editableField("pr_std_dev", "ba_contact_pct_std_dev", "Contact % Std Dev (Range: 54 to 95)")}
+                {editableField("pr_std_dev", "ba_line_drive_pct_std_dev", "Line Drive % Std Dev (Range: 8 to 35)")}
+                {editableField("pr_std_dev", "ba_avg_exit_velocity_std_dev", "Average Exit Velocity Std Dev (Range: 59.3 to 103.5)")}
+                {editableField("pr_std_dev", "ba_pop_up_pct_std_dev", "Pop-Up % Std Dev (Range: 20.8 to 0)")}
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">On Base %</p>
+                {editableField("pr_std_dev", "obp_contact_pct_std_dev", "Contact % Std Dev (Range: 54 to 95)")}
+                {editableField("pr_std_dev", "obp_line_drive_pct_std_dev", "Line Drive % Std Dev (Range: 8 to 35)")}
+                {editableField("pr_std_dev", "obp_avg_exit_velocity_std_dev", "Average Exit Velocity Std Dev (Range: 59.3 to 103.5)")}
+                {editableField("pr_std_dev", "obp_pop_up_pct_std_dev", "Pop-Up % Std Dev (Range: 20.8 to 0)")}
+                {editableField("pr_std_dev", "obp_walk_pct_std_dev", "BB% Std Dev (Range: 2.5 to 26)")}
+                {editableField("pr_std_dev", "obp_chase_pct_std_dev", "Chase % Std Dev (Range: 43.7 to 79)")}
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">Isolated Power</p>
+                {editableField("pr_std_dev", "iso_ev_std_dev", "EV Std Dev (Range: min to max)")}
+                {editableField("pr_std_dev", "iso_barrel_std_dev", "Barrel Std Dev (Range: min to max)")}
+                {editableField("pr_std_dev", "iso_whiff_std_dev", "Whiff Std Dev (Range: min to max)")}
+                {editableField("pr_std_dev", "iso_chase_std_dev", "Chase Std Dev (Range: min to max)")}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">NCAA Averages (Power Ratings Inputs)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Note: These NCAA averages are temporary manual admin inputs and should be pulled automatically from a data source like TruMedia.
+          </p>
+          <div className={sectionPanelClass}>
+            {editableSectionHeader("pr_ncaa_averages")}
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">Batting Average</p>
+                {editableField("pr_ncaa_averages", "ba_ncaa_contact_pct", "NCAA Average Contact % (%)")}
+                {editableField("pr_ncaa_averages", "ba_ncaa_line_drive_pct", "NCAA Average Line Drive % (%)")}
+                {editableField("pr_ncaa_averages", "ba_ncaa_avg_exit_velocity", "NCAA Average Exit Velocity")}
+                {editableField("pr_ncaa_averages", "ba_ncaa_pop_up_pct", "NCAA Average Pop-Up % (%)")}
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">On Base %</p>
+                {editableField("pr_ncaa_averages", "obp_ncaa_contact_pct", "NCAA Average Contact % (%)")}
+                {editableField("pr_ncaa_averages", "obp_ncaa_line_drive_pct", "NCAA Average Line Drive % (%)")}
+                {editableField("pr_ncaa_averages", "obp_ncaa_avg_exit_velocity", "NCAA Average Exit Velocity")}
+                {editableField("pr_ncaa_averages", "obp_ncaa_pop_up_pct", "NCAA Average Pop-Up % (%)")}
+                {editableField("pr_ncaa_averages", "obp_ncaa_walk_pct", "NCAA Average BB%")}
+                {editableField("pr_ncaa_averages", "obp_ncaa_chase_pct", "NCAA Average Chase % (%)")}
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">Isolated Power</p>
+                {editableField("pr_ncaa_averages", "iso_ncaa_ev_metric", "NCAA Average EV Metric")}
+                {editableField("pr_ncaa_averages", "iso_ncaa_barrel_metric", "NCAA Average Barrel Metric")}
+                {editableField("pr_ncaa_averages", "iso_ncaa_whiff_metric", "NCAA Average Whiff Metric")}
+                {editableField("pr_ncaa_averages", "iso_ncaa_chase_metric", "NCAA Average Chase Metric")}
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -995,6 +1290,20 @@ type WeightForm = {
 };
 
 const emptyForm: WeightForm = { position: "", from_class: "", to_class: "", stat_category: "overall", weight: "1.000", notes: "" };
+const CONFERENCES = [
+  "ACC", "AAC", "A-10", "America East", "ASUN", "Big 12", "Big East", "Big Sky",
+  "Big South", "Big Ten", "Big West", "CAA", "CUSA", "Horizon League", "Ivy League",
+  "MAAC", "MAC", "MEAC", "Mountain West", "MVC", "NEC", "OVC", "Pac-12",
+  "Patriot League", "SoCon", "Southland", "Summit League", "Sun Belt", "SWAC",
+  "WAC", "WCC",
+];
+
+type TeamRow = {
+  id: string;
+  name: string;
+  conference: string | null;
+  park_factor: number | null;
+};
 
 function DevWeightsTab() {
   const queryClient = useQueryClient();
@@ -1247,6 +1556,252 @@ function DevWeightsTab() {
   );
 }
 
+// ─── Teams Tab ────────────────────────────────────────────────────────────────
+
+function TeamsAdminTab() {
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [confFilter, setConfFilter] = useState<string>("all");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editConf, setEditConf] = useState("");
+  const [editName, setEditName] = useState("");
+  const [newTeamName, setNewTeamName] = useState("");
+  const [newTeamConf, setNewTeamConf] = useState("");
+  const [showAddForm, setShowAddForm] = useState(false);
+
+  const { data: teams = [], isLoading } = useQuery({
+    queryKey: ["admin-teams"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("teams")
+        .select("id, name, conference, park_factor")
+        .order("name");
+      if (error) throw error;
+      return (data || []) as TeamRow[];
+    },
+  });
+
+  const updateTeam = useMutation({
+    mutationFn: async ({ id, name, conference }: { id: string; name: string; conference: string }) => {
+      const { error } = await supabase.from("teams").update({ name, conference }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
+      queryClient.invalidateQueries({ queryKey: ["teams"] });
+      setEditingId(null);
+      toast.success("Team updated");
+    },
+    onError: (e) => toast.error(`Failed: ${e.message}`),
+  });
+
+  const deleteTeam = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("teams").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
+      queryClient.invalidateQueries({ queryKey: ["teams"] });
+      toast.success("Team deleted");
+    },
+    onError: (e) => toast.error(`Failed: ${e.message}`),
+  });
+
+  const addTeam = useMutation({
+    mutationFn: async ({ name, conference }: { name: string; conference: string }) => {
+      const { error } = await supabase.from("teams").insert({ name, conference: conference || null });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
+      queryClient.invalidateQueries({ queryKey: ["teams"] });
+      setNewTeamName("");
+      setNewTeamConf("");
+      setShowAddForm(false);
+      toast.success("Team added");
+    },
+    onError: (e) => toast.error(`Failed: ${e.message}`),
+  });
+
+  const filtered = useMemo(() => {
+    let list = teams;
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter((t) => t.name.toLowerCase().includes(q) || (t.conference || "").toLowerCase().includes(q));
+    }
+    if (confFilter !== "all") {
+      if (confFilter === "unassigned") list = list.filter((t) => !t.conference);
+      else list = list.filter((t) => t.conference === confFilter);
+    }
+    return list;
+  }, [teams, search, confFilter]);
+
+  const confCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    teams.forEach((t) => {
+      const c = t.conference || "Unassigned";
+      counts[c] = (counts[c] || 0) + 1;
+    });
+    return counts;
+  }, [teams]);
+
+  const uniqueConfs = useMemo(() => [...new Set(teams.map((t) => t.conference).filter(Boolean))].sort() as string[], [teams]);
+
+  const startEdit = (team: TeamRow) => {
+    setEditingId(team.id);
+    setEditConf(team.conference || "");
+    setEditName(team.name);
+  };
+
+  const saveEdit = (id: string) => {
+    updateTeam.mutate({ id, name: editName, conference: editConf });
+  };
+
+  return (
+    <div className="space-y-4">
+      {showAddForm && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex gap-3 items-end">
+              <div className="flex-1">
+                <label className="text-sm font-medium text-muted-foreground mb-1 block">Team Name</label>
+                <Input value={newTeamName} onChange={(e) => setNewTeamName(e.target.value)} placeholder="e.g. University of Example" />
+              </div>
+              <div className="w-48">
+                <label className="text-sm font-medium text-muted-foreground mb-1 block">Conference</label>
+                <Select value={newTeamConf} onValueChange={setNewTeamConf}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CONFERENCES.map((c) => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button onClick={() => addTeam.mutate({ name: newTeamName, conference: newTeamConf })} disabled={!newTeamName.trim()} size="sm">
+                Add
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setShowAddForm(false)}>Cancel</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle className="text-base">All Teams</CardTitle>
+          <div className="flex gap-2">
+            <Select value={confFilter} onValueChange={setConfFilter}>
+              <SelectTrigger className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Conferences</SelectItem>
+                <SelectItem value="unassigned">Unassigned</SelectItem>
+                {uniqueConfs.map((c) => (
+                  <SelectItem key={c} value={c}>{c} ({confCounts[c] || 0})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="relative w-full sm:w-64">
+              <Input placeholder="Search teams..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+            </div>
+            <Button onClick={() => setShowAddForm((v) => !v)} size="sm" className="gap-1">
+              <Plus className="h-4 w-4" />
+              Add Team
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground">Loading teams…</div>
+          ) : filtered.length === 0 ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground">No teams found</div>
+          ) : (
+            <div className="overflow-auto max-h-[60vh]">
+              <Table>
+                <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
+                  <TableRow>
+                    <TableHead className="min-w-[250px]">Team</TableHead>
+                    <TableHead className="min-w-[100px] text-center">Park Factor</TableHead>
+                    <TableHead className="min-w-[180px]">Conference</TableHead>
+                    <TableHead className="w-[100px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((team) => (
+                    <TableRow key={team.id}>
+                      <TableCell className="font-medium">
+                        {editingId === team.id ? (
+                          <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="h-8 w-full max-w-[280px]" />
+                        ) : (
+                          team.name
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className="text-sm tabular-nums">{Math.round((team.park_factor ?? 1.0) * 100)}</span>
+                      </TableCell>
+                      <TableCell>
+                        {editingId === team.id ? (
+                          <Select value={editConf} onValueChange={setEditConf}>
+                            <SelectTrigger className="w-44 h-8">
+                              <SelectValue placeholder="Select conference" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CONFERENCES.map((c) => (
+                                <SelectItem key={c} value={c}>{c}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : team.conference ? (
+                          <Badge variant="secondary">{team.conference}</Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground italic">Unassigned</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {editingId === team.id ? (
+                          <div className="flex gap-1">
+                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => saveEdit(team.id)}>
+                              <Check className="h-3.5 w-3.5 text-[hsl(var(--success))]" />
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingId(null)}>
+                              <X className="h-3.5 w-3.5 text-destructive" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex gap-1">
+                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEdit(team)}>
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7"
+                              onClick={() => {
+                                if (confirm(`Delete "${team.name}"?`)) deleteTeam.mutate(team.id);
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                            </Button>
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ─── NIL Valuations Tab ───────────────────────────────────────────────────────
 
 function NilValuationsTableTab() {
@@ -1450,7 +2005,7 @@ export default function AdminDashboard() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Admin Dashboard</h2>
           <p className="text-muted-foreground">
-            Manage equation constants, power ratings, and developmental weights in one place.
+            Manage equation constants, conference statistics, teams, and NIL valuations in one place.
           </p>
         </div>
 
@@ -1462,15 +2017,15 @@ export default function AdminDashboard() {
             </TabsTrigger>
             <TabsTrigger value="power" className="gap-1.5">
               <Trophy className="h-4 w-4" />
+              Conference Statistics
+            </TabsTrigger>
+            <TabsTrigger value="power-ratings" className="gap-1.5">
+              <Trophy className="h-4 w-4" />
               Power Ratings
             </TabsTrigger>
-            <TabsTrigger value="weights" className="gap-1.5">
-              <Scale className="h-4 w-4" />
-              Dev Weights
-            </TabsTrigger>
-            <TabsTrigger value="nil" className="gap-1.5">
-              <Trophy className="h-4 w-4" />
-              NIL Valuations
+            <TabsTrigger value="teams" className="gap-1.5">
+              <Building2 className="h-4 w-4" />
+              Teams
             </TabsTrigger>
             <TabsTrigger value="actions" className="gap-1.5">
               <RefreshCw className="h-4 w-4" />
@@ -1484,11 +2039,11 @@ export default function AdminDashboard() {
           <TabsContent value="power">
             <PowerRatingsTab />
           </TabsContent>
-          <TabsContent value="weights">
-            <DevWeightsTab />
+          <TabsContent value="power-ratings">
+            <AdminPowerRatingsTab />
           </TabsContent>
-          <TabsContent value="nil">
-            <NilValuationsTableTab />
+          <TabsContent value="teams">
+            <TeamsAdminTab />
           </TabsContent>
           <TabsContent value="actions">
             <QuickActionsTab />
