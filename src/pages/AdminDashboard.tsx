@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -16,6 +17,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Pencil, RefreshCw, Scale, Sliders, Trophy, Plus, Trash2, Building2, Check, Edit2, Save, X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { bulkRecalculatePredictionsLocal } from "@/lib/predictionEngine";
+import storage2025Seed from "@/data/storage_2025_seed.json";
+import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
+import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
 
 // ─── Equation Constants Tab ───────────────────────────────────────────────────
 
@@ -47,6 +52,13 @@ function EquationConstantsTab() {
     r_iso_class_sj: "3",
     r_iso_class_js: "2",
     r_iso_class_gr: "1",
+    r_ba_damp_tier1_max: "0.350",
+    r_ba_damp_tier2_max: "0.380",
+    r_ba_damp_tier3_max: "0.420",
+    r_ba_damp_tier1_impact: "1.00",
+    r_ba_damp_tier2_impact: "0.90",
+    r_ba_damp_tier3_impact: "0.70",
+    r_ba_damp_tier4_impact: "0.40",
     t_ba_ncaa_avg: "0.280",
     t_ba_power_weight: "0.70",
     t_ba_conference_weight: "1.000",
@@ -218,6 +230,9 @@ function EquationConstantsTab() {
   );
 
   if (isLoading || isConferenceStatsLoading) return <p className="text-muted-foreground py-8 text-center">Loading…</p>;
+  const baTier1Max = editableValues.r_ba_damp_tier1_max || "0.350";
+  const baTier2Max = editableValues.r_ba_damp_tier2_max || "0.380";
+  const baTier3Max = editableValues.r_ba_damp_tier3_max || "0.420";
 
   return (
     <div className="space-y-6">
@@ -240,13 +255,12 @@ function EquationConstantsTab() {
               <div><span className="text-muted-foreground">Mult =</span> (1) + (ClassAdjustment) + (DevAggressiveness × 0.06)</div>
               <div><span className="text-muted-foreground">Projected =</span> Blended × Mult</div>
               <div><span className="text-muted-foreground">Delta =</span> Projected - LastBA</div>
-              <div><span className="text-muted-foreground">DampFactor =</span></div>
+              <div><span className="text-muted-foreground">DampFactor =</span> IFS(ProjectedBA ≤ 0.350, 1.0, ProjectedBA ≤ 0.380, 0.9, ProjectedBA ≤ 0.420, 0.7, TRUE, 0.4)</div>
               <div className="ml-6 space-y-1 text-xs">
-                <div>1.0 if Delta ≤ 0 (no growth)</div>
-                <div>1.0 if 0 &lt; Delta ≤ 0.03 (small growth, full effect)</div>
-                <div>0.9 if 0.03 &lt; Delta ≤ 0.06 (moderate growth, 90% of delta)</div>
-                <div>0.7 if 0.06 &lt; Delta ≤ 0.08 (large growth, 70% of delta)</div>
-                <div>0.4 if Delta &gt; 0.08 (extreme growth, 40% of delta)</div>
+                <div>1.0 if ProjectedBA ≤ 0.350</div>
+                <div>0.9 if 0.350 &lt; ProjectedBA ≤ 0.380</div>
+                <div>0.7 if 0.380 &lt; ProjectedBA ≤ 0.420</div>
+                <div>0.4 if ProjectedBA &gt; 0.420</div>
               </div>
               <div><span className="text-muted-foreground">Final =</span> LastBA + (Delta × DampFactor)</div>
             </div>
@@ -279,6 +293,107 @@ function EquationConstantsTab() {
                   {editableField("r_ba_class", "r_ba_class_sj", "SJ", "0.1", "%")}
                   {editableField("r_ba_class", "r_ba_class_js", "JS", "0.1", "%")}
                   {editableField("r_ba_class", "r_ba_class_gr", "GR", "0.1", "%")}
+                </div>
+              </div>
+              <div className={sectionPanelClass}>
+                {editableSectionHeader("r_ba_damp", "Batting Average Dampening")}
+                <div className="space-y-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={editableValues.r_ba_damp_tier1_max ?? ""}
+                      onChange={(e) => setEditable("r_ba_damp_tier1_max", e.target.value)}
+                      readOnly={!editableSections.r_ba_damp}
+                      className="h-7 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+                    />
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={editableValues.r_ba_damp_tier2_max ?? ""}
+                      onChange={(e) => setEditable("r_ba_damp_tier2_max", e.target.value)}
+                      readOnly={!editableSections.r_ba_damp}
+                      className="h-7 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+                    />
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={editableValues.r_ba_damp_tier3_max ?? ""}
+                      onChange={(e) => setEditable("r_ba_damp_tier3_max", e.target.value)}
+                      readOnly={!editableSections.r_ba_damp}
+                      className="h-7 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <span>Range (Projected BA)</span>
+                    <span>Impact</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 items-center">
+                    <div className="h-7 px-2 flex items-center border rounded-md bg-muted/40 text-[11px] text-muted-foreground font-mono">
+                      ≤ {baTier1Max}
+                    </div>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={editableValues.r_ba_damp_tier1_impact ?? ""}
+                      onChange={(e) => setEditable("r_ba_damp_tier1_impact", e.target.value)}
+                      readOnly={!editableSections.r_ba_damp}
+                      className="h-7 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 items-center">
+                    <div className="h-7 px-2 flex items-center border rounded-md bg-muted/40 text-[11px] text-muted-foreground font-mono">
+                      &gt; {baTier1Max} and ≤ {baTier2Max}
+                    </div>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={editableValues.r_ba_damp_tier2_impact ?? ""}
+                      onChange={(e) => setEditable("r_ba_damp_tier2_impact", e.target.value)}
+                      readOnly={!editableSections.r_ba_damp}
+                      className="h-7 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 items-center">
+                    <div className="h-7 px-2 flex items-center border rounded-md bg-muted/40 text-[11px] text-muted-foreground font-mono">
+                      &gt; {baTier2Max} and ≤ {baTier3Max}
+                    </div>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={editableValues.r_ba_damp_tier3_impact ?? ""}
+                      onChange={(e) => setEditable("r_ba_damp_tier3_impact", e.target.value)}
+                      readOnly={!editableSections.r_ba_damp}
+                      className="h-7 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 items-center">
+                    <div className="h-7 px-2 flex items-center border rounded-md bg-muted/40 text-[11px] text-muted-foreground font-mono">
+                      &gt; {baTier3Max}
+                    </div>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={editableValues.r_ba_damp_tier4_impact ?? ""}
+                      onChange={(e) => setEditable("r_ba_damp_tier4_impact", e.target.value)}
+                      readOnly={!editableSections.r_ba_damp}
+                      className="h-7 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -801,7 +916,7 @@ function EquationConstantsTab() {
                   <div>• ACC / Big12 / Big10 = 1.2</div>
                   <div>• Strong Mid Major = 0.8</div>
                   <div>• Low Major = 0.5</div>
-                  <div className="pt-1">• Catcher / Shortstop / Center Field = 1.3</div>
+                  <div className="pt-1">• Catcher / Shortstop / Center Field / TWP = 1.3</div>
                   <div>• Second Base / Third Base / Corner Outfield = 1.1</div>
                   <div>• First Base / DH = 1.0</div>
                   <div>• Bench Utility = 0.8</div>
@@ -819,7 +934,7 @@ function EquationConstantsTab() {
                 <div className="my-2 border-t" />
                 {editableSectionHeader("nil_positions")}
                 <div className="space-y-1.5">
-                  {editableField("nil_positions", "nil_pos_group_c_ss_cf", "Catcher / Shortstop / Center Field")}
+                  {editableField("nil_positions", "nil_pos_group_c_ss_cf", "Catcher / Shortstop / Center Field / TWP")}
                   {editableField("nil_positions", "nil_pos_group_2b_3b_cof", "Second Base / Third Base / Corner Outfield")}
                   {editableField("nil_positions", "nil_pos_group_1b_dh", "First Base / DH")}
                   {editableField("nil_positions", "nil_pos_group_bench_utility", "Bench Utility")}
@@ -882,10 +997,11 @@ function AdminPowerRatingsTab() {
     obp_ncaa_pop_up_pct: "7.9",
     obp_ncaa_walk_pct: "11.4",
     obp_ncaa_chase_pct: "23.1",
-    iso_ncaa_ev_metric: "0.0",
-    iso_ncaa_barrel_metric: "0.0",
-    iso_ncaa_whiff_metric: "0.0",
-    iso_ncaa_chase_metric: "0.0",
+    iso_ncaa_barrel_pct: "17.3",
+    iso_ncaa_ev90: "103.10",
+    iso_ncaa_pull_pct: "36.5",
+    iso_ncaa_la_10_30: "29",
+    iso_ncaa_gb_pct: "43.2",
     ba_contact_pct_std_dev: "6.60",
     ba_line_drive_pct_std_dev: "4.31",
     ba_avg_exit_velocity_std_dev: "4.28",
@@ -896,10 +1012,11 @@ function AdminPowerRatingsTab() {
     obp_pop_up_pct_std_dev: "3.37",
     obp_walk_pct_std_dev: "3.57",
     obp_chase_pct_std_dev: "5.58",
-    iso_ev_std_dev: "1.0",
-    iso_barrel_std_dev: "1.0",
-    iso_whiff_std_dev: "1.0",
-    iso_chase_std_dev: "1.0",
+    iso_barrel_pct_std_dev: "7.89",
+    iso_ev90_std_dev: "3.97",
+    iso_pull_pct_std_dev: "8.03",
+    iso_la_10_30_std_dev: "6.81",
+    iso_gb_pct_std_dev: "8.0",
     ba_contact_pct_weight: "0.40",
     ba_line_drive_pct_weight: "0.25",
     ba_avg_exit_velocity_weight: "0.20",
@@ -910,14 +1027,15 @@ function AdminPowerRatingsTab() {
     obp_pop_up_pct_weight: "0.10",
     obp_walk_pct_weight: "0.15",
     obp_chase_pct_weight: "0.05",
-    iso_ev_weight: "0.45",
-    iso_barrel_weight: "0.40",
-    iso_whiff_weight: "0.10",
-    iso_chase_weight: "0.05",
-    overall_ba_weight: "0.30",
-    overall_obp_weight: "0.30",
-    overall_iso_weight: "0.25",
-    overall_contact_weight: "0.15",
+    iso_barrel_pct_weight: "0.45",
+    iso_ev90_weight: "0.30",
+    iso_pull_pct_weight: "0.15",
+    iso_la_10_30_weight: "0.05",
+    iso_gb_pct_weight: "0.05",
+    overall_avg_exit_velocity_weight: "0.35",
+    overall_barrel_pct_weight: "0.15",
+    overall_contact_pct_weight: "0.30",
+    overall_chase_pct_weight: "0.20",
   };
   const [editableValues, setEditableValues] = useState<Record<string, string>>(() => {
     try {
@@ -925,6 +1043,24 @@ function AdminPowerRatingsTab() {
       if (!raw) return defaultEditableValues;
       const parsed = JSON.parse(raw) as Record<string, string>;
       const merged = { ...defaultEditableValues, ...parsed };
+      merged.obp_contact_pct_weight = defaultEditableValues.obp_contact_pct_weight;
+      merged.obp_line_drive_pct_weight = defaultEditableValues.obp_line_drive_pct_weight;
+      merged.obp_avg_exit_velocity_weight = defaultEditableValues.obp_avg_exit_velocity_weight;
+      merged.obp_pop_up_pct_weight = defaultEditableValues.obp_pop_up_pct_weight;
+      merged.obp_walk_pct_weight = defaultEditableValues.obp_walk_pct_weight;
+      merged.obp_chase_pct_weight = defaultEditableValues.obp_chase_pct_weight;
+      merged.obp_ncaa_avg_power_rating = defaultEditableValues.obp_ncaa_avg_power_rating;
+      merged.iso_barrel_pct_weight = defaultEditableValues.iso_barrel_pct_weight;
+      merged.iso_ev90_weight = defaultEditableValues.iso_ev90_weight;
+      merged.iso_pull_pct_weight = defaultEditableValues.iso_pull_pct_weight;
+      merged.iso_la_10_30_weight = defaultEditableValues.iso_la_10_30_weight;
+      merged.iso_gb_pct_weight = defaultEditableValues.iso_gb_pct_weight;
+      merged.iso_ncaa_avg_power_rating = defaultEditableValues.iso_ncaa_avg_power_rating;
+      merged.iso_ncaa_barrel_pct = defaultEditableValues.iso_ncaa_barrel_pct;
+      merged.iso_ncaa_ev90 = defaultEditableValues.iso_ncaa_ev90;
+      merged.iso_ncaa_pull_pct = defaultEditableValues.iso_ncaa_pull_pct;
+      merged.iso_ncaa_la_10_30 = defaultEditableValues.iso_ncaa_la_10_30;
+      merged.iso_ncaa_gb_pct = defaultEditableValues.iso_ncaa_gb_pct;
       for (const [k, v] of Object.entries(merged)) {
         if (v === "") merged[k] = defaultEditableValues[k] ?? "";
       }
@@ -1005,10 +1141,15 @@ function AdminPowerRatingsTab() {
   const obpPopUpWeight = safeNumber(editableValues.obp_pop_up_pct_weight, 0.1);
   const obpWalkWeight = safeNumber(editableValues.obp_walk_pct_weight, 0.15);
   const obpChaseWeight = safeNumber(editableValues.obp_chase_pct_weight, 0.05);
-  const isoEVWeight = safeNumber(editableValues.iso_ev_weight, 0.45);
-  const isoBarrelWeight = safeNumber(editableValues.iso_barrel_weight, 0.4);
-  const isoWhiffWeight = safeNumber(editableValues.iso_whiff_weight, 0.1);
-  const isoChaseWeight = safeNumber(editableValues.iso_chase_weight, 0.05);
+  const isoBarrelWeight = safeNumber(editableValues.iso_barrel_pct_weight, 0.45);
+  const isoEV90Weight = safeNumber(editableValues.iso_ev90_weight, 0.3);
+  const isoPullWeight = safeNumber(editableValues.iso_pull_pct_weight, 0.15);
+  const isoLA1030Weight = safeNumber(editableValues.iso_la_10_30_weight, 0.05);
+  const isoGBWeight = safeNumber(editableValues.iso_gb_pct_weight, 0.05);
+  const overallAvgEVWeight = safeNumber(editableValues.overall_avg_exit_velocity_weight, 0.35);
+  const overallBarrelWeight = safeNumber(editableValues.overall_barrel_pct_weight, 0.15);
+  const overallContactWeight = safeNumber(editableValues.overall_contact_pct_weight, 0.3);
+  const overallChaseWeight = safeNumber(editableValues.overall_chase_pct_weight, 0.2);
 
   return (
     <div className="space-y-4">
@@ -1093,27 +1234,29 @@ function AdminPowerRatingsTab() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="bg-muted p-4 rounded-lg font-mono text-sm">
-            <div><span className="text-muted-foreground">ISOPowerRating =</span> ({isoEVWeight.toFixed(2)} × EVScore) + ({isoBarrelWeight.toFixed(2)} × BarrelScore) + ({isoWhiffWeight.toFixed(2)} × WhiffScore) + ({isoChaseWeight.toFixed(2)} × ChaseScore)</div>
-            <div><span className="text-muted-foreground">ISOPowerRating+ =</span> (ISOPowerRating / NCAAAverageISOPowerRating) × 100</div>
+            <div><span className="text-muted-foreground">ISOPowerRating =</span> ({isoBarrelWeight.toFixed(2)} × BarrelScore) + ({isoEV90Weight.toFixed(2)} × EV90Score) + ({isoPullWeight.toFixed(2)} × Pull%Score) + ({isoLA1030Weight.toFixed(2)} × LA10-30Score) + ({isoGBWeight.toFixed(2)} × GB%Score)</div>
+            <div><span className="text-muted-foreground">ISOPowerRating+ =</span> (ISOPowerRating / NCAAAverageISOPowerRating(50)) / 100</div>
           </div>
           <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
             <div className={sectionPanelClass}>
               <p className={sectionHeadingClass}>Player-Specific Inputs</p>
               <div className="ml-2 space-y-0.5">
-                <div>• EV Score</div>
-                <div>• Barrel Score</div>
-                <div>• Whiff Score</div>
-                <div>• Chase Score</div>
+                <div>• Barrel %</div>
+                <div>• EV90</div>
+                <div>• Pull %</div>
+                <div>• LA10-30</div>
+                <div>• GB %</div>
               </div>
             </div>
             <div className={sectionPanelClass}>
               {editableSectionHeader("pr_iso")}
               <div className="space-y-1.5">
                 {editableField("pr_iso", "iso_ncaa_avg_power_rating", "NCAA Average ISO Power Rating")}
-                {editableField("pr_iso", "iso_ev_weight", "EV Weight")}
-                {editableField("pr_iso", "iso_barrel_weight", "Barrel Weight")}
-                {editableField("pr_iso", "iso_whiff_weight", "Whiff Weight")}
-                {editableField("pr_iso", "iso_chase_weight", "Chase Weight")}
+                {editableField("pr_iso", "iso_barrel_pct_weight", "Barrel % Weight")}
+                {editableField("pr_iso", "iso_ev90_weight", "EV90 Weight")}
+                {editableField("pr_iso", "iso_pull_pct_weight", "Pull % Weight")}
+                {editableField("pr_iso", "iso_la_10_30_weight", "LA10-30 Weight")}
+                {editableField("pr_iso", "iso_gb_pct_weight", "GB % Weight")}
               </div>
             </div>
           </div>
@@ -1126,25 +1269,26 @@ function AdminPowerRatingsTab() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="bg-muted p-4 rounded-lg font-mono text-sm">
-            <div><span className="text-muted-foreground">OverallPowerRating =</span> (BAPowerRating × BAWeight) + (OBPPowerRating × OBPWeight) + (ISOPowerRating × ISOWeight) + (ContactComponent × ContactWeight)</div>
+            <div><span className="text-muted-foreground">OverallPowerRating =</span> ({overallAvgEVWeight.toFixed(2)} × AverageExitVelocityScore) + ({overallBarrelWeight.toFixed(2)} × Barrel%Score) + ({overallContactWeight.toFixed(2)} × Contact%Score) + ({overallChaseWeight.toFixed(2)} × Chase%Score)</div>
+            <div><span className="text-muted-foreground">OverallPowerRating+ =</span> (OverallPowerRating / 50) × 100</div>
           </div>
           <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
             <div className={sectionPanelClass}>
               <p className={sectionHeadingClass}>Inputs</p>
               <div className="ml-2 space-y-0.5">
-                <div>• BA Power Rating</div>
-                <div>• OBP Power Rating</div>
-                <div>• ISO Power Rating</div>
-                <div>• Contact Component</div>
+                <div>• Average Exit Velocity Score</div>
+                <div>• Barrel% Score</div>
+                <div>• Contact% Score</div>
+                <div>• Chase% Score</div>
               </div>
             </div>
             <div className={sectionPanelClass}>
               {editableSectionHeader("pr_overall")}
               <div className="space-y-1.5">
-                {editableField("pr_overall", "overall_ba_weight", "BA Weight")}
-                {editableField("pr_overall", "overall_obp_weight", "OBP Weight")}
-                {editableField("pr_overall", "overall_iso_weight", "ISO Weight")}
-                {editableField("pr_overall", "overall_contact_weight", "Contact Weight")}
+                {editableField("pr_overall", "overall_avg_exit_velocity_weight", "Average Exit Velocity Weight")}
+                {editableField("pr_overall", "overall_barrel_pct_weight", "Barrel% Weight")}
+                {editableField("pr_overall", "overall_contact_pct_weight", "Contact% Weight")}
+                {editableField("pr_overall", "overall_chase_pct_weight", "Chase% Weight")}
               </div>
             </div>
           </div>
@@ -1180,10 +1324,11 @@ function AdminPowerRatingsTab() {
             <div className={sectionPanelClass}>
               <p className={sectionHeadingClass}>Isolated Power Scores</p>
               <div className="space-y-2 font-mono leading-relaxed">
-                <div className="rounded bg-background/70 px-2 py-1 break-words">EVScore = NORM.DIST(EVMetric, NCAAAverageEVMetric, EVMetricStdDev, TRUE) × 100</div>
-                <div className="rounded bg-background/70 px-2 py-1 break-words">BarrelScore = NORM.DIST(BarrelMetric, NCAAAverageBarrelMetric, BarrelMetricStdDev, TRUE) × 100</div>
-                <div className="rounded bg-background/70 px-2 py-1 break-words">WhiffScore = 100 - (NORM.DIST(WhiffMetric, NCAAAverageWhiffMetric, WhiffMetricStdDev, TRUE) × 100)</div>
-                <div className="rounded bg-background/70 px-2 py-1 break-words">ChaseScore = 100 - (NORM.DIST(ChaseMetric, NCAAAverageChaseMetric, ChaseMetricStdDev, TRUE) × 100)</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">BarrelScore = NORM.DIST(Barrel%, NCAAAverageBarrel%, Barrel%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">EV90Score = NORM.DIST(EV90, NCAAAverageEV90, EV90StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">Pull%Score = NORM.DIST(Pull%, NCAAAveragePull%, Pull%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">LA10-30Score = NORM.DIST(LA10-30, NCAAAverageLA10-30, LA10-30StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">GB%Score = 100 - (NORM.DIST(GB%, NCAAAverageGB%, GB%StdDev, TRUE) × 100)</div>
               </div>
             </div>
           </div>
@@ -1212,10 +1357,11 @@ function AdminPowerRatingsTab() {
               </div>
               <div className="space-y-1.5">
                 <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">Isolated Power</p>
-                {editableField("pr_std_dev", "iso_ev_std_dev", "EV Std Dev (Range: min to max)")}
-                {editableField("pr_std_dev", "iso_barrel_std_dev", "Barrel Std Dev (Range: min to max)")}
-                {editableField("pr_std_dev", "iso_whiff_std_dev", "Whiff Std Dev (Range: min to max)")}
-                {editableField("pr_std_dev", "iso_chase_std_dev", "Chase Std Dev (Range: min to max)")}
+                {editableField("pr_std_dev", "iso_barrel_pct_std_dev", "Barrel % Std Dev (Range: 0 to 50)")}
+                {editableField("pr_std_dev", "iso_ev90_std_dev", "EV90 Std Dev (Range: 75.1 to 115.9)")}
+                {editableField("pr_std_dev", "iso_pull_pct_std_dev", "Pull % Std Dev (Range: 0 to 72)")}
+                {editableField("pr_std_dev", "iso_la_10_30_std_dev", "LA10-30 % Std Dev (Range: 0 to 72.7)")}
+                {editableField("pr_std_dev", "iso_gb_pct_std_dev", "GB % Std Dev (Range: 69.7 to 18.8)")}
               </div>
             </div>
           </div>
@@ -1251,10 +1397,11 @@ function AdminPowerRatingsTab() {
               </div>
               <div className="space-y-1.5">
                 <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">Isolated Power</p>
-                {editableField("pr_ncaa_averages", "iso_ncaa_ev_metric", "NCAA Average EV Metric")}
-                {editableField("pr_ncaa_averages", "iso_ncaa_barrel_metric", "NCAA Average Barrel Metric")}
-                {editableField("pr_ncaa_averages", "iso_ncaa_whiff_metric", "NCAA Average Whiff Metric")}
-                {editableField("pr_ncaa_averages", "iso_ncaa_chase_metric", "NCAA Average Chase Metric")}
+                {editableField("pr_ncaa_averages", "iso_ncaa_barrel_pct", "NCAA Average Barrel %")}
+                {editableField("pr_ncaa_averages", "iso_ncaa_ev90", "NCAA Average EV90")}
+                {editableField("pr_ncaa_averages", "iso_ncaa_pull_pct", "NCAA Average Pull %")}
+                {editableField("pr_ncaa_averages", "iso_ncaa_la_10_30", "NCAA Average LA10-30")}
+                {editableField("pr_ncaa_averages", "iso_ncaa_gb_pct", "NCAA Average GB %")}
               </div>
             </div>
           </div>
@@ -1568,6 +1715,33 @@ function TeamsAdminTab() {
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamConf, setNewTeamConf] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
+  const teamCsvInputRef = useRef<HTMLInputElement | null>(null);
+  const canonicalTeamNames = useMemo(() => {
+    const set = new Set<string>();
+    (storage2025Seed as Array<{ team: string | null }>).forEach((r) => {
+      const t = (r.team || "").trim();
+      if (t) set.add(t);
+    });
+    return Array.from(set);
+  }, []);
+  const normalizeCanonicalKey = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/university|college|state|school|the/gi, "")
+      .replace(/[^a-z0-9]/g, "")
+      .trim();
+  const resolveCanonicalTeamName = (input: string) => {
+    const raw = (input || "").trim();
+    if (!raw) return raw;
+    const key = normalizeCanonicalKey(raw);
+    if (!key) return raw;
+    const candidates = canonicalTeamNames.filter((name) => {
+      const ckey = normalizeCanonicalKey(name);
+      return ckey === key || ckey.includes(key) || key.includes(ckey);
+    });
+    if (candidates.length === 1) return candidates[0];
+    return raw;
+  };
 
   const { data: teams = [], isLoading } = useQuery({
     queryKey: ["admin-teams"],
@@ -1624,18 +1798,200 @@ function TeamsAdminTab() {
     onError: (e) => toast.error(`Failed: ${e.message}`),
   });
 
+  const fillConferencesFromPlayers = useMutation({
+    mutationFn: async () => {
+      const { data: players, error: playersError } = await supabase
+        .from("players")
+        .select("team, conference")
+        .not("team", "is", null)
+        .not("conference", "is", null);
+      if (playersError) throw playersError;
+
+      const byTeam = new Map<string, Map<string, number>>();
+      const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
+      for (const p of (players || [])) {
+        const team = (p.team || "").trim();
+        const conf = (p.conference || "").trim();
+        if (!team || !conf) continue;
+        const key = norm(resolveCanonicalTeamName(team));
+        if (!byTeam.has(key)) byTeam.set(key, new Map());
+        const confCounts = byTeam.get(key)!;
+        confCounts.set(conf, (confCounts.get(conf) || 0) + 1);
+      }
+
+      let updated = 0;
+      for (const t of teams) {
+        if (t.conference && t.conference.trim()) continue;
+        const key = norm(resolveCanonicalTeamName(t.name));
+        const confCounts = byTeam.get(key);
+        if (!confCounts || confCounts.size === 0) continue;
+        const best = Array.from(confCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
+        if (!best) continue;
+        const { error } = await supabase.from("teams").update({ conference: best }).eq("id", t.id);
+        if (error) throw error;
+        updated++;
+      }
+      return { updated };
+    },
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
+      queryClient.invalidateQueries({ queryKey: ["teams"] });
+      toast.success(`Filled conference for ${res.updated} teams.`);
+    },
+    onError: (e) => toast.error(`Conference fill failed: ${e.message}`),
+  });
+
+  const scrapeConferences = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("scrape-team-conferences", {
+        body: { startPage: 1, endPage: 222 },
+      });
+      if (error) throw error;
+      return data as { success: boolean; updated?: number; inserted?: number; scraped?: number; error?: string };
+    },
+    onSuccess: (res) => {
+      if (!res?.success) {
+        toast.error(res?.error || "Conference scrape failed");
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
+      queryClient.invalidateQueries({ queryKey: ["teams"] });
+      toast.success(`Conference scrape complete: ${res.updated || 0} updated, ${res.inserted || 0} inserted.`);
+    },
+    onError: (e) => toast.error(`Conference scrape failed: ${e.message}`),
+  });
+
+  const importTeamParkFactors = useMutation({
+    mutationFn: async (file: File) => {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      if (lines.length < 2) throw new Error("CSV has no data rows");
+
+      const parseCsvLine = (line: string) => {
+        const out: string[] = [];
+        let cur = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === "\"") {
+            if (inQuotes && line[i + 1] === "\"") {
+              cur += "\"";
+              i++;
+            } else {
+              inQuotes = !inQuotes;
+            }
+          } else if (ch === "," && !inQuotes) {
+            out.push(cur.trim());
+            cur = "";
+          } else {
+            cur += ch;
+          }
+        }
+        out.push(cur.trim());
+        return out.map((v) => v.replace(/^"(.*)"$/, "$1").trim());
+      };
+
+      const normalizedRows = lines.map((line) =>
+        parseCsvLine(line).map((c) => c.toLowerCase().replace(/\s+/g, " ").trim()),
+      );
+      const findHeaderRowIndex = () => {
+        for (let i = 0; i < Math.min(normalizedRows.length, 10); i++) {
+          const row = normalizedRows[i];
+          if (row.includes("team") && row.some((c) => c.includes("park factor+"))) return i;
+        }
+        return -1;
+      };
+      const headerRowIndex = findHeaderRowIndex();
+      if (headerRowIndex < 0) throw new Error("CSV must include Team and Park Factor+ columns");
+      const header = normalizedRows[headerRowIndex];
+
+      const idx = (names: string[]) => {
+        for (const n of names) {
+          const i = header.findIndex((h) => h === n);
+          if (i >= 0) return i;
+        }
+        return -1;
+      };
+      const teamIdx = idx(["team", "team name", "school"]);
+      const parkPlusIdx = idx(["park factor+ (wrc+)", "park factor+", "park factor wrc+"]);
+      if (teamIdx < 0 || parkPlusIdx < 0) {
+        throw new Error("CSV must include Team and Park Factor+ columns");
+      }
+
+      const normalizeTeamKey = (v: string) =>
+        v.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const parseNum = (v: string | undefined) => {
+        if (!v) return null;
+        const n = Number.parseFloat(v.replace(/[%,$]/g, "").trim());
+        return Number.isFinite(n) ? n : null;
+      };
+
+      const { data: existingTeams, error: existingError } = await supabase
+        .from("teams")
+        .select("id, name, conference");
+      if (existingError) throw existingError;
+      const byNorm = new Map<string, { id: string; name: string; conference: string | null }>();
+      for (const t of (existingTeams || [])) {
+        const key = normalizeTeamKey(t.name);
+        if (!byNorm.has(key)) byNorm.set(key, t);
+      }
+
+      const toUpdate: Array<{ id: string; park_factor: number | null }> = [];
+      const toInsert: Array<{ name: string; conference: string | null; park_factor: number | null }> = [];
+      let processed = 0;
+
+      for (let i = headerRowIndex + 1; i < lines.length; i++) {
+        const cols = parseCsvLine(lines[i]);
+        const team = resolveCanonicalTeamName((cols[teamIdx] || "").trim());
+        if (!team) continue;
+        const pfPlus = parseNum(cols[parkPlusIdx]);
+        const parkFactor = pfPlus == null ? null : pfPlus / 100;
+        const key = normalizeTeamKey(team);
+        const existing = byNorm.get(key);
+        if (existing) {
+          toUpdate.push({ id: existing.id, park_factor: parkFactor });
+        } else {
+          toInsert.push({ name: team, conference: null, park_factor: parkFactor });
+        }
+        processed++;
+      }
+
+      for (let i = 0; i < toUpdate.length; i += 200) {
+        const chunk = toUpdate.slice(i, i + 200);
+        for (const row of chunk) {
+          const { error } = await supabase.from("teams").update({ park_factor: row.park_factor }).eq("id", row.id);
+          if (error) throw error;
+        }
+      }
+      if (toInsert.length > 0) {
+        const { error } = await supabase.from("teams").insert(toInsert);
+        if (error) throw error;
+      }
+
+      return { processed, updated: toUpdate.length, inserted: toInsert.length };
+    },
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
+      queryClient.invalidateQueries({ queryKey: ["teams"] });
+      toast.success(`Imported team park factors: ${res.updated} updated, ${res.inserted} inserted (${res.processed} rows).`);
+    },
+    onError: (e) => toast.error(`Team CSV import failed: ${e.message}`),
+  });
+
   const filtered = useMemo(() => {
     let list = teams;
     if (search) {
       const q = search.toLowerCase();
-      list = list.filter((t) => t.name.toLowerCase().includes(q) || (t.conference || "").toLowerCase().includes(q));
+      list = list.filter((t) =>
+        resolveCanonicalTeamName(t.name).toLowerCase().includes(q) || (t.conference || "").toLowerCase().includes(q),
+      );
     }
     if (confFilter !== "all") {
       if (confFilter === "unassigned") list = list.filter((t) => !t.conference);
       else list = list.filter((t) => t.conference === confFilter);
     }
     return list;
-  }, [teams, search, confFilter]);
+  }, [teams, search, confFilter, resolveCanonicalTeamName]);
 
   const confCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -1655,7 +2011,7 @@ function TeamsAdminTab() {
   };
 
   const saveEdit = (id: string) => {
-    updateTeam.mutate({ id, name: editName, conference: editConf });
+    updateTeam.mutate({ id, name: resolveCanonicalTeamName(editName), conference: editConf });
   };
 
   return (
@@ -1681,7 +2037,7 @@ function TeamsAdminTab() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button onClick={() => addTeam.mutate({ name: newTeamName, conference: newTeamConf })} disabled={!newTeamName.trim()} size="sm">
+              <Button onClick={() => addTeam.mutate({ name: resolveCanonicalTeamName(newTeamName), conference: newTeamConf })} disabled={!newTeamName.trim()} size="sm">
                 Add
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setShowAddForm(false)}>Cancel</Button>
@@ -1694,6 +2050,18 @@ function TeamsAdminTab() {
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="text-base">All Teams</CardTitle>
           <div className="flex gap-2">
+            <input
+              ref={teamCsvInputRef}
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                importTeamParkFactors.mutate(f);
+                e.currentTarget.value = "";
+              }}
+            />
             <Select value={confFilter} onValueChange={setConfFilter}>
               <SelectTrigger className="w-44">
                 <SelectValue />
@@ -1709,6 +2077,29 @@ function TeamsAdminTab() {
             <div className="relative w-full sm:w-64">
               <Input placeholder="Search teams..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
             </div>
+            <Button
+              onClick={() => teamCsvInputRef.current?.click()}
+              size="sm"
+              variant="outline"
+            >
+              {importTeamParkFactors.isPending ? "Importing CSV…" : "Import Teams CSV"}
+            </Button>
+            <Button
+              onClick={() => fillConferencesFromPlayers.mutate()}
+              size="sm"
+              variant="outline"
+              disabled={fillConferencesFromPlayers.isPending}
+            >
+              {fillConferencesFromPlayers.isPending ? "Filling…" : "Fill Conferences"}
+            </Button>
+            <Button
+              onClick={() => scrapeConferences.mutate()}
+              size="sm"
+              variant="outline"
+              disabled={scrapeConferences.isPending}
+            >
+              {scrapeConferences.isPending ? "Scraping…" : "Scrape Conferences"}
+            </Button>
             <Button onClick={() => setShowAddForm((v) => !v)} size="sm" className="gap-1">
               <Plus className="h-4 w-4" />
               Add Team
@@ -1738,7 +2129,7 @@ function TeamsAdminTab() {
                         {editingId === team.id ? (
                           <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="h-8 w-full max-w-[280px]" />
                         ) : (
-                          team.name
+                          resolveCanonicalTeamName(team.name)
                         )}
                       </TableCell>
                       <TableCell className="text-center">
@@ -1928,28 +2319,53 @@ function NilValuationsTableTab() {
 function QuickActionsTab() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ updated: number; errors: number; total: number } | null>(null);
+  const [clearTeamsLoading, setClearTeamsLoading] = useState(false);
+  const [clearTeamsResult, setClearTeamsResult] = useState<{ playersCleared: number } | null>(null);
+  const [syncTeamsLoading, setSyncTeamsLoading] = useState(false);
+  const [syncTeamsResult, setSyncTeamsResult] = useState<{ updated: number; skippedAmbiguous: number; unmatched: number } | null>(null);
 
   const runBulkRecalculate = async () => {
-    setBulkLoading(true);
-    setBulkResult(null);
+    setBulkLoading(false);
+    toast.info("Bulk recalculation is frozen while we run a single-player equation trace.");
+  };
+
+  const clearTransfer2026Assignments = async () => {
+    setClearTeamsLoading(true);
+    setClearTeamsResult(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
-      const res = await supabase.functions.invoke("recalculate-prediction", {
-        body: { action: "bulk_recalculate" },
-      });
-      const result = res.data;
-      if (result?.success) {
-        setBulkResult({ updated: result.updated, errors: result.errors, total: result.total });
-        toast.success(`Recalculated ${result.updated} of ${result.total} predictions`);
-      } else {
-        toast.error(result?.error ?? "Failed");
-      }
+
+      const { count: transferPlayerCount, error: countPlayerErr } = await supabase
+        .from("players")
+        .select("id", { count: "exact", head: true })
+        .eq("transfer_portal", true);
+      if (countPlayerErr) throw countPlayerErr;
+
+      const { error: clearPlayersErr } = await supabase
+        .from("players")
+        .update({ team: null, conference: null })
+        .eq("transfer_portal", true);
+      if (clearPlayersErr) throw clearPlayersErr;
+
+      const result = {
+        playersCleared: transferPlayerCount ?? 0,
+      };
+      setClearTeamsResult(result);
+      toast.success(
+        `Cleared destination team data for ${result.playersCleared} transfer players.`,
+      );
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
-      setBulkLoading(false);
+      setClearTeamsLoading(false);
     }
+  };
+
+  const sync2025TeamsForNonTransfers = async () => {
+    setSyncTeamsLoading(false);
+    setSyncTeamsResult(null);
+    toast.info("Team sync writes are disabled for this testing phase. Team display is sourced from 2025 Data Storage.");
   };
 
   return (
@@ -1961,14 +2377,14 @@ function QuickActionsTab() {
       <Card>
         <CardContent className="pt-6 space-y-4">
           <div>
-            <p className="font-medium">Bulk Recalculate Returner Predictions</p>
+            <p className="font-medium">Bulk Recalculate All Returners</p>
             <p className="text-sm text-muted-foreground">
-              Re-run the formula on all active returner predictions using the latest equation constants and power ratings.
+              Re-run the returner formula on all player predictions (returners + transfers), including departed players.
             </p>
           </div>
-          <Button onClick={runBulkRecalculate} disabled={bulkLoading} className="gap-2">
+          <Button onClick={runBulkRecalculate} disabled className="gap-2">
             {bulkLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            {bulkLoading ? "Recalculating…" : "Recalculate All"}
+            Bulk Recalc Frozen
           </Button>
           {bulkResult && (
             <p className="text-sm text-muted-foreground">
@@ -1976,6 +2392,1065 @@ function QuickActionsTab() {
               {bulkResult.errors > 0 ? `, ${bulkResult.errors} errors` : ""}
             </p>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-6 space-y-4">
+          <div>
+            <p className="font-medium">Clear Transfer 2026 Team Assignments</p>
+            <p className="text-sm text-muted-foreground">
+              Clears destination team/conference for transfer players so 2026 mapping can be re-imported cleanly.
+            </p>
+          </div>
+          <Button onClick={clearTransfer2026Assignments} disabled={clearTeamsLoading} variant="destructive" className="gap-2">
+            {clearTeamsLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            {clearTeamsLoading ? "Clearing…" : "Clear Transfer 2026 Team Data"}
+          </Button>
+          {clearTeamsResult && (
+            <p className="text-sm text-muted-foreground">
+              Cleared players: {clearTeamsResult.playersCleared}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-6 space-y-4">
+          <div>
+            <p className="font-medium">Sync 2025 Teams (Non-Transfer Players)</p>
+            <p className="text-sm text-muted-foreground">
+              Disabled: team writes are blocked in this phase to prevent accidental 2026 team backfill.
+            </p>
+          </div>
+          <Button onClick={sync2025TeamsForNonTransfers} disabled variant="outline" className="gap-2">
+            {syncTeamsLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            Team Sync Disabled
+          </Button>
+          {syncTeamsResult && (
+            <p className="text-sm text-muted-foreground">
+              Updated: {syncTeamsResult.updated}, skipped ambiguous: {syncTeamsResult.skippedAmbiguous}, unmatched: {syncTeamsResult.unmatched}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function DataStorage2025Tab() {
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [selectedSeason, setSelectedSeason] = useState<"2025" | "2026">("2025");
+  const [storageView, setStorageView] = useState<"stats" | "power">("stats");
+  const [showMissingOnly, setShowMissingOnly] = useState(false);
+  const normalize = (value: string | null | undefined) =>
+    (value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  const toPlayerKey = (name: string, team?: string | null) => `${normalize(name)}|${normalize(team || "")}`;
+  const statsSeedRows = useMemo(
+    () =>
+      (storage2025Seed as Array<{
+        id: string;
+        playerName: string;
+        team: string | null;
+        conference: string | null;
+        avg: number | null;
+        obp: number | null;
+        slg: number | null;
+        source: string;
+      }>).map((r) => ({ ...r })),
+    [],
+  );
+  const statsSeedByKey = useMemo(
+    () => new Map(statsSeedRows.map((r) => [toPlayerKey(r.playerName, r.team), r])),
+    [statsSeedRows],
+  );
+  const statsSeedByName = useMemo(() => {
+    const map = new Map<string, Array<(typeof statsSeedRows)[number]>>();
+    for (const row of statsSeedRows) {
+      const key = normalize(row.playerName);
+      const arr = map.get(key) || [];
+      arr.push(row);
+      map.set(key, arr);
+    }
+    return map;
+  }, [statsSeedRows]);
+  const powerSeedRows = useMemo(
+    () =>
+      (powerRatings2025Seed as Array<{
+        id: string;
+        playerName: string;
+        team: string | null;
+        contact: number | null;
+        lineDrive: number | null;
+        avgExitVelo: number | null;
+        popUp: number | null;
+        bb: number | null;
+        chase: number | null;
+        barrel: number | null;
+        ev90: number | null;
+        pull: number | null;
+        la10_30: number | null;
+        gb: number | null;
+        source: string;
+      }>).map((r) => ({ ...r })),
+    [],
+  );
+  const powerSeedByKey = useMemo(
+    () => new Map(powerSeedRows.map((r) => [toPlayerKey(r.playerName, r.team), r])),
+    [powerSeedRows],
+  );
+  const powerSeedByName = useMemo(() => {
+    const map = new Map<string, Array<(typeof powerSeedRows)[number]>>();
+    for (const row of powerSeedRows) {
+      const key = normalize(row.playerName);
+      const arr = map.get(key) || [];
+      arr.push(row);
+      map.set(key, arr);
+    }
+    return map;
+  }, [powerSeedRows]);
+
+  const { data: playerDirectory = [] } = useQuery({
+    queryKey: ["admin-player-directory"],
+    queryFn: async () => {
+      const allPlayers: Array<{ id: string; first_name: string; last_name: string; team: string | null }> = [];
+      let from = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("players")
+          .select("id, first_name, last_name, team")
+          .order("id", { ascending: true })
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        const batch = data || [];
+        allPlayers.push(...batch);
+        if (batch.length < pageSize) break;
+        from += pageSize;
+      }
+      return allPlayers;
+    },
+  });
+
+  const playerIdByKey = useMemo(() => {
+    const byKey = new Map<string, string>();
+    const byName = new Map<string, string>();
+    for (const p of playerDirectory) {
+      const fullName = `${p.first_name} ${p.last_name}`.trim();
+      const key = toPlayerKey(fullName, p.team);
+      const nameKey = normalize(fullName);
+      if (!byKey.has(key)) byKey.set(key, p.id);
+      if (!byName.has(nameKey)) byName.set(nameKey, p.id);
+    }
+    return { byKey, byName };
+  }, [playerDirectory]);
+  const resolvePlayerId = (playerName: string, team?: string | null) => {
+    const key = toPlayerKey(playerName, team);
+    const byKeyMatch = playerIdByKey.byKey.get(key);
+    if (byKeyMatch) return byKeyMatch;
+    return playerIdByKey.byName.get(normalize(playerName)) ?? null;
+  };
+
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ["admin-data-storage", selectedSeason],
+    queryFn: async () => {
+      let allData: any[] = [];
+      let from = 0;
+      const pageSize = 1000;
+
+      while (true) {
+        const { data, error } = await supabase
+          .from("season_stats")
+          .select(`
+            id,
+            season,
+            games,
+            at_bats,
+            hits,
+            home_runs,
+            rbi,
+            batting_avg,
+            on_base_pct,
+            slugging_pct,
+            ops,
+            players!inner(first_name, last_name, team, conference)
+          `)
+          .eq("season", Number(selectedSeason))
+          .order("id", { ascending: true })
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+
+        const batch = data || [];
+        allData = allData.concat(batch);
+        if (batch.length < pageSize) break;
+        from += pageSize;
+      }
+
+      if (selectedSeason === "2025") {
+        const dbRowsByName = new Map<string, Array<{ avg: number | null; obp: number | null; slg: number | null; conference: string | null }>>();
+        for (const row of allData) {
+          const playerName = `${row.players?.first_name || ""} ${row.players?.last_name || ""}`.trim();
+          const key = normalize(playerName);
+          if (!key) continue;
+          const arr = dbRowsByName.get(key) || [];
+          arr.push({
+            avg: row.batting_avg as number | null,
+            obp: row.on_base_pct as number | null,
+            slg: row.slugging_pct as number | null,
+            conference: row.players?.conference as string | null,
+          });
+          dbRowsByName.set(key, arr);
+        }
+        return statsSeedRows.map((seed) => {
+          const matches = dbRowsByName.get(normalize(seed.playerName)) || [];
+          const db = matches.length === 1 ? matches[0] : null;
+          return {
+            id: seed.id,
+            playerName: seed.playerName,
+            team: seed.team,
+            conference: db?.conference ?? seed.conference ?? null,
+            avg: db?.avg ?? seed.avg ?? null,
+            obp: db?.obp ?? seed.obp ?? null,
+            slg: db?.slg ?? seed.slg ?? null,
+            source: db ? "storage_2025_seed + season_stats_overlay" : seed.source,
+          };
+        });
+      }
+
+      if (allData.length > 0) {
+        return allData.map((row: any) => {
+          const playerName = `${row.players?.first_name || ""} ${row.players?.last_name || ""}`.trim();
+          return {
+            id: row.id as string,
+            playerName,
+            team: row.players?.team as string | null,
+            conference: row.players?.conference as string | null,
+            avg: row.batting_avg as number | null,
+            obp: row.on_base_pct as number | null,
+            slg: row.slugging_pct as number | null,
+            source: "season_stats",
+          };
+        });
+      }
+
+      // Fallback for testing: pull last-known baseline stats from player_predictions
+      // so the storage table is still populated before season_stats is fully imported.
+      let predData: any[] = [];
+      let predFrom = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from("player_predictions")
+          .select(`
+            id,
+            player_id,
+            from_avg,
+            from_obp,
+            from_slg,
+            players!inner(first_name, last_name, team, conference)
+          `)
+          .eq("season", Number(selectedSeason))
+          .range(predFrom, predFrom + pageSize - 1);
+        if (error) throw error;
+        const batch = data || [];
+        predData = predData.concat(batch);
+        if (batch.length < pageSize) break;
+        predFrom += pageSize;
+      }
+
+      const byPlayer = new Map<string, any>();
+      for (const row of predData) {
+        const pid = row.player_id as string;
+        if (!byPlayer.has(pid)) byPlayer.set(pid, row);
+      }
+
+      const predictionFallback = Array.from(byPlayer.values()).map((row: any) => {
+        const playerName = `${row.players?.first_name || ""} ${row.players?.last_name || ""}`.trim();
+        const team = row.players?.team as string | null;
+        return {
+          id: row.id as string,
+          playerName,
+          team,
+          conference: row.players?.conference as string | null,
+          avg: row.from_avg as number | null,
+          obp: row.from_obp as number | null,
+          slg: row.from_slg as number | null,
+          source: "player_predictions.from_*",
+        };
+      });
+      if (predictionFallback.length > 0) return predictionFallback;
+
+      if (selectedSeason === "2025") {
+        return statsSeedRows.map((r) => ({ ...r }));
+      }
+      return [];
+    },
+  });
+
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let result = rows;
+    if (q) {
+      result = result.filter((r) =>
+        [r.playerName, r.team || "", r.conference || ""].some((v) =>
+          v.toLowerCase().includes(q),
+        ),
+      );
+    }
+    if (showMissingOnly && storageView === "stats") {
+      result = result.filter((r) => {
+        const playerKey = toPlayerKey(r.playerName || "", r.team);
+        const hasLinkedProfile = playerIdByKey.byKey.has(playerKey) || playerIdByKey.byName.has(normalize(r.playerName || ""));
+        return (
+          !hasLinkedProfile ||
+          !r.team ||
+          r.avg == null ||
+          r.obp == null ||
+          r.slg == null
+        );
+      });
+    }
+    return result;
+  }, [rows, search, showMissingOnly, storageView, playerIdByKey]);
+
+  const { data: powerRows = [], isLoading: isPowerLoading } = useQuery({
+    queryKey: ["admin-power-storage", selectedSeason],
+    queryFn: async () => {
+      let allData: any[] = [];
+      let from = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("player_predictions")
+          .select(`
+            id,
+            model_type,
+            variant,
+            ev_score,
+            barrel_score,
+            whiff_score,
+            chase_score,
+            power_rating_score,
+            power_rating_plus,
+            players!inner(first_name, last_name, team)
+          `)
+          .eq("season", Number(selectedSeason))
+          .order("updated_at", { ascending: false })
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        const batch = data || [];
+        allData = allData.concat(batch);
+        if (batch.length < pageSize) break;
+        from += pageSize;
+      }
+      if (allData.length > 0) {
+        if (selectedSeason === "2025") {
+          const dbRowsByName = new Map<string, Array<{ chase: number | null; barrel: number | null; ev90: number | null }>>();
+          for (const row of allData) {
+            const playerName = `${row.players?.first_name || ""} ${row.players?.last_name || ""}`.trim();
+            const key = normalize(playerName);
+            if (!key) continue;
+            const arr = dbRowsByName.get(key) || [];
+            arr.push({
+              chase: row.chase_score as number | null,
+              barrel: row.barrel_score as number | null,
+              ev90: row.ev_score as number | null,
+            });
+            dbRowsByName.set(key, arr);
+          }
+          return powerSeedRows.map((seed) => {
+            const matches = dbRowsByName.get(normalize(seed.playerName)) || [];
+            const db = matches.length === 1 ? matches[0] : null;
+            return {
+              ...seed,
+              chase: db?.chase ?? seed.chase ?? null,
+              barrel: db?.barrel ?? seed.barrel ?? null,
+              ev90: db?.ev90 ?? seed.ev90 ?? null,
+              source: db ? "power_seed_2025 + predictions_overlay" : seed.source,
+            };
+          });
+        }
+        return allData.map((row: any) => {
+          const playerName = `${row.players?.first_name || ""} ${row.players?.last_name || ""}`.trim();
+          return {
+            id: row.id as string,
+            playerName,
+            team: row.players?.team as string | null,
+            contact: null,
+            lineDrive: null,
+            avgExitVelo: null,
+            popUp: null,
+            bb: null,
+            chase: row.chase_score as number | null,
+            barrel: row.barrel_score as number | null,
+            ev90: row.ev_score as number | null,
+            pull: null,
+            la10_30: null,
+            gb: null,
+            source: "player_predictions.partial",
+          };
+        });
+      }
+
+      if (selectedSeason === "2025") {
+        return powerSeedRows.map((r) => ({ ...r }));
+      }
+      return [];
+    },
+  });
+
+  const filteredPowerRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let result = powerRows;
+    if (q) {
+      result = result.filter((r) =>
+        [r.playerName, r.team || ""].some((v) => v.toLowerCase().includes(q)),
+      );
+    }
+    if (showMissingOnly && storageView === "power") {
+      result = result.filter((r) =>
+        r.contact == null ||
+        r.lineDrive == null ||
+        r.avgExitVelo == null ||
+        r.popUp == null ||
+        r.bb == null ||
+        r.chase == null ||
+        r.barrel == null ||
+        r.ev90 == null ||
+        r.pull == null ||
+        r.la10_30 == null ||
+        r.gb == null,
+      );
+    }
+    return result;
+  }, [powerRows, search, showMissingOnly, storageView]);
+
+  const fmt3 = (v: number | null) => (v == null ? "—" : v.toFixed(3));
+  const fmt2 = (v: number | null) => (v == null ? "—" : v.toFixed(2));
+  const fmtWhole = (v: number | null) => (v == null ? "—" : Math.round(v).toString());
+  const toAbbrevName = (fullName: string) => {
+    const parts = fullName.trim().split(/\s+/).filter(Boolean);
+    if (parts.length < 2) return fullName;
+    const firstInitial = parts[0][0]?.toUpperCase() || "";
+    const lastName = parts[parts.length - 1];
+    return `${firstInitial}. ${lastName}`;
+  };
+  const getPositionFor = (playerName: string, team?: string | null) => {
+    if (selectedSeason !== "2025") return null;
+    const byNameTeam = (exitPositions2025Seed as Record<string, string>)[`${playerName}|${team || ""}`];
+    if (byNameTeam) return byNameTeam;
+    const byName = (exitPositions2025Seed as Record<string, string>)[playerName];
+    if (byName) return byName;
+    const key = toAbbrevName(playerName);
+    return (exitPositions2025Seed as Record<string, string>)[key] ?? null;
+  };
+  const erf = (x: number) => {
+    const sign = x < 0 ? -1 : 1;
+    const ax = Math.abs(x);
+    const t = 1 / (1 + 0.3275911 * ax);
+    const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-ax * ax);
+    return sign * y;
+  };
+  const normalCdf = (x: number, mean: number, sd: number) => {
+    if (!Number.isFinite(x) || !Number.isFinite(mean) || !Number.isFinite(sd) || sd <= 0) return null;
+    return 0.5 * (1 + erf((x - mean) / (sd * Math.SQRT2)));
+  };
+  const scoreFromNormal = (x: number | null, mean: number, sd: number, invert = false) => {
+    if (x == null) return null;
+    const cdf = normalCdf(x, mean, sd);
+    if (cdf == null) return null;
+    const pct = cdf * 100;
+    return invert ? 100 - pct : pct;
+  };
+  const derivePowerScoresAndRatings = (r: {
+    contact: number | null; lineDrive: number | null; avgExitVelo: number | null; popUp: number | null;
+    bb: number | null; chase: number | null; barrel: number | null; ev90: number | null;
+    pull: number | null; la10_30: number | null; gb: number | null;
+  }) => {
+    const contactScore = scoreFromNormal(r.contact, 77.1, 6.6);
+    const lineDriveScore = scoreFromNormal(r.lineDrive, 20.9, 4.31);
+    const avgEVScore = scoreFromNormal(r.avgExitVelo, 86.2, 4.28);
+    const popUpScore = scoreFromNormal(r.popUp, 7.9, 3.37, true);
+    const bbScore = scoreFromNormal(r.bb, 11.4, 3.57);
+    const chaseScore = scoreFromNormal(r.chase, 23.1, 5.58, true);
+    const barrelScore = scoreFromNormal(r.barrel, 17.3, 7.89);
+    const ev90Score = scoreFromNormal(r.ev90, 103.1, 3.97);
+    const pullScore = scoreFromNormal(r.pull, 36.5, 8.03);
+    const la1030Score = scoreFromNormal(r.la10_30, 29, 6.81);
+    const gbScore = scoreFromNormal(r.gb, 43.2, 8.0, true);
+
+    const baPower =
+      contactScore == null || lineDriveScore == null || avgEVScore == null || popUpScore == null
+        ? null
+        : (0.4 * contactScore) + (0.25 * lineDriveScore) + (0.2 * avgEVScore) + (0.15 * popUpScore);
+    const obpPower =
+      contactScore == null || lineDriveScore == null || avgEVScore == null || popUpScore == null || bbScore == null || chaseScore == null
+        ? null
+        : (0.35 * contactScore) + (0.2 * lineDriveScore) + (0.15 * avgEVScore) + (0.1 * popUpScore) + (0.15 * bbScore) + (0.05 * chaseScore);
+    const isoPower =
+      barrelScore == null || ev90Score == null || pullScore == null || la1030Score == null || gbScore == null
+        ? null
+        : (0.45 * barrelScore) + (0.3 * ev90Score) + (0.15 * pullScore) + (0.05 * la1030Score) + (0.05 * gbScore);
+    const overallPower =
+      avgEVScore == null || barrelScore == null || contactScore == null || chaseScore == null
+        ? null
+        : (0.35 * avgEVScore) + (0.15 * barrelScore) + (0.3 * contactScore) + (0.2 * chaseScore);
+    const toPlus = (v: number | null) => (v == null ? null : (v / 50) * 100);
+    const baPowerPlus = toPlus(baPower);
+    const obpPowerPlus = toPlus(obpPower);
+    const isoPowerPlus = toPlus(isoPower);
+    const overallPowerPlus = toPlus(overallPower);
+
+    return {
+      contactScore, lineDriveScore, avgEVScore, popUpScore, bbScore, chaseScore,
+      barrelScore, ev90Score, pullScore, la1030Score, gbScore,
+      baPower, obpPower, isoPower, overallPower,
+      baPowerPlus, obpPowerPlus, isoPowerPlus, overallPowerPlus,
+    };
+  };
+  const deriveMetrics = (avg: number | null, obp: number | null, slg: number | null) => {
+    if (avg == null || obp == null || slg == null) {
+      return { iso: null, ops: null, wrc: null, wrcPlus: null, owar: null };
+    }
+    // Manual in-app calculations from B-D style inputs (AVG/OBP/SLG).
+    const iso = slg - avg;
+    const ops = obp + slg;
+    const wObp = 0.45;
+    const wSlg = 0.30;
+    const wAvg = 0.15;
+    const wIso = 0.10;
+    const ncaaAvgWrc = 0.364;
+    const wrc = (wObp * obp) + (wSlg * slg) + (wAvg * avg) + (wIso * iso);
+    const wrcPlus = ncaaAvgWrc === 0 ? null : (wrc / ncaaAvgWrc) * 100;
+    if (wrcPlus == null) return { iso, ops, wrc, wrcPlus: null, owar: null };
+    const offValue = (wrcPlus - 100) / 100;
+    const plateAppearances = 260;
+    const runsPerPA = 0.13;
+    const replacementRunsPer600 = 25;
+    const runsPerWin = 10;
+    const raa = offValue * plateAppearances * runsPerPA;
+    const replacementRuns = (plateAppearances / 600) * replacementRunsPer600;
+    const rar = raa + replacementRuns;
+    const owar = rar / runsPerWin;
+    return { iso, ops, wrc, wrcPlus, owar };
+  };
+
+  const buildAndLinkProfilesMutation = useMutation({
+    mutationFn: async () => {
+      const season = Number(selectedSeason);
+      if (season !== 2025) {
+        throw new Error("Build/link action is currently limited to 2025 data storage.");
+      }
+      const { data: authData } = await supabase.auth.getSession();
+      if (!authData.session) throw new Error("Not authenticated");
+
+      const toNameParts = (fullName: string) => {
+        const parts = fullName.trim().split(/\s+/).filter(Boolean);
+        if (parts.length === 0) return { first_name: "Unknown", last_name: "Player" };
+        if (parts.length === 1) return { first_name: parts[0], last_name: parts[0] };
+        return { first_name: parts.slice(0, -1).join(" "), last_name: parts[parts.length - 1] };
+      };
+      const statsSeed = (storage2025Seed as Array<{
+        id: string;
+        playerName: string;
+        team: string | null;
+        conference: string | null;
+        avg: number | null;
+        obp: number | null;
+        slg: number | null;
+      }>).filter((row) => !!row.playerName?.trim());
+
+      const powerByKey = new Map(
+        (powerRatings2025Seed as Array<{
+          playerName: string;
+          team: string | null;
+          contact: number | null;
+          lineDrive: number | null;
+          avgExitVelo: number | null;
+          popUp: number | null;
+          bb: number | null;
+          chase: number | null;
+          barrel: number | null;
+          ev90: number | null;
+          pull: number | null;
+          la10_30: number | null;
+          gb: number | null;
+        }>).map((row) => [toPlayerKey(row.playerName, row.team), row]),
+      );
+
+      // Fetch current players so we only insert missing ones.
+      const existingPlayers: Array<{
+        id: string;
+        first_name: string;
+        last_name: string;
+        team: string | null;
+      }> = [];
+      let playerFrom = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("players")
+          .select("id, first_name, last_name, team")
+          .order("id", { ascending: true })
+          .range(playerFrom, playerFrom + pageSize - 1);
+        if (error) throw error;
+        const batch = data || [];
+        existingPlayers.push(...batch);
+        if (batch.length < pageSize) break;
+        playerFrom += pageSize;
+      }
+
+      const playerIdByKey = new Map<string, string>();
+      const playerIdByName = new Map<string, string>();
+      for (const player of existingPlayers) {
+        const fullName = `${player.first_name} ${player.last_name}`.trim();
+        const key = toPlayerKey(fullName, player.team);
+        if (!playerIdByKey.has(key)) playerIdByKey.set(key, player.id);
+        const nameKey = normalize(fullName);
+        if (!playerIdByName.has(nameKey)) playerIdByName.set(nameKey, player.id);
+      }
+
+      const playersToInsert: Array<{
+        first_name: string;
+        last_name: string;
+        team: string | null;
+        conference: string | null;
+        position: string | null;
+        transfer_portal: boolean;
+      }> = [];
+      const plannedPlayerKeys = new Set<string>();
+      const plannedPlayerNameKeys = new Set<string>();
+
+      for (const row of statsSeed) {
+        const fullName = row.playerName.trim();
+        const key = toPlayerKey(fullName, row.team);
+        const nameKey = normalize(fullName);
+        if (playerIdByKey.has(key) || playerIdByName.has(nameKey) || plannedPlayerKeys.has(key) || plannedPlayerNameKeys.has(nameKey)) continue;
+        const nameParts = toNameParts(fullName);
+        playersToInsert.push({
+          first_name: nameParts.first_name,
+          last_name: nameParts.last_name,
+          // Keep canonical team/conference display sourced from 2025 storage in this testing phase.
+          team: null,
+          conference: null,
+          position: getPositionFor(fullName, row.team),
+          transfer_portal: false,
+        });
+        plannedPlayerKeys.add(key);
+        plannedPlayerNameKeys.add(nameKey);
+      }
+
+      let createdPlayers = 0;
+      if (playersToInsert.length > 0) {
+        const insertedPlayers: Array<{
+          id: string;
+          first_name: string;
+          last_name: string;
+          team: string | null;
+        }> = [];
+        for (let i = 0; i < playersToInsert.length; i += 300) {
+          const batch = playersToInsert.slice(i, i + 300);
+          const { data, error } = await supabase
+            .from("players")
+            .insert(batch)
+            .select("id, first_name, last_name, team");
+          if (error) throw error;
+          insertedPlayers.push(...(data || []));
+        }
+        createdPlayers = insertedPlayers.length;
+        for (const player of insertedPlayers) {
+          const fullName = `${player.first_name} ${player.last_name}`.trim();
+          const key = toPlayerKey(fullName, player.team);
+          const nameKey = normalize(fullName);
+          if (!playerIdByKey.has(key)) playerIdByKey.set(key, player.id);
+          if (!playerIdByName.has(nameKey)) playerIdByName.set(nameKey, player.id);
+        }
+      }
+
+      // Fetch existing regular returner predictions for this season.
+      const existingPreds: Array<{ id: string; player_id: string }> = [];
+      let predFrom = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from("player_predictions")
+          .select("id, player_id")
+          .eq("season", season)
+          .eq("model_type", "returner")
+          .eq("variant", "regular")
+          .range(predFrom, predFrom + pageSize - 1);
+        if (error) throw error;
+        const batch = data || [];
+        existingPreds.push(...batch);
+        if (batch.length < pageSize) break;
+        predFrom += pageSize;
+      }
+      const existingPredPlayerIds = new Set(existingPreds.map((p) => p.player_id));
+
+      const predictionsToInsert: Array<{
+        player_id: string;
+        model_type: string;
+        variant: string;
+        season: number;
+        status: string;
+        locked: boolean;
+        class_transition: string;
+        dev_aggressiveness: number;
+        from_avg: number | null;
+        from_obp: number | null;
+        from_slg: number | null;
+        power_rating_plus: number | null;
+      }> = [];
+      const internalByPlayerId = new Map<string, { avg: number | null; obp: number | null; slg: number | null }>();
+      const plannedPredictionPlayerIds = new Set<string>();
+
+      for (const row of statsSeed) {
+        const fullName = row.playerName.trim();
+        const key = toPlayerKey(fullName, row.team);
+        const nameKey = normalize(fullName);
+        const playerId = playerIdByKey.get(key) || playerIdByName.get(nameKey);
+        const powerRow = powerByKey.get(key);
+        const power = powerRow ? derivePowerScoresAndRatings(powerRow) : null;
+        if (playerId) internalByPlayerId.set(playerId, {
+          avg: power?.baPowerPlus ?? null,
+          obp: power?.obpPowerPlus ?? null,
+          slg: power?.isoPowerPlus ?? null,
+        });
+        if (!playerId || existingPredPlayerIds.has(playerId) || plannedPredictionPlayerIds.has(playerId)) continue;
+        predictionsToInsert.push({
+          player_id: playerId,
+          model_type: "returner",
+          variant: "regular",
+          season,
+          status: "active",
+          locked: true,
+          class_transition: "SJ",
+          dev_aggressiveness: 0.0,
+          from_avg: row.avg ?? null,
+          from_obp: row.obp ?? null,
+          from_slg: row.slg ?? null,
+          power_rating_plus: power?.overallPowerPlus ?? 100,
+        });
+        plannedPredictionPlayerIds.add(playerId);
+      }
+
+      let createdPredictions = 0;
+      const insertedPredictionRows: Array<{ id: string; player_id: string }> = [];
+      if (predictionsToInsert.length > 0) {
+        for (let i = 0; i < predictionsToInsert.length; i += 300) {
+          const batch = predictionsToInsert.slice(i, i + 300);
+          const { data, error } = await supabase
+            .from("player_predictions")
+            .insert(batch)
+            .select("id, player_id");
+          if (error) throw error;
+          const inserted = data || [];
+          insertedPredictionRows.push(...inserted);
+          createdPredictions += inserted.length;
+        }
+      }
+
+      const internalsToUpsert: Array<{
+        prediction_id: string;
+        avg_power_rating: number | null;
+        obp_power_rating: number | null;
+        slg_power_rating: number | null;
+      }> = insertedPredictionRows.map((pred) => {
+        const internal = internalByPlayerId.get(pred.player_id);
+        return {
+          prediction_id: pred.id,
+          avg_power_rating: internal?.avg ?? null,
+          obp_power_rating: internal?.obp ?? null,
+          slg_power_rating: internal?.slg ?? null,
+        };
+      });
+      if (internalsToUpsert.length > 0) {
+        const { error } = await supabase
+          .from("player_prediction_internals")
+          .upsert(internalsToUpsert, { onConflict: "prediction_id" });
+        if (error) throw error;
+      }
+
+      // Backfill internals for already-existing returner predictions in case they were created earlier.
+      if (existingPreds.length > 0) {
+        const missingInternals = existingPreds.map((pred) => {
+          const internal = internalByPlayerId.get(pred.player_id);
+          return {
+            prediction_id: pred.id,
+            avg_power_rating: internal?.avg ?? null,
+            obp_power_rating: internal?.obp ?? null,
+            slg_power_rating: internal?.slg ?? null,
+          };
+        });
+        if (missingInternals.length > 0) {
+          const { error } = await supabase
+            .from("player_prediction_internals")
+            .upsert(missingInternals, { onConflict: "prediction_id" });
+          if (error) throw error;
+        }
+      }
+
+      // Keep 2025 returner template aligned with current testing defaults:
+      // class transition SJ and dev aggressiveness 0.0 unless user manually changed away from legacy default.
+      const { error: normalizeDevError } = await supabase
+        .from("player_predictions")
+        .update({ dev_aggressiveness: 0.0, class_transition: "SJ" })
+        .eq("season", season)
+        .eq("model_type", "returner")
+        .eq("variant", "regular")
+        .or("dev_aggressiveness.is.null,dev_aggressiveness.eq.0.5");
+      if (normalizeDevError) throw normalizeDevError;
+
+      const recalcData = await bulkRecalculatePredictionsLocal();
+
+      return {
+        createdPlayers,
+        createdPredictions,
+        recalculated: recalcData.updated ?? 0,
+      };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-data-storage"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-power-storage"] });
+      queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
+      queryClient.invalidateQueries({ queryKey: ["player-profile"] });
+      toast.success(
+        `Profiles synced: ${result.createdPlayers} players added, ${result.createdPredictions} predictions added, ${result.recalculated} recalculated.`,
+      );
+    },
+    onError: (error: unknown) => {
+      let message = "Failed to build/link player profiles.";
+      if (error instanceof Error && error.message) {
+        message = error.message;
+      } else if (error && typeof error === "object") {
+        try {
+          const maybe = error as { message?: string; details?: string; hint?: string; code?: string };
+          const parts = [maybe.message, maybe.details, maybe.hint, maybe.code].filter(Boolean);
+          if (parts.length > 0) message = parts.join(" | ");
+          else message = JSON.stringify(error);
+        } catch {
+          // keep default
+        }
+      }
+      toast.error(message);
+    },
+  });
+
+  if ((storageView === "stats" && isLoading) || (storageView === "power" && isPowerLoading)) {
+    return <p className="text-muted-foreground py-8 text-center">Loading {selectedSeason} storage data…</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold">2025 Data Storage</h3>
+          <p className="text-sm text-muted-foreground">Storage for each player&apos;s 2025 team and stats. This is source data for future backend equation auto-population, not prediction results.</p>
+          {filteredRows.length > 0 ? (
+            <p className="text-xs text-muted-foreground mt-1">Source: {filteredRows[0].source}</p>
+          ) : null}
+        </div>
+        <Input
+          placeholder="Search player/team/conference…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full sm:w-72"
+        />
+        <Button
+          type="button"
+          variant={showMissingOnly ? "secondary" : "outline"}
+          onClick={() => setShowMissingOnly((prev) => !prev)}
+        >
+          {showMissingOnly ? "Showing Missing Only" : "Missing Data Only"}
+        </Button>
+        <Select value={selectedSeason} onValueChange={(v: "2025" | "2026") => setSelectedSeason(v)}>
+          <SelectTrigger className="w-36">
+            <SelectValue placeholder="Season" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="2025">2025</SelectItem>
+            <SelectItem value="2026">2026</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          variant="outline"
+          className="gap-2"
+          onClick={() => buildAndLinkProfilesMutation.mutate()}
+          disabled={buildAndLinkProfilesMutation.isPending || selectedSeason !== "2025"}
+          title={selectedSeason !== "2025" ? "Only available for 2025 right now" : undefined}
+        >
+          {buildAndLinkProfilesMutation.isPending ? (
+            <RefreshCw className="h-4 w-4 animate-spin" />
+          ) : (
+            <Check className="h-4 w-4" />
+          )}
+          {buildAndLinkProfilesMutation.isPending ? "Building/Linking…" : "Build/Link 2025 Profiles"}
+        </Button>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <Tabs value={storageView} onValueChange={(v) => setStorageView(v as "stats" | "power")} className="p-4 pt-3">
+            <TabsList>
+              <TabsTrigger value="stats">Stats Storage</TabsTrigger>
+              <TabsTrigger value="power">Power Ratings Storage</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="stats" className="mt-3">
+              <div className="max-h-[620px] overflow-auto">
+                <Table>
+                  <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
+                    <TableRow>
+                      <TableHead className="sticky left-0 z-30 bg-background min-w-[220px]">Player</TableHead>
+                      <TableHead>Team</TableHead>
+                      <TableHead>Pos</TableHead>
+                      <TableHead className="text-right">AVG</TableHead>
+                      <TableHead className="text-right">OBP</TableHead>
+                      <TableHead className="text-right">SLG</TableHead>
+                      <TableHead className="text-right">OPS</TableHead>
+                      <TableHead className="text-right">ISO</TableHead>
+                      <TableHead className="text-right">WRC</TableHead>
+                      <TableHead className="text-right">WRC+</TableHead>
+                      <TableHead className="text-right">oWAR</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredRows.length ? (
+                      filteredRows.map((r) => {
+                        const m = deriveMetrics(r.avg, r.obp, r.slg);
+                        return (
+                          <TableRow key={r.id}>
+                            <TableCell className="sticky left-0 z-10 bg-background font-medium min-w-[220px]">
+                              {(() => {
+                                const playerId = resolvePlayerId(r.playerName || "", r.team);
+                                if (!playerId) return r.playerName || "—";
+                                return (
+                                  <Link to={`/dashboard/player/${playerId}`} className="text-primary underline-offset-4 hover:underline">
+                                    {r.playerName || "—"}
+                                  </Link>
+                                );
+                              })()}
+                            </TableCell>
+                            <TableCell>{r.team || "—"}</TableCell>
+                            <TableCell>{getPositionFor(r.playerName, r.team) || "—"}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt3(r.avg)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt3(r.obp)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt3(r.slg)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt3(m.ops)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt3(m.iso)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt3(m.wrc)}</TableCell>
+                            <TableCell className="text-right font-mono">{m.wrcPlus == null ? "—" : Math.round(m.wrcPlus).toString()}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt2(m.owar)}</TableCell>
+                          </TableRow>
+                        );
+                      })
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={12} className="py-8 text-center text-muted-foreground">
+                          No {selectedSeason} season stats rows found.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="power" className="mt-3">
+              <div className="max-h-[620px] overflow-auto">
+                <Table>
+                  <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
+                    <TableRow>
+                      <TableHead className="sticky left-0 z-30 bg-background min-w-[220px]">Player</TableHead>
+                      <TableHead>Team</TableHead>
+                      <TableHead>Pos</TableHead>
+                      <TableHead className="text-right">Contact%</TableHead>
+                      <TableHead className="text-right">Line Drive%</TableHead>
+                      <TableHead className="text-right">Avg Exit Velo</TableHead>
+                      <TableHead className="text-right">Pop-Up%</TableHead>
+                      <TableHead className="text-right">BB%</TableHead>
+                      <TableHead className="text-right">Chase%</TableHead>
+                      <TableHead className="text-right">Barrel%</TableHead>
+                      <TableHead className="text-right">EV90</TableHead>
+                      <TableHead className="text-right">Pull%</TableHead>
+                      <TableHead className="text-right">LA 10-30%</TableHead>
+                      <TableHead className="text-right">GB%</TableHead>
+                      <TableHead className="text-right">Contact Score</TableHead>
+                      <TableHead className="text-right">Line Drive Score</TableHead>
+                      <TableHead className="text-right">Avg EV Score</TableHead>
+                      <TableHead className="text-right">Pop-Up Score</TableHead>
+                      <TableHead className="text-right">BB% Score</TableHead>
+                      <TableHead className="text-right">Chase% Score</TableHead>
+                      <TableHead className="text-right">Barrel Score</TableHead>
+                      <TableHead className="text-right">EV90 Score</TableHead>
+                      <TableHead className="text-right">Pull% Score</TableHead>
+                      <TableHead className="text-right">LA10-30 Score</TableHead>
+                      <TableHead className="text-right">GB% Score</TableHead>
+                      <TableHead className="text-right">BA Power Rating+</TableHead>
+                      <TableHead className="text-right">OBP Power Rating+</TableHead>
+                      <TableHead className="text-right">ISO Power Rating+</TableHead>
+                      <TableHead className="text-right">Overall Power Rating+</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredPowerRows.length ? (
+                      filteredPowerRows.map((r) => {
+                        const p = derivePowerScoresAndRatings(r);
+                        return (
+                        <TableRow key={r.id}>
+                          <TableCell className="sticky left-0 z-10 bg-background font-medium min-w-[220px]">
+                            {(() => {
+                              const playerId = resolvePlayerId(r.playerName || "", r.team);
+                              if (!playerId) return r.playerName || "—";
+                              return (
+                                <Link to={`/dashboard/player/${playerId}`} className="text-primary underline-offset-4 hover:underline">
+                                  {r.playerName || "—"}
+                                </Link>
+                              );
+                            })()}
+                          </TableCell>
+                          <TableCell>{r.team || "—"}</TableCell>
+                          <TableCell>{getPositionFor(r.playerName, r.team) || "—"}</TableCell>
+                          <TableCell className="text-right font-mono">{fmt2(r.contact)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt2(r.lineDrive)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt2(r.avgExitVelo)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt2(r.popUp)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt2(r.bb)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt2(r.chase)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt2(r.barrel)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt2(r.ev90)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt2(r.pull)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt2(r.la10_30)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmt2(r.gb)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.contactScore)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.lineDriveScore)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.avgEVScore)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.popUpScore)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.bbScore)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.chaseScore)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.barrelScore)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.ev90Score)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.pullScore)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.la1030Score)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.gbScore)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.baPowerPlus)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.obpPowerPlus)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.isoPowerPlus)}</TableCell>
+                            <TableCell className="text-right font-mono">{fmtWhole(p.overallPowerPlus)}</TableCell>
+                          </TableRow>
+                        );
+                      })
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={29} className="py-8 text-center text-muted-foreground">
+                          No {selectedSeason} power rating rows found.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
     </div>
@@ -2027,9 +3502,13 @@ export default function AdminDashboard() {
               <Building2 className="h-4 w-4" />
               Teams
             </TabsTrigger>
+            <TabsTrigger value="data-storage-2025" className="gap-1.5">
+              <Check className="h-4 w-4" />
+              Data Storage
+            </TabsTrigger>
             <TabsTrigger value="actions" className="gap-1.5">
               <RefreshCw className="h-4 w-4" />
-              Actions
+              Data Sync
             </TabsTrigger>
           </TabsList>
 
@@ -2047,6 +3526,9 @@ export default function AdminDashboard() {
           </TabsContent>
           <TabsContent value="actions">
             <QuickActionsTab />
+          </TabsContent>
+          <TabsContent value="data-storage-2025">
+            <DataStorage2025Tab />
           </TabsContent>
         </Tabs>
       </div>

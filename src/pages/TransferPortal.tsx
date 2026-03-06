@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Users, TrendingUp, TrendingDown, ArrowUpDown, Search, BarChart3 } from "lucide-react";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Cell } from "recharts";
+import storage2025Seed from "@/data/storage_2025_seed.json";
 
 type SortKey = "name" | "p_ops" | "p_avg" | "p_slg" | "p_obp" | "p_iso" | "p_wrc_plus" | "power_rating_plus" | "power_rating_score" | "ev_score" | "barrel_score";
 type SortDir = "asc" | "desc";
@@ -21,6 +22,7 @@ interface TransferPlayer {
   first_name: string;
   last_name: string;
   team: string | null;
+  from_team: string | null;
   conference: string | null;
   position: string | null;
   class_year: string | null;
@@ -85,54 +87,32 @@ export default function TransferPortal() {
   const [sortKey, setSortKey] = useState<SortKey>("p_ops");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  const { data: players = [], isLoading } = useQuery({
-    queryKey: ["transfer-portal", variant],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("player_predictions")
-        .select(`
-          *,
-          players!inner(id, first_name, last_name, team, conference, position, class_year)
-        `)
-        .eq("model_type", "transfer")
-        .eq("variant", variant);
+  const normalize = (value: string | null | undefined) =>
+    (value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  const statKeyPart = (value: number | null | undefined) => (value == null ? "na" : value.toFixed(3));
+  const seedSignature = (name: string, avg: number | null | undefined, obp: number | null | undefined, slg: number | null | undefined) =>
+    `${normalize(name)}|${statKeyPart(avg)}|${statKeyPart(obp)}|${statKeyPart(slg)}`;
+  const teamOverrides2025: Record<string, string> = {
+    "christopher hacopian": "University of Maryland-College Park",
+    "eddie hacopian": "University of Maryland-College Park",
+  };
+  const seedLookup = useMemo(() => {
+    const bySignature = new Map<string, string>();
+    const byName = new Map<string, string[]>();
+    for (const row of storage2025Seed as Array<{ playerName: string; team: string | null; avg: number | null; obp: number | null; slg: number | null }>) {
+      if (!row.playerName || !row.team) continue;
+      bySignature.set(seedSignature(row.playerName, row.avg, row.obp, row.slg), row.team);
+      const nameKey = normalize(row.playerName);
+      const existing = byName.get(nameKey) || [];
+      existing.push(row.team);
+      byName.set(nameKey, existing);
+    }
+    return { bySignature, byName };
+  }, []);
 
-      if (error) throw error;
-
-      return (data || []).map((row: any) => ({
-        id: row.players.id,
-        first_name: row.players.first_name,
-        last_name: row.players.last_name,
-        team: row.players.team,
-        conference: row.players.conference,
-        position: row.players.position,
-        class_year: row.players.class_year,
-        prediction: {
-          variant: row.variant,
-          p_avg: row.p_avg,
-          p_obp: row.p_obp,
-          p_slg: row.p_slg,
-          p_ops: row.p_ops,
-          p_iso: row.p_iso,
-          p_wrc_plus: row.p_wrc_plus,
-          from_avg: row.from_avg,
-          from_obp: row.from_obp,
-          from_slg: row.from_slg,
-          from_park_factor: row.from_park_factor,
-          to_park_factor: row.to_park_factor,
-          from_stuff_plus: row.from_stuff_plus,
-          to_stuff_plus: row.to_stuff_plus,
-          power_rating_plus: row.power_rating_plus,
-          power_rating_score: row.power_rating_score,
-          ev_score: row.ev_score,
-          barrel_score: row.barrel_score,
-          whiff_score: row.whiff_score,
-          chase_score: row.chase_score,
-          class_transition: row.class_transition,
-        },
-      })) as TransferPlayer[];
-    },
-  });
+  // Intentionally cleared for redesign. Data remains in storage.
+  const players: TransferPlayer[] = [];
+  const isLoading = false;
 
   const positions = useMemo(() => {
     const set = new Set(players.map((p) => p.position).filter(Boolean) as string[]);
@@ -146,12 +126,13 @@ export default function TransferPortal() {
     }
     if (search) {
       const q = search.toLowerCase();
-      list = list.filter(
-        (p) =>
-          `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
-          (p.team || "").toLowerCase().includes(q) ||
-          (p.conference || "").toLowerCase().includes(q)
-      );
+          list = list.filter(
+            (p) =>
+              `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
+              (p.from_team || "").toLowerCase().includes(q) ||
+              (p.team || "").toLowerCase().includes(q) ||
+              (p.conference || "").toLowerCase().includes(q)
+          );
     }
     list.sort((a, b) => {
       let aVal: number | string | null;
@@ -263,6 +244,12 @@ export default function TransferPortal() {
           </Card>
         </div>
 
+        <Card>
+          <CardContent className="py-10 text-center text-muted-foreground">
+            Transfer Portal dashboard has been cleared for interactive rebuild. Underlying transfer data is still saved.
+          </CardContent>
+        </Card>
+
         {/* Chart — Top 10 by pOPS */}
         {chartData.length > 0 && (
           <Card>
@@ -354,7 +341,7 @@ export default function TransferPortal() {
                           <TableCell className="sticky left-0 z-10 bg-background">
                             <Link to={`/dashboard/player/${p.id}`} className="font-medium hover:text-primary hover:underline transition-colors">{p.first_name} {p.last_name}</Link>
                             <div className="text-xs text-muted-foreground">
-                              {[p.position, p.team, p.class_year].filter(Boolean).join(" · ") || "—"}
+                              {[p.position, p.from_team, p.class_year].filter(Boolean).join(" · ") || "—"}
                             </div>
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground whitespace-nowrap">

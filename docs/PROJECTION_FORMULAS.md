@@ -151,12 +151,19 @@ ProgramSpecificNIL = (PlayerScore / SumOfTotalRosterPlayerScore(~68 fallback)) Ã
 ## Future Must-Dos (Post-CSV Automation)
 
 - Next session priority: Start with **Isolated Power Power Rating** and finish the full setup end-to-end (equation, inputs, NCAA averages, standard deviations, editable weights, and rating+).
+- Scoring rule: any score equation that starts with `100 -` should be treated as an inverse percentile where lower raw values are better during percentile calculation.
+- Reliable 2025 data in the admin interface is a testing-stage storage/validation layer; production should use a direct data API as the source of truth for all inputs.
+- All data entry should eventually come from the API pipeline we build; current interface work is for training/validating in-app equation calculations so the system can compute required outputs automatically.
+- Decide player-portal inclusion policy: whether to keep every active player (including players with exhausted eligibility or draft status) in next-year prediction outputs, or filter by eligibility/projection status.
+- Rename the Admin `Actions` tab to `Data Sync` and use it as the control point for recurring API re-sync jobs (weekly by default, configurable cadence).
+- Add a durable duplicate-resolution strategy for same-name players (unique identifiers, collision checks, and merge/split workflows) so storage and predictions never map to the wrong player.
 - Define a single source-of-truth schema for `players`, `teams`, `conference_stats`, `park_factors`, `power_ratings`, and `player_predictions` with canonical IDs and alias mapping.
 - Replace CSV uploads with automated data ingestors (API/scrape connectors) writing into staging tables first.
 - Add scheduled sync jobs (daily/weekly) with idempotent upserts.
 - Add validation gates before promotion from staging to production (required fields, ranges, duplicates, canonical team-name checks).
 - Automatically calculate and refresh all model standard deviations from full-system player data during data processing (with manual override retained in admin).
 - Pull score inputs as percentiles directly from TruMedia (or equivalent primary data source) instead of manually deriving percentile scores in the app.
+- Cross-check developmental aggressiveness impact across all recalculation paths (single-player recalc, bulk recalc, CSV power-rating imports) to confirm consistent projected stat deltas.
 - Version equation constants/weights with effective dates and store version used for each prediction run.
 - Trigger automatic prediction recalculation after successful syncs (incremental first, full batch optional).
 - Separate environments (`dev`, `test`, `prod`) and keep `testing-trevor` pointed to test-only data sources.

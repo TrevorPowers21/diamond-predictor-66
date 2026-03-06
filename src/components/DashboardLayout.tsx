@@ -24,7 +24,7 @@ import { useState } from "react";
 const navItems = [
   { label: "Overview", href: "/dashboard", icon: BarChart3 },
   { label: "Transfer Portal", href: "/dashboard/portal", icon: Users },
-  { label: "Returning Players", href: "/dashboard/returning", icon: Activity },
+  { label: "Player Dashboard", href: "/dashboard/returning", icon: Activity },
   { label: "NIL Valuations", href: "/dashboard/nil", icon: DollarSign },
   { label: "Compare", href: "/dashboard/compare", icon: GitCompare },
   { label: "Teams", href: "/dashboard/teams", icon: Building2 },

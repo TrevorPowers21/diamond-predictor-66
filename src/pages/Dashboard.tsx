@@ -69,7 +69,7 @@ export default function Dashboard() {
 
   const cards = [
     { label: "Portal Players", value: stats?.transferCount ?? "—", sub: `Avg pOPS: ${stats ? stats.avgTransferOps.toFixed(3) : "—"}`, icon: Users, color: "text-primary", href: "/dashboard/portal" },
-    { label: "Returning Players", value: stats?.returnerCount ?? "—", sub: `Avg wRC+: ${stats ? stats.avgReturnerWrc.toFixed(0) : "—"}`, icon: Activity, color: "text-accent", href: "/dashboard/returning" },
+    { label: "Player Dashboard", value: stats?.returnerCount ?? "—", sub: `Avg wRC+: ${stats ? stats.avgReturnerWrc.toFixed(0) : "—"}`, icon: Activity, color: "text-accent", href: "/dashboard/returning" },
     { label: "NIL Valuations", value: stats?.nilCount ?? "—", sub: stats ? `$${(stats.totalNilValue / 1000).toFixed(0)}k total` : "—", icon: DollarSign, color: "text-[hsl(var(--success))]", href: "/dashboard/nil" },
     { label: "Conferences Tracked", value: stats?.conferenceCount ?? "—", sub: "2025 season", icon: BarChart3, color: "text-[hsl(var(--warning))]", href: "/dashboard/sync" },
   ];
@@ -149,7 +149,7 @@ export default function Dashboard() {
           {stats?.topReturner && stats.topReturner.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Top Returning Players (wRC+)</CardTitle>
+                <CardTitle className="text-base">Top Players (wRC+)</CardTitle>
                 <CardDescription>Highest projected wRC+ for returning roster</CardDescription>
               </CardHeader>
               <CardContent>

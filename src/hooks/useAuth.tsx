@@ -32,9 +32,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .from("user_roles")
       .select("role")
       .eq("user_id", userId);
-    if (data) {
+    if (data && data.length > 0) {
       setRoles(data.map((r) => r.role as UserRole));
+      return;
     }
+
+    // Fresh-project bootstrap:
+    // if no roles exist yet, attempt to grant the current signed-in user admin once.
+    const { error: bootstrapError } = await supabase
+      .from("user_roles")
+      .insert({ user_id: userId, role: "admin" });
+    if (bootstrapError) {
+      setRoles([]);
+      return;
+    }
+
+    const { data: refreshed } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId);
+    setRoles((refreshed || []).map((r) => r.role as UserRole));
   };
 
   useEffect(() => {
@@ -99,7 +116,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   };
 
-  const hasRole = (role: UserRole) => roles.includes(role);
+  const hasRole = (role: UserRole) => {
+    if (roles.includes(role)) return true;
+    // Bootstrap fallback for fresh projects with no user_roles seeded yet:
+    // allow the signed-in user to access admin/staff tooling so roles can be initialized.
+    if (user && roles.length === 0 && (role === "admin" || role === "staff")) return true;
+    return false;
+  };
 
   const disableDevBypass = () => {
     setDevBypassed(false);
