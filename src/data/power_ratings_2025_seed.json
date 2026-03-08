@@ -376,7 +376,7 @@
   {
     "id": "pr-csv-80",
     "playerName": "Matthew Pena",
-    "team": "Cal State-Northridge",
+    "team": "CSU Northridge",
     "contact": 65.8,
     "lineDrive": 27.8,
     "avgExitVelo": 94.4,
@@ -529,7 +529,7 @@
   {
     "id": "pr-csv-89",
     "playerName": "Devin Taylor",
-    "team": "Indiana University, Bloomington",
+    "team": "Indiana University",
     "contact": 80.8,
     "lineDrive": 20.4,
     "avgExitVelo": 93.9,
@@ -614,7 +614,7 @@
   {
     "id": "pr-csv-94",
     "playerName": "Judd Utermark",
-    "team": "University of Mississippi",
+    "team": "Ole Miss",
     "contact": 61.5,
     "lineDrive": 25.5,
     "avgExitVelo": 93.8,
@@ -937,7 +937,7 @@
   {
     "id": "pr-csv-113",
     "playerName": "Hollis Porter",
-    "team": "University of Maryland-College Park",
+    "team": "University of Maryland",
     "contact": 62.4,
     "lineDrive": 28.1,
     "avgExitVelo": 93.2,
@@ -1005,7 +1005,7 @@
   {
     "id": "pr-csv-117",
     "playerName": "Christopher Hacopian",
-    "team": "University of Maryland-College Park",
+    "team": "University of Maryland",
     "contact": 84.5,
     "lineDrive": 24.3,
     "avgExitVelo": 93.2,
@@ -1362,7 +1362,7 @@
   {
     "id": "pr-csv-138",
     "playerName": "Jace LaViolette",
-    "team": "Texas A&M University",
+    "team": "Texas A&M",
     "contact": 71.4,
     "lineDrive": 17.8,
     "avgExitVelo": 92.8,
@@ -1447,7 +1447,7 @@
   {
     "id": "pr-csv-143",
     "playerName": "Alex Birge",
-    "team": "University of California",
+    "team": "California",
     "contact": 68.9,
     "lineDrive": 20.0,
     "avgExitVelo": 92.8,
@@ -1651,7 +1651,7 @@
   {
     "id": "pr-csv-155",
     "playerName": "Korbyn Dickerson",
-    "team": "Indiana University, Bloomington",
+    "team": "Indiana University",
     "contact": 75.7,
     "lineDrive": 21.8,
     "avgExitVelo": 92.6,
@@ -1685,7 +1685,7 @@
   {
     "id": "pr-csv-157",
     "playerName": "Joshua Ibe",
-    "team": "Stephen F. Austin State University",
+    "team": "Stephen F Austin State",
     "contact": 71.1,
     "lineDrive": 20.3,
     "avgExitVelo": 92.5,
@@ -1889,7 +1889,7 @@
   {
     "id": "pr-csv-169",
     "playerName": "Isaac Humphrey",
-    "team": "University of Mississippi",
+    "team": "Ole Miss",
     "contact": 74.1,
     "lineDrive": 24.4,
     "avgExitVelo": 92.4,
@@ -1957,7 +1957,7 @@
   {
     "id": "pr-csv-173",
     "playerName": "Dawson Bryce",
-    "team": "UNC Charlotte",
+    "team": "Charlotte",
     "contact": 72.3,
     "lineDrive": 27.0,
     "avgExitVelo": 92.3,
@@ -2008,7 +2008,7 @@
   {
     "id": "pr-csv-176",
     "playerName": "Jack Cannon",
-    "team": "Le Moyne College",
+    "team": "Le Moyne",
     "contact": 71.9,
     "lineDrive": 16.8,
     "avgExitVelo": 92.2,
@@ -2042,7 +2042,7 @@
   {
     "id": "pr-csv-178",
     "playerName": "Nicholas Pratt",
-    "team": "UMBC",
+    "team": "University of Maryland, Baltimore County",
     "contact": 70.4,
     "lineDrive": 24.6,
     "avgExitVelo": 92.2,
@@ -2076,7 +2076,7 @@
   {
     "id": "pr-csv-180",
     "playerName": "Ethan Frey",
-    "team": "Louisiana State University",
+    "team": "Louisiana State",
     "contact": 79.0,
     "lineDrive": 25.0,
     "avgExitVelo": 92.2,
@@ -2195,7 +2195,7 @@
   {
     "id": "pr-csv-187",
     "playerName": "Dominic Smaldino",
-    "team": "University of California",
+    "team": "California",
     "contact": 73.3,
     "lineDrive": 24.8,
     "avgExitVelo": 92.1,
@@ -2637,7 +2637,7 @@
   {
     "id": "pr-csv-213",
     "playerName": "Adam Sullivan",
-    "team": "Le Moyne College",
+    "team": "Le Moyne",
     "contact": 74.1,
     "lineDrive": 28.3,
     "avgExitVelo": 91.9,
@@ -2773,7 +2773,7 @@
   {
     "id": "pr-csv-221",
     "playerName": "Carl Schmidt",
-    "team": "University of California",
+    "team": "California",
     "contact": 72.3,
     "lineDrive": 26.2,
     "avgExitVelo": 91.8,
@@ -2909,7 +2909,7 @@
   {
     "id": "pr-csv-229",
     "playerName": "Austin Fawley",
-    "team": "University of Mississippi",
+    "team": "Ole Miss",
     "contact": 57.9,
     "lineDrive": 18.0,
     "avgExitVelo": 91.6,
@@ -3164,7 +3164,7 @@
   {
     "id": "pr-csv-244",
     "playerName": "Roch Cholowsky",
-    "team": "UCLA",
+    "team": "University of California Los Angeles",
     "contact": 81.2,
     "lineDrive": 25.9,
     "avgExitVelo": 91.5,
@@ -3572,7 +3572,7 @@
   {
     "id": "pr-csv-268",
     "playerName": "Andrew Wiggins",
-    "team": "Indiana University, Bloomington",
+    "team": "Indiana University",
     "contact": 76.0,
     "lineDrive": 22.4,
     "avgExitVelo": 91.3,
@@ -3844,7 +3844,7 @@
   {
     "id": "pr-csv-284",
     "playerName": "Fisher Ingersoll",
-    "team": "Nicholls State University",
+    "team": "Nicholls State",
     "contact": 61.8,
     "lineDrive": 22.2,
     "avgExitVelo": 91.1,
@@ -3861,7 +3861,7 @@
   {
     "id": "pr-csv-285",
     "playerName": "Jason Campo",
-    "team": "North Carolina A&T State University",
+    "team": "North Carolina State A&T",
     "contact": 63.5,
     "lineDrive": 17.4,
     "avgExitVelo": 91.1,
@@ -3929,7 +3929,7 @@
   {
     "id": "pr-csv-289",
     "playerName": "Will Furniss",
-    "team": "University of Mississippi",
+    "team": "Ole Miss",
     "contact": 69.9,
     "lineDrive": 26.0,
     "avgExitVelo": 91.0,
@@ -4014,7 +4014,7 @@
   {
     "id": "pr-csv-294",
     "playerName": "Tripp Garrish",
-    "team": "Air Force Academy",
+    "team": "Air Force",
     "contact": 66.3,
     "lineDrive": 26.7,
     "avgExitVelo": 91.0,
@@ -4031,7 +4031,7 @@
   {
     "id": "pr-csv-295",
     "playerName": "Ben Zeigler-Namoa",
-    "team": "University of Hawaii, Manoa",
+    "team": "University of Hawaii",
     "contact": 74.4,
     "lineDrive": 16.6,
     "avgExitVelo": 91.0,
@@ -4167,7 +4167,7 @@
   {
     "id": "pr-csv-303",
     "playerName": "Jacob Lee",
-    "team": "Virginia Commonwealth University",
+    "team": "VCU",
     "contact": 65.4,
     "lineDrive": 25.7,
     "avgExitVelo": 90.9,
@@ -4592,7 +4592,7 @@
   {
     "id": "pr-csv-328",
     "playerName": "Kishon Frett",
-    "team": "Florida International University",
+    "team": "Florida International",
     "contact": 68.0,
     "lineDrive": 19.6,
     "avgExitVelo": 90.7,
@@ -4677,7 +4677,7 @@
   {
     "id": "pr-csv-333",
     "playerName": "Simon Larranaga",
-    "team": "McNeese State University",
+    "team": "McNeese State",
     "contact": 57.2,
     "lineDrive": 23.3,
     "avgExitVelo": 90.6,
@@ -5238,7 +5238,7 @@
   {
     "id": "pr-csv-366",
     "playerName": "Evan Appelwick",
-    "team": "Miami University (Ohio)",
+    "team": "Miami (OH)",
     "contact": 78.3,
     "lineDrive": 21.9,
     "avgExitVelo": 90.4,
@@ -5289,7 +5289,7 @@
   {
     "id": "pr-csv-369",
     "playerName": "Bear Harrison",
-    "team": "Texas A&M University",
+    "team": "Texas A&M",
     "contact": 70.7,
     "lineDrive": 24.5,
     "avgExitVelo": 90.4,
@@ -5357,7 +5357,7 @@
   {
     "id": "pr-csv-373",
     "playerName": "Roman Martin",
-    "team": "UCLA",
+    "team": "University of California Los Angeles",
     "contact": 79.4,
     "lineDrive": 23.0,
     "avgExitVelo": 90.3,
@@ -5561,7 +5561,7 @@
   {
     "id": "pr-csv-385",
     "playerName": "AJ Salgado",
-    "team": "UCLA",
+    "team": "University of California Los Angeles",
     "contact": 74.3,
     "lineDrive": 25.8,
     "avgExitVelo": 90.2,
@@ -5612,7 +5612,7 @@
   {
     "id": "pr-csv-388",
     "playerName": "Bryce Cannon",
-    "team": "Southeast Missouri State University",
+    "team": "Southeast Missouri State",
     "contact": 81.1,
     "lineDrive": 24.6,
     "avgExitVelo": 90.2,
@@ -5663,7 +5663,7 @@
   {
     "id": "pr-csv-391",
     "playerName": "Matthew Bardowell",
-    "team": "Cal State Fullerton",
+    "team": "CSU Fullerton",
     "contact": 71.1,
     "lineDrive": 22.6,
     "avgExitVelo": 90.2,
@@ -5714,7 +5714,7 @@
   {
     "id": "pr-csv-394",
     "playerName": "Jay Campbell",
-    "team": "Florida A&M University",
+    "team": "Florida A&M",
     "contact": 87.2,
     "lineDrive": 25.5,
     "avgExitVelo": 90.2,
@@ -6037,7 +6037,7 @@
   {
     "id": "pr-csv-413",
     "playerName": "Conor Higgs",
-    "team": "University of Louisiana at Lafayette",
+    "team": "Louisiana",
     "contact": 74.6,
     "lineDrive": 15.1,
     "avgExitVelo": 90.1,
@@ -6105,7 +6105,7 @@
   {
     "id": "pr-csv-417",
     "playerName": "Broedy Poppell",
-    "team": "Florida A&M University",
+    "team": "Florida A&M",
     "contact": 87.1,
     "lineDrive": 17.7,
     "avgExitVelo": 90.1,
@@ -6326,7 +6326,7 @@
   {
     "id": "pr-csv-430",
     "playerName": "Jake Souders",
-    "team": "Samford University",
+    "team": "Samford",
     "contact": 73.6,
     "lineDrive": 23.6,
     "avgExitVelo": 90.0,
@@ -6598,7 +6598,7 @@
   {
     "id": "pr-csv-446",
     "playerName": "Andrew Kirchner",
-    "team": "Cal State Fullerton",
+    "team": "CSU Fullerton",
     "contact": 65.7,
     "lineDrive": 22.3,
     "avgExitVelo": 89.9,
@@ -6836,7 +6836,7 @@
   {
     "id": "pr-csv-460",
     "playerName": "Cody Gunderson",
-    "team": "UNC Charlotte",
+    "team": "Charlotte",
     "contact": 72.5,
     "lineDrive": 26.9,
     "avgExitVelo": 89.8,
@@ -7006,7 +7006,7 @@
   {
     "id": "pr-csv-470",
     "playerName": "Brylan West",
-    "team": "Florida International University",
+    "team": "Florida International",
     "contact": 82.5,
     "lineDrive": 23.2,
     "avgExitVelo": 89.8,
@@ -7023,7 +7023,7 @@
   {
     "id": "pr-csv-471",
     "playerName": "Jake Hanley",
-    "team": "Indiana University, Bloomington",
+    "team": "Indiana University",
     "contact": 76.5,
     "lineDrive": 22.2,
     "avgExitVelo": 89.8,
@@ -7193,7 +7193,7 @@
   {
     "id": "pr-csv-481",
     "playerName": "Hogan Denny",
-    "team": "Indiana University, Bloomington",
+    "team": "Indiana University",
     "contact": 76.8,
     "lineDrive": 29.9,
     "avgExitVelo": 89.7,
@@ -7380,7 +7380,7 @@
   {
     "id": "pr-csv-492",
     "playerName": "Ryan Moerman",
-    "team": "University of Mississippi",
+    "team": "Ole Miss",
     "contact": 70.6,
     "lineDrive": 21.1,
     "avgExitVelo": 89.6,
@@ -7618,7 +7618,7 @@
   {
     "id": "pr-csv-506",
     "playerName": "Mulivai Levu",
-    "team": "UCLA",
+    "team": "University of California Los Angeles",
     "contact": 81.8,
     "lineDrive": 24.7,
     "avgExitVelo": 89.6,
@@ -7686,7 +7686,7 @@
   {
     "id": "pr-csv-510",
     "playerName": "Walker Zapp",
-    "team": "Air Force Academy",
+    "team": "Air Force",
     "contact": 76.3,
     "lineDrive": 21.3,
     "avgExitVelo": 89.5,
@@ -7788,7 +7788,7 @@
   {
     "id": "pr-csv-516",
     "playerName": "Mitchell Sanford",
-    "team": "University of Mississippi",
+    "team": "Ole Miss",
     "contact": 71.5,
     "lineDrive": 22.2,
     "avgExitVelo": 89.5,
@@ -7992,7 +7992,7 @@
   {
     "id": "pr-csv-528",
     "playerName": "Alex Calarco",
-    "team": "University of Maryland-College Park",
+    "team": "University of Maryland",
     "contact": 73.5,
     "lineDrive": 17.4,
     "avgExitVelo": 89.5,
@@ -8145,7 +8145,7 @@
   {
     "id": "pr-csv-537",
     "playerName": "Ryan Novak",
-    "team": "Miami University (Ohio)",
+    "team": "Miami (OH)",
     "contact": 78.2,
     "lineDrive": 20.8,
     "avgExitVelo": 89.4,
@@ -8196,7 +8196,7 @@
   {
     "id": "pr-csv-540",
     "playerName": "Danny Orr",
-    "team": "UMBC",
+    "team": "University of Maryland, Baltimore County",
     "contact": 80.8,
     "lineDrive": 16.8,
     "avgExitVelo": 89.4,
@@ -8230,7 +8230,7 @@
   {
     "id": "pr-csv-542",
     "playerName": "Cole Warehime",
-    "team": "Southeast Missouri State University",
+    "team": "Southeast Missouri State",
     "contact": 79.3,
     "lineDrive": 24.2,
     "avgExitVelo": 89.4,
@@ -8298,7 +8298,7 @@
   {
     "id": "pr-csv-546",
     "playerName": "Carson Bayne",
-    "team": "UNC Charlotte",
+    "team": "Charlotte",
     "contact": 72.2,
     "lineDrive": 20.4,
     "avgExitVelo": 89.4,
@@ -8587,7 +8587,7 @@
   {
     "id": "pr-csv-563",
     "playerName": "Cooper Malamazian",
-    "team": "Indiana University, Bloomington",
+    "team": "Indiana University",
     "contact": 73.0,
     "lineDrive": 25.2,
     "avgExitVelo": 89.3,
@@ -8791,7 +8791,7 @@
   {
     "id": "pr-csv-575",
     "playerName": "Jared Jones",
-    "team": "Louisiana State University",
+    "team": "Louisiana State",
     "contact": 70.9,
     "lineDrive": 26.5,
     "avgExitVelo": 89.2,
@@ -9063,7 +9063,7 @@
   {
     "id": "pr-csv-591",
     "playerName": "Andrew Ildefonso",
-    "team": "Florida International University",
+    "team": "Florida International",
     "contact": 76.7,
     "lineDrive": 18.1,
     "avgExitVelo": 89.1,
@@ -9675,7 +9675,7 @@
   {
     "id": "pr-csv-627",
     "playerName": "Eddison Esquivel",
-    "team": "University of San Francisco",
+    "team": "San Francisco",
     "contact": 68.9,
     "lineDrive": 21.8,
     "avgExitVelo": 88.9,
@@ -9964,7 +9964,7 @@
   {
     "id": "pr-csv-644",
     "playerName": "Kaeden Kent",
-    "team": "Texas A&M University",
+    "team": "Texas A&M",
     "contact": 83.7,
     "lineDrive": 24.9,
     "avgExitVelo": 88.8,
@@ -10287,7 +10287,7 @@
   {
     "id": "pr-csv-663",
     "playerName": "Ryan Geck",
-    "team": "Little Rock",
+    "team": "University of Arkansas Little Rock",
     "contact": 75.7,
     "lineDrive": 16.3,
     "avgExitVelo": 88.8,
@@ -10389,7 +10389,7 @@
   {
     "id": "pr-csv-669",
     "playerName": "Carter Hanson",
-    "team": "University of Massachusetts",
+    "team": "UMass",
     "contact": 78.9,
     "lineDrive": 29.0,
     "avgExitVelo": 88.7,
@@ -10729,7 +10729,7 @@
   {
     "id": "pr-csv-689",
     "playerName": "Wyatt Henseler",
-    "team": "Texas A&M University",
+    "team": "Texas A&M",
     "contact": 76.6,
     "lineDrive": 23.3,
     "avgExitVelo": 88.7,
@@ -10763,7 +10763,7 @@
   {
     "id": "pr-csv-691",
     "playerName": "Jayce Blalock",
-    "team": "Little Rock",
+    "team": "University of Arkansas Little Rock",
     "contact": 70.2,
     "lineDrive": 11.5,
     "avgExitVelo": 88.6,
@@ -11086,7 +11086,7 @@
   {
     "id": "pr-csv-710",
     "playerName": "Noah Furcht",
-    "team": "UNC Charlotte",
+    "team": "Charlotte",
     "contact": 65.0,
     "lineDrive": 23.3,
     "avgExitVelo": 88.5,
@@ -11358,7 +11358,7 @@
   {
     "id": "pr-csv-726",
     "playerName": "Dante Turgeon",
-    "team": "Stephen F. Austin State University",
+    "team": "Stephen F Austin State",
     "contact": 69.4,
     "lineDrive": 12.3,
     "avgExitVelo": 88.5,
@@ -11494,7 +11494,7 @@
   {
     "id": "pr-csv-734",
     "playerName": "Sean Swenson",
-    "team": "Virginia Commonwealth University",
+    "team": "VCU",
     "contact": 75.2,
     "lineDrive": 17.4,
     "avgExitVelo": 88.5,
@@ -11596,7 +11596,7 @@
   {
     "id": "pr-csv-740",
     "playerName": "Zach Peters",
-    "team": "Air Force Academy",
+    "team": "Air Force",
     "contact": 75.8,
     "lineDrive": 16.5,
     "avgExitVelo": 88.4,
@@ -11715,7 +11715,7 @@
   {
     "id": "pr-csv-747",
     "playerName": "Luke Hill",
-    "team": "University of Mississippi",
+    "team": "Ole Miss",
     "contact": 76.8,
     "lineDrive": 20.5,
     "avgExitVelo": 88.4,
@@ -11766,7 +11766,7 @@
   {
     "id": "pr-csv-750",
     "playerName": "Parker McDonald",
-    "team": "Samford University",
+    "team": "Samford",
     "contact": 69.8,
     "lineDrive": 26.1,
     "avgExitVelo": 88.4,
@@ -12242,7 +12242,7 @@
   {
     "id": "pr-csv-778",
     "playerName": "Connor Maryniak",
-    "team": "UNC Charlotte",
+    "team": "Charlotte",
     "contact": 75.4,
     "lineDrive": 21.7,
     "avgExitVelo": 88.3,
@@ -12259,7 +12259,7 @@
   {
     "id": "pr-csv-779",
     "playerName": "John McKillop",
-    "team": "Army West Point",
+    "team": "Army",
     "contact": 74.8,
     "lineDrive": 33.0,
     "avgExitVelo": 88.3,
@@ -12701,7 +12701,7 @@
   {
     "id": "pr-csv-805",
     "playerName": "Dalton Mullins",
-    "team": "Stephen F. Austin State University",
+    "team": "Stephen F Austin State",
     "contact": 81.5,
     "lineDrive": 15.2,
     "avgExitVelo": 88.2,
@@ -13109,7 +13109,7 @@
   {
     "id": "pr-csv-829",
     "playerName": "Austin Dearing",
-    "team": "Florida International University",
+    "team": "Florida International",
     "contact": 72.5,
     "lineDrive": 21.8,
     "avgExitVelo": 88.1,
@@ -13296,7 +13296,7 @@
   {
     "id": "pr-csv-840",
     "playerName": "AJ Anderson",
-    "team": "Alabama A&M University",
+    "team": "Alabama A&M",
     "contact": 89.8,
     "lineDrive": 19.5,
     "avgExitVelo": 88.0,
@@ -13568,7 +13568,7 @@
   {
     "id": "pr-csv-856",
     "playerName": "Tyler Bishop",
-    "team": "University of Nebraska-Omaha",
+    "team": "Omaha",
     "contact": 78.3,
     "lineDrive": 19.7,
     "avgExitVelo": 87.9,
@@ -13585,7 +13585,7 @@
   {
     "id": "pr-csv-857",
     "playerName": "Ethan Farina",
-    "team": "Le Moyne College",
+    "team": "Le Moyne",
     "contact": 77.0,
     "lineDrive": 18.8,
     "avgExitVelo": 87.9,
@@ -13636,7 +13636,7 @@
   {
     "id": "pr-csv-860",
     "playerName": "Bruce Wyche",
-    "team": "North Carolina A&T State University",
+    "team": "North Carolina State A&T",
     "contact": 70.1,
     "lineDrive": 19.7,
     "avgExitVelo": 87.9,
@@ -13670,7 +13670,7 @@
   {
     "id": "pr-csv-862",
     "playerName": "Cade Carr",
-    "team": "Samford University",
+    "team": "Samford",
     "contact": 75.0,
     "lineDrive": 26.7,
     "avgExitVelo": 87.9,
@@ -13738,7 +13738,7 @@
   {
     "id": "pr-csv-866",
     "playerName": "Mason Gaines",
-    "team": "University of Nebraska-Omaha",
+    "team": "Omaha",
     "contact": 70.7,
     "lineDrive": 20.8,
     "avgExitVelo": 87.9,
@@ -14078,7 +14078,7 @@
   {
     "id": "pr-csv-886",
     "playerName": "Hayden Schott",
-    "team": "Texas A&M University",
+    "team": "Texas A&M",
     "contact": 68.4,
     "lineDrive": 15.5,
     "avgExitVelo": 87.8,
@@ -14316,7 +14316,7 @@
   {
     "id": "pr-csv-900",
     "playerName": "Nate Kirkpatrick",
-    "team": "Virginia Commonwealth University",
+    "team": "VCU",
     "contact": 73.4,
     "lineDrive": 20.7,
     "avgExitVelo": 87.8,
@@ -14554,7 +14554,7 @@
   {
     "id": "pr-csv-914",
     "playerName": "Patrick Keighran",
-    "team": "University of San Francisco",
+    "team": "San Francisco",
     "contact": 75.8,
     "lineDrive": 30.5,
     "avgExitVelo": 87.7,
@@ -15098,7 +15098,7 @@
   {
     "id": "pr-csv-946",
     "playerName": "Jackson Harris",
-    "team": "Samford University",
+    "team": "Samford",
     "contact": 81.4,
     "lineDrive": 20.4,
     "avgExitVelo": 87.6,
@@ -15234,7 +15234,7 @@
   {
     "id": "pr-csv-954",
     "playerName": "Lee Amedee",
-    "team": "University of Louisiana at Lafayette",
+    "team": "Louisiana",
     "contact": 85.4,
     "lineDrive": 21.5,
     "avgExitVelo": 87.5,
@@ -15455,7 +15455,7 @@
   {
     "id": "pr-csv-967",
     "playerName": "Max Handron",
-    "team": "University of California",
+    "team": "California",
     "contact": 72.5,
     "lineDrive": 22.9,
     "avgExitVelo": 87.5,
@@ -15523,7 +15523,7 @@
   {
     "id": "pr-csv-971",
     "playerName": "PJ Moutzouridis",
-    "team": "University of California",
+    "team": "California",
     "contact": 85.0,
     "lineDrive": 22.0,
     "avgExitVelo": 87.5,
@@ -15642,7 +15642,7 @@
   {
     "id": "pr-csv-978",
     "playerName": "Javier Crespo",
-    "team": "Florida International University",
+    "team": "Florida International",
     "contact": 82.9,
     "lineDrive": 20.0,
     "avgExitVelo": 87.4,
@@ -15812,7 +15812,7 @@
   {
     "id": "pr-csv-988",
     "playerName": "Jacob Orr",
-    "team": "University of Maryland-College Park",
+    "team": "University of Maryland",
     "contact": 85.0,
     "lineDrive": 21.0,
     "avgExitVelo": 87.4,
@@ -16067,7 +16067,7 @@
   {
     "id": "pr-csv-1003",
     "playerName": "Payton Brennan",
-    "team": "UCLA",
+    "team": "University of California Los Angeles",
     "contact": 72.9,
     "lineDrive": 17.4,
     "avgExitVelo": 87.3,
@@ -16084,7 +16084,7 @@
   {
     "id": "pr-csv-1004",
     "playerName": "Jesiah carpenter",
-    "team": "UMBC",
+    "team": "University of Maryland, Baltimore County",
     "contact": 74.6,
     "lineDrive": 23.5,
     "avgExitVelo": 87.3,
@@ -16203,7 +16203,7 @@
   {
     "id": "pr-csv-1011",
     "playerName": "Cade Martin",
-    "team": "Little Rock",
+    "team": "University of Arkansas Little Rock",
     "contact": 71.5,
     "lineDrive": 24.6,
     "avgExitVelo": 87.3,
@@ -16458,7 +16458,7 @@
   {
     "id": "pr-csv-1026",
     "playerName": "TJ Rogers",
-    "team": "University of San Francisco",
+    "team": "San Francisco",
     "contact": 77.5,
     "lineDrive": 25.5,
     "avgExitVelo": 87.2,
@@ -16645,7 +16645,7 @@
   {
     "id": "pr-csv-1037",
     "playerName": "Ty Stauss",
-    "team": "Southeast Missouri State University",
+    "team": "Southeast Missouri State",
     "contact": 77.5,
     "lineDrive": 23.0,
     "avgExitVelo": 87.1,
@@ -16696,7 +16696,7 @@
   {
     "id": "pr-csv-1040",
     "playerName": "Eddie Hacopian",
-    "team": "University of Maryland-College Park",
+    "team": "University of Maryland",
     "contact": 86.0,
     "lineDrive": 23.8,
     "avgExitVelo": 87.1,
@@ -16883,7 +16883,7 @@
   {
     "id": "pr-csv-1051",
     "playerName": "Mark Henning",
-    "team": "Stephen F. Austin State University",
+    "team": "Stephen F Austin State",
     "contact": 86.8,
     "lineDrive": 18.5,
     "avgExitVelo": 87.0,
@@ -17121,7 +17121,7 @@
   {
     "id": "pr-csv-1065",
     "playerName": "Carter Johnstone",
-    "team": "Cal State Fullerton",
+    "team": "CSU Fullerton",
     "contact": 89.5,
     "lineDrive": 22.6,
     "avgExitVelo": 87.0,
@@ -17257,7 +17257,7 @@
   {
     "id": "pr-csv-1073",
     "playerName": "Tyler Smith",
-    "team": "North Carolina A&T State University",
+    "team": "North Carolina State A&T",
     "contact": 71.0,
     "lineDrive": 15.4,
     "avgExitVelo": 86.9,
@@ -17325,7 +17325,7 @@
   {
     "id": "pr-csv-1077",
     "playerName": "William Parker",
-    "team": "Army West Point",
+    "team": "Army",
     "contact": 71.6,
     "lineDrive": 23.1,
     "avgExitVelo": 86.9,
@@ -17393,7 +17393,7 @@
   {
     "id": "pr-csv-1081",
     "playerName": "Cade Campbell",
-    "team": "University of California",
+    "team": "California",
     "contact": 72.2,
     "lineDrive": 26.3,
     "avgExitVelo": 86.9,
@@ -17444,7 +17444,7 @@
   {
     "id": "pr-csv-1084",
     "playerName": "Marcus Heusohn",
-    "team": "McNeese State University",
+    "team": "McNeese State",
     "contact": 89.0,
     "lineDrive": 21.2,
     "avgExitVelo": 86.9,
@@ -17461,7 +17461,7 @@
   {
     "id": "pr-csv-1085",
     "playerName": "Ty Batusich",
-    "team": "Miami University (Ohio)",
+    "team": "Miami (OH)",
     "contact": 86.8,
     "lineDrive": 20.3,
     "avgExitVelo": 86.9,
@@ -17529,7 +17529,7 @@
   {
     "id": "pr-csv-1089",
     "playerName": "Leewood Molessa",
-    "team": "UMBC",
+    "team": "University of Maryland, Baltimore County",
     "contact": 72.3,
     "lineDrive": 12.9,
     "avgExitVelo": 86.8,
@@ -17546,7 +17546,7 @@
   {
     "id": "pr-csv-1090",
     "playerName": "Landon Williams",
-    "team": "Prairie View A&M University",
+    "team": "Prairie View A&M",
     "contact": 77.8,
     "lineDrive": 21.4,
     "avgExitVelo": 86.8,
@@ -17784,7 +17784,7 @@
   {
     "id": "pr-csv-1104",
     "playerName": "Dillon Baker",
-    "team": "Miami University (Ohio)",
+    "team": "Miami (OH)",
     "contact": 78.2,
     "lineDrive": 19.1,
     "avgExitVelo": 86.8,
@@ -17835,7 +17835,7 @@
   {
     "id": "pr-csv-1107",
     "playerName": "Aden Hill",
-    "team": "University of Maryland-College Park",
+    "team": "University of Maryland",
     "contact": 70.6,
     "lineDrive": 19.6,
     "avgExitVelo": 86.8,
@@ -18141,7 +18141,7 @@
   {
     "id": "pr-csv-1125",
     "playerName": "Aaron Biediger",
-    "team": "Nicholls State University",
+    "team": "Nicholls State",
     "contact": 77.9,
     "lineDrive": 28.3,
     "avgExitVelo": 86.7,
@@ -18821,7 +18821,7 @@
   {
     "id": "pr-csv-1165",
     "playerName": "Chase Jans",
-    "team": "Nicholls State University",
+    "team": "Nicholls State",
     "contact": 73.4,
     "lineDrive": 22.1,
     "avgExitVelo": 86.5,
@@ -18923,7 +18923,7 @@
   {
     "id": "pr-csv-1171",
     "playerName": "Maddox Latta",
-    "team": "Cal State Fullerton",
+    "team": "CSU Fullerton",
     "contact": 80.9,
     "lineDrive": 25.3,
     "avgExitVelo": 86.5,
@@ -18974,7 +18974,7 @@
   {
     "id": "pr-csv-1174",
     "playerName": "Eli Gries-Smith",
-    "team": "University of Arkansas-Pine Bluff",
+    "team": "Arkansas Pine Bluff",
     "contact": 80.6,
     "lineDrive": 23.2,
     "avgExitVelo": 86.4,
@@ -19212,7 +19212,7 @@
   {
     "id": "pr-csv-1188",
     "playerName": "Seth Gwynn",
-    "team": "University of California",
+    "team": "California",
     "contact": 78.1,
     "lineDrive": 18.1,
     "avgExitVelo": 86.4,
@@ -19365,7 +19365,7 @@
   {
     "id": "pr-csv-1197",
     "playerName": "Marcos Rosales",
-    "team": "Cal State Fullerton",
+    "team": "CSU Fullerton",
     "contact": 78.2,
     "lineDrive": 20.3,
     "avgExitVelo": 86.4,
@@ -19450,7 +19450,7 @@
   {
     "id": "pr-csv-1202",
     "playerName": "Tyler Cerny",
-    "team": "Indiana University, Bloomington",
+    "team": "Indiana University",
     "contact": 77.8,
     "lineDrive": 21.6,
     "avgExitVelo": 86.4,
@@ -19569,7 +19569,7 @@
   {
     "id": "pr-csv-1209",
     "playerName": "Matthew Miura",
-    "team": "University of Hawaii, Manoa",
+    "team": "University of Hawaii",
     "contact": 93.1,
     "lineDrive": 16.8,
     "avgExitVelo": 86.3,
@@ -19603,7 +19603,7 @@
   {
     "id": "pr-csv-1211",
     "playerName": "Eli Lopez",
-    "team": "Cal State Fullerton",
+    "team": "CSU Fullerton",
     "contact": 84.9,
     "lineDrive": 26.9,
     "avgExitVelo": 86.3,
@@ -19756,7 +19756,7 @@
   {
     "id": "pr-csv-1220",
     "playerName": "Michael Gupton",
-    "team": "Samford University",
+    "team": "Samford",
     "contact": 68.4,
     "lineDrive": 20.9,
     "avgExitVelo": 86.3,
@@ -19875,7 +19875,7 @@
   {
     "id": "pr-csv-1227",
     "playerName": "Brayden Martin",
-    "team": "University of Maryland-College Park",
+    "team": "University of Maryland",
     "contact": 94.7,
     "lineDrive": 22.6,
     "avgExitVelo": 86.3,
@@ -19892,7 +19892,7 @@
   {
     "id": "pr-csv-1228",
     "playerName": "Elijah Lambros",
-    "team": "University of Maryland-College Park",
+    "team": "University of Maryland",
     "contact": 78.4,
     "lineDrive": 22.4,
     "avgExitVelo": 86.3,
@@ -19943,7 +19943,7 @@
   {
     "id": "pr-csv-1231",
     "playerName": "Steven Milam",
-    "team": "Louisiana State University",
+    "team": "Louisiana State",
     "contact": 84.7,
     "lineDrive": 26.6,
     "avgExitVelo": 86.2,
@@ -20130,7 +20130,7 @@
   {
     "id": "pr-csv-1242",
     "playerName": "Terrence Kiel II",
-    "team": "Texas A&M University",
+    "team": "Texas A&M",
     "contact": 75.6,
     "lineDrive": 18.8,
     "avgExitVelo": 86.2,
@@ -20249,7 +20249,7 @@
   {
     "id": "pr-csv-1249",
     "playerName": "Trent Adelman",
-    "team": "Virginia Commonwealth University",
+    "team": "VCU",
     "contact": 76.2,
     "lineDrive": 25.8,
     "avgExitVelo": 86.2,
@@ -20640,7 +20640,7 @@
   {
     "id": "pr-csv-1272",
     "playerName": "David Novak",
-    "team": "Miami University (Ohio)",
+    "team": "Miami (OH)",
     "contact": 78.9,
     "lineDrive": 19.4,
     "avgExitVelo": 86.1,
@@ -20657,7 +20657,7 @@
   {
     "id": "pr-csv-1273",
     "playerName": "Hayden Federico",
-    "team": "University of Mississippi",
+    "team": "Ole Miss",
     "contact": 82.7,
     "lineDrive": 22.9,
     "avgExitVelo": 86.1,
@@ -21031,7 +21031,7 @@
   {
     "id": "pr-csv-1295",
     "playerName": "Will Linberg",
-    "team": "Cal State-Northridge",
+    "team": "CSU Northridge",
     "contact": 82.8,
     "lineDrive": 23.7,
     "avgExitVelo": 86.0,
@@ -21184,7 +21184,7 @@
   {
     "id": "pr-csv-1304",
     "playerName": "Jeffrey Ince",
-    "team": "Samford University",
+    "team": "Samford",
     "contact": 80.5,
     "lineDrive": 23.0,
     "avgExitVelo": 86.0,
@@ -21490,7 +21490,7 @@
   {
     "id": "pr-csv-1322",
     "playerName": "Phoenix Call",
-    "team": "UCLA",
+    "team": "University of California Los Angeles",
     "contact": 81.5,
     "lineDrive": 24.9,
     "avgExitVelo": 85.9,
@@ -21592,7 +21592,7 @@
   {
     "id": "pr-csv-1328",
     "playerName": "Wyatt Patchett",
-    "team": "Le Moyne College",
+    "team": "Le Moyne",
     "contact": 65.4,
     "lineDrive": 11.8,
     "avgExitVelo": 85.9,
@@ -21626,7 +21626,7 @@
   {
     "id": "pr-csv-1330",
     "playerName": "Chandler Riley",
-    "team": "UNC Charlotte",
+    "team": "Charlotte",
     "contact": 82.5,
     "lineDrive": 22.4,
     "avgExitVelo": 85.8,
@@ -21643,7 +21643,7 @@
   {
     "id": "pr-csv-1331",
     "playerName": "Jaden Collura",
-    "team": "Nicholls State University",
+    "team": "Nicholls State",
     "contact": 84.4,
     "lineDrive": 31.8,
     "avgExitVelo": 85.8,
@@ -21677,7 +21677,7 @@
   {
     "id": "pr-csv-1333",
     "playerName": "Kody Watanabe",
-    "team": "University of San Francisco",
+    "team": "San Francisco",
     "contact": 80.4,
     "lineDrive": 20.0,
     "avgExitVelo": 85.8,
@@ -22136,7 +22136,7 @@
   {
     "id": "pr-csv-1360",
     "playerName": "Braden Sullivan",
-    "team": "University of Massachusetts",
+    "team": "UMass",
     "contact": 82.9,
     "lineDrive": 18.9,
     "avgExitVelo": 85.7,
@@ -22425,7 +22425,7 @@
   {
     "id": "pr-csv-1377",
     "playerName": "Ty Rhoades",
-    "team": "Little Rock",
+    "team": "University of Arkansas Little Rock",
     "contact": 79.1,
     "lineDrive": 17.0,
     "avgExitVelo": 85.6,
@@ -22663,7 +22663,7 @@
   {
     "id": "pr-csv-1391",
     "playerName": "Dane Small",
-    "team": "University of Arkansas-Pine Bluff",
+    "team": "Arkansas Pine Bluff",
     "contact": 88.4,
     "lineDrive": 22.2,
     "avgExitVelo": 85.5,
@@ -22969,7 +22969,7 @@
   {
     "id": "pr-csv-1409",
     "playerName": "Adrian Jimenez",
-    "team": "Virginia Commonwealth University",
+    "team": "VCU",
     "contact": 82.0,
     "lineDrive": 20.9,
     "avgExitVelo": 85.4,
@@ -23020,7 +23020,7 @@
   {
     "id": "pr-csv-1412",
     "playerName": "Carter Jenkins",
-    "team": "Nicholls State University",
+    "team": "Nicholls State",
     "contact": 78.7,
     "lineDrive": 27.0,
     "avgExitVelo": 85.4,
@@ -23122,7 +23122,7 @@
   {
     "id": "pr-csv-1418",
     "playerName": "Daniel Moore",
-    "team": "Coppin State University",
+    "team": "Coppin State",
     "contact": 83.7,
     "lineDrive": 21.0,
     "avgExitVelo": 85.4,
@@ -23581,7 +23581,7 @@
   {
     "id": "pr-csv-1445",
     "playerName": "Dom Krupinski",
-    "team": "Miami University (Ohio)",
+    "team": "Miami (OH)",
     "contact": 76.0,
     "lineDrive": 23.2,
     "avgExitVelo": 85.3,
@@ -23734,7 +23734,7 @@
   {
     "id": "pr-csv-1454",
     "playerName": "Cole Cleveland",
-    "team": "Florida International University",
+    "team": "Florida International",
     "contact": 66.9,
     "lineDrive": 19.4,
     "avgExitVelo": 85.2,
@@ -24040,7 +24040,7 @@
   {
     "id": "pr-csv-1472",
     "playerName": "Kamana Nahaku",
-    "team": "University of Hawaii, Manoa",
+    "team": "University of Hawaii",
     "contact": 76.1,
     "lineDrive": 17.8,
     "avgExitVelo": 85.2,
@@ -24108,7 +24108,7 @@
   {
     "id": "pr-csv-1476",
     "playerName": "Caleb Stelly",
-    "team": "University of Louisiana at Lafayette",
+    "team": "Louisiana",
     "contact": 73.9,
     "lineDrive": 21.7,
     "avgExitVelo": 85.1,
@@ -24210,7 +24210,7 @@
   {
     "id": "pr-csv-1482",
     "playerName": "Logan Poteet",
-    "team": "UNC Charlotte",
+    "team": "Charlotte",
     "contact": 71.5,
     "lineDrive": 20.0,
     "avgExitVelo": 85.1,
@@ -24244,7 +24244,7 @@
   {
     "id": "pr-csv-1484",
     "playerName": "Justin Lehman",
-    "team": "Army West Point",
+    "team": "Army",
     "contact": 77.5,
     "lineDrive": 22.9,
     "avgExitVelo": 85.1,
@@ -24261,7 +24261,7 @@
   {
     "id": "pr-csv-1485",
     "playerName": "Max Ortega",
-    "team": "Cal State Fullerton",
+    "team": "CSU Fullerton",
     "contact": 77.2,
     "lineDrive": 15.7,
     "avgExitVelo": 85.1,
@@ -24295,7 +24295,7 @@
   {
     "id": "pr-csv-1487",
     "playerName": "Ben Kim",
-    "team": "Florida A&M University",
+    "team": "Florida A&M",
     "contact": 91.5,
     "lineDrive": 23.8,
     "avgExitVelo": 85.1,
@@ -24329,7 +24329,7 @@
   {
     "id": "pr-csv-1489",
     "playerName": "Alex Ulloa",
-    "team": "Florida International University",
+    "team": "Florida International",
     "contact": 72.9,
     "lineDrive": 21.0,
     "avgExitVelo": 85.1,
@@ -24431,7 +24431,7 @@
   {
     "id": "pr-csv-1495",
     "playerName": "Jarren Advincula",
-    "team": "University of California",
+    "team": "California",
     "contact": 87.8,
     "lineDrive": 24.8,
     "avgExitVelo": 85.0,
@@ -24499,7 +24499,7 @@
   {
     "id": "pr-csv-1499",
     "playerName": "Alex Adams",
-    "team": "Air Force Academy",
+    "team": "Air Force",
     "contact": 81.2,
     "lineDrive": 18.6,
     "avgExitVelo": 85.0,
@@ -24941,7 +24941,7 @@
   {
     "id": "pr-csv-1525",
     "playerName": "Cooper Chaplain",
-    "team": "Little Rock",
+    "team": "University of Arkansas Little Rock",
     "contact": 75.2,
     "lineDrive": 13.6,
     "avgExitVelo": 84.9,
@@ -25213,7 +25213,7 @@
   {
     "id": "pr-csv-1541",
     "playerName": "T.J. Oster",
-    "team": "Air Force Academy",
+    "team": "Air Force",
     "contact": 76.2,
     "lineDrive": 15.3,
     "avgExitVelo": 84.8,
@@ -25349,7 +25349,7 @@
   {
     "id": "pr-csv-1549",
     "playerName": "Shunsuke Sakaino",
-    "team": "University of Hawaii, Manoa",
+    "team": "University of Hawaii",
     "contact": 81.4,
     "lineDrive": 16.8,
     "avgExitVelo": 84.8,
@@ -25570,7 +25570,7 @@
   {
     "id": "pr-csv-1562",
     "playerName": "Christian Taylor",
-    "team": "Air Force Academy",
+    "team": "Air Force",
     "contact": 73.4,
     "lineDrive": 27.5,
     "avgExitVelo": 84.7,
@@ -25587,7 +25587,7 @@
   {
     "id": "pr-csv-1563",
     "playerName": "Jackson Trout",
-    "team": "University of Nebraska-Omaha",
+    "team": "Omaha",
     "contact": 84.9,
     "lineDrive": 18.5,
     "avgExitVelo": 84.7,
@@ -25672,7 +25672,7 @@
   {
     "id": "pr-csv-1568",
     "playerName": "Drew Borner",
-    "team": "University of Nebraska-Omaha",
+    "team": "Omaha",
     "contact": 87.0,
     "lineDrive": 15.1,
     "avgExitVelo": 84.7,
@@ -25689,7 +25689,7 @@
   {
     "id": "pr-csv-1569",
     "playerName": "Tyler Palmer",
-    "team": "University of Nebraska-Omaha",
+    "team": "Omaha",
     "contact": 77.9,
     "lineDrive": 14.4,
     "avgExitVelo": 84.7,
@@ -25706,7 +25706,7 @@
   {
     "id": "pr-csv-1570",
     "playerName": "Jack Quinlan",
-    "team": "Army West Point",
+    "team": "Army",
     "contact": 73.8,
     "lineDrive": 25.0,
     "avgExitVelo": 84.7,
@@ -25774,7 +25774,7 @@
   {
     "id": "pr-csv-1574",
     "playerName": "Justen Crews",
-    "team": "Florida A&M University",
+    "team": "Florida A&M",
     "contact": 90.9,
     "lineDrive": 15.8,
     "avgExitVelo": 84.7,
@@ -25808,7 +25808,7 @@
   {
     "id": "pr-csv-1576",
     "playerName": "Kyle Panganiban",
-    "team": "Cal State-Northridge",
+    "team": "CSU Northridge",
     "contact": 77.4,
     "lineDrive": 26.7,
     "avgExitVelo": 84.7,
@@ -26437,7 +26437,7 @@
   {
     "id": "pr-csv-1613",
     "playerName": "Julian Jimenez",
-    "team": "University of Maryland Eastern Shore",
+    "team": "Maryland Eastern Shore",
     "contact": 79.4,
     "lineDrive": 12.5,
     "avgExitVelo": 84.5,
@@ -26896,7 +26896,7 @@
   {
     "id": "pr-csv-1640",
     "playerName": "Jayden Williams",
-    "team": "Prairie View A&M University",
+    "team": "Prairie View A&M",
     "contact": 80.4,
     "lineDrive": 12.2,
     "avgExitVelo": 84.3,
@@ -26964,7 +26964,7 @@
   {
     "id": "pr-csv-1644",
     "playerName": "Luke Elmore",
-    "team": "Air Force Academy",
+    "team": "Air Force",
     "contact": 76.2,
     "lineDrive": 20.1,
     "avgExitVelo": 84.3,
@@ -26998,7 +26998,7 @@
   {
     "id": "pr-csv-1646",
     "playerName": "Thomas Schreck",
-    "team": "Army West Point",
+    "team": "Army",
     "contact": 79.9,
     "lineDrive": 22.1,
     "avgExitVelo": 84.3,
@@ -27032,7 +27032,7 @@
   {
     "id": "pr-csv-1648",
     "playerName": "Nick Flores",
-    "team": "Virginia Commonwealth University",
+    "team": "VCU",
     "contact": 88.3,
     "lineDrive": 18.5,
     "avgExitVelo": 84.3,
@@ -27185,7 +27185,7 @@
   {
     "id": "pr-csv-1657",
     "playerName": "Kylan Duncan",
-    "team": "Alabama A&M University",
+    "team": "Alabama A&M",
     "contact": 85.3,
     "lineDrive": 21.4,
     "avgExitVelo": 84.2,
@@ -27253,7 +27253,7 @@
   {
     "id": "pr-csv-1661",
     "playerName": "Danny Wyatt",
-    "team": "UMBC",
+    "team": "University of Maryland, Baltimore County",
     "contact": 82.2,
     "lineDrive": 21.1,
     "avgExitVelo": 84.2,
@@ -27389,7 +27389,7 @@
   {
     "id": "pr-csv-1669",
     "playerName": "Matt Stancliff",
-    "team": "McNeese State University",
+    "team": "McNeese State",
     "contact": 88.5,
     "lineDrive": 19.4,
     "avgExitVelo": 84.2,
@@ -27406,7 +27406,7 @@
   {
     "id": "pr-csv-1670",
     "playerName": "Anthony Zarlingo",
-    "team": "Miami University (Ohio)",
+    "team": "Miami (OH)",
     "contact": 86.4,
     "lineDrive": 21.8,
     "avgExitVelo": 84.2,
@@ -27576,7 +27576,7 @@
   {
     "id": "pr-csv-1680",
     "playerName": "Chris Barr",
-    "team": "Army West Point",
+    "team": "Army",
     "contact": 87.2,
     "lineDrive": 24.2,
     "avgExitVelo": 84.1,
@@ -27695,7 +27695,7 @@
   {
     "id": "pr-csv-1687",
     "playerName": "Chase Spencer",
-    "team": "Air Force Academy",
+    "team": "Air Force",
     "contact": 80.4,
     "lineDrive": 25.4,
     "avgExitVelo": 84.1,
@@ -27729,7 +27729,7 @@
   {
     "id": "pr-csv-1689",
     "playerName": "Owen Galt",
-    "team": "University of Louisiana at Lafayette",
+    "team": "Louisiana",
     "contact": 77.4,
     "lineDrive": 23.0,
     "avgExitVelo": 84.1,
@@ -27797,7 +27797,7 @@
   {
     "id": "pr-csv-1693",
     "playerName": "Larry Edwards",
-    "team": "McNeese State University",
+    "team": "McNeese State",
     "contact": 79.8,
     "lineDrive": 27.1,
     "avgExitVelo": 84.0,
@@ -27865,7 +27865,7 @@
   {
     "id": "pr-csv-1697",
     "playerName": "Henry Zipay",
-    "team": "University of Nebraska-Omaha",
+    "team": "Omaha",
     "contact": 78.8,
     "lineDrive": 27.4,
     "avgExitVelo": 84.0,
@@ -27916,7 +27916,7 @@
   {
     "id": "pr-csv-1700",
     "playerName": "Jason Brown",
-    "team": "University of Maryland Eastern Shore",
+    "team": "Maryland Eastern Shore",
     "contact": 86.2,
     "lineDrive": 18.0,
     "avgExitVelo": 84.0,
@@ -28035,7 +28035,7 @@
   {
     "id": "pr-csv-1707",
     "playerName": "Derek Curiel",
-    "team": "Louisiana State University",
+    "team": "Louisiana State",
     "contact": 84.8,
     "lineDrive": 29.8,
     "avgExitVelo": 84.0,
@@ -28086,7 +28086,7 @@
   {
     "id": "pr-csv-1710",
     "playerName": "Karson Irvin",
-    "team": "Nicholls State University",
+    "team": "Nicholls State",
     "contact": 73.5,
     "lineDrive": 27.9,
     "avgExitVelo": 84.0,
@@ -28358,7 +28358,7 @@
   {
     "id": "pr-csv-1726",
     "playerName": "Luis Hernandez",
-    "team": "Louisiana State University",
+    "team": "Louisiana State",
     "contact": 79.2,
     "lineDrive": 25.7,
     "avgExitVelo": 83.9,
@@ -28562,7 +28562,7 @@
   {
     "id": "pr-csv-1738",
     "playerName": "Easton Dowell",
-    "team": "McNeese State University",
+    "team": "McNeese State",
     "contact": 86.0,
     "lineDrive": 25.0,
     "avgExitVelo": 83.8,
@@ -28647,7 +28647,7 @@
   {
     "id": "pr-csv-1743",
     "playerName": "Brooks Kettering",
-    "team": "Southeast Missouri State University",
+    "team": "Southeast Missouri State",
     "contact": 80.0,
     "lineDrive": 19.9,
     "avgExitVelo": 83.8,
@@ -28664,7 +28664,7 @@
   {
     "id": "pr-csv-1744",
     "playerName": "Ansel Carson",
-    "team": "University of Maryland Eastern Shore",
+    "team": "Maryland Eastern Shore",
     "contact": 85.0,
     "lineDrive": 19.6,
     "avgExitVelo": 83.8,
@@ -28817,7 +28817,7 @@
   {
     "id": "pr-csv-1753",
     "playerName": "Anthony Mascuilli",
-    "team": "UMBC",
+    "team": "University of Maryland, Baltimore County",
     "contact": 86.0,
     "lineDrive": 25.4,
     "avgExitVelo": 83.7,
@@ -28987,7 +28987,7 @@
   {
     "id": "pr-csv-1763",
     "playerName": "Chris Stanfield",
-    "team": "Louisiana State University",
+    "team": "Louisiana State",
     "contact": 79.7,
     "lineDrive": 23.6,
     "avgExitVelo": 83.7,
@@ -29123,7 +29123,7 @@
   {
     "id": "pr-csv-1771",
     "playerName": "Jared Quandt",
-    "team": "University of Hawaii, Manoa",
+    "team": "University of Hawaii",
     "contact": 81.8,
     "lineDrive": 17.7,
     "avgExitVelo": 83.6,
@@ -29174,7 +29174,7 @@
   {
     "id": "pr-csv-1774",
     "playerName": "Roberto Gonzalez",
-    "team": "Cal State-Northridge",
+    "team": "CSU Northridge",
     "contact": 81.4,
     "lineDrive": 24.5,
     "avgExitVelo": 83.6,
@@ -29191,7 +29191,7 @@
   {
     "id": "pr-csv-1775",
     "playerName": "Carson Schrack",
-    "team": "Southeast Missouri State University",
+    "team": "Southeast Missouri State",
     "contact": 92.2,
     "lineDrive": 19.7,
     "avgExitVelo": 83.6,
@@ -29310,7 +29310,7 @@
   {
     "id": "pr-csv-1782",
     "playerName": "Sammy Harris",
-    "team": "Little Rock",
+    "team": "University of Arkansas Little Rock",
     "contact": 79.0,
     "lineDrive": 19.5,
     "avgExitVelo": 83.5,
@@ -29378,7 +29378,7 @@
   {
     "id": "pr-csv-1786",
     "playerName": "Jake Brown",
-    "team": "Louisiana State University",
+    "team": "Louisiana State",
     "contact": 78.5,
     "lineDrive": 24.0,
     "avgExitVelo": 83.5,
@@ -29395,7 +29395,7 @@
   {
     "id": "pr-csv-1787",
     "playerName": "Josue Figueroa",
-    "team": "Florida A&M University",
+    "team": "Florida A&M",
     "contact": 77.9,
     "lineDrive": 18.8,
     "avgExitVelo": 83.5,
@@ -29684,7 +29684,7 @@
   {
     "id": "pr-csv-1804",
     "playerName": "Savoi Edwards",
-    "team": "North Carolina A&T State University",
+    "team": "North Carolina State A&T",
     "contact": 66.8,
     "lineDrive": 21.2,
     "avgExitVelo": 83.4,
@@ -29769,7 +29769,7 @@
   {
     "id": "pr-csv-1809",
     "playerName": "Jake Stadler",
-    "team": "Indiana University, Bloomington",
+    "team": "Indiana University",
     "contact": 87.4,
     "lineDrive": 11.0,
     "avgExitVelo": 83.4,
@@ -29786,7 +29786,7 @@
   {
     "id": "pr-csv-1810",
     "playerName": "Jack Beverly",
-    "team": "University of Massachusetts",
+    "team": "UMass",
     "contact": 73.1,
     "lineDrive": 20.8,
     "avgExitVelo": 83.4,
@@ -30058,7 +30058,7 @@
   {
     "id": "pr-csv-1826",
     "playerName": "Diego Aponte",
-    "team": "University of Maryland Eastern Shore",
+    "team": "Maryland Eastern Shore",
     "contact": 89.8,
     "lineDrive": 16.4,
     "avgExitVelo": 83.3,
@@ -30177,7 +30177,7 @@
   {
     "id": "pr-csv-1833",
     "playerName": "Marc Willi",
-    "team": "University of Massachusetts",
+    "team": "UMass",
     "contact": 68.0,
     "lineDrive": 20.4,
     "avgExitVelo": 83.3,
@@ -30347,7 +30347,7 @@
   {
     "id": "pr-csv-1843",
     "playerName": "Dean West",
-    "team": "UCLA",
+    "team": "University of California Los Angeles",
     "contact": 90.5,
     "lineDrive": 20.2,
     "avgExitVelo": 83.2,
@@ -30364,7 +30364,7 @@
   {
     "id": "pr-csv-1844",
     "playerName": "Mack Brousseau",
-    "team": "McNeese State University",
+    "team": "McNeese State",
     "contact": 64.4,
     "lineDrive": 19.5,
     "avgExitVelo": 83.2,
@@ -30432,7 +30432,7 @@
   {
     "id": "pr-csv-1848",
     "playerName": "Anthony Tirado",
-    "team": "University of Massachusetts",
+    "team": "UMass",
     "contact": 81.1,
     "lineDrive": 23.2,
     "avgExitVelo": 83.2,
@@ -30772,7 +30772,7 @@
   {
     "id": "pr-csv-1868",
     "playerName": "Matt Travisano",
-    "team": "University of Massachusetts",
+    "team": "UMass",
     "contact": 71.5,
     "lineDrive": 22.3,
     "avgExitVelo": 83.0,
@@ -30942,7 +30942,7 @@
   {
     "id": "pr-csv-1878",
     "playerName": "Benji Ries",
-    "team": "Le Moyne College",
+    "team": "Le Moyne",
     "contact": 88.4,
     "lineDrive": 26.1,
     "avgExitVelo": 82.9,
@@ -30976,7 +30976,7 @@
   {
     "id": "pr-csv-1880",
     "playerName": "Ben Niednagel",
-    "team": "Air Force Academy",
+    "team": "Air Force",
     "contact": 74.8,
     "lineDrive": 19.0,
     "avgExitVelo": 82.9,
@@ -31095,7 +31095,7 @@
   {
     "id": "pr-csv-1887",
     "playerName": "JT Taylor",
-    "team": "North Carolina A&T State University",
+    "team": "North Carolina State A&T",
     "contact": 67.6,
     "lineDrive": 16.4,
     "avgExitVelo": 82.8,
@@ -31367,7 +31367,7 @@
   {
     "id": "pr-csv-1903",
     "playerName": "Michael Mugan",
-    "team": "Southeast Missouri State University",
+    "team": "Southeast Missouri State",
     "contact": 81.0,
     "lineDrive": 15.5,
     "avgExitVelo": 82.7,
@@ -31554,7 +31554,7 @@
   {
     "id": "pr-csv-1914",
     "playerName": "Charles Morris",
-    "team": "Alabama A&M University",
+    "team": "Alabama A&M",
     "contact": 87.6,
     "lineDrive": 19.2,
     "avgExitVelo": 82.6,
@@ -31571,7 +31571,7 @@
   {
     "id": "pr-csv-1915",
     "playerName": "Grant Mangrum",
-    "team": "McNeese State University",
+    "team": "McNeese State",
     "contact": 81.5,
     "lineDrive": 16.5,
     "avgExitVelo": 82.6,
@@ -31673,7 +31673,7 @@
   {
     "id": "pr-csv-1921",
     "playerName": "Cameron Calvillo",
-    "team": "Cal State-Northridge",
+    "team": "CSU Northridge",
     "contact": 84.3,
     "lineDrive": 27.7,
     "avgExitVelo": 82.5,
@@ -31741,7 +31741,7 @@
   {
     "id": "pr-csv-1925",
     "playerName": "Kristian Amaro",
-    "team": "North Carolina A&T State University",
+    "team": "North Carolina State A&T",
     "contact": 70.7,
     "lineDrive": 10.2,
     "avgExitVelo": 82.5,
@@ -31775,7 +31775,7 @@
   {
     "id": "pr-csv-1927",
     "playerName": "Julian Swift",
-    "team": "Stephen F. Austin State University",
+    "team": "Stephen F Austin State",
     "contact": 89.4,
     "lineDrive": 17.5,
     "avgExitVelo": 82.5,
@@ -31877,7 +31877,7 @@
   {
     "id": "pr-csv-1933",
     "playerName": "Conner Westenburg",
-    "team": "McNeese State University",
+    "team": "McNeese State",
     "contact": 82.3,
     "lineDrive": 20.1,
     "avgExitVelo": 82.4,
@@ -31928,7 +31928,7 @@
   {
     "id": "pr-csv-1936",
     "playerName": "Will Moore",
-    "team": "Indiana University, Bloomington",
+    "team": "Indiana University",
     "contact": 92.1,
     "lineDrive": 18.6,
     "avgExitVelo": 82.4,
@@ -31962,7 +31962,7 @@
   {
     "id": "pr-csv-1938",
     "playerName": "Alex Seguine",
-    "team": "Little Rock",
+    "team": "University of Arkansas Little Rock",
     "contact": 90.0,
     "lineDrive": 18.4,
     "avgExitVelo": 82.4,
@@ -32013,7 +32013,7 @@
   {
     "id": "pr-csv-1941",
     "playerName": "Enrique Wood",
-    "team": "North Carolina A&T State University",
+    "team": "North Carolina State A&T",
     "contact": 67.1,
     "lineDrive": 18.9,
     "avgExitVelo": 82.3,
@@ -32081,7 +32081,7 @@
   {
     "id": "pr-csv-1945",
     "playerName": "Jacob French",
-    "team": "University of California",
+    "team": "California",
     "contact": 81.2,
     "lineDrive": 28.1,
     "avgExitVelo": 82.3,
@@ -32557,7 +32557,7 @@
   {
     "id": "pr-csv-1973",
     "playerName": "Ben VanMaanen",
-    "team": "University of Arkansas-Pine Bluff",
+    "team": "Arkansas Pine Bluff",
     "contact": 85.4,
     "lineDrive": 22.0,
     "avgExitVelo": 82.0,
@@ -32659,7 +32659,7 @@
   {
     "id": "pr-csv-1979",
     "playerName": "Josh Pearson",
-    "team": "Louisiana State University",
+    "team": "Louisiana State",
     "contact": 82.4,
     "lineDrive": 19.1,
     "avgExitVelo": 81.9,
@@ -32676,7 +32676,7 @@
   {
     "id": "pr-csv-1980",
     "playerName": "Trey Rutledge",
-    "team": "Alabama A&M University",
+    "team": "Alabama A&M",
     "contact": 93.5,
     "lineDrive": 20.7,
     "avgExitVelo": 81.9,
@@ -32744,7 +32744,7 @@
   {
     "id": "pr-csv-1984",
     "playerName": "Addison Ainsworth",
-    "team": "Army West Point",
+    "team": "Army",
     "contact": 85.8,
     "lineDrive": 17.6,
     "avgExitVelo": 81.9,
@@ -32914,7 +32914,7 @@
   {
     "id": "pr-csv-1994",
     "playerName": "Brayden Johnson",
-    "team": "Prairie View A&M University",
+    "team": "Prairie View A&M",
     "contact": 79.6,
     "lineDrive": 15.6,
     "avgExitVelo": 81.8,
@@ -32965,7 +32965,7 @@
   {
     "id": "pr-csv-1997",
     "playerName": "Indy Anderson",
-    "team": "Coppin State University",
+    "team": "Coppin State",
     "contact": 85.8,
     "lineDrive": 20.1,
     "avgExitVelo": 81.8,
@@ -33016,7 +33016,7 @@
   {
     "id": "pr-csv-2000",
     "playerName": "Daniel Dickinson",
-    "team": "Louisiana State University",
+    "team": "Louisiana State",
     "contact": 81.3,
     "lineDrive": 20.5,
     "avgExitVelo": 81.8,
@@ -33135,7 +33135,7 @@
   {
     "id": "pr-csv-2007",
     "playerName": "Miles Jackson",
-    "team": "Alabama A&M University",
+    "team": "Alabama A&M",
     "contact": 87.5,
     "lineDrive": 14.0,
     "avgExitVelo": 81.7,
@@ -33203,7 +33203,7 @@
   {
     "id": "pr-csv-2011",
     "playerName": "Sam Beck",
-    "team": "University of Nebraska-Omaha",
+    "team": "Omaha",
     "contact": 82.0,
     "lineDrive": 26.0,
     "avgExitVelo": 81.6,
@@ -33288,7 +33288,7 @@
   {
     "id": "pr-csv-2016",
     "playerName": "Jonathan Gonzalez Perez",
-    "team": "University of Maryland Eastern Shore",
+    "team": "Maryland Eastern Shore",
     "contact": 82.6,
     "lineDrive": 20.5,
     "avgExitVelo": 81.6,
@@ -33322,7 +33322,7 @@
   {
     "id": "pr-csv-2018",
     "playerName": "Bryce Thompson",
-    "team": "Coppin State University",
+    "team": "Coppin State",
     "contact": 75.8,
     "lineDrive": 18.1,
     "avgExitVelo": 81.6,
@@ -33577,7 +33577,7 @@
   {
     "id": "pr-csv-2033",
     "playerName": "Cashel Duggar",
-    "team": "UCLA",
+    "team": "University of California Los Angeles",
     "contact": 85.8,
     "lineDrive": 26.5,
     "avgExitVelo": 81.4,
@@ -33645,7 +33645,7 @@
   {
     "id": "pr-csv-2037",
     "playerName": "Kenny Decelle",
-    "team": "University of San Francisco",
+    "team": "San Francisco",
     "contact": 83.8,
     "lineDrive": 20.8,
     "avgExitVelo": 81.4,
@@ -33713,7 +33713,7 @@
   {
     "id": "pr-csv-2041",
     "playerName": "Cam Burdick",
-    "team": "Cal State Fullerton",
+    "team": "CSU Fullerton",
     "contact": 69.7,
     "lineDrive": 19.8,
     "avgExitVelo": 81.4,
@@ -34070,7 +34070,7 @@
   {
     "id": "pr-csv-2062",
     "playerName": "Gavin Terry",
-    "team": "University of Arkansas-Pine Bluff",
+    "team": "Arkansas Pine Bluff",
     "contact": 83.1,
     "lineDrive": 23.1,
     "avgExitVelo": 81.1,
@@ -34189,7 +34189,7 @@
   {
     "id": "pr-csv-2069",
     "playerName": "Coleson Titus",
-    "team": "Army West Point",
+    "team": "Army",
     "contact": 82.4,
     "lineDrive": 18.4,
     "avgExitVelo": 81.0,
@@ -34665,7 +34665,7 @@
   {
     "id": "pr-csv-2097",
     "playerName": "AJ Cappell",
-    "team": "Nicholls State University",
+    "team": "Nicholls State",
     "contact": 78.7,
     "lineDrive": 20.9,
     "avgExitVelo": 80.8,
@@ -34716,7 +34716,7 @@
   {
     "id": "pr-csv-2100",
     "playerName": "Jordan Lewis",
-    "team": "University of San Francisco",
+    "team": "San Francisco",
     "contact": 68.5,
     "lineDrive": 19.3,
     "avgExitVelo": 80.7,
@@ -34750,7 +34750,7 @@
   {
     "id": "pr-csv-2102",
     "playerName": "Logan Mock",
-    "team": "Nicholls State University",
+    "team": "Nicholls State",
     "contact": 87.0,
     "lineDrive": 17.8,
     "avgExitVelo": 80.7,
@@ -34954,7 +34954,7 @@
   {
     "id": "pr-csv-2114",
     "playerName": "Jose Torres",
-    "team": "University of Louisiana at Lafayette",
+    "team": "Louisiana",
     "contact": 80.1,
     "lineDrive": 20.8,
     "avgExitVelo": 80.6,
@@ -34988,7 +34988,7 @@
   {
     "id": "pr-csv-2116",
     "playerName": "Andrew Becker",
-    "team": "Cal State-Northridge",
+    "team": "CSU Northridge",
     "contact": 80.8,
     "lineDrive": 30.4,
     "avgExitVelo": 80.5,
@@ -35090,7 +35090,7 @@
   {
     "id": "pr-csv-2122",
     "playerName": "Andrew Tinsley",
-    "team": "North Carolina A&T State University",
+    "team": "North Carolina State A&T",
     "contact": 79.2,
     "lineDrive": 16.0,
     "avgExitVelo": 80.5,
@@ -35209,7 +35209,7 @@
   {
     "id": "pr-csv-2129",
     "playerName": "Gus Gandy",
-    "team": "Samford University",
+    "team": "Samford",
     "contact": 80.2,
     "lineDrive": 24.2,
     "avgExitVelo": 80.4,
@@ -35379,7 +35379,7 @@
   {
     "id": "pr-csv-2139",
     "playerName": "Jesus Riera",
-    "team": "University of Arkansas-Pine Bluff",
+    "team": "Arkansas Pine Bluff",
     "contact": 78.4,
     "lineDrive": 20.9,
     "avgExitVelo": 80.3,
@@ -35396,7 +35396,7 @@
   {
     "id": "pr-csv-2140",
     "playerName": "Blake Buzzeo",
-    "team": "Miami University (Ohio)",
+    "team": "Miami (OH)",
     "contact": 76.7,
     "lineDrive": 22.3,
     "avgExitVelo": 80.2,
@@ -35532,7 +35532,7 @@
   {
     "id": "pr-csv-2148",
     "playerName": "Jalen Niles",
-    "team": "Florida A&M University",
+    "team": "Florida A&M",
     "contact": 87.7,
     "lineDrive": 17.9,
     "avgExitVelo": 80.1,
@@ -35634,7 +35634,7 @@
   {
     "id": "pr-csv-2154",
     "playerName": "Casey Kleinman",
-    "team": "Virginia Commonwealth University",
+    "team": "VCU",
     "contact": 93.8,
     "lineDrive": 20.8,
     "avgExitVelo": 80.1,
@@ -35668,7 +35668,7 @@
   {
     "id": "pr-csv-2156",
     "playerName": "Anthony Divittorio",
-    "team": "Coppin State University",
+    "team": "Coppin State",
     "contact": 81.7,
     "lineDrive": 18.8,
     "avgExitVelo": 80.0,
@@ -35804,7 +35804,7 @@
   {
     "id": "pr-csv-2164",
     "playerName": "Will Brown",
-    "team": "Florida A&M University",
+    "team": "Florida A&M",
     "contact": 82.2,
     "lineDrive": 19.0,
     "avgExitVelo": 79.9,
@@ -35906,7 +35906,7 @@
   {
     "id": "pr-csv-2170",
     "playerName": "Gavin Grutzmacher",
-    "team": "Coppin State University",
+    "team": "Coppin State",
     "contact": 80.6,
     "lineDrive": 16.7,
     "avgExitVelo": 79.8,
@@ -36127,7 +36127,7 @@
   {
     "id": "pr-csv-2183",
     "playerName": "Juan Rivera",
-    "team": "UNC Charlotte",
+    "team": "Charlotte",
     "contact": 86.5,
     "lineDrive": 20.8,
     "avgExitVelo": 79.7,
@@ -36331,7 +36331,7 @@
   {
     "id": "pr-csv-2195",
     "playerName": "Brant Voth",
-    "team": "University of Arkansas-Pine Bluff",
+    "team": "Arkansas Pine Bluff",
     "contact": 80.8,
     "lineDrive": 18.5,
     "avgExitVelo": 79.5,
@@ -36450,7 +36450,7 @@
   {
     "id": "pr-csv-2202",
     "playerName": "Derek Paris",
-    "team": "UMBC",
+    "team": "University of Maryland, Baltimore County",
     "contact": 86.1,
     "lineDrive": 17.7,
     "avgExitVelo": 79.4,
@@ -36484,7 +36484,7 @@
   {
     "id": "pr-csv-2204",
     "playerName": "Reed Willbanks",
-    "team": "Little Rock",
+    "team": "University of Arkansas Little Rock",
     "contact": 75.7,
     "lineDrive": 16.3,
     "avgExitVelo": 79.4,
@@ -36637,7 +36637,7 @@
   {
     "id": "pr-csv-2213",
     "playerName": "Ahmar Donatto",
-    "team": "Prairie View A&M University",
+    "team": "Prairie View A&M",
     "contact": 82.3,
     "lineDrive": 16.1,
     "avgExitVelo": 79.2,
@@ -36960,7 +36960,7 @@
   {
     "id": "pr-csv-2232",
     "playerName": "Carlos Rodriguez-Velez",
-    "team": "University of Arkansas-Pine Bluff",
+    "team": "Arkansas Pine Bluff",
     "contact": 81.8,
     "lineDrive": 18.6,
     "avgExitVelo": 78.7,
@@ -36977,7 +36977,7 @@
   {
     "id": "pr-csv-2233",
     "playerName": "Kareh Valentin",
-    "team": "Florida International University",
+    "team": "Florida International",
     "contact": 83.5,
     "lineDrive": 12.7,
     "avgExitVelo": 78.7,
@@ -37096,7 +37096,7 @@
   {
     "id": "pr-csv-2240",
     "playerName": "Jayden Asencio",
-    "team": "Coppin State University",
+    "team": "Coppin State",
     "contact": 83.3,
     "lineDrive": 12.7,
     "avgExitVelo": 78.4,
@@ -37198,7 +37198,7 @@
   {
     "id": "pr-csv-2246",
     "playerName": "Seth Werchan",
-    "team": "Virginia Commonwealth University",
+    "team": "VCU",
     "contact": 74.8,
     "lineDrive": 15.8,
     "avgExitVelo": 78.2,
@@ -37266,7 +37266,7 @@
   {
     "id": "pr-csv-2250",
     "playerName": "Angel Rivera",
-    "team": "Alabama A&M University",
+    "team": "Alabama A&M",
     "contact": 78.5,
     "lineDrive": 16.7,
     "avgExitVelo": 78.1,
@@ -37300,7 +37300,7 @@
   {
     "id": "pr-csv-2252",
     "playerName": "Kyle Eddington",
-    "team": "UMBC",
+    "team": "University of Maryland, Baltimore County",
     "contact": 75.6,
     "lineDrive": 16.2,
     "avgExitVelo": 78.1,
@@ -37351,7 +37351,7 @@
   {
     "id": "pr-csv-2255",
     "playerName": "Isaac Castro",
-    "team": "Alabama A&M University",
+    "team": "Alabama A&M",
     "contact": 81.5,
     "lineDrive": 15.1,
     "avgExitVelo": 78.1,
@@ -37470,7 +37470,7 @@
   {
     "id": "pr-csv-2262",
     "playerName": "Davis Meche",
-    "team": "McNeese State University",
+    "team": "McNeese State",
     "contact": 83.7,
     "lineDrive": 13.9,
     "avgExitVelo": 77.9,
@@ -37827,7 +37827,7 @@
   {
     "id": "pr-csv-2283",
     "playerName": "Kevin Duran",
-    "team": "Stephen F. Austin State University",
+    "team": "Stephen F Austin State",
     "contact": 76.8,
     "lineDrive": 15.6,
     "avgExitVelo": 77.2,
@@ -37895,7 +37895,7 @@
   {
     "id": "pr-csv-2287",
     "playerName": "Dre Amaral",
-    "team": "Alabama A&M University",
+    "team": "Alabama A&M",
     "contact": 94.7,
     "lineDrive": 19.7,
     "avgExitVelo": 77.1,
@@ -38201,7 +38201,7 @@
   {
     "id": "pr-csv-2305",
     "playerName": "Tim Denet",
-    "team": "Le Moyne College",
+    "team": "Le Moyne",
     "contact": 75.5,
     "lineDrive": 19.2,
     "avgExitVelo": 76.0,
@@ -38388,7 +38388,7 @@
   {
     "id": "pr-csv-2316",
     "playerName": "Pranav Sundar",
-    "team": "Coppin State University",
+    "team": "Coppin State",
     "contact": 79.5,
     "lineDrive": 22.1,
     "avgExitVelo": 75.5,
@@ -38439,7 +38439,7 @@
   {
     "id": "pr-csv-2319",
     "playerName": "Nick Dicarlo",
-    "team": "North Carolina A&T State University",
+    "team": "North Carolina State A&T",
     "contact": 86.8,
     "lineDrive": 17.5,
     "avgExitVelo": 75.2,
@@ -38626,7 +38626,7 @@
   {
     "id": "pr-csv-2330",
     "playerName": "Cooper Schneider",
-    "team": "Stephen F. Austin State University",
+    "team": "Stephen F Austin State",
     "contact": 85.5,
     "lineDrive": 17.3,
     "avgExitVelo": 74.6,
@@ -38694,7 +38694,7 @@
   {
     "id": "pr-csv-2334",
     "playerName": "Michael Burroughs",
-    "team": "Prairie View A&M University",
+    "team": "Prairie View A&M",
     "contact": 81.5,
     "lineDrive": 13.4,
     "avgExitVelo": 74.4,
@@ -38796,7 +38796,7 @@
   {
     "id": "pr-csv-2340",
     "playerName": "Matthew Perez",
-    "team": "Florida A&M University",
+    "team": "Florida A&M",
     "contact": 83.8,
     "lineDrive": 15.8,
     "avgExitVelo": 73.9,
@@ -38881,7 +38881,7 @@
   {
     "id": "pr-csv-2345",
     "playerName": "Draven Nushida",
-    "team": "University of Hawaii, Manoa",
+    "team": "University of Hawaii",
     "contact": 80.2,
     "lineDrive": 21.1,
     "avgExitVelo": 73.2,
@@ -38983,7 +38983,7 @@
   {
     "id": "pr-csv-2351",
     "playerName": "Collin McLemore",
-    "team": "University of Arkansas-Pine Bluff",
+    "team": "Arkansas Pine Bluff",
     "contact": 86.7,
     "lineDrive": 24.8,
     "avgExitVelo": 69.4,
@@ -39000,7 +39000,7 @@
   {
     "id": "pr-csv-2352",
     "playerName": "Mike Whelehan",
-    "team": "Le Moyne College",
+    "team": "Le Moyne",
     "contact": 79.0,
     "lineDrive": 13.6,
     "avgExitVelo": 68.5,
@@ -39017,7 +39017,7 @@
   {
     "id": "pr-csv-2353",
     "playerName": "Ryan Davis",
-    "team": "University of Maryland Eastern Shore",
+    "team": "Maryland Eastern Shore",
     "contact": 73.9,
     "lineDrive": 18.2,
     "avgExitVelo": 68.4,
@@ -39034,7 +39034,7 @@
   {
     "id": "pr-csv-2354",
     "playerName": "Mason Heiskell",
-    "team": "Prairie View A&M University",
+    "team": "Prairie View A&M",
     "contact": 86.1,
     "lineDrive": 11.7,
     "avgExitVelo": 68.3,
@@ -39068,7 +39068,7 @@
   {
     "id": "pr-csv-2356",
     "playerName": "Paulie Goodness",
-    "team": "Le Moyne College",
+    "team": "Le Moyne",
     "contact": 86.0,
     "lineDrive": 10.2,
     "avgExitVelo": 59.3,

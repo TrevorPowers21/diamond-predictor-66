@@ -21,6 +21,24 @@ Status: In testing phase. Defer cleanup until testing is complete.
 - Add at least smoke tests for core routes/components.
 - Add at least one auth flow test and one data-loading behavior test.
 
+4. Remove temporary Teams Admin action buttons added during testing.
+- Delete one-off migration/cleanup buttons before release (for example: `Reset Team Import`, `Reset Teams to Seed`, `Apply Locked Standards`, plus any other temporary backfill/reset controls).
+- Keep only long-term production-safe controls.
+
+5. Conference timeline note (2026).
+- LaSalle was manually added under Atlantic 10 / A-10 in this testing setup.
+- Confirm and handle first-year-in-2026 conference membership timing logic when production conference sync rules are finalized.
+
+6. Team-private in-season data uploads (fall + preseason).
+- Build a secure workflow for programs to upload their own player data points during fall/preseason.
+- Enforce tenant-level privacy so only that team/program can view and use its uploaded data.
+- Use those private inputs in future player prediction calculations while preventing cross-team access.
+
+7. Transfer Portal automation by team account profile.
+- Auto-set destination team in Transfer Portal simulations from the logged-in team account/profile.
+- Restrict team users to their own program context and keep cross-program data access blocked.
+- Keep manual team override available for admin-only testing.
+
 ### Resume Here (Latest Work)
 
 1. Teams conference backfill is blocked at edge function deploy step.

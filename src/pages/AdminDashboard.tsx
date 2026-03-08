@@ -59,6 +59,13 @@ function EquationConstantsTab() {
     r_ba_damp_tier2_impact: "0.90",
     r_ba_damp_tier3_impact: "0.70",
     r_ba_damp_tier4_impact: "0.40",
+    r_obp_damp_tier1_max: "0.455",
+    r_obp_damp_tier2_max: "0.485",
+    r_obp_damp_tier3_max: "0.525",
+    r_obp_damp_tier1_impact: "1.00",
+    r_obp_damp_tier2_impact: "0.90",
+    r_obp_damp_tier3_impact: "0.70",
+    r_obp_damp_tier4_impact: "0.40",
     t_ba_ncaa_avg: "0.280",
     t_ba_power_weight: "0.70",
     t_ba_conference_weight: "1.000",
@@ -83,6 +90,7 @@ function EquationConstantsTab() {
     nil_base_per_owar: "25000",
     nil_tier_sec: "1.5",
     nil_tier_p4: "1.2",
+    nil_tier_big_ten: "1.0",
     nil_tier_strong_mid: "0.8",
     nil_tier_low_major: "0.5",
     nil_pos_group_c_ss_cf: "1.3",
@@ -233,6 +241,9 @@ function EquationConstantsTab() {
   const baTier1Max = editableValues.r_ba_damp_tier1_max || "0.350";
   const baTier2Max = editableValues.r_ba_damp_tier2_max || "0.380";
   const baTier3Max = editableValues.r_ba_damp_tier3_max || "0.420";
+  const obpTier1Max = editableValues.r_obp_damp_tier1_max || "0.455";
+  const obpTier2Max = editableValues.r_obp_damp_tier2_max || "0.485";
+  const obpTier3Max = editableValues.r_obp_damp_tier3_max || "0.525";
 
   return (
     <div className="space-y-6">
@@ -406,13 +417,12 @@ function EquationConstantsTab() {
               <div><span className="text-muted-foreground">Mult =</span> (1) + (ClassAdjustment) + (DevAggressiveness × 0.06)</div>
               <div><span className="text-muted-foreground">Projected =</span> Blended × Mult</div>
               <div><span className="text-muted-foreground">Delta =</span> Projected - LastOBP</div>
-              <div><span className="text-muted-foreground">DampFactor =</span></div>
+              <div><span className="text-muted-foreground">DampFactor =</span> IFS(ProjectedOBP ≤ 0.455, 1.0, ProjectedOBP ≤ 0.485, 0.9, ProjectedOBP ≤ 0.525, 0.7, TRUE, 0.4)</div>
               <div className="ml-6 space-y-1 text-xs">
-                <div>1.0 if Delta ≤ 0 (no growth)</div>
-                <div>1.0 if 0 &lt; Delta ≤ 0.03 (small growth, full effect)</div>
-                <div>0.9 if 0.03 &lt; Delta ≤ 0.06 (moderate growth, 90% of delta)</div>
-                <div>0.7 if 0.06 &lt; Delta ≤ 0.08 (large growth, 70% of delta)</div>
-                <div>0.4 if Delta &gt; 0.08 (extreme growth, 40% of delta)</div>
+                <div>1.0 if ProjectedOBP ≤ 0.455</div>
+                <div>0.9 if 0.455 &lt; ProjectedOBP ≤ 0.485</div>
+                <div>0.7 if 0.485 &lt; ProjectedOBP ≤ 0.525</div>
+                <div>0.4 if ProjectedOBP &gt; 0.525</div>
               </div>
               <div><span className="text-muted-foreground">Final =</span> LastOBP + (Delta × DampFactor)</div>
             </div>
@@ -445,6 +455,107 @@ function EquationConstantsTab() {
                   {editableField("r_obp_class", "r_obp_class_sj", "SJ", "0.1", "%")}
                   {editableField("r_obp_class", "r_obp_class_js", "JS", "0.1", "%")}
                   {editableField("r_obp_class", "r_obp_class_gr", "GR", "0.1", "%")}
+                </div>
+              </div>
+              <div className={sectionPanelClass}>
+                {editableSectionHeader("r_obp_damp", "On Base % Dampening")}
+                <div className="space-y-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={editableValues.r_obp_damp_tier1_max ?? ""}
+                      onChange={(e) => setEditable("r_obp_damp_tier1_max", e.target.value)}
+                      readOnly={!editableSections.r_obp_damp}
+                      className="h-7 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+                    />
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={editableValues.r_obp_damp_tier2_max ?? ""}
+                      onChange={(e) => setEditable("r_obp_damp_tier2_max", e.target.value)}
+                      readOnly={!editableSections.r_obp_damp}
+                      className="h-7 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+                    />
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={editableValues.r_obp_damp_tier3_max ?? ""}
+                      onChange={(e) => setEditable("r_obp_damp_tier3_max", e.target.value)}
+                      readOnly={!editableSections.r_obp_damp}
+                      className="h-7 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <span>Range (Projected OBP)</span>
+                    <span>Impact</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 items-center">
+                    <div className="h-7 px-2 flex items-center border rounded-md bg-muted/40 text-[11px] text-muted-foreground font-mono">
+                      ≤ {obpTier1Max}
+                    </div>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={editableValues.r_obp_damp_tier1_impact ?? ""}
+                      onChange={(e) => setEditable("r_obp_damp_tier1_impact", e.target.value)}
+                      readOnly={!editableSections.r_obp_damp}
+                      className="h-7 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 items-center">
+                    <div className="h-7 px-2 flex items-center border rounded-md bg-muted/40 text-[11px] text-muted-foreground font-mono">
+                      &gt; {obpTier1Max} and ≤ {obpTier2Max}
+                    </div>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={editableValues.r_obp_damp_tier2_impact ?? ""}
+                      onChange={(e) => setEditable("r_obp_damp_tier2_impact", e.target.value)}
+                      readOnly={!editableSections.r_obp_damp}
+                      className="h-7 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 items-center">
+                    <div className="h-7 px-2 flex items-center border rounded-md bg-muted/40 text-[11px] text-muted-foreground font-mono">
+                      &gt; {obpTier2Max} and ≤ {obpTier3Max}
+                    </div>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={editableValues.r_obp_damp_tier3_impact ?? ""}
+                      onChange={(e) => setEditable("r_obp_damp_tier3_impact", e.target.value)}
+                      readOnly={!editableSections.r_obp_damp}
+                      className="h-7 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 items-center">
+                    <div className="h-7 px-2 flex items-center border rounded-md bg-muted/40 text-[11px] text-muted-foreground font-mono">
+                      &gt; {obpTier3Max}
+                    </div>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={editableValues.r_obp_damp_tier4_impact ?? ""}
+                      onChange={(e) => setEditable("r_obp_damp_tier4_impact", e.target.value)}
+                      readOnly={!editableSections.r_obp_damp}
+                      className="h-7 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -913,21 +1024,24 @@ function EquationConstantsTab() {
                 <p className={sectionHeadingClass}>Defaults</p>
                 <div className="ml-2 space-y-0.5">
                   <div>• SEC = 1.5</div>
-                  <div>• ACC / Big12 / Big10 = 1.2</div>
+                  <div>• ACC / Big12 = 1.2</div>
+                  <div>• Big Ten = 1.0</div>
                   <div>• Strong Mid Major = 0.8</div>
                   <div>• Low Major = 0.5</div>
+                  <div className="pt-1">• Strong Mid Major conferences: American Athletic, Sun Belt, Big West, Mountain West</div>
+                  <div>• All remaining conferences default to Low Major</div>
                   <div className="pt-1">• Catcher / Shortstop / Center Field / TWP = 1.3</div>
                   <div>• Second Base / Third Base / Corner Outfield = 1.1</div>
                   <div>• First Base / DH = 1.0</div>
                   <div>• Bench Utility = 0.8</div>
-                  <div className="pt-1 text-[10px]">Conference-to-tier mapping can be defined later.</div>
                 </div>
               </div>
               <div className={sectionPanelClass}>
                 {editableSectionHeader("nil_tiers")}
                 <div className="space-y-1.5">
                   {editableField("nil_tiers", "nil_tier_sec", "SEC")}
-                  {editableField("nil_tiers", "nil_tier_p4", "ACC/Big12/Big10")}
+                  {editableField("nil_tiers", "nil_tier_p4", "ACC/Big12")}
+                  {editableField("nil_tiers", "nil_tier_big_ten", "Big Ten")}
                   {editableField("nil_tiers", "nil_tier_strong_mid", "Strong Mid Major")}
                   {editableField("nil_tiers", "nil_tier_low_major", "Low Major")}
                 </div>
@@ -1438,10 +1552,10 @@ type WeightForm = {
 
 const emptyForm: WeightForm = { position: "", from_class: "", to_class: "", stat_category: "overall", weight: "1.000", notes: "" };
 const CONFERENCES = [
-  "ACC", "AAC", "A-10", "America East", "ASUN", "Big 12", "Big East", "Big Sky",
+  "ACC", "AAC", "A-10", "America East", "ASUN", "Big 12", "Big East",
   "Big South", "Big Ten", "Big West", "CAA", "CUSA", "Horizon League", "Ivy League",
   "MAAC", "MAC", "MEAC", "Mountain West", "MVC", "NEC", "OVC", "Pac-12",
-  "Patriot League", "SoCon", "Southland", "Summit League", "Sun Belt", "SWAC",
+  "Patriot League", "SEC", "SoCon", "Southland", "Summit League", "Sun Belt", "SWAC",
   "WAC", "WCC",
 ];
 
@@ -1709,9 +1823,11 @@ function TeamsAdminTab() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [confFilter, setConfFilter] = useState<string>("all");
+  const [parkFilter, setParkFilter] = useState<string>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editConf, setEditConf] = useState("");
   const [editName, setEditName] = useState("");
+  const [editParkFactor, setEditParkFactor] = useState("");
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamConf, setNewTeamConf] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
@@ -1724,24 +1840,893 @@ function TeamsAdminTab() {
     });
     return Array.from(set);
   }, []);
+  const TEAM_ALIASES: Record<string, string> = {
+    lsu: "Louisiana State",
+    fsu: "Florida State University",
+    olemiss: "Ole Miss",
+    uconn: "University of Connecticut",
+    unc: "University of North Carolina",
+    ucla: "University of California Los Angeles",
+    universityofcalifornialosangelesucla: "University of California Los Angeles",
+    usc: "University of Southern California",
+    ucf: "University of Central Florida",
+    usf: "University of South Florida",
+    uab: "UAB",
+    alabamabirmingham: "UAB",
+    utsa: "UTSA",
+    universityoftexassanantonio: "UTSA",
+    fau: "Florida Atlantic University",
+    utrgv: "University of Texas Rio Grande Valley",
+    texasriograndevalley: "University of Texas Rio Grande Valley",
+    ncstate: "North Carolina State University",
+    kstate: "Kansas State University",
+    osu: "Ohio State",
+    arizona: "University of Arizona",
+    uofa: "University of Arizona",
+    universityofarizona: "University of Arizona",
+    california: "California",
+    universityofcalifornia: "California",
+    ucb: "California",
+    calberkeley: "California",
+    // Big Ten locked canonical aliases
+    universityofsoutherncalifornia: "University of Southern California",
+    universityofcalifornialosangeles: "University of California Los Angeles",
+    umd: "University of Maryland",
+    universityofmaryland: "University of Maryland",
+    universityofmarylandcollegepark: "University of Maryland",
+    marylandcollegepark: "University of Maryland",
+    rutgersuniversity: "Rutgers",
+    uiuc: "Illinois",
+    universityofillinois: "Illinois",
+    umich: "Michigan",
+    universityofmichigan: "Michigan",
+    indianauniversity: "Indiana",
+    indianauniversitybloomington: "Indiana University",
+    indianauniversitybloomingtonindianauniversity: "Indiana University",
+    northwesternuniversity: "Northwestern",
+    ohiostateuniversity: "Ohio State",
+    psu: "Penn State",
+    pennstateuniversity: "Penn State",
+    msu: "Michigan State",
+    michiganstateuniversity: "Michigan State",
+    universityofwashington: "Washington",
+    // Big West locked canonical aliases
+    ucsantabarbara: "UC Santa Barbara",
+    ucsb: "UC Santa Barbara",
+    csunorthridge: "CSU Northridge",
+    csun: "CSU Northridge",
+    universityofhawaii: "Hawaii",
+    hawaiiatmanoa: "Hawaii",
+    ucirvine: "UC Irvine",
+    uci: "UC Irvine",
+    ucdavis: "UC Davis",
+    ucd: "UC Davis",
+    calpoly: "Cal Poly",
+    calpolystate: "Cal Poly",
+    csufullerton: "CSU Fullerton",
+    calstatefullerton: "CSU Fullerton",
+    fullerton: "CSU Fullerton",
+    csubakersfield: "California State University Bakersfield",
+    calstatebakersfield: "California State University Bakersfield",
+    ucsandiego: "University of California San Diego",
+    ucsd: "University of California San Diego",
+    universityofcaliforniasandiego: "University of California San Diego",
+    lbsu: "Long Beach State",
+    longbeachstateuniversity: "Long Beach State",
+    ucriverside: "UC Riverside",
+    ucr: "UC Riverside",
+    // Coastal Athletic Association locked canonical aliases
+    uncw: "University of North Carolina Wilmington",
+    universityofnorthcarolinawilmington: "University of North Carolina Wilmington",
+    towsonuniversity: "Towson",
+    collegeofcharleston: "College of Charleston",
+    cofc: "College of Charleston",
+    elonuniversity: "Elon",
+    williamandmary: "William and Mary",
+    collegeofwilliamandmary: "William and Mary",
+    campbelluniversity: "Campbell",
+    northeasternuniversity: "Northeastern",
+    monmouthuniversity: "Monmouth",
+    northcarolinaat: "North Carolina State A&T",
+    northcarolinaaandt: "North Carolina State A&T",
+    northcarolinastateat: "North Carolina State A&T",
+    northcarolinastateaandt: "North Carolina State A&T",
+    ncat: "North Carolina State A&T",
+    hofstrauniversity: "Hofstra",
+    stonybrookuniversity: "Stony Brook",
+    sunystonybrook: "Stony Brook",
+    // Conference USA locked canonical aliases
+    jacksonvillestateuniversity: "Jacksonville State",
+    jsu: "Jacksonville State",
+    libertyuniversity: "Liberty",
+    middletennesseestateuniversity: "Middle Tennessee State",
+    mtsu: "Middle Tennessee State",
+    missouristateuniversity: "Missouri State",
+    dallasbaptist: "Dallas Baptist University",
+    dbu: "Dallas Baptist University",
+    westernkentuckyuniversity: "Western Kentucky",
+    wku: "Western Kentucky",
+    louisianatechuniversity: "Louisiana Tech",
+    latech: "Louisiana Tech",
+    samhoustonstateuniversity: "Sam Houston State",
+    shu: "Sam Houston State",
+    floridainternational: "Florida International",
+    floridainternationaluniversity: "Florida International",
+    fiu: "Florida International",
+    newmexicostateuniversity: "New Mexico State",
+    nmstate: "New Mexico State",
+    kennesawstateuniversity: "Kennesaw State",
+    universityofdelaware: "Delaware",
+    udel: "Delaware",
+    // Ivy League locked canonical aliases
+    yaleuniversity: "Yale",
+    dartmouthcollege: "Dartmouth",
+    columbiauniversity: "Columbia",
+    princetonuniversity: "Princeton",
+    brownuniversity: "Brown",
+    universityofpennsylvania: "Pennsylvania",
+    upenn: "Pennsylvania",
+    penn: "Pennsylvania",
+    cornelluniversity: "Cornell",
+    harvarduniversity: "Harvard",
+    // Metro Atlantic Athletic Conference (MAAC) locked canonical aliases
+    rideruniversity: "Rider",
+    manhattancollege: "Manhattan",
+    manhattanuniversity: "Manhattan",
+    mountsaintmarys: "Mount St. Mary's",
+    mountstmarys: "Mount St. Mary's",
+    mountsaintmarysuniversity: "Mount St. Mary's",
+    ionauniversity: "Iona",
+    sienacollege: "Siena",
+    merrimackcollege: "Merrimack",
+    canisiusuniversity: "Canisius",
+    quinnipiacuniversity: "Quinnipiac",
+    niagarauniversity: "Niagara",
+    fairfielduniversity: "Fairfield",
+    sacredheartuniversity: "Sacred Heart",
+    stpeters: "St. Peters",
+    saintpeters: "St. Peters",
+    saintpetersuniversity: "St. Peters",
+    maristcollege: "Marist",
+    maristuniversity: "Marist",
+    // Mid-American Conference (MAC) locked canonical aliases
+    kentstateuniversity: "Kent State",
+    miamiofohio: "Miami (OH)",
+    miamiohio: "Miami (OH)",
+    miamioh: "Miami (OH)",
+    miamiuniversityohio: "Miami (OH)",
+    northernillinoisuniversity: "Northern Illinois",
+    niu: "Northern Illinois",
+    umass: "UMass",
+    universityofmassachusetts: "UMass",
+    umassamherst: "UMass",
+    centralmichiganuniversity: "Central Michigan",
+    akronuniversity: "Akron",
+    universityofakron: "Akron",
+    ballstateuniversity: "Ball State",
+    westernmichiganuniversity: "Western Michigan",
+    toledouniversity: "Toledo",
+    universityoftoledo: "Toledo",
+    easternmichiganuniversity: "Eastern Michigan",
+    bowlinggreenstateuniversity: "Bowling Green",
+    bowlinggreenohio: "Bowling Green",
+    // Missouri Valley Conference (MVC) locked canonical aliases
+    murraystateuniversity: "Murray State",
+    illinoisstateuniversity: "Illinois State",
+    indianastateuniversity: "Indiana State",
+    valparaisouniversity: "Valparaiso",
+    southernillinoisuniversity: "Southern Illinois",
+    siu: "Southern Illinois",
+    illinoischicago: "Illinois Chicago",
+    universityillinoischicago: "Illinois Chicago",
+    universityofillinoischicago: "Illinois Chicago",
+    uic: "Illinois Chicago",
+    belmontuniversity: "Belmont",
+    bradleyuniversity: "Bradley",
+    universityofevansville: "Evansville",
+    // Mountain West locked canonical aliases
+    universityofnewmexico: "New Mexico",
+    unm: "New Mexico",
+    universityofnevadalasvegas: "UNLV",
+    unlv: "UNLV",
+    sandiegostateuniversity: "San Diego State",
+    sdsu: "San Diego State",
+    fresnostateuniversity: "Fresno State",
+    californiastateuniversityfresno: "Fresno State",
+    universityofnevadareno: "Nevada",
+    unreno: "Nevada",
+    grandcanyonuniversity: "Grand Canyon",
+    gcu: "Grand Canyon",
+    washingtonstateuniversity: "Washington State",
+    wsu: "Washington State",
+    sanjosestateuniversity: "San Jose State",
+    sjsu: "San Jose State",
+    unitedstatesairforceacademy: "Air Force",
+    airforceacademy: "Air Force",
+    // Northeast Conference (NEC) locked canonical aliases
+    centralconnecticutstateuniversity: "Central Connecticut State",
+    ccsu: "Central Connecticut State",
+    fairleighdickinsonuniversity: "Fairleigh Dickinson",
+    fdu: "Fairleigh Dickinson",
+    norfolkstateuniversity: "Norfolk State",
+    comptonstate: "Coppin State",
+    coppinstate: "Coppin State",
+    coppinstateuniversity: "Coppin State",
+    longislanduniversity: "Long Island University",
+    liu: "Long Island University-Brooklyn",
+    liubrooklyn: "Long Island University-Brooklyn",
+    longislanduniversitybrooklyn: "Long Island University-Brooklyn",
+    brooklyncollege: "Long Island University-Brooklyn",
+    universityofnewhaven: "University of New Haven",
+    marylandeasternshore: "Maryland Eastern Shore",
+    universityofmarylandeasternshore: "Maryland Eastern Shore",
+    umes: "Maryland Eastern Shore",
+    wagnercollege: "Wagner",
+    mercyhurstuniversity: "Mercyhurst",
+    stonehillcollege: "Stonehill",
+    lemoynecollege: "Le Moyne",
+    lemoyne: "Le Moyne",
+    delawarestateuniversity: "Delaware State",
+    // Ohio Valley Conference (OVC) locked canonical aliases
+    universityofsouthernindiana: "Southern Indiana",
+    southernindianauniversity: "Southern Indiana",
+    tennesseetechuniversity: "Tennessee Tech",
+    southeasternmissouristate: "Southeast Missouri State",
+    southeastmissouristate: "Southeast Missouri State",
+    southeastmissoutistate: "Southeast Missouri State",
+    semo: "Southeast Missouri State",
+    universityofarkansaslittlerock: "University of Arkansas Little Rock",
+    arkansaslittlerock: "University of Arkansas Little Rock",
+    littlerock: "University of Arkansas Little Rock",
+    utmartin: "UT Martin",
+    universityoftennesseemartin: "UT Martin",
+    easternillinoisuniversity: "Eastern Illinois",
+    moreheadstateuniversity: "Morehead State",
+    lindenwooduniversity: "Lindenwood",
+    southernindianaedwardsville: "University of Southern Indiana Edwardsville",
+    southernillinoisedwardsville: "University of Southern Indiana Edwardsville",
+    siue: "University of Southern Indiana Edwardsville",
+    westernillinoisuniversity: "Western Illinois",
+    // Patriot League locked canonical aliases
+    unitedstatesnavalacademy: "Navy",
+    usna: "Navy",
+    armywestpoint: "Army",
+    unitedstatesmilitaryacademy: "Army",
+    usma: "Army",
+    lehighuniversity: "Lehigh",
+    collegeoftheholycross: "Holy Cross",
+    holycrossuniversity: "Holy Cross",
+    bucknelluniversity: "Bucknell",
+    lafayettecollege: "Lafayette",
+    // Southeastern Conference (SEC) locked canonical aliases
+    universityoftexas: "Texas",
+    universityoftexasataustin: "Texas",
+    ut: "Texas",
+    texasam: "Texas A&M",
+    texasaandm: "Texas A&M",
+    texasamuniversity: "Texas A&M",
+    universityofmississippi: "Ole Miss",
+    uf: "Florida",
+    universityofflorida: "Florida",
+    mississippistateuniversity: "Mississippi State",
+    msst: "Mississippi State",
+    universityofoklahoma: "Oklahoma",
+    uk: "Kentucky",
+    universityofkentucky: "Kentucky",
+    universityofmissouri: "Missouri",
+    mizzou: "Missouri",
+    auburnuniversity: "Auburn",
+    universityofalabama: "Alabama",
+    louisianastate: "Louisiana State",
+    louisianastateuniversity: "Louisiana State",
+    universityofgeorgia: "Georgia",
+    universityofarkansas: "Arkansas",
+    universityoftennessee: "Tennessee",
+    universityofsouthcarolina: "South Carolina",
+    southcarolinauniversity: "South Carolina",
+    vanderbiltuniversity: "Vanderbilt",
+    // Southern Conference (SoCon) locked canonical aliases
+    merceruniversity: "Mercer",
+    virginiamilitaryinstitute: "Virginia Military Institute",
+    vmi: "Virginia Military Institute",
+    easttennesseestateuniversity: "East Tennessee State",
+    etsu: "East Tennessee State",
+    woffordcollege: "Wofford",
+    westerncarolinauniversity: "Western Carolina",
+    thecitadel: "The Citadel",
+    citadel: "The Citadel",
+    uncgreensboro: "UNC Greensboro",
+    universityofnorthcarolinagreensboro: "UNC Greensboro",
+    samford: "Samford",
+    samforduniversity: "Samford",
+    sanford: "Samford",
+    // Southland Conference locked canonical aliases
+    stephenfaustinstate: "Stephen F Austin State",
+    stephenfaustinstateuniversity: "Stephen F Austin State",
+    sfa: "Stephen F Austin State",
+    lamaruniversity: "Lamar",
+    texasamcorpuschristi: "Texas A&M Corpus Christi",
+    texasaandmcorpuschristi: "Texas A&M Corpus Christi",
+    tamucc: "Texas A&M Corpus Christi",
+    mcneesestate: "McNeese State",
+    mcneesestateuniversity: "McNeese State",
+    universityofincarnateword: "Incarnate Word",
+    uiw: "Incarnate Word",
+    northwesternstateuniversity: "Northwestern State",
+    southeasternlouisianauniversity: "Southeastern Louisiana",
+    nichollsstate: "Nicholls State",
+    nichollsstateuniversity: "Nicholls State",
+    houstonchristianuniversity: "Houston Christian",
+    houstonbaptist: "Houston Christian",
+    hcu: "Houston Christian",
+    universityoftexasriograndevalley: "University of Texas Rio Grande Valley",
+    utriograndevalley: "University of Texas Rio Grande Valley",
+    utriogrande: "University of Texas Rio Grande Valley",
+    universityofneworleans: "New Orleans",
+    uno: "New Orleans",
+    // Southwestern Athletic Conference (SWAC) locked canonical aliases
+    bethunecookmanuniversity: "Bethune-Cookman",
+    jacksonstateuniversity: "Jackson State",
+    alabamastateuniversity: "Alabama State",
+    texassouthernuniversity: "Texas Southern",
+    alabamaam: "Alabama A&M",
+    alabamaaandm: "Alabama A&M",
+    alabamaamuniversity: "Alabama A&M",
+    universityofarkansaspinebluff: "Arkansas Pine Bluff",
+    arkansaspinebluff: "Arkansas Pine Bluff",
+    uapb: "Arkansas Pine Bluff",
+    floridaam: "Florida A&M",
+    floridaaandm: "Florida A&M",
+    floridaamuniversity: "Florida A&M",
+    famu: "Florida A&M",
+    prairieviewam: "Prairie View A&M",
+    prairieviewaandm: "Prairie View A&M",
+    prairieviewamuniversity: "Prairie View A&M",
+    pvam: "Prairie View A&M",
+    southernuniversity: "Southern",
+    gramblingstateuniversity: "Grambling State",
+    mississippivalleystateuniversity: "Mississippi Valley State",
+    alcornstateuniversity: "Alcorn State",
+    // Sun Belt Conference locked canonical aliases
+    southernmiss: "Southern Miss",
+    universityofsouthernmississippi: "Southern Miss",
+    usm: "Southern Miss",
+    universityofsouthalabama: "South Alabama",
+    usa: "South Alabama",
+    arkansasstateuniversity: "Arkansas State",
+    texassateuniversity: "Texas State",
+    texasstateuniversity: "Texas State",
+    louisianalafayette: "Louisiana",
+    universityoflouisianalafayette: "Louisiana",
+    ulafayette: "Louisiana",
+    louisiana: "Louisiana",
+    appalachianstateuniversity: "Appalachian State",
+    appstate: "Appalachian State",
+    coastalcarolinauniversity: "Coastal Carolina",
+    georgiastateuniversity: "Georgia State",
+    olddominionuniversity: "Old Dominion",
+    odu: "Old Dominion",
+    marshalluniversity: "Marshall",
+    universityoflouisianamonroe: "University of Louisiana Monroe",
+    ulmonroe: "University of Louisiana Monroe",
+    ulm: "University of Louisiana Monroe",
+    troyuniversity: "Troy",
+    jamesmadisonuniversity: "James Madison",
+    jmu: "James Madison",
+    georgiasouthernuniversity: "Georgia Southern",
+    // The Summit League locked canonical aliases
+    oralrobertsuniversity: "Oral Roberts",
+    oru: "Oral Roberts",
+    southdakotastateuniversity: "South Dakota State",
+    sdsujackrabbits: "South Dakota State",
+    universityofnebraskaomaha: "Omaha",
+    nebraskaomaha: "Omaha",
+    omahauniversity: "Omaha",
+    universityofstthomasminnesota: "University of St. Thomas",
+    stthomasminnesota: "University of St. Thomas",
+    ust: "University of St. Thomas",
+    northdakotastateuniversity: "North Dakota State",
+    ndsu: "North Dakota State",
+    northerncoloradouniversity: "Northern Colorado",
+    unco: "Northern Colorado",
+    // West Coast Conference (WCC) locked canonical aliases
+    saintmarys: "Saint Mary's",
+    stmarys: "Saint Mary's",
+    saintmaryscollege: "Saint Mary's",
+    sanfrancisco: "San Francisco",
+    universityofsanfrancisco: "San Francisco",
+    usfca: "San Francisco",
+    universityofsandiego: "San Diego",
+    usd: "San Diego",
+    universityofportland: "Portland",
+    universityofthepacific: "Pacific",
+    pacificuniversity: "Pacific",
+    santaclarauniversity: "Santa Clara",
+    gonzagauniversity: "Gonzaga",
+    loyolamarymountuniversity: "Loyola Marymount",
+    lmu: "Loyola Marymount",
+    pepperdineuniversity: "Pepperdine",
+    seattleuniversity: "Seattle",
+    // Western Athletic Conference (WAC) locked canonical aliases
+    californiabaptistuniversity: "California Baptist",
+    cbu: "California Baptist",
+    utahtechuniversity: "Utah Tech",
+    dixiestate: "Utah Tech",
+    tarletonstateuniversity: "Tarleton State",
+    abilenechristianuniversity: "Abilene Christian",
+    acu: "Abilene Christian",
+    utahvalleyuniversity: "Utah Valley",
+    uvu: "Utah Valley",
+    universityoftexasarlington: "University of Texas Arlington",
+    utarlington: "University of Texas Arlington",
+    uta: "University of Texas Arlington",
+    sacramentostateuniversity: "Sacramento State",
+    sacstate: "Sacramento State",
+  };
   const normalizeCanonicalKey = (value: string) =>
     value
       .toLowerCase()
-      .replace(/university|college|state|school|the/gi, "")
+      .replace(/\ba&m\b/g, "am")
+      .replace(/\but\b/g, "texas")
+      .replace(/\bnc\b/g, "north carolina")
+      .replace(/\bsc\b/g, "south carolina")
+      .replace(/\bint'?l\b/g, "international")
+      .replace(/\bsaint\b/g, "st")
+      .replace(/\bst[.]?\b/g, "state")
+      .replace(/\brio grande valley\b/g, "riograndevalley")
+      .replace(/\bthe\b|\bof\b|\bat\b|\band\b/g, " ")
+      .replace(/university|college|school/gi, "")
       .replace(/[^a-z0-9]/g, "")
       .trim();
+  const canonicalTokens = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/[()\-/,]/g, " ")
+      .replace(/\bsaint\b/g, "st")
+      .replace(/\bst[.]?\b/g, "state")
+      .replace(/\bthe\b|\bof\b|\bat\b|\band\b/g, " ")
+      .replace(/university|college|school/gi, " ")
+      .split(/\s+/)
+      .filter(Boolean);
+  const acronymKey = (value: string) => {
+    const words = value
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter((w) => !["university", "college", "the", "of", "at", "and"].includes(w));
+    return words.map((w) => w[0]).join("");
+  };
   const resolveCanonicalTeamName = (input: string) => {
     const raw = (input || "").trim();
     if (!raw) return raw;
     const key = normalizeCanonicalKey(raw);
     if (!key) return raw;
+    // Hard disambiguation: "California" must never map to UCLA.
+    if (key === "california") return "California";
+    if (key === "californialosangeles") return "University of California Los Angeles";
+    if (TEAM_ALIASES[key]) return TEAM_ALIASES[key];
+
     const candidates = canonicalTeamNames.filter((name) => {
       const ckey = normalizeCanonicalKey(name);
       return ckey === key || ckey.includes(key) || key.includes(ckey);
     });
     if (candidates.length === 1) return candidates[0];
+
+    // Match acronym/short form (e.g. LSU, UTRGV) to a unique canonical school.
+    const keyAcr = acronymKey(raw);
+    const acronymMatches = canonicalTeamNames.filter((name) => acronymKey(name) === keyAcr);
+    if (acronymMatches.length === 1) return acronymMatches[0];
+    const looseAcronymMatches = canonicalTeamNames.filter((name) => {
+      const a = acronymKey(name);
+      return a.startsWith(keyAcr) || keyAcr.startsWith(a);
+    });
+    if (keyAcr.length >= 2 && looseAcronymMatches.length === 1) return looseAcronymMatches[0];
+
+    // Token-prefix matching for shortened forms (e.g. "Miss St", "UT Rio Grande").
+    const rawTokens = canonicalTokens(raw);
+    if (rawTokens.length > 0) {
+      const tokenMatches = canonicalTeamNames.filter((name) => {
+        const cTokens = canonicalTokens(name);
+        return rawTokens.every((rt) => cTokens.some((ct) => ct.startsWith(rt)));
+      });
+      if (tokenMatches.length === 1) return tokenMatches[0];
+    }
+
     return raw;
   };
+  const normalizeConferenceName = (input: string | null | undefined) => {
+    const raw = (input || "").trim();
+    if (!raw) return "";
+    const key = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const map: Record<string, string> = {
+      aac: "American Athletic Conference",
+      americanaeast: "America East",
+      americaeast: "America East",
+      americanathleticconference: "American Athletic Conference",
+      a10: "Atlantic 10",
+      atlantic10: "Atlantic 10",
+      caa: "Coastal Athletic Association",
+      coastalathleticassociation: "Coastal Athletic Association",
+      bigtenconference: "Big Ten",
+      bigten: "Big Ten",
+      coastalathleticconference: "Coastal Athletic Association",
+      coastalalthleticconference: "Coastal Athletic Association",
+      coastalathletic: "Coastal Athletic Association",
+    };
+    if (map[key]) return map[key];
+    return raw;
+  };
+  const LOCKED_TEAM_CONFERENCES: Record<string, string> = {
+    // America East
+    "New Jersey Institute of Technology": "America East",
+    "University of Maryland, Baltimore County": "America East",
+    "Bryant University": "America East",
+    Binghamton: "America East",
+    "UMass Lowell": "America East",
+    Albany: "America East",
+    Maine: "America East",
+    // American Athletic
+    UTSA: "American Athletic Conference",
+    "South Florida": "American Athletic Conference",
+    "Wichita State": "American Athletic Conference",
+    Charlotte: "American Athletic Conference",
+    UAB: "American Athletic Conference",
+    Rice: "American Athletic Conference",
+    Tulane: "American Athletic Conference",
+    "East Carolina": "American Athletic Conference",
+    "Florida Atlantic": "American Athletic Conference",
+    Memphis: "American Athletic Conference",
+    // Atlantic 10
+    Dayton: "Atlantic 10",
+    LaSalle: "Atlantic 10",
+    Richmond: "Atlantic 10",
+    "George Mason": "Atlantic 10",
+    VCU: "Atlantic 10",
+    Davidson: "Atlantic 10",
+    "George Washington": "Atlantic 10",
+    "St. Joseph's": "Atlantic 10",
+    "St. Louis": "Atlantic 10",
+    "St. Bonaventure": "Atlantic 10",
+    Fordham: "Atlantic 10",
+    "Rhode Island": "Atlantic 10",
+    // ACC
+    "Georgia Tech": "ACC",
+    "Wake Forest": "ACC",
+    Clemson: "ACC",
+    Virginia: "ACC",
+    "North Carolina": "ACC",
+    "North Carolina State": "ACC",
+    "Florida State": "ACC",
+    Pittsburgh: "ACC",
+    Miami: "ACC",
+    Duke: "ACC",
+    California: "ACC",
+    "Notre Dame": "ACC",
+    "Boston College": "ACC",
+    Louisville: "ACC",
+    "Virginia Tech": "ACC",
+    Stanford: "ACC",
+    // ASUN
+    "Florida Gulf Coast": "ASUN",
+    Jacksonville: "ASUN",
+    "Central Arkansas": "ASUN",
+    "North Florida": "ASUN",
+    "Austin Peay": "ASUN",
+    "North Alabama": "ASUN",
+    Lipscomb: "ASUN",
+    Stetson: "ASUN",
+    "Queens University of Charlotte": "ASUN",
+    "Eastern Kentucky": "ASUN",
+    Bellarmine: "ASUN",
+    "West Georgia": "ASUN",
+    // Big 12
+    Cincinnati: "Big 12",
+    "West Virginia": "Big 12",
+    "Arizona State": "Big 12",
+    "Oklahoma State": "Big 12",
+    Kansas: "Big 12",
+    "Kansas State": "Big 12",
+    "Texas Tech": "Big 12",
+    TCU: "Big 12",
+    Houston: "Big 12",
+    "Central Florida": "Big 12",
+    Utah: "Big 12",
+    Baylor: "Big 12",
+    BYU: "Big 12",
+    "University of Arizona": "Big 12",
+    // Big East
+    Georgetown: "Big East",
+    UConn: "Big East",
+    "Seton Hall": "Big East",
+    Xavier: "Big East",
+    Creighton: "Big East",
+    Villanova: "Big East",
+    Butler: "Big East",
+    "Saint John's": "Big East",
+    // Big South
+    Longwood: "Big South",
+    "Charleston Southern": "Big South",
+    Winthrop: "Big South",
+    "Gardner Webb": "Big South",
+    Radford: "Big South",
+    "High Point": "Big South",
+    "University of North Carolina Asheville": "Big South",
+    "South Carolina Upstate": "Big South",
+    Presbyterian: "Big South",
+    // Big Ten
+    "University of Southern California": "Big Ten",
+    "University of California Los Angeles": "Big Ten",
+    UCLA: "Big Ten",
+    Oregon: "Big Ten",
+    Minnesota: "Big Ten",
+    Iowa: "Big Ten",
+    Purdue: "Big Ten",
+    Nebraska: "Big Ten",
+    "University of Maryland": "Big Ten",
+    Rutgers: "Big Ten",
+    Illinois: "Big Ten",
+    Michigan: "Big Ten",
+    Indiana: "Big Ten",
+    Northwestern: "Big Ten",
+    "Ohio State": "Big Ten",
+    "Penn State": "Big Ten",
+    "Michigan State": "Big Ten",
+    Washington: "Big Ten",
+    // Big West
+    "UC Santa Barbara": "Big West",
+    "CSU Northridge": "Big West",
+    Hawaii: "Big West",
+    "UC Irvine": "Big West",
+    "UC Davis": "Big West",
+    "Cal Poly": "Big West",
+    "CSU Fullerton": "Big West",
+    "California State University Bakersfield": "Big West",
+    "University of California San Diego": "Big West",
+    "Long Beach State": "Big West",
+    "UC Riverside": "Big West",
+    // CAA
+    "University of North Carolina Wilmington": "Coastal Athletic Association",
+    Towson: "Coastal Athletic Association",
+    "College of Charleston": "Coastal Athletic Association",
+    Elon: "Coastal Athletic Association",
+    "William and Mary": "Coastal Athletic Association",
+    Campbell: "Coastal Athletic Association",
+    Northeastern: "Coastal Athletic Association",
+    Monmouth: "Coastal Athletic Association",
+    "North Carolina State A&T": "Coastal Athletic Association",
+    Hofstra: "Coastal Athletic Association",
+    "Stony Brook": "Coastal Athletic Association",
+    // CUSA
+    "Jacksonville State": "CUSA",
+    Liberty: "CUSA",
+    "Middle Tennessee State": "CUSA",
+    "Missouri State": "CUSA",
+    "Dallas Baptist University": "CUSA",
+    "Western Kentucky": "CUSA",
+    "Louisiana Tech": "CUSA",
+    "Sam Houston State": "CUSA",
+    "Florida International": "CUSA",
+    "New Mexico State": "CUSA",
+    "Kennesaw State": "CUSA",
+    Delaware: "CUSA",
+    // Independent
+    "Oregon State": "Independent",
+    // Ivy
+    Yale: "Ivy League",
+    Dartmouth: "Ivy League",
+    Columbia: "Ivy League",
+    Princeton: "Ivy League",
+    Brown: "Ivy League",
+    Pennsylvania: "Ivy League",
+    Cornell: "Ivy League",
+    Harvard: "Ivy League",
+    // MAAC
+    Rider: "MAAC",
+    Manhattan: "MAAC",
+    "Mount St. Mary's": "MAAC",
+    Iona: "MAAC",
+    Siena: "MAAC",
+    Merrimack: "MAAC",
+    Canisius: "MAAC",
+    Quinnipiac: "MAAC",
+    Niagara: "MAAC",
+    Fairfield: "MAAC",
+    "Sacred Heart": "MAAC",
+    "St. Peters": "MAAC",
+    Marist: "MAAC",
+    // MAC
+    "Kent State": "MAC",
+    "Miami (OH)": "MAC",
+    "Northern Illinois": "MAC",
+    UMass: "MAC",
+    "Central Michigan": "MAC",
+    Akron: "MAC",
+    "Ball State": "MAC",
+    "Western Michigan": "MAC",
+    Toledo: "MAC",
+    "Eastern Michigan": "MAC",
+    "Bowling Green": "MAC",
+    // MVC
+    "Murray State": "MVC",
+    "Illinois State": "MVC",
+    "Indiana State": "MVC",
+    Valparaiso: "MVC",
+    "Southern Illinois": "MVC",
+    "Illinois Chicago": "MVC",
+    Belmont: "MVC",
+    Bradley: "MVC",
+    Evansville: "MVC",
+    // Mountain West
+    "New Mexico": "Mountain West",
+    UNLV: "Mountain West",
+    "San Diego State": "Mountain West",
+    "Fresno State": "Mountain West",
+    Nevada: "Mountain West",
+    "Grand Canyon": "Mountain West",
+    "Washington State": "Mountain West",
+    "San Jose State": "Mountain West",
+    "Air Force": "Mountain West",
+    // NEC
+    "Central Connecticut State": "NEC",
+    "Fairleigh Dickinson": "NEC",
+    "Norfolk State": "NEC",
+    "Coppin State": "NEC",
+    "Long Island University-Brooklyn": "NEC",
+    "University of New Haven": "NEC",
+    "Maryland Eastern Shore": "NEC",
+    Wagner: "NEC",
+    Mercyhurst: "NEC",
+    Stonehill: "NEC",
+    "Le Moyne": "NEC",
+    "Delaware State": "NEC",
+    // OVC
+    "Southern Indiana": "OVC",
+    "Tennessee Tech": "OVC",
+    "Southeast Missouri State": "OVC",
+    "University of Arkansas Little Rock": "OVC",
+    "UT Martin": "OVC",
+    "Eastern Illinois": "OVC",
+    "Morehead State": "OVC",
+    Lindenwood: "OVC",
+    "University of Southern Indiana Edwardsville": "OVC",
+    "Western Illinois": "OVC",
+    // Patriot
+    Navy: "Patriot League",
+    Army: "Patriot League",
+    Lehigh: "Patriot League",
+    "Holy Cross": "Patriot League",
+    Bucknell: "Patriot League",
+    Lafayette: "Patriot League",
+    // SEC
+    Texas: "SEC",
+    "Texas A&M": "SEC",
+    "Ole Miss": "SEC",
+    Florida: "SEC",
+    "Mississippi State": "SEC",
+    Oklahoma: "SEC",
+    Kentucky: "SEC",
+    Missouri: "SEC",
+    Auburn: "SEC",
+    Alabama: "SEC",
+    "Louisiana State": "SEC",
+    Georgia: "SEC",
+    Arkansas: "SEC",
+    Tennessee: "SEC",
+    "South Carolina": "SEC",
+    Vanderbilt: "SEC",
+    // SoCon
+    Mercer: "SoCon",
+    "Virginia Military Institute": "SoCon",
+    "East Tennessee State": "SoCon",
+    Wofford: "SoCon",
+    "Western Carolina": "SoCon",
+    "The Citadel": "SoCon",
+    "UNC Greensboro": "SoCon",
+    Samford: "SoCon",
+    // Southland
+    "Stephen F Austin State": "Southland",
+    Lamar: "Southland",
+    "Texas A&M Corpus Christi": "Southland",
+    "McNeese State": "Southland",
+    "Incarnate Word": "Southland",
+    "Northwestern State": "Southland",
+    "Southeastern Louisiana": "Southland",
+    "Nicholls State": "Southland",
+    "Houston Christian": "Southland",
+    "University of Texas Rio Grande Valley": "Southland",
+    "New Orleans": "Southland",
+    // SWAC
+    "Bethune-Cookman": "SWAC",
+    "Jackson State": "SWAC",
+    "Alabama State": "SWAC",
+    "Texas Southern": "SWAC",
+    "Alabama A&M": "SWAC",
+    "Arkansas Pine Bluff": "SWAC",
+    "Florida A&M": "SWAC",
+    "Prairie View A&M": "SWAC",
+    Southern: "SWAC",
+    "Grambling State": "SWAC",
+    "Mississippi Valley State": "SWAC",
+    "Alcorn State": "SWAC",
+    // Sun Belt
+    "Southern Miss": "Sun Belt",
+    "South Alabama": "Sun Belt",
+    "Arkansas State": "Sun Belt",
+    "Texas State": "Sun Belt",
+    Louisiana: "Sun Belt",
+    "Appalachian State": "Sun Belt",
+    "Coastal Carolina": "Sun Belt",
+    "Georgia State": "Sun Belt",
+    "Old Dominion": "Sun Belt",
+    Marshall: "Sun Belt",
+    "University of Louisiana Monroe": "Sun Belt",
+    Troy: "Sun Belt",
+    "James Madison": "Sun Belt",
+    "Georgia Southern": "Sun Belt",
+    // Summit
+    "Oral Roberts": "Summit League",
+    "South Dakota State": "Summit League",
+    Omaha: "Summit League",
+    "University of St. Thomas": "Summit League",
+    "North Dakota State": "Summit League",
+    "Northern Colorado": "Summit League",
+    // WCC
+    "Saint Mary's": "WCC",
+    "San Francisco": "WCC",
+    "San Diego": "WCC",
+    Portland: "WCC",
+    Pacific: "WCC",
+    "Santa Clara": "WCC",
+    Gonzaga: "WCC",
+    "Loyola Marymount": "WCC",
+    Pepperdine: "WCC",
+    Seattle: "WCC",
+    // WAC
+    "California Baptist": "WAC",
+    "Utah Tech": "WAC",
+    "Tarleton State": "WAC",
+    "Abilene Christian": "WAC",
+    "Utah Valley": "WAC",
+    "University of Texas Arlington": "WAC",
+    "Sacramento State": "WAC",
+    // Explicit disambiguation
+    "University of California": "ACC",
+  };
+  const isOregonStateTeam = (name: string) => {
+    const key = normalizeCanonicalKey(resolveCanonicalTeamName(name || ""));
+    return key === "oregonstate";
+  };
+  const getLockedConferenceForTeam = (name: string) => {
+    const canonical = resolveCanonicalTeamName(name || "");
+    const key = normalizeCanonicalKey(canonical);
+    for (const [teamName, conference] of Object.entries(LOCKED_TEAM_CONFERENCES)) {
+      if (normalizeCanonicalKey(teamName) === key) return normalizeConferenceName(conference);
+    }
+    return null;
+  };
+  const seedTeamDefaults = useMemo(() => {
+    const byKey = new Map<string, { name: string; conferenceCounts: Map<string, number> }>();
+    for (const r of storage2025Seed as Array<{ team: string | null; conference?: string | null }>) {
+      const rawTeam = (r.team || "").trim();
+      if (!rawTeam) continue;
+      const canonicalName = resolveCanonicalTeamName(rawTeam);
+      const key = normalizeCanonicalKey(canonicalName || rawTeam);
+      if (!byKey.has(key)) {
+        byKey.set(key, { name: canonicalName || rawTeam, conferenceCounts: new Map() });
+      }
+      const conf = ((r.conference as string | null) || "").trim();
+      if (!conf) continue;
+      const normalizedConf = normalizeConferenceName(conf);
+      const counts = byKey.get(key)!.conferenceCounts;
+      counts.set(normalizedConf, (counts.get(normalizedConf) || 0) + 1);
+    }
+    return Array.from(byKey.entries()).map(([key, value]) => {
+      const bestConference =
+        Array.from(value.conferenceCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+      return { key, name: value.name, conference: bestConference };
+    });
+  }, [canonicalTeamNames]);
 
   const { data: teams = [], isLoading } = useQuery({
     queryKey: ["admin-teams"],
@@ -1755,9 +2740,126 @@ function TeamsAdminTab() {
     },
   });
 
+  const dedupeTeamsInDb = async () => {
+    const { data: allTeams, error } = await supabase
+      .from("teams")
+      .select("id, name, conference, park_factor");
+    if (error) throw error;
+
+    type TeamRec = { id: string; name: string; conference: string | null; park_factor: number | null };
+    const byKey = new Map<string, TeamRec[]>();
+    for (const t of (allTeams || []) as TeamRec[]) {
+      const canonicalName = resolveCanonicalTeamName(t.name);
+      const key = normalizeCanonicalKey(canonicalName || t.name);
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key)!.push(t);
+    }
+
+    let mergedGroups = 0;
+    let removedRows = 0;
+    for (const [, group] of byKey) {
+      if (group.length <= 1) continue;
+      mergedGroups++;
+      const canonical = resolveCanonicalTeamName(group[0].name);
+
+      const confCounts = new Map<string, number>();
+      for (const row of group) {
+        const conf = (row.conference || "").trim();
+        if (!conf) continue;
+        confCounts.set(conf, (confCounts.get(conf) || 0) + 1);
+      }
+      const bestConferenceRaw = Array.from(confCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+      const bestConference = bestConferenceRaw ? normalizeConferenceName(bestConferenceRaw) : null;
+      const bestParkFactor = group.find((r) => r.park_factor != null)?.park_factor ?? null;
+
+      const primary = [...group].sort((a, b) => {
+        const aScore =
+          (resolveCanonicalTeamName(a.name) === canonical ? 4 : 0) +
+          (a.conference ? 2 : 0) +
+          (a.park_factor != null ? 1 : 0);
+        const bScore =
+          (resolveCanonicalTeamName(b.name) === canonical ? 4 : 0) +
+          (b.conference ? 2 : 0) +
+          (b.park_factor != null ? 1 : 0);
+        return bScore - aScore;
+      })[0];
+
+      const duplicateIds = group.filter((r) => r.id !== primary.id).map((r) => r.id);
+      if (duplicateIds.length > 0) {
+        const { error: delErr } = await supabase.from("teams").delete().in("id", duplicateIds);
+        if (delErr) throw delErr;
+        removedRows += duplicateIds.length;
+      }
+
+      // Update the remaining row after duplicates are removed to avoid teams_name_key collisions.
+      const desiredName = canonical || primary.name;
+      const { error: upErr } = await supabase
+        .from("teams")
+        .update({
+          name: desiredName,
+          conference: bestConference,
+          park_factor: bestParkFactor,
+        })
+        .eq("id", primary.id);
+      if (upErr) {
+        // If a name collision still exists outside this group, keep current name and only apply data merge.
+        const { error: fallbackErr } = await supabase
+          .from("teams")
+          .update({
+            conference: bestConference,
+            park_factor: bestParkFactor,
+          })
+          .eq("id", primary.id);
+        if (fallbackErr) throw fallbackErr;
+      }
+    }
+
+    // Fill missing conferences from canonical-key peers, then ensure no blanks remain.
+    const { data: afterDedupeTeams, error: refetchError } = await supabase
+      .from("teams")
+      .select("id, name, conference");
+    if (refetchError) throw refetchError;
+
+    const conferenceByKey = new Map<string, Map<string, number>>();
+    for (const t of (afterDedupeTeams || []) as Array<{ id: string; name: string; conference: string | null }>) {
+      const conf = normalizeConferenceName(t.conference).trim();
+      if (!conf) continue;
+      const key = normalizeCanonicalKey(resolveCanonicalTeamName(t.name));
+      if (!conferenceByKey.has(key)) conferenceByKey.set(key, new Map());
+      const counts = conferenceByKey.get(key)!;
+      counts.set(conf, (counts.get(conf) || 0) + 1);
+    }
+
+    for (const t of (afterDedupeTeams || []) as Array<{ id: string; name: string; conference: string | null }>) {
+      const conf = normalizeConferenceName(t.conference).trim();
+      if (conf) continue;
+      const key = normalizeCanonicalKey(resolveCanonicalTeamName(t.name));
+      const counts = conferenceByKey.get(key);
+      const best = counts ? Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] : null;
+      const nextConf = normalizeConferenceName(best || (isOregonStateTeam(t.name) ? "Independent" : "Unknown"));
+      const { error: fillErr } = await supabase.from("teams").update({ conference: nextConf }).eq("id", t.id);
+      if (fillErr) throw fillErr;
+    }
+
+    return { mergedGroups, removedRows };
+  };
+
   const updateTeam = useMutation({
-    mutationFn: async ({ id, name, conference }: { id: string; name: string; conference: string }) => {
-      const { error } = await supabase.from("teams").update({ name, conference }).eq("id", id);
+    mutationFn: async ({ id, name, conference, parkFactorInput }: { id: string; name: string; conference: string; parkFactorInput: string }) => {
+      const manualName = name.trim();
+      if (!manualName) throw new Error("Team name is required.");
+      const normalizedConference = normalizeConferenceName(conference) || "Unknown";
+      const parkRaw = parkFactorInput.trim();
+      let parkFactor: number | null = null;
+      if (parkRaw !== "") {
+        const parsed = Number.parseFloat(parkRaw);
+        if (!Number.isFinite(parsed)) throw new Error("Park factor must be numeric or blank.");
+        parkFactor = parsed > 3 ? parsed / 100 : parsed;
+      }
+      const { error } = await supabase
+        .from("teams")
+        .update({ name: manualName, conference: normalizedConference, park_factor: parkFactor })
+        .eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -1784,16 +2886,30 @@ function TeamsAdminTab() {
 
   const addTeam = useMutation({
     mutationFn: async ({ name, conference }: { name: string; conference: string }) => {
-      const { error } = await supabase.from("teams").insert({ name, conference: conference || null });
-      if (error) throw error;
+      const manualName = name.trim();
+      if (!manualName) throw new Error("Team name is required.");
+      const normalizedConference = normalizeConferenceName(conference);
+      const { error } = await supabase
+        .from("teams")
+        .insert({ name: manualName, conference: normalizedConference || null });
+      if (!error) return { mode: "inserted" as const };
+
+      // If the team already exists, do not modify it automatically.
+      const code = (error as { code?: string }).code;
+      if (code === "23505" || (error.message || "").toLowerCase().includes("teams_name_key")) {
+        return { mode: "exists" as const };
+      }
+
+      throw error;
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
       queryClient.invalidateQueries({ queryKey: ["teams"] });
       setNewTeamName("");
       setNewTeamConf("");
       setShowAddForm(false);
-      toast.success("Team added");
+      if (res.mode === "exists") toast.success("Team already exists. No changes made.");
+      else toast.success("Team added");
     },
     onError: (e) => toast.error(`Failed: ${e.message}`),
   });
@@ -1811,7 +2927,7 @@ function TeamsAdminTab() {
       const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
       for (const p of (players || [])) {
         const team = (p.team || "").trim();
-        const conf = (p.conference || "").trim();
+        const conf = normalizeConferenceName(p.conference).trim();
         if (!team || !conf) continue;
         const key = norm(resolveCanonicalTeamName(team));
         if (!byTeam.has(key)) byTeam.set(key, new Map());
@@ -1827,38 +2943,36 @@ function TeamsAdminTab() {
         if (!confCounts || confCounts.size === 0) continue;
         const best = Array.from(confCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
         if (!best) continue;
-        const { error } = await supabase.from("teams").update({ conference: best }).eq("id", t.id);
+        const { error } = await supabase.from("teams").update({ conference: normalizeConferenceName(best) }).eq("id", t.id);
         if (error) throw error;
         updated++;
       }
-      return { updated };
+
+      // Ensure every team has a conference label, even if we cannot infer one yet.
+      const { data: stillBlank, error: blankErr } = await supabase
+        .from("teams")
+        .select("id,name")
+        .or("conference.is.null,conference.eq.");
+      if (blankErr) throw blankErr;
+
+      let defaulted = 0;
+      for (const row of stillBlank || []) {
+        const defaultConference = normalizeConferenceName(
+          isOregonStateTeam((row as { name?: string }).name || "") ? "Independent" : "Unknown",
+        );
+        const { error } = await supabase.from("teams").update({ conference: defaultConference }).eq("id", row.id);
+        if (error) throw error;
+        defaulted++;
+      }
+
+      return { updated, defaulted };
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
       queryClient.invalidateQueries({ queryKey: ["teams"] });
-      toast.success(`Filled conference for ${res.updated} teams.`);
+      toast.success(`Filled conference for ${res.updated} teams (${res.defaulted} set to Unknown).`);
     },
     onError: (e) => toast.error(`Conference fill failed: ${e.message}`),
-  });
-
-  const scrapeConferences = useMutation({
-    mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke("scrape-team-conferences", {
-        body: { startPage: 1, endPage: 222 },
-      });
-      if (error) throw error;
-      return data as { success: boolean; updated?: number; inserted?: number; scraped?: number; error?: string };
-    },
-    onSuccess: (res) => {
-      if (!res?.success) {
-        toast.error(res?.error || "Conference scrape failed");
-        return;
-      }
-      queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
-      queryClient.invalidateQueries({ queryKey: ["teams"] });
-      toast.success(`Conference scrape complete: ${res.updated || 0} updated, ${res.inserted || 0} inserted.`);
-    },
-    onError: (e) => toast.error(`Conference scrape failed: ${e.message}`),
   });
 
   const importTeamParkFactors = useMutation({
@@ -1932,30 +3046,34 @@ function TeamsAdminTab() {
       if (existingError) throw existingError;
       const byNorm = new Map<string, { id: string; name: string; conference: string | null }>();
       for (const t of (existingTeams || [])) {
-        const key = normalizeTeamKey(t.name);
-        if (!byNorm.has(key)) byNorm.set(key, t);
+        const rawKey = normalizeTeamKey(t.name);
+        const canonicalKey = normalizeTeamKey(resolveCanonicalTeamName(t.name));
+        if (!byNorm.has(rawKey)) byNorm.set(rawKey, t);
+        if (!byNorm.has(canonicalKey)) byNorm.set(canonicalKey, t);
       }
 
-      const toUpdate: Array<{ id: string; park_factor: number | null }> = [];
-      const toInsert: Array<{ name: string; conference: string | null; park_factor: number | null }> = [];
+      const toUpdateById = new Map<string, number | null>();
+      const unmatchedTeams = new Set<string>();
       let processed = 0;
 
       for (let i = headerRowIndex + 1; i < lines.length; i++) {
         const cols = parseCsvLine(lines[i]);
-        const team = resolveCanonicalTeamName((cols[teamIdx] || "").trim());
+        const originalTeam = (cols[teamIdx] || "").trim();
+        const team = resolveCanonicalTeamName(originalTeam);
         if (!team) continue;
         const pfPlus = parseNum(cols[parkPlusIdx]);
         const parkFactor = pfPlus == null ? null : pfPlus / 100;
         const key = normalizeTeamKey(team);
         const existing = byNorm.get(key);
         if (existing) {
-          toUpdate.push({ id: existing.id, park_factor: parkFactor });
+          toUpdateById.set(existing.id, parkFactor);
         } else {
-          toInsert.push({ name: team, conference: null, park_factor: parkFactor });
+          unmatchedTeams.add(originalTeam || team);
         }
         processed++;
       }
 
+      const toUpdate = Array.from(toUpdateById.entries()).map(([id, park_factor]) => ({ id, park_factor }));
       for (let i = 0; i < toUpdate.length; i += 200) {
         const chunk = toUpdate.slice(i, i + 200);
         for (const row of chunk) {
@@ -1963,19 +3081,230 @@ function TeamsAdminTab() {
           if (error) throw error;
         }
       }
-      if (toInsert.length > 0) {
-        const { error } = await supabase.from("teams").insert(toInsert);
-        if (error) throw error;
-      }
-
-      return { processed, updated: toUpdate.length, inserted: toInsert.length };
+      return {
+        processed,
+        updated: toUpdate.length,
+        skippedUnmatched: unmatchedTeams.size,
+        unmatchedPreview: Array.from(unmatchedTeams).slice(0, 5),
+      };
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
       queryClient.invalidateQueries({ queryKey: ["teams"] });
-      toast.success(`Imported team park factors: ${res.updated} updated, ${res.inserted} inserted (${res.processed} rows).`);
+      const suffix =
+        res.skippedUnmatched > 0
+          ? `, ${res.skippedUnmatched} unmatched skipped${res.unmatchedPreview.length ? ` (${res.unmatchedPreview.join(", ")})` : ""}`
+          : "";
+      toast.success(`Imported team park factors: ${res.updated} updated (${res.processed} rows processed${suffix}).`);
     },
     onError: (e) => toast.error(`Team CSV import failed: ${e.message}`),
+  });
+
+  const dedupeTeams = useMutation({
+    mutationFn: dedupeTeamsInDb,
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
+      queryClient.invalidateQueries({ queryKey: ["teams"] });
+      toast.success(`Deduplicated teams: ${res.removedRows} duplicate rows removed across ${res.mergedGroups} schools.`);
+    },
+    onError: (e) => toast.error(`Deduplicate failed: ${e.message}`),
+  });
+  const resetTeamImport = useMutation({
+    mutationFn: async () => {
+      const { data: allTeams, error } = await supabase
+        .from("teams")
+        .select("id, name, conference, park_factor");
+      if (error) throw error;
+
+      type TeamRec = { id: string; name: string; conference: string | null; park_factor: number | null };
+      const byKey = new Map<string, TeamRec[]>();
+      for (const t of (allTeams || []) as TeamRec[]) {
+        const canonical = resolveCanonicalTeamName(t.name);
+        const key = normalizeCanonicalKey(canonical || t.name);
+        if (!byKey.has(key)) byKey.set(key, []);
+        byKey.get(key)!.push(t);
+      }
+
+      let removedRows = 0;
+      for (const [, group] of byKey) {
+        const canonicalName = resolveCanonicalTeamName(group[0].name);
+        const primary = [...group].sort((a, b) => {
+          const aScore = (a.conference ? 2 : 0) + (a.park_factor != null ? 1 : 0);
+          const bScore = (b.conference ? 2 : 0) + (b.park_factor != null ? 1 : 0);
+          return bScore - aScore;
+        })[0];
+        const duplicateIds = group.filter((r) => r.id !== primary.id).map((r) => r.id);
+
+        if (duplicateIds.length > 0) {
+          const { error: delErr } = await supabase.from("teams").delete().in("id", duplicateIds);
+          if (delErr) throw delErr;
+          removedRows += duplicateIds.length;
+        }
+
+        const normalizedConference = normalizeConferenceName(
+          isOregonStateTeam(canonicalName) ? "Independent" : primary.conference,
+        );
+        const { error: upErr } = await supabase
+          .from("teams")
+          .update({
+            name: canonicalName || primary.name,
+            conference: normalizedConference && normalizedConference.trim() ? normalizedConference : "Unknown",
+            park_factor: null, // restart park-factor import from clean slate
+          })
+          .eq("id", primary.id);
+        if (upErr) throw upErr;
+      }
+
+      return { removedRows, retainedRows: byKey.size };
+    },
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
+      queryClient.invalidateQueries({ queryKey: ["teams"] });
+      toast.success(`Team import reset complete: ${res.removedRows} duplicates removed, ${res.retainedRows} canonical teams kept.`);
+    },
+    onError: (e) => toast.error(`Reset team import failed: ${e.message}`),
+  });
+  const resetTeamsToSeed = useMutation({
+    mutationFn: async () => {
+      await dedupeTeamsInDb();
+
+      const desiredByKey = new Map(
+        seedTeamDefaults.map((t) => {
+          const conf = t.conference || (isOregonStateTeam(t.name) ? "Independent" : "Unknown");
+          return [t.key, { name: t.name, conference: normalizeConferenceName(conf) }];
+        }),
+      );
+
+      const { data: allTeams, error } = await supabase.from("teams").select("id, name, conference, park_factor");
+      if (error) throw error;
+
+      let removed = 0;
+      let updated = 0;
+      let inserted = 0;
+      const keptKeys = new Set<string>();
+
+      for (const t of allTeams || []) {
+        const key = normalizeCanonicalKey(resolveCanonicalTeamName(t.name));
+        const desired = desiredByKey.get(key);
+        if (!desired) {
+          const { error: delErr } = await supabase.from("teams").delete().eq("id", t.id);
+          if (delErr) throw delErr;
+          removed++;
+          continue;
+        }
+        if (keptKeys.has(key)) {
+          const { error: delDupErr } = await supabase.from("teams").delete().eq("id", t.id);
+          if (delDupErr) throw delDupErr;
+          removed++;
+          continue;
+        }
+        keptKeys.add(key);
+
+        const nextConference = desired.conference || "Unknown";
+        const needsUpdate =
+          t.name !== desired.name ||
+          (t.conference || "") !== nextConference ||
+          t.park_factor !== null;
+        if (needsUpdate) {
+          const { error: upErr } = await supabase
+            .from("teams")
+            .update({
+              name: desired.name,
+              conference: nextConference,
+              park_factor: null,
+            })
+            .eq("id", t.id);
+          if (upErr) throw upErr;
+          updated++;
+        }
+      }
+
+      for (const [key, desired] of desiredByKey.entries()) {
+        if (keptKeys.has(key)) continue;
+        const { error: insErr } = await supabase.from("teams").insert({
+          name: desired.name,
+          conference: desired.conference || "Unknown",
+          park_factor: null,
+        });
+        if (insErr) throw insErr;
+        inserted++;
+      }
+
+      await dedupeTeamsInDb();
+      return { removed, updated, inserted, totalSeedTeams: desiredByKey.size };
+    },
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
+      queryClient.invalidateQueries({ queryKey: ["teams"] });
+      toast.success(
+        `Reset to seed complete: ${res.removed} removed, ${res.updated} updated, ${res.inserted} inserted (${res.totalSeedTeams} baseline teams).`,
+      );
+    },
+    onError: (e) => toast.error(`Reset to seed failed: ${e.message}`),
+  });
+  const applyLockedTeamStandards = useMutation({
+    mutationFn: async () => {
+      const { data: allTeams, error } = await supabase.from("teams").select("id, name, conference, park_factor");
+      if (error) throw error;
+
+      let updated = 0;
+      let inserted = 0;
+      for (const t of allTeams || []) {
+        const canonicalName = resolveCanonicalTeamName(t.name);
+        const lockedConference = getLockedConferenceForTeam(canonicalName);
+        const nextConference =
+          lockedConference ||
+          (isOregonStateTeam(canonicalName) ? "Independent" : normalizeConferenceName(t.conference || "") || "Unknown");
+        const needsUpdate =
+          t.name !== canonicalName ||
+          (t.conference || "") !== nextConference;
+        if (!needsUpdate) continue;
+        const { error: upErr } = await supabase
+          .from("teams")
+          .update({ name: canonicalName, conference: nextConference })
+          .eq("id", t.id);
+        if (upErr) throw upErr;
+        updated++;
+      }
+
+      // Ensure every locked canonical team exists at least once.
+      const existingKeys = new Set(
+        (allTeams || []).map((t) => normalizeCanonicalKey(resolveCanonicalTeamName(t.name))),
+      );
+      const canonicalLockedTeams = new Map<string, { name: string; conference: string }>();
+      for (const [teamName, conference] of Object.entries(LOCKED_TEAM_CONFERENCES)) {
+        const canonicalName = resolveCanonicalTeamName(teamName);
+        const key = normalizeCanonicalKey(canonicalName);
+        if (!key) continue;
+        if (!canonicalLockedTeams.has(key)) {
+          canonicalLockedTeams.set(key, {
+            name: canonicalName,
+            conference: normalizeConferenceName(conference),
+          });
+        }
+      }
+      for (const [key, row] of canonicalLockedTeams.entries()) {
+        if (existingKeys.has(key)) continue;
+        const { error: insErr } = await supabase.from("teams").insert({
+          name: row.name,
+          conference: row.conference,
+          park_factor: null,
+        });
+        if (insErr) throw insErr;
+        inserted++;
+      }
+
+      const dedupe = await dedupeTeamsInDb();
+      return { updated, inserted, dedupe };
+    },
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
+      queryClient.invalidateQueries({ queryKey: ["teams"] });
+      toast.success(
+        `Applied locked team standards: ${res.updated} updated, ${res.inserted} inserted, ${res.dedupe?.removedRows || 0} duplicates removed.`,
+      );
+    },
+    onError: (e) => toast.error(`Apply locked standards failed: ${e.message}`),
   });
 
   const filtered = useMemo(() => {
@@ -1983,35 +3312,45 @@ function TeamsAdminTab() {
     if (search) {
       const q = search.toLowerCase();
       list = list.filter((t) =>
-        resolveCanonicalTeamName(t.name).toLowerCase().includes(q) || (t.conference || "").toLowerCase().includes(q),
+        resolveCanonicalTeamName(t.name).toLowerCase().includes(q) ||
+        normalizeConferenceName(t.conference).toLowerCase().includes(q),
       );
     }
     if (confFilter !== "all") {
-      if (confFilter === "unassigned") list = list.filter((t) => !t.conference);
-      else list = list.filter((t) => t.conference === confFilter);
+      if (confFilter === "unassigned") list = list.filter((t) => !normalizeConferenceName(t.conference));
+      else list = list.filter((t) => normalizeConferenceName(t.conference) === confFilter);
+    }
+    if (parkFilter !== "all") {
+      if (parkFilter === "blank") list = list.filter((t) => t.park_factor == null);
+      else if (parkFilter === "filled") list = list.filter((t) => t.park_factor != null);
     }
     return list;
-  }, [teams, search, confFilter, resolveCanonicalTeamName]);
+  }, [teams, search, confFilter, parkFilter, resolveCanonicalTeamName]);
 
   const confCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     teams.forEach((t) => {
-      const c = t.conference || "Unassigned";
+      const c = normalizeConferenceName(t.conference) || "Unassigned";
       counts[c] = (counts[c] || 0) + 1;
     });
     return counts;
   }, [teams]);
 
-  const uniqueConfs = useMemo(() => [...new Set(teams.map((t) => t.conference).filter(Boolean))].sort() as string[], [teams]);
+  const uniqueConfs = useMemo(
+    () =>
+      [...new Set(teams.map((t) => normalizeConferenceName(t.conference)).filter(Boolean))].sort() as string[],
+    [teams],
+  );
 
   const startEdit = (team: TeamRow) => {
     setEditingId(team.id);
     setEditConf(team.conference || "");
     setEditName(team.name);
+    setEditParkFactor(team.park_factor == null ? "" : String(Math.round(team.park_factor * 100)));
   };
 
   const saveEdit = (id: string) => {
-    updateTeam.mutate({ id, name: resolveCanonicalTeamName(editName), conference: editConf });
+    updateTeam.mutate({ id, name: editName, conference: editConf, parkFactorInput: editParkFactor });
   };
 
   return (
@@ -2037,7 +3376,7 @@ function TeamsAdminTab() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button onClick={() => addTeam.mutate({ name: resolveCanonicalTeamName(newTeamName), conference: newTeamConf })} disabled={!newTeamName.trim()} size="sm">
+              <Button onClick={() => addTeam.mutate({ name: newTeamName, conference: newTeamConf })} disabled={!newTeamName.trim()} size="sm">
                 Add
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setShowAddForm(false)}>Cancel</Button>
@@ -2074,6 +3413,16 @@ function TeamsAdminTab() {
                 ))}
               </SelectContent>
             </Select>
+            <Select value={parkFilter} onValueChange={setParkFilter}>
+              <SelectTrigger className="w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Park: All</SelectItem>
+                <SelectItem value="blank">Park: Blank</SelectItem>
+                <SelectItem value="filled">Park: Filled</SelectItem>
+              </SelectContent>
+            </Select>
             <div className="relative w-full sm:w-64">
               <Input placeholder="Search teams..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
             </div>
@@ -2083,22 +3432,6 @@ function TeamsAdminTab() {
               variant="outline"
             >
               {importTeamParkFactors.isPending ? "Importing CSV…" : "Import Teams CSV"}
-            </Button>
-            <Button
-              onClick={() => fillConferencesFromPlayers.mutate()}
-              size="sm"
-              variant="outline"
-              disabled={fillConferencesFromPlayers.isPending}
-            >
-              {fillConferencesFromPlayers.isPending ? "Filling…" : "Fill Conferences"}
-            </Button>
-            <Button
-              onClick={() => scrapeConferences.mutate()}
-              size="sm"
-              variant="outline"
-              disabled={scrapeConferences.isPending}
-            >
-              {scrapeConferences.isPending ? "Scraping…" : "Scrape Conferences"}
             </Button>
             <Button onClick={() => setShowAddForm((v) => !v)} size="sm" className="gap-1">
               <Plus className="h-4 w-4" />
@@ -2133,7 +3466,18 @@ function TeamsAdminTab() {
                         )}
                       </TableCell>
                       <TableCell className="text-center">
-                        <span className="text-sm tabular-nums">{Math.round((team.park_factor ?? 1.0) * 100)}</span>
+                        {editingId === team.id ? (
+                          <Input
+                            value={editParkFactor}
+                            onChange={(e) => setEditParkFactor(e.target.value)}
+                            placeholder="blank"
+                            className="h-8 w-24 text-center"
+                          />
+                        ) : (
+                          <span className="text-sm tabular-nums">
+                            {team.park_factor == null ? "—" : Math.round(team.park_factor * 100)}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell>
                         {editingId === team.id ? (
@@ -2322,7 +3666,13 @@ function QuickActionsTab() {
   const [clearTeamsLoading, setClearTeamsLoading] = useState(false);
   const [clearTeamsResult, setClearTeamsResult] = useState<{ playersCleared: number } | null>(null);
   const [syncTeamsLoading, setSyncTeamsLoading] = useState(false);
-  const [syncTeamsResult, setSyncTeamsResult] = useState<{ updated: number; skippedAmbiguous: number; unmatched: number } | null>(null);
+  const [syncTeamsResult, setSyncTeamsResult] = useState<{
+    updated: number;
+    clearedUnmatched: number;
+    skippedAmbiguous: number;
+    unmatched: number;
+    unresolvedSample: string[];
+  } | null>(null);
 
   const runBulkRecalculate = async () => {
     setBulkLoading(false);
@@ -2363,9 +3713,245 @@ function QuickActionsTab() {
   };
 
   const sync2025TeamsForNonTransfers = async () => {
-    setSyncTeamsLoading(false);
+    setSyncTeamsLoading(true);
     setSyncTeamsResult(null);
-    toast.info("Team sync writes are disabled for this testing phase. Team display is sourced from 2025 Data Storage.");
+    try {
+      const normalize = (value: string | null | undefined) =>
+        (value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+      const normalizeTeamMatch = (value: string | null | undefined) => {
+        const key = normalize(value);
+        const aliases: Record<string, string> = {
+          "university of maryland college park": "university of maryland",
+          "maryland college park": "university of maryland",
+          "university of maryland eastern shore": "maryland eastern shore",
+          "maryland eastern shore": "maryland eastern shore",
+          "umes": "maryland eastern shore",
+          "alabama birmingham": "uab",
+          "uab": "uab",
+          "university of texas san antonio": "utsa",
+          "utsa": "utsa",
+          "university of southern indiana": "southern indiana",
+          "university of san francisco": "san francisco",
+          "university of nebraska omaha": "omaha",
+          "university of nevada las vegas": "unlv",
+          "unlv": "unlv",
+          "university of mississippi": "ole miss",
+          "olemiss": "ole miss",
+          "university of massachusetts": "umass",
+          "umass": "umass",
+          "university of hawaii manoa": "hawaii",
+          "university of hawaii": "hawaii",
+          "university of arkansas pine bluff": "arkansas pine bluff",
+          "charlotte university": "charlotte",
+          "unc charlotte": "charlotte",
+          "texas a m university": "texas a m",
+          "stephen f austin state university": "stephen f austin state",
+          "southeast missouri state university": "southeast missouri state",
+          "southeastern missouri state": "southeast missouri state",
+          "southeastern missouri state university": "southeast missouri state",
+          "semo": "southeast missouri state",
+          "southeast missouti state": "southeast missouri state",
+          "samford university": "samford",
+          "nicholls state university": "nicholls state",
+          "miami university ohio": "miami oh",
+          "mcneese state university": "mcneese state",
+          "louisiana state university": "louisiana state",
+          "indiana university bloomington": "indiana university",
+          "florida international university": "florida international",
+          "coppin state university": "coppin state",
+          "cal state northridge": "csu northridge",
+          "cal state fullerton": "csu fullerton",
+          "california state university fullerton": "csu fullerton",
+          "california state fullerton": "csu fullerton",
+          "csu fullerton": "csu fullerton",
+          "uic": "illinois chicago",
+          "university illinois chicago": "illinois chicago",
+          "university of illinois chicago": "illinois chicago",
+          "army west point": "army",
+          "prairie view a m university": "prairie view a m",
+          "prairie view a m": "prairie view a m",
+          "pvam": "prairie view a m",
+          "alabama a m university": "alabama a m",
+          "air force academy": "air force",
+          "air force": "air force",
+          "fiu": "florida international",
+          "famu": "florida a m",
+          "lsu": "louisiana state",
+          "vcu": "vcu",
+          "north carolina a t state university": "north carolina state a t",
+          "north carolina a t": "north carolina state a t",
+          "ncat": "north carolina state a t",
+        };
+        return aliases[key] || key;
+      };
+
+      const seedRows = storage2025Seed as Array<{
+        playerName: string;
+        team: string | null;
+        conference: string | null;
+      }>;
+
+      const seedByName = new Map<string, Array<{ team: string | null; conference: string | null }>>();
+      for (const row of seedRows) {
+        const nameKey = normalize(row.playerName);
+        if (!nameKey) continue;
+        const arr = seedByName.get(nameKey) || [];
+        arr.push({ team: row.team, conference: row.conference });
+        seedByName.set(nameKey, arr);
+      }
+
+      const { data: allPlayers, error: playersErr } = await supabase
+        .from("players")
+        .select("id, first_name, last_name, team, conference");
+      if (playersErr) throw playersErr;
+
+      const { data: teams, error: teamsErr } = await supabase
+        .from("teams")
+        .select("name, conference");
+      if (teamsErr) throw teamsErr;
+      const teamByNorm = new Map<string, { name: string; conference: string | null }>();
+      for (const t of teams || []) {
+        const key = normalizeTeamMatch(t.name);
+        if (!key) continue;
+        if (!teamByNorm.has(key)) {
+          teamByNorm.set(key, { name: t.name, conference: t.conference || null });
+        }
+      }
+      const lookupTeamMatch = (team: string | null | undefined) => {
+        const raw = (team || "").trim();
+        if (!raw) return null;
+        return teamByNorm.get(normalizeTeamMatch(raw)) || null;
+      };
+
+      let updated = 0;
+      let clearedUnmatched = 0;
+      let skippedAmbiguous = 0;
+      let unmatched = 0;
+      const unresolvedNames: string[] = [];
+
+      for (const p of allPlayers || []) {
+        const fullName = `${p.first_name || ""} ${p.last_name || ""}`.trim();
+        const nameKey = normalize(fullName);
+        if (!nameKey) continue;
+        const matches = seedByName.get(nameKey) || [];
+        const currentTeamMatch = lookupTeamMatch(p.team);
+
+        let nextTeam: string | null = null;
+        let nextConference: string | null = null;
+
+        if (matches.length === 0) {
+          if (currentTeamMatch) {
+            nextTeam = currentTeamMatch.name;
+            nextConference = currentTeamMatch.conference;
+          } else {
+            unmatched++;
+            unresolvedNames.push(fullName);
+          }
+        } else {
+          const uniqueTeams = [
+            ...new Set(
+              matches.map((m) => normalizeTeamMatch((m.team || "").trim())).filter(Boolean),
+            ),
+          ];
+          if (uniqueTeams.length > 1) {
+            const playerConference = (p.conference || "").trim();
+            const confMatches = playerConference
+              ? matches.filter((m) => (m.conference || "").trim() === playerConference)
+              : [];
+            const uniqueConfTeams = [
+              ...new Set(
+                confMatches.map((m) => normalizeTeamMatch((m.team || "").trim())).filter(Boolean),
+              ),
+            ];
+
+            if (uniqueConfTeams.length === 1) {
+              const chosen = confMatches.find(
+                (m) => normalizeTeamMatch((m.team || "").trim()) === uniqueConfTeams[0],
+              ) || confMatches[0];
+              const chosenTeam = (chosen.team || "").trim();
+              if (chosenTeam) {
+                const chosenTeamMatch = lookupTeamMatch(chosenTeam);
+                if (chosenTeamMatch) {
+                  nextTeam = chosenTeamMatch.name;
+                  nextConference = chosenTeamMatch.conference;
+                }
+              }
+            }
+
+            if (nextTeam) {
+              // resolved from conference disambiguation
+            } else
+            // Prefer canonicalizing existing team if it maps cleanly.
+            if (currentTeamMatch) {
+              nextTeam = currentTeamMatch.name;
+              nextConference = currentTeamMatch.conference;
+            } else {
+              skippedAmbiguous++;
+              unresolvedNames.push(fullName);
+            }
+          } else {
+            const chosen = matches.find(
+              (m) => normalizeTeamMatch((m.team || "").trim()) === uniqueTeams[0],
+            ) || matches[0];
+            const chosenTeam = (chosen.team || "").trim();
+            if (chosenTeam) {
+              const chosenTeamMatch = lookupTeamMatch(chosenTeam);
+              if (chosenTeamMatch) {
+                nextTeam = chosenTeamMatch.name;
+                nextConference = chosenTeamMatch.conference;
+              } else {
+                unmatched++;
+                unresolvedNames.push(fullName);
+              }
+            } else if (currentTeamMatch) {
+              nextTeam = currentTeamMatch.name;
+              nextConference = currentTeamMatch.conference;
+            } else {
+              unmatched++;
+              unresolvedNames.push(fullName);
+            }
+          }
+        }
+
+        if (!nextTeam) {
+          if ((p.team || "") !== "" || (p.conference || "") !== "") {
+            const { error: clearErr } = await supabase
+              .from("players")
+              .update({ team: null, conference: null })
+              .eq("id", p.id);
+            if (clearErr) throw clearErr;
+            clearedUnmatched++;
+          }
+          continue;
+        }
+
+        const changed = (p.team || "") !== nextTeam || (p.conference || "") !== (nextConference || "");
+        if (!changed) continue;
+
+        const { error: upErr } = await supabase
+          .from("players")
+          .update({ team: nextTeam, conference: nextConference })
+          .eq("id", p.id);
+        if (upErr) throw upErr;
+        updated++;
+      }
+
+      const result = {
+        updated,
+        clearedUnmatched,
+        skippedAmbiguous,
+        unmatched,
+        unresolvedSample: unresolvedNames.slice(0, 12),
+      };
+      setSyncTeamsResult(result);
+      toast.success(
+        `Synced player teams: ${updated} updated, ${clearedUnmatched} cleared to blank, ${skippedAmbiguous} ambiguous, ${unmatched} unmatched.`,
+      );
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSyncTeamsLoading(false);
+    }
   };
 
   return (
@@ -2418,18 +4004,23 @@ function QuickActionsTab() {
       <Card>
         <CardContent className="pt-6 space-y-4">
           <div>
-            <p className="font-medium">Sync 2025 Teams (Non-Transfer Players)</p>
+            <p className="font-medium">Sync Player Profile Teams to Teams Table</p>
             <p className="text-sm text-muted-foreground">
-              Disabled: team writes are blocked in this phase to prevent accidental 2026 team backfill.
+              Match player team/conference to valid Teams-table names using 2025 storage + aliases. Ambiguous or unmatched entries are left blank for manual review.
             </p>
           </div>
-          <Button onClick={sync2025TeamsForNonTransfers} disabled variant="outline" className="gap-2">
+          <Button onClick={sync2025TeamsForNonTransfers} disabled={syncTeamsLoading} variant="outline" className="gap-2">
             {syncTeamsLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            Team Sync Disabled
+            {syncTeamsLoading ? "Syncing Teams…" : "Sync Team Names"}
           </Button>
           {syncTeamsResult && (
             <p className="text-sm text-muted-foreground">
-              Updated: {syncTeamsResult.updated}, skipped ambiguous: {syncTeamsResult.skippedAmbiguous}, unmatched: {syncTeamsResult.unmatched}
+              Updated: {syncTeamsResult.updated}, cleared to blank: {syncTeamsResult.clearedUnmatched}, skipped ambiguous: {syncTeamsResult.skippedAmbiguous}, unmatched: {syncTeamsResult.unmatched}
+            </p>
+          )}
+          {syncTeamsResult && syncTeamsResult.unresolvedSample.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Unresolved sample: {syncTeamsResult.unresolvedSample.join(", ")}
             </p>
           )}
         </CardContent>
@@ -2444,6 +4035,9 @@ function DataStorage2025Tab() {
   const [selectedSeason, setSelectedSeason] = useState<"2025" | "2026">("2025");
   const [storageView, setStorageView] = useState<"stats" | "power">("stats");
   const [showMissingOnly, setShowMissingOnly] = useState(false);
+  const [statsPage, setStatsPage] = useState(1);
+  const [powerPage, setPowerPage] = useState(1);
+  const PAGE_SIZE = 100;
   const normalize = (value: string | null | undefined) =>
     (value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
   const toPlayerKey = (name: string, team?: string | null) => `${normalize(name)}|${normalize(team || "")}`;
@@ -2550,6 +4144,101 @@ function DataStorage2025Tab() {
     const byKeyMatch = playerIdByKey.byKey.get(key);
     if (byKeyMatch) return byKeyMatch;
     return playerIdByKey.byName.get(normalize(playerName)) ?? null;
+  };
+  const normalizeTeamMatch = (value: string | null | undefined) => {
+    const key = normalize(value);
+    const aliases: Record<string, string> = {
+      "university of maryland college park": "university of maryland",
+      "maryland college park": "university of maryland",
+      "university of maryland eastern shore": "maryland eastern shore",
+      "maryland eastern shore": "maryland eastern shore",
+      "umes": "maryland eastern shore",
+      "alabama birmingham": "uab",
+      "uab": "uab",
+      "university of texas san antonio": "utsa",
+      "utsa": "utsa",
+      "university of southern indiana": "southern indiana",
+      "university of san francisco": "san francisco",
+      "university of nebraska omaha": "omaha",
+      "university of nevada las vegas": "unlv",
+      "unlv": "unlv",
+      "university of mississippi": "ole miss",
+      "olemiss": "ole miss",
+      "university of massachusetts": "umass",
+      "umass": "umass",
+      "university of hawaii manoa": "hawaii",
+      "university of hawaii": "hawaii",
+      "university of arkansas pine bluff": "arkansas pine bluff",
+      "charlotte university": "charlotte",
+      "unc charlotte": "charlotte",
+      "texas a m university": "texas a m",
+      "stephen f austin state university": "stephen f austin state",
+      "southeast missouri state university": "southeast missouri state",
+      "southeastern missouri state": "southeast missouri state",
+      "southeastern missouri state university": "southeast missouri state",
+      "semo": "southeast missouri state",
+      "southeast missouti state": "southeast missouri state",
+      "samford university": "samford",
+      "nicholls state university": "nicholls state",
+      "miami university ohio": "miami oh",
+      "mcneese state university": "mcneese state",
+      "louisiana state university": "louisiana state",
+      "indiana university bloomington": "indiana university",
+      "florida international university": "florida international",
+      "coppin state university": "coppin state",
+      "cal state northridge": "csu northridge",
+      "cal state fullerton": "csu fullerton",
+      "california state university fullerton": "csu fullerton",
+      "california state fullerton": "csu fullerton",
+      "csu fullerton": "csu fullerton",
+      "uic": "illinois chicago",
+      "university illinois chicago": "illinois chicago",
+      "university of illinois chicago": "illinois chicago",
+      "army west point": "army",
+      "prairie view a m university": "prairie view a m",
+      "prairie view a m": "prairie view a m",
+      "pvam": "prairie view a m",
+      "alabama a m university": "alabama a m",
+      "air force academy": "air force",
+      "air force": "air force",
+      "fiu": "florida international",
+      "famu": "florida a m",
+      "lsu": "louisiana state",
+      "vcu": "vcu",
+      "north carolina a t state university": "north carolina state a t",
+      "north carolina a t": "north carolina state a t",
+      "ncat": "north carolina state a t",
+    };
+    return aliases[key] || key;
+  };
+  const { data: teamDirectory = [] } = useQuery({
+    queryKey: ["admin-teams-park-factor-directory"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("teams")
+        .select("name, park_factor");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+  const parkFactorByTeam = useMemo(() => {
+    const map = new Map<string, number | null>();
+    for (const row of teamDirectory as Array<{ name: string; park_factor: number | null }>) {
+      const key = normalizeTeamMatch(row.name);
+      if (!key) continue;
+      if (!map.has(key)) map.set(key, row.park_factor);
+    }
+    return map;
+  }, [teamDirectory]);
+  const getParkFactorForTeam = (team: string | null | undefined) => {
+    const key = normalizeTeamMatch(team);
+    if (!key) return null;
+    const fromTeams = parkFactorByTeam.get(key);
+    if (fromTeams != null) return fromTeams;
+    // Temporary hardcoded values requested for normalization checks.
+    if (key === "university of southern indiana" || key === "southern indiana") return 0.98;
+    if (key === "omaha") return 0.99;
+    return null;
   };
 
   const { data: rows = [], isLoading } = useQuery({
@@ -2824,6 +4513,37 @@ function DataStorage2025Tab() {
     }
     return result;
   }, [powerRows, search, showMissingOnly, storageView]);
+  useEffect(() => {
+    setStatsPage(1);
+    setPowerPage(1);
+  }, [search, showMissingOnly, selectedSeason, storageView]);
+  const statsTotalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const powerTotalPages = Math.max(1, Math.ceil(filteredPowerRows.length / PAGE_SIZE));
+  const safeStatsPage = Math.min(statsPage, statsTotalPages);
+  const safePowerPage = Math.min(powerPage, powerTotalPages);
+  const pagedStatsRows = useMemo(() => {
+    const start = (safeStatsPage - 1) * PAGE_SIZE;
+    return filteredRows.slice(start, start + PAGE_SIZE);
+  }, [filteredRows, safeStatsPage]);
+  const pagedPowerRows = useMemo(() => {
+    const start = (safePowerPage - 1) * PAGE_SIZE;
+    return filteredPowerRows.slice(start, start + PAGE_SIZE);
+  }, [filteredPowerRows, safePowerPage]);
+  const getPageWindow = (current: number, total: number) => {
+    const maxButtons = 7;
+    if (total <= maxButtons) return Array.from({ length: total }, (_, i) => i + 1);
+    let start = Math.max(1, current - 3);
+    let end = Math.min(total, start + maxButtons - 1);
+    start = Math.max(1, end - maxButtons + 1);
+    return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+  };
+  const powerParkCoverage = useMemo(() => {
+    const total = filteredPowerRows.length;
+    const assigned = filteredPowerRows.filter((r) => {
+      return getParkFactorForTeam(r.team) != null;
+    }).length;
+    return { assigned, total };
+  }, [filteredPowerRows, parkFactorByTeam]);
 
   const fmt3 = (v: number | null) => (v == null ? "—" : v.toFixed(3));
   const fmt2 = (v: number | null) => (v == null ? "—" : v.toFixed(2));
@@ -2977,6 +4697,22 @@ function DataStorage2025Tab() {
           gb: number | null;
         }>).map((row) => [toPlayerKey(row.playerName, row.team), row]),
       );
+      const desiredTeamByName = new Map<string, { team: string | null; conference: string | null }>();
+      const ambiguousNameKeys = new Set<string>();
+      for (const row of statsSeed) {
+        const nameKey = normalize(row.playerName);
+        if (!nameKey) continue;
+        const existing = desiredTeamByName.get(nameKey);
+        if (!existing) {
+          desiredTeamByName.set(nameKey, { team: row.team ?? null, conference: row.conference ?? null });
+          continue;
+        }
+        const existingTeam = (existing.team || "").trim();
+        const nextTeam = (row.team || "").trim();
+        if (existingTeam && nextTeam && existingTeam !== nextTeam) {
+          ambiguousNameKeys.add(nameKey);
+        }
+      }
 
       // Fetch current players so we only insert missing ones.
       const existingPlayers: Array<{
@@ -3002,12 +4738,35 @@ function DataStorage2025Tab() {
 
       const playerIdByKey = new Map<string, string>();
       const playerIdByName = new Map<string, string>();
+      const playerTeamBackfillUpdates: Array<{ id: string; team: string | null; conference: string | null }> = [];
       for (const player of existingPlayers) {
         const fullName = `${player.first_name} ${player.last_name}`.trim();
         const key = toPlayerKey(fullName, player.team);
         if (!playerIdByKey.has(key)) playerIdByKey.set(key, player.id);
         const nameKey = normalize(fullName);
         if (!playerIdByName.has(nameKey)) playerIdByName.set(nameKey, player.id);
+        if (!nameKey || ambiguousNameKeys.has(nameKey)) continue;
+        const desired = desiredTeamByName.get(nameKey);
+        if (!desired) continue;
+        const currTeam = (player.team || "").trim();
+        const nextTeam = (desired.team || "").trim();
+        if (currTeam === nextTeam) continue;
+        playerTeamBackfillUpdates.push({
+          id: player.id,
+          team: desired.team ?? null,
+          conference: desired.conference ?? null,
+        });
+      }
+      let updatedPlayers = 0;
+      if (playerTeamBackfillUpdates.length > 0) {
+        for (const row of playerTeamBackfillUpdates) {
+          const { error } = await supabase
+            .from("players")
+            .update({ team: row.team, conference: row.conference })
+            .eq("id", row.id);
+          if (error) throw error;
+          updatedPlayers++;
+        }
       }
 
       const playersToInsert: Array<{
@@ -3030,9 +4789,8 @@ function DataStorage2025Tab() {
         playersToInsert.push({
           first_name: nameParts.first_name,
           last_name: nameParts.last_name,
-          // Keep canonical team/conference display sourced from 2025 storage in this testing phase.
-          team: null,
-          conference: null,
+          team: row.team ?? null,
+          conference: row.conference ?? null,
           position: getPositionFor(fullName, row.team),
           transfer_portal: false,
         });
@@ -3204,6 +4962,7 @@ function DataStorage2025Tab() {
 
       return {
         createdPlayers,
+        updatedPlayers,
         createdPredictions,
         recalculated: recalcData.updated ?? 0,
       };
@@ -3214,7 +4973,7 @@ function DataStorage2025Tab() {
       queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
       queryClient.invalidateQueries({ queryKey: ["player-profile"] });
       toast.success(
-        `Profiles synced: ${result.createdPlayers} players added, ${result.createdPredictions} predictions added, ${result.recalculated} recalculated.`,
+        `Profiles synced: ${result.createdPlayers} players added, ${result.updatedPlayers} players updated, ${result.createdPredictions} predictions added, ${result.recalculated} recalculated.`,
       );
     },
     onError: (error: unknown) => {
@@ -3248,6 +5007,11 @@ function DataStorage2025Tab() {
           {filteredRows.length > 0 ? (
             <p className="text-xs text-muted-foreground mt-1">Source: {filteredRows[0].source}</p>
           ) : null}
+          {storageView === "power" && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Park factors assigned (filtered rows): {powerParkCoverage.assigned}/{powerParkCoverage.total}
+            </p>
+          )}
         </div>
         <Input
           placeholder="Search player/team/conference…"
@@ -3296,12 +5060,32 @@ function DataStorage2025Tab() {
             </TabsList>
 
             <TabsContent value="stats" className="mt-3">
+              <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+                <span>
+                  Showing {filteredRows.length ? (safeStatsPage - 1) * PAGE_SIZE + 1 : 0}-
+                  {Math.min(safeStatsPage * PAGE_SIZE, filteredRows.length)} of {filteredRows.length} players
+                </span>
+                <div className="flex items-center gap-1">
+                  {getPageWindow(safeStatsPage, statsTotalPages).map((p) => (
+                    <Button
+                      key={`stats-page-${p}`}
+                      size="sm"
+                      variant={p === safeStatsPage ? "secondary" : "ghost"}
+                      className="h-7 min-w-7 px-2 text-xs"
+                      onClick={() => setStatsPage(p)}
+                    >
+                      {p}
+                    </Button>
+                  ))}
+                </div>
+              </div>
               <div className="max-h-[620px] overflow-auto">
                 <Table>
                   <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
                     <TableRow>
                       <TableHead className="sticky left-0 z-30 bg-background min-w-[220px]">Player</TableHead>
                       <TableHead>Team</TableHead>
+                      <TableHead className="text-right">Park Factor+</TableHead>
                       <TableHead>Pos</TableHead>
                       <TableHead className="text-right">AVG</TableHead>
                       <TableHead className="text-right">OBP</TableHead>
@@ -3314,8 +5098,8 @@ function DataStorage2025Tab() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredRows.length ? (
-                      filteredRows.map((r) => {
+                    {pagedStatsRows.length ? (
+                      pagedStatsRows.map((r) => {
                         const m = deriveMetrics(r.avg, r.obp, r.slg);
                         return (
                           <TableRow key={r.id}>
@@ -3331,6 +5115,12 @@ function DataStorage2025Tab() {
                               })()}
                             </TableCell>
                             <TableCell>{r.team || "—"}</TableCell>
+                            <TableCell className="text-right font-mono">
+                              {(() => {
+                                const pf = getParkFactorForTeam(r.team);
+                                return pf == null ? "—" : Math.round(pf * 100).toString();
+                              })()}
+                            </TableCell>
                             <TableCell>{getPositionFor(r.playerName, r.team) || "—"}</TableCell>
                             <TableCell className="text-right font-mono">{fmt3(r.avg)}</TableCell>
                             <TableCell className="text-right font-mono">{fmt3(r.obp)}</TableCell>
@@ -3356,6 +5146,25 @@ function DataStorage2025Tab() {
             </TabsContent>
 
             <TabsContent value="power" className="mt-3">
+              <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+                <span>
+                  Showing {filteredPowerRows.length ? (safePowerPage - 1) * PAGE_SIZE + 1 : 0}-
+                  {Math.min(safePowerPage * PAGE_SIZE, filteredPowerRows.length)} of {filteredPowerRows.length} players
+                </span>
+                <div className="flex items-center gap-1">
+                  {getPageWindow(safePowerPage, powerTotalPages).map((p) => (
+                    <Button
+                      key={`power-page-${p}`}
+                      size="sm"
+                      variant={p === safePowerPage ? "secondary" : "ghost"}
+                      className="h-7 min-w-7 px-2 text-xs"
+                      onClick={() => setPowerPage(p)}
+                    >
+                      {p}
+                    </Button>
+                  ))}
+                </div>
+              </div>
               <div className="max-h-[620px] overflow-auto">
                 <Table>
                   <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
@@ -3392,8 +5201,8 @@ function DataStorage2025Tab() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredPowerRows.length ? (
-                      filteredPowerRows.map((r) => {
+                    {pagedPowerRows.length ? (
+                      pagedPowerRows.map((r) => {
                         const p = derivePowerScoresAndRatings(r);
                         return (
                         <TableRow key={r.id}>
@@ -3441,7 +5250,7 @@ function DataStorage2025Tab() {
                       })
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={29} className="py-8 text-center text-muted-foreground">
+                        <TableCell colSpan={30} className="py-8 text-center text-muted-foreground">
                           No {selectedSeason} power rating rows found.
                         </TableCell>
                       </TableRow>

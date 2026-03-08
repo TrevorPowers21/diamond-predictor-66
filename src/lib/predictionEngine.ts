@@ -57,6 +57,13 @@ interface ReturnerConfig {
   baDampTier2Impact: number;
   baDampTier3Impact: number;
   baDampTier4Impact: number;
+  obpDampTier1Max: number;
+  obpDampTier2Max: number;
+  obpDampTier3Max: number;
+  obpDampTier1Impact: number;
+  obpDampTier2Impact: number;
+  obpDampTier3Impact: number;
+  obpDampTier4Impact: number;
 }
 
 interface TransferConfig {
@@ -195,6 +202,13 @@ async function loadEngineConfig(): Promise<EngineConfig> {
     baDampTier2Impact: 0.9,
     baDampTier3Impact: 0.7,
     baDampTier4Impact: 0.4,
+    obpDampTier1Max: 0.455,
+    obpDampTier2Max: 0.485,
+    obpDampTier3Max: 0.525,
+    obpDampTier1Impact: 1.0,
+    obpDampTier2Impact: 0.9,
+    obpDampTier3Impact: 0.7,
+    obpDampTier4Impact: 0.4,
   };
 
   for (const row of returnerRows) {
@@ -263,6 +277,13 @@ async function loadEngineConfig(): Promise<EngineConfig> {
   applyIfFinite(n("r_ba_damp_tier2_impact"), (v) => { returner.baDampTier2Impact = toWeight(v); });
   applyIfFinite(n("r_ba_damp_tier3_impact"), (v) => { returner.baDampTier3Impact = toWeight(v); });
   applyIfFinite(n("r_ba_damp_tier4_impact"), (v) => { returner.baDampTier4Impact = toWeight(v); });
+  applyIfFinite(n("r_obp_damp_tier1_max"), (v) => { returner.obpDampTier1Max = toStatRate(v); });
+  applyIfFinite(n("r_obp_damp_tier2_max"), (v) => { returner.obpDampTier2Max = toStatRate(v); });
+  applyIfFinite(n("r_obp_damp_tier3_max"), (v) => { returner.obpDampTier3Max = toStatRate(v); });
+  applyIfFinite(n("r_obp_damp_tier1_impact"), (v) => { returner.obpDampTier1Impact = toWeight(v); });
+  applyIfFinite(n("r_obp_damp_tier2_impact"), (v) => { returner.obpDampTier2Impact = toWeight(v); });
+  applyIfFinite(n("r_obp_damp_tier3_impact"), (v) => { returner.obpDampTier3Impact = toWeight(v); });
+  applyIfFinite(n("r_obp_damp_tier4_impact"), (v) => { returner.obpDampTier4Impact = toWeight(v); });
 
   const transfer: TransferConfig = {
     baNcaaAvg: 0.28,
@@ -330,18 +351,17 @@ function recalcReturner(
   const baPlus = powerContext?.baPlus ?? null;
   const obpPlus = powerContext?.obpPlus ?? null;
   const isoPlus = powerContext?.isoPlus ?? null;
-  const dampFactor = (delta: number) => {
-    if (delta <= 0) return 1.0;
-    if (delta <= 0.03) return 1.0;
-    if (delta <= 0.06) return 0.9;
-    if (delta <= 0.08) return 0.7;
-    return 0.4;
-  };
   const avgProjectedTierDamp = (projectedAvg: number) => {
     if (projectedAvg <= config.baDampTier1Max) return config.baDampTier1Impact;
     if (projectedAvg <= config.baDampTier2Max) return config.baDampTier2Impact;
     if (projectedAvg <= config.baDampTier3Max) return config.baDampTier3Impact;
     return config.baDampTier4Impact;
+  };
+  const obpProjectedTierDamp = (projectedObp: number) => {
+    if (projectedObp <= config.obpDampTier1Max) return config.obpDampTier1Impact;
+    if (projectedObp <= config.obpDampTier2Max) return config.obpDampTier2Impact;
+    if (projectedObp <= config.obpDampTier3Max) return config.obpDampTier3Impact;
+    return config.obpDampTier4Impact;
   };
 
   const pAvg = baPlus == null
@@ -359,7 +379,7 @@ function recalcReturner(
       const obpBlended = (fromObp * (1 - config.powerWeight)) + (config.ncaaObp * (obpPlus / config.ncaaPR) * config.powerWeight);
       const obpProjected = obpBlended * (1 + bases.obp + (devAgg * config.devCoeffs.obp));
       const obpDelta = obpProjected - fromObp;
-      return round3(normalizeProjectedRate(fromObp + (obpDelta * dampFactor(obpDelta))));
+      return round3(normalizeProjectedRate(fromObp + (obpDelta * obpProjectedTierDamp(obpProjected))));
     })();
 
   const pIso = isoPlus == null
@@ -423,7 +443,7 @@ function recalcTransfer(pred: PredictionRow, config: TransferConfig) {
   const toSlgPlus = Number.isFinite(toSlgPlusRaw) ? toSlgPlusRaw : fromSlgPlus;
   const fromStuff = Number.isFinite(fromStuffRaw) ? fromStuffRaw : 100;
   const toStuff = Number.isFinite(toStuffRaw) ? toStuffRaw : fromStuff;
-  const fromPark = Number.isFinite(fromParkRaw) ? fromParkRaw : 1;
+  const fromPark = Number.isFinite(fromParkRaw) ? fromParkRaw : 100;
   const toPark = Number.isFinite(toParkRaw) ? toParkRaw : fromPark;
 
   const baPowerAdj = config.baNcaaAvg * (prPlus / 100);

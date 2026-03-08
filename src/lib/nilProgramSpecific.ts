@@ -1,5 +1,49 @@
 export const DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE = 68;
 
+export const DEFAULT_NIL_TIER_MULTIPLIERS = {
+  sec: 1.5,
+  p4: 1.2, // ACC + Big12
+  bigTen: 1.0,
+  strongMid: 0.8,
+  lowMajor: 0.5,
+};
+
+type NilTierMultipliers = typeof DEFAULT_NIL_TIER_MULTIPLIERS;
+
+const normalizeConferenceKey = (conference: string | null | undefined): string =>
+  (conference || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const STRONG_MID_KEYS = new Set([
+  "americanathleticconference",
+  "aac",
+  "sunbeltconference",
+  "sunbelt",
+  "bigwestconference",
+  "bigwest",
+  "mountainwestconference",
+  "mountainwest",
+]);
+
+export const getProgramTierMultiplierByConference = (
+  conference: string | null | undefined,
+  multipliers: NilTierMultipliers = DEFAULT_NIL_TIER_MULTIPLIERS,
+): number => {
+  const key = normalizeConferenceKey(conference);
+  if (!key) return multipliers.lowMajor;
+
+  if (key.includes("southeasternconference") || key === "sec") return multipliers.sec;
+  if (key.includes("bigten")) return multipliers.bigTen;
+  if (
+    key.includes("atlanticcoastconference") ||
+    key === "acc" ||
+    key.includes("big12")
+  ) {
+    return multipliers.p4;
+  }
+  if (STRONG_MID_KEYS.has(key)) return multipliers.strongMid;
+  return multipliers.lowMajor;
+};
+
 export const getPositionValueMultiplier = (position: string | null | undefined): number => {
   const pos = (position || "").trim().toUpperCase();
 

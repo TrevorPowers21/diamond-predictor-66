@@ -22,12 +22,27 @@ interface Team {
 }
 
 const CONFERENCES = [
-  "ACC", "AAC", "A-10", "America East", "ASUN", "Big 12", "Big East", "Big Sky",
+  "ACC", "AAC", "A-10", "America East", "ASUN", "Big 12", "Big East",
   "Big South", "Big Ten", "Big West", "CAA", "CUSA", "Horizon League", "Ivy League",
   "MAAC", "MAC", "MEAC", "Mountain West", "MVC", "NEC", "OVC", "Pac-12",
-  "Patriot League", "SoCon", "Southland", "Summit League", "Sun Belt", "SWAC",
+  "Patriot League", "SEC", "SoCon", "Southland", "Summit League", "Sun Belt", "SWAC",
   "WAC", "WCC",
 ];
+
+const normalizeConferenceName = (input: string | null | undefined) => {
+  const raw = (input || "").trim();
+  if (!raw) return "";
+  const key = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const map: Record<string, string> = {
+    aac: "American Athletic Conference",
+    americanathleticconference: "American Athletic Conference",
+    a10: "Atlantic 10",
+    atlantic10: "Atlantic 10",
+    caa: "Coastal Athletic Association",
+    coastalathleticassociation: "Coastal Athletic Association",
+  };
+  return map[key] || raw;
+};
 
 export default function Teams() {
   const queryClient = useQueryClient();
@@ -113,14 +128,14 @@ export default function Teams() {
       list = list.filter(
         (t) =>
           t.name.toLowerCase().includes(q) ||
-          (t.conference || "").toLowerCase().includes(q)
+          normalizeConferenceName(t.conference).toLowerCase().includes(q)
       );
     }
     if (confFilter !== "all") {
       if (confFilter === "unassigned") {
-        list = list.filter((t) => !t.conference);
+        list = list.filter((t) => !normalizeConferenceName(t.conference));
       } else {
-        list = list.filter((t) => t.conference === confFilter);
+        list = list.filter((t) => normalizeConferenceName(t.conference) === confFilter);
       }
     }
     return list;
@@ -129,14 +144,14 @@ export default function Teams() {
   const confCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     teams.forEach((t) => {
-      const c = t.conference || "Unassigned";
+      const c = normalizeConferenceName(t.conference) || "Unassigned";
       counts[c] = (counts[c] || 0) + 1;
     });
     return counts;
   }, [teams]);
 
   const uniqueConfs = useMemo(() => {
-    return [...new Set(teams.map((t) => t.conference).filter(Boolean))].sort() as string[];
+    return [...new Set(teams.map((t) => normalizeConferenceName(t.conference)).filter(Boolean))].sort() as string[];
   }, [teams]);
 
   const startEdit = (team: Team) => {
@@ -298,7 +313,7 @@ export default function Teams() {
                             </TableCell>
                             <TableCell className="text-center">
                               <span className="text-sm tabular-nums">
-                                {Math.round((team.park_factor ?? 1.000) * 100)}
+                                {team.park_factor == null ? "—" : Math.round(team.park_factor * 100)}
                               </span>
                             </TableCell>
                             <TableCell>

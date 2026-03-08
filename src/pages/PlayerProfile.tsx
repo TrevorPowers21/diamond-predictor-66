@@ -18,6 +18,11 @@ import storage2025Seed from "@/data/storage_2025_seed.json";
 import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
 import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
+import {
+  DEFAULT_NIL_TIER_MULTIPLIERS,
+  getPositionValueMultiplier,
+  getProgramTierMultiplierByConference,
+} from "@/lib/nilProgramSpecific";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -531,6 +536,14 @@ export default function PlayerProfile() {
     projectedOWar ??
     ((nilValuation as any)?.war as number | null) ??
     historicalOWar;
+  const nilBasePerOWar = 25000;
+  const fallbackNilValuation = (() => {
+    if (displayOWar == null) return null;
+    const ptm = getProgramTierMultiplierByConference(player.conference, DEFAULT_NIL_TIER_MULTIPLIERS);
+    const pvm = getPositionValueMultiplier(player.position);
+    return displayOWar * nilBasePerOWar * ptm * pvm;
+  })();
+  const displayNilValuation = (nilValuation as any)?.estimated_value ?? fallbackNilValuation;
   const predFromAvg = seedStatRow?.avg ?? regularPred?.from_avg ?? null;
   const predFromObp = seedStatRow?.obp ?? regularPred?.from_obp ?? null;
   const predFromSlg = seedStatRow?.slg ?? regularPred?.from_slg ?? null;
@@ -729,8 +742,8 @@ export default function PlayerProfile() {
                 </CardHeader>
                 <CardContent className="pt-0">
                   <div className="text-3xl font-bold text-[hsl(var(--success))]">
-                    {nilValuation?.estimated_value != null
-                      ? `$${Math.round(nilValuation.estimated_value).toLocaleString()}`
+                    {displayNilValuation != null
+                      ? `$${Math.round(displayNilValuation).toLocaleString()}`
                       : "—"}
                   </div>
                 </CardContent>

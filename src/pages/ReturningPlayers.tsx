@@ -24,6 +24,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell } from "recharts";
 import { toast } from "sonner";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import storage2025Seed from "@/data/storage_2025_seed.json";
+import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
 
 type SortKey =
   | "name"
@@ -63,7 +64,7 @@ interface ReturnerPlayer {
     power_rating_plus: number | null;
     ev_score: number | null;
     barrel_score: number | null;
-    whiff_score: number | null;
+    contact_score: number | null;
     chase_score: number | null;
   };
 }
@@ -108,6 +109,42 @@ const deltaClass = (from: number | null, to: number | null, threshold = 0.001) =
   return "text-muted-foreground";
 };
 
+const normalizeName = (value: string | null | undefined) =>
+  (value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+const nameTeamKey = (name: string | null | undefined, team: string | null | undefined) =>
+  `${normalizeName(name)}|${normalizeName(team)}`;
+const erf = (x: number) => {
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * ax);
+  const y =
+    1 -
+    (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+      t *
+      Math.exp(-ax * ax);
+  return sign * y;
+};
+const scoreFromNormal = (x: number | null, mean: number, sd: number, invert = false) => {
+  if (x == null || sd <= 0) return null;
+  const cdf = 0.5 * (1 + erf((x - mean) / (sd * Math.SQRT2)));
+  const pct = cdf * 100;
+  return invert ? 100 - pct : pct;
+};
+const powerSeedByName = new Map<string, Array<any>>();
+const powerSeedByNameTeam = new Map<string, any>();
+for (const row of powerRatings2025Seed as Array<any>) {
+  const key = normalizeName(row.playerName);
+  const arr = powerSeedByName.get(key) || [];
+  arr.push(row);
+  powerSeedByName.set(key, arr);
+  const ntKey = nameTeamKey(row.playerName, row.team);
+  if (!powerSeedByNameTeam.has(ntKey)) powerSeedByNameTeam.set(ntKey, row);
+}
+
 export default function ReturningPlayers() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
@@ -117,8 +154,10 @@ export default function ReturningPlayers() {
   const [sortKey, setSortKey] = useState<SortKey>("p_ops");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [bulkEditMode, setBulkEditMode] = useState(false);
-  const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string; position?: string }>>({});
+  const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string | null; position?: string | null }>>({});
   const [showMissingOnly, setShowMissingOnly] = useState(false);
+  const normalize = (value: string | null | undefined) =>
+    (value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 
   // Fixed scrollbar refs & sync
   const scrollbarRef = useRef<HTMLDivElement>(null);
@@ -191,8 +230,6 @@ export default function ReturningPlayers() {
   const { data: players = [], isLoading } = useQuery({
     queryKey: ["returning-players-2025-unified"],
     queryFn: async () => {
-      const normalize = (value: string | null | undefined) =>
-        (value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
       const nameTeamKey = (name: string, team: string | null | undefined) => `${normalize(name)}|${normalize(team || "")}`;
       const statSeedRows = storage2025Seed as Array<{
         playerName: string;
@@ -226,7 +263,6 @@ export default function ReturningPlayers() {
           `,
           )
           .in("model_type", ["returner", "transfer"])
-          .eq("variant", "regular")
           .range(from, from + PAGE_SIZE - 1);
 
         const { data, error } = await query;
@@ -253,6 +289,11 @@ export default function ReturningPlayers() {
           row.p_ops != null &&
           row.p_iso != null &&
           row.p_wrc_plus != null;
+        const rowHasScout =
+          row.ev_score != null ||
+          row.barrel_score != null ||
+          row.whiff_score != null ||
+          row.chase_score != null;
         const existingHasPred =
           existing.p_avg != null &&
           existing.p_obp != null &&
@@ -260,12 +301,18 @@ export default function ReturningPlayers() {
           existing.p_ops != null &&
           existing.p_iso != null &&
           existing.p_wrc_plus != null;
+        const existingHasScout =
+          existing.ev_score != null ||
+          existing.barrel_score != null ||
+          existing.whiff_score != null ||
+          existing.chase_score != null;
         const rowScore =
           ((row.players.transfer_portal === true && row.model_type === "transfer") ||
             (row.players.transfer_portal !== true && row.model_type === "returner")
             ? 6
             : 0) +
           (rowHasPred ? 5 : 0) +
+          (rowHasScout ? 2 : 0) +
           (row.model_type === "transfer" ? 3 : 0) +
           (row.status === "active" ? 2 : 0) +
           (rowHasFrom ? 1 : 0);
@@ -275,6 +322,7 @@ export default function ReturningPlayers() {
             ? 6
             : 0) +
           (existingHasPred ? 5 : 0) +
+          (existingHasScout ? 2 : 0) +
           (existing.model_type === "transfer" ? 3 : 0) +
           (existing.status === "active" ? 2 : 0) +
           (existingHasFrom ? 1 : 0);
@@ -291,6 +339,16 @@ export default function ReturningPlayers() {
 
       return Array.from(byPlayer.values()).map((row: any) => {
         const fullName = `${row.players.first_name} ${row.players.last_name}`;
+        const seedPowerRow =
+          powerSeedByNameTeam.get(nameTeamKey(fullName, row.players.team)) ||
+          (() => {
+            const candidates = powerSeedByName.get(normalizeName(fullName)) || [];
+            return candidates.length === 1 ? candidates[0] : null;
+          })();
+        const seedEvScore = scoreFromNormal(seedPowerRow?.avgExitVelo ?? null, 86.2, 4.28);
+        const seedBarrelScore = scoreFromNormal(seedPowerRow?.barrel ?? null, 17.3, 7.89);
+        const seedContactScore = scoreFromNormal(seedPowerRow?.contact ?? null, 77.1, 6.6);
+        const seedChaseScore = scoreFromNormal(seedPowerRow?.chase ?? null, 23.1, 5.58, true);
         const candidates = statsByName.get(normalize(fullName)) || [];
         const byTeam = statsByNameTeam.get(nameTeamKey(fullName, row.players.team));
         const exactByStats = candidates.find((r) =>
@@ -325,13 +383,24 @@ export default function ReturningPlayers() {
           p_iso: row.p_iso,
           p_wrc_plus: row.p_wrc_plus,
           power_rating_plus: row.power_rating_plus,
-          ev_score: row.ev_score,
-          barrel_score: row.barrel_score,
-          whiff_score: row.whiff_score,
-          chase_score: row.chase_score,
+          ev_score: seedEvScore ?? null,
+          barrel_score: seedBarrelScore ?? null,
+          contact_score: seedContactScore ?? null,
+          chase_score: seedChaseScore ?? null,
         },
       });
       }) as ReturnerPlayer[];
+    },
+  });
+
+  const { data: teamsDirectory = [] } = useQuery({
+    queryKey: ["teams-directory-for-player-dashboard-edit"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("teams")
+        .select("name, conference");
+      if (error) throw error;
+      return (data || []) as Array<{ name: string; conference: string | null }>;
     },
   });
 
@@ -339,12 +408,51 @@ export default function ReturningPlayers() {
     mutationFn: async () => {
       const entries = Object.entries(editedPlayers);
       if (entries.length === 0) return;
+      const teamByNorm = new Map<string, { name: string; conference: string | null }>();
+      for (const t of teamsDirectory) {
+        const key = normalize(t.name);
+        if (!key) continue;
+        if (!teamByNorm.has(key)) teamByNorm.set(key, t);
+      }
+
+      const invalidTeams = new Set<string>();
+      const updates: Array<{ playerId: string; payload: Record<string, string | null> }> = [];
+      for (const [playerId, data] of entries) {
+        const payload: Record<string, string | null> = {};
+        if (Object.prototype.hasOwnProperty.call(data, "position")) {
+          payload.position = data.position ?? null;
+        }
+        if (Object.prototype.hasOwnProperty.call(data, "team")) {
+          const rawTeam = (data.team || "").trim();
+          if (!rawTeam) {
+            payload.team = null;
+            payload.conference = null;
+          } else {
+            const match = teamByNorm.get(normalize(rawTeam));
+            if (!match) {
+              invalidTeams.add(rawTeam);
+            } else {
+              payload.team = match.name;
+              payload.conference = match.conference ?? null;
+            }
+          }
+        }
+        if (Object.keys(payload).length > 0) {
+          updates.push({ playerId, payload });
+        }
+      }
+
+      if (invalidTeams.size > 0) {
+        const sample = Array.from(invalidTeams).slice(0, 8).join(", ");
+        throw new Error(`Team name(s) not found in Teams dashboard: ${sample}`);
+      }
+
       const results = await Promise.all(
-        entries.map(([playerId, data]) => supabase.from("players").update(data).eq("id", playerId)),
+        updates.map(({ playerId, payload }) => supabase.from("players").update(payload).eq("id", playerId)),
       );
       const errors = results.filter((r) => r.error);
       if (errors.length > 0) throw new Error(`${errors.length} updates failed`);
-      return entries.length;
+      return updates.length;
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
@@ -480,6 +588,18 @@ export default function ReturningPlayers() {
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+
+  const visiblePages = useMemo(() => {
+    if (totalPages <= 11) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const pages = new Set<number>([
+      1, 2, 3, 4, 5,
+      totalPages - 1, totalPages,
+      currentPage - 2, currentPage - 1, currentPage, currentPage + 1, currentPage + 2,
+    ]);
+    return Array.from(pages)
+      .filter((p) => p >= 1 && p <= totalPages)
+      .sort((a, b) => a - b);
+  }, [currentPage, totalPages]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -636,6 +756,19 @@ export default function ReturningPlayers() {
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <CardTitle className="text-base">Player Projections</CardTitle>
+              <Select value={positionFilter} onValueChange={setPositionFilter}>
+                <SelectTrigger className="w-36 h-8">
+                  <SelectValue placeholder="Position" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Positions</SelectItem>
+                  {positions.map((pos) => (
+                    <SelectItem key={pos} value={pos}>
+                      {pos}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {bulkEditMode ? (
                 <div className="flex gap-1">
                   <Button
@@ -669,19 +802,25 @@ export default function ReturningPlayers() {
               )}
             </div>
             <div className="flex items-center gap-2 w-full sm:w-auto">
-              <Select value={positionFilter} onValueChange={setPositionFilter}>
-                <SelectTrigger className="w-32">
-                  <SelectValue placeholder="Position" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Positions</SelectItem>
-                  {positions.map((pos) => (
-                    <SelectItem key={pos} value={pos}>
-                      {pos}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-1 overflow-x-auto max-w-[360px]">
+                {visiblePages.map((p, i) => {
+                  const prev = visiblePages[i - 1];
+                  const showGap = i > 0 && prev != null && p - prev > 1;
+                  return (
+                    <div key={p} className="flex items-center gap-1">
+                      {showGap ? <span className="px-1 text-muted-foreground text-xs">...</span> : null}
+                      <Button
+                        variant={p === currentPage ? "default" : "outline"}
+                        size="sm"
+                        className="h-6 min-w-6 px-1.5 text-[10px]"
+                        onClick={() => setPage(p)}
+                      >
+                        {p}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
               <div className="relative w-full sm:w-64">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -803,12 +942,19 @@ export default function ReturningPlayers() {
                               {statFormat(computeOWarFromWrcPlus(pred.p_wrc_plus), 2)}
                             </TableCell>
                             <TableCell className="text-center">
-                              <div className="flex gap-1 justify-center flex-wrap">
-                                {pred.ev_score != null && <ScoutMiniBox label="EV" value={pred.ev_score} />}
-                                {pred.barrel_score != null && <ScoutMiniBox label="Brl" value={pred.barrel_score} />}
-                                {pred.whiff_score != null && <ScoutMiniBox label="Whf" value={pred.whiff_score} />}
-                                {pred.chase_score != null && <ScoutMiniBox label="Chs" value={pred.chase_score} />}
-                              </div>
+                              {pred.ev_score != null &&
+                              pred.barrel_score != null &&
+                              pred.contact_score != null &&
+                              pred.chase_score != null ? (
+                                <div className="flex gap-1 justify-center flex-wrap">
+                                  <ScoutMiniBox label="EV" value={pred.ev_score} />
+                                  <ScoutMiniBox label="Brl" value={pred.barrel_score} />
+                                  <ScoutMiniBox label="Con" value={pred.contact_score} />
+                                  <ScoutMiniBox label="Chs" value={pred.chase_score} />
+                                </div>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
                             </TableCell>
                           </TableRow>
                         );
@@ -860,27 +1006,6 @@ export default function ReturningPlayers() {
                         <SelectItem value="500">500</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8"
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
-                      disabled={currentPage <= 1}
-                    >
-                      Previous
-                    </Button>
-                    <div className="min-w-[80px] text-center text-muted-foreground">
-                      Page {currentPage} / {totalPages}
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8"
-                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                      disabled={currentPage >= totalPages}
-                    >
-                      Next
-                    </Button>
                   </div>
                 </div>
               </>

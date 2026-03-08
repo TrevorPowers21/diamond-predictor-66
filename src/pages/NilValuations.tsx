@@ -12,7 +12,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { DollarSign, ArrowUpDown, Search, TrendingUp, BarChart3 } from "lucide-react";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell } from "recharts";
-import { calcPlayerScore, calcProgramSpecificAllocation, DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE } from "@/lib/nilProgramSpecific";
+import {
+  calcPlayerScore,
+  calcProgramSpecificAllocation,
+  DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
+  DEFAULT_NIL_TIER_MULTIPLIERS,
+  getProgramTierMultiplierByConference,
+} from "@/lib/nilProgramSpecific";
 
 type SortKey = "name" | "estimated_value" | "p_avg" | "p_obp" | "p_slg" | "p_wrc_plus" | "owar";
 type SortDir = "asc" | "desc";
@@ -58,7 +64,6 @@ export default function NilValuations() {
   const [search, setSearch] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
   const [consultationNilBudget, setConsultationNilBudget] = useState<number>(0);
-  const [programTierMultiplier, setProgramTierMultiplier] = useState<number>(1.2);
   const [fallbackRosterTotalPlayerScore, setFallbackRosterTotalPlayerScore] = useState<number>(DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
   const [sortKey, setSortKey] = useState<SortKey>("estimated_value");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -151,13 +156,18 @@ export default function NilValuations() {
   const consultationRows = useMemo(() => {
     return filtered.map((p) => {
       const owar = p.component_breakdown?.ncaa_owar ?? 0;
+      const programTierMultiplier = getProgramTierMultiplierByConference(
+        p.conference,
+        DEFAULT_NIL_TIER_MULTIPLIERS,
+      );
       const playerScore = calcPlayerScore({ owar, programTierMultiplier, position: p.position });
       return {
         ...p,
+        program_tier_multiplier: programTierMultiplier,
         consultation_player_score: playerScore,
       };
     });
-  }, [filtered, programTierMultiplier]);
+  }, [filtered]);
 
   const totalRosterPlayerScore = useMemo(() => {
     return consultationRows.reduce((sum, p) => sum + p.consultation_player_score, 0);
@@ -252,14 +262,11 @@ export default function NilValuations() {
                 onChange={(e) => setConsultationNilBudget(Number(e.target.value) || 0)}
               />
             </div>
-            <div>
-              <Label className="text-xs mb-1 block">Program Tier Multiplier (PTM)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                value={programTierMultiplier || ""}
-                onChange={(e) => setProgramTierMultiplier(Number(e.target.value) || 0)}
-              />
+            <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
+              <div className="font-medium text-foreground">PTM by Conference</div>
+              <div>SEC: {DEFAULT_NIL_TIER_MULTIPLIERS.sec.toFixed(1)} | ACC/Big12: {DEFAULT_NIL_TIER_MULTIPLIERS.p4.toFixed(1)} | Big Ten: {DEFAULT_NIL_TIER_MULTIPLIERS.bigTen.toFixed(1)}</div>
+              <div>Strong Mid: AAC, Sun Belt, Big West, Mountain West ({DEFAULT_NIL_TIER_MULTIPLIERS.strongMid.toFixed(1)})</div>
+              <div>All other conferences: Low Tier ({DEFAULT_NIL_TIER_MULTIPLIERS.lowMajor.toFixed(1)})</div>
             </div>
             <div>
               <Label className="text-xs mb-1 block">Total Roster Player Score (68 for future projections)</Label>

@@ -19,6 +19,39 @@ function normalizeTeamName(input: string): string {
     .trim();
 }
 
+function normalizeConferenceName(input: string): string {
+  const raw = (input || "").trim();
+  if (!raw) return raw;
+  const key = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const map: Record<string, string> = {
+    americanaeast: "America East",
+    americaeast: "America East",
+    bigtenconference: "Big Ten",
+    bigten: "Big Ten",
+    coastalathleticconference: "Coastal Athletic Association",
+    coastalalthleticconference: "Coastal Athletic Association",
+    coastalathleticassociation: "Coastal Athletic Association",
+    coastalathletic: "Coastal Athletic Association",
+  };
+  return map[key] || raw;
+}
+
+function stripHtmlToLines(html: string): string[] {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, "\n")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&#39;/g, "'")
+    .replace(/&ndash;/g, "-")
+    .replace(/&mdash;/g, "-")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((s) => s.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -32,6 +65,25 @@ Deno.serve(async (req) => {
     const db = createClient(supabaseUrl, serviceRole);
 
     const teamToConference = new Map<string, { team: string; conference: string; count: number }>();
+    const upsertCandidate = (teamRaw: string, confRaw: string) => {
+      const team = (teamRaw || "").trim();
+      if (!team) return;
+      let conference = normalizeConferenceName(confRaw);
+      if (normalizeTeamName(team) === "oregon state") conference = "Independent";
+      if (!conference) return;
+      const key = normalizeTeamName(team);
+      const existing = teamToConference.get(key);
+      if (!existing) {
+        teamToConference.set(key, { team, conference, count: 1 });
+      } else if (existing.conference === conference) {
+        existing.count += 1;
+      } else {
+        existing.count -= 1;
+        if (existing.count <= 0) {
+          teamToConference.set(key, { team, conference, count: 1 });
+        }
+      }
+    };
 
     for (let page = startPage; page <= endPage; page++) {
       const url = `https://www.64analytics.com/players?page=${page}&division=D-I&sport=Baseball`;
@@ -53,21 +105,38 @@ Deno.serve(async (req) => {
         if (cells.length < 3) continue;
         const team = (cells[1] || "").trim();
         const conference = (cells[2] || "").trim();
-        if (!team || !conference) continue;
-        const key = normalizeTeamName(team);
-        const existing = teamToConference.get(key);
-        if (!existing) {
-          teamToConference.set(key, { team, conference, count: 1 });
-        } else if (existing.conference === conference) {
-          existing.count += 1;
-        } else {
-          // Keep most frequent conference for the normalized team key.
-          existing.count -= 1;
-          if (existing.count <= 0) {
-            teamToConference.set(key, { team, conference, count: 1 });
-          }
+        upsertCandidate(team, conference);
+      }
+    }
+
+    // Secondary source: NCSA D1 baseball school list.
+    // Parse 5-line blocks: School, City/State, Type, Conference, Division.
+    try {
+      const ncsaResp = await fetch("https://www.ncsasports.org/baseball/division-1-colleges");
+      if (ncsaResp.ok) {
+        const ncsaHtml = await ncsaResp.text();
+        const lines = stripHtmlToLines(ncsaHtml);
+        const startIdx = lines.findIndex((l) => /full list of d1 baseball colleges/i.test(l));
+        const parseLines = startIdx >= 0 ? lines.slice(startIdx) : lines;
+
+        for (let i = 0; i + 4 < parseLines.length; i++) {
+          const school = parseLines[i];
+          const cityState = parseLines[i + 1];
+          const type = parseLines[i + 2];
+          const conference = parseLines[i + 3];
+          const division = parseLines[i + 4];
+
+          if (!/ncaa\s*d1/i.test(division)) continue;
+          if (!/^(public|private)$/i.test(type)) continue;
+          if (!cityState.includes(",")) continue;
+          if (!/(conference|independent|league)/i.test(conference)) continue;
+          if (/^school$/i.test(school)) continue;
+
+          upsertCandidate(school, conference);
         }
       }
+    } catch (_) {
+      // Best-effort source; ignore if blocked.
     }
 
     const { data: teams, error: teamErr } = await db.from("teams").select("id, name, conference");

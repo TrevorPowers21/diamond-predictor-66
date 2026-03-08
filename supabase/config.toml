@@ -38,3 +38,6 @@ verify_jwt = false
 
 [functions.import-power-ratings-csv]
 verify_jwt = false
+
+[functions.scrape-team-conferences]
+verify_jwt = false
