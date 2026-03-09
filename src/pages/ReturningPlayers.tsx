@@ -25,6 +25,11 @@ import { toast } from "sonner";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import storage2025Seed from "@/data/storage_2025_seed.json";
 import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
+import {
+  DEFAULT_NIL_TIER_MULTIPLIERS,
+  getProgramTierMultiplierByConference,
+  getPositionValueMultiplier,
+} from "@/lib/nilProgramSpecific";
 
 type SortKey =
   | "name"
@@ -34,7 +39,8 @@ type SortKey =
   | "p_ops"
   | "p_iso"
   | "p_wrc_plus"
-  | "p_war";
+  | "p_war"
+  | "p_nil";
 type SortDir = "asc" | "desc";
 
 interface ReturnerPlayer {
@@ -49,6 +55,7 @@ interface ReturnerPlayer {
   transfer_portal?: boolean | null;
   model_type: "returner" | "transfer";
   status: "active" | "departed" | "archived";
+  nil_value: number | null;
   prediction: {
     from_avg: number | null;
     from_obp: number | null;
@@ -78,6 +85,18 @@ const pctFormat = (v: number | null | undefined) => {
   if (v == null) return "—";
   return Math.round(v).toString();
 };
+const compactDollar = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  compactDisplay: "short",
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 1,
+});
+
+const moneyFormat = (v: number | null | undefined) => {
+  if (v == null) return "—";
+  return compactDollar.format(v).replace("k", "K").replace("m", "M").replace("b", "B");
+};
 
 const computeDerived = (avg: number | null, obp: number | null, slg: number | null) => {
   const ncaaAvgWrc = 0.364;
@@ -99,6 +118,25 @@ const computeOWarFromWrcPlus = (wrcPlus: number | null) => {
   const raa = offValue * pa * runsPerPa;
   const rar = raa + replacementRuns;
   return rar / 10;
+};
+
+const computeNilFallback = ({
+  storedNil,
+  wrcPlus,
+  conference,
+  position,
+}: {
+  storedNil: number | null | undefined;
+  wrcPlus: number | null | undefined;
+  conference: string | null | undefined;
+  position: string | null | undefined;
+}) => {
+  if (storedNil != null) return storedNil;
+  const owar = computeOWarFromWrcPlus(wrcPlus ?? null);
+  if (owar == null) return null;
+  const ptm = getProgramTierMultiplierByConference(conference, DEFAULT_NIL_TIER_MULTIPLIERS);
+  const pvm = getPositionValueMultiplier(position);
+  return owar * 25000 * ptm * pvm;
 };
 
 const deltaClass = (from: number | null, to: number | null, threshold = 0.001) => {
@@ -273,6 +311,33 @@ export default function ReturningPlayers() {
         from += PAGE_SIZE;
       }
 
+      const playerIds = Array.from(new Set((allData || []).map((r: any) => r.player_id))).filter(Boolean);
+      const nilByPlayer = new Map<string, number | null>();
+      if (playerIds.length > 0) {
+        // Avoid oversized `in (...)` query strings by fetching NIL in chunks.
+        const NIL_BATCH = 300;
+        const nilRowsAll: Array<{ player_id: string; estimated_value: number | null; season: number | null }> = [];
+        for (let i = 0; i < playerIds.length; i += NIL_BATCH) {
+          const ids = playerIds.slice(i, i + NIL_BATCH);
+          const { data: nilRows, error: nilErr } = await supabase
+            .from("nil_valuations")
+            .select("player_id, estimated_value, season")
+            .in("player_id", ids);
+          if (nilErr) {
+            console.warn("NIL query failed for batch; continuing without NIL values for this chunk.", nilErr);
+            continue;
+          }
+          nilRowsAll.push(...((nilRows || []) as Array<{ player_id: string; estimated_value: number | null; season: number | null }>));
+        }
+        const bySeason = new Map<string, { season: number; value: number | null }>();
+        for (const row of nilRowsAll) {
+          const curr = bySeason.get(row.player_id);
+          const season = Number(row.season) || 0;
+          if (!curr || season > curr.season) bySeason.set(row.player_id, { season, value: row.estimated_value });
+        }
+        for (const [pid, val] of bySeason.entries()) nilByPlayer.set(pid, val.value);
+      }
+
       const byPlayer = new Map<string, any>();
       for (const row of allData || []) {
         const existing = byPlayer.get(row.players.id);
@@ -370,6 +435,7 @@ export default function ReturningPlayers() {
         transfer_portal: row.players.transfer_portal,
         model_type: row.model_type,
         status: row.status,
+        nil_value: nilByPlayer.get(row.players.id) ?? null,
         prediction: {
           from_avg: row.from_avg,
           from_obp: row.from_obp,
@@ -556,6 +622,12 @@ export default function ReturningPlayers() {
         p_iso: a.prediction.p_iso ?? computeDerived(a.prediction.p_avg, a.prediction.p_obp, a.prediction.p_slg).iso,
         p_wrc_plus: a.prediction.p_wrc_plus,
         p_war: computeOWarFromWrcPlus(a.prediction.p_wrc_plus),
+        p_nil: computeNilFallback({
+          storedNil: a.nil_value,
+          wrcPlus: a.prediction.p_wrc_plus,
+          conference: a.conference,
+          position: a.position,
+        }),
       };
       const bMetric: Record<SortKey, number | null> = {
         name: null,
@@ -566,6 +638,12 @@ export default function ReturningPlayers() {
         p_iso: b.prediction.p_iso ?? computeDerived(b.prediction.p_avg, b.prediction.p_obp, b.prediction.p_slg).iso,
         p_wrc_plus: b.prediction.p_wrc_plus,
         p_war: computeOWarFromWrcPlus(b.prediction.p_wrc_plus),
+        p_nil: computeNilFallback({
+          storedNil: b.nil_value,
+          wrcPlus: b.prediction.p_wrc_plus,
+          conference: b.conference,
+          position: b.position,
+        }),
       };
       aVal = aMetric[sortKey] ?? -999;
       bVal = bMetric[sortKey] ?? -999;
@@ -861,6 +939,7 @@ export default function ReturningPlayers() {
                         <TableHead className="text-right"><SortButton label="pISO" sortKeyVal="p_iso" /></TableHead>
                         <TableHead className="text-right"><SortButton label="wRC+" sortKeyVal="p_wrc_plus" /></TableHead>
                         <TableHead className="text-right"><SortButton label="oWAR" sortKeyVal="p_war" /></TableHead>
+                        <TableHead className="text-right"><SortButton label="NIL" sortKeyVal="p_nil" /></TableHead>
                         <TableHead className="text-center min-w-[180px]">Scouting</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -940,6 +1019,16 @@ export default function ReturningPlayers() {
                             </TableCell>
                             <TableCell className={`text-right font-mono text-sm font-bold ${deltaClass(computeOWarFromWrcPlus(computeDerived(pred.from_avg, pred.from_obp, pred.from_slg).wrcPlus), computeOWarFromWrcPlus(pred.p_wrc_plus), 0.05)}`}>
                               {statFormat(computeOWarFromWrcPlus(pred.p_wrc_plus), 2)}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-sm font-bold">
+                              {moneyFormat(
+                                computeNilFallback({
+                                  storedNil: p.nil_value,
+                                  wrcPlus: p.prediction.p_wrc_plus,
+                                  conference: p.conference,
+                                  position: p.position,
+                                }),
+                              )}
                             </TableCell>
                             <TableCell className="text-center">
                               {pred.ev_score != null &&

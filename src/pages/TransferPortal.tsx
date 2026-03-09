@@ -94,7 +94,10 @@ const conferenceKeyAliases = (conference: string | null | undefined): string[] =
   if (key === "sec" || key.includes("southeastern")) aliases.add("southeastern conference");
   if (key === "acc" || key.includes("atlantic coast")) aliases.add("atlantic coast conference");
   if (key === "big 12" || key === "big12" || key.includes("big 12")) aliases.add("big 12");
-  if (key === "big ten" || key === "big10" || key.includes("big ten")) aliases.add("big ten");
+  if (key === "big ten" || key === "big10" || key.includes("big ten")) {
+    aliases.add("big ten");
+    aliases.add("big10");
+  }
   if (key === "aac" || key.includes("american athletic")) aliases.add("american athletic conference");
   if (key === "a 10" || key === "a10" || key.includes("atlantic 10")) aliases.add("atlantic 10");
   if (key === "caa" || key.includes("coastal athletic")) aliases.add("coastal athletic association");
@@ -516,7 +519,7 @@ export default function TransferPortal() {
                 <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? whole(simulation.pWrcPlus) : "-"}</div>
               </div>
               <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("owar", simulation?.owar))}`}>
-                <div className="text-xs font-medium tracking-wide">owar</div>
+                <div className="text-xs font-medium tracking-wide">oWAR</div>
                 <div className="mt-1 font-mono text-3xl font-bold">{simulation ? stat(simulation.owar, 2) : "-"}</div>
               </div>
               <div className="rounded-lg border border-accent/40 bg-accent/12 p-4 shadow-sm">
