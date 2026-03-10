@@ -106,16 +106,8 @@ function EquationConstantsTab() {
       if (!raw) return defaultEditableValues;
       const parsed = JSON.parse(raw) as Record<string, string>;
       const merged = { ...defaultEditableValues, ...parsed };
-      // Force latest OBP weight defaults into editable values so legacy local storage does not override them.
-      merged.obp_contact_pct_weight = defaultEditableValues.obp_contact_pct_weight;
-      merged.obp_line_drive_pct_weight = defaultEditableValues.obp_line_drive_pct_weight;
-      merged.obp_avg_exit_velocity_weight = defaultEditableValues.obp_avg_exit_velocity_weight;
-      merged.obp_pop_up_pct_weight = defaultEditableValues.obp_pop_up_pct_weight;
-      merged.obp_walk_pct_weight = defaultEditableValues.obp_walk_pct_weight;
-      merged.obp_chase_pct_weight = defaultEditableValues.obp_chase_pct_weight;
-      merged.obp_ncaa_avg_power_rating = defaultEditableValues.obp_ncaa_avg_power_rating;
       for (const [k, v] of Object.entries(merged)) {
-        if (v === "") merged[k] = defaultEditableValues[k] ?? "";
+        if (v == null) merged[k] = defaultEditableValues[k] ?? "";
       }
       return merged;
     } catch {

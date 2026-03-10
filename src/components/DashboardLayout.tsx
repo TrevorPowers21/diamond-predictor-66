@@ -20,6 +20,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
+import { useEffect } from "react";
 
 const navItems = [
   { label: "Overview", href: "/dashboard", icon: BarChart3 },
@@ -40,6 +41,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  useEffect(() => {
+    setSidebarOpen(false);
+    // Defensive reset: sometimes UI libraries can leave body pointer lock behind.
+    if (typeof document !== "undefined") {
+      document.body.style.pointerEvents = "auto";
+    }
+  }, [location.pathname]);
+
   const handleSignOut = async () => {
     await signOut();
     navigate("/auth");
@@ -48,10 +57,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-screen bg-background">
       {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} />
-      )}
-
       {/* Sidebar */}
       <aside
         className={cn(

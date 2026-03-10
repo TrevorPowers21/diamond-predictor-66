@@ -85,8 +85,11 @@ export const calcProgramSpecificAllocation = ({
   const budget = Number(nilBudget) || 0;
   if (budget <= 0) return 0;
 
-  const denominator = (Number(rosterTotalPlayerScore) || 0) > 0
-    ? rosterTotalPlayerScore
+  // Keep 68 (or configured fallback) as the default denominator for partial rosters.
+  // Only use the calculated roster score once it exceeds the fallback baseline.
+  const calculatedTotal = Number(rosterTotalPlayerScore) || 0;
+  const denominator = calculatedTotal > fallbackTotalPlayerScore
+    ? calculatedTotal
     : fallbackTotalPlayerScore;
 
   if (denominator <= 0) return 0;

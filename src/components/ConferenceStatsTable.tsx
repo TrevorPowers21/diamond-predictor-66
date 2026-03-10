@@ -43,6 +43,55 @@ function normalizeConferenceName(raw: string | null | undefined): string {
     .trim();
 }
 
+function canonicalConferenceName(raw: string | null | undefined): string {
+  const cleaned = normalizeConferenceName(raw);
+  if (!cleaned) return "";
+  const key = cleaned.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const map: Record<string, string> = {
+    aac: "American Athletic Conference",
+    americanathleticconference: "American Athletic Conference",
+    a10: "Atlantic 10",
+    atlantic10: "Atlantic 10",
+    caa: "Coastal Athletic Association",
+    coastalathleticassociation: "Coastal Athletic Association",
+    acc: "ACC",
+    atlanticcoastconference: "ACC",
+    sec: "SEC",
+    southeasternconference: "SEC",
+    big10: "Big Ten",
+    bigten: "Big Ten",
+    bigtenconference: "Big Ten",
+    big12: "Big 12",
+    big12conference: "Big 12",
+    cusa: "Conference USA",
+    conferenceusa: "Conference USA",
+    mwc: "Mountain West",
+    mountainwest: "Mountain West",
+    mountainwestconference: "Mountain West",
+    mvc: "Missouri Valley Conference",
+    missourivalleyconference: "Missouri Valley Conference",
+    nec: "Northeast Conference",
+    northeastconference: "Northeast Conference",
+    socon: "Southern Conference",
+    southernconference: "Southern Conference",
+    swac: "Southwestern Athletic Conference",
+    southwesternathleticconference: "Southwestern Athletic Conference",
+    wcc: "West Coast Conference",
+    westcoastconference: "West Coast Conference",
+    wac: "Western Athletic Conference",
+    westernathleticconference: "Western Athletic Conference",
+    asun: "Atlantic Sun Conference",
+    atlanticsunconference: "Atlantic Sun Conference",
+    maac: "Metro Atlantic Athletic Conference",
+    metroatlanticathleticconference: "Metro Atlantic Athletic Conference",
+    mac: "Mid-American Conference",
+    midamericanconference: "Mid-American Conference",
+    ovc: "Ohio Valley Conference",
+    ohiovalleyconference: "Ohio Valley Conference",
+  };
+  return map[key] || cleaned;
+}
+
 type EditFields = Omit<ConferenceStat, "id" | "created_at" | "updated_at">;
 
 const NUM_FIELDS: (keyof EditFields)[] = [
@@ -55,6 +104,9 @@ const LABELS: Record<string, string> = {
   avg_plus: "AVG+", obp_plus: "OBP+", slg_plus: "SLG+",
   ops_plus: "OPS+", iso_plus: "ISO+", wrc_plus: "WRC+", stuff_plus: "Stuff+",
 };
+
+const isWholePlusField = (field: keyof EditFields) =>
+  field.includes("plus") && field !== "stuff_plus";
 
 function computeDerivedConferenceStats(avg: number | null, obp: number | null, slg: number | null) {
   if (avg == null || obp == null || slg == null) {
@@ -182,7 +234,7 @@ export default function ConferenceStatsTable() {
       const records: Array<Record<string, unknown>> = [];
       for (let r = 1; r < lines.length; r++) {
         const cols = parseCsvLine(lines[r]);
-        const conference = normalizeConferenceName(cols[conferenceIdx]);
+        const conference = canonicalConferenceName(cols[conferenceIdx]);
         if (!conference) continue;
         const avg = parseNum(cols[avgIdx]);
         const obp = parseNum(cols[obpIdx]);
@@ -230,7 +282,25 @@ export default function ConferenceStatsTable() {
   });
 
   const { ncaaRow, filtered } = useMemo(() => {
-    let list = stats;
+    // Collapse alias duplicates to one canonical conference row.
+    const byConference = new Map<string, ConferenceStat>();
+    const score = (s: ConferenceStat) =>
+      NUM_FIELDS.reduce((acc, f) => acc + ((s[f] as number | null) != null ? 1 : 0), 0) +
+      (s.stuff_plus != null ? 1 : 0);
+    for (const s of stats) {
+      const canonical = canonicalConferenceName(s.conference) || normalizeConferenceName(s.conference);
+      const key = canonical.toLowerCase();
+      if (!key) continue;
+      const current = byConference.get(key);
+      if (!current || score(s) > score(current)) {
+        byConference.set(key, { ...s, conference: canonical });
+      }
+    }
+
+    // Keep the table focused: only rows that already have the base stats needed.
+    let list = Array.from(byConference.values()).filter(
+      (s) => s.avg != null && s.obp != null && s.slg != null,
+    );
     if (search) {
       const q = search.toLowerCase();
       list = list.filter((s) => s.conference.toLowerCase().includes(q));
@@ -242,7 +312,7 @@ export default function ConferenceStatsTable() {
 
   const startEdit = (stat: ConferenceStat) => {
     setEditingId(stat.id);
-    setEditName(normalizeConferenceName(stat.conference));
+    setEditName(canonicalConferenceName(stat.conference));
     const fields: Record<string, number | null> = {};
     NUM_FIELDS.forEach((f) => { fields[f] = stat[f] as number | null; });
     setEditData(fields);
@@ -255,9 +325,9 @@ export default function ConferenceStatsTable() {
     }));
   };
 
-  const fmt = (val: number | null, isPlus = false) => {
+  const fmt = (val: number | null, isPlus = false, digits = 3) => {
     if (val === null || val === undefined) return "—";
-    return isPlus ? val.toFixed(0) : val.toFixed(3);
+    return isPlus ? val.toFixed(0) : val.toFixed(digits);
   };
 
   const renderRow = (stat: ConferenceStat, pinned = false) => (
@@ -278,14 +348,18 @@ export default function ConferenceStatsTable() {
           {editingId === stat.id ? (
             <Input
               type="number"
-              step={f.includes("plus") || f === "offensive_power_rating" ? "1" : "0.001"}
+              step={isWholePlusField(f) || f === "offensive_power_rating" ? "1" : f === "stuff_plus" ? "0.1" : "0.001"}
               value={editData[f] ?? ""}
               onChange={(e) => handleFieldChange(f, e.target.value)}
               className="h-7 w-[70px] text-center text-xs"
             />
           ) : (
             <span className="text-sm tabular-nums">
-              {fmt(stat[f] as number | null, f.includes("plus") || f === "offensive_power_rating")}
+              {fmt(
+                stat[f] as number | null,
+                isWholePlusField(f) || f === "offensive_power_rating",
+                f === "stuff_plus" ? 1 : 3,
+              )}
             </span>
           )}
         </TableCell>
@@ -304,7 +378,7 @@ export default function ConferenceStatsTable() {
                 const derived = computeDerivedConferenceStats(avg ?? null, obp ?? null, slg ?? null);
                 updateStat.mutate({
                   id: stat.id,
-                  updates: { ...editData, ...derived, conference: normalizeConferenceName(editName) },
+                  updates: { ...editData, ...derived, conference: canonicalConferenceName(editName) },
                 });
               }}
             >
