@@ -12,12 +12,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, BarChart3, DollarSign, Upload } from "lucide-react";
+import { Plus, Trash2, BarChart3, DollarSign, Upload, ChevronDown, ChevronUp } from "lucide-react";
 import storage2025Seed from "@/data/storage_2025_seed.json";
 import {
   calcPlayerScore,
   DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
   getProgramTierMultiplierByConference,
+  getPositionValueMultiplier,
   DEFAULT_NIL_TIER_MULTIPLIERS,
 } from "@/lib/nilProgramSpecific";
 import { computeTransferProjection } from "@/lib/transferProjection";
@@ -163,7 +164,9 @@ type LivePredictionRow = {
   class_transition: string | null;
   dev_aggressiveness: number | null;
   model_type: string | null;
+  variant: string | null;
   status: string | null;
+  updated_at: string | null;
 };
 
 type LivePlayerRow = {
@@ -397,9 +400,19 @@ const selectTransferPortalPreferredPrediction = (predictions: any[] | null | und
     const hasFrom = row.from_avg != null || row.from_obp != null || row.from_slg != null;
     const hasPower = row.power_rating_plus != null;
     const statusBoost = row.status === "active" ? 2 : row.status === "departed" ? 1 : 0;
-    return (row.model_type === "transfer" ? 3 : 1) + (hasFrom ? 2 : 0) + (hasPower ? 1 : 0) + statusBoost;
+    // Target board players are always transfers; prefer "transfer" model predictions (matches Transfer Portal logic)
+    const modelMatchBoost = row.model_type === "transfer" ? 4 : 0;
+    const variantBoost = row.variant === "regular" ? 3 : 0;
+    return modelMatchBoost + variantBoost + (row.model_type === "transfer" ? 3 : 1) + (hasFrom ? 2 : 0) + (hasPower ? 1 : 0) + statusBoost;
   };
-  return [...list].sort((a, b) => rank(b) - rank(a))[0] ?? null;
+  return [...list].sort((a, b) => {
+    const diff = rank(b) - rank(a);
+    if (diff !== 0) return diff;
+    // Tie-break: most recently updated wins (matches Transfer Portal logic)
+    const tsA = new Date(a.updated_at || 0).getTime();
+    const tsB = new Date(b.updated_at || 0).getTime();
+    return tsB - tsA;
+  })[0] ?? null;
 };
 
 const readTargetBoard = (): TargetBoardEntry[] => {
@@ -459,6 +472,7 @@ const depthRoleMultiplier = (role: BuildPlayer["depth_role"]) => {
 };
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
+const statKey = (v: number | null | undefined) => (v == null ? "na" : round3(v).toFixed(3));
 const toRate = (n: number) => (Math.abs(n) > 1 ? n / 100 : n);
 // Weight parser for transfer multipliers:
 // - keep small scalar entries as-is (e.g. 2 => 2)
@@ -510,6 +524,8 @@ export default function TeamBuilder() {
   const isAdmin = hasRole("admin");
 
   const [selectedBuildId, setSelectedBuildId] = useState<string | null>(null);
+  const [nilEquationOpen, setNilEquationOpen] = useState(false);
+  const [metricsUploadOpen, setMetricsUploadOpen] = useState(false);
   const [buildName, setBuildName] = useState("My Team Build");
   const [selectedTeam, setSelectedTeam] = useState<string>("");
   const [totalBudget, setTotalBudget] = useState<number>(0);
@@ -523,6 +539,10 @@ export default function TeamBuilder() {
   const [incomingName, setIncomingName] = useState("");
   const [incomingPosition, setIncomingPosition] = useState("");
   const [incomingNil, setIncomingNil] = useState<number>(0);
+  const [teamSearchQuery, setTeamSearchQuery] = useState("");
+  const [teamSearchOpen, setTeamSearchOpen] = useState(false);
+  const [targetPlayerSearchQuery, setTargetPlayerSearchQuery] = useState("");
+  const [targetPlayerSearchOpen, setTargetPlayerSearchOpen] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const skipAutoSeedOnceRef = useRef(false);
 
@@ -532,6 +552,27 @@ export default function TeamBuilder() {
     queryFn: async () => {
       const { data } = await supabase.from("teams").select("name, conference, park_factor").order("name");
       return (data ?? []) as TeamRow[];
+    },
+  });
+
+  // All players for target board search
+  const { data: allPlayersForSearch = [] } = useQuery({
+    queryKey: ["team-builder-all-players-search"],
+    queryFn: async () => {
+      let all: any[] = [];
+      let from = 0;
+      const PAGE = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("players")
+          .select("id, first_name, last_name, position, team, from_team, conference, player_predictions(id, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant), nil_valuations(estimated_value, component_breakdown)")
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        all = all.concat(data || []);
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+      }
+      return all.filter((p) => p.first_name && p.last_name);
     },
   });
 
@@ -569,6 +610,22 @@ export default function TeamBuilder() {
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [teams]);
+
+  const filteredTeamOptions = useMemo(() => {
+    const q = teamSearchQuery.trim().toLowerCase();
+    if (!q) return teams;
+    return teams.filter((t) => t.name.toLowerCase().includes(q));
+  }, [teams, teamSearchQuery]);
+
+  const filteredTargetPlayerSearch = useMemo(() => {
+    const q = normalizeName(targetPlayerSearchQuery);
+    if (!q) return [];
+    return allPlayersForSearch
+      .filter((p) =>
+        normalizeName(`${p.first_name} ${p.last_name} ${p.team || ""} ${p.position || ""}`).includes(q)
+      )
+      .slice(0, 25);
+  }, [allPlayersForSearch, targetPlayerSearchQuery]);
 
   // Fetch existing builds
   const { data: builds = [] } = useQuery({
@@ -995,11 +1052,9 @@ export default function TeamBuilder() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("player_predictions")
-        .select("id, player_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status")
-        .eq("variant", "regular")
-        .in("status", ["active", "departed"])
-        .in("player_id", targetPlayerIds)
-        .in("model_type", ["returner", "transfer"]);
+        .select("id, player_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at")
+        .in("model_type", ["returner", "transfer"])
+        .in("player_id", targetPlayerIds);
       if (error) throw error;
       return (data || []) as LivePredictionRow[];
     },
@@ -1133,6 +1188,7 @@ export default function TeamBuilder() {
     const baPR = internals?.avg_power_rating ?? null;
     const obpPR = internals?.obp_power_rating ?? null;
     const isoPR = internals?.slg_power_rating ?? null;
+
     if (baPR == null || obpPR == null || isoPR == null) {
       return snapshotFallback;
     }
@@ -1219,7 +1275,11 @@ export default function TeamBuilder() {
       wAvg,
       wIso,
     });
-    return { p_avg: projected.pAvg, p_obp: projected.pObp, p_slg: projected.pSlg, p_wrc_plus: projected.pWrcPlus };
+    const basePerOwar = readLocalNum("nil_base_per_owar", 25000);
+    const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
+    const pvm = getPositionValueMultiplier(livePlayer.position ?? p.player?.position ?? null);
+    const simNilValuation = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
+    return { p_avg: projected.pAvg, p_obp: projected.pObp, p_slg: projected.pSlg, p_wrc_plus: projected.pWrcPlus, owar: projected.owar, nil_valuation: simNilValuation };
   }, [selectedTeam, teamByKey, resolveConferenceStats, internalsByPredictionId, seedByName, liveTargetPredictionByPlayerId, liveTargetPlayerById]);
 
   const removePlayer = (idx: number) => {
@@ -1270,6 +1330,158 @@ export default function TeamBuilder() {
     setIncomingPosition("");
     setIncomingNil(0);
     setDirty(true);
+  };
+
+  const addPlayerFromTargetSearch = async (row: any) => {
+    const alreadyAdded = rosterPlayers.some(
+      (p) => p.player_id === row.id && (p.roster_status || "returner") === "target"
+    );
+    if (alreadyAdded) {
+      toast({ title: "Already on target board", description: `${row.first_name} ${row.last_name} is already a target.` });
+      setTargetPlayerSearchQuery("");
+      setTargetPlayerSearchOpen(false);
+      return;
+    }
+
+    const chosenPred = selectTransferPortalPreferredPrediction(
+      (row.player_predictions || []).filter((pr: any) => pr.variant === "regular")
+    );
+
+    // Fetch prediction internals so we can run the same simulation as Transfer Portal
+    let transferSnapshot: TransferSnapshot | null = null;
+    if (chosenPred?.id && selectedTeam) {
+      const { data: internals } = await supabase
+        .from("player_prediction_internals")
+        .select("avg_power_rating, obp_power_rating, slg_power_rating")
+        .eq("prediction_id", chosenPred.id)
+        .maybeSingle();
+
+      const baPR = internals?.avg_power_rating ?? null;
+      const obpPR = internals?.obp_power_rating ?? null;
+      const isoPR = internals?.slg_power_rating ?? null;
+
+      const lastAvg = chosenPred.from_avg ?? null;
+      const lastObp = chosenPred.from_obp ?? null;
+      const lastSlg = chosenPred.from_slg ?? null;
+
+      const fullName = `${row.first_name} ${row.last_name}`;
+      const candidates = seedByName.get(normalizeKey(fullName)) || [];
+      let inferredFromTeam: string | null = null;
+      if (candidates.length === 1) {
+        inferredFromTeam = candidates[0].team;
+      } else if (candidates.length > 1 && lastAvg != null) {
+        const key = `${statKey(lastAvg)}|${statKey(lastObp)}|${statKey(lastSlg)}`;
+        const exact = candidates.find((r) => `${statKey(r.avg)}|${statKey(r.obp)}|${statKey(r.slg)}` === key);
+        inferredFromTeam = exact?.team || candidates[0].team;
+      }
+
+      const fromTeamName = row.from_team || inferredFromTeam || row.team;
+      const fromTeamRow = fromTeamName ? teamByKey.get(normalizeKey(fromTeamName)) || null : null;
+      const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
+      const fromConference = fromTeamRow?.conference || row.conference || null;
+      const fromConfStats = resolveConferenceStats(fromConference);
+      const toConfStats = resolveConferenceStats(toTeamRow?.conference || null);
+
+      if (
+        baPR != null && obpPR != null && isoPR != null &&
+        lastAvg != null && lastObp != null && lastSlg != null &&
+        toTeamRow && fromConfStats && toConfStats &&
+        fromConfStats.avg_plus != null && toConfStats.avg_plus != null &&
+        fromConfStats.obp_plus != null && toConfStats.obp_plus != null &&
+        fromConfStats.iso_plus != null && toConfStats.iso_plus != null &&
+        fromConfStats.stuff_plus != null && toConfStats.stuff_plus != null &&
+        fromTeamRow?.park_factor != null && toTeamRow.park_factor != null
+      ) {
+        const fromPark = normalizeParkToIndex(fromTeamRow!.park_factor);
+        const toPark = normalizeParkToIndex(toTeamRow.park_factor);
+
+        const ncaaAvgBA = toRate(readLocalNum("t_ba_ncaa_avg", 0.280));
+        const ncaaAvgOBP = toRate(readLocalNum("t_obp_ncaa_avg", 0.385));
+        const ncaaAvgISO = toRate(readLocalNum("t_iso_ncaa_avg", 0.162));
+        const ncaaAvgWrc = toRate(readLocalNum("t_wrc_ncaa_avg", 0.364));
+        const baPowerWeight = toRate(readLocalNum("t_ba_power_weight", 0.70));
+        const obpPowerWeight = toRate(readLocalNum("t_obp_power_weight", 0.70));
+        const baConferenceWeight = toWeight(readLocalNum("t_ba_conference_weight", 1.0));
+        const obpConferenceWeight = toWeight(readLocalNum("t_obp_conference_weight", 1.0));
+        const isoConferenceWeight = toWeight(readLocalNum("t_iso_conference_weight", 1.0));
+        const baPitchingWeight = toWeight(readLocalNum("t_ba_pitching_weight", 1.0));
+        const obpPitchingWeight = toWeight(readLocalNum("t_obp_pitching_weight", 1.0));
+        const isoPitchingWeight = toWeight(readLocalNum("t_iso_pitching_weight", 1.0));
+        const baParkWeight = toWeight(readLocalNum("t_ba_park_weight", 1.0));
+        const obpParkWeight = toWeight(readLocalNum("t_obp_park_weight", 1.0));
+        const isoParkWeight = toWeight(readLocalNum("t_iso_park_weight", 1.0));
+        const isoStdPower = readLocalNum("r_iso_std_pr", 45.423);
+        const isoStdNcaa = toRate(readLocalNum("r_iso_std_ncaa", 0.07849797197));
+        const wObp = toRate(readLocalNum("r_w_obp", 0.45));
+        const wSlg = toRate(readLocalNum("r_w_slg", 0.30));
+        const wAvg = toRate(readLocalNum("r_w_avg", 0.15));
+        const wIso = toRate(readLocalNum("r_w_iso", 0.10));
+
+        const projected = computeTransferProjection({
+          lastAvg, lastObp, lastSlg, baPR, obpPR, isoPR,
+          fromAvgPlus: fromConfStats.avg_plus, toAvgPlus: toConfStats.avg_plus,
+          fromObpPlus: fromConfStats.obp_plus, toObpPlus: toConfStats.obp_plus,
+          fromIsoPlus: fromConfStats.iso_plus, toIsoPlus: toConfStats.iso_plus,
+          fromStuff: fromConfStats.stuff_plus, toStuff: toConfStats.stuff_plus,
+          fromPark, toPark,
+          ncaaAvgBA, ncaaAvgOBP, ncaaAvgISO, ncaaAvgWrc,
+          baPowerWeight, obpPowerWeight,
+          baConferenceWeight, obpConferenceWeight, isoConferenceWeight,
+          baPitchingWeight, obpPitchingWeight, isoPitchingWeight,
+          baParkWeight, obpParkWeight, isoParkWeight,
+          isoStdPower, isoStdNcaa, wObp, wSlg, wAvg, wIso,
+        });
+
+        const basePerOwar = readLocalNum("nil_base_per_owar", 25000);
+        const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
+        const pvm = getPositionValueMultiplier(row.position);
+        const nilValuation = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
+
+        transferSnapshot = {
+          p_avg: projected.pAvg,
+          p_obp: projected.pObp,
+          p_slg: projected.pSlg,
+          p_wrc_plus: projected.pWrcPlus,
+          owar: projected.owar,
+          nil_valuation: nilValuation,
+          from_team: fromTeamName || null,
+          from_conference: fromConference,
+        };
+      }
+    }
+
+    const newP: BuildPlayer = {
+      player_id: row.id,
+      source: "portal",
+      custom_name: null,
+      position_slot: null,
+      depth_order: 1,
+      nil_value: row.nil_valuations?.[0]?.estimated_value ? Number(row.nil_valuations[0].estimated_value) : 0,
+      production_notes: null,
+      roster_status: "target",
+      depth_role: "utility",
+      class_transition: chosenPred?.class_transition ?? "SJ",
+      dev_aggressiveness: chosenPred?.dev_aggressiveness ?? 0,
+      transfer_snapshot: transferSnapshot,
+      player: {
+        first_name: row.first_name,
+        last_name: row.last_name,
+        position: row.position,
+        team: row.team,
+        from_team: row.from_team,
+        conference: row.conference ?? null,
+      },
+      prediction: chosenPred ?? null,
+      nilVal: row.nil_valuations?.[0]?.estimated_value ?? null,
+      nil_owar: row.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
+      team_metrics: null,
+      team_power_plus: null,
+    };
+    setRosterPlayers((prev) => [...prev, newP]);
+    setDirty(true);
+    setTargetPlayerSearchQuery("");
+    setTargetPlayerSearchOpen(false);
+    toast({ title: "Added to targets", description: `${row.first_name} ${row.last_name}` });
   };
 
   const applyTeamMetricsCsv = async (file: File) => {
@@ -1765,8 +1977,13 @@ export default function TeamBuilder() {
 
   const renderPlayerRow = (p: BuildPlayer, idx: number, globalIdx: number) => {
     const projection = playerProjection(p);
-    const projectedOwar = projection.owar ?? null;
-    const projectedNil = projectedNilForPlayer(p);
+    const isTarget = (p.roster_status || "returner") === "target";
+    const sim = isTarget ? simulateTransferProjection(p) : null;
+    // For target players, show raw projected oWAR/NIL (no depth role multiplier) to match Transfer Portal
+    const projectedOwar = isTarget ? (sim?.owar ?? null) : (projection.owar ?? null);
+    const projectedNil = isTarget
+      ? (sim?.nil_valuation ?? projectedNilForPlayer(p))
+      : projectedNilForPlayer(p);
     return (
     <TableRow key={globalIdx}>
       <TableCell className="font-medium">
@@ -1899,9 +2116,6 @@ export default function TeamBuilder() {
           onChange={(e) => updatePlayer(globalIdx, { nil_value: Number(e.target.value) || 0 })}
         />
       </TableCell>
-      <TableCell className={`text-center font-mono text-xs ${(p.roster_status || "returner") === "leaving" ? "text-muted-foreground" : projectedNilTierClass(projectedNil, totalBudget, fallbackRosterTotalPlayerScore)}`}>
-        {(p.roster_status || "returner") === "leaving" ? "—" : `$${Math.round(projectedNil).toLocaleString()}`}
-      </TableCell>
       <TableCell className="text-center font-mono text-xs">
         {(p.roster_status || "returner") === "leaving" ? "—" : (projectedOwar != null ? projectedOwar.toFixed(2) : "—")}
       </TableCell>
@@ -1957,18 +2171,35 @@ export default function TeamBuilder() {
 
         {/* Build selector & config */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
+          <div className="relative">
             <Label className="text-xs mb-1 block">Team</Label>
-            <Select value={selectedTeam} onValueChange={(v) => { setSelectedTeam(v); setSelectedBuildId(null); setDirty(true); }}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select team…" />
-              </SelectTrigger>
-              <SelectContent>
-                {teams.map((t) => (
-                  <SelectItem key={t.name} value={t.name}>{t.name}</SelectItem>
+            <Input
+              placeholder="Search team…"
+              value={teamSearchQuery || selectedTeam}
+              onChange={(e) => { setTeamSearchQuery(e.target.value); setTeamSearchOpen(true); }}
+              onFocus={() => { setTeamSearchQuery(""); setTeamSearchOpen(true); }}
+              onBlur={() => setTimeout(() => setTeamSearchOpen(false), 150)}
+              className="w-full"
+            />
+            {teamSearchOpen && filteredTeamOptions.length > 0 && (
+              <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-60 overflow-auto">
+                {filteredTeamOptions.map((t) => (
+                  <div
+                    key={t.name}
+                    className="px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground"
+                    onMouseDown={() => {
+                      setSelectedTeam(t.name);
+                      setTeamSearchQuery("");
+                      setTeamSearchOpen(false);
+                      setSelectedBuildId(null);
+                      setDirty(true);
+                    }}
+                  >
+                    {t.name}
+                  </div>
                 ))}
-              </SelectContent>
-            </Select>
+              </div>
+            )}
           </div>
           <div>
             <Label className="text-xs mb-1 block">Team-Specific Total NIL Budget ($)</Label>
@@ -2037,68 +2268,79 @@ export default function TeamBuilder() {
 
         {isAdmin && (
           <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Projected NIL Equation</CardTitle>
-              <CardDescription>
-                Player Score = oWAR × PTM × PVF; Projected NIL = Player Score × $/oWAR
-              </CardDescription>
-              <p className="text-xs text-muted-foreground">
-                Team budget is used to track fit: Sum(NIL used for returners + targets) vs Team-Specific Total NIL Budget.
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Position Change uses PVF for valuation. Updating Position Change recalculates Player Score and Projected NIL automatically.
-              </p>
+            <CardHeader className="pb-3 cursor-pointer select-none" onClick={() => setNilEquationOpen(o => !o)}>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Projected NIL Equation</CardTitle>
+                {nilEquationOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+              </div>
             </CardHeader>
-            <CardContent className="flex flex-col gap-3 text-sm md:flex-row md:items-center md:justify-between">
-              <div className="text-muted-foreground">
-                Total Roster Player Score: <span className="font-mono text-foreground">{totalRosterPlayerScore.toFixed(2)}</span>
-              </div>
-              <div className="text-muted-foreground">
-                NIL Used Total (Returners + Targets): <span className="font-mono text-foreground">${Math.round(totalEffectiveNil).toLocaleString()}</span>
-              </div>
-            </CardContent>
+            {nilEquationOpen && (
+              <>
+                <CardContent className="pt-0 pb-3 space-y-1">
+                  <CardDescription>
+                    Player Score = oWAR × PTM × PVF; Projected NIL = Player Score × $/oWAR
+                  </CardDescription>
+                  <p className="text-xs text-muted-foreground">
+                    Team budget is used to track fit: Sum(NIL used for returners + targets) vs Team-Specific Total NIL Budget.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Position Change uses PVF for valuation. Updating Position Change recalculates Player Score and Projected NIL automatically.
+                  </p>
+                </CardContent>
+                <CardContent className="flex flex-col gap-3 text-sm md:flex-row md:items-center md:justify-between pt-0">
+                  <div className="text-muted-foreground">
+                    Total Roster Player Score: <span className="font-mono text-foreground">{totalRosterPlayerScore.toFixed(2)}</span>
+                  </div>
+                  <div className="text-muted-foreground">
+                    NIL Used Total (Returners + Targets): <span className="font-mono text-foreground">${Math.round(totalEffectiveNil).toLocaleString()}</span>
+                  </div>
+                </CardContent>
+              </>
+            )}
           </Card>
         )}
 
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Team-Only Power Metrics Upload</CardTitle>
-            <CardDescription>
-              Upload preseason/inter-squad/fall batted-ball metrics (CSV) for this build only. This does not update global player data.
-            </CardDescription>
+          <CardHeader className="pb-3 cursor-pointer select-none" onClick={() => setMetricsUploadOpen(o => !o)}>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Team-Only Power Metrics Upload</CardTitle>
+              {metricsUploadOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+            </div>
           </CardHeader>
-          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <input
-              ref={uploadInputRef}
-              type="file"
-              accept=".csv"
-              className="hidden"
-              onChange={async (e) => {
-                const f = e.target.files?.[0];
-                if (!f) return;
-                try {
-                  await applyTeamMetricsCsv(f);
-                } catch (err: any) {
-                  toast({ title: "CSV import failed", description: err?.message || "Unable to parse CSV", variant: "destructive" });
-                } finally {
-                  e.currentTarget.value = "";
-                }
-              }}
-            />
-            <Button variant="outline" onClick={() => uploadInputRef.current?.click()}>
-              <Upload className="h-4 w-4 mr-1" />
-              Upload Team Metrics CSV
-            </Button>
-            <Button variant="ghost" onClick={downloadTeamMetricsTemplate}>
-              Download Metrics Template
-            </Button>
-            <Button variant="ghost" onClick={downloadPlayerProfileTemplate}>
-              Download Player Profile Template
-            </Button>
-            <p className="text-xs text-muted-foreground">
-              Team-build only import. Templates include data fields and examples, not internal formulas or weighting logic.
-            </p>
-          </CardContent>
+          {metricsUploadOpen && (
+            <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  try {
+                    await applyTeamMetricsCsv(f);
+                  } catch (err: any) {
+                    toast({ title: "CSV import failed", description: err?.message || "Unable to parse CSV", variant: "destructive" });
+                  } finally {
+                    e.currentTarget.value = "";
+                  }
+                }}
+              />
+              <Button variant="outline" onClick={() => uploadInputRef.current?.click()}>
+                <Upload className="h-4 w-4 mr-1" />
+                Upload Team Metrics CSV
+              </Button>
+              <Button variant="ghost" onClick={downloadTeamMetricsTemplate}>
+                Download Metrics Template
+              </Button>
+              <Button variant="ghost" onClick={downloadPlayerProfileTemplate}>
+                Download Player Profile Template
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Team-build only import. Templates include data fields and examples, not internal formulas or weighting logic.
+              </p>
+            </CardContent>
+          )}
         </Card>
 
         <Tabs defaultValue="roster">
@@ -2296,11 +2538,33 @@ export default function TeamBuilder() {
                 <CardTitle className="text-base">Add Player Target</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="rounded-md border p-4 text-sm space-y-3">
-                  <div className="text-muted-foreground">Add targets from Transfer Portal dashboard only.</div>
-                  <Button asChild>
-                    <Link to="/dashboard/portal">Open Transfer Portal</Link>
-                  </Button>
+                <div className="relative">
+                  <Input
+                    placeholder="Search any player by name, team, or position…"
+                    value={targetPlayerSearchQuery}
+                    onChange={(e) => { setTargetPlayerSearchQuery(e.target.value); setTargetPlayerSearchOpen(true); }}
+                    onFocus={() => setTargetPlayerSearchOpen(true)}
+                    onBlur={() => setTimeout(() => setTargetPlayerSearchOpen(false), 150)}
+                  />
+                  {targetPlayerSearchOpen && filteredTargetPlayerSearch.length > 0 && (
+                    <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
+                      {filteredTargetPlayerSearch.map((p) => (
+                        <div
+                          key={p.id}
+                          className="px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground flex justify-between items-center gap-2"
+                          onMouseDown={() => addPlayerFromTargetSearch(p)}
+                        >
+                          <span className="font-medium">{p.first_name} {p.last_name}</span>
+                          <span className="text-muted-foreground text-xs">{p.team || "—"} · {p.position || "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {targetPlayerSearchQuery && filteredTargetPlayerSearch.length === 0 && (
+                    <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md px-3 py-2 text-sm text-muted-foreground">
+                      No players found
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

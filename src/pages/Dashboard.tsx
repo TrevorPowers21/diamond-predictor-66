@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
@@ -35,16 +36,16 @@ type PlayerRow = {
   nil_value: number | null;
 };
 
-const METRIC_LABELS: Record<MetricKey, string> = {
-  p_avg: "pAVG",
-  p_obp: "pOBP",
-  p_slg: "pSLG",
-  p_ops: "pOPS",
-  p_iso: "pISO",
-  p_wrc_plus: "pWRC+",
-  owar: "oWAR",
-  nil_value: "NIL",
-};
+const METRICS: { key: MetricKey; label: string }[] = [
+  { key: "p_avg", label: "pAVG" },
+  { key: "p_obp", label: "pOBP" },
+  { key: "p_slg", label: "pSLG" },
+  { key: "p_ops", label: "pOPS" },
+  { key: "p_iso", label: "pISO" },
+  { key: "p_wrc_plus", label: "pWRC+" },
+  { key: "owar", label: "oWAR" },
+  { key: "nil_value", label: "NIL" },
+];
 
 const compactDollar = new Intl.NumberFormat("en-US", {
   notation: "compact",
@@ -83,14 +84,13 @@ const computeOWar = (wrcPlus: number | null | undefined): number | null => {
   return rar / 10;
 };
 
+
 export default function Dashboard() {
   const { devBypassed, disableDevBypass } = useAuth();
   const navigate = useNavigate();
   const serviceKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
-  const [visualMetric, setVisualMetric] = useState<MetricKey>("p_avg");
-  const [visualPool, setVisualPool] = useState<PoolKey>("all");
-  const [rankingMetric, setRankingMetric] = useState<MetricKey>("p_obp");
-  const [rankingPool, setRankingPool] = useState<PoolKey>("all");
+  const [metric, setMetric] = useState<MetricKey>("p_avg");
+  const [pool, setPool] = useState<PoolKey>("all");
 
   const { data: players = [], isLoading } = useQuery({
     queryKey: ["overview-top10-base"],
@@ -159,11 +159,8 @@ export default function Dashboard() {
     return [...new Set(players.map((p) => (p.conference || "").trim()).filter(Boolean))].sort();
   }, [players]);
 
-  const top10For = (metric: MetricKey, pool: PoolKey) => {
-    const source =
-      pool === "all"
-        ? players
-        : players.filter((p) => (p.conference || "").trim() === pool);
+  const top10 = useMemo(() => {
+    const source = pool === "all" ? players : players.filter((p) => (p.conference || "").trim() === pool);
     return source
       .map((p) => {
         const owarValue = computeOWar(p.p_wrc_plus);
@@ -192,20 +189,20 @@ export default function Dashboard() {
       .filter((p) => p.metric_value != null)
       .sort((a, b) => (b.metric_value ?? -Infinity) - (a.metric_value ?? -Infinity))
       .slice(0, 10);
-  };
+  }, [players, metric, pool]);
 
-  const visualTop10 = useMemo(() => top10For(visualMetric, visualPool), [players, visualMetric, visualPool]);
-  const rankingTop10 = useMemo(() => top10For(rankingMetric, rankingPool), [players, rankingMetric, rankingPool]);
-
-  const chartData = visualTop10.map((p, idx) => ({
+  const chartData = top10.map((p, idx) => ({
     name: `${idx + 1}. ${p.chart_name}`,
     value: p.metric_value ?? 0,
-    valueLabel: formatMetric(visualMetric, p.metric_value ?? null),
+    valueLabel: formatMetric(metric, p.metric_value ?? null),
     player_id: p.player_id,
   }));
+
   const chartConfig = {
-    value: { label: METRIC_LABELS[visualMetric], color: "hsl(var(--primary))" },
+    value: { label: METRICS.find((m) => m.key === metric)?.label ?? metric, color: "hsl(var(--primary))" },
   };
+
+  const metricLabel = METRICS.find((m) => m.key === metric)?.label ?? metric;
 
   return (
     <DashboardLayout>
@@ -227,56 +224,100 @@ export default function Dashboard() {
       <div className="space-y-6">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Overview</h2>
-          <p className="text-muted-foreground">
-            {isLoading ? "Loading top 10 explorer..." : "Use separate visual and ranking modules for Top 10 projected outcomes."}
+          <p className="text-muted-foreground text-sm">
+            {isLoading ? "Loading…" : "Top 10 projected outcomes across the player pool."}
           </p>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card className="min-w-0 overflow-hidden order-2">
-            <CardHeader className="space-y-3">
-              <CardTitle className="text-base">Visual Top 10</CardTitle>
-              <CardDescription>Graph module (left).</CardDescription>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="min-w-0">
-                  <div className="mb-1 text-xs font-medium text-muted-foreground">Metric</div>
-                  <Select value={visualMetric} onValueChange={(v) => setVisualMetric(v as MetricKey)}>
-                    <SelectTrigger className="h-9 w-full"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="p_avg">pAVG</SelectItem>
-                      <SelectItem value="p_obp">pOBP</SelectItem>
-                      <SelectItem value="p_slg">pSLG</SelectItem>
-                      <SelectItem value="p_ops">pOPS</SelectItem>
-                      <SelectItem value="p_iso">pISO</SelectItem>
-                      <SelectItem value="p_wrc_plus">pWRC+</SelectItem>
-                      <SelectItem value="owar">oWAR</SelectItem>
-                      <SelectItem value="nil_value">NIL</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="min-w-0">
-                  <div className="mb-1 text-xs font-medium text-muted-foreground">Pool</div>
-                  <Select value={visualPool} onValueChange={(v) => setVisualPool(v as PoolKey)}>
-                    <SelectTrigger className="h-9 w-full"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Conferences</SelectItem>
-                      {conferenceOptions.map((conf) => (
-                        <SelectItem key={`visual-${conf}`} value={conf}>{conf}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+        <Card>
+          <CardHeader className="pb-3 space-y-4">
+            {/* Metric tabs + pool dropdown row */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Tabs value={metric} onValueChange={(v) => setMetric(v as MetricKey)}>
+                <TabsList className="flex-wrap h-auto gap-1">
+                  {METRICS.map((m) => (
+                    <TabsTrigger key={m.key} value={m.key} className="text-xs px-3 py-1.5">
+                      {m.label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+
+              <div className="min-w-[180px]">
+                <Select value={pool} onValueChange={(v) => setPool(v as PoolKey)}>
+                  <SelectTrigger className="h-9 w-full">
+                    <SelectValue placeholder="All Conferences" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Conferences</SelectItem>
+                    {conferenceOptions.map((conf) => (
+                      <SelectItem key={conf} value={conf}>{conf}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-            </CardHeader>
-            <CardContent className="space-y-3 overflow-hidden pl-3 pr-3">
-              {visualTop10.length === 0 ? (
-                <div className="py-10 text-center text-sm text-muted-foreground">No rows available for this metric/pool.</div>
-              ) : (
-                <div className="space-y-3 overflow-hidden">
-                  <ChartContainer config={chartConfig} className="h-[340px] w-full overflow-hidden">
-                    <BarChart data={chartData} layout="vertical" margin={{ left: 8, right: 64, top: 4, bottom: 4 }}>
+            </div>
+
+            <CardTitle className="text-sm font-semibold text-muted-foreground">
+              Top 10 — {metricLabel}{pool !== "all" ? ` · ${pool}` : ""}
+            </CardTitle>
+          </CardHeader>
+
+          <CardContent className="p-0">
+            {isLoading ? (
+              <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>
+            ) : top10.length === 0 ? (
+              <div className="py-16 text-center text-sm text-muted-foreground">No data available for this metric / pool.</div>
+            ) : (
+              <div className="grid lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x items-stretch">
+                {/* Ranked cards list */}
+                <div className="divide-y">
+                  {top10.map((row, idx) => (
+                      <div key={`${row.player_id}-${idx}`} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center text-xs font-semibold text-muted-foreground tabular-nums">
+                          {idx + 1}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <Link
+                            to={`/dashboard/player/${row.player_id}`}
+                            className="block truncate text-sm font-semibold text-primary hover:underline"
+                          >
+                            {row.full_name}
+                          </Link>
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <span className="truncate">{row.school}</span>
+                            {row.position && (
+                              <>
+                                <span>·</span>
+                                <span>{row.position}</span>
+                              </>
+                            )}
+                            {row.model_type === "transfer" && (
+                              <>
+                                <span>·</span>
+                                <span className="text-accent-foreground font-medium">Transfer</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className="ml-2 font-mono text-sm font-bold tabular-nums">
+                          {formatMetric(metric, row.metric_value)}
+                        </div>
+                      </div>
+                  ))}
+                </div>
+
+                {/* Bar chart */}
+                <div className="p-4 overflow-hidden flex flex-col">
+                  <ChartContainer config={chartConfig} className="flex-1 min-h-0 w-full overflow-hidden">
+                    <BarChart data={chartData} layout="vertical" barCategoryGap="30%" margin={{ left: 8, right: 72, top: 8, bottom: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                      <XAxis type="number" domain={[0, "auto"]} tickFormatter={(v) => tickFormat(visualMetric, Number(v))} />
+                      <XAxis
+                        type="number"
+                        domain={[0, "auto"]}
+                        tickFormatter={(v) => tickFormat(metric, Number(v))}
+                        tick={{ fontSize: 10 }}
+                      />
                       <YAxis
                         type="category"
                         dataKey="name"
@@ -322,69 +363,10 @@ export default function Dashboard() {
                     </BarChart>
                   </ChartContainer>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="min-w-0 overflow-hidden order-1">
-            <CardHeader className="space-y-3">
-              <CardTitle className="text-base">Ranking Top 10</CardTitle>
-              <CardDescription>Single uninterrupted list with separate controls.</CardDescription>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="min-w-0">
-                  <div className="mb-1 text-xs font-medium text-muted-foreground">Metric</div>
-                  <Select value={rankingMetric} onValueChange={(v) => setRankingMetric(v as MetricKey)}>
-                    <SelectTrigger className="h-9 w-full"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="p_avg">pAVG</SelectItem>
-                      <SelectItem value="p_obp">pOBP</SelectItem>
-                      <SelectItem value="p_slg">pSLG</SelectItem>
-                      <SelectItem value="p_ops">pOPS</SelectItem>
-                      <SelectItem value="p_iso">pISO</SelectItem>
-                      <SelectItem value="p_wrc_plus">pWRC+</SelectItem>
-                      <SelectItem value="owar">oWAR</SelectItem>
-                      <SelectItem value="nil_value">NIL</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="min-w-0">
-                  <div className="mb-1 text-xs font-medium text-muted-foreground">Pool</div>
-                  <Select value={rankingPool} onValueChange={(v) => setRankingPool(v as PoolKey)}>
-                    <SelectTrigger className="h-9 w-full"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Conferences</SelectItem>
-                      {conferenceOptions.map((conf) => (
-                        <SelectItem key={`ranking-${conf}`} value={conf}>{conf}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
               </div>
-            </CardHeader>
-            <CardContent className="overflow-hidden">
-              {rankingTop10.length === 0 ? (
-                <div className="py-10 text-center text-sm text-muted-foreground">No rows available for this metric/pool.</div>
-              ) : (
-                <div className="rounded-md border">
-                  <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Ranking ({METRIC_LABELS[rankingMetric]})
-                  </div>
-                  {rankingTop10.map((row, idx) => (
-                    <div key={`${row.player_id}-${idx}`} className="flex items-center justify-between border-b px-3 py-2 last:border-b-0">
-                      <div className="min-w-0">
-                        <Link to={`/dashboard/player/${row.player_id}`} className="block truncate text-sm font-medium text-primary hover:underline">
-                          {idx + 1}. {row.full_name}
-                        </Link>
-                        <div className="truncate text-xs text-muted-foreground">{row.school}</div>
-                      </div>
-                      <div className="ml-3 font-mono text-sm font-semibold">{formatMetric(rankingMetric, row.metric_value)}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </DashboardLayout>
   );
