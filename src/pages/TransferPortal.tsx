@@ -217,7 +217,7 @@ export default function TransferPortal() {
             from_avg,
             from_obp,
             from_slg,
-            power_rating_plus,
+            power_rating_plus
           `)
           .in("model_type", ["returner", "transfer"])
           .range(predFrom, predFrom + PAGE_SIZE - 1);
@@ -439,6 +439,7 @@ export default function TransferPortal() {
     const baPR = internals?.avg_power_rating ?? null;
     const obpPR = internals?.obp_power_rating ?? null;
     const isoPR = internals?.slg_power_rating ?? null;
+
     if (baPR == null) missingInputs.push("BA Power Rating+");
     if (obpPR == null) missingInputs.push("OBP Power Rating+");
     if (isoPR == null) missingInputs.push("ISO Power Rating+");
@@ -673,8 +674,8 @@ export default function TransferPortal() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Transfer Portal</h2>
           <p className="text-muted-foreground">
-            Move a player to a destination school and simulate transfer outcomes using conference/park/stuff deltas,
-            internal power ratings, oWAR, and NIL.
+            Simulate any player's projected outcomes at a destination school using conference/park/stuff deltas,
+            internal power ratings, oWAR, and NIL. All active roster players are eligible — not limited to portal entries.
           </p>
         </div>
 
