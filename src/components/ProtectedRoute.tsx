@@ -3,7 +3,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Activity } from "lucide-react";
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { session, loading } = useAuth();
+  const { session, loading, devBypassed } = useAuth();
 
   if (loading) {
     return (
@@ -13,8 +13,7 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     );
   }
 
-  // Allow bypass for testing — remove this check to re-enable auth protection
-  // if (!session) return <Navigate to="/auth" replace />;
+  if (!session && !devBypassed) return <Navigate to="/auth" replace />;
 
   return <>{children}</>;
 }

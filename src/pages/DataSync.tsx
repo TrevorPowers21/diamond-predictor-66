@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
+import { bulkRecalculatePredictionsLocal } from "@/lib/predictionEngine";
 import { toast } from "sonner";
 import { Download, Upload, RefreshCw, FileSpreadsheet, CheckCircle, AlertCircle, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
@@ -141,26 +142,8 @@ export default function DataSync() {
   const [bulkResult, setBulkResult] = useState<{ updated: number; errors: number; total: number } | null>(null);
 
   const runBulkRecalculate = async () => {
-    setBulkLoading(true);
-    setBulkResult(null);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error("Not authenticated");
-      const res = await supabase.functions.invoke("recalculate-prediction", {
-        body: { action: "bulk_recalculate" },
-      });
-      const result = res.data;
-      if (result?.success) {
-        setBulkResult({ updated: result.updated, errors: result.errors, total: result.total });
-        toast.success(`Recalculated ${result.updated} of ${result.total} returner predictions`);
-      } else {
-        toast.error(result?.error ?? "Bulk recalculation failed");
-      }
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBulkLoading(false);
-    }
+    setBulkLoading(false);
+    toast.info("Bulk recalculation is frozen while we run a single-player equation trace.");
   };
 
   const actions = [
@@ -240,17 +223,17 @@ export default function DataSync() {
         <Card className="border-primary/30 col-span-full">
           <CardContent className="flex flex-1 flex-col justify-between pt-6">
             <div className="mb-4">
-              <div className="flex items-center gap-2 font-semibold">Bulk Recalculate Returner Predictions</div>
-              <p className="text-sm text-muted-foreground mt-1">Re-run the returning player formula on all active returner predictions using the latest equation.</p>
+              <div className="flex items-center gap-2 font-semibold">Bulk Recalculate All Returners</div>
+              <p className="text-sm text-muted-foreground mt-1">Re-run the returner formula on all player predictions (returners + transfers), including departed players.</p>
             </div>
             <Button
               onClick={runBulkRecalculate}
-              disabled={bulkLoading || loading !== null}
+              disabled
               variant="default"
               className="w-full gap-2"
             >
               {bulkLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              {bulkLoading ? "Recalculating…" : "Recalculate All Returners"}
+              Bulk Recalc Frozen
             </Button>
             {bulkResult && (
               <p className="text-sm text-muted-foreground mt-2">

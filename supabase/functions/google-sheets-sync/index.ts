@@ -857,22 +857,40 @@ async function importConferenceStats(
   let imported = 0;
   let skipped = 0;
   let confStatsImported = 0;
+  const WRC_WEIGHTS = { obp: 0.45, slg: 0.30, avg: 0.15, iso: 0.10 };
+  const round3 = (v: number) => Math.round(v * 1000) / 1000;
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
     const conference = row[0]?.trim();
     if (!conference) { skipped++; continue; }
 
+    const avg = Number.parseFloat(row[1]);
+    const obp = Number.parseFloat(row[2]);
+    const slg = Number.parseFloat(row[3]);
+    const hasCoreRates = Number.isFinite(avg) && Number.isFinite(obp) && Number.isFinite(slg);
+    const calcIso = hasCoreRates ? (slg - avg) : null;
+    const calcOps = hasCoreRates ? (obp + slg) : null;
+    const calcWrc = hasCoreRates && calcIso != null
+      ? (
+        (WRC_WEIGHTS.obp * obp) +
+        (WRC_WEIGHTS.slg * slg) +
+        (WRC_WEIGHTS.avg * avg) +
+        (WRC_WEIGHTS.iso * calcIso)
+      )
+      : null;
+
     // ── 1. Upsert into conference_stats (dedicated columns) ──
     const confStatsRecord = {
       conference,
       season,
-      avg: parseFloat(row[1]) || null,
-      obp: parseFloat(row[2]) || null,
-      slg: parseFloat(row[3]) || null,
-      ops: parseFloat(row[4]) || null,
-      iso: parseFloat(row[5]) || null,
-      wrc: parseFloat(row[6]) || null,
+      avg: Number.isFinite(avg) ? round3(avg) : null,
+      obp: Number.isFinite(obp) ? round3(obp) : null,
+      slg: Number.isFinite(slg) ? round3(slg) : null,
+      // Calculated in-app from AVG/OBP/SLG to keep this deterministic.
+      ops: calcOps != null ? round3(calcOps) : null,
+      iso: calcIso != null ? round3(calcIso) : null,
+      wrc: calcWrc != null ? round3(calcWrc) : null,
       // H-L stored for future pitching use
       ev_score: parseFloat(row[7]) || null,
       barrel_score: parseFloat(row[8]) || null,
@@ -910,12 +928,12 @@ async function importConferenceStats(
       rank: null as number | null,
       strength_of_schedule: null as number | null,
       notes: JSON.stringify({
-        avg: parseFloat(row[1]) || null,
-        obp: parseFloat(row[2]) || null,
-        slg: parseFloat(row[3]) || null,
-        ops: parseFloat(row[4]) || null,
-        iso: parseFloat(row[5]) || null,
-        wrc: parseFloat(row[6]) || null,
+        avg: Number.isFinite(avg) ? round3(avg) : null,
+        obp: Number.isFinite(obp) ? round3(obp) : null,
+        slg: Number.isFinite(slg) ? round3(slg) : null,
+        ops: calcOps != null ? round3(calcOps) : null,
+        iso: calcIso != null ? round3(calcIso) : null,
+        wrc: calcWrc != null ? round3(calcWrc) : null,
         ev_score: parseFloat(row[7]) || null,
         barrel_score: parseFloat(row[8]) || null,
         whiff_score: parseFloat(row[9]) || null,

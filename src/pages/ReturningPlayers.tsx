@@ -7,13 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Users,
-  TrendingUp,
-  TrendingDown,
   ArrowUpDown,
   Search,
   BarChart3,
@@ -25,17 +22,25 @@ import {
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell } from "recharts";
 import { toast } from "sonner";
+import { recalculatePredictionById } from "@/lib/predictionEngine";
+import storage2025Seed from "@/data/storage_2025_seed.json";
+import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
+import {
+  DEFAULT_NIL_TIER_MULTIPLIERS,
+  getProgramTierMultiplierByConference,
+  getPositionValueMultiplier,
+} from "@/lib/nilProgramSpecific";
 
 type SortKey =
   | "name"
-  | "p_ops"
   | "p_avg"
-  | "p_slg"
   | "p_obp"
+  | "p_slg"
+  | "p_ops"
   | "p_iso"
   | "p_wrc_plus"
-  | "power_rating_plus"
-  | "class_transition";
+  | "p_war"
+  | "p_nil";
 type SortDir = "asc" | "desc";
 
 interface ReturnerPlayer {
@@ -47,23 +52,26 @@ interface ReturnerPlayer {
   conference: string | null;
   position: string | null;
   class_year: string | null;
+  transfer_portal?: boolean | null;
+  model_type: "returner" | "transfer";
+  status: "active" | "departed" | "archived";
+  nil_value: number | null;
   prediction: {
-    variant: string;
+    from_avg: number | null;
+    from_obp: number | null;
+    from_slg: number | null;
+    class_transition: string | null;
+    dev_aggressiveness: number | null;
     p_avg: number | null;
     p_obp: number | null;
     p_slg: number | null;
     p_ops: number | null;
     p_iso: number | null;
     p_wrc_plus: number | null;
-    from_avg: number | null;
-    from_obp: number | null;
-    from_slg: number | null;
-    dev_aggressiveness: number | null;
-    class_transition: string | null;
     power_rating_plus: number | null;
     ev_score: number | null;
     barrel_score: number | null;
-    whiff_score: number | null;
+    contact_score: number | null;
     chase_score: number | null;
   };
 }
@@ -77,45 +85,117 @@ const pctFormat = (v: number | null | undefined) => {
   if (v == null) return "—";
   return Math.round(v).toString();
 };
+const compactDollar = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  compactDisplay: "short",
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 1,
+});
 
-const deltaColor = (from: number | null, to: number | null) => {
-  if (from == null || to == null) return "";
+const moneyFormat = (v: number | null | undefined) => {
+  if (v == null) return "—";
+  return compactDollar.format(v).replace("k", "K").replace("m", "M").replace("b", "B");
+};
+
+const computeDerived = (avg: number | null, obp: number | null, slg: number | null) => {
+  const ncaaAvgWrc = 0.364;
+  const ops = obp != null && slg != null ? obp + slg : null;
+  const iso = slg != null && avg != null ? slg - avg : null;
+  const wrc = avg != null && obp != null && slg != null && iso != null
+    ? (0.45 * obp) + (0.3 * slg) + (0.15 * avg) + (0.1 * iso)
+    : null;
+  const wrcPlus = wrc != null && ncaaAvgWrc !== 0 ? (wrc / ncaaAvgWrc) * 100 : null;
+  return { ops, iso, wrcPlus };
+};
+
+const computeOWarFromWrcPlus = (wrcPlus: number | null) => {
+  if (wrcPlus == null) return null;
+  const pa = 260;
+  const runsPerPa = 0.13;
+  const replacementRuns = (pa / 600) * 25;
+  const offValue = (wrcPlus - 100) / 100;
+  const raa = offValue * pa * runsPerPa;
+  const rar = raa + replacementRuns;
+  return rar / 10;
+};
+
+const computeNilFallback = ({
+  storedNil,
+  wrcPlus,
+  conference,
+  position,
+}: {
+  storedNil: number | null | undefined;
+  wrcPlus: number | null | undefined;
+  conference: string | null | undefined;
+  position: string | null | undefined;
+}) => {
+  if (storedNil != null) return storedNil;
+  const owar = computeOWarFromWrcPlus(wrcPlus ?? null);
+  if (owar == null) return null;
+  const ptm = getProgramTierMultiplierByConference(conference, DEFAULT_NIL_TIER_MULTIPLIERS);
+  const pvm = getPositionValueMultiplier(position);
+  return owar * 25000 * ptm * pvm;
+};
+
+const deltaClass = (from: number | null, to: number | null, threshold = 0.001) => {
+  if (from == null || to == null) return "text-muted-foreground";
   const diff = to - from;
-  if (diff > 0.01) return "text-[hsl(var(--success))]";
-  if (diff < -0.01) return "text-destructive";
+  if (diff > threshold) return "text-[hsl(var(--success))]";
+  if (diff < -threshold) return "text-destructive";
   return "text-muted-foreground";
 };
 
-const DeltaIndicator = ({ from, to }: { from: number | null; to: number | null }) => {
-  if (from == null || to == null) return null;
-  const diff = to - from;
-  if (Math.abs(diff) < 0.001) return null;
-  return diff > 0 ? (
-    <TrendingUp className="inline h-3 w-3 text-[hsl(var(--success))] ml-1" />
-  ) : (
-    <TrendingDown className="inline h-3 w-3 text-destructive ml-1" />
-  );
+const normalizeName = (value: string | null | undefined) =>
+  (value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+const nameTeamKey = (name: string | null | undefined, team: string | null | undefined) =>
+  `${normalizeName(name)}|${normalizeName(team)}`;
+const erf = (x: number) => {
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * ax);
+  const y =
+    1 -
+    (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+      t *
+      Math.exp(-ax * ax);
+  return sign * y;
 };
-
-const classTransitionLabel: Record<string, string> = {
-  FS: "FR → SO",
-  SJ: "SO → JR",
-  JS: "JR → SR",
-  GR: "Graduate",
+const scoreFromNormal = (x: number | null, mean: number, sd: number, invert = false) => {
+  if (x == null || sd <= 0) return null;
+  const cdf = 0.5 * (1 + erf((x - mean) / (sd * Math.SQRT2)));
+  const pct = cdf * 100;
+  return invert ? 100 - pct : pct;
 };
+const powerSeedByName = new Map<string, Array<any>>();
+const powerSeedByNameTeam = new Map<string, any>();
+for (const row of powerRatings2025Seed as Array<any>) {
+  const key = normalizeName(row.playerName);
+  const arr = powerSeedByName.get(key) || [];
+  arr.push(row);
+  powerSeedByName.set(key, arr);
+  const ntKey = nameTeamKey(row.playerName, row.team);
+  if (!powerSeedByNameTeam.has(ntKey)) powerSeedByNameTeam.set(ntKey, row);
+}
 
 export default function ReturningPlayers() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
-  const [variant, setVariant] = useState<"regular" | "xstats">("regular");
   const [positionFilter, setPositionFilter] = useState<string>("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(100);
   const [sortKey, setSortKey] = useState<SortKey>("p_ops");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-
-  const [statusFilter, setStatusFilter] = useState<"active" | "departed" | "all">("active");
   const [bulkEditMode, setBulkEditMode] = useState(false);
-  const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string; position?: string }>>({});
+  const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string | null; position?: string | null }>>({});
   const [showMissingOnly, setShowMissingOnly] = useState(false);
+  const normalize = (value: string | null | undefined) =>
+    (value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 
   // Fixed scrollbar refs & sync
   const scrollbarRef = useRef<HTMLDivElement>(null);
@@ -186,29 +266,42 @@ export default function ReturningPlayers() {
   }, []);
 
   const { data: players = [], isLoading } = useQuery({
-    queryKey: ["returning-players", variant, statusFilter],
+    queryKey: ["returning-players-2025-unified"],
     queryFn: async () => {
-      // Fetch all rows using pagination to bypass the 1000-row default limit
+      const nameTeamKey = (name: string, team: string | null | undefined) => `${normalize(name)}|${normalize(team || "")}`;
+      const statSeedRows = storage2025Seed as Array<{
+        playerName: string;
+        team: string | null;
+        avg: number | null;
+        obp: number | null;
+        slg: number | null;
+      }>;
+      const statsByName = new Map<string, typeof statSeedRows>();
+      const statsByNameTeam = new Map<string, (typeof statSeedRows)[number]>();
+      for (const row of statSeedRows) {
+        const nk = normalize(row.playerName);
+        const arr = statsByName.get(nk) || [];
+        arr.push(row);
+        statsByName.set(nk, arr);
+        statsByNameTeam.set(nameTeamKey(row.playerName, row.team), row);
+      }
+
+      // Fetch all regular prediction rows (returner + transfer, all statuses), then dedupe to one row/player.
       let allData: any[] = [];
       let from = 0;
       const PAGE_SIZE = 1000;
 
       while (true) {
-        let query = supabase
+        const query = supabase
           .from("player_predictions")
           .select(
             `
             *,
-            players!inner(id, first_name, last_name, team, conference, position, class_year)
+            players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal)
           `,
           )
-          .eq("model_type", "returner")
-          .eq("variant", variant)
+          .in("model_type", ["returner", "transfer"])
           .range(from, from + PAGE_SIZE - 1);
-
-        if (statusFilter !== "all") {
-          query = query.eq("status", statusFilter);
-        }
 
         const { data, error } = await query;
         if (error) throw error;
@@ -218,92 +311,265 @@ export default function ReturningPlayers() {
         from += PAGE_SIZE;
       }
 
-      return (allData || []).map((row: any) => ({
+      const playerIds = Array.from(new Set((allData || []).map((r: any) => r.player_id))).filter(Boolean);
+      const nilByPlayer = new Map<string, number | null>();
+      if (playerIds.length > 0) {
+        // Avoid oversized `in (...)` query strings by fetching NIL in chunks.
+        const NIL_BATCH = 300;
+        const nilRowsAll: Array<{ player_id: string; estimated_value: number | null; season: number | null }> = [];
+        for (let i = 0; i < playerIds.length; i += NIL_BATCH) {
+          const ids = playerIds.slice(i, i + NIL_BATCH);
+          const { data: nilRows, error: nilErr } = await supabase
+            .from("nil_valuations")
+            .select("player_id, estimated_value, season")
+            .in("player_id", ids);
+          if (nilErr) {
+            console.warn("NIL query failed for batch; continuing without NIL values for this chunk.", nilErr);
+            continue;
+          }
+          nilRowsAll.push(...((nilRows || []) as Array<{ player_id: string; estimated_value: number | null; season: number | null }>));
+        }
+        const bySeason = new Map<string, { season: number; value: number | null }>();
+        for (const row of nilRowsAll) {
+          const curr = bySeason.get(row.player_id);
+          const season = Number(row.season) || 0;
+          if (!curr || season > curr.season) bySeason.set(row.player_id, { season, value: row.estimated_value });
+        }
+        for (const [pid, val] of bySeason.entries()) nilByPlayer.set(pid, val.value);
+      }
+
+      const byPlayer = new Map<string, any>();
+      for (const row of allData || []) {
+        const existing = byPlayer.get(row.players.id);
+        if (!existing) {
+          byPlayer.set(row.players.id, row);
+          continue;
+        }
+        const rowHasFrom = row.from_avg != null || row.from_obp != null || row.from_slg != null;
+        const existingHasFrom = existing.from_avg != null || existing.from_obp != null || existing.from_slg != null;
+        const rowHasPred =
+          row.p_avg != null &&
+          row.p_obp != null &&
+          row.p_slg != null &&
+          row.p_ops != null &&
+          row.p_iso != null &&
+          row.p_wrc_plus != null;
+        const rowHasScout =
+          row.ev_score != null ||
+          row.barrel_score != null ||
+          row.whiff_score != null ||
+          row.chase_score != null;
+        const existingHasPred =
+          existing.p_avg != null &&
+          existing.p_obp != null &&
+          existing.p_slg != null &&
+          existing.p_ops != null &&
+          existing.p_iso != null &&
+          existing.p_wrc_plus != null;
+        const existingHasScout =
+          existing.ev_score != null ||
+          existing.barrel_score != null ||
+          existing.whiff_score != null ||
+          existing.chase_score != null;
+        const rowScore =
+          ((row.players.transfer_portal === true && row.model_type === "transfer") ||
+            (row.players.transfer_portal !== true && row.model_type === "returner")
+            ? 6
+            : 0) +
+          (rowHasPred ? 5 : 0) +
+          (rowHasScout ? 2 : 0) +
+          (row.model_type === "transfer" ? 3 : 0) +
+          (row.status === "active" ? 2 : 0) +
+          (rowHasFrom ? 1 : 0);
+        const existingScore =
+          ((existing.players.transfer_portal === true && existing.model_type === "transfer") ||
+            (existing.players.transfer_portal !== true && existing.model_type === "returner")
+            ? 6
+            : 0) +
+          (existingHasPred ? 5 : 0) +
+          (existingHasScout ? 2 : 0) +
+          (existing.model_type === "transfer" ? 3 : 0) +
+          (existing.status === "active" ? 2 : 0) +
+          (existingHasFrom ? 1 : 0);
+        if (rowScore > existingScore) {
+          byPlayer.set(row.players.id, row);
+          continue;
+        }
+        if (rowScore === existingScore) {
+          const rowTs = new Date(row.updated_at || 0).getTime();
+          const existingTs = new Date(existing.updated_at || 0).getTime();
+          if (rowTs > existingTs) byPlayer.set(row.players.id, row);
+        }
+      }
+
+      return Array.from(byPlayer.values()).map((row: any) => {
+        const fullName = `${row.players.first_name} ${row.players.last_name}`;
+        const seedPowerRow =
+          powerSeedByNameTeam.get(nameTeamKey(fullName, row.players.team)) ||
+          (() => {
+            const candidates = powerSeedByName.get(normalizeName(fullName)) || [];
+            return candidates.length === 1 ? candidates[0] : null;
+          })();
+        const seedEvScore = scoreFromNormal(seedPowerRow?.avgExitVelo ?? null, 86.2, 4.28);
+        const seedBarrelScore = scoreFromNormal(seedPowerRow?.barrel ?? null, 17.3, 7.89);
+        const seedContactScore = scoreFromNormal(seedPowerRow?.contact ?? null, 77.1, 6.6);
+        const seedChaseScore = scoreFromNormal(seedPowerRow?.chase ?? null, 23.1, 5.58, true);
+        const candidates = statsByName.get(normalize(fullName)) || [];
+        const byTeam = statsByNameTeam.get(nameTeamKey(fullName, row.players.team));
+        const exactByStats = candidates.find((r) =>
+          (r.avg == null || row.from_avg == null || Math.round(r.avg * 1000) === Math.round(Number(row.from_avg) * 1000)) &&
+          (r.obp == null || row.from_obp == null || Math.round(r.obp * 1000) === Math.round(Number(row.from_obp) * 1000)) &&
+          (r.slg == null || row.from_slg == null || Math.round(r.slg * 1000) === Math.round(Number(row.from_slg) * 1000))
+        );
+        const resolvedTeam2025 = byTeam?.team || exactByStats?.team || (candidates.length === 1 ? candidates[0].team : null) || row.players.team;
+
+        return ({
         id: row.players.id,
         prediction_id: row.id,
         first_name: row.players.first_name,
         last_name: row.players.last_name,
-        team: row.players.team,
+        team: resolvedTeam2025,
         conference: row.players.conference,
         position: row.players.position,
         class_year: row.players.class_year,
+        transfer_portal: row.players.transfer_portal,
+        model_type: row.model_type,
+        status: row.status,
+        nil_value: nilByPlayer.get(row.players.id) ?? null,
         prediction: {
-          variant: row.variant,
+          from_avg: row.from_avg,
+          from_obp: row.from_obp,
+          from_slg: row.from_slg,
+          class_transition: row.class_transition,
+          dev_aggressiveness: row.dev_aggressiveness,
           p_avg: row.p_avg,
           p_obp: row.p_obp,
           p_slg: row.p_slg,
           p_ops: row.p_ops,
           p_iso: row.p_iso,
           p_wrc_plus: row.p_wrc_plus,
-          from_avg: row.from_avg,
-          from_obp: row.from_obp,
-          from_slg: row.from_slg,
-          dev_aggressiveness: row.dev_aggressiveness,
-          class_transition: row.class_transition,
           power_rating_plus: row.power_rating_plus,
-          ev_score: row.ev_score,
-          barrel_score: row.barrel_score,
-          whiff_score: row.whiff_score,
-          chase_score: row.chase_score,
+          ev_score: seedEvScore ?? null,
+          barrel_score: seedBarrelScore ?? null,
+          contact_score: seedContactScore ?? null,
+          chase_score: seedChaseScore ?? null,
         },
-      })) as ReturnerPlayer[];
+      });
+      }) as ReturnerPlayer[];
     },
   });
 
-  const updateDevAgg = useMutation({
-    mutationFn: async ({ predictionId, value }: { predictionId: string; value: number }) => {
-      const { data, error } = await supabase.functions.invoke("recalculate-prediction", {
-        body: { prediction_id: predictionId, dev_aggressiveness: value },
-      });
+  const { data: teamsDirectory = [] } = useQuery({
+    queryKey: ["teams-directory-for-player-dashboard-edit"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("teams")
+        .select("name, conference");
       if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      return data;
+      return (data || []) as Array<{ name: string; conference: string | null }>;
     },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["returning-players"] });
-      toast.success(
-        `Recalculated — pOPS: ${data?.prediction?.p_ops?.toFixed(3) ?? "?"}, wRC+: ${data?.prediction?.p_wrc_plus ?? "?"}`,
-      );
-    },
-    onError: (e) => toast.error(`Failed to recalculate: ${e.message}`),
-  });
-
-  const updateClassTransition = useMutation({
-    mutationFn: async ({ predictionId, value }: { predictionId: string; value: string }) => {
-      const { data, error } = await supabase.functions.invoke("recalculate-prediction", {
-        body: { prediction_id: predictionId, class_transition: value },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      return data;
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["returning-players"] });
-      toast.success(
-        `Class updated — pOPS: ${data?.prediction?.p_ops?.toFixed(3) ?? "?"}, wRC+: ${data?.prediction?.p_wrc_plus ?? "?"}`,
-      );
-    },
-    onError: (e) => toast.error(`Failed to update class: ${e.message}`),
   });
 
   const bulkSave = useMutation({
     mutationFn: async () => {
       const entries = Object.entries(editedPlayers);
       if (entries.length === 0) return;
+      const teamByNorm = new Map<string, { name: string; conference: string | null }>();
+      for (const t of teamsDirectory) {
+        const key = normalize(t.name);
+        if (!key) continue;
+        if (!teamByNorm.has(key)) teamByNorm.set(key, t);
+      }
+
+      const invalidTeams = new Set<string>();
+      const updates: Array<{ playerId: string; payload: Record<string, string | null> }> = [];
+      for (const [playerId, data] of entries) {
+        const payload: Record<string, string | null> = {};
+        if (Object.prototype.hasOwnProperty.call(data, "position")) {
+          payload.position = data.position ?? null;
+        }
+        if (Object.prototype.hasOwnProperty.call(data, "team")) {
+          const rawTeam = (data.team || "").trim();
+          if (!rawTeam) {
+            payload.team = null;
+            payload.conference = null;
+          } else {
+            const match = teamByNorm.get(normalize(rawTeam));
+            if (!match) {
+              invalidTeams.add(rawTeam);
+            } else {
+              payload.team = match.name;
+              payload.conference = match.conference ?? null;
+            }
+          }
+        }
+        if (Object.keys(payload).length > 0) {
+          updates.push({ playerId, payload });
+        }
+      }
+
+      if (invalidTeams.size > 0) {
+        const sample = Array.from(invalidTeams).slice(0, 8).join(", ");
+        throw new Error(`Team name(s) not found in Teams dashboard: ${sample}`);
+      }
+
       const results = await Promise.all(
-        entries.map(([playerId, data]) => supabase.from("players").update(data).eq("id", playerId)),
+        updates.map(({ playerId, payload }) => supabase.from("players").update(payload).eq("id", playerId)),
       );
       const errors = results.filter((r) => r.error);
       if (errors.length > 0) throw new Error(`${errors.length} updates failed`);
-      return entries.length;
+      return updates.length;
     },
     onSuccess: (count) => {
-      queryClient.invalidateQueries({ queryKey: ["returning-players"] });
+      queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
       setEditedPlayers({});
       setBulkEditMode(false);
       toast.success(`Updated ${count} player(s)`);
     },
     onError: (e) => toast.error(`Bulk save failed: ${e.message}`),
+  });
+
+  const updateClassTransition = useMutation({
+    mutationFn: async ({ predictionId, value }: { predictionId: string; value: string }) => {
+      return recalculatePredictionById(predictionId, { class_transition: value });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
+      toast.success("Class adjustment updated");
+    },
+    onError: (e) => toast.error(`Class adjustment failed: ${e.message}`),
+  });
+
+  const updateDevAgg = useMutation({
+    mutationFn: async ({ predictionId, value }: { predictionId: string; value: number }) => {
+      return recalculatePredictionById(predictionId, { dev_aggressiveness: value });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
+      toast.success("Dev aggressiveness updated");
+    },
+    onError: (e) => toast.error(`Dev aggressiveness failed: ${e.message}`),
+  });
+
+  const applyTemplateDefaults = useMutation({
+    mutationFn: async () => {
+      const returnerRows = players.filter((p) => p.model_type === "returner");
+      const BATCH = 40;
+      for (let i = 0; i < returnerRows.length; i += BATCH) {
+        const batch = returnerRows.slice(i, i + BATCH);
+        await Promise.all(
+          batch.map(async (p) => {
+            await recalculatePredictionById(p.prediction_id, { class_transition: "SJ", dev_aggressiveness: 0.0 });
+          }),
+        );
+      }
+      return returnerRows.length;
+    },
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
+      toast.success(`Applied template to ${count} returner rows`);
+    },
+    onError: (e) => toast.error(`Template apply failed: ${e.message}`),
   });
 
   const handleEditField = (playerId: string, field: "team" | "position", value: string) => {
@@ -332,8 +598,7 @@ export default function ReturningPlayers() {
         (p) =>
           `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
           (p.team || "").toLowerCase().includes(q) ||
-          (p.conference || "").toLowerCase().includes(q) ||
-          (p.prediction.class_transition || "").toLowerCase().includes(q),
+          (p.conference || "").toLowerCase().includes(q),
       );
     }
     list.sort((a, b) => {
@@ -346,19 +611,73 @@ export default function ReturningPlayers() {
           ? (aVal as string).localeCompare(bVal as string)
           : (bVal as string).localeCompare(aVal as string);
       }
-      if (sortKey === "class_transition") {
-        aVal = a.prediction.class_transition || "";
-        bVal = b.prediction.class_transition || "";
-        return sortDir === "asc"
-          ? (aVal as string).localeCompare(bVal as string)
-          : (bVal as string).localeCompare(aVal as string);
-      }
-      aVal = a.prediction[sortKey] ?? -999;
-      bVal = b.prediction[sortKey] ?? -999;
+      const ad = computeDerived(a.prediction.from_avg, a.prediction.from_obp, a.prediction.from_slg);
+      const bd = computeDerived(b.prediction.from_avg, b.prediction.from_obp, b.prediction.from_slg);
+      const aMetric: Record<SortKey, number | null> = {
+        name: null,
+        p_avg: a.prediction.p_avg,
+        p_obp: a.prediction.p_obp,
+        p_slg: a.prediction.p_slg,
+        p_ops: a.prediction.p_ops ?? computeDerived(a.prediction.p_avg, a.prediction.p_obp, a.prediction.p_slg).ops,
+        p_iso: a.prediction.p_iso ?? computeDerived(a.prediction.p_avg, a.prediction.p_obp, a.prediction.p_slg).iso,
+        p_wrc_plus: a.prediction.p_wrc_plus,
+        p_war: computeOWarFromWrcPlus(a.prediction.p_wrc_plus),
+        p_nil: computeNilFallback({
+          storedNil: a.nil_value,
+          wrcPlus: a.prediction.p_wrc_plus,
+          conference: a.conference,
+          position: a.position,
+        }),
+      };
+      const bMetric: Record<SortKey, number | null> = {
+        name: null,
+        p_avg: b.prediction.p_avg,
+        p_obp: b.prediction.p_obp,
+        p_slg: b.prediction.p_slg,
+        p_ops: b.prediction.p_ops ?? computeDerived(b.prediction.p_avg, b.prediction.p_obp, b.prediction.p_slg).ops,
+        p_iso: b.prediction.p_iso ?? computeDerived(b.prediction.p_avg, b.prediction.p_obp, b.prediction.p_slg).iso,
+        p_wrc_plus: b.prediction.p_wrc_plus,
+        p_war: computeOWarFromWrcPlus(b.prediction.p_wrc_plus),
+        p_nil: computeNilFallback({
+          storedNil: b.nil_value,
+          wrcPlus: b.prediction.p_wrc_plus,
+          conference: b.conference,
+          position: b.position,
+        }),
+      };
+      aVal = aMetric[sortKey] ?? -999;
+      bVal = bMetric[sortKey] ?? -999;
       return sortDir === "asc" ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
     });
     return list;
   }, [players, search, sortKey, sortDir, showMissingOnly, positionFilter]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, positionFilter, showMissingOnly, sortKey, sortDir, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pagedPlayers = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const visiblePages = useMemo(() => {
+    if (totalPages <= 11) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const pages = new Set<number>([
+      1, 2, 3, 4, 5,
+      totalPages - 1, totalPages,
+      currentPage - 2, currentPage - 1, currentPage, currentPage + 1, currentPage + 2,
+    ]);
+    return Array.from(pages)
+      .filter((p) => p >= 1 && p <= totalPages)
+      .sort((a, b) => a - b);
+  }, [currentPage, totalPages]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -369,24 +688,33 @@ export default function ReturningPlayers() {
   };
 
   // Summary stats
-  const avgOps = players.length ? players.reduce((s, p) => s + (p.prediction.p_ops ?? 0), 0) / players.length : 0;
+  const avgOps = players.length
+    ? players.reduce((s, p) => s + (p.prediction.p_ops ?? computeDerived(p.prediction.p_avg, p.prediction.p_obp, p.prediction.p_slg).ops ?? 0), 0) / players.length
+    : 0;
   const avgWrcPlus = players.length
     ? players.reduce((s, p) => s + (p.prediction.p_wrc_plus ?? 0), 0) / players.length
     : 0;
   const topPlayer = players.length
-    ? [...players].sort((a, b) => (b.prediction.p_wrc_plus ?? 0) - (a.prediction.p_wrc_plus ?? 0))[0]
+    ? [...players].sort((a, b) => {
+      const aw = a.prediction.p_wrc_plus ?? 0;
+      const bw = b.prediction.p_wrc_plus ?? 0;
+      return bw - aw;
+    })[0]
     : null;
 
   // Chart data — top 10 by pWRC+
   const chartData = useMemo(() => {
     return [...players]
-      .filter((p) => p.prediction.p_wrc_plus != null)
-      .sort((a, b) => (b.prediction.p_wrc_plus ?? 0) - (a.prediction.p_wrc_plus ?? 0))
-      .slice(0, 10)
       .map((p) => ({
-        name: `${p.first_name[0]}. ${p.last_name}`,
-        wrcPlus: p.prediction.p_wrc_plus ?? 0,
-        transition: p.prediction.class_transition || "—",
+        player: p,
+        wrcPlus: p.prediction.p_wrc_plus,
+      }))
+      .filter((p) => p.wrcPlus != null)
+      .sort((a, b) => (b.wrcPlus ?? 0) - (a.wrcPlus ?? 0))
+      .slice(0, 10)
+      .map(({ player, wrcPlus }) => ({
+        name: `${player.first_name[0]}. ${player.last_name}`,
+        wrcPlus: wrcPlus ?? 0,
       }));
   }, [players]);
 
@@ -412,8 +740,8 @@ export default function ReturningPlayers() {
         {/* Header */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight">Returning Players</h2>
-            <p className="text-muted-foreground">Projected production for returning roster players</p>
+            <h2 className="text-2xl font-bold tracking-tight">2025 Player Dashboard</h2>
+            <p className="text-muted-foreground">Unified 2025 player dashboard (all players, including transferred and departed)</p>
           </div>
           <div className="flex gap-2 flex-wrap">
             <Button
@@ -424,25 +752,15 @@ export default function ReturningPlayers() {
             >
               {showMissingOnly ? "Show All" : "Missing Teams"}
             </Button>
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "active" | "departed" | "all")}>
-              <SelectTrigger className="w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="departed">Departed</SelectItem>
-                <SelectItem value="all">All</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={variant} onValueChange={(v) => setVariant(v as "regular" | "xstats")}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="regular">Regular Stats</SelectItem>
-                <SelectItem value="xstats">xStats</SelectItem>
-              </SelectContent>
-            </Select>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 text-xs"
+              onClick={() => applyTemplateDefaults.mutate()}
+              disabled={applyTemplateDefaults.isPending}
+            >
+              {applyTemplateDefaults.isPending ? "Applying Template…" : "Apply Template: SO→JR, 0.0"}
+            </Button>
           </div>
         </div>
 
@@ -450,14 +768,12 @@ export default function ReturningPlayers() {
         <div className="grid gap-4 sm:grid-cols-3">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Returning Players</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">2025 Players</CardTitle>
               <Users className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{players.length}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {variant === "xstats" ? "xStats" : "Regular"} variant
-              </p>
+              <p className="text-xs text-muted-foreground mt-1">All 2025 players</p>
             </CardContent>
           </Card>
           <Card>
@@ -481,7 +797,7 @@ export default function ReturningPlayers() {
               </div>
               <p className="text-xs text-muted-foreground mt-1">
                 {topPlayer
-                  ? `pWRC+: ${pctFormat(topPlayer.prediction.p_wrc_plus)} · ${classTransitionLabel[topPlayer.prediction.class_transition || ""] || topPlayer.prediction.class_transition || "—"}`
+                  ? `wRC+: ${pctFormat(topPlayer.prediction.p_wrc_plus)}`
                   : "No data"}
               </p>
             </CardContent>
@@ -492,8 +808,8 @@ export default function ReturningPlayers() {
         {chartData.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Top 10 Projected wRC+</CardTitle>
-              <CardDescription>Predicted production for top returning players (100 = league average)</CardDescription>
+              <CardTitle className="text-base">Top 10 wRC+</CardTitle>
+              <CardDescription>Top 2025 weighted runs created plus (100 = NCAA average)</CardDescription>
             </CardHeader>
             <CardContent>
               <ChartContainer config={chartConfig} className="h-[280px]">
@@ -518,6 +834,19 @@ export default function ReturningPlayers() {
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <CardTitle className="text-base">Player Projections</CardTitle>
+              <Select value={positionFilter} onValueChange={setPositionFilter}>
+                <SelectTrigger className="w-36 h-8">
+                  <SelectValue placeholder="Position" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Positions</SelectItem>
+                  {positions.map((pos) => (
+                    <SelectItem key={pos} value={pos}>
+                      {pos}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {bulkEditMode ? (
                 <div className="flex gap-1">
                   <Button
@@ -551,19 +880,25 @@ export default function ReturningPlayers() {
               )}
             </div>
             <div className="flex items-center gap-2 w-full sm:w-auto">
-              <Select value={positionFilter} onValueChange={setPositionFilter}>
-                <SelectTrigger className="w-32">
-                  <SelectValue placeholder="Position" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Positions</SelectItem>
-                  {positions.map((pos) => (
-                    <SelectItem key={pos} value={pos}>
-                      {pos}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-1 overflow-x-auto max-w-[360px]">
+                {visiblePages.map((p, i) => {
+                  const prev = visiblePages[i - 1];
+                  const showGap = i > 0 && prev != null && p - prev > 1;
+                  return (
+                    <div key={p} className="flex items-center gap-1">
+                      {showGap ? <span className="px-1 text-muted-foreground text-xs">...</span> : null}
+                      <Button
+                        variant={p === currentPage ? "default" : "outline"}
+                        size="sm"
+                        className="h-6 min-w-6 px-1.5 text-[10px]"
+                        onClick={() => setPage(p)}
+                      >
+                        {p}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
               <div className="relative w-full sm:w-64">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -594,59 +929,22 @@ export default function ReturningPlayers() {
                         <TableHead className="min-w-[160px] sticky left-0 z-30 bg-background">
                           <SortButton label="Player" sortKeyVal="name" />
                         </TableHead>
-                        <TableHead className="min-w-[120px]">Team</TableHead>
-                        <TableHead className="min-w-[80px]">Pos</TableHead>
-                        <TableHead>
-                          <SortButton label="Year" sortKeyVal="class_transition" />
-                        </TableHead>
-                        <TableHead className="min-w-[120px]">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="cursor-help font-medium text-muted-foreground">Dev Confidence</span>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-xs">
-                              <p className="text-xs">
-                                Adjusts the developmental weight applied to projections. 0 = no growth, 0.5 = moderate,
-                                1.0 = full confidence.
-                              </p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TableHead>
-                        <TableHead className="text-right">
-                          <SortButton label="Prev AVG" sortKeyVal="p_avg" />
-                        </TableHead>
-                        <TableHead className="text-right">
-                          <SortButton label="Prev OBP" sortKeyVal="p_obp" />
-                        </TableHead>
-                        <TableHead className="text-right">
-                          <SortButton label="Prev SLG" sortKeyVal="p_slg" />
-                        </TableHead>
-                        <TableHead className="text-right">
-                          <SortButton label="pAVG" sortKeyVal="p_avg" />
-                        </TableHead>
-                        <TableHead className="text-right">
-                          <SortButton label="pOBP" sortKeyVal="p_obp" />
-                        </TableHead>
-                        <TableHead className="text-right">
-                          <SortButton label="pSLG" sortKeyVal="p_slg" />
-                        </TableHead>
-                        <TableHead className="text-right">
-                          <SortButton label="pOPS" sortKeyVal="p_ops" />
-                        </TableHead>
-                        <TableHead className="text-right">
-                          <SortButton label="pISO" sortKeyVal="p_iso" />
-                        </TableHead>
-                        <TableHead className="text-right">
-                          <SortButton label="pWRC+" sortKeyVal="p_wrc_plus" />
-                        </TableHead>
-                        <TableHead className="text-right">
-                          <SortButton label="PWR+" sortKeyVal="power_rating_plus" />
-                        </TableHead>
-                        <TableHead className="text-center min-w-[180px]">Scout Grades</TableHead>
+                        <TableHead>Prior</TableHead>
+                        <TableHead className="min-w-[120px]">Class Adjustment</TableHead>
+                        <TableHead className="min-w-[140px]">Dev Aggressiveness</TableHead>
+                        <TableHead className="text-right"><SortButton label="pAVG" sortKeyVal="p_avg" /></TableHead>
+                        <TableHead className="text-right"><SortButton label="p OBP" sortKeyVal="p_obp" /></TableHead>
+                        <TableHead className="text-right"><SortButton label="pSLG" sortKeyVal="p_slg" /></TableHead>
+                        <TableHead className="text-right"><SortButton label="p OPS" sortKeyVal="p_ops" /></TableHead>
+                        <TableHead className="text-right"><SortButton label="pISO" sortKeyVal="p_iso" /></TableHead>
+                        <TableHead className="text-right"><SortButton label="wRC+" sortKeyVal="p_wrc_plus" /></TableHead>
+                        <TableHead className="text-right"><SortButton label="oWAR" sortKeyVal="p_war" /></TableHead>
+                        <TableHead className="text-right"><SortButton label="NIL" sortKeyVal="p_nil" /></TableHead>
+                        <TableHead className="text-center min-w-[180px]">Scouting</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filtered.map((p) => {
+                      {pagedPlayers.map((p) => {
                         const pred = p.prediction;
                         return (
                           <TableRow key={p.prediction_id}>
@@ -657,95 +955,95 @@ export default function ReturningPlayers() {
                               >
                                 {p.first_name} {p.last_name}
                               </Link>
+                              {bulkEditMode ? (
+                                <div className="mt-1 flex items-center gap-1">
+                                  <Input
+                                    className="h-6 w-[72px] text-[10px]"
+                                    defaultValue={editedPlayers[p.id]?.position ?? p.position ?? ""}
+                                    placeholder="Pos"
+                                    onBlur={(e) => {
+                                      const val = e.target.value.trim();
+                                      if (val !== (p.position ?? "")) handleEditField(p.id, "position", val);
+                                    }}
+                                  />
+                                  <Input
+                                    className="h-6 w-[130px] text-[10px]"
+                                    defaultValue={editedPlayers[p.id]?.team ?? p.team ?? ""}
+                                    placeholder="Team"
+                                    onBlur={(e) => {
+                                      const val = e.target.value.trim();
+                                      if (val !== (p.team ?? "")) handleEditField(p.id, "team", val);
+                                    }}
+                                  />
+                                </div>
+                              ) : (
+                                <div className="text-xs text-muted-foreground">
+                                  {[p.position, p.team].filter(Boolean).join(" · ") || "—"}
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                              {statFormat(pred.from_avg)}/{statFormat(pred.from_obp)}/{statFormat(pred.from_slg)}
                             </TableCell>
                             <TableCell>
-                              {bulkEditMode ? (
-                                <Input
-                                  className="h-7 w-[130px] text-xs"
-                                  defaultValue={editedPlayers[p.id]?.team ?? p.team ?? ""}
-                                  placeholder="Team"
-                                  onBlur={(e) => {
-                                    const val = e.target.value.trim();
-                                    if (val !== (p.team ?? "")) handleEditField(p.id, "team", val);
-                                  }}
+                              {p.model_type === "returner" ? (
+                                <ClassAdjustmentSelector
+                                  value={pred.class_transition || "SJ"}
+                                  onChange={(v) => updateClassTransition.mutate({ predictionId: p.prediction_id, value: v })}
                                 />
                               ) : (
-                                <span className="text-xs text-muted-foreground">{p.team || "—"}</span>
+                                <span className="text-xs text-muted-foreground">—</span>
                               )}
                             </TableCell>
                             <TableCell>
-                              {bulkEditMode ? (
-                                <Input
-                                  className="h-7 w-[70px] text-xs"
-                                  defaultValue={editedPlayers[p.id]?.position ?? p.position ?? ""}
-                                  placeholder="Pos"
-                                  onBlur={(e) => {
-                                    const val = e.target.value.trim();
-                                    if (val !== (p.position ?? "")) handleEditField(p.id, "position", val);
-                                  }}
+                              {p.model_type === "returner" ? (
+                                <DevAggSelector
+                                  value={pred.dev_aggressiveness ?? 0.0}
+                                  onChange={(v) => updateDevAgg.mutate({ predictionId: p.prediction_id, value: v })}
                                 />
                               ) : (
-                                <span className="text-xs text-muted-foreground">{p.position || "—"}</span>
+                                <span className="text-xs text-muted-foreground">—</span>
                               )}
                             </TableCell>
-                            <TableCell>
-                              <ClassTransitionSelector
-                                value={pred.class_transition || "FS"}
-                                onChange={(v) =>
-                                  updateClassTransition.mutate({ predictionId: p.prediction_id, value: v })
-                                }
-                              />
+                            <TableCell className={`text-right font-mono text-sm font-bold ${deltaClass(pred.from_avg, pred.p_avg, 0.001)}`}>{statFormat(pred.p_avg)}</TableCell>
+                            <TableCell className={`text-right font-mono text-sm font-bold ${deltaClass(pred.from_obp, pred.p_obp, 0.001)}`}>{statFormat(pred.p_obp)}</TableCell>
+                            <TableCell className={`text-right font-mono text-sm font-bold ${deltaClass(pred.from_slg, pred.p_slg, 0.001)}`}>{statFormat(pred.p_slg)}</TableCell>
+                            <TableCell className={`text-right font-mono text-sm font-bold ${deltaClass(computeDerived(pred.from_avg, pred.from_obp, pred.from_slg).ops, pred.p_ops ?? computeDerived(pred.p_avg, pred.p_obp, pred.p_slg).ops, 0.001)}`}>
+                              {statFormat(pred.p_ops ?? computeDerived(pred.p_avg, pred.p_obp, pred.p_slg).ops)}
                             </TableCell>
-                            <TableCell>
-                              <DevConfidenceSelector
-                                value={pred.dev_aggressiveness ?? 1}
-                                onChange={(v) => updateDevAgg.mutate({ predictionId: p.prediction_id, value: v })}
-                              />
+                            <TableCell className={`text-right font-mono text-sm font-bold ${deltaClass(computeDerived(pred.from_avg, pred.from_obp, pred.from_slg).iso, pred.p_iso ?? computeDerived(pred.p_avg, pred.p_obp, pred.p_slg).iso, 0.001)}`}>
+                              {statFormat(pred.p_iso ?? computeDerived(pred.p_avg, pred.p_obp, pred.p_slg).iso)}
                             </TableCell>
-                            <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                              {statFormat(pred.from_avg)}
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                              {statFormat(pred.from_obp)}
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                              {statFormat(pred.from_slg)}
-                            </TableCell>
-                            <TableCell
-                              className={`text-right font-mono text-sm font-semibold ${deltaColor(pred.from_avg, pred.p_avg)}`}
-                            >
-                              {statFormat(pred.p_avg)}
-                              <DeltaIndicator from={pred.from_avg} to={pred.p_avg} />
-                            </TableCell>
-                            <TableCell
-                              className={`text-right font-mono text-sm font-semibold ${deltaColor(pred.from_obp, pred.p_obp)}`}
-                            >
-                              {statFormat(pred.p_obp)}
-                              <DeltaIndicator from={pred.from_obp} to={pred.p_obp} />
-                            </TableCell>
-                            <TableCell
-                              className={`text-right font-mono text-sm font-semibold ${deltaColor(pred.from_slg, pred.p_slg)}`}
-                            >
-                              {statFormat(pred.p_slg)}
-                              <DeltaIndicator from={pred.from_slg} to={pred.p_slg} />
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">
-                              {statFormat(pred.p_ops)}
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-sm">{statFormat(pred.p_iso)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">
+                            <TableCell className={`text-right font-mono text-sm font-bold ${deltaClass(computeDerived(pred.from_avg, pred.from_obp, pred.from_slg).wrcPlus, pred.p_wrc_plus, 0.5)}`}>
                               {pctFormat(pred.p_wrc_plus)}
                             </TableCell>
-                            <TableCell className="text-right font-mono text-sm">
-                              {pctFormat(pred.power_rating_plus)}
+                            <TableCell className={`text-right font-mono text-sm font-bold ${deltaClass(computeOWarFromWrcPlus(computeDerived(pred.from_avg, pred.from_obp, pred.from_slg).wrcPlus), computeOWarFromWrcPlus(pred.p_wrc_plus), 0.05)}`}>
+                              {statFormat(computeOWarFromWrcPlus(pred.p_wrc_plus), 2)}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-sm font-bold">
+                              {moneyFormat(
+                                computeNilFallback({
+                                  storedNil: p.nil_value,
+                                  wrcPlus: p.prediction.p_wrc_plus,
+                                  conference: p.conference,
+                                  position: p.position,
+                                }),
+                              )}
                             </TableCell>
                             <TableCell className="text-center">
-                              <div className="flex gap-1 justify-center flex-wrap">
-                                {pred.ev_score != null && <ScoutBadge label="EV" value={pred.ev_score} />}
-                                {pred.barrel_score != null && <ScoutBadge label="Brl" value={pred.barrel_score} />}
-                                {pred.whiff_score != null && <ScoutBadge label="Whf" value={pred.whiff_score} />}
-                                {pred.chase_score != null && <ScoutBadge label="Chs" value={pred.chase_score} />}
-                              </div>
+                              {pred.ev_score != null &&
+                              pred.barrel_score != null &&
+                              pred.contact_score != null &&
+                              pred.chase_score != null ? (
+                                <div className="flex gap-1 justify-center flex-wrap">
+                                  <ScoutMiniBox label="EV" value={pred.ev_score} />
+                                  <ScoutMiniBox label="Brl" value={pred.barrel_score} />
+                                  <ScoutMiniBox label="Con" value={pred.contact_score} />
+                                  <ScoutMiniBox label="Chs" value={pred.chase_score} />
+                                </div>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
                             </TableCell>
                           </TableRow>
                         );
@@ -767,6 +1065,38 @@ export default function ReturningPlayers() {
                     <div ref={scrollbarInnerRef} style={{ height: 1 }} />
                   </div>
                 )}
+                <div className="flex flex-col gap-2 border-t px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-muted-foreground">
+                    Showing{" "}
+                    <span className="font-medium text-foreground">
+                      {filtered.length === 0 ? 0 : ((currentPage - 1) * pageSize) + 1}
+                    </span>
+                    {" "}-{" "}
+                    <span className="font-medium text-foreground">
+                      {Math.min(currentPage * pageSize, filtered.length)}
+                    </span>
+                    {" "}of{" "}
+                    <span className="font-medium text-foreground">{filtered.length}</span>
+                    {" "}players
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Rows</span>
+                    <Select
+                      value={String(pageSize)}
+                      onValueChange={(v) => setPageSize(Number(v))}
+                    >
+                      <SelectTrigger className="h-8 w-[88px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="50">50</SelectItem>
+                        <SelectItem value="100">100</SelectItem>
+                        <SelectItem value="250">250</SelectItem>
+                        <SelectItem value="500">500</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
               </>
             )}
           </CardContent>
@@ -776,22 +1106,40 @@ export default function ReturningPlayers() {
   );
 }
 
+function ScoutMiniBox({ label, value }: { label: string; value: number }) {
+  const tier =
+    value >= 80
+      ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]"
+      : value >= 50
+        ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]"
+        : "bg-destructive/15 text-destructive";
+  return (
+    <div
+      className={`inline-flex min-w-[34px] flex-col items-center rounded px-1 py-0.5 leading-tight ${tier}`}
+      title={`${label}: ${value}`}
+    >
+      <span className="text-[9px] font-semibold">{label}</span>
+      <span className="text-[10px] font-bold">{Math.round(value)}</span>
+    </div>
+  );
+}
+
 const CLASS_OPTIONS = [
-  { value: "FS", label: "FR → SO" },
-  { value: "SJ", label: "SO → JR" },
-  { value: "JS", label: "JR → SR" },
-  { value: "GR", label: "Graduate" },
+  { value: "FS", label: "FR→SO" },
+  { value: "SJ", label: "SO→JR" },
+  { value: "JS", label: "JR→SR" },
+  { value: "GR", label: "GR" },
 ] as const;
 
-function ClassTransitionSelector({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function ClassAdjustmentSelector({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-7 w-[100px] text-xs font-mono px-2">
+      <SelectTrigger className="h-7 w-[105px] px-2 text-xs">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {CLASS_OPTIONS.map((opt) => (
-          <SelectItem key={opt.value} value={opt.value} className="text-xs font-mono">
+          <SelectItem key={opt.value} value={opt.value} className="text-xs">
             {opt.label}
           </SelectItem>
         ))}
@@ -800,57 +1148,34 @@ function ClassTransitionSelector({ value, onChange }: { value: string; onChange:
   );
 }
 
-function ScoutBadge({ label, value }: { label: string; value: number }) {
-  const tier =
-    value >= 80
-      ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]"
-      : value >= 50
-        ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]"
-        : "bg-destructive/15 text-destructive";
-  return (
-    <span
-      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${tier}`}
-      title={`${label}: ${value}`}
-    >
-      {label} {value}
-    </span>
-  );
-}
-
 const DEV_OPTIONS = [
-  { value: 0, label: "0.0", desc: "No development expected" },
-  { value: 0.5, label: "0.5", desc: "Moderate growth" },
-  { value: 1, label: "1.0", desc: "Full confidence" },
+  { value: 0, label: "0.0" },
+  { value: 0.5, label: "0.5" },
+  { value: 1, label: "1.0" },
 ] as const;
 
-function DevConfidenceSelector({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+function DevAggSelector({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <div className="flex gap-0.5">
       {DEV_OPTIONS.map((opt) => {
-        const isActive = value === opt.value;
+        const active = value === opt.value;
         return (
-          <Tooltip key={opt.value}>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => onChange(opt.value)}
-                className={`rounded px-2 py-1 text-xs font-mono font-semibold transition-colors ${
-                  isActive
-                    ? opt.value === 0
-                      ? "bg-destructive/15 text-destructive"
-                      : opt.value === 0.5
-                        ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]"
-                        : "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80"
-                }`}
-              >
-                {opt.label}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              <p className="text-xs">{opt.desc}</p>
-            </TooltipContent>
-          </Tooltip>
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            className={`rounded px-2 py-1 text-xs font-semibold transition-colors ${
+              active
+                ? opt.value === 0
+                  ? "bg-destructive/15 text-destructive"
+                  : opt.value === 0.5
+                    ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]"
+                    : "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            }`}
+          >
+            {opt.label}
+          </button>
         );
       })}
     </div>
