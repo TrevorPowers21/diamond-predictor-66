@@ -22,6 +22,7 @@ import {
   DEFAULT_NIL_TIER_MULTIPLIERS,
 } from "@/lib/nilProgramSpecific";
 import { computeTransferProjection } from "@/lib/transferProjection";
+import { recalculatePredictionById } from "@/lib/predictionEngine";
 
 const POSITION_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"] as const;
 const PITCHER_SLOTS = ["SP1", "SP2", "SP3", "SP4", "SP5", "RP1", "RP2", "RP3", "RP4", "CL"] as const;
@@ -504,7 +505,9 @@ const conferenceKeyAliases = (conference: string | null | undefined): string[] =
   return Array.from(aliases);
 };
 
-function readLocalNum(key: string, fallback: number): number {
+function readLocalNum(key: string, fallback: number, remoteValues?: Record<string, number>): number {
+  const remote = remoteValues?.[key];
+  if (Number.isFinite(remote)) return Number(remote);
   if (typeof window === "undefined") return fallback;
   try {
     const raw = window.localStorage.getItem("admin_dashboard_equation_values_v1");
@@ -554,6 +557,23 @@ export default function TeamBuilder() {
       return (data ?? []) as TeamRow[];
     },
   });
+
+  const { data: remoteEquationValues = {} } = useQuery({
+    queryKey: ["admin-ui-equation-values"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("model_config")
+        .select("config_key, config_value")
+        .eq("model_type", "admin_ui")
+        .eq("season", 2025);
+      if (error) throw error;
+      const map: Record<string, number> = {};
+      for (const row of data || []) map[row.config_key] = Number(row.config_value);
+      return map;
+    },
+  });
+
+  const eqNum = (key: string, fallback: number) => readLocalNum(key, fallback, remoteEquationValues);
 
   // All players for target board search
   const { data: allPlayersForSearch = [] } = useQuery({
@@ -1214,27 +1234,27 @@ export default function TeamBuilder() {
     const fromPark = normalizeParkToIndex(fromParkRaw);
     const toPark = normalizeParkToIndex(toParkRaw);
 
-    const ncaaAvgBA = toRate(readLocalNum("t_ba_ncaa_avg", 0.280));
-    const ncaaAvgOBP = toRate(readLocalNum("t_obp_ncaa_avg", 0.385));
-    const ncaaAvgISO = toRate(readLocalNum("t_iso_ncaa_avg", 0.162));
-    const ncaaAvgWrc = toRate(readLocalNum("t_wrc_ncaa_avg", 0.364));
-    const baPowerWeight = toRate(readLocalNum("t_ba_power_weight", 0.70));
-    const obpPowerWeight = toRate(readLocalNum("t_obp_power_weight", 0.70));
-    const baConferenceWeight = toWeight(readLocalNum("t_ba_conference_weight", 1.0));
-    const obpConferenceWeight = toWeight(readLocalNum("t_obp_conference_weight", 1.0));
-    const isoConferenceWeight = toWeight(readLocalNum("t_iso_conference_weight", 1.0));
-    const baPitchingWeight = toWeight(readLocalNum("t_ba_pitching_weight", 1.0));
-    const obpPitchingWeight = toWeight(readLocalNum("t_obp_pitching_weight", 1.0));
-    const isoPitchingWeight = toWeight(readLocalNum("t_iso_pitching_weight", 1.0));
-    const baParkWeight = toWeight(readLocalNum("t_ba_park_weight", 1.0));
-    const obpParkWeight = toWeight(readLocalNum("t_obp_park_weight", 1.0));
-    const isoParkWeight = toWeight(readLocalNum("t_iso_park_weight", 1.0));
-    const isoStdPower = readLocalNum("r_iso_std_pr", 45.423);
-    const isoStdNcaa = toRate(readLocalNum("r_iso_std_ncaa", 0.07849797197));
-    const wObp = toRate(readLocalNum("r_w_obp", 0.45));
-    const wSlg = toRate(readLocalNum("r_w_slg", 0.30));
-    const wAvg = toRate(readLocalNum("r_w_avg", 0.15));
-    const wIso = toRate(readLocalNum("r_w_iso", 0.10));
+    const ncaaAvgBA = toRate(eqNum("t_ba_ncaa_avg", 0.280));
+    const ncaaAvgOBP = toRate(eqNum("t_obp_ncaa_avg", 0.385));
+    const ncaaAvgISO = toRate(eqNum("t_iso_ncaa_avg", 0.162));
+    const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.364));
+    const baPowerWeight = toRate(eqNum("t_ba_power_weight", 0.70));
+    const obpPowerWeight = toRate(eqNum("t_obp_power_weight", 0.70));
+    const baConferenceWeight = toWeight(eqNum("t_ba_conference_weight", 1.0));
+    const obpConferenceWeight = toWeight(eqNum("t_obp_conference_weight", 1.0));
+    const isoConferenceWeight = toWeight(eqNum("t_iso_conference_weight", 1.0));
+    const baPitchingWeight = toWeight(eqNum("t_ba_pitching_weight", 1.0));
+    const obpPitchingWeight = toWeight(eqNum("t_obp_pitching_weight", 1.0));
+    const isoPitchingWeight = toWeight(eqNum("t_iso_pitching_weight", 1.0));
+    const baParkWeight = toWeight(eqNum("t_ba_park_weight", 1.0));
+    const obpParkWeight = toWeight(eqNum("t_obp_park_weight", 1.0));
+    const isoParkWeight = toWeight(eqNum("t_iso_park_weight", 1.0));
+    const isoStdPower = eqNum("r_iso_std_pr", 45.423);
+    const isoStdNcaa = toRate(eqNum("r_iso_std_ncaa", 0.07849797197));
+    const wObp = toRate(eqNum("r_w_obp", 0.45));
+    const wSlg = toRate(eqNum("r_w_slg", 0.30));
+    const wAvg = toRate(eqNum("r_w_avg", 0.15));
+    const wIso = toRate(eqNum("r_w_iso", 0.10));
 
     const projected = computeTransferProjection({
       lastAvg,
@@ -1275,7 +1295,7 @@ export default function TeamBuilder() {
       wAvg,
       wIso,
     });
-    const basePerOwar = readLocalNum("nil_base_per_owar", 25000);
+    const basePerOwar = eqNum("nil_base_per_owar", 25000);
     const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
     const pvm = getPositionValueMultiplier(livePlayer.position ?? p.player?.position ?? null);
     const simNilValuation = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
@@ -1290,6 +1310,43 @@ export default function TeamBuilder() {
   const updatePlayer = (idx: number, updates: Partial<BuildPlayer>) => {
     setRosterPlayers((prev) => prev.map((p, i) => (i === idx ? { ...p, ...updates } : p)));
     setDirty(true);
+  };
+
+  const updatePlayerWithRecalc = async (idx: number, updates: Partial<BuildPlayer>) => {
+    const current = rosterPlayers[idx];
+    updatePlayer(idx, updates);
+
+    // For returner rows, re-run the prediction when class/dev inputs change so displayed
+    // pAVG/pOBP/pSLG, wRC+, and derived oWAR stay accurate.
+    if (!current || (current.roster_status || "returner") === "target") return;
+    const predictionId = current.prediction?.id;
+    if (!predictionId) return;
+
+    const classTransition = (updates.class_transition ?? current.class_transition ?? null) as string | null;
+    const devAgg = Number(updates.dev_aggressiveness ?? current.dev_aggressiveness ?? 0);
+
+    try {
+      const res = await recalculatePredictionById(predictionId, {
+        class_transition: classTransition ?? undefined,
+        dev_aggressiveness: Number.isFinite(devAgg) ? devAgg : undefined,
+      });
+      setRosterPlayers((prev) =>
+        prev.map((p, i) =>
+          i === idx
+            ? {
+                ...p,
+                prediction: p.prediction ? { ...p.prediction, ...(res?.prediction || {}) } : p.prediction,
+              }
+            : p,
+        ),
+      );
+    } catch (e: any) {
+      toast({
+        title: "Recalc failed",
+        description: e?.message || "Could not recalculate player outputs.",
+        variant: "destructive",
+      });
+    }
   };
 
   const addIncomingFreshman = () => {
@@ -1395,27 +1452,27 @@ export default function TeamBuilder() {
         const fromPark = normalizeParkToIndex(fromTeamRow!.park_factor);
         const toPark = normalizeParkToIndex(toTeamRow.park_factor);
 
-        const ncaaAvgBA = toRate(readLocalNum("t_ba_ncaa_avg", 0.280));
-        const ncaaAvgOBP = toRate(readLocalNum("t_obp_ncaa_avg", 0.385));
-        const ncaaAvgISO = toRate(readLocalNum("t_iso_ncaa_avg", 0.162));
-        const ncaaAvgWrc = toRate(readLocalNum("t_wrc_ncaa_avg", 0.364));
-        const baPowerWeight = toRate(readLocalNum("t_ba_power_weight", 0.70));
-        const obpPowerWeight = toRate(readLocalNum("t_obp_power_weight", 0.70));
-        const baConferenceWeight = toWeight(readLocalNum("t_ba_conference_weight", 1.0));
-        const obpConferenceWeight = toWeight(readLocalNum("t_obp_conference_weight", 1.0));
-        const isoConferenceWeight = toWeight(readLocalNum("t_iso_conference_weight", 1.0));
-        const baPitchingWeight = toWeight(readLocalNum("t_ba_pitching_weight", 1.0));
-        const obpPitchingWeight = toWeight(readLocalNum("t_obp_pitching_weight", 1.0));
-        const isoPitchingWeight = toWeight(readLocalNum("t_iso_pitching_weight", 1.0));
-        const baParkWeight = toWeight(readLocalNum("t_ba_park_weight", 1.0));
-        const obpParkWeight = toWeight(readLocalNum("t_obp_park_weight", 1.0));
-        const isoParkWeight = toWeight(readLocalNum("t_iso_park_weight", 1.0));
-        const isoStdPower = readLocalNum("r_iso_std_pr", 45.423);
-        const isoStdNcaa = toRate(readLocalNum("r_iso_std_ncaa", 0.07849797197));
-        const wObp = toRate(readLocalNum("r_w_obp", 0.45));
-        const wSlg = toRate(readLocalNum("r_w_slg", 0.30));
-        const wAvg = toRate(readLocalNum("r_w_avg", 0.15));
-        const wIso = toRate(readLocalNum("r_w_iso", 0.10));
+        const ncaaAvgBA = toRate(eqNum("t_ba_ncaa_avg", 0.280));
+        const ncaaAvgOBP = toRate(eqNum("t_obp_ncaa_avg", 0.385));
+        const ncaaAvgISO = toRate(eqNum("t_iso_ncaa_avg", 0.162));
+        const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.364));
+        const baPowerWeight = toRate(eqNum("t_ba_power_weight", 0.70));
+        const obpPowerWeight = toRate(eqNum("t_obp_power_weight", 0.70));
+        const baConferenceWeight = toWeight(eqNum("t_ba_conference_weight", 1.0));
+        const obpConferenceWeight = toWeight(eqNum("t_obp_conference_weight", 1.0));
+        const isoConferenceWeight = toWeight(eqNum("t_iso_conference_weight", 1.0));
+        const baPitchingWeight = toWeight(eqNum("t_ba_pitching_weight", 1.0));
+        const obpPitchingWeight = toWeight(eqNum("t_obp_pitching_weight", 1.0));
+        const isoPitchingWeight = toWeight(eqNum("t_iso_pitching_weight", 1.0));
+        const baParkWeight = toWeight(eqNum("t_ba_park_weight", 1.0));
+        const obpParkWeight = toWeight(eqNum("t_obp_park_weight", 1.0));
+        const isoParkWeight = toWeight(eqNum("t_iso_park_weight", 1.0));
+        const isoStdPower = eqNum("r_iso_std_pr", 45.423);
+        const isoStdNcaa = toRate(eqNum("r_iso_std_ncaa", 0.07849797197));
+        const wObp = toRate(eqNum("r_w_obp", 0.45));
+        const wSlg = toRate(eqNum("r_w_slg", 0.30));
+        const wAvg = toRate(eqNum("r_w_avg", 0.15));
+        const wIso = toRate(eqNum("r_w_iso", 0.10));
 
         const projected = computeTransferProjection({
           lastAvg, lastObp, lastSlg, baPR, obpPR, isoPR,
@@ -1432,7 +1489,7 @@ export default function TeamBuilder() {
           isoStdPower, isoStdNcaa, wObp, wSlg, wAvg, wIso,
         });
 
-        const basePerOwar = readLocalNum("nil_base_per_owar", 25000);
+        const basePerOwar = eqNum("nil_base_per_owar", 25000);
         const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
         const pvm = getPositionValueMultiplier(row.position);
         const nilValuation = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
@@ -1688,7 +1745,7 @@ export default function TeamBuilder() {
     });
   }, [playerProjection, programTierMultiplier]);
 
-  const nilBasePerOWar = readLocalNum("nil_base_per_owar", 25000);
+  const nilBasePerOWar = eqNum("nil_base_per_owar", 25000);
   const projectedNilForPlayer = useCallback((p: BuildPlayer) => {
     if (!isProjectedStatus(p)) return 0;
     return projectedPlayerScore(p) * nilBasePerOWar;
@@ -2040,7 +2097,7 @@ export default function TeamBuilder() {
       <TableCell>
         <Select
           value={p.class_transition || "SJ"}
-          onValueChange={(v) => updatePlayer(globalIdx, { class_transition: v })}
+          onValueChange={(v) => updatePlayerWithRecalc(globalIdx, { class_transition: v })}
         >
           <SelectTrigger className="w-[90px] h-8">
             <SelectValue />
@@ -2056,7 +2113,7 @@ export default function TeamBuilder() {
       <TableCell>
         <Select
           value={String(p.dev_aggressiveness ?? 0)}
-          onValueChange={(v) => updatePlayer(globalIdx, { dev_aggressiveness: Number(v) })}
+          onValueChange={(v) => updatePlayerWithRecalc(globalIdx, { dev_aggressiveness: Number(v) })}
         >
           <SelectTrigger className="w-[90px] h-8">
             <SelectValue />
@@ -2115,6 +2172,9 @@ export default function TeamBuilder() {
           value={p.nil_value || ""}
           onChange={(e) => updatePlayer(globalIdx, { nil_value: Number(e.target.value) || 0 })}
         />
+      </TableCell>
+      <TableCell className={`text-center font-mono text-xs ${(p.roster_status || "returner") === "leaving" ? "text-muted-foreground" : projectedNilTierClass(projectedNil, totalBudget, fallbackRosterTotalPlayerScore)}`}>
+        {(p.roster_status || "returner") === "leaving" ? "—" : `$${Math.round(projectedNil).toLocaleString()}`}
       </TableCell>
       <TableCell className="text-center font-mono text-xs">
         {(p.roster_status || "returner") === "leaving" ? "—" : (projectedOwar != null ? projectedOwar.toFixed(2) : "—")}

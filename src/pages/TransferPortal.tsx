@@ -163,7 +163,9 @@ type TargetBoardEntry = {
   createdAt: string;
 };
 
-function readLocalNum(key: string, fallback: number): number {
+function readLocalNum(key: string, fallback: number, remoteValues?: Record<string, number>): number {
+  const remote = remoteValues?.[key];
+  if (Number.isFinite(remote)) return Number(remote);
   if (typeof window === "undefined") return fallback;
   try {
     const raw = window.localStorage.getItem("admin_dashboard_equation_values_v1");
@@ -323,6 +325,21 @@ export default function TransferPortal() {
         }
       }
       return Array.from(byConf.values()).map((v) => v.row);
+    },
+  });
+
+  const { data: remoteEquationValues = {} } = useQuery({
+    queryKey: ["admin-ui-equation-values"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("model_config")
+        .select("config_key, config_value")
+        .eq("model_type", "admin_ui")
+        .eq("season", 2025);
+      if (error) throw error;
+      const map: Record<string, number> = {};
+      for (const row of data || []) map[row.config_key] = Number(row.config_value);
+      return map;
     },
   });
 
@@ -498,33 +515,33 @@ export default function TransferPortal() {
     const fromPark = normalizeParkToIndex(fromParkRaw);
     const toPark = normalizeParkToIndex(toParkRaw);
 
-    const ncaaAvgBA = toRate(readLocalNum("t_ba_ncaa_avg", 0.280));
-    const ncaaAvgOBP = toRate(readLocalNum("t_obp_ncaa_avg", 0.385));
-    const ncaaAvgISO = toRate(readLocalNum("t_iso_ncaa_avg", 0.162));
-    const ncaaAvgWrc = toRate(readLocalNum("t_wrc_ncaa_avg", 0.364));
+    const ncaaAvgBA = toRate(readLocalNum("t_ba_ncaa_avg", 0.280, remoteEquationValues));
+    const ncaaAvgOBP = toRate(readLocalNum("t_obp_ncaa_avg", 0.385, remoteEquationValues));
+    const ncaaAvgISO = toRate(readLocalNum("t_iso_ncaa_avg", 0.162, remoteEquationValues));
+    const ncaaAvgWrc = toRate(readLocalNum("t_wrc_ncaa_avg", 0.364, remoteEquationValues));
 
-    const baPowerWeight = toRate(readLocalNum("t_ba_power_weight", 0.70));
-    const obpPowerWeight = toRate(readLocalNum("t_obp_power_weight", 0.70));
+    const baPowerWeight = toRate(readLocalNum("t_ba_power_weight", 0.70, remoteEquationValues));
+    const obpPowerWeight = toRate(readLocalNum("t_obp_power_weight", 0.70, remoteEquationValues));
 
-    const baConferenceWeight = toWeight(readLocalNum("t_ba_conference_weight", 1.0));
-    const obpConferenceWeight = toWeight(readLocalNum("t_obp_conference_weight", 1.0));
-    const isoConferenceWeight = toWeight(readLocalNum("t_iso_conference_weight", 1.0));
+    const baConferenceWeight = toWeight(readLocalNum("t_ba_conference_weight", 1.0, remoteEquationValues));
+    const obpConferenceWeight = toWeight(readLocalNum("t_obp_conference_weight", 1.0, remoteEquationValues));
+    const isoConferenceWeight = toWeight(readLocalNum("t_iso_conference_weight", 1.0, remoteEquationValues));
 
-    const baPitchingWeight = toWeight(readLocalNum("t_ba_pitching_weight", 1.0));
-    const obpPitchingWeight = toWeight(readLocalNum("t_obp_pitching_weight", 1.0));
-    const isoPitchingWeight = toWeight(readLocalNum("t_iso_pitching_weight", 1.0));
+    const baPitchingWeight = toWeight(readLocalNum("t_ba_pitching_weight", 1.0, remoteEquationValues));
+    const obpPitchingWeight = toWeight(readLocalNum("t_obp_pitching_weight", 1.0, remoteEquationValues));
+    const isoPitchingWeight = toWeight(readLocalNum("t_iso_pitching_weight", 1.0, remoteEquationValues));
 
-    const baParkWeight = toWeight(readLocalNum("t_ba_park_weight", 1.0));
-    const obpParkWeight = toWeight(readLocalNum("t_obp_park_weight", 1.0));
-    const isoParkWeight = toWeight(readLocalNum("t_iso_park_weight", 1.0));
+    const baParkWeight = toWeight(readLocalNum("t_ba_park_weight", 1.0, remoteEquationValues));
+    const obpParkWeight = toWeight(readLocalNum("t_obp_park_weight", 1.0, remoteEquationValues));
+    const isoParkWeight = toWeight(readLocalNum("t_iso_park_weight", 1.0, remoteEquationValues));
 
-    const isoStdPower = readLocalNum("r_iso_std_pr", 45.423);
-    const isoStdNcaa = toRate(readLocalNum("r_iso_std_ncaa", 0.07849797197));
+    const isoStdPower = readLocalNum("r_iso_std_pr", 45.423, remoteEquationValues);
+    const isoStdNcaa = toRate(readLocalNum("r_iso_std_ncaa", 0.07849797197, remoteEquationValues));
 
-    const wObp = toRate(readLocalNum("r_w_obp", 0.45));
-    const wSlg = toRate(readLocalNum("r_w_slg", 0.30));
-    const wAvg = toRate(readLocalNum("r_w_avg", 0.15));
-    const wIso = toRate(readLocalNum("r_w_iso", 0.10));
+    const wObp = toRate(readLocalNum("r_w_obp", 0.45, remoteEquationValues));
+    const wSlg = toRate(readLocalNum("r_w_slg", 0.30, remoteEquationValues));
+    const wAvg = toRate(readLocalNum("r_w_avg", 0.15, remoteEquationValues));
+    const wIso = toRate(readLocalNum("r_w_iso", 0.10, remoteEquationValues));
 
     const projected = computeTransferProjection({
       lastAvg,
@@ -566,7 +583,7 @@ export default function TransferPortal() {
       wIso,
     });
 
-    const basePerOwar = readLocalNum("nil_base_per_owar", 25000);
+    const basePerOwar = readLocalNum("nil_base_per_owar", 25000, remoteEquationValues);
     const ptm = getProgramTierMultiplierByConference(toConference, DEFAULT_NIL_TIER_MULTIPLIERS);
     const pvm = getPositionValueMultiplier(selectedPlayer.position);
     const nilValuation = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
@@ -625,7 +642,7 @@ export default function TransferPortal() {
         multiplier: baMultiplier,
       },
     };
-  }, [selectedPlayer, toTeamRow, internals, fromConfStats, toConfStats, fromTeamRow, toConference]);
+  }, [selectedPlayer, toTeamRow, internals, fromConfStats, toConfStats, fromTeamRow, toConference, remoteEquationValues]);
 
   const addToTargetBoard = () => {
     if (!selectedPlayer || !selectedDestinationTeam) return;

@@ -25,6 +25,8 @@ import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
 // ─── Equation Constants Tab ───────────────────────────────────────────────────
 
 function EquationConstantsTab() {
+  const ADMIN_UI_MODEL_TYPE = "admin_ui";
+  const ADMIN_UI_SEASON = 2025;
   const [editableSections, setEditableSections] = useState<Record<string, boolean>>({});
   const defaultEditableValues: Record<string, string> = {
     r_ncaa_avg_ba: "0.280",
@@ -115,7 +117,10 @@ function EquationConstantsTab() {
     }
   });
 
-  const { isLoading } = useQuery({
+  const remoteHydratedRef = useRef(false);
+  const lastPersistedRef = useRef<Record<string, string> | null>(null);
+
+  const { data: modelConfigRows = [], isLoading } = useQuery({
     queryKey: ["model_config"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -152,6 +157,58 @@ function EquationConstantsTab() {
     } catch {
       // ignore localStorage write failures
     }
+  }, [editableValues]);
+
+  useEffect(() => {
+    if (remoteHydratedRef.current) return;
+    if (!modelConfigRows.length) {
+      remoteHydratedRef.current = true;
+      return;
+    }
+    const remoteRows = modelConfigRows.filter(
+      (row) => row.model_type === ADMIN_UI_MODEL_TYPE && Number(row.season) === ADMIN_UI_SEASON,
+    );
+    if (remoteRows.length > 0) {
+      setEditableValues((prev) => {
+        const next = { ...prev };
+        for (const row of remoteRows) {
+          if (row.config_key) next[row.config_key] = String(row.config_value);
+        }
+        return next;
+      });
+    }
+    remoteHydratedRef.current = true;
+  }, [modelConfigRows]);
+
+  useEffect(() => {
+    if (!remoteHydratedRef.current) return;
+    if (lastPersistedRef.current && JSON.stringify(lastPersistedRef.current) === JSON.stringify(editableValues)) return;
+
+    const timeout = window.setTimeout(async () => {
+      const rows = Object.entries(editableValues)
+        .map(([config_key, raw]) => ({
+          model_type: ADMIN_UI_MODEL_TYPE,
+          season: ADMIN_UI_SEASON,
+          config_key,
+          config_value: Number(raw),
+        }))
+        .filter((r) => Number.isFinite(r.config_value));
+
+      if (rows.length === 0) return;
+
+      const { error } = await supabase
+        .from("model_config")
+        .upsert(rows, { onConflict: "model_type,season,config_key" });
+
+      if (!error) {
+        lastPersistedRef.current = editableValues;
+      } else {
+        // Keep local values even if DB persistence fails.
+        console.warn("Failed to persist admin equation values", error.message);
+      }
+    }, 500);
+
+    return () => window.clearTimeout(timeout);
   }, [editableValues]);
 
   const toggleEditableSection = (sectionKey: string) => {
