@@ -36,7 +36,7 @@ function EquationConstantsTab() {
     r_w_slg: "0.30",
     r_w_avg: "0.15",
     r_w_iso: "0.10",
-    r_ncaa_avg_wrc: "1.000",
+    r_ncaa_avg_wrc: "0.364",
     owar_wrc_plus_baseline: "100",
     owar_plate_appearances: "260",
     owar_run_value_per_pa: "0.13",

@@ -252,7 +252,10 @@ async function loadEngineConfig(): Promise<EngineConfig> {
   applyIfFinite(n("r_ncaa_avg_obp"), (v) => { returner.ncaaObp = toStatRate(v); });
   applyIfFinite(n("r_ncaa_avg_iso"), (v) => { returner.ncaaIso = toStatRate(v); });
   applyIfFinite(n("r_ncaa_avg_wrc"), (v) => {
-    if (v > 0) returner.ncaaWrc = toStatRate(v);
+    const normalized = toStatRate(v);
+    // Guardrail: NCAA wRC baseline is a rate (~0.364), not an index (1.000).
+    // Ignore out-of-range values that would destabilize wRC+ and oWAR.
+    if (normalized > 0 && normalized < 0.8) returner.ncaaWrc = normalized;
   });
   applyIfFinite(n("r_w_obp"), (v) => { returner.wrcWeights.obp = toWeight(v); });
   applyIfFinite(n("r_w_slg"), (v) => { returner.wrcWeights.slg = toWeight(v); });
