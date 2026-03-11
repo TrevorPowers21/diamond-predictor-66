@@ -17,6 +17,7 @@ import {
   getProgramTierMultiplierByConference,
 } from "@/lib/nilProgramSpecific";
 import { computeTransferProjection } from "@/lib/transferProjection";
+import { getConferenceAliases } from "@/lib/conferenceMapping";
 
 type SimPlayer = {
   prediction_id: string | null;
@@ -90,50 +91,7 @@ const statTier = (
   return value >= 75000 ? "good" : value >= 25000 ? "avg" : "bad";
 };
 
-const conferenceKeyAliases = (conference: string | null | undefined): string[] => {
-  const key = normalizeKey(conference);
-  if (!key) return [];
-
-  const aliases = new Set<string>([key, key.replace(" conference", "").trim()]);
-
-  if (key === "sec" || key.includes("southeastern")) aliases.add("southeastern conference");
-  if (key === "acc" || key.includes("atlantic coast")) aliases.add("atlantic coast conference");
-  if (key === "big 12" || key === "big12" || key.includes("big 12")) aliases.add("big 12");
-  if (key === "big ten" || key === "big10" || key === "big 10" || key.includes("big ten") || key.includes("big 10")) {
-    aliases.add("big ten");
-    aliases.add("big10");
-    aliases.add("big 10");
-  }
-  if (key === "aac" || key.includes("american athletic")) aliases.add("american athletic conference");
-  if (key === "a 10" || key === "a10" || key.includes("atlantic 10")) aliases.add("atlantic 10");
-  if (key === "caa" || key.includes("coastal athletic")) aliases.add("coastal athletic association");
-  if (key === "mac" || key.includes("mid american")) aliases.add("mid american conference");
-  if (key === "mvc" || key.includes("missouri valley")) aliases.add("missouri valley conference");
-  if (key === "nec" || key.includes("northeast")) aliases.add("northeast conference");
-  if (key === "wac" || key.includes("western athletic")) aliases.add("western athletic conference");
-  if (key === "wcc" || key.includes("west coast")) aliases.add("west coast conference");
-  if (key === "cusa" || key.includes("conference usa")) aliases.add("conference usa");
-  if (key === "mwc" || key.includes("mountain west")) {
-    aliases.add("mountain west");
-    aliases.add("mwc");
-  }
-  if (key === "big west" || key.includes("big west")) aliases.add("big west");
-  if (key === "sun belt" || key.includes("sun belt")) aliases.add("sun belt");
-  if (key === "asun" || key.includes("atlantic sun")) aliases.add("atlantic sun conference");
-  if (key === "a east" || key === "ae" || key === "aec" || key.includes("america east")) aliases.add("america east");
-  if (key === "bsc" || key.includes("big south")) aliases.add("big south conference");
-  if (key === "be" || key.includes("big east")) aliases.add("big east conference");
-  if (key === "maac" || key.includes("metro atlantic")) aliases.add("metro atlantic athletic conference");
-  if (key === "patriot" || key.includes("patriot league")) aliases.add("patriot league");
-  if (key === "ivy" || key.includes("ivy league")) aliases.add("ivy league");
-  if (key === "summit" || key.includes("summit league")) aliases.add("summit league");
-  if (key.includes("southland")) aliases.add("southland conference");
-  if (key === "socon" || key.includes("southern conference")) aliases.add("southern conference");
-  if (key === "ovc" || key.includes("ohio valley")) aliases.add("ohio valley conference");
-  if (key === "swac" || key.includes("southwestern athletic")) aliases.add("southwestern athletic conference");
-
-  return Array.from(aliases);
-};
+const conferenceKeyAliases = getConferenceAliases;
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 const toRate = (n: number) => (Math.abs(n) > 1 ? n / 100 : n);
@@ -427,15 +385,33 @@ export default function TransferPortal() {
 
   const resolveConferenceStats = (conference: string | null | undefined): ConferenceRow | null => {
     const aliases = conferenceKeyAliases(conference);
+    let best: ConferenceRow | null = null;
+    let bestScore = -1;
+    const score = (row: ConferenceRow) =>
+      (row.avg_plus != null ? 1 : 0) +
+      (row.obp_plus != null ? 1 : 0) +
+      (row.iso_plus != null ? 1 : 0) +
+      (row.stuff_plus != null ? 1 : 0);
+
     for (const key of aliases) {
       const hit = confByKey.get(key);
-      if (hit) return hit;
+      if (!hit) continue;
+      const s = score(hit);
+      if (s > bestScore) {
+        best = hit;
+        bestScore = s;
+      }
     }
     // fallback: loose include match either direction
     for (const [k, row] of confByKey.entries()) {
-      if (aliases.some((a) => k.includes(a) || a.includes(k))) return row;
+      if (!aliases.some((a) => k.includes(a) || a.includes(k))) continue;
+      const s = score(row);
+      if (s > bestScore) {
+        best = row;
+        bestScore = s;
+      }
     }
-    return null;
+    return best;
   };
 
   const fromConfStats = resolveConferenceStats(fromConference);

@@ -2389,6 +2389,8 @@ function TeamsAdminTab() {
     if (!raw) return "";
     const key = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
     const map: Record<string, string> = {
+      acc: "Atlantic Coast Conference",
+      atlanticcoastconference: "Atlantic Coast Conference",
       aac: "American Athletic Conference",
       americanaeast: "America East",
       americaeast: "America East",
@@ -3361,7 +3363,7 @@ function TeamsAdminTab() {
     if (search) {
       const q = search.toLowerCase();
       list = list.filter((t) =>
-        resolveCanonicalTeamName(t.name).toLowerCase().includes(q) ||
+        t.name.toLowerCase().includes(q) ||
         normalizeConferenceName(t.conference).toLowerCase().includes(q),
       );
     }
@@ -3511,7 +3513,7 @@ function TeamsAdminTab() {
                         {editingId === team.id ? (
                           <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="h-8 w-full max-w-[280px]" />
                         ) : (
-                          resolveCanonicalTeamName(team.name)
+                          team.name
                         )}
                       </TableCell>
                       <TableCell className="text-center">

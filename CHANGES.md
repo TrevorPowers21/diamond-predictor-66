@@ -1,5 +1,23 @@
 # Changelog — testing-peyton
 
+## Session: March 11, 2026
+
+### Team Builder — Compare Tab (Work In Progress)
+- Added a new `Compare` tab in Team Builder.
+- Built two independent side-by-side panels: `Compare A` and `Compare B`.
+- Each panel now has:
+  - Player search (name/team/position)
+  - Destination team search
+  - Context + multipliers display (from/to conference, park factor, AVG+/OBP+/ISO+ deltas, Stuff+ delta)
+  - Projected outcomes (`pAVG`, `pOBP`, `pSLG`, `pOPS`, `pISO`, `pWRC+`, `oWAR`, projected NIL)
+  - Clickable link to the selected player profile
+- Compare panels support choosing the same player in both A and B for side-by-side scenario testing.
+
+### Start Here Next Session
+- Start in Team Builder `Compare` tab.
+- Validate calculations panel-by-panel against Transfer Portal dashboard for matching inputs.
+- If any mismatch appears, trace one player line-by-line (PowerAdj, Blended, Multiplier, Projected) before changing broad logic.
+
 ## Session: March 10, 2026
 
 ### Fixes

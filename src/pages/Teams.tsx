@@ -22,7 +22,7 @@ interface Team {
 }
 
 const CONFERENCES = [
-  "ACC", "AAC", "A-10", "America East", "ASUN", "Big 12", "Big East",
+  "Atlantic Coast Conference", "ACC", "AAC", "A-10", "America East", "ASUN", "Big 12", "Big East",
   "Big South", "Big Ten", "Big West", "CAA", "CUSA", "Horizon League", "Ivy League",
   "MAAC", "MAC", "MEAC", "Mountain West", "MVC", "NEC", "OVC", "Pac-12",
   "Patriot League", "SEC", "SoCon", "Southland", "Summit League", "Sun Belt", "SWAC",
@@ -34,6 +34,8 @@ const normalizeConferenceName = (input: string | null | undefined) => {
   if (!raw) return "";
   const key = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
   const map: Record<string, string> = {
+    acc: "Atlantic Coast Conference",
+    atlanticcoastconference: "Atlantic Coast Conference",
     aac: "American Athletic Conference",
     americanathleticconference: "American Athletic Conference",
     a10: "Atlantic 10",
@@ -78,9 +80,10 @@ export default function Teams() {
 
   const updateTeam = useMutation({
     mutationFn: async ({ id, name, conference }: { id: string; name: string; conference: string }) => {
+      const normalizedConference = normalizeConferenceName(conference);
       const { error } = await supabase
         .from("teams")
-        .update({ name, conference })
+        .update({ name, conference: normalizedConference || null })
         .eq("id", id);
       if (error) throw error;
     },
@@ -106,9 +109,10 @@ export default function Teams() {
 
   const addTeam = useMutation({
     mutationFn: async ({ name, conference }: { name: string; conference: string }) => {
+      const normalizedConference = normalizeConferenceName(conference);
       const { error } = await supabase
         .from("teams")
-        .insert({ name, conference: conference || null });
+        .insert({ name, conference: normalizedConference || null });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -156,7 +160,7 @@ export default function Teams() {
 
   const startEdit = (team: Team) => {
     setEditingId(team.id);
-    setEditConf(team.conference || "");
+    setEditConf(normalizeConferenceName(team.conference) || "");
     setEditName(team.name);
   };
 
