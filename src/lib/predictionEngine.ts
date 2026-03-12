@@ -41,6 +41,10 @@ interface ReturnerConfig {
   ncaaAvg: number;
   ncaaObp: number;
   ncaaIso: number;
+  baStdPower: number;
+  baStdNcaa: number;
+  obpStdPower: number;
+  obpStdNcaa: number;
   ncaaPR: number;
   powerWeight: number;
   ncaaWrc: number;
@@ -70,6 +74,10 @@ interface TransferConfig {
   baNcaaAvg: number;
   obpNcaaAvg: number;
   isoNcaaAvg: number;
+  baStdPower: number;
+  baStdNcaa: number;
+  obpStdPower: number;
+  obpStdNcaa: number;
   baPowerWeight: number;
   obpPowerWeight: number;
   baConferenceWeight: number;
@@ -181,6 +189,10 @@ async function loadEngineConfig(): Promise<EngineConfig> {
     ncaaAvg: 0.28,
     ncaaObp: 0.385,
     ncaaIso: 0.162,
+    baStdPower: 31.297,
+    baStdNcaa: 0.043455,
+    obpStdPower: 28.889,
+    obpStdNcaa: 0.046781,
     ncaaPR: 100,
     powerWeight: 0.7,
     ncaaWrc: 0.364,
@@ -217,6 +229,10 @@ async function loadEngineConfig(): Promise<EngineConfig> {
     if (k === "ncaa_avg") returner.ncaaAvg = toStatRate(v);
     else if (k === "ncaa_obp") returner.ncaaObp = toStatRate(v);
     else if (k === "ncaa_iso") returner.ncaaIso = toStatRate(v);
+    else if (k === "ba_std_power") returner.baStdPower = v;
+    else if (k === "ba_std_ncaa") returner.baStdNcaa = toStatRate(v);
+    else if (k === "obp_std_power") returner.obpStdPower = v;
+    else if (k === "obp_std_ncaa") returner.obpStdNcaa = toStatRate(v);
     // Keep returner constants locked to Admin equation spec for this phase.
     else if (k === "ncaa_power_rating") { /* locked at 100 */ }
     else if (k === "power_rating_weight") { /* locked at 0.7 */ }
@@ -249,6 +265,10 @@ async function loadEngineConfig(): Promise<EngineConfig> {
     if (Number.isFinite(value)) apply(value);
   };
   applyIfFinite(n("r_ncaa_avg_ba"), (v) => { returner.ncaaAvg = toStatRate(v); });
+  applyIfFinite(n("r_ba_std_pr"), (v) => { returner.baStdPower = v; });
+  applyIfFinite(n("r_ba_std_ncaa"), (v) => { returner.baStdNcaa = toStatRate(v); });
+  applyIfFinite(n("r_obp_std_pr"), (v) => { returner.obpStdPower = v; });
+  applyIfFinite(n("r_obp_std_ncaa"), (v) => { returner.obpStdNcaa = toStatRate(v); });
   applyIfFinite(n("r_ncaa_avg_obp"), (v) => { returner.ncaaObp = toStatRate(v); });
   applyIfFinite(n("r_ncaa_avg_iso"), (v) => { returner.ncaaIso = toStatRate(v); });
   applyIfFinite(n("r_ncaa_avg_wrc"), (v) => {
@@ -292,6 +312,10 @@ async function loadEngineConfig(): Promise<EngineConfig> {
     baNcaaAvg: 0.28,
     obpNcaaAvg: 0.385,
     isoNcaaAvg: 0.162,
+    baStdPower: 31.297,
+    baStdNcaa: 0.043455,
+    obpStdPower: 28.889,
+    obpStdNcaa: 0.046781,
     baPowerWeight: 0.7,
     obpPowerWeight: 0.7,
     baConferenceWeight: 1,
@@ -312,10 +336,14 @@ async function loadEngineConfig(): Promise<EngineConfig> {
   for (const row of transferRows) {
     const k = row.config_key;
     const v = Number(row.config_value);
-    if (k === "ncaa_avg") transfer.baNcaaAvg = v;
-    else if (k === "ncaa_obp") transfer.obpNcaaAvg = v;
-    else if (k === "ncaa_iso") transfer.isoNcaaAvg = v;
-    else if (k === "ncaa_wrc" || k === "wrc_plus_ncaa_avg") transfer.ncaaWrc = v;
+    if (k === "ncaa_avg") transfer.baNcaaAvg = toStatRate(v);
+    else if (k === "ncaa_obp") transfer.obpNcaaAvg = toStatRate(v);
+    else if (k === "ncaa_iso") transfer.isoNcaaAvg = toStatRate(v);
+    else if (k === "ba_std_power") transfer.baStdPower = v;
+    else if (k === "ba_std_ncaa") transfer.baStdNcaa = toStatRate(v);
+    else if (k === "obp_std_power") transfer.obpStdPower = v;
+    else if (k === "obp_std_ncaa") transfer.obpStdNcaa = toStatRate(v);
+    else if (k === "ncaa_wrc" || k === "wrc_plus_ncaa_avg") transfer.ncaaWrc = toStatRate(v);
     else if (k === "ba_power_weight" || k === "power_rating_weight") transfer.baPowerWeight = v;
     else if (k === "obp_power_weight") transfer.obpPowerWeight = v;
     else if (k === "ba_conference_weight" || k === "conference_weight") transfer.baConferenceWeight = v;
@@ -334,6 +362,35 @@ async function loadEngineConfig(): Promise<EngineConfig> {
       if (["obp", "slg", "avg", "iso"].includes(stat)) transfer.wrcWeights[stat] = v;
     }
   }
+
+  applyIfFinite(n("t_ba_ncaa_avg"), (v) => { transfer.baNcaaAvg = toStatRate(v); });
+  applyIfFinite(n("t_obp_ncaa_avg"), (v) => { transfer.obpNcaaAvg = toStatRate(v); });
+  applyIfFinite(n("t_iso_ncaa_avg"), (v) => { transfer.isoNcaaAvg = toStatRate(v); });
+  applyIfFinite(n("t_ba_std_pr"), (v) => { transfer.baStdPower = v; });
+  applyIfFinite(n("t_ba_std_ncaa"), (v) => { transfer.baStdNcaa = toStatRate(v); });
+  applyIfFinite(n("t_obp_std_pr"), (v) => { transfer.obpStdPower = v; });
+  applyIfFinite(n("t_obp_std_ncaa"), (v) => { transfer.obpStdNcaa = toStatRate(v); });
+  applyIfFinite(n("t_ba_power_weight"), (v) => { transfer.baPowerWeight = toRate(v); });
+  applyIfFinite(n("t_obp_power_weight"), (v) => { transfer.obpPowerWeight = toRate(v); });
+  applyIfFinite(n("t_ba_conference_weight"), (v) => { transfer.baConferenceWeight = v; });
+  applyIfFinite(n("t_obp_conference_weight"), (v) => { transfer.obpConferenceWeight = v; });
+  applyIfFinite(n("t_iso_conference_weight"), (v) => { transfer.isoConferenceWeight = v; });
+  applyIfFinite(n("t_ba_pitching_weight"), (v) => { transfer.baPitchingWeight = v; });
+  applyIfFinite(n("t_obp_pitching_weight"), (v) => { transfer.obpPitchingWeight = v; });
+  applyIfFinite(n("t_iso_pitching_weight"), (v) => { transfer.isoPitchingWeight = v; });
+  applyIfFinite(n("t_ba_park_weight"), (v) => { transfer.baParkWeight = v; });
+  applyIfFinite(n("t_obp_park_weight"), (v) => { transfer.obpParkWeight = v; });
+  applyIfFinite(n("t_iso_park_weight"), (v) => { transfer.isoParkWeight = v; });
+  applyIfFinite(n("t_iso_std_ncaa"), (v) => { transfer.isoStdNcaa = toStatRate(v); });
+  applyIfFinite(n("t_iso_std_power"), (v) => { transfer.isoStdPower = v; });
+  applyIfFinite(n("t_w_obp"), (v) => { transfer.wrcWeights.obp = toWeight(v); });
+  applyIfFinite(n("t_w_slg"), (v) => { transfer.wrcWeights.slg = toWeight(v); });
+  applyIfFinite(n("t_w_avg"), (v) => { transfer.wrcWeights.avg = toWeight(v); });
+  applyIfFinite(n("t_w_iso"), (v) => { transfer.wrcWeights.iso = toWeight(v); });
+  applyIfFinite(n("t_wrc_plus_ncaa_avg"), (v) => {
+    const normalized = toStatRate(v);
+    if (normalized > 0 && normalized < 0.8) transfer.ncaaWrc = normalized;
+  });
 
   return { returner, transfer };
 }
@@ -370,7 +427,9 @@ function recalcReturner(
   const pAvg = baPlus == null
     ? null
     : (() => {
-      const baBlended = (fromAvg * (1 - config.powerWeight)) + (config.ncaaAvg * (baPlus / config.ncaaPR) * config.powerWeight);
+      const safeBaStdPower = config.baStdPower === 0 ? 1 : config.baStdPower;
+      const scaledBa = config.ncaaAvg + (((baPlus - config.ncaaPR) / safeBaStdPower) * config.baStdNcaa);
+      const baBlended = (fromAvg * (1 - config.powerWeight)) + (scaledBa * config.powerWeight);
       const baProjected = baBlended * (1 + bases.avg + (devAgg * config.devCoeffs.avg));
       const baDelta = baProjected - fromAvg;
       return round3(normalizeProjectedRate(fromAvg + (baDelta * avgProjectedTierDamp(baProjected))));
@@ -379,7 +438,9 @@ function recalcReturner(
   const pObp = obpPlus == null
     ? null
     : (() => {
-      const obpBlended = (fromObp * (1 - config.powerWeight)) + (config.ncaaObp * (obpPlus / config.ncaaPR) * config.powerWeight);
+      const safeObpStdPower = config.obpStdPower === 0 ? 1 : config.obpStdPower;
+      const scaledObp = config.ncaaObp + (((obpPlus - config.ncaaPR) / safeObpStdPower) * config.obpStdNcaa);
+      const obpBlended = (fromObp * (1 - config.powerWeight)) + (scaledObp * config.powerWeight);
       const obpProjected = obpBlended * (1 + bases.obp + (devAgg * config.devCoeffs.obp));
       const obpDelta = obpProjected - fromObp;
       return round3(normalizeProjectedRate(fromObp + (obpDelta * obpProjectedTierDamp(obpProjected))));
@@ -449,7 +510,8 @@ function recalcTransfer(pred: PredictionRow, config: TransferConfig) {
   const fromPark = Number.isFinite(fromParkRaw) ? fromParkRaw : 100;
   const toPark = Number.isFinite(toParkRaw) ? toParkRaw : fromPark;
 
-  const baPowerAdj = config.baNcaaAvg * (prPlus / 100);
+  const safeBaStdPower = config.baStdPower === 0 ? 1 : config.baStdPower;
+  const baPowerAdj = config.baNcaaAvg + (((prPlus - 100) / safeBaStdPower) * config.baStdNcaa);
   const baBlended = fromAvg * (1 - config.baPowerWeight) + baPowerAdj * config.baPowerWeight;
   const baMultiplier =
     1 +
@@ -458,7 +520,8 @@ function recalcTransfer(pred: PredictionRow, config: TransferConfig) {
     (config.baParkWeight * ((toPark - fromPark) / 100));
   const pAvg = round3(normalizeProjectedRate(baBlended * baMultiplier));
 
-  const obpPowerAdj = config.obpNcaaAvg * (prPlus / 100);
+  const safeObpStdPower = config.obpStdPower === 0 ? 1 : config.obpStdPower;
+  const obpPowerAdj = config.obpNcaaAvg + (((prPlus - 100) / safeObpStdPower) * config.obpStdNcaa);
   const obpBlended = fromObp * (1 - config.obpPowerWeight) + obpPowerAdj * config.obpPowerWeight;
   const obpMultiplier =
     1 +
@@ -573,6 +636,7 @@ export async function bulkRecalculatePredictionsLocal() {
   let updated = 0;
   let errors = 0;
   let updatedReturner = 0;
+  let updatedTransfer = 0;
   const BATCH = 40;
 
   for (let i = 0; i < preds.length; i += BATCH) {
@@ -590,14 +654,19 @@ export async function bulkRecalculatePredictionsLocal() {
     await Promise.all(
       batch.map(async (pred) => {
         try {
-          const internal = internalByPredictionId.get(pred.id);
-          const manual = MANUAL_INTERNAL_OVERRIDES[pred.id];
-          const powerContext: ReturnerPowerContext = {
-            baPlus: readSpecificPlus(internal?.avg_power_rating) ?? manual?.baPlus ?? null,
-            obpPlus: readSpecificPlus(internal?.obp_power_rating) ?? manual?.obpPlus ?? null,
-            isoPlus: readSpecificPlus(internal?.slg_power_rating) ?? manual?.isoPlus ?? null,
-          };
-          const result = recalcReturner(pred, config.returner, powerContext);
+          let result: ReturnType<typeof recalcReturner> | ReturnType<typeof recalcTransfer>;
+          if (pred.model_type === "transfer") {
+            result = recalcTransfer(pred, config.transfer);
+          } else {
+            const internal = internalByPredictionId.get(pred.id);
+            const manual = MANUAL_INTERNAL_OVERRIDES[pred.id];
+            const powerContext: ReturnerPowerContext = {
+              baPlus: readSpecificPlus(internal?.avg_power_rating) ?? manual?.baPlus ?? null,
+              obpPlus: readSpecificPlus(internal?.obp_power_rating) ?? manual?.obpPlus ?? null,
+              isoPlus: readSpecificPlus(internal?.slg_power_rating) ?? manual?.isoPlus ?? null,
+            };
+            result = recalcReturner(pred, config.returner, powerContext);
+          }
           await supabase.from("player_predictions").update({ locked: false }).eq("id", pred.id);
           const { error } = await supabase
             .from("player_predictions")
@@ -610,7 +679,8 @@ export async function bulkRecalculatePredictionsLocal() {
           }
 
           updated += 1;
-          updatedReturner += 1;
+          if (pred.model_type === "transfer") updatedTransfer += 1;
+          else updatedReturner += 1;
         } catch {
           errors += 1;
         }
@@ -618,5 +688,5 @@ export async function bulkRecalculatePredictionsLocal() {
     );
   }
 
-  return { success: true, updated, updated_returner: updatedReturner, updated_transfer: 0, errors, total: preds.length };
+  return { success: true, updated, updated_returner: updatedReturner, updated_transfer: updatedTransfer, errors, total: preds.length };
 }

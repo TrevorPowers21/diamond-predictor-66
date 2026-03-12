@@ -939,7 +939,7 @@ export default function ReturningPlayers() {
                         <TableHead className="text-right"><SortButton label="pISO" sortKeyVal="p_iso" /></TableHead>
                         <TableHead className="text-right"><SortButton label="wRC+" sortKeyVal="p_wrc_plus" /></TableHead>
                         <TableHead className="text-right"><SortButton label="oWAR" sortKeyVal="p_war" /></TableHead>
-                        <TableHead className="text-right"><SortButton label="NIL" sortKeyVal="p_nil" /></TableHead>
+                        <TableHead className="text-right"><SortButton label="Market Value" sortKeyVal="p_nil" /></TableHead>
                         <TableHead className="text-center min-w-[180px]">Scouting</TableHead>
                       </TableRow>
                     </TableHeader>

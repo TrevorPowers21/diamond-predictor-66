@@ -495,6 +495,10 @@ export default function TransferPortal() {
     const ncaaAvgOBP = toRate(readLocalNum("t_obp_ncaa_avg", 0.385, remoteEquationValues));
     const ncaaAvgISO = toRate(readLocalNum("t_iso_ncaa_avg", 0.162, remoteEquationValues));
     const ncaaAvgWrc = toRate(readLocalNum("t_wrc_ncaa_avg", 0.364, remoteEquationValues));
+    const baStdPower = readLocalNum("t_ba_std_pr", 31.297, remoteEquationValues);
+    const baStdNcaa = toRate(readLocalNum("t_ba_std_ncaa", 0.043455, remoteEquationValues));
+    const obpStdPower = readLocalNum("t_obp_std_pr", 28.889, remoteEquationValues);
+    const obpStdNcaa = toRate(readLocalNum("t_obp_std_ncaa", 0.046781, remoteEquationValues));
 
     const baPowerWeight = toRate(readLocalNum("t_ba_power_weight", 0.70, remoteEquationValues));
     const obpPowerWeight = toRate(readLocalNum("t_obp_power_weight", 0.70, remoteEquationValues));
@@ -540,6 +544,10 @@ export default function TransferPortal() {
       ncaaAvgOBP,
       ncaaAvgISO,
       ncaaAvgWrc,
+      baStdPower,
+      baStdNcaa,
+      obpStdPower,
+      obpStdNcaa,
       baPowerWeight,
       obpPowerWeight,
       baConferenceWeight,
@@ -563,8 +571,9 @@ export default function TransferPortal() {
     const ptm = getProgramTierMultiplierByConference(toConference, DEFAULT_NIL_TIER_MULTIPLIERS);
     const pvm = getPositionValueMultiplier(selectedPlayer.position);
     const nilValuation = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
-    const baPowerAdj = ncaaAvgBA * (baPR / 100);
-    const baBlended = (lastAvg * (1 - baPowerWeight)) + (baPowerAdj * baPowerWeight);
+    const safeBaStdPower = baStdPower === 0 ? 1 : baStdPower;
+    const baScaled = ncaaAvgBA + (((baPR - 100) / safeBaStdPower) * baStdNcaa);
+    const baBlended = (lastAvg * (1 - baPowerWeight)) + (baScaled * baPowerWeight);
     const baConfTerm = baConferenceWeight * ((toAvgPlus - fromAvgPlus) / 100);
     const baPitchTerm = baPitchingWeight * ((toStuff - fromStuff) / 100);
     const baParkTerm = baParkWeight * ((toPark - fromPark) / 100);
@@ -610,7 +619,7 @@ export default function TransferPortal() {
         toStuff,
         fromPark,
         toPark,
-        powerAdj: baPowerAdj,
+        powerAdj: baScaled,
         blended: baBlended,
         confTerm: baConfTerm,
         pitchTerm: baPitchTerm,

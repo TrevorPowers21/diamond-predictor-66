@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -510,6 +510,10 @@ export default function TeamBuilder() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const isAdmin = hasRole("admin");
+  const [searchParams] = useSearchParams();
+  const validTabs = new Set(["roster", "target-board", "compare", "depth"]);
+  const requestedTab = (searchParams.get("tab") || "").trim().toLowerCase();
+  const initialTab = validTabs.has(requestedTab) ? requestedTab : "roster";
 
   const [selectedBuildId, setSelectedBuildId] = useState<string | null>(null);
   const [nilEquationOpen, setNilEquationOpen] = useState(false);
@@ -1295,6 +1299,10 @@ export default function TeamBuilder() {
     const ncaaAvgOBP = toRate(eqNum("t_obp_ncaa_avg", 0.385));
     const ncaaAvgISO = toRate(eqNum("t_iso_ncaa_avg", 0.162));
     const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.364));
+    const baStdPower = eqNum("t_ba_std_pr", 31.297);
+    const baStdNcaa = toRate(eqNum("t_ba_std_ncaa", 0.043455));
+    const obpStdPower = eqNum("t_obp_std_pr", 28.889);
+    const obpStdNcaa = toRate(eqNum("t_obp_std_ncaa", 0.046781));
     const baPowerWeight = toRate(eqNum("t_ba_power_weight", 0.70));
     const obpPowerWeight = toRate(eqNum("t_obp_power_weight", 0.70));
     const baConferenceWeight = toWeight(eqNum("t_ba_conference_weight", 1.0));
@@ -1334,6 +1342,10 @@ export default function TeamBuilder() {
       ncaaAvgOBP,
       ncaaAvgISO,
       ncaaAvgWrc,
+      baStdPower,
+      baStdNcaa,
+      obpStdPower,
+      obpStdNcaa,
       baPowerWeight,
       obpPowerWeight,
       baConferenceWeight,
@@ -1459,6 +1471,10 @@ export default function TeamBuilder() {
       ncaaAvgOBP: toRate(eqNum("t_obp_ncaa_avg", 0.385)),
       ncaaAvgISO: toRate(eqNum("t_iso_ncaa_avg", 0.162)),
       ncaaAvgWrc: toRate(eqNum("t_wrc_ncaa_avg", 0.364)),
+      baStdPower: eqNum("t_ba_std_pr", 31.297),
+      baStdNcaa: toRate(eqNum("t_ba_std_ncaa", 0.043455)),
+      obpStdPower: eqNum("t_obp_std_pr", 28.889),
+      obpStdNcaa: toRate(eqNum("t_obp_std_ncaa", 0.046781)),
       baPowerWeight: toRate(eqNum("t_ba_power_weight", 0.70)),
       obpPowerWeight: toRate(eqNum("t_obp_power_weight", 0.70)),
       baConferenceWeight: toWeight(eqNum("t_ba_conference_weight", 1.0)),
@@ -1665,6 +1681,10 @@ export default function TeamBuilder() {
         const ncaaAvgOBP = toRate(eqNum("t_obp_ncaa_avg", 0.385));
         const ncaaAvgISO = toRate(eqNum("t_iso_ncaa_avg", 0.162));
         const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.364));
+        const baStdPower = eqNum("t_ba_std_pr", 31.297);
+        const baStdNcaa = toRate(eqNum("t_ba_std_ncaa", 0.043455));
+        const obpStdPower = eqNum("t_obp_std_pr", 28.889);
+        const obpStdNcaa = toRate(eqNum("t_obp_std_ncaa", 0.046781));
         const baPowerWeight = toRate(eqNum("t_ba_power_weight", 0.70));
         const obpPowerWeight = toRate(eqNum("t_obp_power_weight", 0.70));
         const baConferenceWeight = toWeight(eqNum("t_ba_conference_weight", 1.0));
@@ -1691,6 +1711,7 @@ export default function TeamBuilder() {
           fromStuff: fromConfStats.stuff_plus, toStuff: toConfStats.stuff_plus,
           fromPark, toPark,
           ncaaAvgBA, ncaaAvgOBP, ncaaAvgISO, ncaaAvgWrc,
+          baStdPower, baStdNcaa, obpStdPower, obpStdNcaa,
           baPowerWeight, obpPowerWeight,
           baConferenceWeight, obpConferenceWeight, isoConferenceWeight,
           baPitchingWeight, obpPitchingWeight, isoPitchingWeight,
@@ -2612,12 +2633,12 @@ export default function TeamBuilder() {
           )}
         </Card>
 
-        <Tabs defaultValue="roster">
+        <Tabs defaultValue={initialTab}>
           <div className="flex items-center justify-between gap-2">
             <TabsList>
               <TabsTrigger value="roster">Roster</TabsTrigger>
               <TabsTrigger value="target-board">Target Board</TabsTrigger>
-              <TabsTrigger value="compare">Compare</TabsTrigger>
+              <TabsTrigger value="compare" className="hidden">Compare</TabsTrigger>
               <TabsTrigger value="depth">Depth Chart</TabsTrigger>
             </TabsList>
             <Button

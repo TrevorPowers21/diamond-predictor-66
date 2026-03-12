@@ -18,6 +18,22 @@
 - Validate calculations panel-by-panel against Transfer Portal dashboard for matching inputs.
 - If any mismatch appears, trace one player line-by-line (PowerAdj, Blended, Multiplier, Projected) before changing broad logic.
 
+## Session: March 12, 2026
+
+### Power Ratings — Full Recalculation From Updated CSV
+- Replaced `src/data/power_ratings_2025_seed.json` using:
+  - `/Users/danielleogonowski/Downloads/rate_no_percent_clean.csv`
+- Recalculation scope:
+  - `2299` rows processed from CSV
+  - `2274` matched existing seed rows
+  - `184` rows changed (previously off/misaligned metrics)
+  - `2090` rows unchanged
+  - `25` new rows added
+  - `27` old rows removed (not present in latest CSV)
+- Tre Phelps was verified and updated from the new CSV.
+- Detailed run report saved at:
+  - `reports/power_ratings_recalc_2026-03-12.json`
+
 ## Session: March 10, 2026
 
 ### Fixes
