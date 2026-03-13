@@ -1,0 +1,10 @@
+{
+  "date": "2026-03-12",
+  "model_type": "returner",
+  "status": "active",
+  "variant": "regular",
+  "total_ids": 2292,
+  "updated": 2292,
+  "failed": 0,
+  "failure_samples": []
+}

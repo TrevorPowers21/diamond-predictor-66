@@ -1,0 +1,116 @@
+{
+  "date": "2026-03-12",
+  "csv_rows": 2299,
+  "previous_rows": 2299,
+  "matched_rows": 2274,
+  "changed_rows": 184,
+  "unchanged_rows": 2090,
+  "added_rows": 25,
+  "removed_rows": 27,
+  "changed_samples": [
+    {
+      "playerName": "Ethan Frey",
+      "team": "Louisiana State University",
+      "diffFields": 10
+    },
+    {
+      "playerName": "Will Hodo",
+      "team": "University of Alabama",
+      "diffFields": 1
+    },
+    {
+      "playerName": "Jared Jones",
+      "team": "Louisiana State University",
+      "diffFields": 9
+    },
+    {
+      "playerName": "Ryan Kucherak",
+      "team": "Northwestern University",
+      "diffFields": 6
+    },
+    {
+      "playerName": "Chayton Krauss",
+      "team": "Dallas Baptist University",
+      "diffFields": 6
+    },
+    {
+      "playerName": "Nash Rippen",
+      "team": "University of North Alabama",
+      "diffFields": 8
+    },
+    {
+      "playerName": "Clay Burdette",
+      "team": "Xavier University",
+      "diffFields": 3
+    },
+    {
+      "playerName": "Andrew Fischer",
+      "team": "University of Tennessee",
+      "diffFields": 5
+    },
+    {
+      "playerName": "Anthony DePino",
+      "team": "University of Rhode Island",
+      "diffFields": 1
+    },
+    {
+      "playerName": "Alex Hernandez",
+      "team": "Georgia Tech",
+      "diffFields": 5
+    },
+    {
+      "playerName": "Grant Jay",
+      "team": "Dallas Baptist University",
+      "diffFields": 8
+    },
+    {
+      "playerName": "Dean Curley",
+      "team": "University of Tennessee",
+      "diffFields": 4
+    },
+    {
+      "playerName": "Michael O'Shaughnessy",
+      "team": "Davidson College",
+      "diffFields": 6
+    },
+    {
+      "playerName": "Reese Chapman",
+      "team": "University of Tennessee",
+      "diffFields": 6
+    },
+    {
+      "playerName": "Kuhio Aloy",
+      "team": "University of Arkansas",
+      "diffFields": 1
+    },
+    {
+      "playerName": "Eli Putnam",
+      "team": "Davidson College",
+      "diffFields": 5
+    },
+    {
+      "playerName": "Braden Benton",
+      "team": "Northwestern State University",
+      "diffFields": 8
+    },
+    {
+      "playerName": "Pierre Seals",
+      "team": "University of Missouri",
+      "diffFields": 5
+    },
+    {
+      "playerName": "Hunter Hines",
+      "team": "Mississippi State University",
+      "diffFields": 5
+    },
+    {
+      "playerName": "Brady Christensen",
+      "team": "Sam Houston State University",
+      "diffFields": 9
+    }
+  ],
+  "notes": [
+    "Power ratings are recalculated in-app from these raw metrics.",
+    "Updating this seed updates BA/OBP/ISO/Overall ratings and scouting grades derived from normal-score formulas."
+  ]
+}

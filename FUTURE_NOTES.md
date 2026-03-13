@@ -102,3 +102,8 @@ Status: In testing phase. Defer cleanup until testing is complete.
 3. Duplicate conference handling
 - Prevent alias-driven conference duplication in Conference Stats (for example, AAC vs American Athletic Conference, A-10 vs Atlantic 10, CAA vs Coastal Athletic Association).
 - Keep canonical conference naming consistent during manual edits/imports.
+
+- Data QA note (2026-03-12): 2025 player stats and team assignments look accurate, but multiple power rating inputs are misaligned from prior CSV line/order issues. Re-import accurate power metrics and recalculate all power ratings before next projection pass. Known incorrect example: Tre Phelps power ratings.
+
+- Player Dashboard design note (2026-03-12): revisit regression color styling. Current regression color makes too many players look overly poor; tone down/redesign negative-state color treatment.
+- Compare workflow note (2026-03-12): Compare was moved to the Compare Dashboard route (redirecting into Team Builder compare view). Re-evaluate whether Compare should move back into Team Builder tabs later.

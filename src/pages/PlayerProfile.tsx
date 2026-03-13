@@ -738,7 +738,7 @@ export default function PlayerProfile() {
             <div className="grid gap-3 md:grid-cols-3">
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">NIL Valuation</CardTitle>
+                  <CardTitle className="text-lg">Market Value</CardTitle>
                 </CardHeader>
                 <CardContent className="pt-0">
                   <div className="text-3xl font-bold text-[hsl(var(--success))]">

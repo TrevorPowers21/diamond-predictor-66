@@ -19,6 +19,10 @@ export type TransferProjectionInputs = {
   ncaaAvgOBP: number;
   ncaaAvgISO: number;
   ncaaAvgWrc: number;
+  baStdPower: number;
+  baStdNcaa: number;
+  obpStdPower: number;
+  obpStdNcaa: number;
   baPowerWeight: number;
   obpPowerWeight: number;
   baConferenceWeight: number;
@@ -52,8 +56,9 @@ export type TransferProjectionOutput = {
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 
 export function computeTransferProjection(input: TransferProjectionInputs): TransferProjectionOutput {
-  const baPowerAdj = input.ncaaAvgBA * (input.baPR / 100);
-  const baBlended = input.lastAvg * (1 - input.baPowerWeight) + baPowerAdj * input.baPowerWeight;
+  const safeBaStdPower = input.baStdPower === 0 ? 1 : input.baStdPower;
+  const baScaled = input.ncaaAvgBA + (((input.baPR - 100) / safeBaStdPower) * input.baStdNcaa);
+  const baBlended = input.lastAvg * (1 - input.baPowerWeight) + baScaled * input.baPowerWeight;
   const baMultiplier =
     1 +
     (input.baConferenceWeight * ((input.toAvgPlus - input.fromAvgPlus) / 100)) -
@@ -61,8 +66,9 @@ export function computeTransferProjection(input: TransferProjectionInputs): Tran
     (input.baParkWeight * ((input.toPark - input.fromPark) / 100));
   const pAvgRaw = baBlended * baMultiplier;
 
-  const obpPowerAdj = input.ncaaAvgOBP * (input.obpPR / 100);
-  const obpBlended = input.lastObp * (1 - input.obpPowerWeight) + obpPowerAdj * input.obpPowerWeight;
+  const safeObpStdPower = input.obpStdPower === 0 ? 1 : input.obpStdPower;
+  const obpScaled = input.ncaaAvgOBP + (((input.obpPR - 100) / safeObpStdPower) * input.obpStdNcaa);
+  const obpBlended = input.lastObp * (1 - input.obpPowerWeight) + obpScaled * input.obpPowerWeight;
   const obpMultiplier =
     1 +
     (input.obpConferenceWeight * ((input.toObpPlus - input.fromObpPlus) / 100)) -

@@ -30,7 +30,11 @@ function EquationConstantsTab() {
   const [editableSections, setEditableSections] = useState<Record<string, boolean>>({});
   const defaultEditableValues: Record<string, string> = {
     r_ncaa_avg_ba: "0.280",
+    r_ba_std_pr: "31.297",
+    r_ba_std_ncaa: "0.043455",
     r_ncaa_avg_obp: "0.385",
+    r_obp_std_pr: "28.889",
+    r_obp_std_ncaa: "0.046781",
     r_ncaa_avg_iso: "0.162",
     r_w_obp: "0.45",
     r_w_slg: "0.30",
@@ -69,11 +73,15 @@ function EquationConstantsTab() {
     r_obp_damp_tier3_impact: "0.70",
     r_obp_damp_tier4_impact: "0.40",
     t_ba_ncaa_avg: "0.280",
+    t_ba_std_pr: "31.297",
+    t_ba_std_ncaa: "0.043455",
     t_ba_power_weight: "0.70",
     t_ba_conference_weight: "1.000",
     t_ba_pitching_weight: "1.000",
     t_ba_park_weight: "1.000",
     t_obp_ncaa_avg: "0.385",
+    t_obp_std_pr: "28.889",
+    t_obp_std_ncaa: "0.046781",
     t_obp_power_weight: "0.70",
     t_obp_conference_weight: "1.000",
     t_obp_pitching_weight: "1.000",
@@ -311,16 +319,17 @@ function EquationConstantsTab() {
           <div>
             <h4 className="font-semibold mb-4">Batting Average</h4>
             <div className="bg-muted p-4 rounded-lg font-mono text-sm space-y-2">
-              <div><span className="text-muted-foreground">Blended =</span> (LastBA × (1 - PowerRatingWeight)) + (NCAAAvgBA × (BAPowerRating+ / NCAAAvgPowerRating) × PowerRatingWeight)</div>
+              <div><span className="text-muted-foreground">ScaledBA =</span> NCAAAvgBA + ((BAPowerRating+ - NCAAAvgPowerRating) / StdDevBAPowerRating) × StdDevNCAABA</div>
+              <div><span className="text-muted-foreground">Blended =</span> (LastBA × (1 - PowerRatingWeight)) + (ScaledBA × PowerRatingWeight)</div>
               <div><span className="text-muted-foreground">Mult =</span> (1) + (ClassAdjustment) + (DevAggressiveness × 0.06)</div>
               <div><span className="text-muted-foreground">Projected =</span> Blended × Mult</div>
               <div><span className="text-muted-foreground">Delta =</span> Projected - LastBA</div>
-              <div><span className="text-muted-foreground">DampFactor =</span> IFS(ProjectedBA ≤ 0.350, 1.0, ProjectedBA ≤ 0.380, 0.9, ProjectedBA ≤ 0.420, 0.7, TRUE, 0.4)</div>
+              <div><span className="text-muted-foreground">DampFactor =</span> IFS(Projected ≤ 0.350, 1.0, Projected ≤ 0.380, 0.9, Projected ≤ 0.420, 0.7, TRUE, 0.4)</div>
               <div className="ml-6 space-y-1 text-xs">
-                <div>1.0 if ProjectedBA ≤ 0.350</div>
-                <div>0.9 if 0.350 &lt; ProjectedBA ≤ 0.380</div>
-                <div>0.7 if 0.380 &lt; ProjectedBA ≤ 0.420</div>
-                <div>0.4 if ProjectedBA &gt; 0.420</div>
+                <div>1.0 if Projected ≤ 0.350</div>
+                <div>0.9 if 0.350 &lt; Projected ≤ 0.380</div>
+                <div>0.7 if 0.380 &lt; Projected ≤ 0.420</div>
+                <div>0.4 if Projected &gt; 0.420</div>
               </div>
               <div><span className="text-muted-foreground">Final =</span> LastBA + (Delta × DampFactor)</div>
             </div>
@@ -330,6 +339,13 @@ function EquationConstantsTab() {
                 <div className="ml-2 space-y-0.5">
                   <div>• Power Rating Weight = 0.7</div>
                   <div>• NCAA Avg Power Rating = 100</div>
+                </div>
+              </div>
+              <div className={sectionPanelClass}>
+                {editableSectionHeader("r_ba_sd", "SD Constants")}
+                <div className="space-y-1.5">
+                  {editableField("r_ba_sd", "r_ba_std_pr", "Std Dev BA Power Rating+")}
+                  {editableField("r_ba_sd", "r_ba_std_ncaa", "Std Dev NCAA BA")}
                 </div>
               </div>
               <div className={sectionPanelClass}>
@@ -462,16 +478,17 @@ function EquationConstantsTab() {
           <div>
             <h4 className="font-semibold mb-4">On Base %</h4>
             <div className="bg-muted p-4 rounded-lg font-mono text-sm space-y-2">
-              <div><span className="text-muted-foreground">Blended =</span> (LastOBP × (1 - PowerRatingWeight)) + (NCAAAvgOBP × (OBPPowerRating+ / NCAAAvgPowerRating) × PowerRatingWeight)</div>
+              <div><span className="text-muted-foreground">ScaledOBP =</span> NCAAAvgOBP + ((OBPPowerRating+ - NCAAAvgPowerRating) / StdDevOBPPowerRating) × StdDevNCAAOBP</div>
+              <div><span className="text-muted-foreground">Blended =</span> (LastOBP × (1 - PowerRatingWeight)) + (ScaledOBP × PowerRatingWeight)</div>
               <div><span className="text-muted-foreground">Mult =</span> (1) + (ClassAdjustment) + (DevAggressiveness × 0.06)</div>
               <div><span className="text-muted-foreground">Projected =</span> Blended × Mult</div>
               <div><span className="text-muted-foreground">Delta =</span> Projected - LastOBP</div>
-              <div><span className="text-muted-foreground">DampFactor =</span> IFS(ProjectedOBP ≤ 0.455, 1.0, ProjectedOBP ≤ 0.485, 0.9, ProjectedOBP ≤ 0.525, 0.7, TRUE, 0.4)</div>
+              <div><span className="text-muted-foreground">DampFactor =</span> IFS(Projected ≤ 0.455, 1.0, Projected ≤ 0.485, 0.9, Projected ≤ 0.525, 0.7, TRUE, 0.4)</div>
               <div className="ml-6 space-y-1 text-xs">
-                <div>1.0 if ProjectedOBP ≤ 0.455</div>
-                <div>0.9 if 0.455 &lt; ProjectedOBP ≤ 0.485</div>
-                <div>0.7 if 0.485 &lt; ProjectedOBP ≤ 0.525</div>
-                <div>0.4 if ProjectedOBP &gt; 0.525</div>
+                <div>1.0 if Projected ≤ 0.455</div>
+                <div>0.9 if 0.455 &lt; Projected ≤ 0.485</div>
+                <div>0.7 if 0.485 &lt; Projected ≤ 0.525</div>
+                <div>0.4 if Projected &gt; 0.525</div>
               </div>
               <div><span className="text-muted-foreground">Final =</span> LastOBP + (Delta × DampFactor)</div>
             </div>
@@ -487,6 +504,13 @@ function EquationConstantsTab() {
                 <p className={sectionHeadingClass}>NCAA Average</p>
                 <div className="space-y-1.5">
                   {syncedField("NCAA Avg OBP", ncaaStats?.obp, 3)}
+                </div>
+              </div>
+              <div className={sectionPanelClass}>
+                {editableSectionHeader("r_obp_sd", "SD Constants")}
+                <div className="space-y-1.5">
+                  {editableField("r_obp_sd", "r_obp_std_pr", "Std Dev OBP Power Rating+")}
+                  {editableField("r_obp_sd", "r_obp_std_ncaa", "Std Dev NCAA OBP")}
                 </div>
               </div>
               <div className={sectionPanelClass}>
@@ -763,7 +787,7 @@ function EquationConstantsTab() {
             <h4 className="font-semibold mb-4">Batting Average</h4>
             <div className="bg-muted p-4 rounded-lg font-mono text-sm space-y-2">
               <div><span className="text-muted-foreground">LastStat =</span> LastBattingAverage</div>
-              <div><span className="text-muted-foreground">PowerAdj =</span> NCAAAvgBattingAverage × (BattingAveragePowerRating+ / 100)</div>
+              <div><span className="text-muted-foreground">PowerAdj =</span> NCAAAvgBattingAverage + ((BattingAveragePowerRating+ - 100) / StdDevBAPowerRating+) × StdDevNCAABattingAverage</div>
               <div><span className="text-muted-foreground">Blended =</span> (LastStat × (1 - PowerRatingWeight)) + (PowerAdj × PowerRatingWeight)</div>
               <div><span className="text-muted-foreground">Multiplier =</span> (1 + (ConferenceWeight × ((ToAverage+ - FromAverage+) / 100))) - (PitchingWeight × ((ToStuff+ - FromStuff+) / 100)) + (ParkFactorWeight × ((ToParkFactor - FromParkFactor) / 100))</div>
               <div><span className="text-muted-foreground">ProjectedBA =</span> Blended × Multiplier</div>
@@ -772,13 +796,15 @@ function EquationConstantsTab() {
               <div className={sectionPanelClass}>
                 <p className={sectionHeadingClass}>Constants</p>
                 <div className="ml-2 space-y-0.5">
-                  <div>• Power rating normalization = 100</div>
+                  <div>• Power rating baseline = 100</div>
                 </div>
               </div>
               <div className={sectionPanelClass}>
                 {editableSectionHeader("t_ba")}
                 <div className="space-y-1.5">
                   {syncedField("NCAA Avg Batting Average", ncaaStats?.avg, 3)}
+                  {editableField("t_ba", "t_ba_std_pr", "StdDev BA Power Rating +")}
+                  {editableField("t_ba", "t_ba_std_ncaa", "StdDev NCAA Batting Average")}
                   {editableField("t_ba", "t_ba_power_weight", "Power Rating Weight")}
                   {editableField("t_ba", "t_ba_conference_weight", "Conference Weight")}
                   {editableField("t_ba", "t_ba_pitching_weight", "Pitching Weight")}
@@ -807,7 +833,7 @@ function EquationConstantsTab() {
             <h4 className="font-semibold mb-4">On Base %</h4>
             <div className="bg-muted p-4 rounded-lg font-mono text-sm space-y-2">
               <div><span className="text-muted-foreground">LastOBP =</span> LastOnBase%</div>
-              <div><span className="text-muted-foreground">PowerAdj =</span> NCAAAvgOBP × (OBPPowerRating+ / 100)</div>
+              <div><span className="text-muted-foreground">PowerAdj =</span> NCAAAvgOBP + ((OBPPowerRating+ - 100) / StdDevOBPPowerRating+) × StdDevNCAAOBP</div>
               <div><span className="text-muted-foreground">Blended =</span> (LastOBP × (1 - PowerRatingWeight)) + (PowerAdj × PowerRatingWeight)</div>
               <div><span className="text-muted-foreground">Multiplier =</span> (1 + (ConferenceWeight × ((ToOBP+ - FromOBP+) / 100))) - (PitchingWeight × ((ToStuff+ - FromStuff+) / 100)) + (ParkFactorWeight × ((ToParkFactor - FromParkFactor) / 100))</div>
               <div><span className="text-muted-foreground">ProjectedOBP =</span> Blended × Multiplier</div>
@@ -816,13 +842,15 @@ function EquationConstantsTab() {
               <div className={sectionPanelClass}>
                 <p className={sectionHeadingClass}>Constants</p>
                 <div className="ml-2 space-y-0.5">
-                  <div>• Power rating normalization = 100</div>
+                  <div>• Power rating baseline = 100</div>
                 </div>
               </div>
               <div className={sectionPanelClass}>
                 {editableSectionHeader("t_obp")}
                 <div className="space-y-1.5">
                   {syncedField("NCAA Avg OBP", ncaaStats?.obp, 3)}
+                  {editableField("t_obp", "t_obp_std_pr", "StdDev OBP Power Rating +")}
+                  {editableField("t_obp", "t_obp_std_ncaa", "StdDev NCAA OBP")}
                   {editableField("t_obp", "t_obp_power_weight", "Power Rating Weight")}
                   {editableField("t_obp", "t_obp_conference_weight", "Conference Weight")}
                   {editableField("t_obp", "t_obp_pitching_weight", "Pitching Weight")}
@@ -3726,8 +3754,24 @@ function QuickActionsTab() {
   } | null>(null);
 
   const runBulkRecalculate = async () => {
-    setBulkLoading(false);
-    toast.info("Bulk recalculation is frozen while we run a single-player equation trace.");
+    setBulkLoading(true);
+    setBulkResult(null);
+    try {
+      const result = await bulkRecalculatePredictionsLocal();
+      setBulkResult({
+        updated: result.updated ?? 0,
+        errors: result.errors ?? 0,
+        total: result.total ?? 0,
+      });
+      toast.success(
+        `Bulk recalculated ${result.updated ?? 0}/${result.total ?? 0} predictions` +
+          ((result.errors ?? 0) > 0 ? ` with ${result.errors} errors` : ""),
+      );
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBulkLoading(false);
+    }
   };
 
   const clearTransfer2026Assignments = async () => {
@@ -4019,9 +4063,9 @@ function QuickActionsTab() {
               Re-run the returner formula on all player predictions (returners + transfers), including departed players.
             </p>
           </div>
-          <Button onClick={runBulkRecalculate} disabled className="gap-2">
+          <Button onClick={runBulkRecalculate} disabled={bulkLoading} className="gap-2">
             {bulkLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Bulk Recalc Frozen
+            {bulkLoading ? "Recalculating…" : "Run Bulk Recalculate"}
           </Button>
           {bulkResult && (
             <p className="text-sm text-muted-foreground">
@@ -4483,33 +4527,13 @@ function DataStorage2025Tab() {
         if (batch.length < pageSize) break;
         from += pageSize;
       }
+      // 2025 power metrics must be sourced from the curated seed CSV only.
+      // Do not overlay partial scouting fields from player_predictions, which can
+      // reintroduce stale/misaligned values by name.
+      if (selectedSeason === "2025") {
+        return powerSeedRows.map((r) => ({ ...r }));
+      }
       if (allData.length > 0) {
-        if (selectedSeason === "2025") {
-          const dbRowsByName = new Map<string, Array<{ chase: number | null; barrel: number | null; ev90: number | null }>>();
-          for (const row of allData) {
-            const playerName = `${row.players?.first_name || ""} ${row.players?.last_name || ""}`.trim();
-            const key = normalize(playerName);
-            if (!key) continue;
-            const arr = dbRowsByName.get(key) || [];
-            arr.push({
-              chase: row.chase_score as number | null,
-              barrel: row.barrel_score as number | null,
-              ev90: row.ev_score as number | null,
-            });
-            dbRowsByName.set(key, arr);
-          }
-          return powerSeedRows.map((seed) => {
-            const matches = dbRowsByName.get(normalize(seed.playerName)) || [];
-            const db = matches.length === 1 ? matches[0] : null;
-            return {
-              ...seed,
-              chase: db?.chase ?? seed.chase ?? null,
-              barrel: db?.barrel ?? seed.barrel ?? null,
-              ev90: db?.ev90 ?? seed.ev90 ?? null,
-              source: db ? "power_seed_2025 + predictions_overlay" : seed.source,
-            };
-          });
-        }
         return allData.map((row: any) => {
           const playerName = `${row.players?.first_name || ""} ${row.players?.last_name || ""}`.trim();
           return {
@@ -4530,10 +4554,6 @@ function DataStorage2025Tab() {
             source: "player_predictions.partial",
           };
         });
-      }
-
-      if (selectedSeason === "2025") {
-        return powerSeedRows.map((r) => ({ ...r }));
       }
       return [];
     },
@@ -4638,39 +4658,89 @@ function DataStorage2025Tab() {
     bb: number | null; chase: number | null; barrel: number | null; ev90: number | null;
     pull: number | null; la10_30: number | null; gb: number | null;
   }) => {
-    const contactScore = scoreFromNormal(r.contact, 77.1, 6.6);
-    const lineDriveScore = scoreFromNormal(r.lineDrive, 20.9, 4.31);
-    const avgEVScore = scoreFromNormal(r.avgExitVelo, 86.2, 4.28);
-    const popUpScore = scoreFromNormal(r.popUp, 7.9, 3.37, true);
-    const bbScore = scoreFromNormal(r.bb, 11.4, 3.57);
-    const chaseScore = scoreFromNormal(r.chase, 23.1, 5.58, true);
-    const barrelScore = scoreFromNormal(r.barrel, 17.3, 7.89);
-    const ev90Score = scoreFromNormal(r.ev90, 103.1, 3.97);
-    const pullScore = scoreFromNormal(r.pull, 36.5, 8.03);
-    const la1030Score = scoreFromNormal(r.la10_30, 29, 6.81);
-    const gbScore = scoreFromNormal(r.gb, 43.2, 8.0, true);
+    const baNcaaContact = safeNumber(editableValues.ba_ncaa_contact_pct, 77.1);
+    const baNcaaLineDrive = safeNumber(editableValues.ba_ncaa_line_drive_pct, 20.9);
+    const baNcaaAvgEV = safeNumber(editableValues.ba_ncaa_avg_exit_velocity, 86.2);
+    const baNcaaPopUp = safeNumber(editableValues.ba_ncaa_popup_pct, 7.9);
+    const obpNcaaBB = safeNumber(editableValues.obp_ncaa_bb_pct, 11.4);
+    const obpNcaaChase = safeNumber(editableValues.obp_ncaa_chase_pct, 23.1);
+    const isoNcaaBarrel = safeNumber(editableValues.iso_ncaa_barrel_pct, 17.3);
+    const isoNcaaEv90 = safeNumber(editableValues.iso_ncaa_ev90, 103.1);
+    const isoNcaaPull = safeNumber(editableValues.iso_ncaa_pull_pct, 36.5);
+    const isoNcaaLa1030 = safeNumber(editableValues.iso_ncaa_la10_30_pct, 29);
+    const isoNcaaGb = safeNumber(editableValues.iso_ncaa_gb_pct, 43.2);
+
+    const baContactSd = safeNumber(editableValues.ba_contact_pct_std_dev, 6.6);
+    const baLineDriveSd = safeNumber(editableValues.ba_line_drive_pct_std_dev, 4.31);
+    const baAvgEvSd = safeNumber(editableValues.ba_avg_exit_velocity_std_dev, 4.28);
+    const baPopUpSd = safeNumber(editableValues.ba_popup_pct_std_dev, 3.37);
+    const obpBbSd = safeNumber(editableValues.obp_bb_pct_std_dev, 3.57);
+    const obpChaseSd = safeNumber(editableValues.obp_chase_pct_std_dev, 5.58);
+    const isoBarrelSd = safeNumber(editableValues.iso_barrel_pct_std_dev, 7.89);
+    const isoEv90Sd = safeNumber(editableValues.iso_ev90_std_dev, 3.97);
+    const isoPullSd = safeNumber(editableValues.iso_pull_pct_std_dev, 8.03);
+    const isoLa1030Sd = safeNumber(editableValues.iso_la10_30_pct_std_dev, 6.81);
+    const isoGbSd = safeNumber(editableValues.iso_gb_pct_std_dev, 8.0);
+
+    const contactScore = scoreFromNormal(r.contact, baNcaaContact, baContactSd);
+    const lineDriveScore = scoreFromNormal(r.lineDrive, baNcaaLineDrive, baLineDriveSd);
+    const avgEVScore = scoreFromNormal(r.avgExitVelo, baNcaaAvgEV, baAvgEvSd);
+    const popUpScore = scoreFromNormal(r.popUp, baNcaaPopUp, baPopUpSd, true);
+    const bbScore = scoreFromNormal(r.bb, obpNcaaBB, obpBbSd);
+    const chaseScore = scoreFromNormal(r.chase, obpNcaaChase, obpChaseSd, true);
+    const barrelScore = scoreFromNormal(r.barrel, isoNcaaBarrel, isoBarrelSd);
+    const ev90Score = scoreFromNormal(r.ev90, isoNcaaEv90, isoEv90Sd);
+    const pullScore = scoreFromNormal(r.pull, isoNcaaPull, isoPullSd);
+    const la1030Score = scoreFromNormal(r.la10_30, isoNcaaLa1030, isoLa1030Sd);
+    const gbScore = scoreFromNormal(r.gb, isoNcaaGb, isoGbSd, true);
 
     const baPower =
       contactScore == null || lineDriveScore == null || avgEVScore == null || popUpScore == null
         ? null
-        : (0.4 * contactScore) + (0.25 * lineDriveScore) + (0.2 * avgEVScore) + (0.15 * popUpScore);
+        : (
+          (safeNumber(editableValues.ba_contact_pct_weight, 0.4) * contactScore) +
+          (safeNumber(editableValues.ba_line_drive_pct_weight, 0.25) * lineDriveScore) +
+          (safeNumber(editableValues.ba_avg_exit_velocity_weight, 0.2) * avgEVScore) +
+          (safeNumber(editableValues.ba_popup_pct_weight, 0.15) * popUpScore)
+        );
     const obpPower =
       contactScore == null || lineDriveScore == null || avgEVScore == null || popUpScore == null || bbScore == null || chaseScore == null
         ? null
-        : (0.35 * contactScore) + (0.2 * lineDriveScore) + (0.15 * avgEVScore) + (0.1 * popUpScore) + (0.15 * bbScore) + (0.05 * chaseScore);
+        : (
+          (safeNumber(editableValues.obp_contact_pct_weight, 0.35) * contactScore) +
+          (safeNumber(editableValues.obp_line_drive_pct_weight, 0.2) * lineDriveScore) +
+          (safeNumber(editableValues.obp_avg_exit_velocity_weight, 0.15) * avgEVScore) +
+          (safeNumber(editableValues.obp_popup_pct_weight, 0.1) * popUpScore) +
+          (safeNumber(editableValues.obp_bb_pct_weight, 0.15) * bbScore) +
+          (safeNumber(editableValues.obp_chase_pct_weight, 0.05) * chaseScore)
+        );
     const isoPower =
       barrelScore == null || ev90Score == null || pullScore == null || la1030Score == null || gbScore == null
         ? null
-        : (0.45 * barrelScore) + (0.3 * ev90Score) + (0.15 * pullScore) + (0.05 * la1030Score) + (0.05 * gbScore);
+        : (
+          (safeNumber(editableValues.iso_barrel_pct_weight, 0.45) * barrelScore) +
+          (safeNumber(editableValues.iso_ev90_weight, 0.3) * ev90Score) +
+          (safeNumber(editableValues.iso_pull_pct_weight, 0.15) * pullScore) +
+          (safeNumber(editableValues.iso_la10_30_pct_weight, 0.05) * la1030Score) +
+          (safeNumber(editableValues.iso_gb_pct_weight, 0.05) * gbScore)
+        );
     const overallPower =
       avgEVScore == null || barrelScore == null || contactScore == null || chaseScore == null
         ? null
-        : (0.35 * avgEVScore) + (0.15 * barrelScore) + (0.3 * contactScore) + (0.2 * chaseScore);
-    const toPlus = (v: number | null) => (v == null ? null : (v / 50) * 100);
-    const baPowerPlus = toPlus(baPower);
-    const obpPowerPlus = toPlus(obpPower);
-    const isoPowerPlus = toPlus(isoPower);
-    const overallPowerPlus = toPlus(overallPower);
+        : (
+          (safeNumber(editableValues.overall_avg_exit_velocity_weight, 0.35) * avgEVScore) +
+          (safeNumber(editableValues.overall_barrel_pct_weight, 0.15) * barrelScore) +
+          (safeNumber(editableValues.overall_contact_pct_weight, 0.3) * contactScore) +
+          (safeNumber(editableValues.overall_chase_pct_weight, 0.2) * chaseScore)
+        );
+    const baBase = safeNumber(editableValues.ba_ncaa_avg_power_rating, 50);
+    const obpBase = safeNumber(editableValues.obp_ncaa_avg_power_rating, 50);
+    const isoBase = safeNumber(editableValues.iso_ncaa_avg_power_rating, 50);
+    const toPlus = (v: number | null, base: number) => (v == null || base === 0 ? null : (v / base) * 100);
+    const baPowerPlus = toPlus(baPower, baBase);
+    const obpPowerPlus = toPlus(obpPower, obpBase);
+    const isoPowerPlus = toPlus(isoPower, isoBase);
+    const overallPowerPlus = toPlus(overallPower, 50);
 
     return {
       contactScore, lineDriveScore, avgEVScore, popUpScore, bbScore, chaseScore,
