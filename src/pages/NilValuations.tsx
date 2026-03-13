@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -257,9 +258,10 @@ export default function NilValuations() {
             <div>
               <Label className="text-xs mb-1 block">Team-Specific Total NIL Budget ($)</Label>
               <Input
-                type="number"
-                value={consultationNilBudget || ""}
-                onChange={(e) => setConsultationNilBudget(Number(e.target.value) || 0)}
+                type="text"
+                inputMode="numeric"
+                value={formatWithCommas(consultationNilBudget)}
+                onChange={(e) => setConsultationNilBudget(parseCommaNumber(e.target.value))}
               />
             </div>
             <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">

@@ -674,64 +674,6 @@ export default function TransferPortal() {
 
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle className="text-base">Projected Outcomes</CardTitle>
-              {selectedPlayer && simulation && !simulation.blocked && (
-                <Button asChild variant="outline" size="sm">
-                  <Link to={`/dashboard/player/${selectedPlayer.player_id}`}>
-                    View Player Page
-                  </Link>
-                </Button>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {simulation?.blocked && (
-              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                Equation stopped. Missing inputs: {simulation.missingInputs.join(", ")}
-              </div>
-            )}
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("avg", simulation?.pAvg))}`}>
-                <div className="text-xs font-medium tracking-wide">pAVG</div>
-                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pAvg) : "-"}</div>
-              </div>
-              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("obp", simulation?.pObp))}`}>
-                <div className="text-xs font-medium tracking-wide">pOBP</div>
-                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pObp) : "-"}</div>
-              </div>
-              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("slg", simulation?.pSlg))}`}>
-                <div className="text-xs font-medium tracking-wide">pSLG</div>
-                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pSlg) : "-"}</div>
-              </div>
-              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("ops", simulation?.pOps))}`}>
-                <div className="text-xs font-medium tracking-wide">pOPS</div>
-                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pOps) : "-"}</div>
-              </div>
-              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("iso", simulation?.pIso))}`}>
-                <div className="text-xs font-medium tracking-wide">pISO</div>
-                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pIso) : "-"}</div>
-              </div>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("wrc_plus", simulation?.pWrcPlus))}`}>
-                <div className="text-xs font-medium tracking-wide">pWRC+</div>
-                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? whole(simulation.pWrcPlus) : "-"}</div>
-              </div>
-              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("owar", simulation?.owar))}`}>
-                <div className="text-xs font-medium tracking-wide">oWAR</div>
-                <div className="mt-1 font-mono text-3xl font-bold">{simulation ? stat(simulation.owar, 2) : "-"}</div>
-              </div>
-              <div className="rounded-lg border border-accent/40 bg-accent/12 p-4 shadow-sm">
-                <div className="text-xs font-medium tracking-wide text-accent-foreground">NIL Valuation</div>
-                <div className="mt-1 font-mono text-4xl font-extrabold text-foreground">{simulation ? money(simulation.nilValuation) : "-"}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
             <CardTitle className="text-base">Transfer Simulator</CardTitle>
             <CardDescription>Select a player and destination school.</CardDescription>
           </CardHeader>
@@ -824,6 +766,64 @@ export default function TransferPortal() {
               >
                 Add To Target Board
               </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="text-base">Projected Outcomes</CardTitle>
+              {selectedPlayer && simulation && !simulation.blocked && (
+                <Button asChild variant="outline" size="sm">
+                  <Link to={`/dashboard/player/${selectedPlayer.player_id}`}>
+                    View Player Page
+                  </Link>
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {simulation?.blocked && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                Equation stopped. Missing inputs: {simulation.missingInputs.join(", ")}
+              </div>
+            )}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("avg", simulation?.pAvg))}`}>
+                <div className="text-xs font-medium tracking-wide">pAVG</div>
+                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pAvg) : "-"}</div>
+              </div>
+              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("obp", simulation?.pObp))}`}>
+                <div className="text-xs font-medium tracking-wide">pOBP</div>
+                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pObp) : "-"}</div>
+              </div>
+              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("slg", simulation?.pSlg))}`}>
+                <div className="text-xs font-medium tracking-wide">pSLG</div>
+                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pSlg) : "-"}</div>
+              </div>
+              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("ops", simulation?.pOps))}`}>
+                <div className="text-xs font-medium tracking-wide">pOPS</div>
+                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pOps) : "-"}</div>
+              </div>
+              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("iso", simulation?.pIso))}`}>
+                <div className="text-xs font-medium tracking-wide">pISO</div>
+                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pIso) : "-"}</div>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("wrc_plus", simulation?.pWrcPlus))}`}>
+                <div className="text-xs font-medium tracking-wide">pWRC+</div>
+                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? whole(simulation.pWrcPlus) : "-"}</div>
+              </div>
+              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("owar", simulation?.owar))}`}>
+                <div className="text-xs font-medium tracking-wide">oWAR</div>
+                <div className="mt-1 font-mono text-3xl font-bold">{simulation ? stat(simulation.owar, 2) : "-"}</div>
+              </div>
+              <div className="rounded-lg border border-accent/40 bg-accent/12 p-4 shadow-sm">
+                <div className="text-xs font-medium tracking-wide text-accent-foreground">NIL Valuation</div>
+                <div className="mt-1 font-mono text-4xl font-extrabold text-foreground">{simulation ? money(simulation.nilValuation) : "-"}</div>
+              </div>
             </div>
           </CardContent>
         </Card>

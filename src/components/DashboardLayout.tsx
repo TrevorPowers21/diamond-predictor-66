@@ -24,12 +24,11 @@ import { useEffect } from "react";
 
 const navItems = [
   { label: "Overview", href: "/dashboard", icon: BarChart3 },
-  { label: "Player Dashboard", href: "/dashboard/returning", icon: Activity },
   { label: "Transfer Portal", href: "/dashboard/portal", icon: Users },
-  { label: "NIL Valuations", href: "/dashboard/nil", icon: DollarSign },
-  { label: "Compare", href: "/dashboard/compare", icon: GitCompare },
-  { label: "Teams", href: "/dashboard/teams", icon: Building2 },
   { label: "Team Builder", href: "/dashboard/team-builder", icon: Hammer },
+  { label: "Player Dashboard", href: "/dashboard/returning", icon: Activity },
+  { label: "NIL Valuations", href: "/dashboard/nil", icon: DollarSign, badge: "Coming Soon" },
+  { label: "Compare", href: "/dashboard/compare", icon: GitCompare },
   { label: "Admin", href: "/dashboard/admin", icon: ShieldCheck },
   { label: "Data Sync", href: "/dashboard/sync", icon: FileSpreadsheet },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
@@ -86,6 +85,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               >
                 <item.icon className="h-4 w-4" />
                 {item.label}
+                {"badge" in item && item.badge && (
+                  <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{item.badge}</span>
+                )}
               </Link>
             );
           })}

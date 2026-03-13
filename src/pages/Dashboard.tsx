@@ -9,6 +9,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell, LabelList } from "recharts";
 import { useAuth } from "@/hooks/useAuth";
 import { Link, useNavigate } from "react-router-dom";
+import { Users, TrendingUp, Trophy, MapPin } from "lucide-react";
 import {
   DEFAULT_NIL_TIER_MULTIPLIERS,
   getProgramTierMultiplierByConference,
@@ -367,6 +368,87 @@ export default function Dashboard() {
             )}
           </CardContent>
         </Card>
+        {/* Summary metric cards */}
+        {!isLoading && players.length > 0 && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="pt-6 pb-4 px-4">
+                <div className="flex items-center gap-2 text-muted-foreground mb-1">
+                  <Users className="h-4 w-4" />
+                  <span className="text-xs font-medium">Total Players Tracked</span>
+                </div>
+                <p className="text-2xl font-bold tabular-nums">
+                  {pool === "all"
+                    ? players.length.toLocaleString()
+                    : players.filter((p) => (p.conference || "").trim() === pool).length.toLocaleString()}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-6 pb-4 px-4">
+                <div className="flex items-center gap-2 text-muted-foreground mb-1">
+                  <TrendingUp className="h-4 w-4" />
+                  <span className="text-xs font-medium">Pool Avg — {metricLabel}</span>
+                </div>
+                <p className="text-2xl font-bold tabular-nums">
+                  {(() => {
+                    const source = pool === "all" ? players : players.filter((p) => (p.conference || "").trim() === pool);
+                    const values = source
+                      .map((p) => {
+                        if (metric === "owar") return computeOWar(p.p_wrc_plus);
+                        if (metric === "nil_value") return p.nil_value;
+                        return p[metric] as number | null;
+                      })
+                      .filter((v): v is number => v != null);
+                    if (values.length === 0) return "-";
+                    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+                    return formatMetric(metric, avg);
+                  })()}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-6 pb-4 px-4">
+                <div className="flex items-center gap-2 text-muted-foreground mb-1">
+                  <Trophy className="h-4 w-4" />
+                  <span className="text-xs font-medium">Highest — {metricLabel}</span>
+                </div>
+                <p className="text-2xl font-bold tabular-nums">
+                  {top10.length > 0 ? formatMetric(metric, top10[0].metric_value) : "-"}
+                </p>
+                {top10.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-0.5 truncate">{top10[0].full_name}</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-6 pb-4 px-4">
+                <div className="flex items-center gap-2 text-muted-foreground mb-1">
+                  <MapPin className="h-4 w-4" />
+                  <span className="text-xs font-medium">Conferences</span>
+                </div>
+                <p className="text-2xl font-bold tabular-nums">
+                  {conferenceOptions.length}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* View Full Leaderboard link */}
+        {!isLoading && players.length > 0 && (
+          <div className="text-center">
+            <Link
+              to="/dashboard/returning"
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              View Full Leaderboard →
+            </Link>
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );

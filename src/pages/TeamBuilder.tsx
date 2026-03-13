@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -531,18 +532,7 @@ export default function TeamBuilder() {
   const [teamSearchOpen, setTeamSearchOpen] = useState(false);
   const [targetPlayerSearchQuery, setTargetPlayerSearchQuery] = useState("");
   const [targetPlayerSearchOpen, setTargetPlayerSearchOpen] = useState(false);
-  const [compareAPlayerId, setCompareAPlayerId] = useState<string>("");
-  const [compareAPlayerSearch, setCompareAPlayerSearch] = useState("");
-  const [compareAPlayerOpen, setCompareAPlayerOpen] = useState(false);
-  const [compareADestinationTeam, setCompareADestinationTeam] = useState<string>("");
-  const [compareATeamSearch, setCompareATeamSearch] = useState("");
-  const [compareATeamOpen, setCompareATeamOpen] = useState(false);
-  const [compareBPlayerId, setCompareBPlayerId] = useState<string>("");
-  const [compareBPlayerSearch, setCompareBPlayerSearch] = useState("");
-  const [compareBPlayerOpen, setCompareBPlayerOpen] = useState(false);
-  const [compareBDestinationTeam, setCompareBDestinationTeam] = useState<string>("");
-  const [compareBTeamSearch, setCompareBTeamSearch] = useState("");
-  const [compareBTeamOpen, setCompareBTeamOpen] = useState(false);
+
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const skipAutoSeedOnceRef = useRef(false);
 
@@ -644,47 +634,6 @@ export default function TeamBuilder() {
       .slice(0, 25);
   }, [allPlayersForSearch, targetPlayerSearchQuery]);
 
-  const allPlayersById = useMemo(() => {
-    const map = new Map<string, any>();
-    for (const p of allPlayersForSearch) map.set(p.id, p);
-    return map;
-  }, [allPlayersForSearch]);
-
-  const filterPlayersForCompare = useCallback((q: string) => {
-    const nq = normalizeName(q);
-    if (!nq) return [] as any[];
-    return allPlayersForSearch
-      .filter((p) =>
-        normalizeName(`${p.first_name} ${p.last_name} ${p.team || ""} ${p.position || ""}`).includes(nq),
-      )
-      .slice(0, 25);
-  }, [allPlayersForSearch]);
-
-  const filteredCompareAPlayers = useMemo(
-    () => filterPlayersForCompare(compareAPlayerSearch),
-    [compareAPlayerSearch, filterPlayersForCompare],
-  );
-  const filteredCompareBPlayers = useMemo(
-    () => filterPlayersForCompare(compareBPlayerSearch),
-    [compareBPlayerSearch, filterPlayersForCompare],
-  );
-
-  const filterTeamsForCompare = useCallback((q: string) => {
-    const nq = normalizeName(q);
-    if (!nq) return [] as TeamRow[];
-    return (teams as TeamRow[])
-      .filter((t) => normalizeName(`${t.name} ${t.conference || ""}`).includes(nq))
-      .slice(0, 30);
-  }, [teams]);
-
-  const filteredCompareATeams = useMemo(
-    () => filterTeamsForCompare(compareATeamSearch),
-    [compareATeamSearch, filterTeamsForCompare],
-  );
-  const filteredCompareBTeams = useMemo(
-    () => filterTeamsForCompare(compareBTeamSearch),
-    [compareBTeamSearch, filterTeamsForCompare],
-  );
 
   // Fetch existing builds
   const { data: builds = [] } = useQuery({
@@ -1374,142 +1323,6 @@ export default function TeamBuilder() {
     const exact = candidates.find((r) => `${statKey(r.avg)}|${statKey(r.obp)}|${statKey(r.slg)}` === key);
     return exact?.team || candidates[0].team;
   }, [seedByName]);
-
-  const compareAPlayer = useMemo(() => allPlayersById.get(compareAPlayerId) || null, [allPlayersById, compareAPlayerId]);
-  const compareBPlayer = useMemo(() => allPlayersById.get(compareBPlayerId) || null, [allPlayersById, compareBPlayerId]);
-  const compareAPrediction = useMemo(
-    () => selectTransferPortalPreferredPrediction((compareAPlayer?.player_predictions || []).filter((pr: any) => pr.variant === "regular")),
-    [compareAPlayer],
-  );
-  const compareBPrediction = useMemo(
-    () => selectTransferPortalPreferredPrediction((compareBPlayer?.player_predictions || []).filter((pr: any) => pr.variant === "regular")),
-    [compareBPlayer],
-  );
-
-  const { data: compareAInternals } = useQuery({
-    queryKey: ["team-builder-compare-internals-a", compareAPrediction?.id],
-    enabled: !!compareAPrediction?.id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("player_prediction_internals")
-        .select("avg_power_rating, obp_power_rating, slg_power_rating")
-        .eq("prediction_id", compareAPrediction.id)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
-    },
-  });
-
-  const { data: compareBInternals } = useQuery({
-    queryKey: ["team-builder-compare-internals-b", compareBPrediction?.id],
-    enabled: !!compareBPrediction?.id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("player_prediction_internals")
-        .select("avg_power_rating, obp_power_rating, slg_power_rating")
-        .eq("prediction_id", compareBPrediction.id)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
-    },
-  });
-
-  const computeCompareSimulation = useCallback((
-    player: any | null,
-    prediction: any | null,
-    internals: { avg_power_rating: number | null; obp_power_rating: number | null; slg_power_rating: number | null } | null | undefined,
-    destinationTeam: string,
-  ) => {
-    if (!player || !prediction || !destinationTeam) return null;
-
-    const baPR = internals?.avg_power_rating ?? null;
-    const obpPR = internals?.obp_power_rating ?? null;
-    const isoPR = internals?.slg_power_rating ?? null;
-    const lastAvg = prediction.from_avg ?? null;
-    const lastObp = prediction.from_obp ?? null;
-    const lastSlg = prediction.from_slg ?? null;
-    if (baPR == null || obpPR == null || isoPR == null || lastAvg == null || lastObp == null || lastSlg == null) return null;
-
-    const inferredFromTeam = inferFromTeamForPrediction(player.first_name, player.last_name, lastAvg, lastObp, lastSlg);
-    const fromTeamName = player.from_team || inferredFromTeam || player.team || null;
-    const fromTeamRow = fromTeamName ? teamByKey.get(normalizeKey(fromTeamName)) || null : null;
-    const toTeamRow = teamByKey.get(normalizeKey(destinationTeam)) || null;
-    if (!toTeamRow) return null;
-
-    const fromConference = fromTeamRow?.conference || player.conference || null;
-    const fromConfStats = resolveConferenceStats(fromConference);
-    const toConfStats = resolveConferenceStats(toTeamRow.conference || null);
-    if (
-      !fromConfStats || !toConfStats ||
-      fromConfStats.avg_plus == null || toConfStats.avg_plus == null ||
-      fromConfStats.obp_plus == null || toConfStats.obp_plus == null ||
-      fromConfStats.iso_plus == null || toConfStats.iso_plus == null ||
-      fromConfStats.stuff_plus == null || toConfStats.stuff_plus == null ||
-      fromTeamRow?.park_factor == null || toTeamRow.park_factor == null
-    ) return null;
-
-    const projected = computeTransferProjection({
-      lastAvg, lastObp, lastSlg, baPR, obpPR, isoPR,
-      fromAvgPlus: fromConfStats.avg_plus, toAvgPlus: toConfStats.avg_plus,
-      fromObpPlus: fromConfStats.obp_plus, toObpPlus: toConfStats.obp_plus,
-      fromIsoPlus: fromConfStats.iso_plus, toIsoPlus: toConfStats.iso_plus,
-      fromStuff: fromConfStats.stuff_plus, toStuff: toConfStats.stuff_plus,
-      fromPark: normalizeParkToIndex(fromTeamRow.park_factor), toPark: normalizeParkToIndex(toTeamRow.park_factor),
-      ncaaAvgBA: toRate(eqNum("t_ba_ncaa_avg", 0.280)),
-      ncaaAvgOBP: toRate(eqNum("t_obp_ncaa_avg", 0.385)),
-      ncaaAvgISO: toRate(eqNum("t_iso_ncaa_avg", 0.162)),
-      ncaaAvgWrc: toRate(eqNum("t_wrc_ncaa_avg", 0.364)),
-      baPowerWeight: toRate(eqNum("t_ba_power_weight", 0.70)),
-      obpPowerWeight: toRate(eqNum("t_obp_power_weight", 0.70)),
-      baConferenceWeight: toWeight(eqNum("t_ba_conference_weight", 1.0)),
-      obpConferenceWeight: toWeight(eqNum("t_obp_conference_weight", 1.0)),
-      isoConferenceWeight: toWeight(eqNum("t_iso_conference_weight", 1.0)),
-      baPitchingWeight: toWeight(eqNum("t_ba_pitching_weight", 1.0)),
-      obpPitchingWeight: toWeight(eqNum("t_obp_pitching_weight", 1.0)),
-      isoPitchingWeight: toWeight(eqNum("t_iso_pitching_weight", 1.0)),
-      baParkWeight: toWeight(eqNum("t_ba_park_weight", 1.0)),
-      obpParkWeight: toWeight(eqNum("t_obp_park_weight", 1.0)),
-      isoParkWeight: toWeight(eqNum("t_iso_park_weight", 1.0)),
-      isoStdPower: eqNum("r_iso_std_pr", 45.423),
-      isoStdNcaa: toRate(eqNum("r_iso_std_ncaa", 0.07849797197)),
-      wObp: toRate(eqNum("r_w_obp", 0.45)),
-      wSlg: toRate(eqNum("r_w_slg", 0.30)),
-      wAvg: toRate(eqNum("r_w_avg", 0.15)),
-      wIso: toRate(eqNum("r_w_iso", 0.10)),
-    });
-
-    const basePerOwar = eqNum("nil_base_per_owar", 25000);
-    const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
-    const pvm = getPositionValueMultiplier(player.position ?? null);
-    const nilValuation = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
-
-    return {
-      fromTeam: fromTeamName,
-      fromConference,
-      toConference: toTeamRow.conference || null,
-      fromPark: fromTeamRow.park_factor,
-      toPark: toTeamRow.park_factor,
-      fromAvgPlus: fromConfStats.avg_plus,
-      toAvgPlus: toConfStats.avg_plus,
-      fromObpPlus: fromConfStats.obp_plus,
-      toObpPlus: toConfStats.obp_plus,
-      fromIsoPlus: fromConfStats.iso_plus,
-      toIsoPlus: toConfStats.iso_plus,
-      fromStuff: fromConfStats.stuff_plus,
-      toStuff: toConfStats.stuff_plus,
-      nilValuation,
-      ...projected,
-    };
-  }, [eqNum, inferFromTeamForPrediction, resolveConferenceStats, teamByKey]);
-
-  const compareASimulation = useMemo(
-    () => computeCompareSimulation(compareAPlayer, compareAPrediction, compareAInternals, compareADestinationTeam),
-    [compareAPlayer, compareAPrediction, compareAInternals, compareADestinationTeam, computeCompareSimulation],
-  );
-  const compareBSimulation = useMemo(
-    () => computeCompareSimulation(compareBPlayer, compareBPrediction, compareBInternals, compareBDestinationTeam),
-    [compareBPlayer, compareBPrediction, compareBInternals, compareBDestinationTeam, computeCompareSimulation],
-  );
 
   const removePlayer = (idx: number) => {
     setRosterPlayers((prev) => prev.filter((_, i) => i !== idx));
@@ -2376,10 +2189,11 @@ export default function TeamBuilder() {
       </TableCell>
       <TableCell className="text-center">
         <Input
-          type="number"
-          className="w-24 h-8 mx-auto text-center"
-          value={p.nil_value || ""}
-          onChange={(e) => updatePlayer(globalIdx, { nil_value: Number(e.target.value) || 0 })}
+          type="text"
+          inputMode="numeric"
+          className="w-28 h-8 mx-auto text-center"
+          value={formatWithCommas(p.nil_value)}
+          onChange={(e) => updatePlayer(globalIdx, { nil_value: parseCommaNumber(e.target.value) })}
         />
       </TableCell>
       <TableCell className={`text-center font-mono text-xs ${(p.roster_status || "returner") === "leaving" ? "text-muted-foreground" : projectedNilTierClass(projectedNil, totalBudget, fallbackRosterTotalPlayerScore)}`}>
@@ -2471,8 +2285,8 @@ export default function TeamBuilder() {
             )}
           </div>
           <div>
-            <Label className="text-xs mb-1 block">Team-Specific Total NIL Budget ($)</Label>
-            <Input type="number" value={totalBudget || ""} onChange={(e) => { setTotalBudget(Number(e.target.value) || 0); setDirty(true); }} />
+            <Label className="text-xs mb-1 block">Total Budget ($)</Label>
+            <Input type="text" inputMode="numeric" value={formatWithCommas(totalBudget)} onChange={(e) => { setTotalBudget(parseCommaNumber(e.target.value)); setDirty(true); }} />
           </div>
           <div>
             <Label className="text-xs mb-1 block">Program Tier Conference (PTM)</Label>
@@ -2495,10 +2309,6 @@ export default function TeamBuilder() {
               </SelectContent>
             </Select>
             <p className="mt-1 text-[11px] text-muted-foreground">PTM auto-set to: {programTierMultiplier.toFixed(2)}</p>
-          </div>
-          <div>
-            <Label className="text-xs mb-1 block">Total Roster Player Score (68 for future projections)</Label>
-            <Input type="number" step="0.01" value={fallbackRosterTotalPlayerScore || ""} onChange={(e) => setFallbackRosterTotalPlayerScore(Number(e.target.value) || 0)} />
           </div>
         </div>
 
@@ -2535,89 +2345,11 @@ export default function TeamBuilder() {
           </Card>
         </div>
 
-        {isAdmin && (
-          <Card>
-            <CardHeader className="pb-3 cursor-pointer select-none" onClick={() => setNilEquationOpen(o => !o)}>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">Projected NIL Equation</CardTitle>
-                {nilEquationOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-              </div>
-            </CardHeader>
-            {nilEquationOpen && (
-              <>
-                <CardContent className="pt-0 pb-3 space-y-1">
-                  <CardDescription>
-                    Player Score = oWAR × PTM × PVF; Projected NIL = Player Score × $/oWAR
-                  </CardDescription>
-                  <p className="text-xs text-muted-foreground">
-                    Team budget is used to track fit: Sum(NIL used for returners + targets) vs Team-Specific Total NIL Budget.
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Position Change uses PVF for valuation. Updating Position Change recalculates Player Score and Projected NIL automatically.
-                  </p>
-                </CardContent>
-                <CardContent className="flex flex-col gap-3 text-sm md:flex-row md:items-center md:justify-between pt-0">
-                  <div className="text-muted-foreground">
-                    Total Roster Player Score: <span className="font-mono text-foreground">{totalRosterPlayerScore.toFixed(2)}</span>
-                  </div>
-                  <div className="text-muted-foreground">
-                    NIL Used Total (Returners + Targets): <span className="font-mono text-foreground">${Math.round(totalEffectiveNil).toLocaleString()}</span>
-                  </div>
-                </CardContent>
-              </>
-            )}
-          </Card>
-        )}
-
-        <Card>
-          <CardHeader className="pb-3 cursor-pointer select-none" onClick={() => setMetricsUploadOpen(o => !o)}>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Team-Only Power Metrics Upload</CardTitle>
-              {metricsUploadOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-            </div>
-          </CardHeader>
-          {metricsUploadOpen && (
-            <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <input
-                ref={uploadInputRef}
-                type="file"
-                accept=".csv"
-                className="hidden"
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
-                  try {
-                    await applyTeamMetricsCsv(f);
-                  } catch (err: any) {
-                    toast({ title: "CSV import failed", description: err?.message || "Unable to parse CSV", variant: "destructive" });
-                  } finally {
-                    e.currentTarget.value = "";
-                  }
-                }}
-              />
-              <Button variant="outline" onClick={() => uploadInputRef.current?.click()}>
-                <Upload className="h-4 w-4 mr-1" />
-                Upload Team Metrics CSV
-              </Button>
-              <Button variant="ghost" onClick={downloadTeamMetricsTemplate}>
-                Download Metrics Template
-              </Button>
-              <Button variant="ghost" onClick={downloadPlayerProfileTemplate}>
-                Download Player Profile Template
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Team-build only import. Templates include data fields and examples, not internal formulas or weighting logic.
-              </p>
-            </CardContent>
-          )}
-        </Card>
-
         <Tabs defaultValue="roster">
           <div className="flex items-center justify-between gap-2">
             <TabsList>
               <TabsTrigger value="roster">Roster</TabsTrigger>
               <TabsTrigger value="target-board">Target Board</TabsTrigger>
-              <TabsTrigger value="compare">Compare</TabsTrigger>
               <TabsTrigger value="depth">Depth Chart</TabsTrigger>
             </TabsList>
             <Button
@@ -2671,9 +2403,10 @@ export default function TeamBuilder() {
                   <div>
                     <Label className="text-xs mb-1 block">Initial NIL ($)</Label>
                     <Input
-                      type="number"
-                      value={incomingNil || ""}
-                      onChange={(e) => setIncomingNil(Number(e.target.value) || 0)}
+                      type="text"
+                      inputMode="numeric"
+                      value={formatWithCommas(incomingNil)}
+                      onChange={(e) => setIncomingNil(parseCommaNumber(e.target.value))}
                     />
                   </div>
                   <div>
@@ -2800,6 +2533,85 @@ export default function TeamBuilder() {
                 </Table>
               </CardContent>
             </Card>
+
+            {/* Projected NIL Equation — admin only */}
+            {isAdmin && (
+              <Card>
+                <CardHeader className="pb-3 cursor-pointer select-none" onClick={() => setNilEquationOpen(o => !o)}>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">Projected NIL Equation</CardTitle>
+                    {nilEquationOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                  </div>
+                </CardHeader>
+                {nilEquationOpen && (
+                  <>
+                    <CardContent className="pt-0 pb-3 space-y-1">
+                      <CardDescription>
+                        Player Score = oWAR × PTM × PVF; Projected NIL = Player Score × $/oWAR
+                      </CardDescription>
+                      <p className="text-xs text-muted-foreground">
+                        Team budget is used to track fit: Sum(NIL used for returners + targets) vs Team-Specific Total NIL Budget.
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Position Change uses PVF for valuation. Updating Position Change recalculates Player Score and Projected NIL automatically.
+                      </p>
+                    </CardContent>
+                    <CardContent className="flex flex-col gap-3 text-sm md:flex-row md:items-center md:justify-between pt-0">
+                      <div className="text-muted-foreground">
+                        Total Roster Player Score: <span className="font-mono text-foreground">{totalRosterPlayerScore.toFixed(2)}</span>
+                      </div>
+                      <div className="text-muted-foreground">
+                        NIL Used Total (Returners + Targets): <span className="font-mono text-foreground">${Math.round(totalEffectiveNil).toLocaleString()}</span>
+                      </div>
+                    </CardContent>
+                  </>
+                )}
+              </Card>
+            )}
+
+            {/* Team-Only Power Metrics Upload */}
+            <Card>
+              <CardHeader className="pb-3 cursor-pointer select-none" onClick={() => setMetricsUploadOpen(o => !o)}>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">Team-Only Power Metrics Upload</CardTitle>
+                  {metricsUploadOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                </div>
+              </CardHeader>
+              {metricsUploadOpen && (
+                <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <input
+                    ref={uploadInputRef}
+                    type="file"
+                    accept=".csv"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      if (!f) return;
+                      try {
+                        await applyTeamMetricsCsv(f);
+                      } catch (err: any) {
+                        toast({ title: "CSV import failed", description: err?.message || "Unable to parse CSV", variant: "destructive" });
+                      } finally {
+                        e.currentTarget.value = "";
+                      }
+                    }}
+                  />
+                  <Button variant="outline" onClick={() => uploadInputRef.current?.click()}>
+                    <Upload className="h-4 w-4 mr-1" />
+                    Upload Team Metrics CSV
+                  </Button>
+                  <Button variant="ghost" onClick={downloadTeamMetricsTemplate}>
+                    Download Metrics Template
+                  </Button>
+                  <Button variant="ghost" onClick={downloadPlayerProfileTemplate}>
+                    Download Player Profile Template
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Team-build only import. Templates include data fields and examples, not internal formulas or weighting logic.
+                  </p>
+                </CardContent>
+              )}
+            </Card>
           </TabsContent>
 
           <TabsContent value="target-board" className="space-y-6">
@@ -2857,7 +2669,7 @@ export default function TeamBuilder() {
                       <TableHead className="text-center">pAVG/pOBP/pSLG</TableHead>
                       <TableHead className="text-center">wRC+</TableHead>
                       <TableHead className="text-center">Actual NIL ($)</TableHead>
-                      <TableHead className="text-center">Projected NIL ($)</TableHead>
+                      <TableHead className="text-center">Projected Value ($)</TableHead>
                       <TableHead className="text-center">oWAR</TableHead>
                       <TableHead className="w-10"></TableHead>
                     </TableRow>
@@ -2915,7 +2727,7 @@ export default function TeamBuilder() {
                       <TableHead className="text-center">pAVG/pOBP/pSLG</TableHead>
                       <TableHead className="text-center">wRC+</TableHead>
                       <TableHead className="text-center">Actual NIL ($)</TableHead>
-                      <TableHead className="text-center">Projected NIL ($)</TableHead>
+                      <TableHead className="text-center">Projected Value ($)</TableHead>
                       <TableHead className="text-center">oWAR</TableHead>
                       <TableHead className="w-10"></TableHead>
                     </TableRow>
@@ -2954,246 +2766,6 @@ export default function TeamBuilder() {
                 </Table>
               </CardContent>
             </Card>
-          </TabsContent>
-
-          <TabsContent value="compare" className="space-y-6">
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Compare A</CardTitle>
-                  <CardDescription>Run Transfer Portal simulation inputs in a standalone panel.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="relative">
-                    <Label className="text-xs mb-1 block">Player</Label>
-                    <Input
-                      placeholder="Search player by name, team, or position…"
-                      value={compareAPlayerSearch}
-                      onChange={(e) => {
-                        setCompareAPlayerSearch(e.target.value);
-                        setCompareAPlayerOpen(true);
-                      }}
-                      onFocus={() => setCompareAPlayerOpen(true)}
-                      onBlur={() => setTimeout(() => setCompareAPlayerOpen(false), 150)}
-                    />
-                    {compareAPlayerOpen && filteredCompareAPlayers.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
-                        {filteredCompareAPlayers.map((p) => (
-                          <div
-                            key={`compare-a-${p.id}`}
-                            className="px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground flex justify-between items-center gap-2"
-                            onMouseDown={() => {
-                              setCompareAPlayerId(p.id);
-                              setCompareAPlayerSearch(`${p.first_name} ${p.last_name}`);
-                              setCompareAPlayerOpen(false);
-                            }}
-                          >
-                            <span className="font-medium">{p.first_name} {p.last_name}</span>
-                            <span className="text-muted-foreground text-xs">{p.team || "—"} · {p.position || "—"}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="relative">
-                    <Label className="text-xs mb-1 block">To Team</Label>
-                    <Input
-                      placeholder="Search destination team…"
-                      value={compareATeamSearch}
-                      onChange={(e) => {
-                        setCompareATeamSearch(e.target.value);
-                        setCompareATeamOpen(true);
-                      }}
-                      onFocus={() => setCompareATeamOpen(true)}
-                      onBlur={() => setTimeout(() => setCompareATeamOpen(false), 150)}
-                    />
-                    {compareATeamOpen && filteredCompareATeams.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
-                        {filteredCompareATeams.map((t) => (
-                          <div
-                            key={`compare-a-team-${t.name}`}
-                            className="px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground"
-                            onMouseDown={() => {
-                              setCompareADestinationTeam(t.name);
-                              setCompareATeamSearch(t.name);
-                              setCompareATeamOpen(false);
-                            }}
-                          >
-                            {t.name} {t.conference ? `· ${t.conference}` : ""}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {compareAPlayer?.id && (
-                    <div className="text-xs text-muted-foreground">
-                      Selected:{" "}
-                      <Link className="underline underline-offset-2 text-primary" to={`/dashboard/player/${compareAPlayer.id}`}>
-                        {compareAPlayer.first_name} {compareAPlayer.last_name}
-                      </Link>
-                    </div>
-                  )}
-
-                  {compareASimulation ? (
-                    <div className="space-y-3">
-                      <div className="rounded-md border p-3 bg-muted/20">
-                        <p className="text-xs font-medium mb-2">Context + Multipliers Used</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                          <div>From Team</div><div className="font-mono text-right">{compareASimulation.fromTeam || "—"}</div>
-                          <div>From Conference</div><div className="font-mono text-right">{compareASimulation.fromConference || "—"}</div>
-                          <div>To Conference</div><div className="font-mono text-right">{compareASimulation.toConference || "—"}</div>
-                          <div>From Park Factor</div><div className="font-mono text-right">{compareASimulation.fromPark ?? "—"}</div>
-                          <div>To Park Factor</div><div className="font-mono text-right">{compareASimulation.toPark ?? "—"}</div>
-                          <div>AVG+ Delta</div><div className="font-mono text-right">{compareASimulation.fromAvgPlus} → {compareASimulation.toAvgPlus}</div>
-                          <div>OBP+ Delta</div><div className="font-mono text-right">{compareASimulation.fromObpPlus} → {compareASimulation.toObpPlus}</div>
-                          <div>ISO+ Delta</div><div className="font-mono text-right">{compareASimulation.fromIsoPlus} → {compareASimulation.toIsoPlus}</div>
-                          <div>Stuff+ Delta</div><div className="font-mono text-right">{compareASimulation.fromStuff} → {compareASimulation.toStuff}</div>
-                        </div>
-                      </div>
-
-                      <div className="rounded-md border p-3">
-                        <p className="text-xs font-medium mb-2">Projected Outcomes</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                          <div>pAVG / pOBP / pSLG</div>
-                          <div className="font-mono text-right">
-                            {compareASimulation.pAvg?.toFixed(3) ?? "—"} / {compareASimulation.pObp?.toFixed(3) ?? "—"} / {compareASimulation.pSlg?.toFixed(3) ?? "—"}
-                          </div>
-                          <div>pOPS</div><div className="font-mono text-right">{compareASimulation.pOps?.toFixed(3) ?? "—"}</div>
-                          <div>pISO</div><div className="font-mono text-right">{compareASimulation.pIso?.toFixed(3) ?? "—"}</div>
-                          <div>pWRC+</div><div className="font-mono text-right">{compareASimulation.pWrcPlus?.toFixed(0) ?? "—"}</div>
-                          <div>oWAR</div><div className="font-mono text-right">{compareASimulation.owar?.toFixed(2) ?? "—"}</div>
-                          <div>Projected NIL</div><div className="font-mono text-right">{compareASimulation.nilValuation != null ? `$${Math.round(compareASimulation.nilValuation).toLocaleString()}` : "—"}</div>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-                      Select player and destination team to run comparison panel A.
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Compare B</CardTitle>
-                  <CardDescription>Independent panel. You can select the same player as Compare A.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="relative">
-                    <Label className="text-xs mb-1 block">Player</Label>
-                    <Input
-                      placeholder="Search player by name, team, or position…"
-                      value={compareBPlayerSearch}
-                      onChange={(e) => {
-                        setCompareBPlayerSearch(e.target.value);
-                        setCompareBPlayerOpen(true);
-                      }}
-                      onFocus={() => setCompareBPlayerOpen(true)}
-                      onBlur={() => setTimeout(() => setCompareBPlayerOpen(false), 150)}
-                    />
-                    {compareBPlayerOpen && filteredCompareBPlayers.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
-                        {filteredCompareBPlayers.map((p) => (
-                          <div
-                            key={`compare-b-${p.id}`}
-                            className="px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground flex justify-between items-center gap-2"
-                            onMouseDown={() => {
-                              setCompareBPlayerId(p.id);
-                              setCompareBPlayerSearch(`${p.first_name} ${p.last_name}`);
-                              setCompareBPlayerOpen(false);
-                            }}
-                          >
-                            <span className="font-medium">{p.first_name} {p.last_name}</span>
-                            <span className="text-muted-foreground text-xs">{p.team || "—"} · {p.position || "—"}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="relative">
-                    <Label className="text-xs mb-1 block">To Team</Label>
-                    <Input
-                      placeholder="Search destination team…"
-                      value={compareBTeamSearch}
-                      onChange={(e) => {
-                        setCompareBTeamSearch(e.target.value);
-                        setCompareBTeamOpen(true);
-                      }}
-                      onFocus={() => setCompareBTeamOpen(true)}
-                      onBlur={() => setTimeout(() => setCompareBTeamOpen(false), 150)}
-                    />
-                    {compareBTeamOpen && filteredCompareBTeams.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
-                        {filteredCompareBTeams.map((t) => (
-                          <div
-                            key={`compare-b-team-${t.name}`}
-                            className="px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground"
-                            onMouseDown={() => {
-                              setCompareBDestinationTeam(t.name);
-                              setCompareBTeamSearch(t.name);
-                              setCompareBTeamOpen(false);
-                            }}
-                          >
-                            {t.name} {t.conference ? `· ${t.conference}` : ""}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {compareBPlayer?.id && (
-                    <div className="text-xs text-muted-foreground">
-                      Selected:{" "}
-                      <Link className="underline underline-offset-2 text-primary" to={`/dashboard/player/${compareBPlayer.id}`}>
-                        {compareBPlayer.first_name} {compareBPlayer.last_name}
-                      </Link>
-                    </div>
-                  )}
-
-                  {compareBSimulation ? (
-                    <div className="space-y-3">
-                      <div className="rounded-md border p-3 bg-muted/20">
-                        <p className="text-xs font-medium mb-2">Context + Multipliers Used</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                          <div>From Team</div><div className="font-mono text-right">{compareBSimulation.fromTeam || "—"}</div>
-                          <div>From Conference</div><div className="font-mono text-right">{compareBSimulation.fromConference || "—"}</div>
-                          <div>To Conference</div><div className="font-mono text-right">{compareBSimulation.toConference || "—"}</div>
-                          <div>From Park Factor</div><div className="font-mono text-right">{compareBSimulation.fromPark ?? "—"}</div>
-                          <div>To Park Factor</div><div className="font-mono text-right">{compareBSimulation.toPark ?? "—"}</div>
-                          <div>AVG+ Delta</div><div className="font-mono text-right">{compareBSimulation.fromAvgPlus} → {compareBSimulation.toAvgPlus}</div>
-                          <div>OBP+ Delta</div><div className="font-mono text-right">{compareBSimulation.fromObpPlus} → {compareBSimulation.toObpPlus}</div>
-                          <div>ISO+ Delta</div><div className="font-mono text-right">{compareBSimulation.fromIsoPlus} → {compareBSimulation.toIsoPlus}</div>
-                          <div>Stuff+ Delta</div><div className="font-mono text-right">{compareBSimulation.fromStuff} → {compareBSimulation.toStuff}</div>
-                        </div>
-                      </div>
-
-                      <div className="rounded-md border p-3">
-                        <p className="text-xs font-medium mb-2">Projected Outcomes</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                          <div>pAVG / pOBP / pSLG</div>
-                          <div className="font-mono text-right">
-                            {compareBSimulation.pAvg?.toFixed(3) ?? "—"} / {compareBSimulation.pObp?.toFixed(3) ?? "—"} / {compareBSimulation.pSlg?.toFixed(3) ?? "—"}
-                          </div>
-                          <div>pOPS</div><div className="font-mono text-right">{compareBSimulation.pOps?.toFixed(3) ?? "—"}</div>
-                          <div>pISO</div><div className="font-mono text-right">{compareBSimulation.pIso?.toFixed(3) ?? "—"}</div>
-                          <div>pWRC+</div><div className="font-mono text-right">{compareBSimulation.pWrcPlus?.toFixed(0) ?? "—"}</div>
-                          <div>oWAR</div><div className="font-mono text-right">{compareBSimulation.owar?.toFixed(2) ?? "—"}</div>
-                          <div>Projected NIL</div><div className="font-mono text-right">{compareBSimulation.nilValuation != null ? `$${Math.round(compareBSimulation.nilValuation).toLocaleString()}` : "—"}</div>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-                      Select player and destination team to run comparison panel B.
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
           </TabsContent>
 
           <TabsContent value="depth">
