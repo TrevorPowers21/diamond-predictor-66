@@ -107,3 +107,5 @@ Status: In testing phase. Defer cleanup until testing is complete.
 
 - Player Dashboard design note (2026-03-12): revisit regression color styling. Current regression color makes too many players look overly poor; tone down/redesign negative-state color treatment.
 - Compare workflow note (2026-03-12): Compare was moved to the Compare Dashboard route (redirecting into Team Builder compare view). Re-evaluate whether Compare should move back into Team Builder tabs later.
+- Equation QA note (2026-03-16): re-validate and potentially adjust the weighted runs created plus (wRC+) equation/baseline so projected outputs stay aligned with expected benchmarks.
+- Next session start point (2026-03-16): begin on the Player Dashboard and clean up the top section by removing the table + graph area.

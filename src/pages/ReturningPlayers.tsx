@@ -153,6 +153,26 @@ const normalizeName = (value: string | null | undefined) =>
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+const FIRST_NAME_ALIASES: Record<string, string[]> = {
+  christopher: ["chris"],
+  matthew: ["matt"],
+  michael: ["mike"],
+  joseph: ["joe"],
+  alexander: ["alex"],
+};
+const getNameVariants = (fullName: string) => {
+  const cleaned = normalizeName(fullName);
+  if (!cleaned) return [];
+  const parts = cleaned.split(" ").filter(Boolean);
+  if (parts.length < 2) return [cleaned];
+  const [first, ...rest] = parts;
+  const restJoined = rest.join(" ");
+  const variants = new Set<string>([cleaned]);
+  const aliases = FIRST_NAME_ALIASES[first] || [];
+  for (const a of aliases) variants.add(`${a} ${restJoined}`.trim());
+  if (first.length > 1) variants.add(`${first[0]} ${restJoined}`.trim());
+  return Array.from(variants);
+};
 const nameTeamKey = (name: string | null | undefined, team: string | null | undefined) =>
   `${normalizeName(name)}|${normalizeName(team)}`;
 const erf = (x: number) => {
@@ -185,17 +205,45 @@ for (const row of powerRatings2025Seed as Array<any>) {
 
 export default function ReturningPlayers() {
   const queryClient = useQueryClient();
+  const applyPredictionPatchToCache = useCallback((predictionId: string, patch: Partial<ReturnerPlayer["prediction"]>) => {
+    queryClient.setQueryData(
+      { queryKey: ["returning-players-2025-unified"] },
+      (prev: { rows: ReturnerPlayer[]; total: number } | undefined) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          rows: prev.rows.map((row) =>
+            row.prediction_id === predictionId
+              ? {
+                  ...row,
+                  prediction: {
+                    ...row.prediction,
+                    ...patch,
+                  },
+                }
+              : row,
+          ),
+        };
+      },
+    );
+  }, [queryClient]);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [positionFilter, setPositionFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(100);
-  const [sortKey, setSortKey] = useState<SortKey>("p_ops");
+  const [sortKey, setSortKey] = useState<SortKey>("p_wrc_plus");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [bulkEditMode, setBulkEditMode] = useState(false);
   const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string | null; position?: string | null }>>({});
   const [showMissingOnly, setShowMissingOnly] = useState(false);
   const normalize = (value: string | null | undefined) =>
     (value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 220);
+    return () => window.clearTimeout(t);
+  }, [search]);
 
   // Fixed scrollbar refs & sync
   const scrollbarRef = useRef<HTMLDivElement>(null);
@@ -227,7 +275,7 @@ export default function ReturningPlayers() {
       obs.disconnect();
       window.removeEventListener("resize", updatePos);
     };
-  });
+  }, []);
 
   // Sync scrollbar width
   useEffect(() => {
@@ -241,7 +289,7 @@ export default function ReturningPlayers() {
     const ro = new ResizeObserver(sync);
     ro.observe(table);
     return () => ro.disconnect();
-  });
+  }, []);
 
   const handleScrollbarScroll = useCallback(() => {
     if (isSyncing.current) return;
@@ -265,8 +313,20 @@ export default function ReturningPlayers() {
     });
   }, []);
 
-  const { data: players = [], isLoading } = useQuery({
-    queryKey: ["returning-players-2025-unified"],
+  const { data: playersResult, isLoading } = useQuery({
+    queryKey: [
+      "returning-players-2025-unified",
+      {
+        scope: sortKey === "name" ? "paged" : "global",
+        page: sortKey === "name" ? page : null,
+        pageSize: sortKey === "name" ? pageSize : null,
+        positionFilter,
+        showMissingOnly,
+        debouncedSearch,
+        sortKey,
+        sortDir,
+      },
+    ],
     queryFn: async () => {
       const nameTeamKey = (name: string, team: string | null | undefined) => `${normalize(name)}|${normalize(team || "")}`;
       const statSeedRows = storage2025Seed as Array<{
@@ -286,32 +346,229 @@ export default function ReturningPlayers() {
         statsByNameTeam.set(nameTeamKey(row.playerName, row.team), row);
       }
 
-      // Fetch all regular prediction rows (returner + transfer, all statuses), then dedupe to one row/player.
-      let allData: any[] = [];
-      let from = 0;
-      const PAGE_SIZE = 1000;
+      const toReturnerRow = (
+        row: any,
+        player: any,
+        nilByPlayer: Map<string, number | null>,
+      ): ReturnerPlayer => {
+        const fullName = `${player.first_name} ${player.last_name}`;
+        const seedPowerRow = (() => {
+          const direct = powerSeedByNameTeam.get(nameTeamKey(fullName, player.team));
+          if (direct) return direct;
 
-      while (true) {
-        const query = supabase
-          .from("player_predictions")
-          .select(
-            `
-            *,
-            players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal)
-          `,
-          )
-          .in("model_type", ["returner", "transfer"])
-          .range(from, from + PAGE_SIZE - 1);
+          const directByName = powerSeedByName.get(normalizeName(fullName)) || [];
+          if (directByName.length === 1) return directByName[0];
 
-        const { data, error } = await query;
-        if (error) throw error;
+          // Fallback for common first-name variants (e.g., Christopher -> Chris).
+          const variantCandidates = getNameVariants(fullName)
+            .flatMap((v) => powerSeedByName.get(v) || []);
+          if (variantCandidates.length === 0) return null;
 
-        allData = allData.concat(data || []);
-        if (!data || data.length < PAGE_SIZE) break;
-        from += PAGE_SIZE;
+          const byTeam = variantCandidates.filter(
+            (c) => normalizeName(c.team) === normalizeName(player.team),
+          );
+          if (byTeam.length === 1) return byTeam[0];
+          if (variantCandidates.length === 1) return variantCandidates[0];
+          return null;
+        })();
+        const seedEvScore = scoreFromNormal(seedPowerRow?.avgExitVelo ?? null, 86.2, 4.28);
+        const seedBarrelScore = scoreFromNormal(seedPowerRow?.barrel ?? null, 17.3, 7.89);
+        const seedContactScore = scoreFromNormal(seedPowerRow?.contact ?? null, 77.1, 6.6);
+        const seedChaseScore = scoreFromNormal(seedPowerRow?.chase ?? null, 23.1, 5.58, true);
+        const candidates = statsByName.get(normalize(fullName)) || [];
+        const byTeam = statsByNameTeam.get(nameTeamKey(fullName, player.team));
+        const exactByStats = candidates.find((r) =>
+          (r.avg == null || row.from_avg == null || Math.round(r.avg * 1000) === Math.round(Number(row.from_avg) * 1000)) &&
+          (r.obp == null || row.from_obp == null || Math.round(r.obp * 1000) === Math.round(Number(row.from_obp) * 1000)) &&
+          (r.slg == null || row.from_slg == null || Math.round(r.slg * 1000) === Math.round(Number(row.from_slg) * 1000))
+        );
+        const resolvedTeam2025 = byTeam?.team || exactByStats?.team || (candidates.length === 1 ? candidates[0].team : null) || player.team;
+
+        return {
+          id: player.id,
+          prediction_id: row.id,
+          first_name: player.first_name,
+          last_name: player.last_name,
+          team: resolvedTeam2025,
+          conference: player.conference,
+          position: player.position,
+          class_year: player.class_year,
+          transfer_portal: player.transfer_portal,
+          model_type: row.model_type,
+          status: row.status,
+          nil_value: nilByPlayer.get(player.id) ?? null,
+          prediction: {
+            from_avg: row.from_avg,
+            from_obp: row.from_obp,
+            from_slg: row.from_slg,
+            class_transition: row.class_transition,
+            dev_aggressiveness: row.dev_aggressiveness,
+            p_avg: row.p_avg,
+            p_obp: row.p_obp,
+            p_slg: row.p_slg,
+            p_ops: row.p_ops,
+            p_iso: row.p_iso,
+            p_wrc_plus: row.p_wrc_plus,
+            power_rating_plus: row.power_rating_plus,
+            ev_score: seedEvScore ?? null,
+            barrel_score: seedBarrelScore ?? null,
+            contact_score: seedContactScore ?? null,
+            chase_score: seedChaseScore ?? null,
+          },
+        };
+      };
+
+      // For stat-column sorts, compute sort globally, then page that sorted set.
+      if (sortKey !== "name") {
+        let allData: any[] = [];
+        let predFrom = 0;
+        const PRED_PAGE_SIZE = 1000;
+        while (true) {
+          const { data, error } = await supabase
+            .from("player_predictions")
+            .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal)")
+            .in("model_type", ["returner", "transfer"])
+            .eq("variant", "regular")
+            .in("status", ["active", "departed"])
+            .range(predFrom, predFrom + PRED_PAGE_SIZE - 1);
+          if (error) throw error;
+          allData = allData.concat(data || []);
+          if (!data || data.length < PRED_PAGE_SIZE) break;
+          predFrom += PRED_PAGE_SIZE;
+        }
+
+        const byPlayer = new Map<string, any>();
+        for (const row of allData || []) {
+          const pid = row.players.id;
+          const existing = byPlayer.get(pid);
+          if (!existing) {
+            byPlayer.set(pid, row);
+            continue;
+          }
+          const rowHasFrom = row.from_avg != null || row.from_obp != null || row.from_slg != null;
+          const existingHasFrom = existing.from_avg != null || existing.from_obp != null || existing.from_slg != null;
+          const rowHasPred =
+            row.p_avg != null && row.p_obp != null && row.p_slg != null && row.p_ops != null && row.p_iso != null && row.p_wrc_plus != null;
+          const existingHasPred =
+            existing.p_avg != null && existing.p_obp != null && existing.p_slg != null && existing.p_ops != null && existing.p_iso != null && existing.p_wrc_plus != null;
+          const rowHasScout = row.ev_score != null || row.barrel_score != null || row.whiff_score != null || row.chase_score != null;
+          const existingHasScout = existing.ev_score != null || existing.barrel_score != null || existing.whiff_score != null || existing.chase_score != null;
+          const rowScore =
+            ((row.players.transfer_portal === true && row.model_type === "transfer") ||
+              (row.players.transfer_portal !== true && row.model_type === "returner")
+              ? 6 : 0) +
+            (rowHasPred ? 5 : 0) +
+            (rowHasScout ? 2 : 0) +
+            (row.model_type === "transfer" ? 3 : 0) +
+            (row.status === "active" ? 2 : 0) +
+            (rowHasFrom ? 1 : 0);
+          const existingScore =
+            ((existing.players.transfer_portal === true && existing.model_type === "transfer") ||
+              (existing.players.transfer_portal !== true && existing.model_type === "returner")
+              ? 6 : 0) +
+            (existingHasPred ? 5 : 0) +
+            (existingHasScout ? 2 : 0) +
+            (existing.model_type === "transfer" ? 3 : 0) +
+            (existing.status === "active" ? 2 : 0) +
+            (existingHasFrom ? 1 : 0);
+          if (rowScore > existingScore) byPlayer.set(pid, row);
+          else if (rowScore === existingScore) {
+            const rowTs = new Date(row.updated_at || 0).getTime();
+            const existingTs = new Date(existing.updated_at || 0).getTime();
+            if (rowTs > existingTs) byPlayer.set(pid, row);
+          }
+        }
+
+        const dedupedRows = Array.from(byPlayer.values());
+        const playerIds = dedupedRows.map((r: any) => r.player_id).filter(Boolean);
+        const nilByPlayer = new Map<string, number | null>();
+        if (playerIds.length > 0) {
+          const NIL_BATCH = 300;
+          const nilRowsAll: Array<{ player_id: string; estimated_value: number | null; season: number | null }> = [];
+          for (let i = 0; i < playerIds.length; i += NIL_BATCH) {
+            const ids = playerIds.slice(i, i + NIL_BATCH);
+            const { data: nilRows, error: nilErr } = await supabase
+              .from("nil_valuations")
+              .select("player_id, estimated_value, season")
+              .in("player_id", ids);
+            if (nilErr) continue;
+            nilRowsAll.push(...((nilRows || []) as Array<{ player_id: string; estimated_value: number | null; season: number | null }>));
+          }
+          const bySeason = new Map<string, { season: number; value: number | null }>();
+          for (const row of nilRowsAll) {
+            const curr = bySeason.get(row.player_id);
+            const season = Number(row.season) || 0;
+            if (!curr || season > curr.season) bySeason.set(row.player_id, { season, value: row.estimated_value });
+          }
+          for (const [pid, val] of bySeason.entries()) nilByPlayer.set(pid, val.value);
+        }
+
+        let allRows = dedupedRows.map((row: any) => toReturnerRow(row, row.players, nilByPlayer));
+        if (positionFilter !== "all") allRows = allRows.filter((p) => p.position === positionFilter);
+        if (showMissingOnly) allRows = allRows.filter((p) => !p.team);
+        if (debouncedSearch) {
+          const q = debouncedSearch.toLowerCase();
+          allRows = allRows.filter(
+            (p) =>
+              `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
+              (p.team || "").toLowerCase().includes(q) ||
+              (p.conference || "").toLowerCase().includes(q),
+          );
+        }
+
+        const metricFor = (p: ReturnerPlayer): number => {
+          if (sortKey === "p_avg") return p.prediction.p_avg ?? -999;
+          if (sortKey === "p_obp") return p.prediction.p_obp ?? -999;
+          if (sortKey === "p_slg") return p.prediction.p_slg ?? -999;
+          if (sortKey === "p_ops") return p.prediction.p_ops ?? computeDerived(p.prediction.p_avg, p.prediction.p_obp, p.prediction.p_slg).ops ?? -999;
+          if (sortKey === "p_iso") return p.prediction.p_iso ?? computeDerived(p.prediction.p_avg, p.prediction.p_obp, p.prediction.p_slg).iso ?? -999;
+          if (sortKey === "p_wrc_plus") return p.prediction.p_wrc_plus ?? -999;
+          if (sortKey === "p_war") return computeOWarFromWrcPlus(p.prediction.p_wrc_plus) ?? -999;
+          if (sortKey === "p_nil") return computeNilFallback({ storedNil: p.nil_value, wrcPlus: p.prediction.p_wrc_plus, conference: p.conference, position: p.position }) ?? -999;
+          return -999;
+        };
+        allRows.sort((a, b) => {
+          const av = metricFor(a);
+          const bv = metricFor(b);
+          return sortDir === "asc" ? av - bv : bv - av;
+        });
+
+        return { rows: allRows, total: allRows.length };
       }
 
-      const playerIds = Array.from(new Set((allData || []).map((r: any) => r.player_id))).filter(Boolean);
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
+      let playersQuery = supabase
+        .from("players")
+        .select("id, first_name, last_name, team, conference, position, class_year, transfer_portal", { count: "exact" })
+        .order("last_name", { ascending: true })
+        .order("first_name", { ascending: true })
+        .range(from, to);
+      if (positionFilter !== "all") playersQuery = playersQuery.eq("position", positionFilter);
+      if (showMissingOnly) playersQuery = playersQuery.is("team", null);
+      if (debouncedSearch) {
+        const q = debouncedSearch.replace(/[%]/g, "").trim();
+        if (q) {
+          playersQuery = playersQuery.or(
+            `first_name.ilike.%${q}%,last_name.ilike.%${q}%,team.ilike.%${q}%,conference.ilike.%${q}%`,
+          );
+        }
+      }
+      const { data: playerRows, error: playersErr, count } = await playersQuery;
+      if (playersErr) throw playersErr;
+
+      const playerIds = (playerRows || []).map((r: any) => r.id).filter(Boolean);
+      if (playerIds.length === 0) return { rows: [] as ReturnerPlayer[], total: count ?? 0 };
+
+      const { data: allData, error: predErr } = await supabase
+        .from("player_predictions")
+        .select("*")
+        .in("player_id", playerIds)
+        .in("model_type", ["returner", "transfer"])
+        .eq("variant", "regular")
+        .in("status", ["active", "departed"]);
+      if (predErr) throw predErr;
+
       const nilByPlayer = new Map<string, number | null>();
       if (playerIds.length > 0) {
         // Avoid oversized `in (...)` query strings by fetching NIL in chunks.
@@ -338,11 +595,15 @@ export default function ReturningPlayers() {
         for (const [pid, val] of bySeason.entries()) nilByPlayer.set(pid, val.value);
       }
 
+      const playerById = new Map<string, any>();
+      for (const p of playerRows || []) playerById.set(p.id, p);
       const byPlayer = new Map<string, any>();
       for (const row of allData || []) {
-        const existing = byPlayer.get(row.players.id);
+        const currentPlayer = playerById.get(row.player_id);
+        if (!currentPlayer) continue;
+        const existing = byPlayer.get(row.player_id);
         if (!existing) {
-          byPlayer.set(row.players.id, row);
+          byPlayer.set(row.player_id, row);
           continue;
         }
         const rowHasFrom = row.from_avg != null || row.from_obp != null || row.from_slg != null;
@@ -372,8 +633,8 @@ export default function ReturningPlayers() {
           existing.whiff_score != null ||
           existing.chase_score != null;
         const rowScore =
-          ((row.players.transfer_portal === true && row.model_type === "transfer") ||
-            (row.players.transfer_portal !== true && row.model_type === "returner")
+          ((currentPlayer.transfer_portal === true && row.model_type === "transfer") ||
+            (currentPlayer.transfer_portal !== true && row.model_type === "returner")
             ? 6
             : 0) +
           (rowHasPred ? 5 : 0) +
@@ -382,8 +643,8 @@ export default function ReturningPlayers() {
           (row.status === "active" ? 2 : 0) +
           (rowHasFrom ? 1 : 0);
         const existingScore =
-          ((existing.players.transfer_portal === true && existing.model_type === "transfer") ||
-            (existing.players.transfer_portal !== true && existing.model_type === "returner")
+          ((currentPlayer.transfer_portal === true && existing.model_type === "transfer") ||
+            (currentPlayer.transfer_portal !== true && existing.model_type === "returner")
             ? 6
             : 0) +
           (existingHasPred ? 5 : 0) +
@@ -392,72 +653,27 @@ export default function ReturningPlayers() {
           (existing.status === "active" ? 2 : 0) +
           (existingHasFrom ? 1 : 0);
         if (rowScore > existingScore) {
-          byPlayer.set(row.players.id, row);
+          byPlayer.set(row.player_id, row);
           continue;
         }
         if (rowScore === existingScore) {
           const rowTs = new Date(row.updated_at || 0).getTime();
           const existingTs = new Date(existing.updated_at || 0).getTime();
-          if (rowTs > existingTs) byPlayer.set(row.players.id, row);
+          if (rowTs > existingTs) byPlayer.set(row.player_id, row);
         }
       }
 
-      return Array.from(byPlayer.values()).map((row: any) => {
-        const fullName = `${row.players.first_name} ${row.players.last_name}`;
-        const seedPowerRow =
-          powerSeedByNameTeam.get(nameTeamKey(fullName, row.players.team)) ||
-          (() => {
-            const candidates = powerSeedByName.get(normalizeName(fullName)) || [];
-            return candidates.length === 1 ? candidates[0] : null;
-          })();
-        const seedEvScore = scoreFromNormal(seedPowerRow?.avgExitVelo ?? null, 86.2, 4.28);
-        const seedBarrelScore = scoreFromNormal(seedPowerRow?.barrel ?? null, 17.3, 7.89);
-        const seedContactScore = scoreFromNormal(seedPowerRow?.contact ?? null, 77.1, 6.6);
-        const seedChaseScore = scoreFromNormal(seedPowerRow?.chase ?? null, 23.1, 5.58, true);
-        const candidates = statsByName.get(normalize(fullName)) || [];
-        const byTeam = statsByNameTeam.get(nameTeamKey(fullName, row.players.team));
-        const exactByStats = candidates.find((r) =>
-          (r.avg == null || row.from_avg == null || Math.round(r.avg * 1000) === Math.round(Number(row.from_avg) * 1000)) &&
-          (r.obp == null || row.from_obp == null || Math.round(r.obp * 1000) === Math.round(Number(row.from_obp) * 1000)) &&
-          (r.slg == null || row.from_slg == null || Math.round(r.slg * 1000) === Math.round(Number(row.from_slg) * 1000))
-        );
-        const resolvedTeam2025 = byTeam?.team || exactByStats?.team || (candidates.length === 1 ? candidates[0].team : null) || row.players.team;
+      const rows = (playerRows || []).map((player: any) => {
+        const row = byPlayer.get(player.id);
+        if (!row) return null;
+        return toReturnerRow(row, player, nilByPlayer);
+      }).filter(Boolean) as ReturnerPlayer[];
 
-        return ({
-        id: row.players.id,
-        prediction_id: row.id,
-        first_name: row.players.first_name,
-        last_name: row.players.last_name,
-        team: resolvedTeam2025,
-        conference: row.players.conference,
-        position: row.players.position,
-        class_year: row.players.class_year,
-        transfer_portal: row.players.transfer_portal,
-        model_type: row.model_type,
-        status: row.status,
-        nil_value: nilByPlayer.get(row.players.id) ?? null,
-        prediction: {
-          from_avg: row.from_avg,
-          from_obp: row.from_obp,
-          from_slg: row.from_slg,
-          class_transition: row.class_transition,
-          dev_aggressiveness: row.dev_aggressiveness,
-          p_avg: row.p_avg,
-          p_obp: row.p_obp,
-          p_slg: row.p_slg,
-          p_ops: row.p_ops,
-          p_iso: row.p_iso,
-          p_wrc_plus: row.p_wrc_plus,
-          power_rating_plus: row.power_rating_plus,
-          ev_score: seedEvScore ?? null,
-          barrel_score: seedBarrelScore ?? null,
-          contact_score: seedContactScore ?? null,
-          chase_score: seedChaseScore ?? null,
-        },
-      });
-      }) as ReturnerPlayer[];
+      return { rows, total: count ?? 0 };
     },
   });
+  const players = playersResult?.rows ?? [];
+  const totalCount = playersResult?.total ?? 0;
 
   const { data: teamsDirectory = [] } = useQuery({
     queryKey: ["teams-directory-for-player-dashboard-edit"],
@@ -531,9 +747,14 @@ export default function ReturningPlayers() {
 
   const updateClassTransition = useMutation({
     mutationFn: async ({ predictionId, value }: { predictionId: string; value: string }) => {
-      return recalculatePredictionById(predictionId, { class_transition: value });
+      const result = await recalculatePredictionById(predictionId, { class_transition: value });
+      return { predictionId, value, result };
     },
-    onSuccess: () => {
+    onSuccess: ({ predictionId, value, result }) => {
+      applyPredictionPatchToCache(predictionId, {
+        class_transition: value,
+        ...(result?.prediction || {}),
+      } as Partial<ReturnerPlayer["prediction"]>);
       queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
       toast.success("Class adjustment updated");
     },
@@ -542,9 +763,14 @@ export default function ReturningPlayers() {
 
   const updateDevAgg = useMutation({
     mutationFn: async ({ predictionId, value }: { predictionId: string; value: number }) => {
-      return recalculatePredictionById(predictionId, { dev_aggressiveness: value });
+      const result = await recalculatePredictionById(predictionId, { dev_aggressiveness: value });
+      return { predictionId, value, result };
     },
-    onSuccess: () => {
+    onSuccess: ({ predictionId, value, result }) => {
+      applyPredictionPatchToCache(predictionId, {
+        dev_aggressiveness: value,
+        ...(result?.prediction || {}),
+      } as Partial<ReturnerPlayer["prediction"]>);
       queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
       toast.success("Dev aggressiveness updated");
     },
@@ -553,7 +779,14 @@ export default function ReturningPlayers() {
 
   const applyTemplateDefaults = useMutation({
     mutationFn: async () => {
-      const returnerRows = players.filter((p) => p.model_type === "returner");
+      const { data: allReturnerPreds, error } = await supabase
+        .from("player_predictions")
+        .select("id")
+        .eq("model_type", "returner")
+        .eq("variant", "regular")
+        .in("status", ["active", "departed"]);
+      if (error) throw error;
+      const returnerRows = (allReturnerPreds || []).map((r) => ({ prediction_id: r.id }));
       const BATCH = 40;
       for (let i = 0; i < returnerRows.length; i += BATCH) {
         const batch = returnerRows.slice(i, i + BATCH);
@@ -584,84 +817,20 @@ export default function ReturningPlayers() {
     return Array.from(set).sort();
   }, [players]);
 
-  const filtered = useMemo(() => {
-    let list = players;
-    if (positionFilter !== "all") {
-      list = list.filter((p) => p.position === positionFilter);
-    }
-    if (showMissingOnly) {
-      list = list.filter((p) => !p.team);
-    }
-    if (search) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        (p) =>
-          `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
-          (p.team || "").toLowerCase().includes(q) ||
-          (p.conference || "").toLowerCase().includes(q),
-      );
-    }
-    list.sort((a, b) => {
-      let aVal: number | string | null;
-      let bVal: number | string | null;
-      if (sortKey === "name") {
-        aVal = `${a.last_name} ${a.first_name}`;
-        bVal = `${b.last_name} ${b.first_name}`;
-        return sortDir === "asc"
-          ? (aVal as string).localeCompare(bVal as string)
-          : (bVal as string).localeCompare(aVal as string);
-      }
-      const ad = computeDerived(a.prediction.from_avg, a.prediction.from_obp, a.prediction.from_slg);
-      const bd = computeDerived(b.prediction.from_avg, b.prediction.from_obp, b.prediction.from_slg);
-      const aMetric: Record<SortKey, number | null> = {
-        name: null,
-        p_avg: a.prediction.p_avg,
-        p_obp: a.prediction.p_obp,
-        p_slg: a.prediction.p_slg,
-        p_ops: a.prediction.p_ops ?? computeDerived(a.prediction.p_avg, a.prediction.p_obp, a.prediction.p_slg).ops,
-        p_iso: a.prediction.p_iso ?? computeDerived(a.prediction.p_avg, a.prediction.p_obp, a.prediction.p_slg).iso,
-        p_wrc_plus: a.prediction.p_wrc_plus,
-        p_war: computeOWarFromWrcPlus(a.prediction.p_wrc_plus),
-        p_nil: computeNilFallback({
-          storedNil: a.nil_value,
-          wrcPlus: a.prediction.p_wrc_plus,
-          conference: a.conference,
-          position: a.position,
-        }),
-      };
-      const bMetric: Record<SortKey, number | null> = {
-        name: null,
-        p_avg: b.prediction.p_avg,
-        p_obp: b.prediction.p_obp,
-        p_slg: b.prediction.p_slg,
-        p_ops: b.prediction.p_ops ?? computeDerived(b.prediction.p_avg, b.prediction.p_obp, b.prediction.p_slg).ops,
-        p_iso: b.prediction.p_iso ?? computeDerived(b.prediction.p_avg, b.prediction.p_obp, b.prediction.p_slg).iso,
-        p_wrc_plus: b.prediction.p_wrc_plus,
-        p_war: computeOWarFromWrcPlus(b.prediction.p_wrc_plus),
-        p_nil: computeNilFallback({
-          storedNil: b.nil_value,
-          wrcPlus: b.prediction.p_wrc_plus,
-          conference: b.conference,
-          position: b.position,
-        }),
-      };
-      aVal = aMetric[sortKey] ?? -999;
-      bVal = bMetric[sortKey] ?? -999;
-      return sortDir === "asc" ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
-    });
-    return list;
-  }, [players, search, sortKey, sortDir, showMissingOnly, positionFilter]);
+  const sortedRows = players;
 
   useEffect(() => {
     setPage(1);
   }, [search, positionFilter, showMissingOnly, sortKey, sortDir, pageSize]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pagedPlayers = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
-  }, [filtered, currentPage, pageSize]);
+    if (sortKey === "name") return sortedRows;
+    const from = (currentPage - 1) * pageSize;
+    const to = from + pageSize;
+    return sortedRows.slice(from, to);
+  }, [sortKey, sortedRows, currentPage, pageSize]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -913,7 +1082,7 @@ export default function ReturningPlayers() {
           <CardContent className="p-0">
             {isLoading ? (
               <div className="flex items-center justify-center py-16 text-muted-foreground">Loading projections…</div>
-            ) : filtered.length === 0 ? (
+            ) : pagedPlayers.length === 0 ? (
               <div className="flex items-center justify-center py-16 text-muted-foreground">No players found</div>
             ) : (
               <>
@@ -1069,14 +1238,14 @@ export default function ReturningPlayers() {
                   <div className="text-muted-foreground">
                     Showing{" "}
                     <span className="font-medium text-foreground">
-                      {filtered.length === 0 ? 0 : ((currentPage - 1) * pageSize) + 1}
+                      {totalCount === 0 ? 0 : ((currentPage - 1) * pageSize) + 1}
                     </span>
                     {" "}-{" "}
                     <span className="font-medium text-foreground">
-                      {Math.min(currentPage * pageSize, filtered.length)}
+                      {Math.min(currentPage * pageSize, totalCount)}
                     </span>
                     {" "}of{" "}
-                    <span className="font-medium text-foreground">{filtered.length}</span>
+                    <span className="font-medium text-foreground">{totalCount}</span>
                     {" "}players
                   </div>
                   <div className="flex items-center gap-2">

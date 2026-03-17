@@ -139,6 +139,26 @@ const normalizeName = (value: string | null | undefined) =>
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+const FIRST_NAME_ALIASES: Record<string, string[]> = {
+  christopher: ["chris"],
+  matthew: ["matt"],
+  michael: ["mike"],
+  joseph: ["joe"],
+  alexander: ["alex"],
+};
+const getNameVariants = (fullName: string) => {
+  const cleaned = normalizeName(fullName);
+  if (!cleaned) return [];
+  const parts = cleaned.split(" ").filter(Boolean);
+  if (parts.length < 2) return [cleaned];
+  const [first, ...rest] = parts;
+  const restJoined = rest.join(" ");
+  const variants = new Set<string>([cleaned]);
+  const aliases = FIRST_NAME_ALIASES[first] || [];
+  for (const a of aliases) variants.add(`${a} ${restJoined}`.trim());
+  if (first.length > 1) variants.add(`${first[0]} ${restJoined}`.trim());
+  return Array.from(variants);
+};
 const nameTeamKey = (name: string | null | undefined, team: string | null | undefined) =>
   `${normalizeName(name)}|${normalizeName(team)}`;
 
@@ -499,13 +519,23 @@ export default function PlayerProfile() {
     if (byFromTeam) return byFromTeam;
     const byPlayerTeam = powerByNameTeam.get(nameTeamKey(fullNameRaw, player.team));
     if (byPlayerTeam) return byPlayerTeam;
-    if (powerCandidates.length === 0) return null;
     if (powerCandidates.length === 1) return powerCandidates[0];
-    const bySeedTeamLoose = powerCandidates.find((r) => (r.team || "") === (seedStatRow?.team || ""));
-    if (bySeedTeamLoose) return bySeedTeamLoose;
-    const byPlayerTeamLoose = powerCandidates.find((r) => (r.team || "") === (player.from_team || "")) ||
-      powerCandidates.find((r) => (r.team || "") === (player.team || ""));
-    if (byPlayerTeamLoose) return byPlayerTeamLoose;
+    if (powerCandidates.length > 1) {
+      const bySeedTeamLoose = powerCandidates.find((r) => (r.team || "") === (seedStatRow?.team || ""));
+      if (bySeedTeamLoose) return bySeedTeamLoose;
+      const byPlayerTeamLoose = powerCandidates.find((r) => (r.team || "") === (player.from_team || "")) ||
+        powerCandidates.find((r) => (r.team || "") === (player.team || ""));
+      if (byPlayerTeamLoose) return byPlayerTeamLoose;
+    }
+    const variantCandidates = getNameVariants(fullNameRaw).flatMap((v) => powerByName.get(v) || []);
+    if (variantCandidates.length > 0) {
+      const byVariantSeedTeam = variantCandidates.find((r) => (r.team || "") === (seedStatRow?.team || ""));
+      if (byVariantSeedTeam) return byVariantSeedTeam;
+      const byVariantPlayerTeam = variantCandidates.find((r) => (r.team || "") === (player.from_team || "")) ||
+        variantCandidates.find((r) => (r.team || "") === (player.team || ""));
+      if (byVariantPlayerTeam) return byVariantPlayerTeam;
+      if (variantCandidates.length === 1) return variantCandidates[0];
+    }
     // Ambiguous name with no reliable discriminator: do not guess.
     return null;
   })();
