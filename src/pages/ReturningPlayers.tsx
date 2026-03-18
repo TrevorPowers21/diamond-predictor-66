@@ -30,6 +30,7 @@ import {
   getProgramTierMultiplierByConference,
   getPositionValueMultiplier,
 } from "@/lib/nilProgramSpecific";
+import { profileRouteFor } from "@/lib/profileRoutes";
 
 type SortKey =
   | "name"
@@ -1119,7 +1120,7 @@ export default function ReturningPlayers() {
                           <TableRow key={p.prediction_id}>
                             <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
                               <Link
-                                to={`/dashboard/player/${p.id}`}
+                                to={profileRouteFor(p.id, p.position)}
                                 className="hover:text-primary hover:underline transition-colors"
                               >
                                 {p.first_name} {p.last_name}

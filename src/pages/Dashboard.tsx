@@ -15,6 +15,7 @@ import {
   getProgramTierMultiplierByConference,
   getPositionValueMultiplier,
 } from "@/lib/nilProgramSpecific";
+import { profileRouteFor } from "@/lib/profileRoutes";
 
 type MetricKey = "p_avg" | "p_obp" | "p_slg" | "p_ops" | "p_iso" | "p_wrc_plus" | "owar" | "nil_value";
 type PoolKey = "all" | string;
@@ -197,6 +198,7 @@ export default function Dashboard() {
     value: p.metric_value ?? 0,
     valueLabel: formatMetric(metric, p.metric_value ?? null),
     player_id: p.player_id,
+    position: p.position,
   }));
 
   const chartConfig = {
@@ -280,7 +282,7 @@ export default function Dashboard() {
                         </span>
                         <div className="min-w-0 flex-1">
                           <Link
-                            to={`/dashboard/player/${row.player_id}`}
+                            to={profileRouteFor(row.player_id, row.position)}
                             className="block truncate text-sm font-semibold text-primary hover:underline"
                           >
                             {row.full_name}
@@ -334,7 +336,7 @@ export default function Dashboard() {
                               textAnchor="end"
                               className="fill-primary underline cursor-pointer"
                               fontSize={11}
-                              onClick={() => row?.player_id && navigate(`/dashboard/player/${row.player_id}`)}
+                              onClick={() => row?.player_id && navigate(profileRouteFor(row.player_id, row.position))}
                             >
                               {payload.value}
                             </text>
@@ -347,7 +349,7 @@ export default function Dashboard() {
                         radius={[0, 4, 4, 0]}
                         onClick={(data: any) => {
                           const pid = data?.payload?.player_id;
-                          if (pid) navigate(`/dashboard/player/${pid}`);
+                          if (pid) navigate(profileRouteFor(pid, data?.payload?.position));
                         }}
                       >
                         <LabelList

@@ -13,7 +13,6 @@ import {
   LogOut,
   Menu,
   X,
-  FileSpreadsheet,
   Scale,
   Building2,
   Hammer,
@@ -30,7 +29,6 @@ const navItems = [
   { label: "NIL Valuations", href: "/dashboard/nil", icon: DollarSign, badge: "Coming Soon" },
   { label: "Compare", href: "/dashboard/compare", icon: GitCompare },
   { label: "Admin", href: "/dashboard/admin", icon: ShieldCheck },
-  { label: "Data Sync", href: "/dashboard/sync", icon: FileSpreadsheet },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 

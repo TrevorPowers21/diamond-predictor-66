@@ -18,6 +18,7 @@ import {
 } from "@/lib/nilProgramSpecific";
 import { computeTransferProjection } from "@/lib/transferProjection";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
+import { profileRouteFor } from "@/lib/profileRoutes";
 
 type SimPlayer = {
   prediction_id: string | null;
@@ -785,7 +786,7 @@ export default function TransferPortal() {
               <CardTitle className="text-base">Projected Outcomes</CardTitle>
               {selectedPlayer && simulation && !simulation.blocked && (
                 <Button asChild variant="outline" size="sm">
-                  <Link to={`/dashboard/player/${selectedPlayer.player_id}`}>
+                  <Link to={profileRouteFor(selectedPlayer.player_id, selectedPlayer.position)}>
                     View Player Page
                   </Link>
                 </Button>

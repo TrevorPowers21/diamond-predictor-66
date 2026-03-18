@@ -47,6 +47,9 @@ function canonicalConferenceName(raw: string | null | undefined): string {
   const cleaned = normalizeConferenceName(raw);
   if (!cleaned) return "";
   const key = cleaned.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (key.includes("atlanticcoastconference")) return "ACC";
+  if (key.includes("americaneast")) return "American East";
+  if (key.includes("atlanticsunconference")) return "Atlantic Sun Conference";
   const map: Record<string, string> = {
     aac: "American Athletic Conference",
     americanathleticconference: "American Athletic Conference",
@@ -88,8 +91,26 @@ function canonicalConferenceName(raw: string | null | undefined): string {
     midamericanconference: "Mid-American Conference",
     ovc: "Ohio Valley Conference",
     ohiovalleyconference: "Ohio Valley Conference",
+    americaeast: "American East",
+    ameast: "American East",
   };
   return map[key] || cleaned;
+}
+
+function placeAccBetweenAmericanEastAndAtlanticSun<T extends { conference: string }>(list: T[]): T[] {
+  const out = [...list];
+  const idxAcc = out.findIndex((r) => canonicalConferenceName(r.conference) === "ACC");
+  if (idxAcc < 0) return out;
+
+  const [accRow] = out.splice(idxAcc, 1);
+  const idxAmericanEast = out.findIndex((r) => canonicalConferenceName(r.conference) === "American East");
+  const idxAtlanticSun = out.findIndex((r) => canonicalConferenceName(r.conference) === "Atlantic Sun Conference");
+
+  let insertAt = out.length;
+  if (idxAmericanEast >= 0) insertAt = idxAmericanEast + 1;
+  if (idxAtlanticSun >= 0) insertAt = Math.min(insertAt, idxAtlanticSun);
+  out.splice(insertAt, 0, accRow);
+  return out;
 }
 
 type EditFields = Omit<ConferenceStat, "id" | "created_at" | "updated_at">;
@@ -301,6 +322,7 @@ export default function ConferenceStatsTable() {
     let list = Array.from(byConference.values()).filter(
       (s) => s.avg != null && s.obp != null && s.slg != null,
     );
+    list = placeAccBetweenAmericanEastAndAtlanticSun(list);
     if (search) {
       const q = search.toLowerCase();
       list = list.filter((s) => s.conference.toLowerCase().includes(q));

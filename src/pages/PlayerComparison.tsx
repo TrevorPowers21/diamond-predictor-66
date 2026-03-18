@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { computeTransferProjection } from "@/lib/transferProjection";
 import { DEFAULT_NIL_TIER_MULTIPLIERS, getPositionValueMultiplier, getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
+import { profileRouteFor } from "@/lib/profileRoutes";
 import storage2025Seed from "@/data/storage_2025_seed.json";
 
 type TeamRow = { name: string; conference: string | null; park_factor: number | null };
@@ -551,7 +552,7 @@ export default function PlayerComparison() {
         {panel.player?.id && (
           <div className="text-xs text-muted-foreground rounded-md border bg-muted/30 px-2.5 py-2">
             Selected:{" "}
-            <Link className="underline underline-offset-2 text-primary" to={`/dashboard/player/${panel.player.id}`}>
+            <Link className="underline underline-offset-2 text-primary" to={profileRouteFor(panel.player.id, panel.player.position)}>
               {panel.player.first_name} {panel.player.last_name}
             </Link>
             <div className="mt-1">
@@ -568,7 +569,7 @@ export default function PlayerComparison() {
         <div className="flex items-center gap-2">
           {panel.player?.id ? (
             <Button asChild size="sm" variant="outline">
-              <Link to={`/dashboard/player/${panel.player.id}`}>View Player Profile</Link>
+              <Link to={profileRouteFor(panel.player.id, panel.player.position)}>View Player Profile</Link>
             </Button>
           ) : null}
           <Button size="sm" onClick={onAddToTargetBoard} disabled={!panel.player || !panel.simulation}>

@@ -25,6 +25,7 @@ import {
 import { computeTransferProjection } from "@/lib/transferProjection";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
+import { profileRouteFor } from "@/lib/profileRoutes";
 
 const POSITION_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"] as const;
 const PITCHER_SLOTS = ["SP1", "SP2", "SP3", "SP4", "SP5", "RP1", "RP2", "RP3", "RP4", "CL"] as const;
@@ -2277,7 +2278,10 @@ export default function TeamBuilder() {
       <TableCell className="font-medium">
         <div className="flex items-center gap-2">
           {p.player_id ? (
-            <Link to={`/dashboard/player/${p.player_id}`} className="text-primary underline underline-offset-2 hover:opacity-80">
+            <Link
+              to={profileRouteFor(p.player_id, p.player?.position ?? null)}
+              className="text-primary underline underline-offset-2 hover:opacity-80"
+            >
               {getPlayerName(p)}
             </Link>
           ) : (
@@ -3052,7 +3056,10 @@ export default function TeamBuilder() {
                   {compareAPlayer?.id && (
                     <div className="text-xs text-muted-foreground">
                       Selected:{" "}
-                      <Link className="underline underline-offset-2 text-primary" to={`/dashboard/player/${compareAPlayer.id}`}>
+                      <Link
+                        className="underline underline-offset-2 text-primary"
+                        to={profileRouteFor(compareAPlayer.id, compareAPlayer.position ?? null)}
+                      >
                         {compareAPlayer.first_name} {compareAPlayer.last_name}
                       </Link>
                     </div>
@@ -3170,7 +3177,10 @@ export default function TeamBuilder() {
                   {compareBPlayer?.id && (
                     <div className="text-xs text-muted-foreground">
                       Selected:{" "}
-                      <Link className="underline underline-offset-2 text-primary" to={`/dashboard/player/${compareBPlayer.id}`}>
+                      <Link
+                        className="underline underline-offset-2 text-primary"
+                        to={profileRouteFor(compareBPlayer.id, compareBPlayer.position ?? null)}
+                      >
                         {compareBPlayer.first_name} {compareBPlayer.last_name}
                       </Link>
                     </div>

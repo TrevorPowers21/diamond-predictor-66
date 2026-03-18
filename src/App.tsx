@@ -11,11 +11,11 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import NotFound from "./pages/NotFound";
-import DataSync from "./pages/DataSync";
 import DevWeights from "./pages/DevWeights";
 import NilValuations from "./pages/NilValuations";
 import PlayerComparison from "./pages/PlayerComparison";
 import PlayerProfile from "./pages/PlayerProfile";
+import PitcherProfile from "./pages/PitcherProfile";
 import Teams from "./pages/Teams";
 import TeamBuilder from "./pages/TeamBuilder";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -33,7 +33,6 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/auth" element={<Auth />} />
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/dashboard/sync" element={<ProtectedRoute><DataSync /></ProtectedRoute>} />
             <Route path="/dashboard/portal" element={<ProtectedRoute><TransferPortal /></ProtectedRoute>} />
             <Route path="/dashboard/returning" element={<ProtectedRoute><ReturningPlayers /></ProtectedRoute>} />
             <Route path="/dashboard/dev-weights" element={<ProtectedRoute><DevWeights /></ProtectedRoute>} />
@@ -41,6 +40,7 @@ const App = () => (
             <Route path="/dashboard/compare" element={<ProtectedRoute><PlayerComparison /></ProtectedRoute>} />
             <Route path="/dashboard/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
             <Route path="/dashboard/player/:id" element={<ProtectedRoute><PlayerProfile /></ProtectedRoute>} />
+            <Route path="/dashboard/pitcher/:id" element={<ProtectedRoute><PitcherProfile /></ProtectedRoute>} />
             <Route path="/dashboard/team-builder" element={<ProtectedRoute><TeamBuilder /></ProtectedRoute>} />
             <Route path="/dashboard/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
             <Route path="/dashboard/*" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />

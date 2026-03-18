@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/DashboardLayout";
 import ConferenceStatsTable from "@/components/ConferenceStatsTable";
+import PitchingConferenceStatsTable from "@/components/PitchingConferenceStatsTable";
+import PitchingStatsStorageTable from "@/components/PitchingStatsStorageTable";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +23,7 @@ import { bulkRecalculatePredictionsLocal } from "@/lib/predictionEngine";
 import storage2025Seed from "@/data/storage_2025_seed.json";
 import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
 import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
+import { profileRouteFor } from "@/lib/profileRoutes";
 
 // ─── Equation Constants Tab ───────────────────────────────────────────────────
 
@@ -4128,6 +4131,7 @@ function DataStorage2025Tab() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [selectedSeason, setSelectedSeason] = useState<"2025" | "2026">("2025");
+  const [storageDomain, setStorageDomain] = useState<"hitting" | "pitching">("hitting");
   const [storageView, setStorageView] = useState<"stats" | "power">("stats");
   const [showMissingOnly, setShowMissingOnly] = useState(false);
   const [statsPage, setStatsPage] = useState(1);
@@ -4199,6 +4203,62 @@ function DataStorage2025Tab() {
     }
     return map;
   }, [powerSeedRows]);
+  const editableValues = useMemo<Record<string, string>>(() => {
+    const defaults: Record<string, string> = {
+      ba_ncaa_contact_pct: "77.1",
+      ba_ncaa_line_drive_pct: "20.9",
+      ba_ncaa_avg_exit_velocity: "86.2",
+      ba_ncaa_popup_pct: "7.9",
+      obp_ncaa_bb_pct: "11.4",
+      obp_ncaa_chase_pct: "23.1",
+      iso_ncaa_barrel_pct: "17.3",
+      iso_ncaa_ev90: "103.10",
+      iso_ncaa_pull_pct: "36.5",
+      iso_ncaa_la10_30_pct: "29",
+      iso_ncaa_gb_pct: "43.2",
+      ba_contact_pct_std_dev: "6.60",
+      ba_line_drive_pct_std_dev: "4.31",
+      ba_avg_exit_velocity_std_dev: "4.28",
+      ba_popup_pct_std_dev: "3.37",
+      obp_bb_pct_std_dev: "3.57",
+      obp_chase_pct_std_dev: "5.58",
+      iso_barrel_pct_std_dev: "7.89",
+      iso_ev90_std_dev: "3.97",
+      iso_pull_pct_std_dev: "8.03",
+      iso_la10_30_pct_std_dev: "6.81",
+      iso_gb_pct_std_dev: "8.0",
+      ba_contact_pct_weight: "0.40",
+      ba_line_drive_pct_weight: "0.25",
+      ba_avg_exit_velocity_weight: "0.20",
+      ba_popup_pct_weight: "0.15",
+      obp_contact_pct_weight: "0.35",
+      obp_line_drive_pct_weight: "0.20",
+      obp_avg_exit_velocity_weight: "0.15",
+      obp_popup_pct_weight: "0.10",
+      obp_bb_pct_weight: "0.15",
+      obp_chase_pct_weight: "0.05",
+      iso_barrel_pct_weight: "0.45",
+      iso_ev90_weight: "0.30",
+      iso_pull_pct_weight: "0.15",
+      iso_la10_30_pct_weight: "0.05",
+      iso_gb_pct_weight: "0.05",
+      overall_avg_exit_velocity_weight: "0.35",
+      overall_barrel_pct_weight: "0.15",
+      overall_contact_pct_weight: "0.30",
+      overall_chase_pct_weight: "0.20",
+      ba_ncaa_avg_power_rating: "50",
+      obp_ncaa_avg_power_rating: "50",
+      iso_ncaa_avg_power_rating: "50",
+    };
+    try {
+      const raw = localStorage.getItem("admin_dashboard_power_equation_values_v3");
+      if (!raw) return defaults;
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      return { ...defaults, ...parsed };
+    } catch {
+      return defaults;
+    }
+  }, []);
 
   const { data: playerDirectory = [] } = useQuery({
     queryKey: ["admin-player-directory"],
@@ -4619,6 +4679,10 @@ function DataStorage2025Tab() {
   const fmt3 = (v: number | null) => (v == null ? "—" : v.toFixed(3));
   const fmt2 = (v: number | null) => (v == null ? "—" : v.toFixed(2));
   const fmtWhole = (v: number | null) => (v == null ? "—" : Math.round(v).toString());
+  const safeNumber = (value: string | undefined, fallback: number) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
   const toAbbrevName = (fullName: string) => {
     const parts = fullName.trim().split(/\s+/).filter(Boolean);
     if (parts.length < 2) return fullName;
@@ -5115,7 +5179,10 @@ function DataStorage2025Tab() {
     },
   });
 
-  if ((storageView === "stats" && isLoading) || (storageView === "power" && isPowerLoading)) {
+  if (
+    storageDomain === "hitting" &&
+    ((storageView === "stats" && isLoading) || (storageView === "power" && isPowerLoading))
+  ) {
     return <p className="text-muted-foreground py-8 text-center">Loading {selectedSeason} storage data…</p>;
   }
 
@@ -5125,10 +5192,10 @@ function DataStorage2025Tab() {
         <div>
           <h3 className="text-lg font-semibold">2025 Data Storage</h3>
           <p className="text-sm text-muted-foreground">Storage for each player&apos;s 2025 team and stats. This is source data for future backend equation auto-population, not prediction results.</p>
-          {filteredRows.length > 0 ? (
+          {storageDomain === "hitting" && filteredRows.length > 0 ? (
             <p className="text-xs text-muted-foreground mt-1">Source: {filteredRows[0].source}</p>
           ) : null}
-          {storageView === "power" && (
+          {storageDomain === "hitting" && storageView === "power" && (
             <p className="text-xs text-muted-foreground mt-1">
               Park factors assigned (filtered rows): {powerParkCoverage.assigned}/{powerParkCoverage.total}
             </p>
@@ -5174,216 +5241,292 @@ function DataStorage2025Tab() {
 
       <Card>
         <CardContent className="p-0">
-          <Tabs value={storageView} onValueChange={(v) => setStorageView(v as "stats" | "power")} className="p-4 pt-3">
+          <Tabs value={storageDomain} onValueChange={(v) => setStorageDomain(v as "hitting" | "pitching")} className="p-4 pt-3">
             <TabsList>
-              <TabsTrigger value="stats">Stats Storage</TabsTrigger>
-              <TabsTrigger value="power">Power Ratings Storage</TabsTrigger>
+              <TabsTrigger value="hitting">Hitting</TabsTrigger>
+              <TabsTrigger value="pitching">Pitching</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="stats" className="mt-3">
-              <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-                <span>
-                  Showing {filteredRows.length ? (safeStatsPage - 1) * PAGE_SIZE + 1 : 0}-
-                  {Math.min(safeStatsPage * PAGE_SIZE, filteredRows.length)} of {filteredRows.length} players
-                </span>
-                <div className="flex items-center gap-1">
-                  {getPageWindow(safeStatsPage, statsTotalPages).map((p) => (
-                    <Button
-                      key={`stats-page-${p}`}
-                      size="sm"
-                      variant={p === safeStatsPage ? "secondary" : "ghost"}
-                      className="h-7 min-w-7 px-2 text-xs"
-                      onClick={() => setStatsPage(p)}
-                    >
-                      {p}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              <div className="max-h-[620px] overflow-auto">
-                <Table>
-                  <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
-                    <TableRow>
-                      <TableHead className="sticky left-0 z-30 bg-background min-w-[220px]">Player</TableHead>
-                      <TableHead>Team</TableHead>
-                      <TableHead className="text-right">Park Factor+</TableHead>
-                      <TableHead>Pos</TableHead>
-                      <TableHead className="text-right">AVG</TableHead>
-                      <TableHead className="text-right">OBP</TableHead>
-                      <TableHead className="text-right">SLG</TableHead>
-                      <TableHead className="text-right">OPS</TableHead>
-                      <TableHead className="text-right">ISO</TableHead>
-                      <TableHead className="text-right">WRC</TableHead>
-                      <TableHead className="text-right">WRC+</TableHead>
-                      <TableHead className="text-right">oWAR</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {pagedStatsRows.length ? (
-                      pagedStatsRows.map((r) => {
-                        const m = deriveMetrics(r.avg, r.obp, r.slg);
-                        return (
-                          <TableRow key={r.id}>
-                            <TableCell className="sticky left-0 z-10 bg-background font-medium min-w-[220px]">
-                              {(() => {
-                                const playerId = resolvePlayerId(r.playerName || "", r.team);
-                                if (!playerId) return r.playerName || "—";
-                                return (
-                                  <Link to={`/dashboard/player/${playerId}`} className="text-primary underline-offset-4 hover:underline">
-                                    {r.playerName || "—"}
-                                  </Link>
-                                );
-                              })()}
+            <TabsContent value="hitting" className="mt-3">
+              <Tabs value={storageView} onValueChange={(v) => setStorageView(v as "stats" | "power")}>
+                <TabsList>
+                  <TabsTrigger value="stats">Stats Storage</TabsTrigger>
+                  <TabsTrigger value="power">Power Ratings Storage</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="stats" className="mt-3">
+                  <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+                    <span>
+                      Showing {filteredRows.length ? (safeStatsPage - 1) * PAGE_SIZE + 1 : 0}-
+                      {Math.min(safeStatsPage * PAGE_SIZE, filteredRows.length)} of {filteredRows.length} players
+                    </span>
+                    <div className="flex items-center gap-1">
+                      {getPageWindow(safeStatsPage, statsTotalPages).map((p) => (
+                        <Button
+                          key={`stats-page-${p}`}
+                          size="sm"
+                          variant={p === safeStatsPage ? "secondary" : "ghost"}
+                          className="h-7 min-w-7 px-2 text-xs"
+                          onClick={() => setStatsPage(p)}
+                        >
+                          {p}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="max-h-[620px] overflow-auto">
+                    <Table>
+                      <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
+                        <TableRow>
+                          <TableHead className="sticky left-0 z-30 bg-background min-w-[220px]">Player</TableHead>
+                          <TableHead>Team</TableHead>
+                          <TableHead className="text-right">Park Factor+</TableHead>
+                          <TableHead>Pos</TableHead>
+                          <TableHead className="text-right">AVG</TableHead>
+                          <TableHead className="text-right">OBP</TableHead>
+                          <TableHead className="text-right">SLG</TableHead>
+                          <TableHead className="text-right">OPS</TableHead>
+                          <TableHead className="text-right">ISO</TableHead>
+                          <TableHead className="text-right">WRC</TableHead>
+                          <TableHead className="text-right">WRC+</TableHead>
+                          <TableHead className="text-right">oWAR</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pagedStatsRows.length ? (
+                          pagedStatsRows.map((r) => {
+                            const m = deriveMetrics(r.avg, r.obp, r.slg);
+                            return (
+                              <TableRow key={r.id}>
+                                <TableCell className="sticky left-0 z-10 bg-background font-medium min-w-[220px]">
+                                  {(() => {
+                                    const playerId = resolvePlayerId(r.playerName || "", r.team);
+                                    if (!playerId) return r.playerName || "—";
+                                    return (
+                                      <Link
+                                        to={profileRouteFor(playerId, getPositionFor(r.playerName, r.team))}
+                                        className="text-primary underline-offset-4 hover:underline"
+                                      >
+                                        {r.playerName || "—"}
+                                      </Link>
+                                    );
+                                  })()}
+                                </TableCell>
+                                <TableCell>{r.team || "—"}</TableCell>
+                                <TableCell className="text-right font-mono">
+                                  {(() => {
+                                    const pf = getParkFactorForTeam(r.team);
+                                    return pf == null ? "—" : Math.round(pf * 100).toString();
+                                  })()}
+                                </TableCell>
+                                <TableCell>{getPositionFor(r.playerName, r.team) || "—"}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt3(r.avg)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt3(r.obp)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt3(r.slg)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt3(m.ops)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt3(m.iso)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt3(m.wrc)}</TableCell>
+                                <TableCell className="text-right font-mono">{m.wrcPlus == null ? "—" : Math.round(m.wrcPlus).toString()}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt2(m.owar)}</TableCell>
+                              </TableRow>
+                            );
+                          })
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={12} className="py-8 text-center text-muted-foreground">
+                              No {selectedSeason} season stats rows found.
                             </TableCell>
-                            <TableCell>{r.team || "—"}</TableCell>
-                            <TableCell className="text-right font-mono">
-                              {(() => {
-                                const pf = getParkFactorForTeam(r.team);
-                                return pf == null ? "—" : Math.round(pf * 100).toString();
-                              })()}
-                            </TableCell>
-                            <TableCell>{getPositionFor(r.playerName, r.team) || "—"}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt3(r.avg)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt3(r.obp)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt3(r.slg)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt3(m.ops)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt3(m.iso)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt3(m.wrc)}</TableCell>
-                            <TableCell className="text-right font-mono">{m.wrcPlus == null ? "—" : Math.round(m.wrcPlus).toString()}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt2(m.owar)}</TableCell>
                           </TableRow>
-                        );
-                      })
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={12} className="py-8 text-center text-muted-foreground">
-                          No {selectedSeason} season stats rows found.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="power" className="mt-3">
+                  <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+                    <span>
+                      Showing {filteredPowerRows.length ? (safePowerPage - 1) * PAGE_SIZE + 1 : 0}-
+                      {Math.min(safePowerPage * PAGE_SIZE, filteredPowerRows.length)} of {filteredPowerRows.length} players
+                    </span>
+                    <div className="flex items-center gap-1">
+                      {getPageWindow(safePowerPage, powerTotalPages).map((p) => (
+                        <Button
+                          key={`power-page-${p}`}
+                          size="sm"
+                          variant={p === safePowerPage ? "secondary" : "ghost"}
+                          className="h-7 min-w-7 px-2 text-xs"
+                          onClick={() => setPowerPage(p)}
+                        >
+                          {p}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="max-h-[620px] overflow-auto">
+                    <Table>
+                      <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
+                        <TableRow>
+                          <TableHead className="sticky left-0 z-30 bg-background min-w-[220px]">Player</TableHead>
+                          <TableHead>Team</TableHead>
+                          <TableHead>Pos</TableHead>
+                          <TableHead className="text-right">Contact%</TableHead>
+                          <TableHead className="text-right">Line Drive%</TableHead>
+                          <TableHead className="text-right">Avg Exit Velo</TableHead>
+                          <TableHead className="text-right">Pop-Up%</TableHead>
+                          <TableHead className="text-right">BB%</TableHead>
+                          <TableHead className="text-right">Chase%</TableHead>
+                          <TableHead className="text-right">Barrel%</TableHead>
+                          <TableHead className="text-right">EV90</TableHead>
+                          <TableHead className="text-right">Pull%</TableHead>
+                          <TableHead className="text-right">LA 10-30%</TableHead>
+                          <TableHead className="text-right">GB%</TableHead>
+                          <TableHead className="text-right">Contact Score</TableHead>
+                          <TableHead className="text-right">Line Drive Score</TableHead>
+                          <TableHead className="text-right">Avg EV Score</TableHead>
+                          <TableHead className="text-right">Pop-Up Score</TableHead>
+                          <TableHead className="text-right">BB% Score</TableHead>
+                          <TableHead className="text-right">Chase% Score</TableHead>
+                          <TableHead className="text-right">Barrel Score</TableHead>
+                          <TableHead className="text-right">EV90 Score</TableHead>
+                          <TableHead className="text-right">Pull% Score</TableHead>
+                          <TableHead className="text-right">LA10-30 Score</TableHead>
+                          <TableHead className="text-right">GB% Score</TableHead>
+                          <TableHead className="text-right">BA Power Rating+</TableHead>
+                          <TableHead className="text-right">OBP Power Rating+</TableHead>
+                          <TableHead className="text-right">ISO Power Rating+</TableHead>
+                          <TableHead className="text-right">Overall Power Rating+</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pagedPowerRows.length ? (
+                          pagedPowerRows.map((r) => {
+                            const p = derivePowerScoresAndRatings(r);
+                            return (
+                            <TableRow key={r.id}>
+                              <TableCell className="sticky left-0 z-10 bg-background font-medium min-w-[220px]">
+                                {(() => {
+                                  const playerId = resolvePlayerId(r.playerName || "", r.team);
+                                  if (!playerId) return r.playerName || "—";
+                                  return (
+                                    <Link
+                                      to={profileRouteFor(playerId, getPositionFor(r.playerName, r.team))}
+                                      className="text-primary underline-offset-4 hover:underline"
+                                    >
+                                      {r.playerName || "—"}
+                                    </Link>
+                                  );
+                                })()}
+                              </TableCell>
+                              <TableCell>{r.team || "—"}</TableCell>
+                              <TableCell>{getPositionFor(r.playerName, r.team) || "—"}</TableCell>
+                              <TableCell className="text-right font-mono">{fmt2(r.contact)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt2(r.lineDrive)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt2(r.avgExitVelo)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt2(r.popUp)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt2(r.bb)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt2(r.chase)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt2(r.barrel)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt2(r.ev90)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt2(r.pull)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt2(r.la10_30)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmt2(r.gb)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.contactScore)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.lineDriveScore)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.avgEVScore)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.popUpScore)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.bbScore)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.chaseScore)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.barrelScore)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.ev90Score)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.pullScore)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.la1030Score)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.gbScore)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.baPowerPlus)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.obpPowerPlus)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.isoPowerPlus)}</TableCell>
+                                <TableCell className="text-right font-mono">{fmtWhole(p.overallPowerPlus)}</TableCell>
+                              </TableRow>
+                            );
+                          })
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={30} className="py-8 text-center text-muted-foreground">
+                              No {selectedSeason} power rating rows found.
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </TabsContent>
+              </Tabs>
             </TabsContent>
 
-            <TabsContent value="power" className="mt-3">
-              <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-                <span>
-                  Showing {filteredPowerRows.length ? (safePowerPage - 1) * PAGE_SIZE + 1 : 0}-
-                  {Math.min(safePowerPage * PAGE_SIZE, filteredPowerRows.length)} of {filteredPowerRows.length} players
-                </span>
-                <div className="flex items-center gap-1">
-                  {getPageWindow(safePowerPage, powerTotalPages).map((p) => (
-                    <Button
-                      key={`power-page-${p}`}
-                      size="sm"
-                      variant={p === safePowerPage ? "secondary" : "ghost"}
-                      className="h-7 min-w-7 px-2 text-xs"
-                      onClick={() => setPowerPage(p)}
-                    >
-                      {p}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              <div className="max-h-[620px] overflow-auto">
-                <Table>
-                  <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
-                    <TableRow>
-                      <TableHead className="sticky left-0 z-30 bg-background min-w-[220px]">Player</TableHead>
-                      <TableHead>Team</TableHead>
-                      <TableHead>Pos</TableHead>
-                      <TableHead className="text-right">Contact%</TableHead>
-                      <TableHead className="text-right">Line Drive%</TableHead>
-                      <TableHead className="text-right">Avg Exit Velo</TableHead>
-                      <TableHead className="text-right">Pop-Up%</TableHead>
-                      <TableHead className="text-right">BB%</TableHead>
-                      <TableHead className="text-right">Chase%</TableHead>
-                      <TableHead className="text-right">Barrel%</TableHead>
-                      <TableHead className="text-right">EV90</TableHead>
-                      <TableHead className="text-right">Pull%</TableHead>
-                      <TableHead className="text-right">LA 10-30%</TableHead>
-                      <TableHead className="text-right">GB%</TableHead>
-                      <TableHead className="text-right">Contact Score</TableHead>
-                      <TableHead className="text-right">Line Drive Score</TableHead>
-                      <TableHead className="text-right">Avg EV Score</TableHead>
-                      <TableHead className="text-right">Pop-Up Score</TableHead>
-                      <TableHead className="text-right">BB% Score</TableHead>
-                      <TableHead className="text-right">Chase% Score</TableHead>
-                      <TableHead className="text-right">Barrel Score</TableHead>
-                      <TableHead className="text-right">EV90 Score</TableHead>
-                      <TableHead className="text-right">Pull% Score</TableHead>
-                      <TableHead className="text-right">LA10-30 Score</TableHead>
-                      <TableHead className="text-right">GB% Score</TableHead>
-                      <TableHead className="text-right">BA Power Rating+</TableHead>
-                      <TableHead className="text-right">OBP Power Rating+</TableHead>
-                      <TableHead className="text-right">ISO Power Rating+</TableHead>
-                      <TableHead className="text-right">Overall Power Rating+</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {pagedPowerRows.length ? (
-                      pagedPowerRows.map((r) => {
-                        const p = derivePowerScoresAndRatings(r);
-                        return (
-                        <TableRow key={r.id}>
-                          <TableCell className="sticky left-0 z-10 bg-background font-medium min-w-[220px]">
-                            {(() => {
-                              const playerId = resolvePlayerId(r.playerName || "", r.team);
-                              if (!playerId) return r.playerName || "—";
-                              return (
-                                <Link to={`/dashboard/player/${playerId}`} className="text-primary underline-offset-4 hover:underline">
-                                  {r.playerName || "—"}
-                                </Link>
-                              );
-                            })()}
-                          </TableCell>
-                          <TableCell>{r.team || "—"}</TableCell>
-                          <TableCell>{getPositionFor(r.playerName, r.team) || "—"}</TableCell>
-                          <TableCell className="text-right font-mono">{fmt2(r.contact)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt2(r.lineDrive)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt2(r.avgExitVelo)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt2(r.popUp)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt2(r.bb)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt2(r.chase)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt2(r.barrel)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt2(r.ev90)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt2(r.pull)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt2(r.la10_30)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmt2(r.gb)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.contactScore)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.lineDriveScore)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.avgEVScore)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.popUpScore)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.bbScore)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.chaseScore)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.barrelScore)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.ev90Score)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.pullScore)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.la1030Score)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.gbScore)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.baPowerPlus)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.obpPowerPlus)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.isoPowerPlus)}</TableCell>
-                            <TableCell className="text-right font-mono">{fmtWhole(p.overallPowerPlus)}</TableCell>
-                          </TableRow>
-                        );
-                      })
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={30} className="py-8 text-center text-muted-foreground">
-                          No {selectedSeason} power rating rows found.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+            <TabsContent value="pitching" className="mt-3">
+              <Tabs defaultValue="stats">
+                <TabsList>
+                  <TabsTrigger value="stats">Stats Storage</TabsTrigger>
+                  <TabsTrigger value="power">Power Ratings Storage</TabsTrigger>
+                </TabsList>
+                <TabsContent value="stats" className="mt-3">
+                  <PitchingStatsStorageTable season={selectedSeason} />
+                </TabsContent>
+                <TabsContent value="power" className="mt-3">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Pitching Power Ratings Storage ({selectedSeason})</CardTitle>
+                      <CardDescription>
+                        Pitching power-ratings table scaffold is ready; pitching power inputs can be added next.
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+                </TabsContent>
+              </Tabs>
             </TabsContent>
           </Tabs>
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function PitchingPlaceholder({ title }: { title: string }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{title}</CardTitle>
+        <CardDescription>
+          Pitching configuration for this section is not set up yet.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground">
+          Use the Hitting tab for current workflows. Pitching will be added in a follow-up pass.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function HittingPitchingSection({
+  hitting,
+  pitching,
+  pitchingTitle,
+}: {
+  hitting: ReactNode;
+  pitching?: ReactNode;
+  pitchingTitle: string;
+}) {
+  return (
+    <Tabs defaultValue="hitting" className="space-y-3">
+      <TabsList>
+        <TabsTrigger value="hitting">Hitting</TabsTrigger>
+        <TabsTrigger value="pitching">Pitching</TabsTrigger>
+      </TabsList>
+      <TabsContent value="hitting">{hitting}</TabsContent>
+      <TabsContent value="pitching">{pitching ?? <PitchingPlaceholder title={pitchingTitle} />}</TabsContent>
+    </Tabs>
   );
 }
 
@@ -5443,13 +5586,23 @@ export default function AdminDashboard() {
           </TabsList>
 
           <TabsContent value="equations">
-            <EquationConstantsTab />
+            <HittingPitchingSection
+              hitting={<EquationConstantsTab />}
+              pitchingTitle="Equations — Pitching"
+            />
           </TabsContent>
           <TabsContent value="power">
-            <PowerRatingsTab />
+            <HittingPitchingSection
+              hitting={<PowerRatingsTab />}
+              pitching={<PitchingConferenceStatsTable />}
+              pitchingTitle="Conference Statistics — Pitching"
+            />
           </TabsContent>
           <TabsContent value="power-ratings">
-            <AdminPowerRatingsTab />
+            <HittingPitchingSection
+              hitting={<AdminPowerRatingsTab />}
+              pitchingTitle="Power Ratings — Pitching"
+            />
           </TabsContent>
           <TabsContent value="teams">
             <TeamsAdminTab />

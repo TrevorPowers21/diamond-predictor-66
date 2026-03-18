@@ -109,3 +109,8 @@ Status: In testing phase. Defer cleanup until testing is complete.
 - Compare workflow note (2026-03-12): Compare was moved to the Compare Dashboard route (redirecting into Team Builder compare view). Re-evaluate whether Compare should move back into Team Builder tabs later.
 - Equation QA note (2026-03-16): re-validate and potentially adjust the weighted runs created plus (wRC+) equation/baseline so projected outputs stay aligned with expected benchmarks.
 - Next session start point (2026-03-16): begin on the Player Dashboard and clean up the top section by removing the table + graph area.
+- WAR modeling scope note (2026-03-17): build both a plate-appearance impact for offensive WAR and an innings-pitched impact for bullpen arms and starting pitchers in P-WAR; this should flow through the RAA and RPA components of the WAR equation.
+- WAR constant note (2026-03-17): update both WAR conversion constants to `10.7` long-term; keep them set to `10` for now during current testing.
+- Pitching conference model note (2026-03-17): Hitter Talent+ should be calculated from conference-by-conference overall hitter power rating combined with quality of stuff faced.
+- Pitcher profile expansion note (2026-03-17): add a pitch-level table on every pitcher dashboard showing each pitch type thrown, usage, Stuff+, and whiff percentage.
+- Next session start point (2026-03-17): start on Pitching Power Ratings Storage and debug why some pitcher player profiles are not fully populating.
