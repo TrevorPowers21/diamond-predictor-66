@@ -119,17 +119,16 @@ const computePowerRatings = (raw: {
   const isoPower = barrelScore == null || ev90Score == null || pullScore == null || laScore == null || gbScore == null
     ? null
     : (0.45 * barrelScore) + (0.3 * ev90Score) + (0.15 * pullScore) + (0.05 * laScore) + (0.05 * gbScore);
-  const overallPower = avgEVScore == null || barrelScore == null || contactScore == null || chaseScore == null
-    ? null
-    : (0.35 * avgEVScore) + (0.15 * barrelScore) + (0.3 * contactScore) + (0.2 * chaseScore);
-
   const toPlus = (v: number | null) => (v == null ? null : (v / 50) * 100);
+  const overallPower = baPower == null || obpPower == null || isoPower == null
+    ? null
+    : (0.25 * toPlus(baPower)) + (0.4 * toPlus(obpPower)) + (0.35 * toPlus(isoPower));
   return {
     contactScore, lineDriveScore, avgEVScore, popUpScore, bbScore, chaseScore, barrelScore, ev90Score, pullScore, laScore, gbScore,
     baPlus: toPlus(baPower),
     obpPlus: toPlus(obpPower),
     isoPlus: toPlus(isoPower),
-    overallPlus: toPlus(overallPower),
+    overallPlus: overallPower,
   };
 };
 

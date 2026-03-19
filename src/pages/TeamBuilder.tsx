@@ -30,7 +30,7 @@ import { profileRouteFor } from "@/lib/profileRoutes";
 const POSITION_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"] as const;
 const PITCHER_SLOTS = ["SP1", "SP2", "SP3", "SP4", "SP5", "RP1", "RP2", "RP3", "RP4", "CL"] as const;
 const MAX_DEPTH = 3;
-const DEV_AGGRESSIVENESS_OPTIONS = [-1, -0.5, 0, 0.5, 1] as const;
+const DEV_AGGRESSIVENESS_OPTIONS = [0, 0.5, 1] as const;
 const TEAM_BUILDER_DRAFT_KEY = "team_builder_draft_v1";
 const TARGET_BOARD_STORAGE_KEY = "team_builder_target_board_v1";
 type TargetBoardEntry = {
@@ -254,16 +254,18 @@ const computeTeamPowerPlus = (raw: TeamMetricInputs): TeamPowerPlus => {
   const isoPower = barrelScore == null || ev90Score == null || pullScore == null || laScore == null || gbScore == null
     ? null
     : (0.45 * barrelScore) + (0.3 * ev90Score) + (0.15 * pullScore) + (0.05 * laScore) + (0.05 * gbScore);
-  const overallPower = avgEVScore == null || barrelScore == null || contactScore == null || chaseScore == null
-    ? null
-    : (0.35 * avgEVScore) + (0.15 * barrelScore) + (0.3 * contactScore) + (0.2 * chaseScore);
-
   const toPlus = (v: number | null) => (v == null ? null : (v / 50) * 100);
+  const baPlus = toPlus(baPower);
+  const obpPlus = toPlus(obpPower);
+  const isoPlus = toPlus(isoPower);
+  const overallPower = baPlus == null || obpPlus == null || isoPlus == null
+    ? null
+    : (0.25 * baPlus) + (0.4 * obpPlus) + (0.35 * isoPlus);
   return {
-    baPlus: toPlus(baPower),
-    obpPlus: toPlus(obpPower),
-    isoPlus: toPlus(isoPower),
-    overallPlus: toPlus(overallPower),
+    baPlus,
+    obpPlus,
+    isoPlus,
+    overallPlus: overallPower,
   };
 };
 
@@ -2347,7 +2349,11 @@ export default function TeamBuilder() {
       </TableCell>
       <TableCell>
         <Select
-          value={String(p.dev_aggressiveness ?? 0)}
+          value={String(
+            p.dev_aggressiveness === 0 || p.dev_aggressiveness === 0.5 || p.dev_aggressiveness === 1
+              ? p.dev_aggressiveness
+              : 0
+          )}
           onValueChange={(v) => updatePlayerWithRecalc(globalIdx, { dev_aggressiveness: Number(v) })}
         >
           <SelectTrigger className="w-[90px] h-8">

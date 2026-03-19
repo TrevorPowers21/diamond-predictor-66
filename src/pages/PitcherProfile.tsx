@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/useAuth";
+import { readPitchingWeights } from "@/lib/pitchingEquations";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
@@ -66,7 +67,7 @@ const PITCHING_EQ_DEFAULTS: Record<string, number> = {
   p_whip_avg_ev_weight: 0.15,
   p_whip_whiff_pct_weight: 0.25,
   p_whip_gb_pct_weight: 0.1,
-  p_whip_chase_pct_weight: 0.5,
+  p_whip_chase_pct_weight: 0.05,
   p_k9_whiff_pct_weight: 0.35,
   p_k9_stuff_plus_weight: 0.3,
   p_k9_in_zone_whiff_pct_weight: 0.25,
@@ -94,6 +95,94 @@ const OVERALL_PITCHER_POWER_WEIGHTS = {
   bb9: 0.15,
   hr9: 0.15,
 } as const;
+
+const PITCHING_POWER_RATING_WEIGHT = 0.7;
+const PITCHING_DEV_FACTOR = 0.06;
+
+const toPitchingClassAdj = (
+  classTransition: "FS" | "SJ" | "JS" | "GR",
+  fs: number,
+  sj: number,
+  js: number,
+  gr: number,
+) => {
+  const pct = classTransition === "FS" ? fs : classTransition === "SJ" ? sj : classTransition === "JS" ? js : gr;
+  return Number.isFinite(pct) ? pct / 100 : 0;
+};
+
+const dampFactorForProjected = (projected: number, thresholds: number[], impacts: number[]) => {
+  for (let i = 0; i < thresholds.length; i++) {
+    if (projected < thresholds[i]) return impacts[i] ?? 1;
+  }
+  return impacts[thresholds.length] ?? impacts[impacts.length - 1] ?? 1;
+};
+
+const projectPitchingRate = ({
+  lastStat,
+  prPlus,
+  ncaaAvg,
+  ncaaSd,
+  prSd,
+  classAdjustment,
+  devAggressiveness,
+  thresholds,
+  impacts,
+  lowerIsBetter,
+}: {
+  lastStat: number | null;
+  prPlus: number | null;
+  ncaaAvg: number;
+  ncaaSd: number;
+  prSd: number;
+  classAdjustment: number;
+  devAggressiveness: number;
+  thresholds: number[];
+  impacts: number[];
+  lowerIsBetter: boolean;
+}) => {
+  if (
+    lastStat == null ||
+    prPlus == null ||
+    !Number.isFinite(lastStat) ||
+    !Number.isFinite(prPlus) ||
+    !Number.isFinite(ncaaAvg) ||
+    !Number.isFinite(ncaaSd) ||
+    !Number.isFinite(prSd) ||
+    prSd === 0
+  ) {
+    return null;
+  }
+  const zShift = ((prPlus - 100) / prSd) * ncaaSd;
+  const powerAdjusted = lowerIsBetter ? (ncaaAvg - zShift) : (ncaaAvg + zShift);
+  const blended = (lastStat * (1 - PITCHING_POWER_RATING_WEIGHT)) + (powerAdjusted * PITCHING_POWER_RATING_WEIGHT);
+  const mult = lowerIsBetter
+    ? (1 - classAdjustment - (devAggressiveness * PITCHING_DEV_FACTOR))
+    : (1 + classAdjustment + (devAggressiveness * PITCHING_DEV_FACTOR));
+  const projected = blended * mult;
+  const delta = projected - lastStat;
+  const dampFactor = dampFactorForProjected(projected, thresholds, impacts);
+  return lastStat + (delta * dampFactor);
+};
+
+const calcPitchingPlus = (
+  value: number | null,
+  ncaaAvg: number,
+  ncaaSd: number,
+  scale: number,
+  higherIsBetter = false,
+) => {
+  if (value == null || !Number.isFinite(value) || !Number.isFinite(ncaaAvg) || !Number.isFinite(ncaaSd) || ncaaSd === 0) return null;
+  const core = higherIsBetter ? ((value - ncaaAvg) / ncaaSd) : ((ncaaAvg - value) / ncaaSd);
+  const raw = 100 + (core * scale);
+  return Number.isFinite(raw) ? raw : null;
+};
+
+const normalizedWeightedSum = (items: Array<{ value: number; weight: number }>) => {
+  const weighted = items.reduce((sum, item) => sum + (item.value * item.weight), 0);
+  const totalWeight = items.reduce((sum, item) => sum + item.weight, 0);
+  if (!Number.isFinite(totalWeight) || totalWeight <= 0) return null;
+  return weighted / totalWeight;
+};
 
 function MetricCard({ title, value, subtitle }: { title: string; value: string; subtitle?: string }) {
   return (
@@ -292,6 +381,8 @@ export default function PitcherProfile() {
     } catch {
       // ignore invalid local storage payload
     }
+    // Locked constant: Chase% contribution in WHIP PR is fixed at 5%.
+    merged.p_whip_chase_pct_weight = 0.05;
     return merged;
   }, []);
 
@@ -353,20 +444,20 @@ export default function PitcherProfile() {
       la1030: parseNum(powerRatingsRow[29]),
     };
     const scores = {
-      stuff: scoreFromMetric(metrics.stuff, pitchingEq.p_ncaa_avg_stuff_plus, pitchingEq.p_sd_stuff_plus) ?? storedScores.stuff,
-      whiff: scoreFromMetric(metrics.whiff, pitchingEq.p_ncaa_avg_whiff_pct, pitchingEq.p_sd_whiff_pct) ?? storedScores.whiff,
-      bb: scoreFromMetric(metrics.bb, pitchingEq.p_ncaa_avg_bb_pct, pitchingEq.p_sd_bb_pct, true) ?? storedScores.bb,
-      hh: scoreFromMetric(metrics.hh, pitchingEq.p_ncaa_avg_hh_pct, pitchingEq.p_sd_hh_pct, true) ?? storedScores.hh,
-      izWhiff: scoreFromMetric(metrics.izWhiff, pitchingEq.p_ncaa_avg_in_zone_whiff_pct, pitchingEq.p_sd_in_zone_whiff_pct) ?? storedScores.izWhiff,
-      chase: scoreFromMetric(metrics.chase, pitchingEq.p_ncaa_avg_chase_pct, pitchingEq.p_sd_chase_pct) ?? storedScores.chase,
-      barrel: scoreFromMetric(metrics.barrel, pitchingEq.p_ncaa_avg_barrel_pct, pitchingEq.p_sd_barrel_pct, true) ?? storedScores.barrel,
-      ld: scoreFromMetric(metrics.ld, pitchingEq.p_ncaa_avg_ld_pct, pitchingEq.p_sd_ld_pct, true) ?? storedScores.ld,
-      avgEv: scoreFromMetric(metrics.avgEv, pitchingEq.p_ncaa_avg_avg_ev, pitchingEq.p_sd_avg_ev, true) ?? storedScores.avgEv,
-      gb: scoreFromMetric(metrics.gb, pitchingEq.p_ncaa_avg_gb_pct, pitchingEq.p_sd_gb_pct) ?? storedScores.gb,
-      iz: scoreFromMetric(metrics.iz, pitchingEq.p_ncaa_avg_in_zone_pct, pitchingEq.p_sd_in_zone_pct) ?? storedScores.iz,
-      ev90: scoreFromMetric(metrics.ev90, pitchingEq.p_ncaa_avg_ev90, pitchingEq.p_sd_ev90, true) ?? storedScores.ev90,
-      pull: scoreFromMetric(metrics.pull, pitchingEq.p_ncaa_avg_pull_pct, pitchingEq.p_sd_pull_pct, true) ?? storedScores.pull,
-      la1030: scoreFromMetric(metrics.la1030, pitchingEq.p_ncaa_avg_la_10_30_pct, pitchingEq.p_sd_la_10_30_pct, true) ?? storedScores.la1030,
+      stuff: storedScores.stuff ?? scoreFromMetric(metrics.stuff, pitchingEq.p_ncaa_avg_stuff_plus, pitchingEq.p_sd_stuff_plus),
+      whiff: storedScores.whiff ?? scoreFromMetric(metrics.whiff, pitchingEq.p_ncaa_avg_whiff_pct, pitchingEq.p_sd_whiff_pct),
+      bb: storedScores.bb ?? scoreFromMetric(metrics.bb, pitchingEq.p_ncaa_avg_bb_pct, pitchingEq.p_sd_bb_pct, true),
+      hh: storedScores.hh ?? scoreFromMetric(metrics.hh, pitchingEq.p_ncaa_avg_hh_pct, pitchingEq.p_sd_hh_pct, true),
+      izWhiff: storedScores.izWhiff ?? scoreFromMetric(metrics.izWhiff, pitchingEq.p_ncaa_avg_in_zone_whiff_pct, pitchingEq.p_sd_in_zone_whiff_pct),
+      chase: storedScores.chase ?? scoreFromMetric(metrics.chase, pitchingEq.p_ncaa_avg_chase_pct, pitchingEq.p_sd_chase_pct),
+      barrel: storedScores.barrel ?? scoreFromMetric(metrics.barrel, pitchingEq.p_ncaa_avg_barrel_pct, pitchingEq.p_sd_barrel_pct, true),
+      ld: storedScores.ld ?? scoreFromMetric(metrics.ld, pitchingEq.p_ncaa_avg_ld_pct, pitchingEq.p_sd_ld_pct, true),
+      avgEv: storedScores.avgEv ?? scoreFromMetric(metrics.avgEv, pitchingEq.p_ncaa_avg_avg_ev, pitchingEq.p_sd_avg_ev, true),
+      gb: storedScores.gb ?? scoreFromMetric(metrics.gb, pitchingEq.p_ncaa_avg_gb_pct, pitchingEq.p_sd_gb_pct),
+      iz: storedScores.iz ?? scoreFromMetric(metrics.iz, pitchingEq.p_ncaa_avg_in_zone_pct, pitchingEq.p_sd_in_zone_pct),
+      ev90: storedScores.ev90 ?? scoreFromMetric(metrics.ev90, pitchingEq.p_ncaa_avg_ev90, pitchingEq.p_sd_ev90, true),
+      pull: storedScores.pull ?? scoreFromMetric(metrics.pull, pitchingEq.p_ncaa_avg_pull_pct, pitchingEq.p_sd_pull_pct, true),
+      la1030: storedScores.la1030 ?? scoreFromMetric(metrics.la1030, pitchingEq.p_ncaa_avg_la_10_30_pct, pitchingEq.p_sd_la_10_30_pct, true),
     };
 
     const hasEraInputs = [scores.stuff, scores.whiff, scores.bb, scores.hh, scores.izWhiff, scores.chase, scores.barrel].every((v) => v != null);
@@ -385,12 +476,14 @@ export default function PitcherProfile() {
         (safe(scores.barrel)! * pitchingEq.p_era_barrel_pct_weight)
       : null;
     const whip = hasWhipInputs
-      ? (safe(scores.bb)! * pitchingEq.p_whip_bb_pct_weight) +
-        (safe(scores.ld)! * pitchingEq.p_whip_ld_pct_weight) +
-        (safe(scores.avgEv)! * pitchingEq.p_whip_avg_ev_weight) +
-        (safe(scores.whiff)! * pitchingEq.p_whip_whiff_pct_weight) +
-        (safe(scores.gb)! * pitchingEq.p_whip_gb_pct_weight) +
-        (safe(scores.chase)! * pitchingEq.p_whip_chase_pct_weight)
+      ? normalizedWeightedSum([
+          { value: safe(scores.bb)!, weight: pitchingEq.p_whip_bb_pct_weight },
+          { value: safe(scores.ld)!, weight: pitchingEq.p_whip_ld_pct_weight },
+          { value: safe(scores.avgEv)!, weight: pitchingEq.p_whip_avg_ev_weight },
+          { value: safe(scores.whiff)!, weight: pitchingEq.p_whip_whiff_pct_weight },
+          { value: safe(scores.gb)!, weight: pitchingEq.p_whip_gb_pct_weight },
+          { value: safe(scores.chase)!, weight: pitchingEq.p_whip_chase_pct_weight },
+        ])
       : null;
     const k9 = hasK9Inputs
       ? (safe(scores.whiff)! * pitchingEq.p_k9_whiff_pct_weight) +
@@ -458,6 +551,133 @@ export default function PitcherProfile() {
   const storageK9 = storageRow?.[6] ? Number(storageRow[6]) : null;
   const storageBb9 = storageRow?.[7] ? Number(storageRow[7]) : null;
   const storageHr9 = storageRow?.[8] ? Number(storageRow[8]) : null;
+  const projectedPitching = useMemo(() => {
+    const eq = readPitchingWeights();
+    const classTransitionRaw = String(activePrediction?.class_transition || "SJ").toUpperCase();
+    const classTransition: "FS" | "SJ" | "JS" | "GR" =
+      classTransitionRaw === "FS" || classTransitionRaw === "SJ" || classTransitionRaw === "JS" || classTransitionRaw === "GR"
+        ? classTransitionRaw
+        : "SJ";
+    const devAggressiveness = Number.isFinite(Number(activePrediction?.dev_aggressiveness))
+      ? Number(activePrediction?.dev_aggressiveness)
+      : 0;
+
+    const eraPrPlus = parseNum(powerRatingsRow?.[30]);
+    const fipPrPlus = parseNum(powerRatingsRow?.[31]);
+    const whipPrPlus = parseNum(powerRatingsRow?.[32]);
+    const k9PrPlus = parseNum(powerRatingsRow?.[33]);
+    const hr9PrPlus = parseNum(powerRatingsRow?.[34]);
+    const bb9PrPlus = parseNum(powerRatingsRow?.[35]);
+
+    const classEraAdj = toPitchingClassAdj(classTransition, eq.class_era_fs, eq.class_era_sj, eq.class_era_js, eq.class_era_gr);
+    const classFipAdj = toPitchingClassAdj(classTransition, eq.class_fip_fs, eq.class_fip_sj, eq.class_fip_js, eq.class_fip_gr);
+    const classWhipAdj = toPitchingClassAdj(classTransition, eq.class_whip_fs, eq.class_whip_sj, eq.class_whip_js, eq.class_whip_gr);
+    const classK9Adj = toPitchingClassAdj(classTransition, eq.class_k9_fs, eq.class_k9_sj, eq.class_k9_js, eq.class_k9_gr);
+    const classBb9Adj = toPitchingClassAdj(classTransition, eq.class_bb9_fs, eq.class_bb9_sj, eq.class_bb9_js, eq.class_bb9_gr);
+    const classHr9Adj = toPitchingClassAdj(classTransition, eq.class_hr9_fs, eq.class_hr9_sj, eq.class_hr9_js, eq.class_hr9_gr);
+
+    const pEra = projectPitchingRate({
+      lastStat: latestStats?.era ?? storageEra,
+      prPlus: eraPrPlus,
+      ncaaAvg: eq.era_plus_ncaa_avg,
+      ncaaSd: eq.era_plus_ncaa_sd,
+      prSd: eq.era_pr_sd,
+      classAdjustment: classEraAdj,
+      devAggressiveness,
+      thresholds: eq.era_damp_thresholds,
+      impacts: eq.era_damp_impacts,
+      lowerIsBetter: true,
+    });
+    const pFip = projectPitchingRate({
+      lastStat: storageFip,
+      prPlus: fipPrPlus,
+      ncaaAvg: eq.fip_plus_ncaa_avg,
+      ncaaSd: eq.fip_plus_ncaa_sd,
+      prSd: eq.fip_pr_sd,
+      classAdjustment: classFipAdj,
+      devAggressiveness,
+      thresholds: eq.fip_damp_thresholds,
+      impacts: eq.fip_damp_impacts,
+      lowerIsBetter: true,
+    });
+    const pWhip = projectPitchingRate({
+      lastStat: latestStats?.whip ?? storageWhip,
+      prPlus: whipPrPlus,
+      ncaaAvg: eq.whip_plus_ncaa_avg,
+      ncaaSd: eq.whip_plus_ncaa_sd,
+      prSd: eq.whip_pr_sd,
+      classAdjustment: classWhipAdj,
+      devAggressiveness,
+      thresholds: eq.whip_damp_thresholds,
+      impacts: eq.whip_damp_impacts,
+      lowerIsBetter: true,
+    });
+    const pK9 = projectPitchingRate({
+      lastStat: storageK9,
+      prPlus: k9PrPlus,
+      ncaaAvg: eq.k9_plus_ncaa_avg,
+      ncaaSd: eq.k9_plus_ncaa_sd,
+      prSd: eq.k9_pr_sd,
+      classAdjustment: classK9Adj,
+      devAggressiveness,
+      thresholds: eq.k9_damp_thresholds,
+      impacts: eq.k9_damp_impacts,
+      lowerIsBetter: false,
+    });
+    const pBb9 = projectPitchingRate({
+      lastStat: storageBb9,
+      prPlus: bb9PrPlus,
+      ncaaAvg: eq.bb9_plus_ncaa_avg,
+      ncaaSd: eq.bb9_plus_ncaa_sd,
+      prSd: eq.bb9_pr_sd,
+      classAdjustment: classBb9Adj,
+      devAggressiveness,
+      thresholds: eq.bb9_damp_thresholds,
+      impacts: eq.bb9_damp_impacts,
+      lowerIsBetter: true,
+    });
+    const pHr9 = projectPitchingRate({
+      lastStat: storageHr9,
+      prPlus: hr9PrPlus,
+      ncaaAvg: eq.hr9_plus_ncaa_avg,
+      ncaaSd: eq.hr9_plus_ncaa_sd,
+      prSd: eq.hr9_pr_sd,
+      classAdjustment: classHr9Adj,
+      devAggressiveness,
+      thresholds: eq.hr9_damp_thresholds,
+      impacts: eq.hr9_damp_impacts,
+      lowerIsBetter: true,
+    });
+
+    const eraPlus = calcPitchingPlus(pEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale);
+    const fipPlus = calcPitchingPlus(pFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale);
+    const whipPlus = calcPitchingPlus(pWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale);
+    const k9Plus = calcPitchingPlus(pK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
+    const bb9Plus = calcPitchingPlus(pBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale);
+    const hr9Plus = calcPitchingPlus(pHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale);
+    const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
+      ? (Number(eraPlus) * eq.era_plus_weight) +
+        (Number(fipPlus) * eq.fip_plus_weight) +
+        (Number(whipPlus) * eq.whip_plus_weight) +
+        (Number(k9Plus) * eq.k9_plus_weight) +
+        (Number(bb9Plus) * eq.bb9_plus_weight) +
+        (Number(hr9Plus) * eq.hr9_plus_weight)
+      : null;
+
+    return { pEra, pFip, pWhip, pK9, pBb9, pHr9, pRvPlus };
+  }, [
+    activePrediction?.class_transition,
+    activePrediction?.dev_aggressiveness,
+    latestStats?.era,
+    latestStats?.whip,
+    powerRatingsRow,
+    storageBb9,
+    storageEra,
+    storageFip,
+    storageHr9,
+    storageK9,
+    storageWhip,
+  ]);
 
   if (isLoading) {
     return (
@@ -539,12 +759,14 @@ export default function PitcherProfile() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
-                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pERA</div><div className="font-semibold">—</div></div>
-                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pWHIP</div><div className="font-semibold">—</div></div>
-                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pK/9</div><div className="font-semibold">—</div></div>
-                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pBB/9</div><div className="font-semibold">—</div></div>
-                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pWAR</div><div className="font-semibold">—</div></div>
+                <div className="grid grid-cols-2 md:grid-cols-7 gap-2 text-sm">
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pERA</div><div className="font-semibold">{fmt(projectedPitching.pEra, 2)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pFIP</div><div className="font-semibold">{fmt(projectedPitching.pFip, 2)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pWHIP</div><div className="font-semibold">{fmt(projectedPitching.pWhip, 2)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pK/9</div><div className="font-semibold">{fmt(projectedPitching.pK9, 2)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pBB/9</div><div className="font-semibold">{fmt(projectedPitching.pBb9, 2)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pHR/9</div><div className="font-semibold">{fmt(projectedPitching.pHr9, 2)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pRV+</div><div className="font-semibold">{fmtWhole(projectedPitching.pRvPlus)}</div></div>
                 </div>
                 <Separator />
                 <p className="text-xs text-muted-foreground">

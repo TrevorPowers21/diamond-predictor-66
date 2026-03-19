@@ -31,6 +31,7 @@ import {
   getProgramTierMultiplierByConference,
   getPositionValueMultiplier,
 } from "@/lib/nilProgramSpecific";
+import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { profileRouteFor } from "@/lib/profileRoutes";
 
 type SortKey =
@@ -95,6 +96,21 @@ interface PitchingDashboardRow {
   k9: number | null;
   bb9: number | null;
   hr9: number | null;
+  class_transition: "FS" | "SJ" | "JS" | "GR";
+  dev_aggressiveness: number;
+  era_pr_plus: number | null;
+  fip_pr_plus: number | null;
+  whip_pr_plus: number | null;
+  k9_pr_plus: number | null;
+  bb9_pr_plus: number | null;
+  hr9_pr_plus: number | null;
+  p_era: number | null;
+  p_fip: number | null;
+  p_whip: number | null;
+  p_k9: number | null;
+  p_bb9: number | null;
+  p_hr9: number | null;
+  p_rv_plus: number | null;
 }
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
@@ -122,6 +138,90 @@ const toNum = (v: string | null | undefined) => {
   if (v == null) return null;
   const n = Number(String(v).replace(/[%,$]/g, "").trim());
   return Number.isFinite(n) ? n : null;
+};
+
+const PITCHING_POWER_RATING_WEIGHT = 0.7;
+const PITCHING_DEV_FACTOR = 0.06;
+const DEFAULT_PITCHING_CLASS_TRANSITION: "FS" | "SJ" | "JS" | "GR" = "SJ";
+const DEFAULT_PITCHING_DEV_AGGRESSIVENESS = 0;
+
+const toPitchingClassAdj = (
+  classTransition: "FS" | "SJ" | "JS" | "GR",
+  fs: number,
+  sj: number,
+  js: number,
+  gr: number,
+) => {
+  const pct = classTransition === "FS" ? fs : classTransition === "SJ" ? sj : classTransition === "JS" ? js : gr;
+  return Number.isFinite(pct) ? pct / 100 : 0;
+};
+
+const dampFactorForProjected = (projected: number, thresholds: number[], impacts: number[]) => {
+  for (let i = 0; i < thresholds.length; i++) {
+    if (projected < thresholds[i]) return impacts[i] ?? 1;
+  }
+  return impacts[thresholds.length] ?? impacts[impacts.length - 1] ?? 1;
+};
+
+const projectPitchingRate = ({
+  lastStat,
+  prPlus,
+  ncaaAvg,
+  ncaaSd,
+  prSd,
+  classAdjustment,
+  devAggressiveness,
+  thresholds,
+  impacts,
+  lowerIsBetter,
+}: {
+  lastStat: number | null;
+  prPlus: number | null;
+  ncaaAvg: number;
+  ncaaSd: number;
+  prSd: number;
+  classAdjustment: number;
+  devAggressiveness: number;
+  thresholds: number[];
+  impacts: number[];
+  lowerIsBetter: boolean;
+}) => {
+  if (
+    lastStat == null ||
+    prPlus == null ||
+    !Number.isFinite(lastStat) ||
+    !Number.isFinite(prPlus) ||
+    !Number.isFinite(ncaaAvg) ||
+    !Number.isFinite(ncaaSd) ||
+    !Number.isFinite(prSd) ||
+    prSd === 0
+  ) {
+    return null;
+  }
+
+  const zShift = ((prPlus - 100) / prSd) * ncaaSd;
+  const powerAdjusted = lowerIsBetter ? (ncaaAvg - zShift) : (ncaaAvg + zShift);
+  const blended = (lastStat * (1 - PITCHING_POWER_RATING_WEIGHT)) + (powerAdjusted * PITCHING_POWER_RATING_WEIGHT);
+  const mult = lowerIsBetter
+    ? (1 - classAdjustment - (devAggressiveness * PITCHING_DEV_FACTOR))
+    : (1 + classAdjustment + (devAggressiveness * PITCHING_DEV_FACTOR));
+  const projected = blended * mult;
+  const delta = projected - lastStat;
+  const dampFactor = dampFactorForProjected(projected, thresholds, impacts);
+  return lastStat + (delta * dampFactor);
+};
+
+const calcPitchingPlus = (
+  value: number | null,
+  ncaaAvg: number,
+  ncaaSd: number,
+  scale: number,
+  higherIsBetter = false,
+) => {
+  if (value == null || !Number.isFinite(value) || !Number.isFinite(ncaaAvg) || !Number.isFinite(ncaaSd) || ncaaSd === 0) return null;
+  const core = higherIsBetter ? ((value - ncaaAvg) / ncaaSd) : ((ncaaAvg - value) / ncaaSd);
+  const raw = 100 + (core * scale);
+  return Number.isFinite(raw) ? raw : null;
 };
 
 const computeDerived = (avg: number | null, obp: number | null, slg: number | null) => {
@@ -957,8 +1057,31 @@ export default function ReturningPlayers() {
     return alias || raw;
   }, []);
   const pitchingRows = useMemo<PitchingDashboardRow[]>(() => {
-    const scoringByNameTeam = new Map<string, { stuff: number | null; whiff: number | null; bb: number | null; barrel: number | null }>();
-    const scoringByName = new Map<string, Array<{ stuff: number | null; whiff: number | null; bb: number | null; barrel: number | null }>>();
+    const eq = readPitchingWeights();
+    const scoringByNameTeam = new Map<string, {
+      stuff: number | null;
+      whiff: number | null;
+      bb: number | null;
+      barrel: number | null;
+      eraPrPlus: number | null;
+      fipPrPlus: number | null;
+      whipPrPlus: number | null;
+      k9PrPlus: number | null;
+      hr9PrPlus: number | null;
+      bb9PrPlus: number | null;
+    }>();
+    const scoringByName = new Map<string, Array<{
+      stuff: number | null;
+      whiff: number | null;
+      bb: number | null;
+      barrel: number | null;
+      eraPrPlus: number | null;
+      fipPrPlus: number | null;
+      whipPrPlus: number | null;
+      k9PrPlus: number | null;
+      hr9PrPlus: number | null;
+      bb9PrPlus: number | null;
+    }>>();
     try {
       const rawPower = localStorage.getItem("pitching_power_ratings_storage_2025_v1");
       if (rawPower) {
@@ -974,6 +1097,12 @@ export default function ReturningPlayers() {
             whiff: toNum(values[17]),
             bb: toNum(values[18]),
             barrel: toNum(values[22]),
+            eraPrPlus: toNum(values[30]),
+            fipPrPlus: toNum(values[31]),
+            whipPrPlus: toNum(values[32]),
+            k9PrPlus: toNum(values[33]),
+            hr9PrPlus: toNum(values[34]),
+            bb9PrPlus: toNum(values[35]),
           };
           scoringByNameTeam.set(nameTeamKey(name, team), scoreObj);
           const nameKey = normalizeName(name);
@@ -1007,22 +1136,135 @@ export default function ReturningPlayers() {
           const byNameBucket = scoringByName.get(normalizeName(playerName)) || [];
           const byNameUnique = byNameBucket.length === 1 ? byNameBucket[0] : null;
           const chosenScores = byNameTeam || byNameUnique || null;
+          const classTransition = DEFAULT_PITCHING_CLASS_TRANSITION;
+          const devAggressiveness = DEFAULT_PITCHING_DEV_AGGRESSIVENESS;
+
+          const classEraAdj = toPitchingClassAdj(classTransition, eq.class_era_fs, eq.class_era_sj, eq.class_era_js, eq.class_era_gr);
+          const classFipAdj = toPitchingClassAdj(classTransition, eq.class_fip_fs, eq.class_fip_sj, eq.class_fip_js, eq.class_fip_gr);
+          const classWhipAdj = toPitchingClassAdj(classTransition, eq.class_whip_fs, eq.class_whip_sj, eq.class_whip_js, eq.class_whip_gr);
+          const classK9Adj = toPitchingClassAdj(classTransition, eq.class_k9_fs, eq.class_k9_sj, eq.class_k9_js, eq.class_k9_gr);
+          const classBb9Adj = toPitchingClassAdj(classTransition, eq.class_bb9_fs, eq.class_bb9_sj, eq.class_bb9_js, eq.class_bb9_gr);
+          const classHr9Adj = toPitchingClassAdj(classTransition, eq.class_hr9_fs, eq.class_hr9_sj, eq.class_hr9_js, eq.class_hr9_gr);
+
+          const pEra = projectPitchingRate({
+            lastStat: era,
+            prPlus: chosenScores?.eraPrPlus ?? null,
+            ncaaAvg: eq.era_plus_ncaa_avg,
+            ncaaSd: eq.era_plus_ncaa_sd,
+            prSd: eq.era_pr_sd,
+            classAdjustment: classEraAdj,
+            devAggressiveness,
+            thresholds: eq.era_damp_thresholds,
+            impacts: eq.era_damp_impacts,
+            lowerIsBetter: true,
+          });
+          const pFip = projectPitchingRate({
+            lastStat: fip,
+            prPlus: chosenScores?.fipPrPlus ?? null,
+            ncaaAvg: eq.fip_plus_ncaa_avg,
+            ncaaSd: eq.fip_plus_ncaa_sd,
+            prSd: eq.fip_pr_sd,
+            classAdjustment: classFipAdj,
+            devAggressiveness,
+            thresholds: eq.fip_damp_thresholds,
+            impacts: eq.fip_damp_impacts,
+            lowerIsBetter: true,
+          });
+          const pWhip = projectPitchingRate({
+            lastStat: whip,
+            prPlus: chosenScores?.whipPrPlus ?? null,
+            ncaaAvg: eq.whip_plus_ncaa_avg,
+            ncaaSd: eq.whip_plus_ncaa_sd,
+            prSd: eq.whip_pr_sd,
+            classAdjustment: classWhipAdj,
+            devAggressiveness,
+            thresholds: eq.whip_damp_thresholds,
+            impacts: eq.whip_damp_impacts,
+            lowerIsBetter: true,
+          });
+          const pK9 = projectPitchingRate({
+            lastStat: k9,
+            prPlus: chosenScores?.k9PrPlus ?? null,
+            ncaaAvg: eq.k9_plus_ncaa_avg,
+            ncaaSd: eq.k9_plus_ncaa_sd,
+            prSd: eq.k9_pr_sd,
+            classAdjustment: classK9Adj,
+            devAggressiveness,
+            thresholds: eq.k9_damp_thresholds,
+            impacts: eq.k9_damp_impacts,
+            lowerIsBetter: false,
+          });
+          const pBb9 = projectPitchingRate({
+            lastStat: bb9,
+            prPlus: chosenScores?.bb9PrPlus ?? null,
+            ncaaAvg: eq.bb9_plus_ncaa_avg,
+            ncaaSd: eq.bb9_plus_ncaa_sd,
+            prSd: eq.bb9_pr_sd,
+            classAdjustment: classBb9Adj,
+            devAggressiveness,
+            thresholds: eq.bb9_damp_thresholds,
+            impacts: eq.bb9_damp_impacts,
+            lowerIsBetter: true,
+          });
+          const pHr9 = projectPitchingRate({
+            lastStat: hr9,
+            prPlus: chosenScores?.hr9PrPlus ?? null,
+            ncaaAvg: eq.hr9_plus_ncaa_avg,
+            ncaaSd: eq.hr9_plus_ncaa_sd,
+            prSd: eq.hr9_pr_sd,
+            classAdjustment: classHr9Adj,
+            devAggressiveness,
+            thresholds: eq.hr9_damp_thresholds,
+            impacts: eq.hr9_damp_impacts,
+            lowerIsBetter: true,
+          });
+
+          const eraPlus = calcPitchingPlus(pEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
+          const fipPlus = calcPitchingPlus(pFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
+          const whipPlus = calcPitchingPlus(pWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
+          const k9Plus = calcPitchingPlus(pK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
+          const bb9Plus = calcPitchingPlus(pBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
+          const hr9Plus = calcPitchingPlus(pHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
+          const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
+            ? (Number(eraPlus) * eq.era_plus_weight) +
+              (Number(fipPlus) * eq.fip_plus_weight) +
+              (Number(whipPlus) * eq.whip_plus_weight) +
+              (Number(k9Plus) * eq.k9_plus_weight) +
+              (Number(bb9Plus) * eq.bb9_plus_weight) +
+              (Number(hr9Plus) * eq.hr9_plus_weight)
+            : null;
+
           return {
             id: r.id || `pitching-${idx}`,
             playerName,
             team: normalizedTeam || null,
             conference: teamMatch?.conference ?? null,
             handedness: (values[2] || "").trim() || null,
+            class_transition: classTransition,
+            dev_aggressiveness: devAggressiveness,
             stuff_score: chosenScores?.stuff ?? null,
             whiff_score: chosenScores?.whiff ?? null,
             bb_score: chosenScores?.bb ?? null,
             barrel_score: chosenScores?.barrel ?? null,
+            era_pr_plus: chosenScores?.eraPrPlus ?? null,
+            fip_pr_plus: chosenScores?.fipPrPlus ?? null,
+            whip_pr_plus: chosenScores?.whipPrPlus ?? null,
+            k9_pr_plus: chosenScores?.k9PrPlus ?? null,
+            hr9_pr_plus: chosenScores?.hr9PrPlus ?? null,
+            bb9_pr_plus: chosenScores?.bb9PrPlus ?? null,
             era,
             fip,
             whip,
             k9,
             bb9,
             hr9,
+            p_era: pEra,
+            p_fip: pFip,
+            p_whip: pWhip,
+            p_k9: pK9,
+            p_bb9: pBb9,
+            p_hr9: pHr9,
+            p_rv_plus: pRvPlus,
           };
         })
         .filter((r) => !!r.playerName);
@@ -1601,13 +1843,13 @@ export default function ReturningPlayers() {
                                 {[r.handedness, r.team].filter(Boolean).join(" · ") || "—"}
                               </div>
                             </TableCell>
-                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
-                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
-                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
-                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
-                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
-                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
-                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
+                            <TableCell className="text-right font-mono text-sm">{statFormat(r.p_era, 2)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm">{statFormat(r.p_fip, 2)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm">{statFormat(r.p_whip, 2)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm">{statFormat(r.p_k9, 2)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm">{statFormat(r.p_bb9, 2)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm">{statFormat(r.p_hr9, 2)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm">{r.p_rv_plus == null ? "—" : Math.round(r.p_rv_plus)}</TableCell>
                             <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
                             <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
                             <TableCell className="text-center">

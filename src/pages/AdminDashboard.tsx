@@ -1071,7 +1071,7 @@ function EquationConstantsTab() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">NIL Valuation</CardTitle>
+          <CardTitle className="text-lg">Market Value</CardTitle>
           <CardDescription>Baseline equation for backend valuation projections</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -1342,10 +1342,6 @@ function AdminPowerRatingsTab() {
   const isoPullWeight = safeNumber(editableValues.iso_pull_pct_weight, 0.15);
   const isoLA1030Weight = safeNumber(editableValues.iso_la_10_30_weight, 0.05);
   const isoGBWeight = safeNumber(editableValues.iso_gb_pct_weight, 0.05);
-  const overallAvgEVWeight = safeNumber(editableValues.overall_avg_exit_velocity_weight, 0.35);
-  const overallBarrelWeight = safeNumber(editableValues.overall_barrel_pct_weight, 0.15);
-  const overallContactWeight = safeNumber(editableValues.overall_contact_pct_weight, 0.3);
-  const overallChaseWeight = safeNumber(editableValues.overall_chase_pct_weight, 0.2);
 
   return (
     <div className="space-y-4">
@@ -1465,26 +1461,23 @@ function AdminPowerRatingsTab() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="bg-muted p-4 rounded-lg font-mono text-sm">
-            <div><span className="text-muted-foreground">OverallPowerRating =</span> ({overallAvgEVWeight.toFixed(2)} × AverageExitVelocityScore) + ({overallBarrelWeight.toFixed(2)} × Barrel%Score) + ({overallContactWeight.toFixed(2)} × Contact%Score) + ({overallChaseWeight.toFixed(2)} × Chase%Score)</div>
-            <div className="mt-2"><span className="text-muted-foreground">OverallPowerRating+ =</span> (OverallPowerRating / 50) × 100</div>
+            <div><span className="text-muted-foreground">OverallPowerRating+ =</span> (0.25 × BAPowerRating+) + (0.40 × OBPPowerRating+) + (0.35 × ISOPowerRating+)</div>
           </div>
           <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
             <div className={sectionPanelClass}>
               <p className={sectionHeadingClass}>Inputs</p>
               <div className="ml-2 space-y-0.5">
-                <div>• Average Exit Velocity Score</div>
-                <div>• Barrel% Score</div>
-                <div>• Contact% Score</div>
-                <div>• Chase% Score</div>
+                <div>• BA Power Rating+</div>
+                <div>• OBP Power Rating+</div>
+                <div>• ISO Power Rating+</div>
               </div>
             </div>
             <div className={sectionPanelClass}>
-              {editableSectionHeader("pr_overall")}
-              <div className="space-y-1.5">
-                {editableField("pr_overall", "overall_avg_exit_velocity_weight", "Average Exit Velocity Weight")}
-                {editableField("pr_overall", "overall_barrel_pct_weight", "Barrel% Weight")}
-                {editableField("pr_overall", "overall_contact_pct_weight", "Contact% Weight")}
-                {editableField("pr_overall", "overall_chase_pct_weight", "Chase% Weight")}
+              <p className={sectionHeadingClass}>Weights</p>
+              <div className="ml-2 space-y-0.5">
+                <div>• BA Power Rating+ Weight = 0.25</div>
+                <div>• OBP Power Rating+ Weight = 0.40</div>
+                <div>• ISO Power Rating+ Weight = 0.35</div>
               </div>
             </div>
           </div>
@@ -1630,7 +1623,7 @@ function PitchingPowerRatingsTab() {
     p_whip_avg_ev_weight: "0.15",
     p_whip_whiff_pct_weight: "0.25",
     p_whip_gb_pct_weight: "0.10",
-    p_whip_chase_pct_weight: "0.50",
+    p_whip_chase_pct_weight: "0.05",
     p_k9_whiff_pct_weight: "0.35",
     p_k9_stuff_plus_weight: "0.30",
     p_k9_in_zone_whiff_pct_weight: "0.25",
@@ -1700,7 +1693,7 @@ function PitchingPowerRatingsTab() {
         p_whip_avg_ev_weight: "0.15",
         p_whip_whiff_pct_weight: "0.25",
         p_whip_gb_pct_weight: "0.10",
-        p_whip_chase_pct_weight: "0.50",
+        p_whip_chase_pct_weight: "0.05",
         p_k9_whiff_pct_weight: "0.35",
         p_k9_stuff_plus_weight: "0.30",
         p_k9_in_zone_whiff_pct_weight: "0.25",
@@ -1759,7 +1752,15 @@ function PitchingPowerRatingsTab() {
     }
   }, [editableValues]);
 
+  useEffect(() => {
+    // Locked constant: keep WHIP Chase% weight fixed at 5%.
+    if (editableValues.p_whip_chase_pct_weight !== "0.05") {
+      setEditableValues((prev) => ({ ...prev, p_whip_chase_pct_weight: "0.05" }));
+    }
+  }, [editableValues.p_whip_chase_pct_weight]);
+
   const setEditable = (key: string, value: string) => {
+    if (key === "p_whip_chase_pct_weight") return;
     setEditableValues((prev) => ({ ...prev, [key]: value }));
   };
   const sectionHeadingClass = "text-[11px] uppercase tracking-wide font-semibold text-foreground";
@@ -1818,7 +1819,7 @@ function PitchingPowerRatingsTab() {
   const whipAvgEvWeight = toNumber(editableValues.p_whip_avg_ev_weight, 0.15);
   const whipWhiffWeight = toNumber(editableValues.p_whip_whiff_pct_weight, 0.25);
   const whipGbWeight = toNumber(editableValues.p_whip_gb_pct_weight, 0.10);
-  const whipChaseWeight = toNumber(editableValues.p_whip_chase_pct_weight, 0.50);
+  const whipChaseWeight = 0.05;
   const k9WhiffWeight = toNumber(editableValues.p_k9_whiff_pct_weight, 0.35);
   const k9StuffWeight = toNumber(editableValues.p_k9_stuff_plus_weight, 0.30);
   const k9InZoneWhiffWeight = toNumber(editableValues.p_k9_in_zone_whiff_pct_weight, 0.25);
@@ -1958,7 +1959,14 @@ function PitchingPowerRatingsTab() {
                 {editableField("p_pr_whip", "p_whip_avg_ev_weight", "AvgEV Weight")}
                 {editableField("p_pr_whip", "p_whip_whiff_pct_weight", "Whiff% Weight")}
                 {editableField("p_pr_whip", "p_whip_gb_pct_weight", "GB% Weight")}
-                {editableField("p_pr_whip", "p_whip_chase_pct_weight", "Chase% Weight")}
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-muted-foreground">Chase% Weight (Locked)</p>
+                  <Input
+                    value="0.05"
+                    readOnly
+                    className="h-7 w-32 px-2 text-left font-mono text-xs cursor-default caret-transparent opacity-70"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -5446,15 +5454,6 @@ function DataStorage2025Tab() {
           (safeNumber(editableValues.iso_la10_30_pct_weight, 0.05) * la1030Score) +
           (safeNumber(editableValues.iso_gb_pct_weight, 0.05) * gbScore)
         );
-    const overallPower =
-      avgEVScore == null || barrelScore == null || contactScore == null || chaseScore == null
-        ? null
-        : (
-          (safeNumber(editableValues.overall_avg_exit_velocity_weight, 0.35) * avgEVScore) +
-          (safeNumber(editableValues.overall_barrel_pct_weight, 0.15) * barrelScore) +
-          (safeNumber(editableValues.overall_contact_pct_weight, 0.3) * contactScore) +
-          (safeNumber(editableValues.overall_chase_pct_weight, 0.2) * chaseScore)
-        );
     const baBase = safeNumber(editableValues.ba_ncaa_avg_power_rating, 50);
     const obpBase = safeNumber(editableValues.obp_ncaa_avg_power_rating, 50);
     const isoBase = safeNumber(editableValues.iso_ncaa_avg_power_rating, 50);
@@ -5462,12 +5461,15 @@ function DataStorage2025Tab() {
     const baPowerPlus = toPlus(baPower, baBase);
     const obpPowerPlus = toPlus(obpPower, obpBase);
     const isoPowerPlus = toPlus(isoPower, isoBase);
-    const overallPowerPlus = toPlus(overallPower, 50);
+    const overallPowerPlus =
+      baPowerPlus == null || obpPowerPlus == null || isoPowerPlus == null
+        ? null
+        : (0.25 * baPowerPlus) + (0.4 * obpPowerPlus) + (0.35 * isoPowerPlus);
 
     return {
       contactScore, lineDriveScore, avgEVScore, popUpScore, bbScore, chaseScore,
       barrelScore, ev90Score, pullScore, la1030Score, gbScore,
-      baPower, obpPower, isoPower, overallPower,
+      baPower, obpPower, isoPower, overallPower: overallPowerPlus,
       baPowerPlus, obpPowerPlus, isoPowerPlus, overallPowerPlus,
     };
   };

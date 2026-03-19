@@ -15,7 +15,7 @@ type PowerRow = {
 };
 
 const BASE_IMPORT_COLS = 16; // A-P
-const MAX_COLS = 31; // 16 base input columns + 14 score columns + 1 overall column
+const MAX_COLS = 37; // 16 base input + 14 scores + 6 PR+ + 1 overall
 const START_ROW_INDEX = 7; // Row 8 (0-based)
 const STORAGE_PREFIX = "storage__";
 const PAGE_SIZE = 100;
@@ -51,7 +51,13 @@ const FIXED_HEADERS = [
   "EV90 Score",
   "Pull% Score",
   "LA 10-30% Score",
-  "Overall Pitcher Power Rating",
+  "ERA PR+",
+  "FIP PR+",
+  "WHIP PR+",
+  "K/9 PR+",
+  "HR/9 PR+",
+  "BB/9 PR+",
+  "Overall PR+",
 ];
 
 const PITCHING_POWER_DEFAULTS: Record<string, number> = {
@@ -103,7 +109,7 @@ const PITCHING_POWER_DEFAULTS: Record<string, number> = {
   p_whip_avg_ev_weight: 0.15,
   p_whip_whiff_pct_weight: 0.25,
   p_whip_gb_pct_weight: 0.1,
-  p_whip_chase_pct_weight: 0.5,
+  p_whip_chase_pct_weight: 0.05,
   p_k9_whiff_pct_weight: 0.35,
   p_k9_stuff_plus_weight: 0.3,
   p_k9_in_zone_whiff_pct_weight: 0.25,
@@ -203,6 +209,8 @@ const getPitchingEquationValues = () => {
   } catch {
     // ignore bad local storage payload
   }
+  // Locked constant: Chase% contribution in WHIP PR is fixed at 5%.
+  merged.p_whip_chase_pct_weight = 0.05;
   return merged;
 };
 
@@ -216,6 +224,13 @@ const calculateScore = (value: number, avg: number, sd: number, lowerIsBetter = 
 const toScore = (value: string | undefined) => {
   const n = Number((value || "").trim());
   return Number.isFinite(n) ? n : null;
+};
+
+const normalizedWeightedSum = (items: Array<{ value: number; weight: number }>) => {
+  const weighted = items.reduce((sum, item) => sum + (item.value * item.weight), 0);
+  const totalWeight = items.reduce((sum, item) => sum + item.weight, 0);
+  if (!Number.isFinite(totalWeight) || totalWeight <= 0) return null;
+  return weighted / totalWeight;
 };
 
 const computeScoreColumns = (sourceValues: string[]) => {
@@ -256,12 +271,14 @@ const computeScoreColumns = (sourceValues: string[]) => {
       : null;
   const whipPower =
     [bbScore, ldScore, avgEvScore, whiffScore, gbScore, chaseScore].every((v) => v != null)
-      ? (bbScore! * eqValues.p_whip_bb_pct_weight) +
-        (ldScore! * eqValues.p_whip_ld_pct_weight) +
-        (avgEvScore! * eqValues.p_whip_avg_ev_weight) +
-        (whiffScore! * eqValues.p_whip_whiff_pct_weight) +
-        (gbScore! * eqValues.p_whip_gb_pct_weight) +
-        (chaseScore! * eqValues.p_whip_chase_pct_weight)
+      ? normalizedWeightedSum([
+          { value: bbScore!, weight: eqValues.p_whip_bb_pct_weight },
+          { value: ldScore!, weight: eqValues.p_whip_ld_pct_weight },
+          { value: avgEvScore!, weight: eqValues.p_whip_avg_ev_weight },
+          { value: whiffScore!, weight: eqValues.p_whip_whiff_pct_weight },
+          { value: gbScore!, weight: eqValues.p_whip_gb_pct_weight },
+          { value: chaseScore!, weight: eqValues.p_whip_chase_pct_weight },
+        ])
       : null;
   const k9Power =
     [whiffScore, stuffScore, izWhiffScore, chaseScore].every((v) => v != null)
@@ -301,7 +318,13 @@ const computeScoreColumns = (sourceValues: string[]) => {
     eraPlus == null || fipPlus == null || whipPlus == null || k9Plus == null || bb9Plus == null || hr9Plus == null
       ? null
       : (0.15 * eraPlus) + (0.25 * fipPlus) + (0.1 * whipPlus) + (0.2 * k9Plus) + (0.15 * bb9Plus) + (0.15 * hr9Plus);
-  next[30] = overallPower == null ? "-" : Math.round(Math.max(0, overallPower)).toString();
+  next[30] = eraPlus == null ? "-" : Math.round(Math.max(0, eraPlus)).toString();
+  next[31] = fipPlus == null ? "-" : Math.round(Math.max(0, fipPlus)).toString();
+  next[32] = whipPlus == null ? "-" : Math.round(Math.max(0, whipPlus)).toString();
+  next[33] = k9Plus == null ? "-" : Math.round(Math.max(0, k9Plus)).toString();
+  next[34] = hr9Plus == null ? "-" : Math.round(Math.max(0, hr9Plus)).toString();
+  next[35] = bb9Plus == null ? "-" : Math.round(Math.max(0, bb9Plus)).toString();
+  next[36] = overallPower == null ? "-" : Math.round(Math.max(0, overallPower)).toString();
   return next;
 };
 
@@ -334,6 +357,21 @@ const getPageWindow = (current: number, total: number) => {
   let end = Math.min(total, start + maxButtons - 1);
   start = Math.max(1, end - maxButtons + 1);
   return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+};
+
+const headerLabelLines = (label: string) => {
+  if (label === "Overall PR+") return ["Overall", "PR+"];
+  if (label === "ERA PR+") return ["ERA", "PR+"];
+  if (label === "FIP PR+") return ["FIP", "PR+"];
+  if (label === "WHIP PR+") return ["WHIP", "PR+"];
+  if (label === "K/9 PR+") return ["K/9", "PR+"];
+  if (label === "HR/9 PR+") return ["HR/9", "PR+"];
+  if (label === "BB/9 PR+") return ["BB/9", "PR+"];
+  if (label.includes(" Score")) return [label.replace(" Score", ""), "Score"];
+  if (label === "Line Drive%") return ["Line Drive%", ""];
+  if (label === "Avg Exit Velo") return ["Avg Exit", "Velo"];
+  if (label === "LA 10-30%") return ["LA 10-30%", ""];
+  return [label, ""];
 };
 
 export default function PitchingPowerRatingsStorageTable({ season }: { season: "2025" | "2026" }) {
@@ -487,7 +525,7 @@ export default function PitchingPowerRatingsStorageTable({ season }: { season: "
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <CardTitle className="text-base">Pitching Power Ratings Storage ({season})</CardTitle>
-          <CardDescription>Imports from row 8 and only columns A-Q.</CardDescription>
+          <CardDescription>Imports from row 8 (A-Q) plus computed score columns and PR+ outputs through Overall PR+.</CardDescription>
         </div>
         <div className="flex w-full sm:w-auto items-center gap-2">
           <input
@@ -543,7 +581,7 @@ export default function PitchingPowerRatingsStorageTable({ season }: { season: "
           </div>
         </div>
         <div className="max-h-[620px] overflow-y-auto overflow-x-auto">
-          <Table className="table-fixed min-w-[4050px]">
+          <Table className="table-fixed min-w-[4300px]">
             <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
               <TableRow>
                 {Array.from({ length: MAX_COLS }).map((_, i) => (
@@ -553,13 +591,23 @@ export default function PitchingPowerRatingsStorageTable({ season }: { season: "
                       i === 0
                         ? "sticky left-0 z-30 bg-background min-w-[220px] w-[220px] whitespace-nowrap"
                         : i === 1
-                          ? "min-w-[160px] w-[160px] whitespace-nowrap"
+                          ? "min-w-[150px] w-[150px] whitespace-nowrap"
                           : i >= BASE_IMPORT_COLS
-                            ? "min-w-[140px] w-[140px] whitespace-nowrap text-right"
-                            : "min-w-[110px] w-[110px] whitespace-nowrap text-right"
+                            ? "min-w-[120px] w-[120px] whitespace-normal leading-tight text-right py-1.5"
+                            : "min-w-[100px] w-[100px] whitespace-normal leading-tight text-right py-1.5"
                     }
                   >
-                    {headers[i] || FIXED_HEADERS[i]}
+                    {(() => {
+                      const label = headers[i] || FIXED_HEADERS[i];
+                      if (i <= 1) return label;
+                      const [line1, line2] = headerLabelLines(label);
+                      return (
+                        <span className="inline-flex flex-col items-end">
+                          <span>{line1}</span>
+                          {line2 ? <span>{line2}</span> : null}
+                        </span>
+                      );
+                    })()}
                   </TableHead>
                 ))}
               </TableRow>
