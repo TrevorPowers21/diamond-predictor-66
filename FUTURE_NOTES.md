@@ -114,3 +114,5 @@ Status: In testing phase. Defer cleanup until testing is complete.
 - Pitching conference model note (2026-03-17): Hitter Talent+ should be calculated from conference-by-conference overall hitter power rating combined with quality of stuff faced.
 - Pitcher profile expansion note (2026-03-17): add a pitch-level table on every pitcher dashboard showing each pitch type thrown, usage, Stuff+, and whiff percentage.
 - Next session start point (2026-03-17): start on Pitching Power Ratings Storage and debug why some pitcher player profiles are not fully populating.
+- NIL dashboard note (2026-03-19): `NIL Valuations` dashboard/nav route is intentionally commented out in app navigation and routing during testing. Rework and reintegrate later instead of deleting.
+- Scouting tier scale note (2026-03-19): consider translating percentile-style scouting outputs to a baseball-standard 20-80 scale for display/communication; keep 50 anchored as average.

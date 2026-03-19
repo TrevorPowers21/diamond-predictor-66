@@ -85,6 +85,10 @@ interface PitchingDashboardRow {
   team: string | null;
   conference: string | null;
   handedness: string | null;
+  stuff_score: number | null;
+  whiff_score: number | null;
+  bb_score: number | null;
+  barrel_score: number | null;
   era: number | null;
   fip: number | null;
   whip: number | null;
@@ -953,6 +957,35 @@ export default function ReturningPlayers() {
     return alias || raw;
   }, []);
   const pitchingRows = useMemo<PitchingDashboardRow[]>(() => {
+    const scoringByNameTeam = new Map<string, { stuff: number | null; whiff: number | null; bb: number | null; barrel: number | null }>();
+    const scoringByName = new Map<string, Array<{ stuff: number | null; whiff: number | null; bb: number | null; barrel: number | null }>>();
+    try {
+      const rawPower = localStorage.getItem("pitching_power_ratings_storage_2025_v1");
+      if (rawPower) {
+        const parsedPower = JSON.parse(rawPower) as { rows?: Array<{ values?: string[] }> };
+        const powerRows = Array.isArray(parsedPower.rows) ? parsedPower.rows : [];
+        for (const pr of powerRows) {
+          const values = Array.isArray(pr.values) ? pr.values : [];
+          const name = (values[0] || "").trim();
+          const team = normalizePitchingTeam(values[1]);
+          if (!name) continue;
+          const scoreObj = {
+            stuff: toNum(values[16]),
+            whiff: toNum(values[17]),
+            bb: toNum(values[18]),
+            barrel: toNum(values[22]),
+          };
+          scoringByNameTeam.set(nameTeamKey(name, team), scoreObj);
+          const nameKey = normalizeName(name);
+          const bucket = scoringByName.get(nameKey) || [];
+          bucket.push(scoreObj);
+          scoringByName.set(nameKey, bucket);
+        }
+      }
+    } catch {
+      // ignore malformed local storage
+    }
+
     const raw = localStorage.getItem("pitching_stats_storage_2025_v1");
     if (!raw) return [];
     try {
@@ -970,12 +1003,20 @@ export default function ReturningPlayers() {
           const k9 = toNum(values[6]);
           const bb9 = toNum(values[7]);
           const hr9 = toNum(values[8]);
+          const byNameTeam = scoringByNameTeam.get(nameTeamKey(playerName, normalizedTeam));
+          const byNameBucket = scoringByName.get(normalizeName(playerName)) || [];
+          const byNameUnique = byNameBucket.length === 1 ? byNameBucket[0] : null;
+          const chosenScores = byNameTeam || byNameUnique || null;
           return {
             id: r.id || `pitching-${idx}`,
             playerName,
             team: normalizedTeam || null,
             conference: teamMatch?.conference ?? null,
             handedness: (values[2] || "").trim() || null,
+            stuff_score: chosenScores?.stuff ?? null,
+            whiff_score: chosenScores?.whiff ?? null,
+            bb_score: chosenScores?.bb ?? null,
+            barrel_score: chosenScores?.barrel ?? null,
             era,
             fip,
             whip,
@@ -1484,7 +1525,7 @@ export default function ReturningPlayers() {
             <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <CardTitle className="text-base">Pitching Dashboard (2025)</CardTitle>
-                <CardDescription>Prior stats only. Projected outcomes and scouting grades are intentionally blank for now.</CardDescription>
+                <CardDescription>Prior stats with scouting grades from pitching power ratings storage.</CardDescription>
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <div className="flex items-center gap-1 overflow-x-auto max-w-[360px]">
@@ -1543,6 +1584,7 @@ export default function ReturningPlayers() {
                           <TableHead className="text-right">pRV+</TableHead>
                           <TableHead className="text-right">pWAR</TableHead>
                           <TableHead className="text-right">Market Value</TableHead>
+                          <TableHead className="text-center min-w-[180px]">Scouting</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1568,6 +1610,21 @@ export default function ReturningPlayers() {
                             <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
                             <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
                             <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
+                            <TableCell className="text-center">
+                              {r.stuff_score != null &&
+                              r.whiff_score != null &&
+                              r.bb_score != null &&
+                              r.barrel_score != null ? (
+                                <div className="flex gap-1 justify-center flex-wrap">
+                                  <ScoutMiniBox label="Stf+" value={r.stuff_score} />
+                                  <ScoutMiniBox label="Whf" value={r.whiff_score} />
+                                  <ScoutMiniBox label="BB%" value={r.bb_score} />
+                                  <ScoutMiniBox label="Brl" value={r.barrel_score} />
+                                </div>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

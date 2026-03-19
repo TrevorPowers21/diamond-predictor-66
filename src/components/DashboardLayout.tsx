@@ -7,7 +7,6 @@ import {
   Activity,
   BarChart3,
   Users,
-  DollarSign,
   GitCompare,
   Settings,
   LogOut,
@@ -26,7 +25,8 @@ const navItems = [
   { label: "Transfer Portal", href: "/dashboard/portal", icon: Users },
   { label: "Team Builder", href: "/dashboard/team-builder", icon: Hammer },
   { label: "Player Dashboard", href: "/dashboard/returning", icon: Activity },
-  { label: "NIL Valuations", href: "/dashboard/nil", icon: DollarSign, badge: "Coming Soon" },
+  // { label: "NIL Valuations", href: "/dashboard/nil", icon: DollarSign, badge: "Coming Soon" },
+  // Temporarily hidden during testing; keep page code for later rework.
   { label: "Compare", href: "/dashboard/compare", icon: GitCompare },
   { label: "Admin", href: "/dashboard/admin", icon: ShieldCheck },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },

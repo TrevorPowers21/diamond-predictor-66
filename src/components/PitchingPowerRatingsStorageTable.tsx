@@ -15,7 +15,7 @@ type PowerRow = {
 };
 
 const BASE_IMPORT_COLS = 16; // A-P
-const MAX_COLS = 30; // 16 base input columns + 14 score columns
+const MAX_COLS = 31; // 16 base input columns + 14 score columns + 1 overall column
 const START_ROW_INDEX = 7; // Row 8 (0-based)
 const STORAGE_PREFIX = "storage__";
 const PAGE_SIZE = 100;
@@ -51,6 +51,7 @@ const FIXED_HEADERS = [
   "EV90 Score",
   "Pull% Score",
   "LA 10-30% Score",
+  "Overall Pitcher Power Rating",
 ];
 
 const PITCHING_POWER_DEFAULTS: Record<string, number> = {
@@ -82,6 +83,39 @@ const PITCHING_POWER_DEFAULTS: Record<string, number> = {
   p_sd_ev90: 1.767350585,
   p_sd_pull_pct: 5.356686254,
   p_sd_la_10_30_pct: 5.773803471,
+  p_era_ncaa_avg_power_rating: 50,
+  p_ncaa_avg_whip_power_rating: 50,
+  p_ncaa_avg_k9_power_rating: 50,
+  p_ncaa_avg_bb9_power_rating: 50,
+  p_ncaa_avg_hr9_power_rating: 50,
+  p_era_stuff_plus_weight: 0.21,
+  p_era_whiff_pct_weight: 0.23,
+  p_era_bb_pct_weight: 0.17,
+  p_era_hh_pct_weight: 0.07,
+  p_era_in_zone_whiff_pct_weight: 0.12,
+  p_era_chase_pct_weight: 0.08,
+  p_era_barrel_pct_weight: 0.12,
+  p_fip_hr9_power_rating_plus_weight: 0.45,
+  p_fip_bb9_power_rating_plus_weight: 0.3,
+  p_fip_k9_power_rating_plus_weight: 0.25,
+  p_whip_bb_pct_weight: 0.25,
+  p_whip_ld_pct_weight: 0.2,
+  p_whip_avg_ev_weight: 0.15,
+  p_whip_whiff_pct_weight: 0.25,
+  p_whip_gb_pct_weight: 0.1,
+  p_whip_chase_pct_weight: 0.5,
+  p_k9_whiff_pct_weight: 0.35,
+  p_k9_stuff_plus_weight: 0.3,
+  p_k9_in_zone_whiff_pct_weight: 0.25,
+  p_k9_chase_pct_weight: 0.1,
+  p_bb9_bb_pct_weight: 0.55,
+  p_bb9_in_zone_pct_weight: 0.3,
+  p_bb9_chase_pct_weight: 0.15,
+  p_hr9_barrel_pct_weight: 0.32,
+  p_hr9_ev90_weight: 0.24,
+  p_hr9_gb_pct_weight: 0.18,
+  p_hr9_pull_pct_weight: 0.14,
+  p_hr9_la_10_30_pct_weight: 0.12,
 };
 
 type ScoreMetric = {
@@ -179,6 +213,11 @@ const calculateScore = (value: number, avg: number, sd: number, lowerIsBetter = 
   return Math.round(Math.max(0, Math.min(100, score))).toString();
 };
 
+const toScore = (value: string | undefined) => {
+  const n = Number((value || "").trim());
+  return Number.isFinite(n) ? n : null;
+};
+
 const computeScoreColumns = (sourceValues: string[]) => {
   const next = [...Array(MAX_COLS)].map((_, i) => sourceValues[i] || "");
   const eqValues = getPitchingEquationValues();
@@ -190,6 +229,79 @@ const computeScoreColumns = (sourceValues: string[]) => {
     }
     next[metric.scoreCol] = calculateScore(value, eqValues[metric.avgKey], eqValues[metric.sdKey], !!metric.lowerIsBetter);
   }
+  const stuffScore = toScore(next[16]);
+  const whiffScore = toScore(next[17]);
+  const bbScore = toScore(next[18]);
+  const hhScore = toScore(next[19]);
+  const izWhiffScore = toScore(next[20]);
+  const chaseScore = toScore(next[21]);
+  const barrelScore = toScore(next[22]);
+  const ldScore = toScore(next[23]);
+  const avgEvScore = toScore(next[24]);
+  const gbScore = toScore(next[25]);
+  const izScore = toScore(next[26]);
+  const ev90Score = toScore(next[27]);
+  const pullScore = toScore(next[28]);
+  const la1030Score = toScore(next[29]);
+
+  const eraPower =
+    [stuffScore, whiffScore, bbScore, hhScore, izWhiffScore, chaseScore, barrelScore].every((v) => v != null)
+      ? (stuffScore! * eqValues.p_era_stuff_plus_weight) +
+        (whiffScore! * eqValues.p_era_whiff_pct_weight) +
+        (bbScore! * eqValues.p_era_bb_pct_weight) +
+        (hhScore! * eqValues.p_era_hh_pct_weight) +
+        (izWhiffScore! * eqValues.p_era_in_zone_whiff_pct_weight) +
+        (chaseScore! * eqValues.p_era_chase_pct_weight) +
+        (barrelScore! * eqValues.p_era_barrel_pct_weight)
+      : null;
+  const whipPower =
+    [bbScore, ldScore, avgEvScore, whiffScore, gbScore, chaseScore].every((v) => v != null)
+      ? (bbScore! * eqValues.p_whip_bb_pct_weight) +
+        (ldScore! * eqValues.p_whip_ld_pct_weight) +
+        (avgEvScore! * eqValues.p_whip_avg_ev_weight) +
+        (whiffScore! * eqValues.p_whip_whiff_pct_weight) +
+        (gbScore! * eqValues.p_whip_gb_pct_weight) +
+        (chaseScore! * eqValues.p_whip_chase_pct_weight)
+      : null;
+  const k9Power =
+    [whiffScore, stuffScore, izWhiffScore, chaseScore].every((v) => v != null)
+      ? (whiffScore! * eqValues.p_k9_whiff_pct_weight) +
+        (stuffScore! * eqValues.p_k9_stuff_plus_weight) +
+        (izWhiffScore! * eqValues.p_k9_in_zone_whiff_pct_weight) +
+        (chaseScore! * eqValues.p_k9_chase_pct_weight)
+      : null;
+  const bb9Power =
+    [bbScore, izScore, chaseScore].every((v) => v != null)
+      ? (bbScore! * eqValues.p_bb9_bb_pct_weight) +
+        (izScore! * eqValues.p_bb9_in_zone_pct_weight) +
+        (chaseScore! * eqValues.p_bb9_chase_pct_weight)
+      : null;
+  const hr9Power =
+    [barrelScore, ev90Score, gbScore, pullScore, la1030Score].every((v) => v != null)
+      ? (barrelScore! * eqValues.p_hr9_barrel_pct_weight) +
+        (ev90Score! * eqValues.p_hr9_ev90_weight) +
+        (gbScore! * eqValues.p_hr9_gb_pct_weight) +
+        (pullScore! * eqValues.p_hr9_pull_pct_weight) +
+        (la1030Score! * eqValues.p_hr9_la_10_30_pct_weight)
+      : null;
+
+  const eraPlus = eraPower == null ? null : (eraPower / eqValues.p_era_ncaa_avg_power_rating) * 100;
+  const whipPlus = whipPower == null ? null : (whipPower / eqValues.p_ncaa_avg_whip_power_rating) * 100;
+  const k9Plus = k9Power == null ? null : (k9Power / eqValues.p_ncaa_avg_k9_power_rating) * 100;
+  const bb9Plus = bb9Power == null ? null : (bb9Power / eqValues.p_ncaa_avg_bb9_power_rating) * 100;
+  const hr9Plus = hr9Power == null ? null : (hr9Power / eqValues.p_ncaa_avg_hr9_power_rating) * 100;
+  const fipPlus =
+    hr9Plus == null || bb9Plus == null || k9Plus == null
+      ? null
+      : (hr9Plus * eqValues.p_fip_hr9_power_rating_plus_weight) +
+        (bb9Plus * eqValues.p_fip_bb9_power_rating_plus_weight) +
+        (k9Plus * eqValues.p_fip_k9_power_rating_plus_weight);
+
+  const overallPower =
+    eraPlus == null || fipPlus == null || whipPlus == null || k9Plus == null || bb9Plus == null || hr9Plus == null
+      ? null
+      : (0.15 * eraPlus) + (0.25 * fipPlus) + (0.1 * whipPlus) + (0.2 * k9Plus) + (0.15 * bb9Plus) + (0.15 * hr9Plus);
+  next[30] = overallPower == null ? "-" : Math.round(Math.max(0, overallPower)).toString();
   return next;
 };
 
@@ -431,7 +543,7 @@ export default function PitchingPowerRatingsStorageTable({ season }: { season: "
           </div>
         </div>
         <div className="max-h-[620px] overflow-y-auto overflow-x-auto">
-          <Table className="table-fixed min-w-[3900px]">
+          <Table className="table-fixed min-w-[4050px]">
             <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
               <TableRow>
                 {Array.from({ length: MAX_COLS }).map((_, i) => (

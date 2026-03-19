@@ -86,6 +86,15 @@ const nilFormat = (v: number | null | undefined) => {
   return `$${Math.round(v).toLocaleString()}`;
 };
 
+const OVERALL_PITCHER_POWER_WEIGHTS = {
+  era: 0.15,
+  fip: 0.25,
+  whip: 0.1,
+  k9: 0.2,
+  bb9: 0.15,
+  hr9: 0.15,
+} as const;
+
 function MetricCard({ title, value, subtitle }: { title: string; value: string; subtitle?: string }) {
   return (
     <Card>
@@ -97,6 +106,27 @@ function MetricCard({ title, value, subtitle }: { title: string; value: string; 
         {subtitle ? <p className="text-xs text-muted-foreground mt-1">{subtitle}</p> : null}
       </CardContent>
     </Card>
+  );
+}
+
+function ScoutGrade({ value, fullLabel }: { value: number | null; fullLabel: string }) {
+  if (value == null) return null;
+  const tier =
+    value >= 80 ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]" :
+    value >= 50 ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]" :
+    "bg-destructive/15 text-destructive border-destructive/30";
+  const grade =
+    value >= 80 ? "Elite" :
+    value >= 70 ? "Plus-Plus" :
+    value >= 60 ? "Plus" :
+    value >= 50 ? "Average" :
+    value >= 40 ? "Below Avg" : "Poor";
+  return (
+    <div className={`rounded-lg border p-3 ${tier}`}>
+      <div className="text-xs font-medium opacity-80">{fullLabel}</div>
+      <div className="text-2xl font-bold mt-1">{Math.round(value)}</div>
+      <div className="text-xs font-semibold mt-0.5">{grade}</div>
+    </div>
   );
 }
 
@@ -391,8 +421,17 @@ export default function PitcherProfile() {
       : (hr9Plus * pitchingEq.p_fip_hr9_power_rating_plus_weight) +
         (bb9Plus * pitchingEq.p_fip_bb9_power_rating_plus_weight) +
         (k9Plus * pitchingEq.p_fip_k9_power_rating_plus_weight);
+    const overallPlus =
+      eraPlus == null || fipPlus == null || whipPlus == null || k9Plus == null || bb9Plus == null || hr9Plus == null
+        ? null
+        : (OVERALL_PITCHER_POWER_WEIGHTS.era * eraPlus) +
+          (OVERALL_PITCHER_POWER_WEIGHTS.fip * fipPlus) +
+          (OVERALL_PITCHER_POWER_WEIGHTS.whip * whipPlus) +
+          (OVERALL_PITCHER_POWER_WEIGHTS.k9 * k9Plus) +
+          (OVERALL_PITCHER_POWER_WEIGHTS.bb9 * bb9Plus) +
+          (OVERALL_PITCHER_POWER_WEIGHTS.hr9 * hr9Plus);
 
-    return { metrics, eraPlus, whipPlus, k9Plus, bb9Plus, hr9Plus, fipPlus };
+    return { metrics, scores, eraPlus, whipPlus, k9Plus, bb9Plus, hr9Plus, fipPlus, overallPlus };
   }, [pitchingEq, powerRatingsRow]);
 
   const latestStats = useMemo(() => seasonStats[0] || null, [seasonStats]);
@@ -445,118 +484,134 @@ export default function PitcherProfile() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <MetricCard title="Market Value" value={nilFormat(nilValuation?.projected_value ?? null)} />
-          <MetricCard title="pWAR" value="—" subtitle="Pitching WAR model pending" />
-          <MetricCard
-            title="Internal Pitching Rating"
-            value={activePrediction?.power_rating_plus != null ? fmtWhole(activePrediction.power_rating_plus) : "—"}
-            subtitle="Template value for pitcher-specific model"
-          />
-        </div>
-
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <Card className="lg:col-span-1">
-            <CardHeader>
-              <CardTitle className="text-base">Pitcher Info</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">Team</span><span>{displayTeam}</span></div>
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">Conference</span><span>{displayConference}</span></div>
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">Class</span><span>{player?.class_year || "—"}</span></div>
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">Throws</span><span>{player?.throws_hand || displayHandedness || "—"}</span></div>
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">Bats</span><span>{player?.bats_hand || "—"}</span></div>
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">Height</span><span>{player?.height_inches ? `${player.height_inches}"` : "—"}</span></div>
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">Weight</span><span>{player?.weight ? `${player.weight} lbs` : "—"}</span></div>
-            </CardContent>
-          </Card>
+          <div className="lg:col-span-1 space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Pitcher Info</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Team</span><span>{displayTeam}</span></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Conference</span><span>{displayConference}</span></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Class</span><span>{player?.class_year || "—"}</span></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Throws</span><span>{player?.throws_hand || displayHandedness || "—"}</span></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Bats</span><span>{player?.bats_hand || "—"}</span></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Height</span><span>{player?.height_inches ? `${player.height_inches}"` : "—"}</span></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Weight</span><span>{player?.weight ? `${player.weight} lbs` : "—"}</span></div>
+              </CardContent>
+            </Card>
 
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle className="text-base">2025 Pitching Stats</CardTitle>
-              <CardDescription>Storage-backed pitching metrics for 2025.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-                <div className="rounded border p-2"><div className="text-muted-foreground text-xs">IP</div><div className="font-semibold">{fmt(latestStats?.innings_pitched ?? null, 1)}</div></div>
-                <div className="rounded border p-2"><div className="text-muted-foreground text-xs">ERA</div><div className="font-semibold">{fmt(latestStats?.era ?? storageEra, 2)}</div></div>
-                <div className="rounded border p-2"><div className="text-muted-foreground text-xs">WHIP</div><div className="font-semibold">{fmt(latestStats?.whip ?? storageWhip, 2)}</div></div>
-                {storageRow ? (
-                  <>
-                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">FIP</div><div className="font-semibold">{fmt(storageFip, 2)}</div></div>
-                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">K/9</div><div className="font-semibold">{fmt(storageK9, 2)}</div></div>
-                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">BB/9</div><div className="font-semibold">{fmt(storageBb9, 2)}</div></div>
-                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">HR/9</div><div className="font-semibold">{fmt(storageHr9, 2)}</div></div>
-                  </>
-                ) : null}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4" />Projected Outcomes</CardTitle>
-            <CardDescription>
-              Independent pitcher projection template. We will add pitcher equations and weighted outputs next.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
-              <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pERA</div><div className="font-semibold">—</div></div>
-              <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pWHIP</div><div className="font-semibold">—</div></div>
-              <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pK/9</div><div className="font-semibold">—</div></div>
-              <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pBB/9</div><div className="font-semibold">—</div></div>
-              <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pWAR</div><div className="font-semibold">—</div></div>
-            </div>
-            <Separator />
-            <p className="text-xs text-muted-foreground">
-              This page is intentionally separate from hitter profile logic so pitcher-specific adjustments can be implemented safely.
-            </p>
-          </CardContent>
-        </Card>
-
-        {isAdmin ? (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                Internal Power Ratings
-                <Badge variant="outline" className="text-[10px] uppercase tracking-wide">Admin Only</Badge>
-              </CardTitle>
-              <CardDescription>Pitching power rating+ outputs and source metrics.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
-                <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">ERA Power Rating+</div><div className="text-3xl font-bold tracking-tight mt-1">{fmtWhole(internalPowerRatings?.eraPlus)}</div></div>
-                <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">WHIP Power Rating+</div><div className="text-3xl font-bold tracking-tight mt-1">{fmtWhole(internalPowerRatings?.whipPlus)}</div></div>
-                <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">K/9 Power Rating+</div><div className="text-3xl font-bold tracking-tight mt-1">{fmtWhole(internalPowerRatings?.k9Plus)}</div></div>
-                <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">BB/9 Power Rating+</div><div className="text-3xl font-bold tracking-tight mt-1">{fmtWhole(internalPowerRatings?.bb9Plus)}</div></div>
-                <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">HR/9 Power Rating+</div><div className="text-3xl font-bold tracking-tight mt-1">{fmtWhole(internalPowerRatings?.hr9Plus)}</div></div>
-                <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">FIP Power Rating+</div><div className="text-3xl font-bold tracking-tight mt-1">{fmtWhole(internalPowerRatings?.fipPlus)}</div></div>
-              </div>
-              <Separator />
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-muted-foreground">2025 Input Metrics</p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-                  <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">Stuff+</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.stuff, 1)}</div></div>
-                  <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">Whiff%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.whiff, 1)}</div></div>
-                  <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">BB%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.bb, 1)}</div></div>
-                  <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">HH%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.hh, 1)}</div></div>
-                  <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">IZ Whiff%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.izWhiff, 1)}</div></div>
-                  <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">Chase%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.chase, 1)}</div></div>
-                  <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">Barrel%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.barrel, 1)}</div></div>
-                  <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">LD%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.ld, 1)}</div></div>
-                  <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">Avg EV</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.avgEv, 1)}</div></div>
-                  <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">GB%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.gb, 1)}</div></div>
-                  <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">IZ%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.iz, 1)}</div></div>
-                  <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">EV90</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.ev90, 1)}</div></div>
-                  <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">Pull%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.pull, 1)}</div></div>
-                  <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">LA 10-30%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.la1030, 1)}</div></div>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">2025 Pitching Stats</CardTitle>
+                <CardDescription>Storage-backed pitching metrics for 2025.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">IP</div><div className="font-semibold">{fmt(latestStats?.innings_pitched ?? null, 1)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">ERA</div><div className="font-semibold">{fmt(latestStats?.era ?? storageEra, 2)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">WHIP</div><div className="font-semibold">{fmt(latestStats?.whip ?? storageWhip, 2)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">FIP</div><div className="font-semibold">{fmt(storageFip, 2)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">K/9</div><div className="font-semibold">{fmt(storageK9, 2)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">BB/9</div><div className="font-semibold">{fmt(storageBb9, 2)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">HR/9</div><div className="font-semibold">{fmt(storageHr9, 2)}</div></div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        ) : null}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="lg:col-span-2 space-y-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <MetricCard title="Market Value" value={nilFormat(nilValuation?.projected_value ?? null)} />
+              <MetricCard title="pWAR" value="—" subtitle="Pitching WAR model pending" />
+              <MetricCard
+                title="Overall Pitcher Power Rating"
+                value={fmtWhole(internalPowerRatings?.overallPlus)}
+                subtitle="Weighted blend of ERA+/FIP+/WHIP+/K/9+/BB/9+/HR/9+"
+              />
+            </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4" />Projected Outcomes</CardTitle>
+                <CardDescription>
+                  Independent pitcher projection template. We will add pitcher equations and weighted outputs next.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pERA</div><div className="font-semibold">—</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pWHIP</div><div className="font-semibold">—</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pK/9</div><div className="font-semibold">—</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pBB/9</div><div className="font-semibold">—</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pWAR</div><div className="font-semibold">—</div></div>
+                </div>
+                <Separator />
+                <p className="text-xs text-muted-foreground">
+                  This page is intentionally separate from hitter profile logic so pitcher-specific adjustments can be implemented safely.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Scouting Grades</CardTitle>
+                <CardDescription>2025 percentile scores (color-coded)</CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <ScoutGrade value={internalPowerRatings?.scores?.stuff ?? null} fullLabel="Stuff+ Score" />
+                  <ScoutGrade value={internalPowerRatings?.scores?.whiff ?? null} fullLabel="Whiff% Score" />
+                  <ScoutGrade value={internalPowerRatings?.scores?.bb ?? null} fullLabel="BB% Score" />
+                  <ScoutGrade value={internalPowerRatings?.scores?.barrel ?? null} fullLabel="Barrel% Score" />
+                </div>
+              </CardContent>
+            </Card>
+
+            {isAdmin ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    Internal Power Ratings
+                    <Badge variant="outline" className="text-[10px] uppercase tracking-wide">Admin Only</Badge>
+                  </CardTitle>
+                  <CardDescription>Pitching power rating+ outputs and source metrics.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+                    <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">Overall Pitcher Power Rating</div><div className="text-3xl font-bold tracking-tight mt-1">{fmtWhole(internalPowerRatings?.overallPlus)}</div></div>
+                    <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">ERA Power Rating+</div><div className="text-3xl font-bold tracking-tight mt-1">{fmtWhole(internalPowerRatings?.eraPlus)}</div></div>
+                    <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">WHIP Power Rating+</div><div className="text-3xl font-bold tracking-tight mt-1">{fmtWhole(internalPowerRatings?.whipPlus)}</div></div>
+                    <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">K/9 Power Rating+</div><div className="text-3xl font-bold tracking-tight mt-1">{fmtWhole(internalPowerRatings?.k9Plus)}</div></div>
+                    <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">BB/9 Power Rating+</div><div className="text-3xl font-bold tracking-tight mt-1">{fmtWhole(internalPowerRatings?.bb9Plus)}</div></div>
+                    <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">HR/9 Power Rating+</div><div className="text-3xl font-bold tracking-tight mt-1">{fmtWhole(internalPowerRatings?.hr9Plus)}</div></div>
+                    <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">FIP Power Rating+</div><div className="text-3xl font-bold tracking-tight mt-1">{fmtWhole(internalPowerRatings?.fipPlus)}</div></div>
+                  </div>
+                  <Separator />
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-muted-foreground">2025 Input Metrics</p>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                      <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">Stuff+</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.stuff, 1)}</div></div>
+                      <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">Whiff%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.whiff, 1)}</div></div>
+                      <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">BB%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.bb, 1)}</div></div>
+                      <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">HH%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.hh, 1)}</div></div>
+                      <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">IZ Whiff%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.izWhiff, 1)}</div></div>
+                      <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">Chase%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.chase, 1)}</div></div>
+                      <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">Barrel%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.barrel, 1)}</div></div>
+                      <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">LD%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.ld, 1)}</div></div>
+                      <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">Avg EV</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.avgEv, 1)}</div></div>
+                      <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">GB%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.gb, 1)}</div></div>
+                      <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">IZ%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.iz, 1)}</div></div>
+                      <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">EV90</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.ev90, 1)}</div></div>
+                      <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">Pull%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.pull, 1)}</div></div>
+                      <div className="rounded-lg border bg-background/70 p-3"><div className="text-muted-foreground text-xs">LA 10-30%</div><div className="font-semibold text-2xl mt-1">{fmt(internalPowerRatings?.metrics.la1030, 1)}</div></div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
+          </div>
+        </div>
       </div>
     </DashboardLayout>
   );

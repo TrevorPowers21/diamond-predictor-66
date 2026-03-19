@@ -12,7 +12,6 @@ import Dashboard from "./pages/Dashboard";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import NotFound from "./pages/NotFound";
 import DevWeights from "./pages/DevWeights";
-import NilValuations from "./pages/NilValuations";
 import PlayerComparison from "./pages/PlayerComparison";
 import PlayerProfile from "./pages/PlayerProfile";
 import PitcherProfile from "./pages/PitcherProfile";
@@ -36,7 +35,8 @@ const App = () => (
             <Route path="/dashboard/portal" element={<ProtectedRoute><TransferPortal /></ProtectedRoute>} />
             <Route path="/dashboard/returning" element={<ProtectedRoute><ReturningPlayers /></ProtectedRoute>} />
             <Route path="/dashboard/dev-weights" element={<ProtectedRoute><DevWeights /></ProtectedRoute>} />
-            <Route path="/dashboard/nil" element={<ProtectedRoute><NilValuations /></ProtectedRoute>} />
+            {/* NIL Valuations route intentionally disabled for now; keep page for rework later. */}
+            {/* <Route path="/dashboard/nil" element={<ProtectedRoute><NilValuations /></ProtectedRoute>} /> */}
             <Route path="/dashboard/compare" element={<ProtectedRoute><PlayerComparison /></ProtectedRoute>} />
             <Route path="/dashboard/teams" element={<ProtectedRoute><Teams /></ProtectedRoute>} />
             <Route path="/dashboard/player/:id" element={<ProtectedRoute><PlayerProfile /></ProtectedRoute>} />

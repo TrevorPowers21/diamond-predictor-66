@@ -183,6 +183,13 @@ export default function PitchingEquationsTab() {
             </p>
           </div>
 
+          <div className={sectionPanelClass}>
+            <p className={sectionHeadingClass}>Overall Pitcher Power Rating</p>
+            <div className="text-sm font-mono">
+              (0.15 × ERA Power Rating+) + (0.25 × FIP Power Rating+) + (0.10 × WHIP Power Rating+) + (0.20 × K/9 Power Rating+) + (0.15 × BB/9 Power Rating+) + (0.15 × HR/9 Power Rating+)
+            </div>
+          </div>
+
           <div className="px-1 pt-1">
             <h4 className="text-sm font-semibold">Z-Score Equations</h4>
           </div>
