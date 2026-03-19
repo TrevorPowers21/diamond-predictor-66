@@ -6,6 +6,8 @@ import DashboardLayout from "@/components/DashboardLayout";
 import ConferenceStatsTable from "@/components/ConferenceStatsTable";
 import PitchingConferenceStatsTable from "@/components/PitchingConferenceStatsTable";
 import PitchingStatsStorageTable from "@/components/PitchingStatsStorageTable";
+import PitchingPowerRatingsStorageTable from "@/components/PitchingPowerRatingsStorageTable";
+import PitchingEquationsTab from "@/components/PitchingEquationsTab";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1359,7 +1361,7 @@ function AdminPowerRatingsTab() {
         <CardContent className="space-y-4">
           <div className="bg-muted p-4 rounded-lg font-mono text-sm">
             <div><span className="text-muted-foreground">BAPowerRating =</span> ({baContactWeight.toFixed(2)} × ContactScore) + ({baLineDriveWeight.toFixed(2)} × LineDriveScore) + ({baAvgEVWeight.toFixed(2)} × AverageExitVelocityScore) + ({baPopUpWeight.toFixed(2)} × PopUpScore)</div>
-            <div><span className="text-muted-foreground">BAPowerRating+ =</span> (BAPowerRating / NCAAAverageBAPowerRating) × 100</div>
+            <div className="mt-2"><span className="text-muted-foreground">BAPowerRating+ =</span> (BAPowerRating / NCAAAverageBAPowerRating) × 100</div>
           </div>
           <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
             <div className={sectionPanelClass}>
@@ -1392,7 +1394,7 @@ function AdminPowerRatingsTab() {
         <CardContent className="space-y-4">
           <div className="bg-muted p-4 rounded-lg font-mono text-sm">
             <div><span className="text-muted-foreground">OBPPowerRating =</span> ({obpContactWeight.toFixed(2)} × ContactScore) + ({obpLineDriveWeight.toFixed(2)} × LineDriveScore) + ({obpAvgEVWeight.toFixed(2)} × AverageExitVelocityScore) + ({obpPopUpWeight.toFixed(2)} × PopUpScore) + ({obpWalkWeight.toFixed(2)} × BB%Score) + ({obpChaseWeight.toFixed(2)} × ChaseScore)</div>
-            <div><span className="text-muted-foreground">OBPPowerRating+ =</span> (OBPPowerRating / NCAAAverageOBPPowerRating) × 100</div>
+            <div className="mt-2"><span className="text-muted-foreground">OBPPowerRating+ =</span> (OBPPowerRating / NCAAAverageOBPPowerRating) × 100</div>
           </div>
           <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
             <div className={sectionPanelClass}>
@@ -1429,7 +1431,7 @@ function AdminPowerRatingsTab() {
         <CardContent className="space-y-4">
           <div className="bg-muted p-4 rounded-lg font-mono text-sm">
             <div><span className="text-muted-foreground">ISOPowerRating =</span> ({isoBarrelWeight.toFixed(2)} × BarrelScore) + ({isoEV90Weight.toFixed(2)} × EV90Score) + ({isoPullWeight.toFixed(2)} × Pull%Score) + ({isoLA1030Weight.toFixed(2)} × LA10-30Score) + ({isoGBWeight.toFixed(2)} × GB%Score)</div>
-            <div><span className="text-muted-foreground">ISOPowerRating+ =</span> (ISOPowerRating / NCAAAverageISOPowerRating(50)) / 100</div>
+            <div className="mt-2"><span className="text-muted-foreground">ISOPowerRating+ =</span> (ISOPowerRating / NCAAAverageISOPowerRating(50)) / 100</div>
           </div>
           <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
             <div className={sectionPanelClass}>
@@ -1464,7 +1466,7 @@ function AdminPowerRatingsTab() {
         <CardContent className="space-y-4">
           <div className="bg-muted p-4 rounded-lg font-mono text-sm">
             <div><span className="text-muted-foreground">OverallPowerRating =</span> ({overallAvgEVWeight.toFixed(2)} × AverageExitVelocityScore) + ({overallBarrelWeight.toFixed(2)} × Barrel%Score) + ({overallContactWeight.toFixed(2)} × Contact%Score) + ({overallChaseWeight.toFixed(2)} × Chase%Score)</div>
-            <div><span className="text-muted-foreground">OverallPowerRating+ =</span> (OverallPowerRating / 50) × 100</div>
+            <div className="mt-2"><span className="text-muted-foreground">OverallPowerRating+ =</span> (OverallPowerRating / 50) × 100</div>
           </div>
           <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
             <div className={sectionPanelClass}>
@@ -1533,14 +1535,14 @@ function AdminPowerRatingsTab() {
               Calculated across every player in this system. These are manual admin inputs until automated recalculation is added.
             </p>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <div className="space-y-1.5">
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
                 <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">Batting Average</p>
                 {editableField("pr_std_dev", "ba_contact_pct_std_dev", "Contact % Std Dev (Range: 54 to 95)")}
                 {editableField("pr_std_dev", "ba_line_drive_pct_std_dev", "Line Drive % Std Dev (Range: 8 to 35)")}
                 {editableField("pr_std_dev", "ba_avg_exit_velocity_std_dev", "Average Exit Velocity Std Dev (Range: 59.3 to 103.5)")}
                 {editableField("pr_std_dev", "ba_pop_up_pct_std_dev", "Pop-Up % Std Dev (Range: 20.8 to 0)")}
               </div>
-              <div className="space-y-1.5">
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
                 <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">On Base %</p>
                 {editableField("pr_std_dev", "obp_contact_pct_std_dev", "Contact % Std Dev (Range: 54 to 95)")}
                 {editableField("pr_std_dev", "obp_line_drive_pct_std_dev", "Line Drive % Std Dev (Range: 8 to 35)")}
@@ -1549,7 +1551,7 @@ function AdminPowerRatingsTab() {
                 {editableField("pr_std_dev", "obp_walk_pct_std_dev", "BB% Std Dev (Range: 2.5 to 26)")}
                 {editableField("pr_std_dev", "obp_chase_pct_std_dev", "Chase % Std Dev (Range: 43.7 to 79)")}
               </div>
-              <div className="space-y-1.5">
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
                 <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">Isolated Power</p>
                 {editableField("pr_std_dev", "iso_barrel_pct_std_dev", "Barrel % Std Dev (Range: 0 to 50)")}
                 {editableField("pr_std_dev", "iso_ev90_std_dev", "EV90 Std Dev (Range: 75.1 to 115.9)")}
@@ -1573,14 +1575,14 @@ function AdminPowerRatingsTab() {
           <div className={sectionPanelClass}>
             {editableSectionHeader("pr_ncaa_averages")}
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <div className="space-y-1.5">
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
                 <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">Batting Average</p>
                 {editableField("pr_ncaa_averages", "ba_ncaa_contact_pct", "NCAA Average Contact % (%)")}
                 {editableField("pr_ncaa_averages", "ba_ncaa_line_drive_pct", "NCAA Average Line Drive % (%)")}
                 {editableField("pr_ncaa_averages", "ba_ncaa_avg_exit_velocity", "NCAA Average Exit Velocity")}
                 {editableField("pr_ncaa_averages", "ba_ncaa_pop_up_pct", "NCAA Average Pop-Up % (%)")}
               </div>
-              <div className="space-y-1.5">
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
                 <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">On Base %</p>
                 {editableField("pr_ncaa_averages", "obp_ncaa_contact_pct", "NCAA Average Contact % (%)")}
                 {editableField("pr_ncaa_averages", "obp_ncaa_line_drive_pct", "NCAA Average Line Drive % (%)")}
@@ -1589,13 +1591,669 @@ function AdminPowerRatingsTab() {
                 {editableField("pr_ncaa_averages", "obp_ncaa_walk_pct", "NCAA Average BB%")}
                 {editableField("pr_ncaa_averages", "obp_ncaa_chase_pct", "NCAA Average Chase % (%)")}
               </div>
-              <div className="space-y-1.5">
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
                 <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">Isolated Power</p>
                 {editableField("pr_ncaa_averages", "iso_ncaa_barrel_pct", "NCAA Average Barrel %")}
                 {editableField("pr_ncaa_averages", "iso_ncaa_ev90", "NCAA Average EV90")}
                 {editableField("pr_ncaa_averages", "iso_ncaa_pull_pct", "NCAA Average Pull %")}
                 {editableField("pr_ncaa_averages", "iso_ncaa_la_10_30", "NCAA Average LA10-30")}
                 {editableField("pr_ncaa_averages", "iso_ncaa_gb_pct", "NCAA Average GB %")}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function PitchingPowerRatingsTab() {
+  const [editableSections, setEditableSections] = useState<Record<string, boolean>>({});
+  const defaultValues: Record<string, string> = {
+    p_era_ncaa_avg_power_rating: "50",
+    p_ncaa_avg_whip_power_rating: "50",
+    p_ncaa_avg_k9_power_rating: "50",
+    p_ncaa_avg_bb9_power_rating: "50",
+    p_ncaa_avg_hr9_power_rating: "50",
+    p_era_stuff_plus_weight: "0.21",
+    p_era_whiff_pct_weight: "0.23",
+    p_era_bb_pct_weight: "0.17",
+    p_era_hh_pct_weight: "0.07",
+    p_era_in_zone_whiff_pct_weight: "0.12",
+    p_era_chase_pct_weight: "0.08",
+    p_era_barrel_pct_weight: "0.12",
+    p_fip_hr9_power_rating_plus_weight: "0.45",
+    p_fip_bb9_power_rating_plus_weight: "0.30",
+    p_fip_k9_power_rating_plus_weight: "0.25",
+    p_whip_bb_pct_weight: "0.25",
+    p_whip_ld_pct_weight: "0.20",
+    p_whip_avg_ev_weight: "0.15",
+    p_whip_whiff_pct_weight: "0.25",
+    p_whip_gb_pct_weight: "0.10",
+    p_whip_chase_pct_weight: "0.50",
+    p_k9_whiff_pct_weight: "0.35",
+    p_k9_stuff_plus_weight: "0.30",
+    p_k9_in_zone_whiff_pct_weight: "0.25",
+    p_k9_chase_pct_weight: "0.10",
+    p_bb9_bb_pct_weight: "0.55",
+    p_bb9_in_zone_pct_weight: "0.30",
+    p_bb9_chase_pct_weight: "0.15",
+    p_hr9_barrel_pct_weight: "0.32",
+    p_hr9_ev90_weight: "0.24",
+    p_hr9_gb_pct_weight: "0.18",
+    p_hr9_pull_pct_weight: "0.14",
+    p_hr9_la_10_30_pct_weight: "0.12",
+    p_ncaa_avg_stuff_plus: "100",
+    p_ncaa_avg_whiff_pct: "22.9",
+    p_ncaa_avg_bb_pct: "11.3",
+    p_ncaa_avg_hh_pct: "36.0",
+    p_ncaa_avg_in_zone_whiff_pct: "16.4",
+    p_ncaa_avg_chase_pct: "23.1",
+    p_ncaa_avg_barrel_pct: "17.3",
+    p_ncaa_avg_ld_pct: "20.9",
+    p_ncaa_avg_avg_ev: "86.2",
+    p_ncaa_avg_gb_pct: "43.2",
+    p_ncaa_avg_in_zone_pct: "47.2",
+    p_ncaa_avg_ev90: "103.1",
+    p_ncaa_avg_pull_pct: "36.5",
+    p_ncaa_avg_la_10_30_pct: "29.0",
+    p_sd_stuff_plus: "3.967566764",
+    p_sd_whiff_pct: "5.476169924",
+    p_sd_bb_pct: "2.92040411",
+    p_sd_hh_pct: "6.474203457",
+    p_sd_in_zone_whiff_pct: "4.299203457",
+    p_sd_chase_pct: "4.619392309",
+    p_sd_barrel_pct: "4.988140199",
+    p_sd_ld_pct: "3.580670928",
+    p_sd_avg_ev: "2.362900608",
+    p_sd_gb_pct: "6.958760046",
+    p_sd_in_zone_pct: "3.325412065",
+    p_sd_ev90: "1.767350585",
+    p_sd_pull_pct: "5.356686254",
+    p_sd_la_10_30_pct: "5.773803471",
+    p_sd_era_power_rating: "",
+    p_sd_fip_power_rating: "",
+    p_sd_whip_power_rating: "",
+    p_sd_k9_power_rating: "",
+    p_sd_bb9_power_rating: "",
+    p_sd_hr9_power_rating: "",
+  };
+  const [editableValues, setEditableValues] = useState<Record<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem("admin_dashboard_pitching_power_equation_values_v1");
+      if (!raw) return defaultValues;
+      return {
+        ...defaultValues,
+        ...(JSON.parse(raw) as Record<string, string>),
+        p_era_stuff_plus_weight: "0.21",
+        p_era_whiff_pct_weight: "0.23",
+        p_era_bb_pct_weight: "0.17",
+        p_era_hh_pct_weight: "0.07",
+        p_era_in_zone_whiff_pct_weight: "0.12",
+        p_era_chase_pct_weight: "0.08",
+        p_era_barrel_pct_weight: "0.12",
+        p_fip_hr9_power_rating_plus_weight: "0.45",
+        p_fip_bb9_power_rating_plus_weight: "0.30",
+        p_fip_k9_power_rating_plus_weight: "0.25",
+        p_whip_bb_pct_weight: "0.25",
+        p_whip_ld_pct_weight: "0.20",
+        p_whip_avg_ev_weight: "0.15",
+        p_whip_whiff_pct_weight: "0.25",
+        p_whip_gb_pct_weight: "0.10",
+        p_whip_chase_pct_weight: "0.50",
+        p_k9_whiff_pct_weight: "0.35",
+        p_k9_stuff_plus_weight: "0.30",
+        p_k9_in_zone_whiff_pct_weight: "0.25",
+        p_k9_chase_pct_weight: "0.10",
+        p_bb9_bb_pct_weight: "0.55",
+        p_bb9_in_zone_pct_weight: "0.30",
+        p_bb9_chase_pct_weight: "0.15",
+        p_hr9_barrel_pct_weight: "0.32",
+        p_hr9_ev90_weight: "0.24",
+        p_hr9_gb_pct_weight: "0.18",
+        p_hr9_pull_pct_weight: "0.14",
+        p_hr9_la_10_30_pct_weight: "0.12",
+        p_era_ncaa_avg_power_rating: "50",
+        p_ncaa_avg_stuff_plus: "100",
+        p_ncaa_avg_whiff_pct: "22.9",
+        p_ncaa_avg_bb_pct: "11.3",
+        p_ncaa_avg_hh_pct: "36.0",
+        p_ncaa_avg_in_zone_whiff_pct: "16.4",
+        p_ncaa_avg_chase_pct: "23.1",
+        p_ncaa_avg_barrel_pct: "17.3",
+        p_ncaa_avg_ld_pct: "20.9",
+        p_ncaa_avg_avg_ev: "86.2",
+        p_ncaa_avg_gb_pct: "43.2",
+        p_ncaa_avg_in_zone_pct: "47.2",
+        p_ncaa_avg_ev90: "103.1",
+        p_ncaa_avg_pull_pct: "36.5",
+        p_ncaa_avg_la_10_30_pct: "29.0",
+        p_ncaa_avg_whip_power_rating: "50",
+        p_ncaa_avg_k9_power_rating: "50",
+        p_ncaa_avg_bb9_power_rating: "50",
+        p_ncaa_avg_hr9_power_rating: "50",
+        p_sd_stuff_plus: "3.967566764",
+        p_sd_whiff_pct: "5.476169924",
+        p_sd_bb_pct: "2.92040411",
+        p_sd_hh_pct: "6.474203457",
+        p_sd_in_zone_whiff_pct: "4.299203457",
+        p_sd_chase_pct: "4.619392309",
+        p_sd_barrel_pct: "4.988140199",
+        p_sd_ld_pct: "3.580670928",
+        p_sd_avg_ev: "2.362900608",
+        p_sd_gb_pct: "6.958760046",
+        p_sd_in_zone_pct: "3.325412065",
+        p_sd_ev90: "1.767350585",
+        p_sd_pull_pct: "5.356686254",
+        p_sd_la_10_30_pct: "5.773803471",
+      };
+    } catch {
+      return defaultValues;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("admin_dashboard_pitching_power_equation_values_v1", JSON.stringify(editableValues));
+    } catch {
+      // ignore localStorage errors
+    }
+  }, [editableValues]);
+
+  const setEditable = (key: string, value: string) => {
+    setEditableValues((prev) => ({ ...prev, [key]: value }));
+  };
+  const sectionHeadingClass = "text-[11px] uppercase tracking-wide font-semibold text-foreground";
+  const sectionPanelClass = "rounded-md border bg-background/60 p-3 space-y-2";
+  const editableSectionHeader = (sectionKey: string, title = "Editable (Admin UI)") => {
+    const isEditable = !!editableSections[sectionKey];
+    return (
+      <div className="flex items-center justify-between">
+        <p className={sectionHeadingClass}>{title}</p>
+        <Button
+          type="button"
+          size="sm"
+          variant={isEditable ? "secondary" : "outline"}
+          className="h-6 px-2 text-[10px]"
+          onClick={() => setEditableSections((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }))}
+        >
+          {isEditable ? "Done" : "Edit"}
+        </Button>
+      </div>
+    );
+  };
+  const editableField = (sectionKey: string, key: string, label: string) => {
+    const isSectionEditable = !!editableSections[sectionKey];
+    return (
+      <div className="flex items-center justify-between gap-3">
+        <span>{label}</span>
+        <Input
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
+          spellCheck={false}
+          value={editableValues[key] ?? ""}
+          onChange={(e) => setEditable(key, e.target.value)}
+          readOnly={!isSectionEditable}
+          className="h-7 w-32 px-2 text-left font-mono text-xs read-only:cursor-default read-only:caret-transparent read-only:opacity-70"
+        />
+      </div>
+    );
+  };
+  const toNumber = (value: string | undefined, fallback: number) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const eraStuffWeight = toNumber(editableValues.p_era_stuff_plus_weight, 0.21);
+  const eraWhiffWeight = toNumber(editableValues.p_era_whiff_pct_weight, 0.23);
+  const eraBBWeight = toNumber(editableValues.p_era_bb_pct_weight, 0.17);
+  const eraHHWeight = toNumber(editableValues.p_era_hh_pct_weight, 0.07);
+  const eraInZoneWhiffWeight = toNumber(editableValues.p_era_in_zone_whiff_pct_weight, 0.12);
+  const eraChaseWeight = toNumber(editableValues.p_era_chase_pct_weight, 0.08);
+  const eraBarrelWeight = toNumber(editableValues.p_era_barrel_pct_weight, 0.12);
+  const fipHr9Weight = toNumber(editableValues.p_fip_hr9_power_rating_plus_weight, 0.45);
+  const fipBb9Weight = toNumber(editableValues.p_fip_bb9_power_rating_plus_weight, 0.30);
+  const fipK9Weight = toNumber(editableValues.p_fip_k9_power_rating_plus_weight, 0.25);
+  const whipBbWeight = toNumber(editableValues.p_whip_bb_pct_weight, 0.25);
+  const whipLdWeight = toNumber(editableValues.p_whip_ld_pct_weight, 0.20);
+  const whipAvgEvWeight = toNumber(editableValues.p_whip_avg_ev_weight, 0.15);
+  const whipWhiffWeight = toNumber(editableValues.p_whip_whiff_pct_weight, 0.25);
+  const whipGbWeight = toNumber(editableValues.p_whip_gb_pct_weight, 0.10);
+  const whipChaseWeight = toNumber(editableValues.p_whip_chase_pct_weight, 0.50);
+  const k9WhiffWeight = toNumber(editableValues.p_k9_whiff_pct_weight, 0.35);
+  const k9StuffWeight = toNumber(editableValues.p_k9_stuff_plus_weight, 0.30);
+  const k9InZoneWhiffWeight = toNumber(editableValues.p_k9_in_zone_whiff_pct_weight, 0.25);
+  const k9ChaseWeight = toNumber(editableValues.p_k9_chase_pct_weight, 0.10);
+  const bb9BbWeight = toNumber(editableValues.p_bb9_bb_pct_weight, 0.55);
+  const bb9InZoneWeight = toNumber(editableValues.p_bb9_in_zone_pct_weight, 0.30);
+  const bb9ChaseWeight = toNumber(editableValues.p_bb9_chase_pct_weight, 0.15);
+  const hr9BarrelWeight = toNumber(editableValues.p_hr9_barrel_pct_weight, 0.32);
+  const hr9Ev90Weight = toNumber(editableValues.p_hr9_ev90_weight, 0.24);
+  const hr9GbWeight = toNumber(editableValues.p_hr9_gb_pct_weight, 0.18);
+  const hr9PullWeight = toNumber(editableValues.p_hr9_pull_pct_weight, 0.14);
+  const hr9LaWeight = toNumber(editableValues.p_hr9_la_10_30_pct_weight, 0.12);
+  const eraPowerRatingAvg = toNumber(editableValues.p_era_ncaa_avg_power_rating, 50);
+  const whipPowerRatingAvg = toNumber(editableValues.p_ncaa_avg_whip_power_rating, 50);
+  const k9PowerRatingAvg = toNumber(editableValues.p_ncaa_avg_k9_power_rating, 50);
+  const bb9PowerRatingAvg = toNumber(editableValues.p_ncaa_avg_bb9_power_rating, 50);
+  const hr9PowerRatingAvg = toNumber(editableValues.p_ncaa_avg_hr9_power_rating, 50);
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-lg font-semibold">Pitching Power Rating Equations</h3>
+        <p className="text-sm text-muted-foreground">Pitching-side buildout scaffold matching the hitting equation structure.</p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">ERA Power Rating</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="bg-muted p-4 rounded-lg font-mono text-sm overflow-hidden cursor-default select-none">
+            <div className="whitespace-nowrap text-[13px] leading-tight">
+              <span className="text-muted-foreground">ERA Power Rating =</span>{" "}
+              ({eraStuffWeight.toFixed(2)} * Stuff+Score) + ({eraWhiffWeight.toFixed(2)} * Whiff%Score) + ({eraBBWeight.toFixed(2)} * BB%Score) + ({eraHHWeight.toFixed(2)} * HardHit%Score) + ({eraInZoneWhiffWeight.toFixed(2)} * InZoneWhiff%Score) + ({eraChaseWeight.toFixed(2)} * Chase%Score) + ({eraBarrelWeight.toFixed(2)} * Barrel%Score)
+            </div>
+            <div className="mt-2">
+              <span className="text-muted-foreground">ERA Power Rating+ =</span>{" "}
+              (ERA Power Rating / NCAA Average ERA Power Rating ({eraPowerRatingAvg.toFixed(0)})) * 100
+            </div>
+          </div>
+          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>Player-Specific Metrics</p>
+              <div className="ml-2 space-y-0.5">
+                <div>• Stuff+</div>
+                <div>• Whiff%</div>
+                <div>• BB%</div>
+                <div>• HardHit%</div>
+                <div>• InZoneWhiff%</div>
+                <div>• Chase%</div>
+                <div>• Barrel%</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              {editableSectionHeader("p_pr_era")}
+              <div className="space-y-1.5">
+                {editableField("p_pr_era", "p_era_ncaa_avg_power_rating", "NCAA Average ERA Power Rating")}
+                {editableField("p_pr_era", "p_era_stuff_plus_weight", "Stuff+ Weight")}
+                {editableField("p_pr_era", "p_era_whiff_pct_weight", "Whiff% Weight")}
+                {editableField("p_pr_era", "p_era_bb_pct_weight", "BB% Weight")}
+                {editableField("p_pr_era", "p_era_hh_pct_weight", "HardHit% Weight")}
+                {editableField("p_pr_era", "p_era_in_zone_whiff_pct_weight", "InZoneWhiff% Weight")}
+                {editableField("p_pr_era", "p_era_chase_pct_weight", "Chase% Weight")}
+                {editableField("p_pr_era", "p_era_barrel_pct_weight", "Barrel% Weight")}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">FIP Power Rating+</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="bg-muted p-4 rounded-lg font-mono text-sm overflow-hidden cursor-default select-none">
+            <div className="whitespace-nowrap text-[13px] leading-tight">
+              <span className="text-muted-foreground">FIP Power Rating+ =</span>{" "}
+              ({fipHr9Weight.toFixed(2)} * HR/9 Power Rating+) + ({fipBb9Weight.toFixed(2)} * BB/9 Power Rating+) + ({fipK9Weight.toFixed(2)} * K/9 Power Rating+)
+            </div>
+          </div>
+          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>Player-Specific Metrics</p>
+              <div className="ml-2 space-y-0.5">
+                <div>• HR/9 Power Rating+</div>
+                <div>• BB/9 Power Rating+</div>
+                <div>• K/9 Power Rating+</div>
+                <div>• No score equations needed (derived from existing power ratings).</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              {editableSectionHeader("p_pr_fip")}
+              <div className="space-y-1.5">
+                {editableField("p_pr_fip", "p_fip_hr9_power_rating_plus_weight", "HR/9 Power Rating+ Weight")}
+                {editableField("p_pr_fip", "p_fip_bb9_power_rating_plus_weight", "BB/9 Power Rating+ Weight")}
+                {editableField("p_pr_fip", "p_fip_k9_power_rating_plus_weight", "K/9 Power Rating+ Weight")}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">WHIP Power Rating</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="bg-muted p-4 rounded-lg font-mono text-sm overflow-hidden cursor-default select-none">
+            <div className="whitespace-nowrap text-[13px] leading-tight">
+              <span className="text-muted-foreground">WHIP Power Rating =</span>{" "}
+              ({whipBbWeight.toFixed(2)} * BB%Score) + ({whipLdWeight.toFixed(2)} * LineDrive%Score) + ({whipAvgEvWeight.toFixed(2)} * AvgEVScore) + ({whipWhiffWeight.toFixed(2)} * Whiff%Score) + ({whipGbWeight.toFixed(2)} * GB%Score) + ({whipChaseWeight.toFixed(2)} * Chase%Score)
+            </div>
+            <div className="mt-2">
+              <span className="text-muted-foreground">WHIP Power Rating+ =</span>{" "}
+              (WHIP Power Rating / NCAA Avg. WHIP Power Rating ({whipPowerRatingAvg.toFixed(0)})) * 100
+            </div>
+          </div>
+          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>Player-Specific Metrics</p>
+              <div className="ml-2 space-y-0.5">
+                <div>• BB%</div>
+                <div>• LineDrive%</div>
+                <div>• AvgEV</div>
+                <div>• Whiff%</div>
+                <div>• GB%</div>
+                <div>• Chase%</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              {editableSectionHeader("p_pr_whip")}
+              <div className="space-y-1.5">
+                {editableField("p_pr_whip", "p_ncaa_avg_whip_power_rating", "NCAA Average WHIP Power Rating")}
+                {editableField("p_pr_whip", "p_whip_bb_pct_weight", "BB% Weight")}
+                {editableField("p_pr_whip", "p_whip_ld_pct_weight", "LineDrive% Weight")}
+                {editableField("p_pr_whip", "p_whip_avg_ev_weight", "AvgEV Weight")}
+                {editableField("p_pr_whip", "p_whip_whiff_pct_weight", "Whiff% Weight")}
+                {editableField("p_pr_whip", "p_whip_gb_pct_weight", "GB% Weight")}
+                {editableField("p_pr_whip", "p_whip_chase_pct_weight", "Chase% Weight")}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">K/9 Power Rating</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="bg-muted p-4 rounded-lg font-mono text-sm overflow-hidden cursor-default select-none">
+            <div className="whitespace-nowrap text-[13px] leading-tight">
+              <span className="text-muted-foreground">K/9 Power Rating =</span>{" "}
+              ({k9WhiffWeight.toFixed(2)} * Whiff%Score) + ({k9StuffWeight.toFixed(2)} * Stuff+Score) + ({k9InZoneWhiffWeight.toFixed(2)} * InZoneWhiff%Score) + ({k9ChaseWeight.toFixed(2)} * Chase%Score)
+            </div>
+            <div className="mt-2">
+              <span className="text-muted-foreground">K/9 Power Rating+ =</span>{" "}
+              (K/9 Power Rating / NCAA Average K/9 Power Rating ({k9PowerRatingAvg.toFixed(0)})) * 100
+            </div>
+          </div>
+          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>Player-Specific Metrics</p>
+              <div className="ml-2 space-y-0.5">
+                <div>• Whiff%</div>
+                <div>• Stuff+</div>
+                <div>• InZoneWhiff%</div>
+                <div>• Chase%</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              {editableSectionHeader("p_pr_k9")}
+              <div className="space-y-1.5">
+                {editableField("p_pr_k9", "p_ncaa_avg_k9_power_rating", "NCAA Average K/9 Power Rating")}
+                {editableField("p_pr_k9", "p_k9_whiff_pct_weight", "Whiff% Weight")}
+                {editableField("p_pr_k9", "p_k9_stuff_plus_weight", "Stuff+ Weight")}
+                {editableField("p_pr_k9", "p_k9_in_zone_whiff_pct_weight", "InZoneWhiff% Weight")}
+                {editableField("p_pr_k9", "p_k9_chase_pct_weight", "Chase% Weight")}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">BB/9 Power Rating</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="bg-muted p-4 rounded-lg font-mono text-sm overflow-hidden cursor-default select-none">
+            <div className="whitespace-nowrap text-[13px] leading-tight">
+              <span className="text-muted-foreground">BB/9 Power Rating =</span>{" "}
+              ({bb9BbWeight.toFixed(2)} * BB%Score) + ({bb9InZoneWeight.toFixed(2)} * In Zone%Score) + ({bb9ChaseWeight.toFixed(2)} * Chase%Score)
+            </div>
+            <div className="mt-2">
+              <span className="text-muted-foreground">BB/9 Power Rating+ =</span>{" "}
+              (BB/9 Power Rating / NCAA Average BB/9 PR ({bb9PowerRatingAvg.toFixed(0)})) * 100
+            </div>
+          </div>
+          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>Player-Specific Metrics</p>
+              <div className="ml-2 space-y-0.5">
+                <div>• BB%</div>
+                <div>• In Zone%</div>
+                <div>• Chase%</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              {editableSectionHeader("p_pr_bb9")}
+              <div className="space-y-1.5">
+                {editableField("p_pr_bb9", "p_ncaa_avg_bb9_power_rating", "NCAA Average BB/9 Power Rating")}
+                {editableField("p_pr_bb9", "p_bb9_bb_pct_weight", "BB% Weight")}
+                {editableField("p_pr_bb9", "p_bb9_in_zone_pct_weight", "In Zone% Weight")}
+                {editableField("p_pr_bb9", "p_bb9_chase_pct_weight", "Chase% Weight")}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">HR/9 Power Rating</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="bg-muted p-4 rounded-lg font-mono text-sm overflow-hidden cursor-default select-none">
+            <div className="whitespace-nowrap text-[13px] leading-tight">
+              <span className="text-muted-foreground">HR/9 Power Rating =</span>{" "}
+              ({hr9BarrelWeight.toFixed(2)} * Barrel%Score) + ({hr9Ev90Weight.toFixed(2)} * EV90Score) + ({hr9GbWeight.toFixed(2)} * GB%Score) + ({hr9PullWeight.toFixed(2)} * Pull%Score) + ({hr9LaWeight.toFixed(2)} * LA 10-30%Score)
+            </div>
+            <div className="mt-2">
+              <span className="text-muted-foreground">HR/9 Power Rating+ =</span>{" "}
+              (HR/9 Power Rating / NCAA Avg HR/9 Power Rating ({hr9PowerRatingAvg.toFixed(0)})) * 100
+            </div>
+          </div>
+          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>Player-Specific Metrics</p>
+              <div className="ml-2 space-y-0.5">
+                <div>• Barrel%</div>
+                <div>• EV90</div>
+                <div>• GB%</div>
+                <div>• Pull%</div>
+                <div>• LA 10-30%</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              {editableSectionHeader("p_pr_hr9")}
+              <div className="space-y-1.5">
+                {editableField("p_pr_hr9", "p_ncaa_avg_hr9_power_rating", "NCAA Average HR/9 Power Rating")}
+                {editableField("p_pr_hr9", "p_hr9_barrel_pct_weight", "Barrel% Weight")}
+                {editableField("p_pr_hr9", "p_hr9_ev90_weight", "EV90 Weight")}
+                {editableField("p_pr_hr9", "p_hr9_gb_pct_weight", "GB% Weight")}
+                {editableField("p_pr_hr9", "p_hr9_pull_pct_weight", "Pull% Weight")}
+                {editableField("p_pr_hr9", "p_hr9_la_10_30_pct_weight", "LA 10-30% Weight")}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Score Equations Reference</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2 xl:grid-cols-3">
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>ERA Power Rating Scores</p>
+              <div className="space-y-2 font-mono leading-relaxed">
+                <div className="rounded bg-background/70 px-2 py-1 break-words">Stuff+ Score = NORM.DIST(Stuff+, NCAAAvgStuff+, Stuff+StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">Whiff% Score = NORM.DIST(Whiff%, NCAAAvgWhiff%, Whiff%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">BB% Score = 100 - (NORM.DIST(BB%, NCAAAvgBB%, BB%StdDev, TRUE) × 100)</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">HH% Score = 100 - (NORM.DIST(HH%, NCAAAvgHH%, HH%StdDev, TRUE) × 100)</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">In Zone Whiff Score = NORM.DIST(InZoneWhiff%, NCAAAvgInZoneWhiff%, InZoneWhiff%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">Chase% Score = NORM.DIST(Chase%, NCAAAvgChase%, Chase%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">Barrel% Score = 100 - (NORM.DIST(Barrel%, NCAAAvgBarrel%, Barrel%StdDev, TRUE) × 100)</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>WHIP Power Rating Scores</p>
+              <div className="space-y-2 font-mono leading-relaxed">
+                <div className="rounded bg-background/70 px-2 py-1 break-words">BB% Score = 100 - (NORM.DIST(BB%, NCAAAvgBB%, BB%StdDev, TRUE) × 100)</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">LineDrive% Score = 100 - (NORM.DIST(LineDrive%, NCAAAvgLineDrive%, LineDrive%StdDev, TRUE) × 100)</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">AvgEV Score = 100 - (NORM.DIST(AvgEV, NCAAAvgAvgEV, AvgEVStdDev, TRUE) × 100)</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">Whiff% Score = NORM.DIST(Whiff%, NCAAAvgWhiff%, Whiff%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">GB% Score = NORM.DIST(GB%, NCAAAvgGB%, GB%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">Chase% Score = NORM.DIST(Chase%, NCAAAvgChase%, Chase%StdDev, TRUE) × 100</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>K/9 Power Rating Scores</p>
+              <div className="space-y-2 font-mono leading-relaxed">
+                <div className="rounded bg-background/70 px-2 py-1 break-words">Whiff% Score = NORM.DIST(Whiff%, NCAAAvgWhiff%, Whiff%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">Stuff+ Score = NORM.DIST(Stuff+, NCAAAvgStuff+, Stuff+StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">InZoneWhiff% Score = NORM.DIST(InZoneWhiff%, NCAAAvgInZoneWhiff%, InZoneWhiff%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">Chase% Score = NORM.DIST(Chase%, NCAAAvgChase%, Chase%StdDev, TRUE) × 100</div>
+              </div>
+            </div>
+          </div>
+          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2 xl:max-w-[66%] xl:mx-auto">
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>BB/9 Power Rating Scores</p>
+              <div className="space-y-2 font-mono leading-relaxed">
+                <div className="rounded bg-background/70 px-2 py-1 break-words">BB% Score = 100 - (NORM.DIST(BB%, NCAAAvgBB%, BB%StdDev, TRUE) × 100)</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">In Zone% Score = NORM.DIST(InZone%, NCAAAvgInZone%, InZone%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">Chase% Score = NORM.DIST(Chase%, NCAAAvgChase%, Chase%StdDev, TRUE) × 100</div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              <p className={sectionHeadingClass}>HR/9 Power Rating Scores</p>
+              <div className="space-y-2 font-mono leading-relaxed">
+                <div className="rounded bg-background/70 px-2 py-1 break-words">Barrel% Score = 100 - (NORM.DIST(Barrel%, NCAAAvgBarrel%, Barrel%StdDev, TRUE) × 100)</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">EV90 Score = NORM.DIST(EV90, NCAAAvgEV90, EV90StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">GB% Score = NORM.DIST(GB%, NCAAAvgGB%, GB%StdDev, TRUE) × 100</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">Pull% Score = 100 - (NORM.DIST(Pull%, NCAAAvgPull%, Pull%StdDev, TRUE) × 100)</div>
+                <div className="rounded bg-background/70 px-2 py-1 break-words">LA 10-30% Score = NORM.DIST(LA10-30%, NCAAAvgLA10-30%, LA10-30%StdDev, TRUE) × 100</div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Power Rating Specific Standard Deviations</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Editable player-metric standard deviations used in each pitching power rating.
+          </p>
+          <div className={sectionPanelClass}>
+            {editableSectionHeader("p_pr_rating_std_dev", "Standard Deviations (Editable, System-Wide)")}
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">ERA Power Rating</p>
+                {editableField("p_pr_rating_std_dev", "p_sd_stuff_plus", "Stuff+ Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_whiff_pct", "Whiff% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_bb_pct", "BB% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_hh_pct", "HardHit% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_in_zone_whiff_pct", "InZoneWhiff% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_chase_pct", "Chase% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_barrel_pct", "Barrel% Std Dev")}
+              </div>
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">WHIP Power Rating</p>
+                {editableField("p_pr_rating_std_dev", "p_sd_bb_pct", "BB% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_ld_pct", "LineDrive% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_avg_ev", "AvgEV Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_whiff_pct", "Whiff% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_gb_pct", "GB% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_chase_pct", "Chase% Std Dev")}
+              </div>
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">K/9 Power Rating</p>
+                {editableField("p_pr_rating_std_dev", "p_sd_whiff_pct", "Whiff% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_stuff_plus", "Stuff+ Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_in_zone_whiff_pct", "InZoneWhiff% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_chase_pct", "Chase% Std Dev")}
+              </div>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:max-w-[66%] xl:mx-auto">
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">BB/9 Power Rating</p>
+                {editableField("p_pr_rating_std_dev", "p_sd_bb_pct", "BB% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_in_zone_pct", "InZone% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_chase_pct", "Chase% Std Dev")}
+              </div>
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">HR/9 Power Rating</p>
+                {editableField("p_pr_rating_std_dev", "p_sd_barrel_pct", "Barrel% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_ev90", "EV90 Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_gb_pct", "GB% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_pull_pct", "Pull% Std Dev")}
+                {editableField("p_pr_rating_std_dev", "p_sd_la_10_30_pct", "LA 10-30% Std Dev")}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Power Rating Specific NCAA Averages</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Editable player-metric NCAA averages used in each pitching power rating.
+          </p>
+          <div className={sectionPanelClass}>
+            {editableSectionHeader("p_pr_rating_ncaa_avg", "NCAA Averages (Editable, System-Wide)")}
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">ERA Power Rating</p>
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_stuff_plus", "NCAA Average Stuff+")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_whiff_pct", "NCAA Average Whiff%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_bb_pct", "NCAA Average BB%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_hh_pct", "NCAA Average HardHit%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_in_zone_whiff_pct", "NCAA Average InZoneWhiff%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_chase_pct", "NCAA Average Chase%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_barrel_pct", "NCAA Average Barrel%")}
+              </div>
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">WHIP Power Rating</p>
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_bb_pct", "NCAA Average BB%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_ld_pct", "NCAA Average LineDrive%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_avg_ev", "NCAA Average AvgEV")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_whiff_pct", "NCAA Average Whiff%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_gb_pct", "NCAA Average GB%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_chase_pct", "NCAA Average Chase%")}
+              </div>
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">K/9 Power Rating</p>
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_whiff_pct", "NCAA Average Whiff%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_stuff_plus", "NCAA Average Stuff+")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_in_zone_whiff_pct", "NCAA Average InZoneWhiff%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_chase_pct", "NCAA Average Chase%")}
+              </div>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:max-w-[66%] xl:mx-auto">
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">BB/9 Power Rating</p>
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_bb_pct", "NCAA Average BB%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_in_zone_pct", "NCAA Average InZone%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_chase_pct", "NCAA Average Chase%")}
+              </div>
+              <div className="rounded-md border bg-background/70 p-3 space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-foreground">HR/9 Power Rating</p>
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_barrel_pct", "NCAA Average Barrel%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_ev90", "NCAA Average EV90")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_gb_pct", "NCAA Average GB%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_pull_pct", "NCAA Average Pull%")}
+                {editableField("p_pr_rating_ncaa_avg", "p_ncaa_avg_la_10_30_pct", "NCAA Average LA 10-30%")}
               </div>
             </div>
           </div>
@@ -4650,8 +5308,8 @@ function DataStorage2025Tab() {
   }, [search, showMissingOnly, selectedSeason, storageView]);
   const statsTotalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const powerTotalPages = Math.max(1, Math.ceil(filteredPowerRows.length / PAGE_SIZE));
-  const safeStatsPage = Math.min(statsPage, statsTotalPages);
-  const safePowerPage = Math.min(powerPage, powerTotalPages);
+  const safeStatsPage = Math.max(1, Math.min(statsPage, statsTotalPages));
+  const safePowerPage = Math.max(1, Math.min(powerPage, powerTotalPages));
   const pagedStatsRows = useMemo(() => {
     const start = (safeStatsPage - 1) * PAGE_SIZE;
     return filteredRows.slice(start, start + PAGE_SIZE);
@@ -5473,14 +6131,7 @@ function DataStorage2025Tab() {
                   <PitchingStatsStorageTable season={selectedSeason} />
                 </TabsContent>
                 <TabsContent value="power" className="mt-3">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-base">Pitching Power Ratings Storage ({selectedSeason})</CardTitle>
-                      <CardDescription>
-                        Pitching power-ratings table scaffold is ready; pitching power inputs can be added next.
-                      </CardDescription>
-                    </CardHeader>
-                  </Card>
+                  <PitchingPowerRatingsStorageTable season={selectedSeason} />
                 </TabsContent>
               </Tabs>
             </TabsContent>
@@ -5588,6 +6239,7 @@ export default function AdminDashboard() {
           <TabsContent value="equations">
             <HittingPitchingSection
               hitting={<EquationConstantsTab />}
+              pitching={<PitchingEquationsTab />}
               pitchingTitle="Equations — Pitching"
             />
           </TabsContent>
@@ -5601,6 +6253,7 @@ export default function AdminDashboard() {
           <TabsContent value="power-ratings">
             <HittingPitchingSection
               hitting={<AdminPowerRatingsTab />}
+              pitching={<PitchingPowerRatingsTab />}
               pitchingTitle="Power Ratings — Pitching"
             />
           </TabsContent>

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -43,6 +44,7 @@ type SortKey =
   | "p_war"
   | "p_nil";
 type SortDir = "asc" | "desc";
+const FAST_DB_SORT_KEYS: SortKey[] = ["p_avg", "p_obp", "p_slg", "p_ops", "p_iso", "p_wrc_plus", "p_war"];
 
 interface ReturnerPlayer {
   id: string;
@@ -77,6 +79,20 @@ interface ReturnerPlayer {
   };
 }
 
+interface PitchingDashboardRow {
+  id: string;
+  playerName: string;
+  team: string | null;
+  conference: string | null;
+  handedness: string | null;
+  era: number | null;
+  fip: number | null;
+  whip: number | null;
+  k9: number | null;
+  bb9: number | null;
+  hr9: number | null;
+}
+
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
   return v >= 1 && decimals === 3 ? v.toFixed(3) : v.toFixed(decimals);
@@ -97,6 +113,11 @@ const compactDollar = new Intl.NumberFormat("en-US", {
 const moneyFormat = (v: number | null | undefined) => {
   if (v == null) return "—";
   return compactDollar.format(v).replace("k", "K").replace("m", "M").replace("b", "B");
+};
+const toNum = (v: string | null | undefined) => {
+  if (v == null) return null;
+  const n = Number(String(v).replace(/[%,$]/g, "").trim());
+  return Number.isFinite(n) ? n : null;
 };
 
 const computeDerived = (avg: number | null, obp: number | null, slg: number | null) => {
@@ -204,6 +225,10 @@ for (const row of powerRatings2025Seed as Array<any>) {
   if (!powerSeedByNameTeam.has(ntKey)) powerSeedByNameTeam.set(ntKey, row);
 }
 
+const PITCHING_TEAM_ALIASES: Record<string, string> = {
+  "unc charlotte": "Charlotte",
+};
+
 export default function ReturningPlayers() {
   const queryClient = useQueryClient();
   const applyPredictionPatchToCache = useCallback((predictionId: string, patch: Partial<ReturnerPlayer["prediction"]>) => {
@@ -238,6 +263,10 @@ export default function ReturningPlayers() {
   const [bulkEditMode, setBulkEditMode] = useState(false);
   const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string | null; position?: string | null }>>({});
   const [showMissingOnly, setShowMissingOnly] = useState(false);
+  const [dashboardView, setDashboardView] = useState<"hitting" | "pitching">("hitting");
+  const [pitchingSearch, setPitchingSearch] = useState("");
+  const [pitchingPage, setPitchingPage] = useState(1);
+  const [pitchingPageSize, setPitchingPageSize] = useState<number>(100);
   const normalize = (value: string | null | undefined) =>
     (value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 
@@ -318,9 +347,9 @@ export default function ReturningPlayers() {
     queryKey: [
       "returning-players-2025-unified",
       {
-        scope: sortKey === "name" ? "paged" : "global",
-        page: sortKey === "name" ? page : null,
-        pageSize: sortKey === "name" ? pageSize : null,
+        scope: sortKey === "name" || FAST_DB_SORT_KEYS.includes(sortKey) ? "paged" : "global",
+        page: sortKey === "name" || FAST_DB_SORT_KEYS.includes(sortKey) ? page : null,
+        pageSize: sortKey === "name" || FAST_DB_SORT_KEYS.includes(sortKey) ? pageSize : null,
         positionFilter,
         showMissingOnly,
         debouncedSearch,
@@ -419,7 +448,58 @@ export default function ReturningPlayers() {
         };
       };
 
-      // For stat-column sorts, compute sort globally, then page that sorted set.
+      // Fast path: server-side paging for sortable prediction columns when no extra filters are active.
+      // This keeps the player dashboard responsive without loading the entire dataset.
+      if (
+        FAST_DB_SORT_KEYS.includes(sortKey) &&
+        positionFilter === "all" &&
+        !showMissingOnly &&
+        !debouncedSearch
+      ) {
+        const orderColumn =
+          sortKey === "p_war"
+            ? "p_wrc_plus" // pWAR is monotonic from pWRC+ in current model
+            : sortKey;
+        const from = (page - 1) * pageSize;
+        const to = from + pageSize - 1;
+        const { data: pageData, error: pageErr, count } = await supabase
+          .from("player_predictions")
+          .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal)", { count: "exact" })
+          .in("model_type", ["returner", "transfer"])
+          .eq("variant", "regular")
+          .in("status", ["active", "departed"])
+          .order(orderColumn, { ascending: sortDir === "asc", nullsFirst: false })
+          .range(from, to);
+        if (pageErr) throw pageErr;
+
+        const playerIds = (pageData || []).map((r: any) => r.player_id).filter(Boolean);
+        const nilByPlayer = new Map<string, number | null>();
+        if (playerIds.length > 0) {
+          const NIL_BATCH = 300;
+          const nilRowsAll: Array<{ player_id: string; estimated_value: number | null; season: number | null }> = [];
+          for (let i = 0; i < playerIds.length; i += NIL_BATCH) {
+            const ids = playerIds.slice(i, i + NIL_BATCH);
+            const { data: nilRows, error: nilErr } = await supabase
+              .from("nil_valuations")
+              .select("player_id, estimated_value, season")
+              .in("player_id", ids);
+            if (nilErr) continue;
+            nilRowsAll.push(...((nilRows || []) as Array<{ player_id: string; estimated_value: number | null; season: number | null }>));
+          }
+          const bySeason = new Map<string, { season: number; value: number | null }>();
+          for (const row of nilRowsAll) {
+            const curr = bySeason.get(row.player_id);
+            const season = Number(row.season) || 0;
+            if (!curr || season > curr.season) bySeason.set(row.player_id, { season, value: row.estimated_value });
+          }
+          for (const [pid, val] of bySeason.entries()) nilByPlayer.set(pid, val.value);
+        }
+
+        const rows = (pageData || []).map((row: any) => toReturnerRow(row, row.players, nilByPlayer));
+        return { rows, total: count ?? rows.length };
+      }
+
+      // For other stat-column sorts, compute sort globally, then page that sorted set.
       if (sortKey !== "name") {
         let allData: any[] = [];
         let predFrom = 0;
@@ -827,7 +907,7 @@ export default function ReturningPlayers() {
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pagedPlayers = useMemo(() => {
-    if (sortKey === "name") return sortedRows;
+    if (sortKey === "name" || FAST_DB_SORT_KEYS.includes(sortKey)) return sortedRows;
     const from = (currentPage - 1) * pageSize;
     const to = from + pageSize;
     return sortedRows.slice(from, to);
@@ -856,6 +936,124 @@ export default function ReturningPlayers() {
       setSortDir("desc");
     }
   };
+
+  const teamsByNorm = useMemo(() => {
+    const map = new Map<string, { name: string; conference: string | null }>();
+    for (const t of teamsDirectory) {
+      const key = normalize(t.name);
+      if (!key) continue;
+      if (!map.has(key)) map.set(key, t);
+    }
+    return map;
+  }, [teamsDirectory]);
+  const normalizePitchingTeam = useCallback((team: string | null | undefined) => {
+    const raw = (team || "").trim();
+    if (!raw) return "";
+    const alias = PITCHING_TEAM_ALIASES[normalize(raw)];
+    return alias || raw;
+  }, []);
+  const pitchingRows = useMemo<PitchingDashboardRow[]>(() => {
+    const raw = localStorage.getItem("pitching_stats_storage_2025_v1");
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw) as { rows?: Array<{ id?: string; values?: string[] }> };
+      const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
+      return rows
+        .map((r, idx) => {
+          const values = Array.isArray(r.values) ? r.values : [];
+          const playerName = (values[0] || "").trim();
+          const normalizedTeam = normalizePitchingTeam(values[1]);
+          const teamMatch = teamsByNorm.get(normalize(normalizedTeam));
+          const era = toNum(values[3]);
+          const fip = toNum(values[4]);
+          const whip = toNum(values[5]);
+          const k9 = toNum(values[6]);
+          const bb9 = toNum(values[7]);
+          const hr9 = toNum(values[8]);
+          return {
+            id: r.id || `pitching-${idx}`,
+            playerName,
+            team: normalizedTeam || null,
+            conference: teamMatch?.conference ?? null,
+            handedness: (values[2] || "").trim() || null,
+            era,
+            fip,
+            whip,
+            k9,
+            bb9,
+            hr9,
+          };
+        })
+        .filter((r) => !!r.playerName);
+    } catch {
+      return [];
+    }
+  }, [normalizePitchingTeam, teamsByNorm]);
+  const filteredPitchingRows = useMemo(() => {
+    const q = pitchingSearch.trim().toLowerCase();
+    if (!q) return pitchingRows;
+    return pitchingRows.filter((r) => {
+      return (
+        r.playerName.toLowerCase().includes(q) ||
+        (r.team || "").toLowerCase().includes(q) ||
+        (r.conference || "").toLowerCase().includes(q) ||
+        (r.handedness || "").toLowerCase().includes(q)
+      );
+    });
+  }, [pitchingRows, pitchingSearch]);
+  useEffect(() => {
+    setPitchingPage(1);
+  }, [pitchingSearch, pitchingPageSize]);
+  const pitchingTotal = filteredPitchingRows.length;
+  const pitchingTotalPages = Math.max(1, Math.ceil(pitchingTotal / pitchingPageSize));
+  const pitchingCurrentPage = Math.min(pitchingPage, pitchingTotalPages);
+  const pagedPitchingRows = useMemo(() => {
+    const from = (pitchingCurrentPage - 1) * pitchingPageSize;
+    const to = from + pitchingPageSize;
+    return filteredPitchingRows.slice(from, to);
+  }, [filteredPitchingRows, pitchingCurrentPage, pitchingPageSize]);
+  useEffect(() => {
+    if (pitchingPage > pitchingTotalPages) setPitchingPage(pitchingTotalPages);
+  }, [pitchingPage, pitchingTotalPages]);
+  const pitchingVisiblePages = useMemo(() => {
+    if (pitchingTotalPages <= 11) return Array.from({ length: pitchingTotalPages }, (_, i) => i + 1);
+    const pages = new Set<number>([
+      1, 2, 3, 4, 5,
+      pitchingTotalPages - 1, pitchingTotalPages,
+      pitchingCurrentPage - 2, pitchingCurrentPage - 1, pitchingCurrentPage, pitchingCurrentPage + 1, pitchingCurrentPage + 2,
+    ]);
+    return Array.from(pages)
+      .filter((p) => p >= 1 && p <= pitchingTotalPages)
+      .sort((a, b) => a - b);
+  }, [pitchingCurrentPage, pitchingTotalPages]);
+  const pitchingMissingTeamCount = useMemo(
+    () => pitchingRows.filter((r) => !r.team || !r.team.trim()).length,
+    [pitchingRows],
+  );
+  useEffect(() => {
+    const key = "pitching_stats_storage_2025_v1";
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as { headers?: string[]; rows?: Array<{ id?: string; values?: string[] }> };
+      const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
+      let changed = false;
+      const nextRows = rows.map((r) => {
+        const values = Array.isArray(r.values) ? [...r.values] : [];
+        const before = (values[1] || "").trim();
+        const after = normalizePitchingTeam(before);
+        if (after !== before) {
+          changed = true;
+          values[1] = after;
+        }
+        return { ...r, values };
+      });
+      if (!changed) return;
+      localStorage.setItem(key, JSON.stringify({ headers: parsed.headers, rows: nextRows }));
+    } catch {
+      // ignore localStorage parse errors
+    }
+  }, [normalizePitchingTeam]);
 
   // Summary stats
   const avgOps = players.length
@@ -934,6 +1132,15 @@ export default function ReturningPlayers() {
           </div>
         </div>
 
+        <Tabs value={dashboardView} onValueChange={(v) => setDashboardView(v as "hitting" | "pitching")}>
+          <TabsList>
+            <TabsTrigger value="hitting">Hitting</TabsTrigger>
+            <TabsTrigger value="pitching">Pitching</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {dashboardView === "hitting" ? (
+          <>
         {/* Summary cards */}
         <div className="grid gap-4 sm:grid-cols-3">
           <Card>
@@ -1271,6 +1478,138 @@ export default function ReturningPlayers() {
             )}
           </CardContent>
         </Card>
+          </>
+        ) : (
+          <Card>
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <CardTitle className="text-base">Pitching Dashboard (2025)</CardTitle>
+                <CardDescription>Prior stats only. Projected outcomes and scouting grades are intentionally blank for now.</CardDescription>
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="flex items-center gap-1 overflow-x-auto max-w-[360px]">
+                  {pitchingVisiblePages.map((p, i) => {
+                    const prev = pitchingVisiblePages[i - 1];
+                    const showGap = i > 0 && prev != null && p - prev > 1;
+                    return (
+                      <div key={p} className="flex items-center gap-1">
+                        {showGap ? <span className="px-1 text-muted-foreground text-xs">...</span> : null}
+                        <Button
+                          variant={p === pitchingCurrentPage ? "default" : "outline"}
+                          size="sm"
+                          className="h-6 min-w-6 px-1.5 text-[10px]"
+                          onClick={() => setPitchingPage(p)}
+                        >
+                          {p}
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="relative w-full sm:w-64">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search pitchers, teams..."
+                    value={pitchingSearch}
+                    onChange={(e) => setPitchingSearch(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="px-4 pt-3 pb-2 text-xs text-muted-foreground">
+                {pitchingMissingTeamCount === 0 ? (
+                  <span>Team check: all pitchers have a team.</span>
+                ) : (
+                  <span className="text-destructive">Team check: {pitchingMissingTeamCount} pitcher(s) missing a team.</span>
+                )}
+              </div>
+              {pagedPitchingRows.length === 0 ? (
+                <div className="flex items-center justify-center py-16 text-muted-foreground">No pitchers found</div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto overflow-y-auto max-h-[70vh]">
+                    <Table>
+                      <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
+                        <TableRow>
+                          <TableHead className="min-w-[160px] sticky left-0 z-30 bg-background">Player</TableHead>
+                          <TableHead className="text-right">pERA</TableHead>
+                          <TableHead className="text-right">pFIP</TableHead>
+                          <TableHead className="text-right">pWHIP</TableHead>
+                          <TableHead className="text-right">pK/9</TableHead>
+                          <TableHead className="text-right">pBB/9</TableHead>
+                          <TableHead className="text-right">pHR/9</TableHead>
+                          <TableHead className="text-right">pRV+</TableHead>
+                          <TableHead className="text-right">pWAR</TableHead>
+                          <TableHead className="text-right">Market Value</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pagedPitchingRows.map((r) => (
+                          <TableRow key={r.id}>
+                            <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
+                              <Link
+                                to={`/dashboard/pitcher/storage__${encodeURIComponent(r.playerName)}__${encodeURIComponent(r.team || "")}`}
+                                className="hover:text-primary hover:underline transition-colors"
+                              >
+                                {r.playerName}
+                              </Link>
+                              <div className="text-xs text-muted-foreground">
+                                {[r.handedness, r.team].filter(Boolean).join(" · ") || "—"}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
+                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
+                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
+                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
+                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
+                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
+                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
+                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
+                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <div className="flex flex-col gap-2 border-t px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                    <div className="text-muted-foreground">
+                      Showing{" "}
+                      <span className="font-medium text-foreground">
+                        {pitchingTotal === 0 ? 0 : ((pitchingCurrentPage - 1) * pitchingPageSize) + 1}
+                      </span>
+                      {" "}-{" "}
+                      <span className="font-medium text-foreground">
+                        {Math.min(pitchingCurrentPage * pitchingPageSize, pitchingTotal)}
+                      </span>
+                      {" "}of{" "}
+                      <span className="font-medium text-foreground">{pitchingTotal}</span>
+                      {" "}pitchers
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Rows</span>
+                      <Select
+                        value={String(pitchingPageSize)}
+                        onValueChange={(v) => setPitchingPageSize(Number(v))}
+                      >
+                        <SelectTrigger className="h-8 w-[88px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="50">50</SelectItem>
+                          <SelectItem value="100">100</SelectItem>
+                          <SelectItem value="250">250</SelectItem>
+                          <SelectItem value="500">500</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
     </DashboardLayout>
   );

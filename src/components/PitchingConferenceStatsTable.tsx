@@ -7,6 +7,7 @@ import { Upload, Search, Edit2, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { readPitchingWeights } from "@/lib/pitchingEquations";
 
 type PitchingRow = {
   conference: string;
@@ -155,6 +156,36 @@ const calcScore = (baseline: number, value: number | null, invert = false) => {
   return roundWhole((baseline / value) * 100); // ERA/FIP/WHIP/BB9/HR9 (lower is better)
 };
 
+const calcEraPlus = (era: number | null, ncaaAvgEra: number, ncaaEraSd: number, scale: number) => {
+  if (era == null || ncaaEraSd === 0) return null;
+  return roundWhole(100 + (((ncaaAvgEra - era) / ncaaEraSd) * scale));
+};
+
+const calcFipPlus = (fip: number | null, ncaaAvgFip: number, ncaaFipSd: number, scale: number) => {
+  if (fip == null || ncaaFipSd === 0) return null;
+  return roundWhole(100 + (((ncaaAvgFip - fip) / ncaaFipSd) * scale));
+};
+
+const calcWhipPlus = (whip: number | null, ncaaAvgWhip: number, ncaaWhipSd: number, scale: number) => {
+  if (whip == null || ncaaWhipSd === 0) return null;
+  return roundWhole(100 + (((ncaaAvgWhip - whip) / ncaaWhipSd) * scale));
+};
+
+const calcK9Plus = (k9: number | null, ncaaAvgK9: number, ncaaK9Sd: number, scale: number) => {
+  if (k9 == null || ncaaK9Sd === 0) return null;
+  return roundWhole(100 + (((k9 - ncaaAvgK9) / ncaaK9Sd) * scale));
+};
+
+const calcBb9Plus = (bb9: number | null, ncaaAvgBb9: number, ncaaBb9Sd: number, scale: number) => {
+  if (bb9 == null || ncaaBb9Sd === 0) return null;
+  return roundWhole(100 + (((ncaaAvgBb9 - bb9) / ncaaBb9Sd) * scale));
+};
+
+const calcHr9Plus = (hr9: number | null, ncaaAvgHr9: number, ncaaHr9Sd: number, scale: number) => {
+  if (hr9 == null || ncaaHr9Sd === 0) return null;
+  return roundWhole(100 + (((ncaaAvgHr9 - hr9) / ncaaHr9Sd) * scale));
+};
+
 const fmt2 = (value: number | null) => (value == null ? "—" : Number(value).toFixed(2));
 
 const calcOffensiveEnvironment = (
@@ -183,6 +214,7 @@ export default function PitchingConferenceStatsTable() {
       return [];
     }
   });
+  const [weights] = useState(() => readPitchingWeights());
   const { data: hittingConferenceStats = [] } = useQuery({
     queryKey: ["conference_stats_stuff_plus_pitching_view"],
     queryFn: async () => {
@@ -411,12 +443,12 @@ export default function PitchingConferenceStatsTable() {
   );
 
   const score = (row: PitchingRow) => ({
-    eraPlus: calcScore(baselines.era, row.era, false),
-    fipPlus: calcScore(baselines.fip, row.fip, false),
-    whipPlus: calcScore(baselines.whip, row.whip, false),
-    k9Plus: calcScore(baselines.k9, row.k9, true),
-    bb9Plus: calcScore(baselines.bb9, row.bb9, false),
-    hr9Plus: calcScore(baselines.hr9, row.hr9, false),
+    eraPlus: calcEraPlus(row.era, weights.era_plus_ncaa_avg, weights.era_plus_ncaa_sd, weights.era_plus_scale),
+    fipPlus: calcFipPlus(row.fip, weights.fip_plus_ncaa_avg, weights.fip_plus_ncaa_sd, weights.fip_plus_scale),
+    whipPlus: calcWhipPlus(row.whip, weights.whip_plus_ncaa_avg, weights.whip_plus_ncaa_sd, weights.whip_plus_scale),
+    k9Plus: calcK9Plus(row.k9, weights.k9_plus_ncaa_avg, weights.k9_plus_ncaa_sd, weights.k9_plus_scale),
+    bb9Plus: calcBb9Plus(row.bb9, weights.bb9_plus_ncaa_avg, weights.bb9_plus_ncaa_sd, weights.bb9_plus_scale),
+    hr9Plus: calcHr9Plus(row.hr9, weights.hr9_plus_ncaa_avg, weights.hr9_plus_ncaa_sd, weights.hr9_plus_scale),
   });
 
   return (
