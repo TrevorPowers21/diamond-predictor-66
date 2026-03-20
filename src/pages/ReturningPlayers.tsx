@@ -33,6 +33,7 @@ import {
 } from "@/lib/nilProgramSpecific";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { profileRouteFor } from "@/lib/profileRoutes";
+import { readPlayerOverrides } from "@/lib/playerOverrides";
 
 type SortKey =
   | "name"
@@ -111,6 +112,7 @@ interface PitchingDashboardRow {
   p_bb9: number | null;
   p_hr9: number | null;
   p_rv_plus: number | null;
+  p_war: number | null;
 }
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
@@ -222,6 +224,217 @@ const calcPitchingPlus = (
   const core = higherIsBetter ? ((value - ncaaAvg) / ncaaSd) : ((ncaaAvg - value) / ncaaSd);
   const raw = 100 + (core * scale);
   return Number.isFinite(raw) ? raw : null;
+};
+
+const parseBaseballInnings = (v: string | null | undefined) => {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  const whole = Math.trunc(n);
+  const frac = Math.round((n - whole) * 10);
+  if (frac === 1) return whole + (1 / 3);
+  if (frac === 2) return whole + (2 / 3);
+  return n;
+};
+
+const resolvePitchingStatsView = (values: string[]) => {
+  // Legacy layout:
+  // [0 Name,1 Team,2 Hand,3 ERA,4 FIP,5 WHIP,6 K9,7 BB9,8 HR9,9 G,10 GS,11 IP,12 Role]
+  // New layout:
+  // [0 Name,1 Team,2 Hand,3 Role,4 IP,5 G,6 GS,7 ERA,8 FIP,9 WHIP,10 K9,11 BB9,12 HR9]
+  const legacyEra = toNum(values[3]);
+  const isLegacy = legacyEra != null;
+  if (isLegacy) {
+    return {
+      role: values[12] || "",
+      g: values[9] || "",
+      gs: values[10] || "",
+      era: values[3] || "",
+      fip: values[4] || "",
+      whip: values[5] || "",
+      k9: values[6] || "",
+      bb9: values[7] || "",
+      hr9: values[8] || "",
+      ip: values[11] || "",
+    };
+  }
+  return {
+    role: values[3] || "",
+    g: values[5] || "",
+    gs: values[6] || "",
+    era: values[7] || "",
+    fip: values[8] || "",
+    whip: values[9] || "",
+    k9: values[10] || "",
+    bb9: values[11] || "",
+    hr9: values[12] || "",
+    ip: values[4] || "",
+  };
+};
+
+const PITCHING_POWER_EQ_DEFAULTS = {
+  p_era_ncaa_avg_power_rating: 50,
+  p_ncaa_avg_whip_power_rating: 50,
+  p_ncaa_avg_k9_power_rating: 50,
+  p_ncaa_avg_bb9_power_rating: 50,
+  p_ncaa_avg_hr9_power_rating: 50,
+  p_era_stuff_plus_weight: 0.21,
+  p_era_whiff_pct_weight: 0.23,
+  p_era_bb_pct_weight: 0.17,
+  p_era_hh_pct_weight: 0.07,
+  p_era_in_zone_whiff_pct_weight: 0.12,
+  p_era_chase_pct_weight: 0.08,
+  p_era_barrel_pct_weight: 0.12,
+  p_fip_hr9_power_rating_plus_weight: 0.45,
+  p_fip_bb9_power_rating_plus_weight: 0.3,
+  p_fip_k9_power_rating_plus_weight: 0.25,
+  p_whip_bb_pct_weight: 0.25,
+  p_whip_ld_pct_weight: 0.2,
+  p_whip_avg_ev_weight: 0.15,
+  p_whip_whiff_pct_weight: 0.25,
+  p_whip_gb_pct_weight: 0.1,
+  p_whip_chase_pct_weight: 0.05,
+  p_k9_whiff_pct_weight: 0.35,
+  p_k9_stuff_plus_weight: 0.3,
+  p_k9_in_zone_whiff_pct_weight: 0.25,
+  p_k9_chase_pct_weight: 0.1,
+  p_bb9_bb_pct_weight: 0.55,
+  p_bb9_in_zone_pct_weight: 0.3,
+  p_bb9_chase_pct_weight: 0.15,
+  p_hr9_barrel_pct_weight: 0.32,
+  p_hr9_ev90_weight: 0.24,
+  p_hr9_gb_pct_weight: 0.18,
+  p_hr9_pull_pct_weight: 0.14,
+  p_hr9_la_10_30_pct_weight: 0.12,
+};
+
+const PITCHING_ROLE_OVERRIDE_KEY = "pitching_role_overrides_v1";
+const toPitchingRole = (raw: string | null | undefined): "SP" | "RP" | "SM" | null => {
+  const v = String(raw || "").trim().toUpperCase();
+  if (v === "SP" || v === "RP" || v === "SM") return v;
+  return null;
+};
+const applyRoleTransitionAdjustment = (
+  value: number | null,
+  pct: number,
+  fromRole: "SP" | "RP" | "SM" | null,
+  toRole: "SP" | "RP" | "SM" | null,
+  lowerIsBetter: boolean,
+) => {
+  if (value == null || !Number.isFinite(value)) return null;
+  if (!fromRole || !toRole || fromRole === toRole) return value;
+  const rank: Record<"SP" | "SM" | "RP", number> = { SP: 0, SM: 1, RP: 2 };
+  const step = rank[toRole] - rank[fromRole];
+  if (step === 0) return value;
+  const factor = 1 + ((pct / 100) * (Math.abs(step) / 2));
+  if (!Number.isFinite(factor) || factor <= 0) return value;
+  if (lowerIsBetter) {
+    return step > 0 ? value / factor : value * factor;
+  }
+  return step > 0 ? value * factor : value / factor;
+};
+
+const readPitchingPowerEqValues = () => {
+  const merged = { ...PITCHING_POWER_EQ_DEFAULTS };
+  try {
+    const raw = localStorage.getItem("admin_dashboard_pitching_power_equation_values_v1");
+    if (!raw) return merged;
+    const parsed = JSON.parse(raw) as Record<string, string | number>;
+    for (const key of Object.keys(PITCHING_POWER_EQ_DEFAULTS) as Array<keyof typeof PITCHING_POWER_EQ_DEFAULTS>) {
+      const n = Number(parsed[key]);
+      if (Number.isFinite(n)) merged[key] = n;
+    }
+  } catch {
+    // ignore invalid local storage payload
+  }
+  merged.p_whip_chase_pct_weight = 0.05;
+  return merged;
+};
+
+const normalizedWeightedSum = (items: Array<{ value: number; weight: number }>) => {
+  const weighted = items.reduce((sum, item) => sum + (item.value * item.weight), 0);
+  const totalWeight = items.reduce((sum, item) => sum + item.weight, 0);
+  if (!Number.isFinite(totalWeight) || totalWeight <= 0) return null;
+  return weighted / totalWeight;
+};
+
+const computePitchingPrPlusFromScores = (
+  scores: {
+    stuff: number | null;
+    whiff: number | null;
+    bb: number | null;
+    hh: number | null;
+    izWhiff: number | null;
+    chase: number | null;
+    barrel: number | null;
+    ld: number | null;
+    avgEv: number | null;
+    gb: number | null;
+    iz: number | null;
+    ev90: number | null;
+    pull: number | null;
+    la1030: number | null;
+  },
+  eq: ReturnType<typeof readPitchingPowerEqValues>,
+) => {
+  const eraPower =
+    [scores.stuff, scores.whiff, scores.bb, scores.hh, scores.izWhiff, scores.chase, scores.barrel].every((v) => v != null)
+      ? (Number(scores.stuff) * eq.p_era_stuff_plus_weight) +
+        (Number(scores.whiff) * eq.p_era_whiff_pct_weight) +
+        (Number(scores.bb) * eq.p_era_bb_pct_weight) +
+        (Number(scores.hh) * eq.p_era_hh_pct_weight) +
+        (Number(scores.izWhiff) * eq.p_era_in_zone_whiff_pct_weight) +
+        (Number(scores.chase) * eq.p_era_chase_pct_weight) +
+        (Number(scores.barrel) * eq.p_era_barrel_pct_weight)
+      : null;
+  const whipPower =
+    [scores.bb, scores.ld, scores.avgEv, scores.whiff, scores.gb, scores.chase].every((v) => v != null)
+      ? normalizedWeightedSum([
+          { value: Number(scores.bb), weight: eq.p_whip_bb_pct_weight },
+          { value: Number(scores.ld), weight: eq.p_whip_ld_pct_weight },
+          { value: Number(scores.avgEv), weight: eq.p_whip_avg_ev_weight },
+          { value: Number(scores.whiff), weight: eq.p_whip_whiff_pct_weight },
+          { value: Number(scores.gb), weight: eq.p_whip_gb_pct_weight },
+          { value: Number(scores.chase), weight: eq.p_whip_chase_pct_weight },
+        ])
+      : null;
+  const k9Power =
+    [scores.whiff, scores.stuff, scores.izWhiff, scores.chase].every((v) => v != null)
+      ? (Number(scores.whiff) * eq.p_k9_whiff_pct_weight) +
+        (Number(scores.stuff) * eq.p_k9_stuff_plus_weight) +
+        (Number(scores.izWhiff) * eq.p_k9_in_zone_whiff_pct_weight) +
+        (Number(scores.chase) * eq.p_k9_chase_pct_weight)
+      : null;
+  const bb9Power =
+    [scores.bb, scores.iz, scores.chase].every((v) => v != null)
+      ? (Number(scores.bb) * eq.p_bb9_bb_pct_weight) +
+        (Number(scores.iz) * eq.p_bb9_in_zone_pct_weight) +
+        (Number(scores.chase) * eq.p_bb9_chase_pct_weight)
+      : null;
+  const hr9Power =
+    [scores.barrel, scores.ev90, scores.gb, scores.pull, scores.la1030].every((v) => v != null)
+      ? (Number(scores.barrel) * eq.p_hr9_barrel_pct_weight) +
+        (Number(scores.ev90) * eq.p_hr9_ev90_weight) +
+        (Number(scores.gb) * eq.p_hr9_gb_pct_weight) +
+        (Number(scores.pull) * eq.p_hr9_pull_pct_weight) +
+        (Number(scores.la1030) * eq.p_hr9_la_10_30_pct_weight)
+      : null;
+
+  const eraPrPlus = eraPower == null ? null : (eraPower / eq.p_era_ncaa_avg_power_rating) * 100;
+  const whipPrPlus = whipPower == null ? null : (whipPower / eq.p_ncaa_avg_whip_power_rating) * 100;
+  const k9PrPlus = k9Power == null ? null : (k9Power / eq.p_ncaa_avg_k9_power_rating) * 100;
+  const bb9PrPlus = bb9Power == null ? null : (bb9Power / eq.p_ncaa_avg_bb9_power_rating) * 100;
+  const hr9PrPlus = hr9Power == null ? null : (hr9Power / eq.p_ncaa_avg_hr9_power_rating) * 100;
+  const fipPrPlus =
+    hr9PrPlus == null || bb9PrPlus == null || k9PrPlus == null
+      ? null
+      : (hr9PrPlus * eq.p_fip_hr9_power_rating_plus_weight) +
+        (bb9PrPlus * eq.p_fip_bb9_power_rating_plus_weight) +
+        (k9PrPlus * eq.p_fip_k9_power_rating_plus_weight);
+
+  return { eraPrPlus, fipPrPlus, whipPrPlus, k9PrPlus, hr9PrPlus, bb9PrPlus };
 };
 
 const computeDerived = (avg: number | null, obp: number | null, slg: number | null) => {
@@ -366,6 +579,7 @@ export default function ReturningPlayers() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [bulkEditMode, setBulkEditMode] = useState(false);
   const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string | null; position?: string | null }>>({});
+  const playerOverrides = useMemo(() => readPlayerOverrides(), []);
   const [showMissingOnly, setShowMissingOnly] = useState(false);
   const [dashboardView, setDashboardView] = useState<"hitting" | "pitching">("hitting");
   const [pitchingSearch, setPitchingSearch] = useState("");
@@ -1058,6 +1272,17 @@ export default function ReturningPlayers() {
   }, []);
   const pitchingRows = useMemo<PitchingDashboardRow[]>(() => {
     const eq = readPitchingWeights();
+    const powerEq = readPitchingPowerEqValues();
+    let roleOverrides: Record<string, "SP" | "RP" | "SM"> = {};
+    try {
+      const rawOverrides = localStorage.getItem(PITCHING_ROLE_OVERRIDE_KEY);
+      if (rawOverrides) {
+        const parsed = JSON.parse(rawOverrides) as Record<string, "SP" | "RP" | "SM">;
+        if (parsed && typeof parsed === "object") roleOverrides = parsed;
+      }
+    } catch {
+      // ignore malformed role overrides
+    }
     const scoringByNameTeam = new Map<string, {
       stuff: number | null;
       whiff: number | null;
@@ -1096,14 +1321,31 @@ export default function ReturningPlayers() {
             stuff: toNum(values[16]),
             whiff: toNum(values[17]),
             bb: toNum(values[18]),
+            hh: toNum(values[19]),
+            izWhiff: toNum(values[20]),
+            chase: toNum(values[21]),
             barrel: toNum(values[22]),
-            eraPrPlus: toNum(values[30]),
-            fipPrPlus: toNum(values[31]),
-            whipPrPlus: toNum(values[32]),
-            k9PrPlus: toNum(values[33]),
-            hr9PrPlus: toNum(values[34]),
-            bb9PrPlus: toNum(values[35]),
+            ld: toNum(values[23]),
+            avgEv: toNum(values[24]),
+            gb: toNum(values[25]),
+            iz: toNum(values[26]),
+            ev90: toNum(values[27]),
+            pull: toNum(values[28]),
+            la1030: toNum(values[29]),
+            eraPrPlus: null as number | null,
+            fipPrPlus: null as number | null,
+            whipPrPlus: null as number | null,
+            k9PrPlus: null as number | null,
+            hr9PrPlus: null as number | null,
+            bb9PrPlus: null as number | null,
           };
+          const recomputed = computePitchingPrPlusFromScores(scoreObj, powerEq);
+          scoreObj.eraPrPlus = recomputed.eraPrPlus ?? toNum(values[30]);
+          scoreObj.fipPrPlus = recomputed.fipPrPlus ?? toNum(values[31]);
+          scoreObj.whipPrPlus = recomputed.whipPrPlus ?? toNum(values[32]);
+          scoreObj.k9PrPlus = recomputed.k9PrPlus ?? toNum(values[33]);
+          scoreObj.hr9PrPlus = recomputed.hr9PrPlus ?? toNum(values[34]);
+          scoreObj.bb9PrPlus = recomputed.bb9PrPlus ?? toNum(values[35]);
           scoringByNameTeam.set(nameTeamKey(name, team), scoreObj);
           const nameKey = normalizeName(name);
           const bucket = scoringByName.get(nameKey) || [];
@@ -1126,12 +1368,19 @@ export default function ReturningPlayers() {
           const playerName = (values[0] || "").trim();
           const normalizedTeam = normalizePitchingTeam(values[1]);
           const teamMatch = teamsByNorm.get(normalize(normalizedTeam));
-          const era = toNum(values[3]);
-          const fip = toNum(values[4]);
-          const whip = toNum(values[5]);
-          const k9 = toNum(values[6]);
-          const bb9 = toNum(values[7]);
-          const hr9 = toNum(values[8]);
+          const statsView = resolvePitchingStatsView(values);
+          const era = toNum(statsView.era);
+          const fip = toNum(statsView.fip);
+          const whip = toNum(statsView.whip);
+          const k9 = toNum(statsView.k9);
+          const bb9 = toNum(statsView.bb9);
+          const hr9 = toNum(statsView.hr9);
+          const games = toNum(statsView.g);
+          const starts = toNum(statsView.gs);
+          const baseRole = toPitchingRole(statsView.role) || (games != null && games > 0 && starts != null ? ((starts / games) < 0.5 ? "RP" : "SP") : null);
+          const roleKey = `${normalizeName(playerName)}|${normalize(normalizedTeam)}`;
+          const projectedRole = roleOverrides[roleKey] || baseRole || "SM";
+          const projectedIp = projectedRole === "SP" ? eq.pwar_ip_sp : projectedRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
           const byNameTeam = scoringByNameTeam.get(nameTeamKey(playerName, normalizedTeam));
           const byNameBucket = scoringByName.get(normalizeName(playerName)) || [];
           const byNameUnique = byNameBucket.length === 1 ? byNameBucket[0] : null;
@@ -1218,13 +1467,19 @@ export default function ReturningPlayers() {
             impacts: eq.hr9_damp_impacts,
             lowerIsBetter: true,
           });
+          const roleAdjustedEra = applyRoleTransitionAdjustment(pEra, eq.sp_to_rp_reg_era_pct, baseRole, projectedRole, true);
+          const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, eq.sp_to_rp_reg_fip_pct, baseRole, projectedRole, true);
+          const roleAdjustedWhip = applyRoleTransitionAdjustment(pWhip, eq.sp_to_rp_reg_whip_pct, baseRole, projectedRole, true);
+          const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, eq.sp_to_rp_reg_k9_pct, baseRole, projectedRole, false);
+          const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, eq.sp_to_rp_reg_bb9_pct, baseRole, projectedRole, true);
+          const roleAdjustedHr9 = applyRoleTransitionAdjustment(pHr9, eq.sp_to_rp_reg_hr9_pct, baseRole, projectedRole, true);
 
-          const eraPlus = calcPitchingPlus(pEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
-          const fipPlus = calcPitchingPlus(pFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
-          const whipPlus = calcPitchingPlus(pWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
-          const k9Plus = calcPitchingPlus(pK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
-          const bb9Plus = calcPitchingPlus(pBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
-          const hr9Plus = calcPitchingPlus(pHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
+          const eraPlus = calcPitchingPlus(roleAdjustedEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
+          const fipPlus = calcPitchingPlus(roleAdjustedFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
+          const whipPlus = calcPitchingPlus(roleAdjustedWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
+          const k9Plus = calcPitchingPlus(roleAdjustedK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
+          const bb9Plus = calcPitchingPlus(roleAdjustedBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
+          const hr9Plus = calcPitchingPlus(roleAdjustedHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
           const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
             ? (Number(eraPlus) * eq.era_plus_weight) +
               (Number(fipPlus) * eq.fip_plus_weight) +
@@ -1233,6 +1488,10 @@ export default function ReturningPlayers() {
               (Number(bb9Plus) * eq.bb9_plus_weight) +
               (Number(hr9Plus) * eq.hr9_plus_weight)
             : null;
+          const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);
+          const pWar = pitcherValue == null || eq.pwar_runs_per_win === 0
+            ? null
+            : ((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
 
           return {
             id: r.id || `pitching-${idx}`,
@@ -1258,13 +1517,14 @@ export default function ReturningPlayers() {
             k9,
             bb9,
             hr9,
-            p_era: pEra,
-            p_fip: pFip,
-            p_whip: pWhip,
-            p_k9: pK9,
-            p_bb9: pBb9,
-            p_hr9: pHr9,
+            p_era: roleAdjustedEra,
+            p_fip: roleAdjustedFip,
+            p_whip: roleAdjustedWhip,
+            p_k9: roleAdjustedK9,
+            p_bb9: roleAdjustedBb9,
+            p_hr9: roleAdjustedHr9,
             p_rv_plus: pRvPlus,
+            p_war: pWar,
           };
         })
         .filter((r) => !!r.playerName);
@@ -1606,11 +1866,12 @@ export default function ReturningPlayers() {
                     <TableBody>
                       {pagedPlayers.map((p) => {
                         const pred = p.prediction;
+                        const effectivePosition = playerOverrides[p.id]?.position ?? p.position;
                         return (
                           <TableRow key={p.prediction_id}>
                             <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
                               <Link
-                                to={profileRouteFor(p.id, p.position)}
+                                to={profileRouteFor(p.id, effectivePosition)}
                                 className="hover:text-primary hover:underline transition-colors"
                               >
                                 {p.first_name} {p.last_name}
@@ -1638,7 +1899,7 @@ export default function ReturningPlayers() {
                                 </div>
                               ) : (
                                 <div className="text-xs text-muted-foreground">
-                                  {[p.position, p.team].filter(Boolean).join(" · ") || "—"}
+                                  {[effectivePosition, p.team].filter(Boolean).join(" · ") || "—"}
                                 </div>
                               )}
                             </TableCell>
@@ -1686,7 +1947,7 @@ export default function ReturningPlayers() {
                                   storedNil: p.nil_value,
                                   wrcPlus: p.prediction.p_wrc_plus,
                                   conference: p.conference,
-                                  position: p.position,
+                                  position: effectivePosition,
                                 }),
                               )}
                             </TableCell>
@@ -1850,7 +2111,7 @@ export default function ReturningPlayers() {
                             <TableCell className="text-right font-mono text-sm">{statFormat(r.p_bb9, 2)}</TableCell>
                             <TableCell className="text-right font-mono text-sm">{statFormat(r.p_hr9, 2)}</TableCell>
                             <TableCell className="text-right font-mono text-sm">{r.p_rv_plus == null ? "—" : Math.round(r.p_rv_plus)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
+                            <TableCell className="text-right font-mono text-sm">{r.p_war == null ? "—" : r.p_war.toFixed(2)}</TableCell>
                             <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
                             <TableCell className="text-center">
                               {r.stuff_score != null &&

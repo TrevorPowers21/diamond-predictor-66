@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -23,6 +23,7 @@ import {
   getPositionValueMultiplier,
   getProgramTierMultiplierByConference,
 } from "@/lib/nilProgramSpecific";
+import { readPlayerOverrides } from "@/lib/playerOverrides";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -410,6 +411,11 @@ export default function PlayerProfile() {
   const regularPred = predictions.find((p) => p.variant === "regular");
   const isTransferPortal = player?.transfer_portal && predictions.some((p) => p.model_type === "transfer");
   const isReturner = predictions.some((p) => p.model_type === "returner");
+  const playerOverride = useMemo(
+    () => (id ? readPlayerOverrides()[id] : undefined),
+    [id],
+  );
+  const effectivePosition = playerOverride?.position ?? player?.position ?? null;
 
   const startPredEdit = () => {
     setPredForm({
@@ -569,7 +575,7 @@ export default function PlayerProfile() {
   const fallbackNilValuation = (() => {
     if (displayOWar == null) return null;
     const ptm = getProgramTierMultiplierByConference(player.conference, DEFAULT_NIL_TIER_MULTIPLIERS);
-    const pvm = getPositionValueMultiplier(player.position);
+    const pvm = getPositionValueMultiplier(effectivePosition);
     return displayOWar * nilBasePerOWar * ptm * pvm;
   })();
   const displayNilValuation = (nilValuation as any)?.estimated_value ?? fallbackNilValuation;
@@ -596,7 +602,7 @@ export default function PlayerProfile() {
               {player.first_name} {player.last_name}
             </h2>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
-              {player.position && <Badge variant="secondary">{player.position}</Badge>}
+              {effectivePosition && <Badge variant="secondary">{effectivePosition}</Badge>}
               {displayTeam2025 && <Badge variant="outline">{displayTeam2025}</Badge>}
               {player.conference && <Badge variant="outline" className="text-muted-foreground">{player.conference}</Badge>}
               {player.transfer_portal && <Badge className="bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]">Transfer Portal</Badge>}
@@ -714,7 +720,7 @@ export default function PlayerProfile() {
                   <div className="space-y-2">
                   <InfoRow label="Team" value={displayTeam2025} />
                   <InfoRow label="Conference" value={player.conference} />
-                  <InfoRow label="Position" value={player.position} />
+                  <InfoRow label="Position" value={effectivePosition} />
                   <InfoRow label="Class Year" value={
                     isReturner && regularPred?.class_transition
                       ? classTransitionToYear[regularPred.class_transition] || player.class_year

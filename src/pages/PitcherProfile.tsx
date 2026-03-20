@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, TrendingUp } from "lucide-react";
@@ -8,16 +8,93 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { readPlayerOverrides } from "@/lib/playerOverrides";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
 const normalize = (v: string | null | undefined) =>
   (v || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+const hasAnyNumericValue = (values: string[] | undefined, indexes: number[]) =>
+  indexes.some((idx) => {
+    const n = Number((values?.[idx] || "").replace(/[%,$]/g, "").trim());
+    return Number.isFinite(n);
+  });
+
+const pickBestNameTeamRow = (
+  rows: Array<{ values?: string[] }>,
+  playerName: string,
+  teamName: string,
+  numericSignalIndexes: number[],
+) => {
+  const normName = normalize(playerName);
+  const normTeam = normalize(teamName);
+  if (!normName) return null;
+
+  const byName = rows.filter((r) => normalize(r.values?.[0]) === normName);
+  if (byName.length === 0) return null;
+
+  const exactTeam = byName.find((r) => normalize(r.values?.[1]) === normTeam);
+  if (exactTeam) return exactTeam;
+
+  const withSignal = byName.find((r) => hasAnyNumericValue(r.values, numericSignalIndexes));
+  if (withSignal) return withSignal;
+
+  return byName[0] || null;
+};
 const isUuid = (v: string | undefined) =>
   !!v && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 const STORAGE_PREFIX = "storage__";
+const parseBaseballInnings = (v: string | null | undefined) => {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  const whole = Math.trunc(n);
+  const frac = Math.round((n - whole) * 10);
+  if (frac === 1) return whole + (1 / 3);
+  if (frac === 2) return whole + (2 / 3);
+  return n;
+};
+
+const resolvePitchingStatsView = (values: string[]) => {
+  const toNum = (v: string | undefined) => {
+    const n = Number((v || "").replace(/[%,$]/g, "").trim());
+    return Number.isFinite(n) ? n : null;
+  };
+  const legacyEra = toNum(values[3]);
+  const isLegacy = legacyEra != null;
+  if (isLegacy) {
+    return {
+      role: values[12] || "",
+      g: values[9] || "",
+      gs: values[10] || "",
+      era: values[3] || "",
+      fip: values[4] || "",
+      whip: values[5] || "",
+      k9: values[6] || "",
+      bb9: values[7] || "",
+      hr9: values[8] || "",
+      ip: values[11] || "",
+    };
+  }
+  return {
+    role: values[3] || "",
+    g: values[5] || "",
+    gs: values[6] || "",
+    era: values[7] || "",
+    fip: values[8] || "",
+    whip: values[9] || "",
+    k9: values[10] || "",
+    bb9: values[11] || "",
+    hr9: values[12] || "",
+    ip: values[4] || "",
+  };
+};
+
 const PITCHING_EQ_DEFAULTS: Record<string, number> = {
   p_ncaa_avg_stuff_plus: 100,
   p_ncaa_avg_whiff_pct: 22.9,
@@ -98,6 +175,31 @@ const OVERALL_PITCHER_POWER_WEIGHTS = {
 
 const PITCHING_POWER_RATING_WEIGHT = 0.7;
 const PITCHING_DEV_FACTOR = 0.06;
+const PITCHER_PROFILE_STORAGE_OVERRIDE_KEY = "pitcher_profile_projection_overrides_v1";
+const toPitchingRole = (raw: string | null | undefined): "SP" | "RP" | "SM" | null => {
+  const v = String(raw || "").trim().toUpperCase();
+  if (v === "SP" || v === "RP" || v === "SM") return v;
+  return null;
+};
+const applyRoleTransitionAdjustment = (
+  value: number | null,
+  pct: number,
+  fromRole: "SP" | "RP" | "SM" | null,
+  toRole: "SP" | "RP" | "SM" | null,
+  lowerIsBetter: boolean,
+) => {
+  if (value == null || !Number.isFinite(value)) return null;
+  if (!fromRole || !toRole || fromRole === toRole) return value;
+  const rank: Record<"SP" | "SM" | "RP", number> = { SP: 0, SM: 1, RP: 2 };
+  const step = rank[toRole] - rank[fromRole];
+  if (step === 0) return value;
+  const factor = 1 + ((pct / 100) * (Math.abs(step) / 2));
+  if (!Number.isFinite(factor) || factor <= 0) return value;
+  if (lowerIsBetter) {
+    return step > 0 ? value / factor : value * factor;
+  }
+  return step > 0 ? value * factor : value / factor;
+};
 
 const toPitchingClassAdj = (
   classTransition: "FS" | "SJ" | "JS" | "GR",
@@ -320,19 +422,8 @@ export default function PitcherProfile() {
         if (!raw) continue;
         const parsed = JSON.parse(raw) as { rows?: Array<{ values?: string[] }> };
         const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
-        const exactTeamRow = rows.find((r) => {
-          const values = Array.isArray(r.values) ? r.values : [];
-          return normalize(values[0]) === normalize(lookupPlayerName) && normalize(values[1]) === normalize(lookupTeamName);
-        });
-        if (exactTeamRow) return Array.isArray(exactTeamRow.values) ? exactTeamRow.values : null;
-        const nameOnlyMatches = rows.filter((r) => {
-          const values = Array.isArray(r.values) ? r.values : [];
-          return normalize(values[0]) === normalize(lookupPlayerName);
-        });
-        if (nameOnlyMatches.length === 1) {
-          const only = nameOnlyMatches[0];
-          return Array.isArray(only.values) ? only.values : null;
-        }
+        const best = pickBestNameTeamRow(rows, lookupPlayerName, lookupTeamName, [7, 8, 9, 10, 11, 12]);
+        if (best && Array.isArray(best.values)) return best.values;
       } catch {
         // ignore parse/storage errors
       }
@@ -348,19 +439,8 @@ export default function PitcherProfile() {
         if (!raw) continue;
         const parsed = JSON.parse(raw) as { rows?: Array<{ values?: string[] }> };
         const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
-        const exactTeamRow = rows.find((r) => {
-          const values = Array.isArray(r.values) ? r.values : [];
-          return normalize(values[0]) === normalize(lookupPlayerName) && normalize(values[1]) === normalize(lookupTeamName);
-        });
-        if (exactTeamRow) return Array.isArray(exactTeamRow.values) ? exactTeamRow.values : null;
-        const nameOnlyMatches = rows.filter((r) => {
-          const values = Array.isArray(r.values) ? r.values : [];
-          return normalize(values[0]) === normalize(lookupPlayerName);
-        });
-        if (nameOnlyMatches.length === 1) {
-          const only = nameOnlyMatches[0];
-          return Array.isArray(only.values) ? only.values : null;
-        }
+        const best = pickBestNameTeamRow(rows, lookupPlayerName, lookupTeamName, [16, 17, 18, 22, 30, 31, 32, 33, 34, 35]);
+        if (best && Array.isArray(best.values)) return best.values;
       } catch {
         // ignore storage parse errors
       }
@@ -543,31 +623,105 @@ export default function PitcherProfile() {
     storageRef?.playerName ||
     "Pitcher";
   const displayTeam = player?.team || storageRow?.[1] || storageRef?.teamName || "—";
+  const playerOverride = useMemo(
+    () => (isDbRoute && id ? readPlayerOverrides()[id] : undefined),
+    [id, isDbRoute],
+  );
+  const storageOverrideKey = useMemo(
+    () => `${normalize(lookupPlayerName)}|${normalize(displayTeam)}`,
+    [lookupPlayerName, displayTeam],
+  );
+  const storageProjectionOverride = useMemo(() => {
+    if (isDbRoute) return undefined;
+    try {
+      const raw = localStorage.getItem(PITCHER_PROFILE_STORAGE_OVERRIDE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Record<string, { pitcher_role?: "SP" | "RP" | "SM"; class_transition?: "FS" | "SJ" | "JS" | "GR"; dev_aggressiveness?: number }>) : {};
+      return parsed?.[storageOverrideKey];
+    } catch {
+      return undefined;
+    }
+  }, [isDbRoute, storageOverrideKey]);
   const displayConference = player?.conference || conferenceByTeam.get(normalize(displayTeam)) || "—";
   const displayHandedness = player?.handedness || storageRow?.[2] || "—";
-  const storageEra = storageRow?.[3] ? Number(storageRow[3]) : null;
-  const storageFip = storageRow?.[4] ? Number(storageRow[4]) : null;
-  const storageWhip = storageRow?.[5] ? Number(storageRow[5]) : null;
-  const storageK9 = storageRow?.[6] ? Number(storageRow[6]) : null;
-  const storageBb9 = storageRow?.[7] ? Number(storageRow[7]) : null;
-  const storageHr9 = storageRow?.[8] ? Number(storageRow[8]) : null;
+  const storageStats = useMemo(() => resolvePitchingStatsView(storageRow || []), [storageRow]);
+  const storageEra = storageStats.era ? Number(storageStats.era) : null;
+  const storageFip = storageStats.fip ? Number(storageStats.fip) : null;
+  const storageWhip = storageStats.whip ? Number(storageStats.whip) : null;
+  const storageK9 = storageStats.k9 ? Number(storageStats.k9) : null;
+  const storageBb9 = storageStats.bb9 ? Number(storageStats.bb9) : null;
+  const storageHr9 = storageStats.hr9 ? Number(storageStats.hr9) : null;
+  const storageIp = parseBaseballInnings(storageStats.ip);
+  const storageGames = storageStats.g ? Number(storageStats.g) : null;
+  const storageGamesStarted = storageStats.gs ? Number(storageStats.gs) : null;
+  const derivedRole = (() => {
+    const roleRaw = toPitchingRole(storageStats.role);
+    if (roleRaw) return roleRaw;
+    if (storageGames != null && storageGames > 0 && storageGamesStarted != null) {
+      return (storageGamesStarted / storageGames) < 0.5 ? "RP" : "SP";
+    }
+    return null;
+  })();
+  const initialProjectedRole = playerOverride?.pitcher_role || storageProjectionOverride?.pitcher_role || derivedRole || "SM";
+  const effectiveRoleDisplay = playerOverride?.pitcher_role || derivedRole;
+  const initialProjectedClassTransition = (() => {
+    const raw = String(playerOverride?.class_transition || storageProjectionOverride?.class_transition || activePrediction?.class_transition || "SJ").toUpperCase();
+    return raw === "FS" || raw === "SJ" || raw === "JS" || raw === "GR" ? raw : "SJ";
+  })();
+  const initialProjectedDevAggressiveness = Number.isFinite(Number(playerOverride?.dev_aggressiveness ?? storageProjectionOverride?.dev_aggressiveness))
+    ? Number(playerOverride?.dev_aggressiveness ?? storageProjectionOverride?.dev_aggressiveness)
+    : (Number.isFinite(Number(activePrediction?.dev_aggressiveness)) ? Number(activePrediction?.dev_aggressiveness) : 0);
+  const [projectedRole, setProjectedRole] = useState<"SP" | "RP" | "SM">(initialProjectedRole as "SP" | "RP" | "SM");
+  const [projectedClassTransition, setProjectedClassTransition] = useState<"FS" | "SJ" | "JS" | "GR">(initialProjectedClassTransition as "FS" | "SJ" | "JS" | "GR");
+  const [projectedDevAggressiveness, setProjectedDevAggressiveness] = useState<number>(initialProjectedDevAggressiveness);
+  useEffect(() => {
+    setProjectedRole(initialProjectedRole as "SP" | "RP" | "SM");
+    setProjectedClassTransition(initialProjectedClassTransition as "FS" | "SJ" | "JS" | "GR");
+    setProjectedDevAggressiveness(initialProjectedDevAggressiveness);
+  }, [initialProjectedRole, initialProjectedClassTransition, initialProjectedDevAggressiveness]);
+  const updateProjectedInputs = (updates: { pitcher_role?: "SP" | "RP" | "SM"; class_transition?: "FS" | "SJ" | "JS" | "GR"; dev_aggressiveness?: number }) => {
+    if (updates.pitcher_role) setProjectedRole(updates.pitcher_role);
+    if (updates.class_transition) setProjectedClassTransition(updates.class_transition);
+    if (Number.isFinite(Number(updates.dev_aggressiveness))) setProjectedDevAggressiveness(Number(updates.dev_aggressiveness));
+    if (isDbRoute && id) {
+      const next = {
+        ...(playerOverride || {}),
+        ...updates,
+      };
+      const all = readPlayerOverrides();
+      all[id] = next;
+      try {
+        localStorage.setItem("team_builder_player_overrides_v1", JSON.stringify(all));
+      } catch {
+        // ignore local storage failures
+      }
+      return;
+    }
+    // Storage-backed profile editing fallback.
+    try {
+      const raw = localStorage.getItem(PITCHER_PROFILE_STORAGE_OVERRIDE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Record<string, { pitcher_role?: "SP" | "RP" | "SM"; class_transition?: "FS" | "SJ" | "JS" | "GR"; dev_aggressiveness?: number }>) : {};
+      const prev = parsed[storageOverrideKey] || {};
+      parsed[storageOverrideKey] = { ...prev, ...updates };
+      localStorage.setItem(PITCHER_PROFILE_STORAGE_OVERRIDE_KEY, JSON.stringify(parsed));
+    } catch {
+      // ignore local storage failures
+    }
+  };
   const projectedPitching = useMemo(() => {
     const eq = readPitchingWeights();
-    const classTransitionRaw = String(activePrediction?.class_transition || "SJ").toUpperCase();
+    const classTransitionRaw = String(projectedClassTransition || "SJ").toUpperCase();
     const classTransition: "FS" | "SJ" | "JS" | "GR" =
       classTransitionRaw === "FS" || classTransitionRaw === "SJ" || classTransitionRaw === "JS" || classTransitionRaw === "GR"
         ? classTransitionRaw
         : "SJ";
-    const devAggressiveness = Number.isFinite(Number(activePrediction?.dev_aggressiveness))
-      ? Number(activePrediction?.dev_aggressiveness)
-      : 0;
+    const devAggressiveness = projectedDevAggressiveness;
 
-    const eraPrPlus = parseNum(powerRatingsRow?.[30]);
-    const fipPrPlus = parseNum(powerRatingsRow?.[31]);
-    const whipPrPlus = parseNum(powerRatingsRow?.[32]);
-    const k9PrPlus = parseNum(powerRatingsRow?.[33]);
-    const hr9PrPlus = parseNum(powerRatingsRow?.[34]);
-    const bb9PrPlus = parseNum(powerRatingsRow?.[35]);
+    const eraPrPlus = internalPowerRatings?.eraPlus ?? parseNum(powerRatingsRow?.[30]);
+    const fipPrPlus = internalPowerRatings?.fipPlus ?? parseNum(powerRatingsRow?.[31]);
+    const whipPrPlus = internalPowerRatings?.whipPlus ?? parseNum(powerRatingsRow?.[32]);
+    const k9PrPlus = internalPowerRatings?.k9Plus ?? parseNum(powerRatingsRow?.[33]);
+    const hr9PrPlus = internalPowerRatings?.hr9Plus ?? parseNum(powerRatingsRow?.[34]);
+    const bb9PrPlus = internalPowerRatings?.bb9Plus ?? parseNum(powerRatingsRow?.[35]);
 
     const classEraAdj = toPitchingClassAdj(classTransition, eq.class_era_fs, eq.class_era_sj, eq.class_era_js, eq.class_era_gr);
     const classFipAdj = toPitchingClassAdj(classTransition, eq.class_fip_fs, eq.class_fip_sj, eq.class_fip_js, eq.class_fip_gr);
@@ -577,7 +731,7 @@ export default function PitcherProfile() {
     const classHr9Adj = toPitchingClassAdj(classTransition, eq.class_hr9_fs, eq.class_hr9_sj, eq.class_hr9_js, eq.class_hr9_gr);
 
     const pEra = projectPitchingRate({
-      lastStat: latestStats?.era ?? storageEra,
+      lastStat: storageEra,
       prPlus: eraPrPlus,
       ncaaAvg: eq.era_plus_ncaa_avg,
       ncaaSd: eq.era_plus_ncaa_sd,
@@ -601,7 +755,7 @@ export default function PitcherProfile() {
       lowerIsBetter: true,
     });
     const pWhip = projectPitchingRate({
-      lastStat: latestStats?.whip ?? storageWhip,
+      lastStat: storageWhip,
       prPlus: whipPrPlus,
       ncaaAvg: eq.whip_plus_ncaa_avg,
       ncaaSd: eq.whip_plus_ncaa_sd,
@@ -648,13 +802,19 @@ export default function PitcherProfile() {
       impacts: eq.hr9_damp_impacts,
       lowerIsBetter: true,
     });
+    const roleAdjustedEra = applyRoleTransitionAdjustment(pEra, eq.sp_to_rp_reg_era_pct, derivedRole, projectedRole, true);
+    const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, eq.sp_to_rp_reg_fip_pct, derivedRole, projectedRole, true);
+    const roleAdjustedWhip = applyRoleTransitionAdjustment(pWhip, eq.sp_to_rp_reg_whip_pct, derivedRole, projectedRole, true);
+    const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, eq.sp_to_rp_reg_k9_pct, derivedRole, projectedRole, false);
+    const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, eq.sp_to_rp_reg_bb9_pct, derivedRole, projectedRole, true);
+    const roleAdjustedHr9 = applyRoleTransitionAdjustment(pHr9, eq.sp_to_rp_reg_hr9_pct, derivedRole, projectedRole, true);
 
-    const eraPlus = calcPitchingPlus(pEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale);
-    const fipPlus = calcPitchingPlus(pFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale);
-    const whipPlus = calcPitchingPlus(pWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale);
-    const k9Plus = calcPitchingPlus(pK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
-    const bb9Plus = calcPitchingPlus(pBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale);
-    const hr9Plus = calcPitchingPlus(pHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale);
+    const eraPlus = calcPitchingPlus(roleAdjustedEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale);
+    const fipPlus = calcPitchingPlus(roleAdjustedFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale);
+    const whipPlus = calcPitchingPlus(roleAdjustedWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale);
+    const k9Plus = calcPitchingPlus(roleAdjustedK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
+    const bb9Plus = calcPitchingPlus(roleAdjustedBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale);
+    const hr9Plus = calcPitchingPlus(roleAdjustedHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale);
     const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
       ? (Number(eraPlus) * eq.era_plus_weight) +
         (Number(fipPlus) * eq.fip_plus_weight) +
@@ -663,14 +823,80 @@ export default function PitcherProfile() {
         (Number(bb9Plus) * eq.bb9_plus_weight) +
         (Number(hr9Plus) * eq.hr9_plus_weight)
       : null;
+    const projectedIp = projectedRole === "SP" ? eq.pwar_ip_sp : projectedRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
+    const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);
+    const pWar = pitcherValue == null || eq.pwar_runs_per_win === 0
+      ? null
+      : ((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
 
-    return { pEra, pFip, pWhip, pK9, pBb9, pHr9, pRvPlus };
+    return {
+      pEra: roleAdjustedEra,
+      pFip: roleAdjustedFip,
+      pWhip: roleAdjustedWhip,
+      pK9: roleAdjustedK9,
+      pBb9: roleAdjustedBb9,
+      pHr9: roleAdjustedHr9,
+      pRvPlus,
+      pWar,
+      projectedIp,
+    };
   }, [
-    activePrediction?.class_transition,
-    activePrediction?.dev_aggressiveness,
+    projectedClassTransition,
+    projectedDevAggressiveness,
+    internalPowerRatings?.bb9Plus,
+    internalPowerRatings?.eraPlus,
+    internalPowerRatings?.fipPlus,
+    internalPowerRatings?.hr9Plus,
+    internalPowerRatings?.k9Plus,
+    internalPowerRatings?.whipPlus,
     latestStats?.era,
     latestStats?.whip,
     powerRatingsRow,
+    storageBb9,
+    storageEra,
+    storageFip,
+    storageHr9,
+    storageK9,
+    storageIp,
+    storageWhip,
+    derivedRole,
+    projectedRole,
+    storageProjectionOverride?.class_transition,
+    storageProjectionOverride?.dev_aggressiveness,
+    storageProjectionOverride?.pitcher_role,
+  ]);
+
+  const pitching2025 = useMemo(() => {
+    const eq = readPitchingWeights();
+    const era2025 = latestStats?.era ?? storageEra;
+    const fip2025 = storageFip;
+    const whip2025 = latestStats?.whip ?? storageWhip;
+    const k92025 = storageK9;
+    const bb92025 = storageBb9;
+    const hr92025 = storageHr9;
+
+    const eraPlus = calcPitchingPlus(era2025, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale);
+    const fipPlus = calcPitchingPlus(fip2025, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale);
+    const whipPlus = calcPitchingPlus(whip2025, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale);
+    const k9Plus = calcPitchingPlus(k92025, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
+    const bb9Plus = calcPitchingPlus(bb92025, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale);
+    const hr9Plus = calcPitchingPlus(hr92025, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale);
+    const pRvPlus2025 = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
+      ? (Number(eraPlus) * eq.era_plus_weight) +
+        (Number(fipPlus) * eq.fip_plus_weight) +
+        (Number(whipPlus) * eq.whip_plus_weight) +
+        (Number(k9Plus) * eq.k9_plus_weight) +
+        (Number(bb9Plus) * eq.bb9_plus_weight) +
+        (Number(hr9Plus) * eq.hr9_plus_weight)
+      : null;
+    const pWar2025 = pRvPlus2025 == null || storageIp == null || eq.pwar_runs_per_win === 0
+      ? null
+      : (((((pRvPlus2025 - 100) / 100) * (storageIp / 9) * eq.pwar_r_per_9) + ((storageIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win);
+
+    return { pRvPlus2025, pWar2025 };
+  }, [
+    latestStats?.era,
+    latestStats?.whip,
     storageBb9,
     storageEra,
     storageFip,
@@ -714,6 +940,7 @@ export default function PitcherProfile() {
                 <div className="flex items-center justify-between"><span className="text-muted-foreground">Team</span><span>{displayTeam}</span></div>
                 <div className="flex items-center justify-between"><span className="text-muted-foreground">Conference</span><span>{displayConference}</span></div>
                 <div className="flex items-center justify-between"><span className="text-muted-foreground">Class</span><span>{player?.class_year || "—"}</span></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Role</span><span>{effectiveRoleDisplay || "—"}</span></div>
                 <div className="flex items-center justify-between"><span className="text-muted-foreground">Throws</span><span>{player?.throws_hand || displayHandedness || "—"}</span></div>
                 <div className="flex items-center justify-between"><span className="text-muted-foreground">Bats</span><span>{player?.bats_hand || "—"}</span></div>
                 <div className="flex items-center justify-between"><span className="text-muted-foreground">Height</span><span>{player?.height_inches ? `${player.height_inches}"` : "—"}</span></div>
@@ -728,13 +955,14 @@ export default function PitcherProfile() {
               </CardHeader>
               <CardContent className="space-y-2">
                 <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">IP</div><div className="font-semibold">{fmt(latestStats?.innings_pitched ?? null, 1)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">IP</div><div className="font-semibold">{fmt(storageIp ?? latestStats?.innings_pitched ?? null, 1)}</div></div>
                   <div className="rounded border p-2"><div className="text-muted-foreground text-xs">ERA</div><div className="font-semibold">{fmt(latestStats?.era ?? storageEra, 2)}</div></div>
                   <div className="rounded border p-2"><div className="text-muted-foreground text-xs">WHIP</div><div className="font-semibold">{fmt(latestStats?.whip ?? storageWhip, 2)}</div></div>
                   <div className="rounded border p-2"><div className="text-muted-foreground text-xs">FIP</div><div className="font-semibold">{fmt(storageFip, 2)}</div></div>
                   <div className="rounded border p-2"><div className="text-muted-foreground text-xs">K/9</div><div className="font-semibold">{fmt(storageK9, 2)}</div></div>
                   <div className="rounded border p-2"><div className="text-muted-foreground text-xs">BB/9</div><div className="font-semibold">{fmt(storageBb9, 2)}</div></div>
                   <div className="rounded border p-2"><div className="text-muted-foreground text-xs">HR/9</div><div className="font-semibold">{fmt(storageHr9, 2)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">2025 pWAR</div><div className="font-semibold">{fmt(pitching2025.pWar2025, 2)}</div></div>
                 </div>
               </CardContent>
             </Card>
@@ -743,7 +971,7 @@ export default function PitcherProfile() {
           <div className="lg:col-span-2 space-y-4">
             <div className="grid gap-3 md:grid-cols-3">
               <MetricCard title="Market Value" value={nilFormat(nilValuation?.projected_value ?? null)} />
-              <MetricCard title="pWAR" value="—" subtitle="Pitching WAR model pending" />
+              <MetricCard title="Projected pWAR" value={fmt(projectedPitching.pWar, 2)} />
               <MetricCard
                 title="Overall Pitcher Power Rating"
                 value={fmtWhole(internalPowerRatings?.overallPlus)}
@@ -759,6 +987,60 @@ export default function PitcherProfile() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
+                <div className="rounded-md border bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+                  Applied Inputs: Role {projectedRole} · Class {projectedClassTransition} · Dev {projectedDevAggressiveness.toFixed(1)}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-1">Role Change</div>
+                    <Select
+                      value={projectedRole}
+                      onValueChange={(v) => updateProjectedInputs({ pitcher_role: v as "SP" | "RP" | "SM" })}
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="SP">SP</SelectItem>
+                        <SelectItem value="RP">RP</SelectItem>
+                        <SelectItem value="SM">SM</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-1">Class Adjustment</div>
+                    <Select
+                      value={projectedClassTransition}
+                      onValueChange={(v) => updateProjectedInputs({ class_transition: v as "FS" | "SJ" | "JS" | "GR" })}
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="FS">FS</SelectItem>
+                        <SelectItem value="SJ">SJ</SelectItem>
+                        <SelectItem value="JS">JS</SelectItem>
+                        <SelectItem value="GR">GR</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-1">Dev Aggressiveness</div>
+                    <Select
+                      value={String(projectedDevAggressiveness)}
+                      onValueChange={(v) => updateProjectedInputs({ dev_aggressiveness: Number(v) })}
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0">0.0</SelectItem>
+                        <SelectItem value="0.5">0.5</SelectItem>
+                        <SelectItem value="1">1.0</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-7 gap-2 text-sm">
                   <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pERA</div><div className="font-semibold">{fmt(projectedPitching.pEra, 2)}</div></div>
                   <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pFIP</div><div className="font-semibold">{fmt(projectedPitching.pFip, 2)}</div></div>
@@ -767,6 +1049,7 @@ export default function PitcherProfile() {
                   <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pBB/9</div><div className="font-semibold">{fmt(projectedPitching.pBb9, 2)}</div></div>
                   <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pHR/9</div><div className="font-semibold">{fmt(projectedPitching.pHr9, 2)}</div></div>
                   <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pRV+</div><div className="font-semibold">{fmtWhole(projectedPitching.pRvPlus)}</div></div>
+                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">pWAR</div><div className="font-semibold">{fmt(projectedPitching.pWar, 2)}</div></div>
                 </div>
                 <Separator />
                 <p className="text-xs text-muted-foreground">

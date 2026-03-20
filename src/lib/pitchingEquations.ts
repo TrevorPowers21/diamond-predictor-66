@@ -47,6 +47,12 @@ export type PitchingEquationWeights = {
   pwar_r_per_9: number;
   pwar_replacement_runs_per_9: number;
   pwar_runs_per_win: number;
+  sp_to_rp_reg_era_pct: number;
+  sp_to_rp_reg_fip_pct: number;
+  sp_to_rp_reg_whip_pct: number;
+  sp_to_rp_reg_k9_pct: number;
+  sp_to_rp_reg_bb9_pct: number;
+  sp_to_rp_reg_hr9_pct: number;
   market_tier_sec: number;
   market_tier_acc_big12: number;
   market_tier_big_ten: number;
@@ -103,7 +109,7 @@ export const DEFAULT_PITCHING_WEIGHTS: PitchingEquationWeights = {
   whip_plus_ncaa_sd: 0.2521159606,
   whip_pr_sd: 24.58561805,
   whip_plus_scale: 20,
-  k9_plus_ncaa_avg: 8.22,
+  k9_plus_ncaa_avg: 8.21,
   k9_plus_ncaa_sd: 1.990147058,
   k9_pr_sd: 43.76562188,
   k9_plus_scale: 20,
@@ -133,6 +139,12 @@ export const DEFAULT_PITCHING_WEIGHTS: PitchingEquationWeights = {
   pwar_r_per_9: 7.11,
   pwar_replacement_runs_per_9: 1.5,
   pwar_runs_per_win: 10,
+  sp_to_rp_reg_era_pct: 6,
+  sp_to_rp_reg_fip_pct: 8,
+  sp_to_rp_reg_whip_pct: 5,
+  sp_to_rp_reg_k9_pct: -8,
+  sp_to_rp_reg_bb9_pct: 4,
+  sp_to_rp_reg_hr9_pct: 10,
   market_tier_sec: 1.5,
   market_tier_acc_big12: 1.2,
   market_tier_big_ten: 1.0,
@@ -176,7 +188,7 @@ export const readPitchingWeights = (): PitchingEquationWeights => {
     const asNumArray = (v: unknown) => Array.isArray(v) ? v.map((n) => Number(n)).filter((n) => Number.isFinite(n)) : [];
     const withFallbackArray = (arr: number[], fallback: number[], expectedLength: number) =>
       arr.length === expectedLength ? arr : fallback;
-    return {
+    const merged = {
       fip_plus_weight: Number.isFinite(parsed.fip_plus_weight) ? Number(parsed.fip_plus_weight) : DEFAULT_PITCHING_WEIGHTS.fip_plus_weight,
       era_plus_weight: Number.isFinite(parsed.era_plus_weight) ? Number(parsed.era_plus_weight) : DEFAULT_PITCHING_WEIGHTS.era_plus_weight,
       whip_plus_weight: Number.isFinite(parsed.whip_plus_weight) ? Number(parsed.whip_plus_weight) : DEFAULT_PITCHING_WEIGHTS.whip_plus_weight,
@@ -225,6 +237,12 @@ export const readPitchingWeights = (): PitchingEquationWeights => {
       pwar_r_per_9: Number.isFinite(parsed.pwar_r_per_9) ? Number(parsed.pwar_r_per_9) : DEFAULT_PITCHING_WEIGHTS.pwar_r_per_9,
       pwar_replacement_runs_per_9: Number.isFinite(parsed.pwar_replacement_runs_per_9) ? Number(parsed.pwar_replacement_runs_per_9) : DEFAULT_PITCHING_WEIGHTS.pwar_replacement_runs_per_9,
       pwar_runs_per_win: Number.isFinite(parsed.pwar_runs_per_win) ? Number(parsed.pwar_runs_per_win) : DEFAULT_PITCHING_WEIGHTS.pwar_runs_per_win,
+      sp_to_rp_reg_era_pct: Number.isFinite(parsed.sp_to_rp_reg_era_pct) ? Number(parsed.sp_to_rp_reg_era_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_era_pct,
+      sp_to_rp_reg_fip_pct: Number.isFinite(parsed.sp_to_rp_reg_fip_pct) ? Number(parsed.sp_to_rp_reg_fip_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_fip_pct,
+      sp_to_rp_reg_whip_pct: Number.isFinite(parsed.sp_to_rp_reg_whip_pct) ? Number(parsed.sp_to_rp_reg_whip_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_whip_pct,
+      sp_to_rp_reg_k9_pct: Number.isFinite(parsed.sp_to_rp_reg_k9_pct) ? Number(parsed.sp_to_rp_reg_k9_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_k9_pct,
+      sp_to_rp_reg_bb9_pct: Number.isFinite(parsed.sp_to_rp_reg_bb9_pct) ? Number(parsed.sp_to_rp_reg_bb9_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_bb9_pct,
+      sp_to_rp_reg_hr9_pct: Number.isFinite(parsed.sp_to_rp_reg_hr9_pct) ? Number(parsed.sp_to_rp_reg_hr9_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_hr9_pct,
       market_tier_sec: Number.isFinite(parsed.market_tier_sec) ? Number(parsed.market_tier_sec) : DEFAULT_PITCHING_WEIGHTS.market_tier_sec,
       market_tier_acc_big12: Number.isFinite(parsed.market_tier_acc_big12) ? Number(parsed.market_tier_acc_big12) : DEFAULT_PITCHING_WEIGHTS.market_tier_acc_big12,
       market_tier_big_ten: Number.isFinite(parsed.market_tier_big_ten) ? Number(parsed.market_tier_big_ten) : DEFAULT_PITCHING_WEIGHTS.market_tier_big_ten,
@@ -259,6 +277,15 @@ export const readPitchingWeights = (): PitchingEquationWeights => {
       class_hr9_js: Number.isFinite(parsed.class_hr9_js) ? Number(parsed.class_hr9_js) : DEFAULT_PITCHING_WEIGHTS.class_hr9_js,
       class_hr9_gr: Number.isFinite(parsed.class_hr9_gr) ? Number(parsed.class_hr9_gr) : DEFAULT_PITCHING_WEIGHTS.class_hr9_gr,
     };
+    // QA lock-in: keep K/9 and BB/9 projection constants fixed to agreed model values.
+    // This prevents stale local edits from drifting projected pK/9 and pBB/9.
+    merged.k9_plus_ncaa_avg = 8.21;
+    merged.k9_plus_ncaa_sd = 1.990147058;
+    merged.k9_pr_sd = 43.76562188;
+    merged.bb9_plus_ncaa_avg = 4.82;
+    merged.bb9_plus_ncaa_sd = 1.340745984;
+    merged.bb9_pr_sd = 42.89490618;
+    return merged;
   } catch {
     return DEFAULT_PITCHING_WEIGHTS;
   }

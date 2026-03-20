@@ -15,8 +15,8 @@ type PitchingStorageRow = {
   values: string[];
 };
 
-const MAX_COLS = 9; // Columns A-I only
-const FIXED_HEADERS = ["Player Name", "Team", "Handedness", "ERA", "FIP", "WHIP", "K/9", "BB/9", "HR/9"];
+const MAX_COLS = 13; // Core A-I + G, GS, IP, Role
+const FIXED_HEADERS = ["Player Name", "Team", "Handedness", "Role", "IP", "G", "GS", "ERA", "FIP", "WHIP", "K/9", "BB/9", "HR/9"];
 const NCAA_BASELINES = {
   era: 6.14,
   fip: 5.07,
@@ -64,6 +64,19 @@ const toNum = (v: string | null | undefined) => {
   if (v == null) return null;
   const n = Number(String(v).replace(/[%,$]/g, "").trim());
   return Number.isFinite(n) ? n : null;
+};
+
+const parseBaseballInnings = (v: string | null | undefined) => {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  const whole = Math.trunc(n);
+  const frac = Math.round((n - whole) * 10);
+  if (frac === 1) return whole + (1 / 3);
+  if (frac === 2) return whole + (2 / 3);
+  return n;
 };
 
 const calcPlus = (baseline: number, value: number | null, invert = false) => {
@@ -115,6 +128,12 @@ const isEmbeddedHeaderRow = (values: string[]) => {
   return v0 === "player name" && v1 === "team" && v2 === "handedness";
 };
 
+const findHeaderIndex = (headers: string[], aliases: string[]) => {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const target = new Set(aliases.map(norm));
+  return headers.findIndex((h) => target.has(norm(h || "")));
+};
+
 const PAGE_SIZE = 100;
 const getPageWindow = (currentPage: number, totalPages: number) => {
   const maxButtons = 7;
@@ -123,6 +142,65 @@ const getPageWindow = (currentPage: number, totalPages: number) => {
   let end = Math.min(totalPages, start + maxButtons - 1);
   start = Math.max(1, end - maxButtons + 1);
   return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+};
+
+const legacyIndexForNewCol = (newCol: number): number | null => {
+  // Legacy layout:
+  // [0 Name,1 Team,2 Hand,3 ERA,4 FIP,5 WHIP,6 K9,7 BB9,8 HR9,9 G,10 GS,11 IP,12 Role]
+  // New layout:
+  // [0 Name,1 Team,2 Hand,3 Role,4 IP,5 G,6 GS,7 ERA,8 FIP,9 WHIP,10 K9,11 BB9,12 HR9]
+  if (newCol === 3) return 12;
+  if (newCol === 4) return 11;
+  if (newCol === 5) return 9;
+  if (newCol === 6) return 10;
+  if (newCol === 7) return 3;
+  if (newCol === 8) return 4;
+  if (newCol === 9) return 5;
+  if (newCol === 10) return 6;
+  if (newCol === 11) return 7;
+  if (newCol === 12) return 8;
+  return null;
+};
+
+const resolveStatsView = (values: string[]) => {
+  // Legacy rows have numeric ERA in column 3.
+  const legacyEra = toNum(values[3]);
+  const isLegacy = legacyEra != null;
+  if (isLegacy) {
+    return {
+      era: values[3] || "",
+      fip: values[4] || "",
+      whip: values[5] || "",
+      k9: values[6] || "",
+      bb9: values[7] || "",
+      hr9: values[8] || "",
+    };
+  }
+  return {
+    era: values[7] || "",
+    fip: values[8] || "",
+    whip: values[9] || "",
+    k9: values[10] || "",
+    bb9: values[11] || "",
+    hr9: values[12] || "",
+  };
+};
+
+const displayValueForCol = (values: string[], newCol: number) => {
+  if (newCol >= 7 && newCol <= 12) {
+    const stats = resolveStatsView(values);
+    if (newCol === 7) return stats.era;
+    if (newCol === 8) return stats.fip;
+    if (newCol === 9) return stats.whip;
+    if (newCol === 10) return stats.k9;
+    if (newCol === 11) return stats.bb9;
+    return stats.hr9;
+  }
+  const direct = values[newCol] || "";
+  if (direct.trim()) return direct;
+  const legacyIdx = legacyIndexForNewCol(newCol);
+  if (legacyIdx == null) return direct;
+  return values[legacyIdx] || "";
 };
 
 export default function PitchingStatsStorageTable({ season }: { season: "2025" | "2026" }) {
@@ -241,26 +319,78 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
     const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
     if (lines.length < 2) throw new Error("CSV has no data rows.");
 
-    // Use line 1 as the header row.
     const headerLineIndex = 0;
+    const headerCols = parseCsvLine(lines[headerLineIndex]);
     const nextHeaders = [...FIXED_HEADERS];
+    const playerIdx = findHeaderIndex(headerCols, ["player", "player name", "name", "playerfullname", "abbrevname"]);
+    const teamIdx = findHeaderIndex(headerCols, ["team", "school", "newestteamname", "newestteamabbrevname"]);
+    const handednessIdx = findHeaderIndex(headerCols, ["handedness", "throws", "throwshand"]);
+    const eraIdx = findHeaderIndex(headerCols, ["era"]);
+    const fipIdx = findHeaderIndex(headerCols, ["fip"]);
+    const whipIdx = findHeaderIndex(headerCols, ["whip"]);
+    const k9Idx = findHeaderIndex(headerCols, ["k/9", "k9", "k per 9"]);
+    const bb9Idx = findHeaderIndex(headerCols, ["bb/9", "bb9", "bb per 9"]);
+    const hr9Idx = findHeaderIndex(headerCols, ["hr/9", "hr9", "hr per 9"]);
+    const gIdx = findHeaderIndex(headerCols, ["g", "games"]);
+    const gsIdx = findHeaderIndex(headerCols, ["gs", "games started"]);
+    const ipIdx = findHeaderIndex(headerCols, ["ip", "innings pitched"]);
 
-    const handednessHeaderIdx = 2;
+    // Identity fallback only (when column names are non-standard).
+    const playerCol = playerIdx >= 0 ? playerIdx : 0;
+    const teamCol = teamIdx >= 0 ? teamIdx : 1;
+    const handCol = handednessIdx >= 0 ? handednessIdx : 2;
+
+    const existingByNameTeam = new Map<string, PitchingStorageRow>();
+    const existingByName = new Map<string, PitchingStorageRow[]>();
+    for (const row of rows) {
+      const v = row.values || [];
+      const name = (v[0] || "").trim();
+      const team = (v[1] || "").trim();
+      if (!name) continue;
+      existingByNameTeam.set(`${normalize(name)}|${normalize(team)}`, row);
+      const key = normalize(name);
+      const bucket = existingByName.get(key) || [];
+      bucket.push(row);
+      existingByName.set(key, bucket);
+    }
 
     const nextRows: PitchingStorageRow[] = [];
     for (let i = headerLineIndex + 1; i < lines.length; i++) {
-      const cols = parseCsvLine(lines[i]).slice(0, MAX_COLS);
+      const cols = parseCsvLine(lines[i]);
       if (cols.every((c) => !c?.trim())) continue;
-
-      const values = [...Array(MAX_COLS)].map((_, idx) => cols[idx] || "");
+      const pick = (idx: number) => (idx >= 0 ? (cols[idx] || "").trim() : "");
+      const values = [...Array(MAX_COLS)].map(() => "");
+      values[0] = pick(playerCol);
+      values[1] = pick(teamCol);
+      values[2] = pick(handCol);
+      values[4] = pick(ipIdx);
+      values[5] = pick(gIdx);
+      values[6] = pick(gsIdx);
+      values[7] = pick(eraIdx);
+      values[8] = pick(fipIdx);
+      values[9] = pick(whipIdx);
+      values[10] = pick(k9Idx);
+      values[11] = pick(bb9Idx);
+      values[12] = pick(hr9Idx);
       if (isEmbeddedHeaderRow(values)) continue;
-      const inferredHandednessIdx =
-        handednessHeaderIdx >= 0
-          ? handednessHeaderIdx
-          : (/^(R|L|RH|LH|RHP|LHP)$/i.test(values[2] || "") ? 2 : -1);
+      if (!/[a-zA-Z]/.test(values[0] || "")) continue;
+      values[2] = normalizeHandedness(values[2] || "");
+      const g = toNum(values[5]);
+      const gs = toNum(values[6]);
+      values[3] = g != null && g > 0 && gs != null
+        ? (gs / g < 0.5 ? "RP" : "SP")
+        : "";
 
-      if (inferredHandednessIdx >= 0) {
-        values[inferredHandednessIdx] = normalizeHandedness(values[inferredHandednessIdx]);
+      const existing = (() => {
+        const direct = existingByNameTeam.get(`${normalize(values[0])}|${normalize(values[1])}`);
+        if (direct) return direct;
+        const bucket = existingByName.get(normalize(values[0])) || [];
+        return bucket.length === 1 ? bucket[0] : null;
+      })();
+      if (existing?.values) {
+        for (let c = 0; c < MAX_COLS; c++) {
+          if (!(values[c] || "").trim()) values[c] = existing.values[c] || "";
+        }
       }
 
       nextRows.push({
@@ -270,7 +400,7 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
     }
 
     persist(nextHeaders, nextRows);
-    toast.success(`Imported ${nextRows.length} pitching rows (columns A-I only).`);
+    toast.success(`Imported ${nextRows.length} pitching rows with G, GS, IP, and role tags.`);
   };
 
   const filteredRows = useMemo(() => {
@@ -296,7 +426,7 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
         <div>
           <CardTitle className="text-base">Pitching Stats Storage ({season})</CardTitle>
           <CardDescription>
-            Imports only columns A-I. Handedness is normalized to RHP/LHP.
+            Imports pitcher stats and maps G, GS, IP. Role is auto-tagged: GS/G &lt; 50% = Reliever.
           </CardDescription>
         </div>
         <div className="flex w-full sm:w-auto items-center gap-2">
@@ -364,9 +494,11 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
                         ? "px-2 w-[170px]"
                         : i === 1
                           ? "px-2 w-[145px]"
-                          : i === 2
-                            ? "px-2 w-[80px]"
-                            : "px-2 w-[70px] text-right"
+                            : i === 2
+                              ? "px-2 w-[86px] text-center"
+                            : i === 3
+                              ? "px-2 w-[86px] text-center"
+                              : "px-2 w-[70px] text-right"
                     }
                   >
                     {FIXED_HEADERS[i]}
@@ -379,6 +511,7 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
                 <TableHead className="px-2 w-[72px] text-right">BB/9+</TableHead>
                 <TableHead className="px-2 w-[72px] text-right">HR/9+</TableHead>
                 <TableHead className="px-2 w-[72px] text-right">pRV+</TableHead>
+                <TableHead className="px-2 w-[72px] text-right">pWAR</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -391,13 +524,15 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
                         className={
                           i === 0
                             ? "font-medium px-2"
-                            : i === 1 || i === 2
+                            : i === 1
                               ? "px-2"
+                              : i === 2 || i === 3
+                                ? "px-2 text-center"
                               : "px-2 text-right font-mono"
                         }
                       >
                         {(() => {
-                          if (i !== 0) return row.values[i] || "—";
+                          if (i !== 0) return displayValueForCol(row.values, i) || "—";
                           const playerName = row.values[0] || "";
                           const teamName = row.values[1] || "";
                           const normalizedName = normalize(playerName);
@@ -439,29 +574,35 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
                       </TableCell>
                     ))}
                     {(() => {
-                      const era = toNum(row.values[3]);
-                      const fip = toNum(row.values[4]);
-                      const whip = toNum(row.values[5]);
-                      const k9 = toNum(row.values[6]);
-                      const bb9 = toNum(row.values[7]);
-                      const hr9 = toNum(row.values[8]);
+                      const stats = resolveStatsView(row.values);
+                      const era = toNum(stats.era);
+                      const fip = toNum(stats.fip);
+                      const whip = toNum(stats.whip);
+                      const k9 = toNum(stats.k9);
+                      const bb9 = toNum(stats.bb9);
+                      const hr9 = toNum(stats.hr9);
                       const eraPlus = calcEraPlus(era, weights.era_plus_ncaa_avg, weights.era_plus_ncaa_sd, weights.era_plus_scale);
                       const fipPlus = calcFipPlus(fip, weights.fip_plus_ncaa_avg, weights.fip_plus_ncaa_sd, weights.fip_plus_scale);
                       const whipPlus = calcWhipPlus(whip, weights.whip_plus_ncaa_avg, weights.whip_plus_ncaa_sd, weights.whip_plus_scale);
                       const k9Plus = calcK9Plus(k9, weights.k9_plus_ncaa_avg, weights.k9_plus_ncaa_sd, weights.k9_plus_scale);
                       const bb9Plus = calcBb9Plus(bb9, weights.bb9_plus_ncaa_avg, weights.bb9_plus_ncaa_sd, weights.bb9_plus_scale);
                       const hr9Plus = calcHr9Plus(hr9, weights.hr9_plus_ncaa_avg, weights.hr9_plus_ncaa_sd, weights.hr9_plus_scale);
-                      const pRV =
+                      const pRVRaw =
                         [fipPlus, eraPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].some((v) => v == null)
                           ? null
-                          : Math.round(
+                          : (
                               (weights.fip_plus_weight * Number(fipPlus)) +
                               (weights.era_plus_weight * Number(eraPlus)) +
                               (weights.whip_plus_weight * Number(whipPlus)) +
                               (weights.k9_plus_weight * Number(k9Plus)) +
                               (weights.bb9_plus_weight * Number(bb9Plus)) +
-                              (weights.hr9_plus_weight * Number(hr9Plus)),
+                              (weights.hr9_plus_weight * Number(hr9Plus))
                             );
+                      const pRV = pRVRaw == null ? null : Math.round(pRVRaw);
+                      const innings = parseBaseballInnings(displayValueForCol(row.values, 4));
+                      const pWar = pRVRaw == null || innings == null || weights.pwar_runs_per_win === 0
+                        ? null
+                        : (((((pRVRaw - 100) / 100) * (innings / 9) * weights.pwar_r_per_9) + ((innings / 9) * weights.pwar_replacement_runs_per_9)) / weights.pwar_runs_per_win);
                       return (
                         <>
                           <TableCell className="px-2 text-right font-mono">{eraPlus ?? "—"}</TableCell>
@@ -471,6 +612,7 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
                           <TableCell className="px-2 text-right font-mono">{bb9Plus ?? "—"}</TableCell>
                           <TableCell className="px-2 text-right font-mono">{hr9Plus ?? "—"}</TableCell>
                           <TableCell className="px-2 text-right font-mono font-semibold">{pRV ?? "—"}</TableCell>
+                          <TableCell className="px-2 text-right font-mono font-semibold">{pWar == null ? "—" : pWar.toFixed(2)}</TableCell>
                         </>
                       );
                     })()}
@@ -478,7 +620,7 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={MAX_COLS + 7} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={MAX_COLS + 8} className="py-8 text-center text-muted-foreground">
                     No pitching rows loaded for {season}. Import a CSV to begin.
                   </TableCell>
                 </TableRow>

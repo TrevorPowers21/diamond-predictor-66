@@ -39,6 +39,18 @@ Status: In testing phase. Defer cleanup until testing is complete.
 - Restrict team users to their own program context and keep cross-program data access blocked.
 - Keep manual team override available for admin-only testing.
 
+- Resume checkpoint (2026-03-20):
+  - Fixed runtime error: `Cannot access uninitialized variable` in `ReturningPlayers` (TDZ on `playerOverrides` dependency).
+  - Fixed pitcher role-change direction logic so role transitions work both ways with metric-aware behavior:
+    - `SP -> RP` improves run-prevention rates and increases `K/9`.
+    - `RP -> SP` regresses run-prevention rates and decreases `K/9`.
+    - `SM` transitions apply partial adjustments between SP and RP.
+  - Current user validation point:
+    - Confirm projected stat cards on pitcher player page update immediately when changing `Role Change`.
+    - Confirm the same values match on the pitching player dashboard table.
+  - If anything is still off next session:
+    - Trace one player line-by-line (inputs -> class/dev -> dampening -> role transition adjustment) starting with the player currently being tested.
+
 8. Team upload template/product decision (protect model IP).
 - Before finalizing Team Builder upload templates, collect and review real team-provided files to understand actual field formats.
 - Rework templates/UI after that review so teams can upload needed data without exposing internal power-rating or predictive metric design.
@@ -116,3 +128,5 @@ Status: In testing phase. Defer cleanup until testing is complete.
 - Next session start point (2026-03-17): start on Pitching Power Ratings Storage and debug why some pitcher player profiles are not fully populating.
 - NIL dashboard note (2026-03-19): `NIL Valuations` dashboard/nav route is intentionally commented out in app navigation and routing during testing. Rework and reintegrate later instead of deleting.
 - Scouting tier scale note (2026-03-19): consider translating percentile-style scouting outputs to a baseball-standard 20-80 scale for display/communication; keep 50 anchored as average.
+- Pitching projection QA note (2026-03-19): projected `pWHIP` is still off; `K%` and `BB/9` are also off but closer. Re-trace those equation paths and inputs before locking final pitching projections.
+- Pitching import note (2026-03-20): combined pitching CSV will not include a `Role` column. During import, role should be auto-derived from usage fields using `GS/G` (`GS/G < 0.5 => RP`, otherwise `SP`).

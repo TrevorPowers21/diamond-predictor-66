@@ -26,6 +26,7 @@ import { computeTransferProjection } from "@/lib/transferProjection";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
+import { updatePlayerOverride } from "@/lib/playerOverrides";
 
 const POSITION_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"] as const;
 const PITCHER_SLOTS = ["SP1", "SP2", "SP3", "SP4", "SP5", "RP1", "RP2", "RP3", "RP4", "CL"] as const;
@@ -33,6 +34,7 @@ const MAX_DEPTH = 3;
 const DEV_AGGRESSIVENESS_OPTIONS = [0, 0.5, 1] as const;
 const TEAM_BUILDER_DRAFT_KEY = "team_builder_draft_v1";
 const TARGET_BOARD_STORAGE_KEY = "team_builder_target_board_v1";
+const LEGACY_PITCHING_ROLE_OVERRIDE_KEY = "pitching_role_overrides_v1";
 type TargetBoardEntry = {
   playerId: string;
   playerName: string;
@@ -477,6 +479,14 @@ const depthRoleMultiplier = (role: BuildPlayer["depth_role"]) => {
   return 1.0;
 };
 
+const pitcherRoleFromSlot = (slot: string | null | undefined): "SP" | "RP" | "SM" | null => {
+  if (!slot) return null;
+  const s = slot.toUpperCase();
+  if (s.startsWith("SP")) return "SP";
+  if (s.startsWith("RP") || s === "CL") return "RP";
+  return "SM";
+};
+
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 const statKey = (v: number | null | undefined) => (v == null ? "na" : round3(v).toFixed(3));
 const toRate = (n: number) => (Math.abs(n) > 1 ? n / 100 : n);
@@ -491,6 +501,24 @@ const normalizeParkToIndex = (n: number | null | undefined) => {
 
 const normalizeKey = (value: string | null | undefined) =>
   (value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+
+const writeLegacyPitchingRoleOverride = (
+  playerName: string | null | undefined,
+  teamName: string | null | undefined,
+  role: "SP" | "RP" | "SM" | null,
+) => {
+  if (typeof window === "undefined" || !playerName || !teamName) return;
+  const key = `${normalizeName(playerName)}|${normalizeKey(teamName)}`;
+  try {
+    const raw = window.localStorage.getItem(LEGACY_PITCHING_ROLE_OVERRIDE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, "SP" | "RP" | "SM">) : {};
+    if (role) parsed[key] = role;
+    else delete parsed[key];
+    window.localStorage.setItem(LEGACY_PITCHING_ROLE_OVERRIDE_KEY, JSON.stringify(parsed));
+  } catch {
+    // ignore local storage failures
+  }
+};
 
 const conferenceKeyAliases = getConferenceAliases;
 
@@ -2318,7 +2346,19 @@ export default function TeamBuilder() {
       <TableCell>
         <Select
           value={p.position_slot || "none"}
-          onValueChange={(v) => updatePlayer(globalIdx, { position_slot: v === "none" ? null : v })}
+          onValueChange={(v) => {
+            const nextSlot = v === "none" ? null : v;
+            updatePlayer(globalIdx, { position_slot: nextSlot });
+            if (p.player_id) {
+              const isPitchSlot = !!nextSlot && [...PITCHER_SLOTS].includes(nextSlot as typeof PITCHER_SLOTS[number]);
+              const nextPitchRole = isPitchSlot ? pitcherRoleFromSlot(nextSlot) : null;
+              updatePlayerOverride(p.player_id, {
+                position: nextSlot,
+                pitcher_role: nextPitchRole,
+              });
+              writeLegacyPitchingRoleOverride(getPlayerName(p), p.player?.team || null, nextPitchRole);
+            }
+          }}
         >
           <SelectTrigger className="w-20 h-8">
             <SelectValue />

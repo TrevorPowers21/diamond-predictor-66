@@ -785,7 +785,7 @@ export default function PitchingEquationsTab() {
               <p className="text-sm font-semibold">pWAR Equation</p>
               <div className="bg-muted p-4 rounded-lg space-y-1 text-sm font-mono leading-relaxed">
                 <div><span className="text-muted-foreground">PitcherValue =</span> (pRV+ - 100) / 100</div>
-                <div><span className="text-muted-foreground">RPA =</span> PitcherValue × IP × R/9</div>
+                <div><span className="text-muted-foreground">RPA =</span> PitcherValue × (IP / 9) × R/9</div>
                 <div><span className="text-muted-foreground">ReplacementRuns =</span> (IP / 9) × ReplacementRunsPer9</div>
                 <div><span className="text-muted-foreground">pRAR =</span> RPA + ReplacementRuns</div>
                 <div><span className="text-muted-foreground">NCAA pWAR =</span> pRAR / RunsPerWin</div>
@@ -834,6 +834,46 @@ export default function PitchingEquationsTab() {
                     <span>Runs/Win</span>
                     <Input type="text" inputMode="decimal" className="h-8" value={weights.pwar_runs_per_win} onChange={(e) => setWeights((p) => ({ ...p, pwar_runs_per_win: toNum(e.target.value) }))} />
                   </div>
+                </div>
+              </div>
+            </div>
+            <div className={sectionPanelClass}>
+              <div className="flex items-center justify-between">
+                <p className={sectionHeadingClass}>Starter To Reliever Regression</p>
+                <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]">Edit</Button>
+              </div>
+              <div className="grid grid-cols-[1fr_140px] gap-2 text-xs text-muted-foreground">
+                <div className="font-medium">Metric</div>
+                <div className="font-medium text-right">Default Adjustment</div>
+                <div>ERA</div>
+                <div className="relative">
+                  <Input type="text" inputMode="decimal" className="h-8 pr-6 text-right" value={weights.sp_to_rp_reg_era_pct} onChange={(e) => setWeights((p) => ({ ...p, sp_to_rp_reg_era_pct: toNum(e.target.value) }))} />
+                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">%</span>
+                </div>
+                <div>FIP</div>
+                <div className="relative">
+                  <Input type="text" inputMode="decimal" className="h-8 pr-6 text-right" value={weights.sp_to_rp_reg_fip_pct} onChange={(e) => setWeights((p) => ({ ...p, sp_to_rp_reg_fip_pct: toNum(e.target.value) }))} />
+                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">%</span>
+                </div>
+                <div>WHIP</div>
+                <div className="relative">
+                  <Input type="text" inputMode="decimal" className="h-8 pr-6 text-right" value={weights.sp_to_rp_reg_whip_pct} onChange={(e) => setWeights((p) => ({ ...p, sp_to_rp_reg_whip_pct: toNum(e.target.value) }))} />
+                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">%</span>
+                </div>
+                <div>K/9</div>
+                <div className="relative">
+                  <Input type="text" inputMode="decimal" className="h-8 pr-6 text-right" value={weights.sp_to_rp_reg_k9_pct} onChange={(e) => setWeights((p) => ({ ...p, sp_to_rp_reg_k9_pct: toNum(e.target.value) }))} />
+                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">%</span>
+                </div>
+                <div>BB/9</div>
+                <div className="relative">
+                  <Input type="text" inputMode="decimal" className="h-8 pr-6 text-right" value={weights.sp_to_rp_reg_bb9_pct} onChange={(e) => setWeights((p) => ({ ...p, sp_to_rp_reg_bb9_pct: toNum(e.target.value) }))} />
+                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">%</span>
+                </div>
+                <div>HR/9</div>
+                <div className="relative">
+                  <Input type="text" inputMode="decimal" className="h-8 pr-6 text-right" value={weights.sp_to_rp_reg_hr9_pct} onChange={(e) => setWeights((p) => ({ ...p, sp_to_rp_reg_hr9_pct: toNum(e.target.value) }))} />
+                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">%</span>
                 </div>
               </div>
             </div>
