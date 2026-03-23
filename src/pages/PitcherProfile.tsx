@@ -12,11 +12,30 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/hooks/useAuth";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { readPlayerOverrides } from "@/lib/playerOverrides";
+import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
 const normalize = (v: string | null | undefined) =>
   (v || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+const PITCHER_TEAM_ALIASES: Record<string, string> = {
+  "unc charlotte": "Charlotte",
+  "louisiana state university": "Louisiana State",
+  "university of mississippi": "Ole Miss",
+  "florida international university": "Florida International",
+  "florida internation": "Florida International",
+  "university of hawaii manoa": "University of Hawaii",
+  "university of hawaii, manoa": "University of Hawaii",
+  "university of california": "California",
+  ucla: "University of California Los Angeles",
+  "samford university": "Samford",
+};
+const normalizePitcherTeamName = (team: string | null | undefined) => {
+  const raw = String(team || "").trim();
+  if (!raw) return "";
+  const alias = PITCHER_TEAM_ALIASES[normalize(raw)];
+  return alias || raw;
+};
 const hasAnyNumericValue = (values: string[] | undefined, indexes: number[]) =>
   indexes.some((idx) => {
     const n = Number((values?.[idx] || "").replace(/[%,$]/g, "").trim());
@@ -176,6 +195,18 @@ const OVERALL_PITCHER_POWER_WEIGHTS = {
 const PITCHING_POWER_RATING_WEIGHT = 0.7;
 const PITCHING_DEV_FACTOR = 0.06;
 const PITCHER_PROFILE_STORAGE_OVERRIDE_KEY = "pitcher_profile_projection_overrides_v1";
+const getPitchingPvfForRole = (
+  role: "SP" | "RP" | "SM",
+  eq: ReturnType<typeof readPitchingWeights>,
+) => (role === "RP" ? eq.market_pvf_reliever : role === "SM" ? eq.market_pvf_weekday_sp : eq.market_pvf_weekend_sp);
+const canShowPitchingMarketValue = (team: string | null | undefined, conference: string | null | undefined) => {
+  const conf = String(conference || "").trim().toLowerCase();
+  const tm = String(team || "").trim().toLowerCase();
+  if (!conf) return false;
+  const isIndependent = conf === "independent" || conf.includes("independent");
+  if (!isIndependent) return true;
+  return tm === "oregon state" || tm.includes("oregon state");
+};
 const toPitchingRole = (raw: string | null | undefined): "SP" | "RP" | "SM" | null => {
   const v = String(raw || "").trim().toUpperCase();
   if (v === "SP" || v === "RP" || v === "SM") return v;
@@ -187,13 +218,40 @@ const applyRoleTransitionAdjustment = (
   fromRole: "SP" | "RP" | "SM" | null,
   toRole: "SP" | "RP" | "SM" | null,
   lowerIsBetter: boolean,
+  rpToSpLowBetterCurve?: {
+    tier1Max: number;
+    tier2Max: number;
+    tier3Max: number;
+    tier1Mult: number;
+    tier2Mult: number;
+    tier3Mult: number;
+  },
 ) => {
   if (value == null || !Number.isFinite(value)) return null;
   if (!fromRole || !toRole || fromRole === toRole) return value;
   const rank: Record<"SP" | "SM" | "RP", number> = { SP: 0, SM: 1, RP: 2 };
   const step = rank[toRole] - rank[fromRole];
   if (step === 0) return value;
-  const factor = 1 + ((pct / 100) * (Math.abs(step) / 2));
+  const movingTowardStarter = rank[toRole] < rank[fromRole];
+
+  // Extra RP->SP penalty curve so elite reliever lines do not stay unrealistically low as starters.
+  const starterRegressionBoost = (() => {
+    if (!movingTowardStarter) return 1;
+    if (lowerIsBetter) {
+      const c = rpToSpLowBetterCurve;
+      if (!c) return 1;
+      if (value <= c.tier1Max) return c.tier1Mult;
+      if (value <= c.tier2Max) return c.tier2Mult;
+      if (value <= c.tier3Max) return c.tier3Mult;
+      return 1.0;
+    }
+    // Keep K/9 and other higher-is-better metrics at the base role-change impact.
+    return 1.0;
+  })();
+
+  // Role change direction controls up/down; admin % is treated as magnitude.
+  const pctMagnitude = Math.abs(pct);
+  const factor = 1 + ((pctMagnitude / 100) * (Math.abs(step) / 2) * starterRegressionBoost);
   if (!Number.isFinite(factor) || factor <= 0) return value;
   if (lowerIsBetter) {
     return step > 0 ? value / factor : value * factor;
@@ -411,7 +469,7 @@ export default function PitcherProfile() {
   }, [player?.first_name, player?.last_name, storageRef?.playerName]);
   const lookupTeamName = useMemo(() => {
     if (storageRef?.teamName) return storageRef.teamName;
-    return player?.team || "";
+    return normalizePitcherTeamName(player?.team || "");
   }, [player?.team, storageRef?.teamName]);
   const storageRow = useMemo(() => {
     if (!lookupPlayerName) return null;
@@ -622,7 +680,7 @@ export default function PitcherProfile() {
     `${player?.first_name || ""} ${player?.last_name || ""}`.trim() ||
     storageRef?.playerName ||
     "Pitcher";
-  const displayTeam = player?.team || storageRow?.[1] || storageRef?.teamName || "—";
+  const displayTeam = normalizePitcherTeamName(player?.team || storageRow?.[1] || storageRef?.teamName || "") || "—";
   const playerOverride = useMemo(
     () => (isDbRoute && id ? readPlayerOverrides()[id] : undefined),
     [id, isDbRoute],
@@ -802,12 +860,20 @@ export default function PitcherProfile() {
       impacts: eq.hr9_damp_impacts,
       lowerIsBetter: true,
     });
-    const roleAdjustedEra = applyRoleTransitionAdjustment(pEra, eq.sp_to_rp_reg_era_pct, derivedRole, projectedRole, true);
-    const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, eq.sp_to_rp_reg_fip_pct, derivedRole, projectedRole, true);
-    const roleAdjustedWhip = applyRoleTransitionAdjustment(pWhip, eq.sp_to_rp_reg_whip_pct, derivedRole, projectedRole, true);
-    const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, eq.sp_to_rp_reg_k9_pct, derivedRole, projectedRole, false);
-    const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, eq.sp_to_rp_reg_bb9_pct, derivedRole, projectedRole, true);
-    const roleAdjustedHr9 = applyRoleTransitionAdjustment(pHr9, eq.sp_to_rp_reg_hr9_pct, derivedRole, projectedRole, true);
+    const roleCurve = {
+      tier1Max: eq.rp_to_sp_low_better_tier1_max,
+      tier2Max: eq.rp_to_sp_low_better_tier2_max,
+      tier3Max: eq.rp_to_sp_low_better_tier3_max,
+      tier1Mult: eq.rp_to_sp_low_better_tier1_mult,
+      tier2Mult: eq.rp_to_sp_low_better_tier2_mult,
+      tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
+    };
+    const roleAdjustedEra = applyRoleTransitionAdjustment(pEra, eq.sp_to_rp_reg_era_pct, derivedRole, projectedRole, true, roleCurve);
+    const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, eq.sp_to_rp_reg_fip_pct, derivedRole, projectedRole, true, roleCurve);
+    const roleAdjustedWhip = applyRoleTransitionAdjustment(pWhip, eq.sp_to_rp_reg_whip_pct, derivedRole, projectedRole, true, roleCurve);
+    const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, eq.sp_to_rp_reg_k9_pct, derivedRole, projectedRole, false, roleCurve);
+    const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, eq.sp_to_rp_reg_bb9_pct, derivedRole, projectedRole, true, roleCurve);
+    const roleAdjustedHr9 = applyRoleTransitionAdjustment(pHr9, eq.sp_to_rp_reg_hr9_pct, derivedRole, projectedRole, true, roleCurve);
 
     const eraPlus = calcPitchingPlus(roleAdjustedEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale);
     const fipPlus = calcPitchingPlus(roleAdjustedFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale);
@@ -828,6 +894,19 @@ export default function PitcherProfile() {
     const pWar = pitcherValue == null || eq.pwar_runs_per_win === 0
       ? null
       : ((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
+    const pitchingTierMultipliers = {
+      sec: eq.market_tier_sec,
+      p4: eq.market_tier_acc_big12,
+      bigTen: eq.market_tier_big_ten,
+      strongMid: eq.market_tier_strong_mid,
+      lowMajor: eq.market_tier_low_major,
+    };
+    const teamForMarket = displayTeam || null;
+    const conferenceForMarket = displayConference === "—" ? null : displayConference;
+    const ptm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
+    const pvm = getPitchingPvfForRole(projectedRole, eq);
+    const marketEligible = canShowPitchingMarketValue(teamForMarket, conferenceForMarket);
+    const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
 
     return {
       pEra: roleAdjustedEra,
@@ -838,6 +917,7 @@ export default function PitcherProfile() {
       pHr9: roleAdjustedHr9,
       pRvPlus,
       pWar,
+      marketValue,
       projectedIp,
     };
   }, [
@@ -859,6 +939,7 @@ export default function PitcherProfile() {
     storageK9,
     storageIp,
     storageWhip,
+    displayConference,
     derivedRole,
     projectedRole,
     storageProjectionOverride?.class_transition,
@@ -970,7 +1051,7 @@ export default function PitcherProfile() {
 
           <div className="lg:col-span-2 space-y-4">
             <div className="grid gap-3 md:grid-cols-3">
-              <MetricCard title="Market Value" value={nilFormat(nilValuation?.projected_value ?? null)} />
+              <MetricCard title="Market Value" value={nilFormat(projectedPitching.marketValue ?? nilValuation?.projected_value ?? null)} />
               <MetricCard title="Projected pWAR" value={fmt(projectedPitching.pWar, 2)} />
               <MetricCard
                 title="Overall Pitcher Power Rating"

@@ -113,6 +113,7 @@ interface PitchingDashboardRow {
   p_hr9: number | null;
   p_rv_plus: number | null;
   p_war: number | null;
+  market_value: number | null;
 }
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
@@ -136,6 +137,11 @@ const moneyFormat = (v: number | null | undefined) => {
   if (v == null) return "—";
   return compactDollar.format(v).replace("k", "K").replace("m", "M").replace("b", "B");
 };
+const csvEscape = (v: string | number | null | undefined) => {
+  const s = v == null ? "" : String(v);
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+};
 const toNum = (v: string | null | undefined) => {
   if (v == null) return null;
   const n = Number(String(v).replace(/[%,$]/g, "").trim());
@@ -146,6 +152,18 @@ const PITCHING_POWER_RATING_WEIGHT = 0.7;
 const PITCHING_DEV_FACTOR = 0.06;
 const DEFAULT_PITCHING_CLASS_TRANSITION: "FS" | "SJ" | "JS" | "GR" = "SJ";
 const DEFAULT_PITCHING_DEV_AGGRESSIVENESS = 0;
+const getPitchingPvfForRole = (
+  role: "SP" | "RP" | "SM",
+  eq: ReturnType<typeof readPitchingWeights>,
+) => (role === "RP" ? eq.market_pvf_reliever : role === "SM" ? eq.market_pvf_weekday_sp : eq.market_pvf_weekend_sp);
+const canShowPitchingMarketValue = (team: string | null | undefined, conference: string | null | undefined) => {
+  const conf = String(conference || "").trim().toLowerCase();
+  const tm = String(team || "").trim().toLowerCase();
+  if (!conf) return false;
+  const isIndependent = conf === "independent" || conf.includes("independent");
+  if (!isIndependent) return true;
+  return tm === "oregon state" || tm.includes("oregon state");
+};
 
 const toPitchingClassAdj = (
   classTransition: "FS" | "SJ" | "JS" | "GR",
@@ -322,13 +340,40 @@ const applyRoleTransitionAdjustment = (
   fromRole: "SP" | "RP" | "SM" | null,
   toRole: "SP" | "RP" | "SM" | null,
   lowerIsBetter: boolean,
+  rpToSpLowBetterCurve?: {
+    tier1Max: number;
+    tier2Max: number;
+    tier3Max: number;
+    tier1Mult: number;
+    tier2Mult: number;
+    tier3Mult: number;
+  },
 ) => {
   if (value == null || !Number.isFinite(value)) return null;
   if (!fromRole || !toRole || fromRole === toRole) return value;
   const rank: Record<"SP" | "SM" | "RP", number> = { SP: 0, SM: 1, RP: 2 };
   const step = rank[toRole] - rank[fromRole];
   if (step === 0) return value;
-  const factor = 1 + ((pct / 100) * (Math.abs(step) / 2));
+  const movingTowardStarter = rank[toRole] < rank[fromRole];
+
+  // Extra RP->SP penalty curve so elite reliever lines do not stay unrealistically low as starters.
+  const starterRegressionBoost = (() => {
+    if (!movingTowardStarter) return 1;
+    if (lowerIsBetter) {
+      const c = rpToSpLowBetterCurve;
+      if (!c) return 1;
+      if (value <= c.tier1Max) return c.tier1Mult;
+      if (value <= c.tier2Max) return c.tier2Mult;
+      if (value <= c.tier3Max) return c.tier3Mult;
+      return 1.0;
+    }
+    // Keep K/9 and other higher-is-better metrics at the base role-change impact.
+    return 1.0;
+  })();
+
+  // Role change direction controls up/down; admin % is treated as magnitude.
+  const pctMagnitude = Math.abs(pct);
+  const factor = 1 + ((pctMagnitude / 100) * (Math.abs(step) / 2) * starterRegressionBoost);
   if (!Number.isFinite(factor) || factor <= 0) return value;
   if (lowerIsBetter) {
     return step > 0 ? value / factor : value * factor;
@@ -544,7 +589,17 @@ for (const row of powerRatings2025Seed as Array<any>) {
 
 const PITCHING_TEAM_ALIASES: Record<string, string> = {
   "unc charlotte": "Charlotte",
+  "louisiana state university": "Louisiana State",
+  "university of mississippi": "Ole Miss",
+  "florida international university": "Florida International",
+  "florida internation": "Florida International",
+  "university of hawaii manoa": "University of Hawaii",
+  "university of hawaii, manoa": "University of Hawaii",
+  "university of california": "California",
+  ucla: "University of California Los Angeles",
+  "samford university": "Samford",
 };
+const RETURNING_VIEW_SNAPSHOT_KEY = "returning_players_view_snapshot_v1";
 
 export default function ReturningPlayers() {
   const queryClient = useQueryClient();
@@ -585,6 +640,8 @@ export default function ReturningPlayers() {
   const [pitchingSearch, setPitchingSearch] = useState("");
   const [pitchingPage, setPitchingPage] = useState(1);
   const [pitchingPageSize, setPitchingPageSize] = useState<number>(100);
+  const skipNextHittingPageResetRef = useRef(false);
+  const skipNextPitchingPageResetRef = useRef(false);
   const normalize = (value: string | null | undefined) =>
     (value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 
@@ -592,6 +649,83 @@ export default function ReturningPlayers() {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 220);
     return () => window.clearTimeout(t);
   }, [search]);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(RETURNING_VIEW_SNAPSHOT_KEY);
+      if (!raw) return;
+      sessionStorage.removeItem(RETURNING_VIEW_SNAPSHOT_KEY);
+      const parsed = JSON.parse(raw) as {
+        search?: string;
+        positionFilter?: string;
+        page?: number;
+        pageSize?: number;
+        sortKey?: SortKey;
+        sortDir?: SortDir;
+        showMissingOnly?: boolean;
+        dashboardView?: "hitting" | "pitching";
+        pitchingSearch?: string;
+        pitchingPage?: number;
+        pitchingPageSize?: number;
+        scrollY?: number;
+      };
+      if (typeof parsed.search === "string") setSearch(parsed.search);
+      if (typeof parsed.positionFilter === "string") setPositionFilter(parsed.positionFilter);
+      if (Number.isFinite(parsed.page) && Number(parsed.page) >= 1) setPage(Number(parsed.page));
+      if (Number.isFinite(parsed.pageSize) && Number(parsed.pageSize) > 0) setPageSize(Number(parsed.pageSize));
+      if (parsed.sortKey) setSortKey(parsed.sortKey);
+      if (parsed.sortDir) setSortDir(parsed.sortDir);
+      if (typeof parsed.showMissingOnly === "boolean") setShowMissingOnly(parsed.showMissingOnly);
+      if (parsed.dashboardView === "hitting" || parsed.dashboardView === "pitching") setDashboardView(parsed.dashboardView);
+      if (typeof parsed.pitchingSearch === "string") setPitchingSearch(parsed.pitchingSearch);
+      if (Number.isFinite(parsed.pitchingPage) && Number(parsed.pitchingPage) >= 1) setPitchingPage(Number(parsed.pitchingPage));
+      if (Number.isFinite(parsed.pitchingPageSize) && Number(parsed.pitchingPageSize) > 0) setPitchingPageSize(Number(parsed.pitchingPageSize));
+      skipNextHittingPageResetRef.current = true;
+      skipNextPitchingPageResetRef.current = true;
+      const y = Number(parsed.scrollY);
+      requestAnimationFrame(() => {
+        if (Number.isFinite(y) && y >= 0) window.scrollTo({ top: y, behavior: "auto" });
+      });
+    } catch {
+      // ignore malformed snapshot payloads
+    }
+  }, []);
+
+  const saveViewSnapshot = useCallback(() => {
+    try {
+      sessionStorage.setItem(
+        RETURNING_VIEW_SNAPSHOT_KEY,
+        JSON.stringify({
+          search,
+          positionFilter,
+          page,
+          pageSize,
+          sortKey,
+          sortDir,
+          showMissingOnly,
+          dashboardView,
+          pitchingSearch,
+          pitchingPage,
+          pitchingPageSize,
+          scrollY: window.scrollY,
+        }),
+      );
+    } catch {
+      // ignore storage write issues
+    }
+  }, [
+    dashboardView,
+    page,
+    pageSize,
+    pitchingPage,
+    pitchingPageSize,
+    pitchingSearch,
+    positionFilter,
+    search,
+    showMissingOnly,
+    sortDir,
+    sortKey,
+  ]);
 
   // Fixed scrollbar refs & sync
   const scrollbarRef = useRef<HTMLDivElement>(null);
@@ -1073,6 +1207,26 @@ export default function ReturningPlayers() {
   });
   const players = playersResult?.rows ?? [];
   const totalCount = playersResult?.total ?? 0;
+  const hittingBlankMarketRows = useMemo(() => {
+    return players
+      .map((p) => {
+        const effectivePosition = playerOverrides[p.id]?.position ?? p.position;
+        const marketValue = computeNilFallback({
+          storedNil: p.nil_value,
+          wrcPlus: p.prediction.p_wrc_plus,
+          conference: p.conference,
+          position: effectivePosition,
+        });
+        if (marketValue != null) return null;
+        return {
+          player: `${p.first_name} ${p.last_name}`,
+          school: p.team || "",
+          conference: p.conference || "",
+          source: "Hitting",
+        };
+      })
+      .filter(Boolean) as Array<{ player: string; school: string; conference: string; source: string }>;
+  }, [players, playerOverrides]);
 
   const { data: teamsDirectory = [] } = useQuery({
     queryKey: ["teams-directory-for-player-dashboard-edit"],
@@ -1219,6 +1373,10 @@ export default function ReturningPlayers() {
   const sortedRows = players;
 
   useEffect(() => {
+    if (skipNextHittingPageResetRef.current) {
+      skipNextHittingPageResetRef.current = false;
+      return;
+    }
     setPage(1);
   }, [search, positionFilter, showMissingOnly, sortKey, sortDir, pageSize]);
 
@@ -1467,12 +1625,20 @@ export default function ReturningPlayers() {
             impacts: eq.hr9_damp_impacts,
             lowerIsBetter: true,
           });
-          const roleAdjustedEra = applyRoleTransitionAdjustment(pEra, eq.sp_to_rp_reg_era_pct, baseRole, projectedRole, true);
-          const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, eq.sp_to_rp_reg_fip_pct, baseRole, projectedRole, true);
-          const roleAdjustedWhip = applyRoleTransitionAdjustment(pWhip, eq.sp_to_rp_reg_whip_pct, baseRole, projectedRole, true);
-          const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, eq.sp_to_rp_reg_k9_pct, baseRole, projectedRole, false);
-          const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, eq.sp_to_rp_reg_bb9_pct, baseRole, projectedRole, true);
-          const roleAdjustedHr9 = applyRoleTransitionAdjustment(pHr9, eq.sp_to_rp_reg_hr9_pct, baseRole, projectedRole, true);
+          const roleCurve = {
+            tier1Max: eq.rp_to_sp_low_better_tier1_max,
+            tier2Max: eq.rp_to_sp_low_better_tier2_max,
+            tier3Max: eq.rp_to_sp_low_better_tier3_max,
+            tier1Mult: eq.rp_to_sp_low_better_tier1_mult,
+            tier2Mult: eq.rp_to_sp_low_better_tier2_mult,
+            tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
+          };
+          const roleAdjustedEra = applyRoleTransitionAdjustment(pEra, eq.sp_to_rp_reg_era_pct, baseRole, projectedRole, true, roleCurve);
+          const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, eq.sp_to_rp_reg_fip_pct, baseRole, projectedRole, true, roleCurve);
+          const roleAdjustedWhip = applyRoleTransitionAdjustment(pWhip, eq.sp_to_rp_reg_whip_pct, baseRole, projectedRole, true, roleCurve);
+          const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, eq.sp_to_rp_reg_k9_pct, baseRole, projectedRole, false, roleCurve);
+          const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, eq.sp_to_rp_reg_bb9_pct, baseRole, projectedRole, true, roleCurve);
+          const roleAdjustedHr9 = applyRoleTransitionAdjustment(pHr9, eq.sp_to_rp_reg_hr9_pct, baseRole, projectedRole, true, roleCurve);
 
           const eraPlus = calcPitchingPlus(roleAdjustedEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
           const fipPlus = calcPitchingPlus(roleAdjustedFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
@@ -1492,6 +1658,18 @@ export default function ReturningPlayers() {
           const pWar = pitcherValue == null || eq.pwar_runs_per_win === 0
             ? null
             : ((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
+          const pitchingTierMultipliers = {
+            sec: eq.market_tier_sec,
+            p4: eq.market_tier_acc_big12,
+            bigTen: eq.market_tier_big_ten,
+            strongMid: eq.market_tier_strong_mid,
+            lowMajor: eq.market_tier_low_major,
+          };
+          const conferenceForMarket = teamMatch?.conference || null;
+          const ptm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
+          const pvm = getPitchingPvfForRole(projectedRole, eq);
+          const marketEligible = canShowPitchingMarketValue(normalizedTeam, conferenceForMarket);
+          const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
 
           return {
             id: r.id || `pitching-${idx}`,
@@ -1525,6 +1703,7 @@ export default function ReturningPlayers() {
             p_hr9: roleAdjustedHr9,
             p_rv_plus: pRvPlus,
             p_war: pWar,
+            market_value: marketValue,
           };
         })
         .filter((r) => !!r.playerName);
@@ -1545,6 +1724,10 @@ export default function ReturningPlayers() {
     });
   }, [pitchingRows, pitchingSearch]);
   useEffect(() => {
+    if (skipNextPitchingPageResetRef.current) {
+      skipNextPitchingPageResetRef.current = false;
+      return;
+    }
     setPitchingPage(1);
   }, [pitchingSearch, pitchingPageSize]);
   const pitchingTotal = filteredPitchingRows.length;
@@ -1573,6 +1756,42 @@ export default function ReturningPlayers() {
     () => pitchingRows.filter((r) => !r.team || !r.team.trim()).length,
     [pitchingRows],
   );
+  const pitchingBlankMarketRows = useMemo(
+    () =>
+      pitchingRows
+        .filter((r) => r.market_value == null)
+        .map((r) => ({
+          player: r.playerName,
+          school: r.team || "",
+          conference: r.conference || "",
+          source: "Pitching",
+        })),
+    [pitchingRows],
+  );
+  const exportBlankMarketValues = useCallback((mode: "hitting" | "pitching" | "all") => {
+    const rows = mode === "hitting"
+      ? hittingBlankMarketRows
+      : mode === "pitching"
+        ? pitchingBlankMarketRows
+        : [...hittingBlankMarketRows, ...pitchingBlankMarketRows];
+    if (!rows.length) {
+      toast.info("No blank market values found.");
+      return;
+    }
+    const header = ["Player", "School", "Conference", "Source"];
+    const lines = rows.map((r) => [csvEscape(r.player), csvEscape(r.school), csvEscape(r.conference), csvEscape(r.source)].join(","));
+    const csv = `${header.join(",")}\n${lines.join("\n")}\n`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `blank_market_values_${mode}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${rows.length} blank market value row(s).`);
+  }, [hittingBlankMarketRows, pitchingBlankMarketRows]);
   useEffect(() => {
     const key = "pitching_stats_storage_2025_v1";
     const raw = localStorage.getItem(key);
@@ -1767,6 +1986,14 @@ export default function ReturningPlayers() {
                   ))}
                 </SelectContent>
               </Select>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() => exportBlankMarketValues("hitting")}
+              >
+                Blank Market Value ({hittingBlankMarketRows.length})
+              </Button>
               {bulkEditMode ? (
                 <div className="flex gap-1">
                   <Button
@@ -1872,6 +2099,7 @@ export default function ReturningPlayers() {
                             <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
                               <Link
                                 to={profileRouteFor(p.id, effectivePosition)}
+                                onClick={saveViewSnapshot}
                                 className="hover:text-primary hover:underline transition-colors"
                               >
                                 {p.first_name} {p.last_name}
@@ -2030,6 +2258,14 @@ export default function ReturningPlayers() {
                 <CardTitle className="text-base">Pitching Dashboard (2025)</CardTitle>
                 <CardDescription>Prior stats with scouting grades from pitching power ratings storage.</CardDescription>
               </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs sm:mr-2"
+                onClick={() => exportBlankMarketValues("pitching")}
+              >
+                Blank Market Value ({pitchingBlankMarketRows.length})
+              </Button>
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <div className="flex items-center gap-1 overflow-x-auto max-w-[360px]">
                   {pitchingVisiblePages.map((p, i) => {
@@ -2096,6 +2332,7 @@ export default function ReturningPlayers() {
                             <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
                               <Link
                                 to={`/dashboard/pitcher/storage__${encodeURIComponent(r.playerName)}__${encodeURIComponent(r.team || "")}`}
+                                onClick={saveViewSnapshot}
                                 className="hover:text-primary hover:underline transition-colors"
                               >
                                 {r.playerName}
@@ -2112,7 +2349,7 @@ export default function ReturningPlayers() {
                             <TableCell className="text-right font-mono text-sm">{statFormat(r.p_hr9, 2)}</TableCell>
                             <TableCell className="text-right font-mono text-sm">{r.p_rv_plus == null ? "—" : Math.round(r.p_rv_plus)}</TableCell>
                             <TableCell className="text-right font-mono text-sm">{r.p_war == null ? "—" : r.p_war.toFixed(2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm text-muted-foreground">—</TableCell>
+                            <TableCell className="text-right font-mono text-sm">{moneyFormat(r.market_value)}</TableCell>
                             <TableCell className="text-center">
                               {r.stuff_score != null &&
                               r.whiff_score != null &&

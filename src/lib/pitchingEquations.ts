@@ -53,15 +53,21 @@ export type PitchingEquationWeights = {
   sp_to_rp_reg_k9_pct: number;
   sp_to_rp_reg_bb9_pct: number;
   sp_to_rp_reg_hr9_pct: number;
+  rp_to_sp_low_better_tier1_max: number;
+  rp_to_sp_low_better_tier2_max: number;
+  rp_to_sp_low_better_tier3_max: number;
+  rp_to_sp_low_better_tier1_mult: number;
+  rp_to_sp_low_better_tier2_mult: number;
+  rp_to_sp_low_better_tier3_mult: number;
   market_tier_sec: number;
   market_tier_acc_big12: number;
   market_tier_big_ten: number;
   market_tier_strong_mid: number;
   market_tier_low_major: number;
+  market_dollars_per_war: number;
   market_pvf_weekend_sp: number;
   market_pvf_weekday_sp: number;
-  market_pvf_high_impact_rp: number;
-  market_pvf_low_impact_rp: number;
+  market_pvf_reliever: number;
   class_era_fs: number;
   class_era_sj: number;
   class_era_js: number;
@@ -144,16 +150,22 @@ export const DEFAULT_PITCHING_WEIGHTS: PitchingEquationWeights = {
   sp_to_rp_reg_whip_pct: 5,
   sp_to_rp_reg_k9_pct: -8,
   sp_to_rp_reg_bb9_pct: 4,
-  sp_to_rp_reg_hr9_pct: 10,
+  sp_to_rp_reg_hr9_pct: 8,
+  rp_to_sp_low_better_tier1_max: 2.1,
+  rp_to_sp_low_better_tier2_max: 2.6,
+  rp_to_sp_low_better_tier3_max: 3.25,
+  rp_to_sp_low_better_tier1_mult: 4.0,
+  rp_to_sp_low_better_tier2_mult: 3.0,
+  rp_to_sp_low_better_tier3_mult: 2.0,
   market_tier_sec: 1.5,
   market_tier_acc_big12: 1.2,
   market_tier_big_ten: 1.0,
   market_tier_strong_mid: 0.8,
   market_tier_low_major: 0.5,
+  market_dollars_per_war: 25000,
   market_pvf_weekend_sp: 1.2,
   market_pvf_weekday_sp: 1.0,
-  market_pvf_high_impact_rp: 1.08,
-  market_pvf_low_impact_rp: 0.9,
+  market_pvf_reliever: 1.0,
   class_era_fs: 3.0,
   class_era_sj: 2.0,
   class_era_js: 1.5,
@@ -243,15 +255,33 @@ export const readPitchingWeights = (): PitchingEquationWeights => {
       sp_to_rp_reg_k9_pct: Number.isFinite(parsed.sp_to_rp_reg_k9_pct) ? Number(parsed.sp_to_rp_reg_k9_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_k9_pct,
       sp_to_rp_reg_bb9_pct: Number.isFinite(parsed.sp_to_rp_reg_bb9_pct) ? Number(parsed.sp_to_rp_reg_bb9_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_bb9_pct,
       sp_to_rp_reg_hr9_pct: Number.isFinite(parsed.sp_to_rp_reg_hr9_pct) ? Number(parsed.sp_to_rp_reg_hr9_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_hr9_pct,
+      rp_to_sp_low_better_tier1_max: Number.isFinite(parsed.rp_to_sp_low_better_tier1_max) ? Number(parsed.rp_to_sp_low_better_tier1_max) : DEFAULT_PITCHING_WEIGHTS.rp_to_sp_low_better_tier1_max,
+      rp_to_sp_low_better_tier2_max: Number.isFinite(parsed.rp_to_sp_low_better_tier2_max) ? Number(parsed.rp_to_sp_low_better_tier2_max) : DEFAULT_PITCHING_WEIGHTS.rp_to_sp_low_better_tier2_max,
+      rp_to_sp_low_better_tier3_max: Number.isFinite(parsed.rp_to_sp_low_better_tier3_max) ? Number(parsed.rp_to_sp_low_better_tier3_max) : DEFAULT_PITCHING_WEIGHTS.rp_to_sp_low_better_tier3_max,
+      rp_to_sp_low_better_tier1_mult: Number.isFinite(parsed.rp_to_sp_low_better_tier1_mult) ? Number(parsed.rp_to_sp_low_better_tier1_mult) : DEFAULT_PITCHING_WEIGHTS.rp_to_sp_low_better_tier1_mult,
+      rp_to_sp_low_better_tier2_mult: Number.isFinite(parsed.rp_to_sp_low_better_tier2_mult) ? Number(parsed.rp_to_sp_low_better_tier2_mult) : DEFAULT_PITCHING_WEIGHTS.rp_to_sp_low_better_tier2_mult,
+      rp_to_sp_low_better_tier3_mult: Number.isFinite(parsed.rp_to_sp_low_better_tier3_mult) ? Number(parsed.rp_to_sp_low_better_tier3_mult) : DEFAULT_PITCHING_WEIGHTS.rp_to_sp_low_better_tier3_mult,
       market_tier_sec: Number.isFinite(parsed.market_tier_sec) ? Number(parsed.market_tier_sec) : DEFAULT_PITCHING_WEIGHTS.market_tier_sec,
       market_tier_acc_big12: Number.isFinite(parsed.market_tier_acc_big12) ? Number(parsed.market_tier_acc_big12) : DEFAULT_PITCHING_WEIGHTS.market_tier_acc_big12,
       market_tier_big_ten: Number.isFinite(parsed.market_tier_big_ten) ? Number(parsed.market_tier_big_ten) : DEFAULT_PITCHING_WEIGHTS.market_tier_big_ten,
       market_tier_strong_mid: Number.isFinite(parsed.market_tier_strong_mid) ? Number(parsed.market_tier_strong_mid) : DEFAULT_PITCHING_WEIGHTS.market_tier_strong_mid,
       market_tier_low_major: Number.isFinite(parsed.market_tier_low_major) ? Number(parsed.market_tier_low_major) : DEFAULT_PITCHING_WEIGHTS.market_tier_low_major,
+      market_dollars_per_war: Number.isFinite((parsed as any).market_dollars_per_war)
+        ? Number((parsed as any).market_dollars_per_war)
+        : DEFAULT_PITCHING_WEIGHTS.market_dollars_per_war,
       market_pvf_weekend_sp: Number.isFinite(parsed.market_pvf_weekend_sp) ? Number(parsed.market_pvf_weekend_sp) : DEFAULT_PITCHING_WEIGHTS.market_pvf_weekend_sp,
       market_pvf_weekday_sp: Number.isFinite(parsed.market_pvf_weekday_sp) ? Number(parsed.market_pvf_weekday_sp) : DEFAULT_PITCHING_WEIGHTS.market_pvf_weekday_sp,
-      market_pvf_high_impact_rp: Number.isFinite(parsed.market_pvf_high_impact_rp) ? Number(parsed.market_pvf_high_impact_rp) : DEFAULT_PITCHING_WEIGHTS.market_pvf_high_impact_rp,
-      market_pvf_low_impact_rp: Number.isFinite(parsed.market_pvf_low_impact_rp) ? Number(parsed.market_pvf_low_impact_rp) : DEFAULT_PITCHING_WEIGHTS.market_pvf_low_impact_rp,
+      market_pvf_reliever: Number.isFinite((parsed as any).market_pvf_reliever)
+        ? Number((parsed as any).market_pvf_reliever)
+        : (
+          Number.isFinite((parsed as any).market_pvf_high_impact_rp)
+            ? Number((parsed as any).market_pvf_high_impact_rp)
+            : (
+              Number.isFinite((parsed as any).market_pvf_low_impact_rp)
+                ? Number((parsed as any).market_pvf_low_impact_rp)
+                : DEFAULT_PITCHING_WEIGHTS.market_pvf_reliever
+            )
+        ),
       class_era_fs: Number.isFinite(parsed.class_era_fs) ? Number(parsed.class_era_fs) : DEFAULT_PITCHING_WEIGHTS.class_era_fs,
       class_era_sj: Number.isFinite(parsed.class_era_sj) ? Number(parsed.class_era_sj) : DEFAULT_PITCHING_WEIGHTS.class_era_sj,
       class_era_js: Number.isFinite(parsed.class_era_js) ? Number(parsed.class_era_js) : DEFAULT_PITCHING_WEIGHTS.class_era_js,
@@ -277,14 +307,15 @@ export const readPitchingWeights = (): PitchingEquationWeights => {
       class_hr9_js: Number.isFinite(parsed.class_hr9_js) ? Number(parsed.class_hr9_js) : DEFAULT_PITCHING_WEIGHTS.class_hr9_js,
       class_hr9_gr: Number.isFinite(parsed.class_hr9_gr) ? Number(parsed.class_hr9_gr) : DEFAULT_PITCHING_WEIGHTS.class_hr9_gr,
     };
-    // QA lock-in: keep K/9 and BB/9 projection constants fixed to agreed model values.
-    // This prevents stale local edits from drifting projected pK/9 and pBB/9.
+    // QA lock-in: keep K/9, BB/9, and HR/9 role-impact constants fixed to agreed model values.
+    // This prevents stale local edits from drifting projected pK/9, pBB/9, and pHR/9 role transitions.
     merged.k9_plus_ncaa_avg = 8.21;
     merged.k9_plus_ncaa_sd = 1.990147058;
     merged.k9_pr_sd = 43.76562188;
     merged.bb9_plus_ncaa_avg = 4.82;
     merged.bb9_plus_ncaa_sd = 1.340745984;
     merged.bb9_pr_sd = 42.89490618;
+    merged.sp_to_rp_reg_hr9_pct = 8;
     return merged;
   } catch {
     return DEFAULT_PITCHING_WEIGHTS;

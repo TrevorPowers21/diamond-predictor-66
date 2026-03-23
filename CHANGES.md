@@ -20,6 +20,10 @@
 
 ## Session: March 12, 2026
 
+### Pitching Role-Change Constant Update (2026-03-22)
+- Locked `HR/9` role-change impact to **8%** (changed from 10%).
+- This is now enforced in pitching weights read logic so projections consistently use `8%` for role-transition `HR/9` impact.
+
 ### Power Ratings — Full Recalculation From Updated CSV
 - Replaced `src/data/power_ratings_2025_seed.json` using:
   - `/Users/danielleogonowski/Downloads/rate_no_percent_clean.csv`

@@ -214,6 +214,12 @@ const parseNum = (raw: unknown): number | null => {
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
 };
+const splitFullName = (fullName: string) => {
+  const parts = String(fullName || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { first: "", last: "" };
+  if (parts.length === 1) return { first: parts[0], last: "" };
+  return { first: parts[0], last: parts.slice(1).join(" ") };
+};
 
 const erf = (x: number) => {
   const sign = x < 0 ? -1 : 1;
@@ -582,6 +588,10 @@ export default function TeamBuilder() {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const skipAutoSeedOnceRef = useRef(false);
 
+  useEffect(() => {
+    setTeamSearchQuery(selectedTeam || "");
+  }, [selectedTeam]);
+
   // Fetch teams
   const { data: teams = [] } = useQuery({
     queryKey: ["teams-list"],
@@ -743,15 +753,67 @@ export default function TeamBuilder() {
         .from("players")
         .select(`
           id, first_name, last_name, position, team, from_team, conference,
-          player_predictions!inner(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status),
+          player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status),
           nil_valuations(estimated_value, component_breakdown)
         `)
         .eq("team", selectedTeam)
-        .eq("transfer_portal", false)
-        .eq("player_predictions.status", "active");
+        .or("transfer_portal.eq.false,transfer_portal.is.null");
       return data ?? [];
     },
   });
+  const storagePitchersForSelectedTeam = useMemo(() => {
+    if (!selectedTeam) return [] as BuildPlayer[];
+    try {
+      const raw = localStorage.getItem("pitching_stats_storage_2025_v1");
+      if (!raw) return [] as BuildPlayer[];
+      const parsed = JSON.parse(raw) as { rows?: Array<{ values?: string[] }> };
+      const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
+      const selectedTeamKey = normalizeName(selectedTeam);
+      const out: BuildPlayer[] = [];
+      for (const row of rows) {
+        const values = Array.isArray(row?.values) ? row.values : [];
+        const playerName = (values[0] || "").trim();
+        const teamName = (values[1] || "").trim();
+        if (!playerName || !teamName) continue;
+        if (normalizeName(teamName) !== selectedTeamKey) continue;
+        const hand = (values[2] || "").trim().toUpperCase();
+        const roleRaw = (values[3] || "").trim().toUpperCase();
+        const role = roleRaw === "SP" || roleRaw === "RP" || roleRaw === "SM" ? roleRaw : null;
+        const position = hand === "RHP" || hand === "LHP" ? hand : (role || "P");
+        const name = splitFullName(playerName);
+        out.push({
+          player_id: null,
+          source: "returner",
+          custom_name: null,
+          position_slot: null,
+          depth_order: 1,
+          nil_value: 0,
+          production_notes: null,
+          roster_status: "returner",
+          depth_role: "starter",
+          class_transition: "SJ",
+          dev_aggressiveness: 0,
+          transfer_snapshot: null,
+          player: {
+            first_name: name.first,
+            last_name: name.last,
+            position,
+            team: teamName,
+            from_team: null,
+            conference: null,
+          },
+          prediction: null,
+          nilVal: null,
+          nil_owar: 0,
+          team_metrics: null,
+          team_power_plus: null,
+        });
+      }
+      return out;
+    } catch {
+      return [] as BuildPlayer[];
+    }
+  }, [selectedTeam]);
 
   // Load a saved build
   const loadBuild = useCallback(async (buildId: string) => {
@@ -846,9 +908,23 @@ export default function TeamBuilder() {
         nil_owar: r.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
       };
     });
-    setRosterPlayers(mapped);
+    const existing = new Set(
+      mapped.map((p) => {
+        const full = `${p.player?.first_name || ""} ${p.player?.last_name || ""}`.trim();
+        return `${normalizeName(full)}|${normalizeName(p.player?.team || selectedTeam)}`;
+      }),
+    );
+    const merged = [...mapped];
+    for (const sp of storagePitchersForSelectedTeam) {
+      const full = `${sp.player?.first_name || ""} ${sp.player?.last_name || ""}`.trim();
+      const key = `${normalizeName(full)}|${normalizeName(sp.player?.team || selectedTeam)}`;
+      if (existing.has(key)) continue;
+      existing.add(key);
+      merged.push(sp);
+    }
+    setRosterPlayers(merged);
     setDirty(true);
-  }, [returners, selectedTeam, selectedBuildId]);
+  }, [returners, selectedTeam, selectedBuildId, storagePitchersForSelectedTeam]);
 
   // Restore unsaved Team Builder draft when coming back from another page.
   useEffect(() => {
@@ -2517,9 +2593,20 @@ export default function TeamBuilder() {
             <Label className="text-xs mb-1 block">Team</Label>
             <Input
               placeholder="Search team…"
-              value={teamSearchQuery || selectedTeam}
-              onChange={(e) => { setTeamSearchQuery(e.target.value); setTeamSearchOpen(true); }}
-              onFocus={() => { setTeamSearchQuery(""); setTeamSearchOpen(true); }}
+              value={teamSearchQuery}
+              onChange={(e) => {
+                const next = e.target.value;
+                setTeamSearchQuery(next);
+                setTeamSearchOpen(true);
+                if (!next.trim() && selectedTeam) {
+                  setSelectedTeam("");
+                  setSelectedBuildId(null);
+                  setDirty(true);
+                }
+              }}
+              onFocus={() => {
+                setTeamSearchOpen(true);
+              }}
               onBlur={() => setTimeout(() => setTeamSearchOpen(false), 150)}
               className="w-full"
             />
