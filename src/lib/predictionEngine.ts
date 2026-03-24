@@ -326,7 +326,7 @@ async function loadEngineConfig(): Promise<EngineConfig> {
     isoPitchingWeight: 1,
     baParkWeight: 1,
     obpParkWeight: 1,
-    isoParkWeight: 1,
+    isoParkWeight: 0.05,
     isoStdNcaa: 0.07849797197,
     isoStdPower: 45.423,
     wrcWeights: { ...DEFAULT_WRC_WEIGHTS },

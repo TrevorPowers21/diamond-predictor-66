@@ -19,6 +19,7 @@ import {
 import { computeTransferProjection } from "@/lib/transferProjection";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
+import { readTeamParkFactorComponents, resolveMetricParkFactor } from "@/lib/parkFactors";
 
 type SimPlayer = {
   prediction_id: string | null;
@@ -326,6 +327,7 @@ export default function TransferPortal() {
       : teams;
     return pool.slice(0, 30);
   }, [teams, teamSearch]);
+  const teamParkComponents = useMemo(() => readTeamParkFactorComponents(), [teams]);
 
   const { data: internals } = useQuery({
     queryKey: ["transfer-sim-internals", selectedPlayer?.prediction_id],
@@ -448,8 +450,12 @@ export default function TransferPortal() {
     const fromStuff = fromConfStats?.stuff_plus ?? null;
     const toStuff = toConfStats?.stuff_plus ?? null;
 
-    const fromParkRaw = fromTeamRow?.park_factor ?? null;
-    const toParkRaw = toTeamRow?.park_factor ?? null;
+    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "avg", teamParkComponents);
+    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "avg", teamParkComponents);
+    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "obp", teamParkComponents);
+    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "obp", teamParkComponents);
+    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "iso", teamParkComponents);
+    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "iso", teamParkComponents);
     if (fromAvgPlus == null) missingInputs.push("From AVG+");
     if (toAvgPlus == null) missingInputs.push("To AVG+");
     if (fromObpPlus == null) missingInputs.push("From OBP+");
@@ -458,8 +464,12 @@ export default function TransferPortal() {
     if (toIsoPlus == null) missingInputs.push("To ISO+");
     if (fromStuff == null) missingInputs.push("From Stuff+");
     if (toStuff == null) missingInputs.push("To Stuff+");
-    if (fromParkRaw == null) missingInputs.push("From Park Factor");
-    if (toParkRaw == null) missingInputs.push("To Park Factor");
+    if (fromParkAvgRaw == null) missingInputs.push("From AVG Park Factor");
+    if (toParkAvgRaw == null) missingInputs.push("To AVG Park Factor");
+    if (fromParkObpRaw == null) missingInputs.push("From OBP Park Factor");
+    if (toParkObpRaw == null) missingInputs.push("To OBP Park Factor");
+    if (fromParkIsoRaw == null) missingInputs.push("From ISO Park Factor");
+    if (toParkIsoRaw == null) missingInputs.push("To ISO Park Factor");
     if (missingInputs.length > 0) {
       return {
         blocked: true as const,
@@ -483,14 +493,22 @@ export default function TransferPortal() {
         toStuff,
         fromPark: null,
         toPark: null,
-        fromParkRaw,
-        toParkRaw,
+        fromParkRaw: fromParkAvgRaw,
+        toParkRaw: toParkAvgRaw,
+        fromObpParkRaw: fromParkObpRaw,
+        toObpParkRaw: toParkObpRaw,
+        fromIsoParkRaw: fromParkIsoRaw,
+        toIsoParkRaw: toParkIsoRaw,
         ptm: null,
         pvm: null,
       };
     }
-    const fromPark = normalizeParkToIndex(fromParkRaw);
-    const toPark = normalizeParkToIndex(toParkRaw);
+    const fromBaPark = normalizeParkToIndex(fromParkAvgRaw);
+    const toBaPark = normalizeParkToIndex(toParkAvgRaw);
+    const fromObpPark = normalizeParkToIndex(fromParkObpRaw);
+    const toObpPark = normalizeParkToIndex(toParkObpRaw);
+    const fromIsoPark = normalizeParkToIndex(fromParkIsoRaw);
+    const toIsoPark = normalizeParkToIndex(toParkIsoRaw);
 
     const ncaaAvgBA = toRate(readLocalNum("t_ba_ncaa_avg", 0.280, remoteEquationValues));
     const ncaaAvgOBP = toRate(readLocalNum("t_obp_ncaa_avg", 0.385, remoteEquationValues));
@@ -514,7 +532,7 @@ export default function TransferPortal() {
 
     const baParkWeight = toWeight(readLocalNum("t_ba_park_weight", 1.0, remoteEquationValues));
     const obpParkWeight = toWeight(readLocalNum("t_obp_park_weight", 1.0, remoteEquationValues));
-    const isoParkWeight = toWeight(readLocalNum("t_iso_park_weight", 1.0, remoteEquationValues));
+    const isoParkWeight = toWeight(readLocalNum("t_iso_park_weight", 0.05, remoteEquationValues));
 
     const isoStdPower = readLocalNum("r_iso_std_pr", 45.423, remoteEquationValues);
     const isoStdNcaa = toRate(readLocalNum("r_iso_std_ncaa", 0.07849797197, remoteEquationValues));
@@ -539,8 +557,14 @@ export default function TransferPortal() {
       toIsoPlus,
       fromStuff,
       toStuff,
-      fromPark,
-      toPark,
+      fromPark: fromBaPark,
+      toPark: toBaPark,
+      fromBaPark,
+      toBaPark,
+      fromObpPark,
+      toObpPark,
+      fromIsoPark,
+      toIsoPark,
       ncaaAvgBA,
       ncaaAvgOBP,
       ncaaAvgISO,
@@ -577,8 +601,23 @@ export default function TransferPortal() {
     const baBlended = (lastAvg * (1 - baPowerWeight)) + (baScaled * baPowerWeight);
     const baConfTerm = baConferenceWeight * ((toAvgPlus - fromAvgPlus) / 100);
     const baPitchTerm = baPitchingWeight * ((toStuff - fromStuff) / 100);
-    const baParkTerm = baParkWeight * ((toPark - fromPark) / 100);
+    const baParkTerm = baParkWeight * ((toBaPark - fromBaPark) / 100);
     const baMultiplier = 1 + baConfTerm - baPitchTerm + baParkTerm;
+    const safeObpStdPower = obpStdPower === 0 ? 1 : obpStdPower;
+    const obpScaled = ncaaAvgOBP + (((obpPR - 100) / safeObpStdPower) * obpStdNcaa);
+    const obpBlended = (lastObp * (1 - obpPowerWeight)) + (obpScaled * obpPowerWeight);
+    const obpConfTerm = obpConferenceWeight * ((toObpPlus - fromObpPlus) / 100);
+    const obpPitchTerm = obpPitchingWeight * ((toStuff - fromStuff) / 100);
+    const obpParkTerm = obpParkWeight * ((toObpPark - fromObpPark) / 100);
+    const obpMultiplier = 1 + obpConfTerm - obpPitchTerm + obpParkTerm;
+    const lastIso = lastSlg - lastAvg;
+    const isoRatingZ = isoStdPower > 0 ? (isoPR - 100) / isoStdPower : 0;
+    const isoScaled = ncaaAvgISO + (isoRatingZ * isoStdNcaa);
+    const isoBlended = (lastIso * (1 - 0.3)) + (isoScaled * 0.3);
+    const isoConfTerm = isoConferenceWeight * ((toIsoPlus - fromIsoPlus) / 100);
+    const isoPitchTerm = isoPitchingWeight * ((toStuff - fromStuff) / 100);
+    const isoParkTerm = isoParkWeight * ((toIsoPark - fromIsoPark) / 100);
+    const isoMultiplier = 1 + isoConfTerm - isoPitchTerm + isoParkTerm;
 
     return {
       blocked: false as const,
@@ -600,16 +639,22 @@ export default function TransferPortal() {
       toIsoPlus,
       fromStuff,
       toStuff,
-      fromPark,
-      toPark,
-      fromParkRaw,
-      toParkRaw,
+      fromPark: fromBaPark,
+      toPark: toBaPark,
+      fromParkRaw: fromParkAvgRaw,
+      toParkRaw: toParkAvgRaw,
+      fromObpParkRaw: fromParkObpRaw,
+      toObpParkRaw: toParkObpRaw,
+      fromIsoParkRaw: fromParkIsoRaw,
+      toIsoParkRaw: toParkIsoRaw,
       ptm,
       pvm,
       baWork: {
         lastStat: lastAvg,
         baPR,
         ncaaAvgBA,
+        baStdPower,
+        baStdNcaa,
         baPowerWeight,
         baConferenceWeight,
         baPitchingWeight,
@@ -618,8 +663,8 @@ export default function TransferPortal() {
         toAvgPlus,
         fromStuff,
         toStuff,
-        fromPark,
-        toPark,
+        fromPark: fromBaPark,
+        toPark: toBaPark,
         powerAdj: baScaled,
         blended: baBlended,
         confTerm: baConfTerm,
@@ -627,8 +672,55 @@ export default function TransferPortal() {
         parkTerm: baParkTerm,
         multiplier: baMultiplier,
       },
+      obpWork: {
+        lastStat: lastObp,
+        obpPR,
+        ncaaAvgOBP,
+        obpStdPower,
+        obpStdNcaa,
+        obpPowerWeight,
+        obpConferenceWeight,
+        obpPitchingWeight,
+        obpParkWeight,
+        fromObpPlus,
+        toObpPlus,
+        fromStuff,
+        toStuff,
+        fromPark: fromObpPark,
+        toPark: toObpPark,
+        powerAdj: obpScaled,
+        blended: obpBlended,
+        confTerm: obpConfTerm,
+        pitchTerm: obpPitchTerm,
+        parkTerm: obpParkTerm,
+        multiplier: obpMultiplier,
+      },
+      isoWork: {
+        lastIso,
+        isoPR,
+        ncaaAvgISO,
+        isoStdPower,
+        isoStdNcaa,
+        isoPowerWeight: 0.3,
+        isoConferenceWeight,
+        isoPitchingWeight,
+        isoParkWeight,
+        fromIsoPlus,
+        toIsoPlus,
+        fromStuff,
+        toStuff,
+        fromPark: fromIsoPark,
+        toPark: toIsoPark,
+        ratingZ: isoRatingZ,
+        powerAdj: isoScaled,
+        blended: isoBlended,
+        confTerm: isoConfTerm,
+        pitchTerm: isoPitchTerm,
+        parkTerm: isoParkTerm,
+        multiplier: isoMultiplier,
+      },
     };
-  }, [selectedPlayer, toTeamRow, internals, fromConfStats, toConfStats, fromTeamRow, toConference, remoteEquationValues]);
+  }, [selectedPlayer, toTeamRow, internals, fromConfStats, toConfStats, fromTeamRow, toConference, remoteEquationValues, teamParkComponents]);
 
   const addToTargetBoard = () => {
     if (!selectedPlayer || !selectedDestinationTeam) return;
@@ -847,8 +939,18 @@ export default function TransferPortal() {
             <div><span className="text-muted-foreground">From Conference:</span> {fromConference || "-"}</div>
             <div><span className="text-muted-foreground">To Team:</span> {selectedDestinationTeam || "-"}</div>
             <div><span className="text-muted-foreground">To Conference:</span> {toConference || "-"}</div>
-            <div><span className="text-muted-foreground">From Park Factor:</span> {simulation ? formatPark(simulation.fromParkRaw) : "-"}</div>
-            <div><span className="text-muted-foreground">To Park Factor:</span> {simulation ? formatPark(simulation.toParkRaw) : "-"}</div>
+            <div>
+              <span className="text-muted-foreground">From Park Factor (AVG/OBP/ISO):</span>{" "}
+              {simulation
+                ? `${formatPark(simulation.fromParkRaw)} / ${formatPark(simulation.fromObpParkRaw)} / ${formatPark(simulation.fromIsoParkRaw)}`
+                : "-"}
+            </div>
+            <div>
+              <span className="text-muted-foreground">To Park Factor (AVG/OBP/ISO):</span>{" "}
+              {simulation
+                ? `${formatPark(simulation.toParkRaw)} / ${formatPark(simulation.toObpParkRaw)} / ${formatPark(simulation.toIsoParkRaw)}`
+                : "-"}
+            </div>
             <div><span className="text-muted-foreground">From Stuff+:</span> {simulation ? whole(simulation.fromStuff) : "-"}</div>
             <div><span className="text-muted-foreground">To Stuff+:</span> {simulation ? whole(simulation.toStuff) : "-"}</div>
           </CardContent>
@@ -869,19 +971,33 @@ export default function TransferPortal() {
         {isAdmin && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Show Work (pAVG)</CardTitle>
-              <CardDescription>Uses the live Context + Multipliers values above.</CardDescription>
+              <CardTitle className="text-base">Show Work</CardTitle>
+              <CardDescription>Uses the live Context + Multipliers values above for pAVG/pOBP/pISO.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2 text-sm font-mono">
               {!simulation || simulation.blocked || !simulation.baWork ? (
                 <div className="text-muted-foreground">Select player + destination with all required inputs.</div>
               ) : (
                 <>
+                  <div className="font-semibold">pAVG</div>
                   <div>LastStat = {stat(simulation.baWork.lastStat)}</div>
-                  <div>PowerAdj = {stat(simulation.baWork.ncaaAvgBA)} × ({stat(simulation.baWork.baPR, 2)} / 100) = {stat(simulation.baWork.powerAdj)}</div>
+                  <div>PowerAdj = {stat(simulation.baWork.ncaaAvgBA)} + ((({stat(simulation.baWork.baPR, 2)} - 100) / {stat(simulation.baWork.baStdPower, 3)}) × {stat(simulation.baWork.baStdNcaa, 5)}) = {stat(simulation.baWork.powerAdj)}</div>
                   <div>Blended = ({stat(simulation.baWork.lastStat)} × (1 - {stat(simulation.baWork.baPowerWeight, 2)})) + ({stat(simulation.baWork.powerAdj)} × {stat(simulation.baWork.baPowerWeight, 2)}) = {stat(simulation.baWork.blended)}</div>
-                  <div>Multiplier = 1 + ({stat(simulation.baWork.baConferenceWeight, 2)} × (({whole(simulation.baWork.toAvgPlus)} - {whole(simulation.baWork.fromAvgPlus)}) / 100)) - ({stat(simulation.baWork.baPitchingWeight, 2)} × (({whole(simulation.baWork.toStuff)} - {whole(simulation.baWork.fromStuff)}) / 100)) + ({stat(simulation.baWork.baParkWeight, 2)} × (({whole(simulation.baWork.toPark)} - {whole(simulation.baWork.fromPark)}) / 100)) = {stat(simulation.baWork.multiplier, 4)}</div>
+                  <div>Multiplier = 1 + ({stat(simulation.baWork.baConferenceWeight, 2)} × (({whole(simulation.baWork.toAvgPlus)} - {whole(simulation.baWork.fromAvgPlus)}) / 100)) - ({stat(simulation.baWork.baPitchingWeight, 2)} × (({whole(simulation.baWork.toStuff)} - {whole(simulation.baWork.fromStuff)}) / 100)) + ({stat(simulation.baWork.baParkWeight, 2)} × ((ToAVGParkFactor {whole(simulation.baWork.toPark)} - FromAVGParkFactor {whole(simulation.baWork.fromPark)}) / 100)) = {stat(simulation.baWork.multiplier, 4)}</div>
                   <div className="font-semibold">ProjectedBA = {stat(simulation.baWork.blended)} × {stat(simulation.baWork.multiplier, 4)} = {stat(simulation.pAvg)}</div>
+                  <div className="pt-2 font-semibold">pOBP</div>
+                  <div>LastStat = {stat(simulation.obpWork.lastStat)}</div>
+                  <div>PowerAdj = {stat(simulation.obpWork.ncaaAvgOBP)} + ((({stat(simulation.obpWork.obpPR, 2)} - 100) / {stat(simulation.obpWork.obpStdPower, 3)}) × {stat(simulation.obpWork.obpStdNcaa, 5)}) = {stat(simulation.obpWork.powerAdj)}</div>
+                  <div>Blended = ({stat(simulation.obpWork.lastStat)} × (1 - {stat(simulation.obpWork.obpPowerWeight, 2)})) + ({stat(simulation.obpWork.powerAdj)} × {stat(simulation.obpWork.obpPowerWeight, 2)}) = {stat(simulation.obpWork.blended)}</div>
+                  <div>Multiplier = 1 + ({stat(simulation.obpWork.obpConferenceWeight, 2)} × (({whole(simulation.obpWork.toObpPlus)} - {whole(simulation.obpWork.fromObpPlus)}) / 100)) - ({stat(simulation.obpWork.obpPitchingWeight, 2)} × (({whole(simulation.obpWork.toStuff)} - {whole(simulation.obpWork.fromStuff)}) / 100)) + ({stat(simulation.obpWork.obpParkWeight, 2)} × ((ToOBPParkFactor {whole(simulation.obpWork.toPark)} - FromOBPParkFactor {whole(simulation.obpWork.fromPark)}) / 100)) = {stat(simulation.obpWork.multiplier, 4)}</div>
+                  <div className="font-semibold">ProjectedOBP = {stat(simulation.obpWork.blended)} × {stat(simulation.obpWork.multiplier, 4)} = {stat(simulation.pObp)}</div>
+                  <div className="pt-2 font-semibold">pISO</div>
+                  <div>LastISO = {stat(simulation.isoWork.lastIso)}</div>
+                  <div>RatingZ = ({stat(simulation.isoWork.isoPR, 2)} - 100) / {stat(simulation.isoWork.isoStdPower, 3)} = {stat(simulation.isoWork.ratingZ, 4)}</div>
+                  <div>PowerAdj = {stat(simulation.isoWork.ncaaAvgISO)} + ({stat(simulation.isoWork.ratingZ, 4)} × {stat(simulation.isoWork.isoStdNcaa, 5)}) = {stat(simulation.isoWork.powerAdj)}</div>
+                  <div>Blended = ({stat(simulation.isoWork.lastIso)} × (1 - {stat(simulation.isoWork.isoPowerWeight, 2)})) + ({stat(simulation.isoWork.powerAdj)} × {stat(simulation.isoWork.isoPowerWeight, 2)}) = {stat(simulation.isoWork.blended)}</div>
+                  <div>Multiplier = 1 + ({stat(simulation.isoWork.isoConferenceWeight, 2)} × (({whole(simulation.isoWork.toIsoPlus)} - {whole(simulation.isoWork.fromIsoPlus)}) / 100)) - ({stat(simulation.isoWork.isoPitchingWeight, 2)} × (({whole(simulation.isoWork.toStuff)} - {whole(simulation.isoWork.fromStuff)}) / 100)) + ({stat(simulation.isoWork.isoParkWeight, 2)} × ((ToISOParkFactor {whole(simulation.isoWork.toPark)} - FromISOParkFactor {whole(simulation.isoWork.fromPark)}) / 100)) = {stat(simulation.isoWork.multiplier, 4)}</div>
+                  <div className="font-semibold">ProjectedISO = {stat(simulation.isoWork.blended)} × {stat(simulation.isoWork.multiplier, 4)} = {stat(simulation.pIso)}</div>
                 </>
               )}
             </CardContent>

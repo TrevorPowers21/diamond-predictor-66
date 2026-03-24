@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -26,6 +26,7 @@ import storage2025Seed from "@/data/storage_2025_seed.json";
 import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
 import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
 import { profileRouteFor } from "@/lib/profileRoutes";
+import { readTeamParkFactorComponents, resolveMetricParkFactor, writeTeamParkFactorComponents } from "@/lib/parkFactors";
 
 // ─── Equation Constants Tab ───────────────────────────────────────────────────
 
@@ -96,7 +97,7 @@ function EquationConstantsTab() {
     t_iso_std_power: "45.423",
     t_iso_conference_weight: "1.000",
     t_iso_pitching_weight: "1.000",
-    t_iso_park_weight: "1.000",
+    t_iso_park_weight: "0.050",
     t_w_obp: "0.45",
     t_w_slg: "0.30",
     t_w_avg: "0.15",
@@ -794,7 +795,7 @@ function EquationConstantsTab() {
               <div><span className="text-muted-foreground">LastStat =</span> LastBattingAverage</div>
               <div><span className="text-muted-foreground">PowerAdj =</span> NCAAAvgBattingAverage + ((BattingAveragePowerRating+ - 100) / StdDevBAPowerRating+) × StdDevNCAABattingAverage</div>
               <div><span className="text-muted-foreground">Blended =</span> (LastStat × (1 - PowerRatingWeight)) + (PowerAdj × PowerRatingWeight)</div>
-              <div><span className="text-muted-foreground">Multiplier =</span> (1 + (ConferenceWeight × ((ToAverage+ - FromAverage+) / 100))) - (PitchingWeight × ((ToStuff+ - FromStuff+) / 100)) + (ParkFactorWeight × ((ToParkFactor - FromParkFactor) / 100))</div>
+              <div><span className="text-muted-foreground">Multiplier =</span> (1 + (ConferenceWeight × ((ToAverage+ - FromAverage+) / 100))) - (PitchingWeight × ((ToStuff+ - FromStuff+) / 100)) + (ParkFactorWeight × ((ToAVGParkFactor - FromAVGParkFactor) / 100))</div>
               <div><span className="text-muted-foreground">ProjectedBA =</span> Blended × Multiplier</div>
             </div>
             <div className="mt-4 grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
@@ -840,7 +841,7 @@ function EquationConstantsTab() {
               <div><span className="text-muted-foreground">LastOBP =</span> LastOnBase%</div>
               <div><span className="text-muted-foreground">PowerAdj =</span> NCAAAvgOBP + ((OBPPowerRating+ - 100) / StdDevOBPPowerRating+) × StdDevNCAAOBP</div>
               <div><span className="text-muted-foreground">Blended =</span> (LastOBP × (1 - PowerRatingWeight)) + (PowerAdj × PowerRatingWeight)</div>
-              <div><span className="text-muted-foreground">Multiplier =</span> (1 + (ConferenceWeight × ((ToOBP+ - FromOBP+) / 100))) - (PitchingWeight × ((ToStuff+ - FromStuff+) / 100)) + (ParkFactorWeight × ((ToParkFactor - FromParkFactor) / 100))</div>
+              <div><span className="text-muted-foreground">Multiplier =</span> (1 + (ConferenceWeight × ((ToOBP+ - FromOBP+) / 100))) - (PitchingWeight × ((ToStuff+ - FromStuff+) / 100)) + (ParkFactorWeight × ((ToOBPParkFactor - FromOBPParkFactor) / 100))</div>
               <div><span className="text-muted-foreground">ProjectedOBP =</span> Blended × Multiplier</div>
             </div>
             <div className="mt-4 grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
@@ -933,7 +934,7 @@ function EquationConstantsTab() {
               <div><span className="text-muted-foreground">RatingZ =</span> (ISOPowerRating+ - 100) / StdDevISOPowerRating</div>
               <div><span className="text-muted-foreground">ScaledISO =</span> NCAAAvgISO + (RatingZ × StdDevNCAAISO)</div>
               <div><span className="text-muted-foreground">Blended =</span> (LastISO × (1 - 0.3)) + (ScaledISO × 0.3)</div>
-              <div><span className="text-muted-foreground">Multiplier =</span> (1 + (ConferenceWeight × ((ToISO+ - FromISO+) / 100))) - (PitchingWeight × ((ToStuff+ - FromStuff+) / 100)) + (ParkFactorWeight × ((ToParkFactor - FromParkFactor) / 100))</div>
+              <div><span className="text-muted-foreground">Multiplier =</span> (1 + (ConferenceWeight × ((ToISO+ - FromISO+) / 100))) - (PitchingWeight × ((ToStuff+ - FromStuff+) / 100)) + (ParkFactorWeight × ((ToISOParkFactor - FromISOParkFactor) / 100))</div>
               <div><span className="text-muted-foreground">ProjectedISO =</span> Blended × Multiplier</div>
             </div>
             <div className="mt-4 grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
@@ -2577,6 +2578,7 @@ function TeamsAdminTab() {
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamConf, setNewTeamConf] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
+  const [lastParkImportUnmatched, setLastParkImportUnmatched] = useState<Array<{ csvName: string; suggestedTeam: string | null }>>([]);
   const teamCsvInputRef = useRef<HTMLInputElement | null>(null);
   const canonicalTeamNames = useMemo(() => {
     const set = new Set<string>();
@@ -2587,6 +2589,45 @@ function TeamsAdminTab() {
     return Array.from(set);
   }, []);
   const TEAM_ALIASES: Record<string, string> = {
+    // Manual short-name aliases from park-factor unmatched audit (2026-03-24)
+    alabama: "University of Alabama",
+    arkansas: "University of Arkansas",
+    byu: "Brigham Young University",
+    connecticut: "University of Connecticut",
+    delaware: "University of Delaware",
+    florida: "University of Florida",
+    georgia: "University of Georgia",
+    houston: "University of Houston",
+    illinois: "University of Illinois",
+    indiana: "Indiana University",
+    kansas: "University of Kansas",
+    kentucky: "University of Kentucky",
+    maryland: "University of Maryland",
+    miami: "University of Miami",
+    michigan: "University of Michigan",
+    missouri: "University of Missouri",
+    missouristate: "Missouri State University",
+    navy: "Navy",
+    navalacademy: "Navy",
+    njit: "New Jersey Institute of Technology",
+    northcarolina: "University of North Carolina",
+    northwestern: "Northwestern University",
+    ohio: "Ohio University",
+    oklahoma: "University of Oklahoma",
+    oregon: "University of Oregon",
+    siuedwardsville: "SIU Edwardsville",
+    southernillinoisunivedwardsville: "SIU Edwardsville",
+    southcarolina: "University of South Carolina",
+    southern: "Southern University",
+    southernillinois: "Southern Illinois University",
+    tcu: "Texas Christian University",
+    tennessee: "University of Tennessee",
+    texas: "University of Texas",
+    louisianaatmonroe: "University of Louisiana Monroe",
+    utah: "University of Utah",
+    umbc: "University of Maryland, Baltimore County",
+    virginia: "University of Virginia",
+    washington: "University of Washington",
     lsu: "Louisiana State",
     fsu: "Florida State University",
     olemiss: "Ole Miss",
@@ -2829,12 +2870,14 @@ function TeamsAdminTab() {
     easternillinoisuniversity: "Eastern Illinois",
     moreheadstateuniversity: "Morehead State",
     lindenwooduniversity: "Lindenwood",
-    southernindianaedwardsville: "University of Southern Indiana Edwardsville",
-    southernillinoisedwardsville: "University of Southern Indiana Edwardsville",
-    siue: "University of Southern Indiana Edwardsville",
+    southernindianaedwardsville: "SIU Edwardsville",
+    southernillinoisedwardsville: "SIU Edwardsville",
+    southernillinoisuniversityedwardsville: "SIU Edwardsville",
+    siue: "SIU Edwardsville",
     westernillinoisuniversity: "Western Illinois",
     // Patriot League locked canonical aliases
     unitedstatesnavalacademy: "Navy",
+    usnavalacademy: "Navy",
     usna: "Navy",
     armywestpoint: "Army",
     unitedstatesmilitaryacademy: "Army",
@@ -2866,6 +2909,9 @@ function TeamsAdminTab() {
     louisianastate: "Louisiana State",
     louisianastateuniversity: "Louisiana State",
     universityofgeorgia: "Georgia",
+    georgiauniversity: "Georgia",
+    universityofgeoriga: "Georgia",
+    georiga: "Georgia",
     universityofarkansas: "Arkansas",
     universityoftennessee: "Tennessee",
     universityofsouthcarolina: "South Carolina",
@@ -2935,6 +2981,7 @@ function TeamsAdminTab() {
     alcornstateuniversity: "Alcorn State",
     // Sun Belt Conference locked canonical aliases
     southernmiss: "Southern Miss",
+    southernmississippi: "Southern Miss",
     universityofsouthernmississippi: "Southern Miss",
     usm: "Southern Miss",
     universityofsouthalabama: "South Alabama",
@@ -2956,6 +3003,7 @@ function TeamsAdminTab() {
     universityoflouisianamonroe: "University of Louisiana Monroe",
     ulmonroe: "University of Louisiana Monroe",
     ulm: "University of Louisiana Monroe",
+    louisianamonroe: "University of Louisiana Monroe",
     troyuniversity: "Troy",
     jamesmadisonuniversity: "James Madison",
     jmu: "James Madison",
@@ -3756,29 +3804,44 @@ function TeamsAdminTab() {
       const normalizedRows = lines.map((line) =>
         parseCsvLine(line).map((c) => c.toLowerCase().replace(/\s+/g, " ").trim()),
       );
-      const findHeaderRowIndex = () => {
-        for (let i = 0; i < Math.min(normalizedRows.length, 10); i++) {
-          const row = normalizedRows[i];
-          if (row.includes("team") && row.some((c) => c.includes("park factor+"))) return i;
+      const scanRows = normalizedRows.slice(0, Math.min(normalizedRows.length, 12));
+      const findColumn = (pred: (cell: string) => boolean) => {
+        for (let r = 0; r < scanRows.length; r++) {
+          const row = scanRows[r];
+          for (let c = 0; c < row.length; c++) {
+            if (pred(row[c])) return { row: r, col: c };
+          }
         }
-        return -1;
+        return null;
       };
-      const headerRowIndex = findHeaderRowIndex();
-      if (headerRowIndex < 0) throw new Error("CSV must include Team and Park Factor+ columns");
-      const header = normalizedRows[headerRowIndex];
-
-      const idx = (names: string[]) => {
-        for (const n of names) {
-          const i = header.findIndex((h) => h === n);
-          if (i >= 0) return i;
-        }
-        return -1;
-      };
-      const teamIdx = idx(["team", "team name", "school"]);
-      const parkPlusIdx = idx(["park factor+ (wrc+)", "park factor+", "park factor wrc+"]);
-      if (teamIdx < 0 || parkPlusIdx < 0) {
-        throw new Error("CSV must include Team and Park Factor+ columns");
+      const teamCell = findColumn((cell) => ["team", "team name", "school"].includes(cell));
+      const parkCell = findColumn((cell) =>
+        cell.includes("park factor+") ||
+        cell === "park factor wrc+" ||
+        cell === "3-year avg impact" ||
+        cell === "3 year avg impact" ||
+        cell === "3-yr avg impact" ||
+        cell === "3yr avg impact",
+      );
+      if (!teamCell || !parkCell) {
+        throw new Error("CSV must include Team and Park Factor+ (or 3-Year AVG Impact) columns");
       }
+      const teamIdx = teamCell.col;
+      const parkPlusIdx = parkCell.col;
+      const obpCell = findColumn((cell) =>
+        (cell.includes("obp") || cell.includes("on base")) &&
+        (cell.includes("impact") || cell.includes("park factor")),
+      );
+      const isoCell = findColumn((cell) =>
+        (cell.includes("iso") || cell.includes("isolated power")) &&
+        (cell.includes("impact") || cell.includes("park factor")),
+      );
+      if (!obpCell || !isoCell) {
+        throw new Error("CSV must include separate OBP and ISO park-factor columns (not just AVG).");
+      }
+      const obpIdx = obpCell?.col ?? -1;
+      const isoIdx = isoCell?.col ?? -1;
+      const dataStartIndex = Math.max(teamCell.row, parkCell.row) + 1;
 
       const normalizeTeamKey = (v: string) =>
         v.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -3792,6 +3855,18 @@ function TeamsAdminTab() {
         .from("teams")
         .select("id, name, conference");
       if (existingError) throw existingError;
+      const existingNames = (existingTeams || []).map((t) => t.name);
+      const suggestTeamName = (csvName: string) => {
+        const targetKey = normalizeCanonicalKey(resolveCanonicalTeamName(csvName || ""));
+        if (!targetKey) return null;
+        const exact = existingNames.find((n) => normalizeCanonicalKey(resolveCanonicalTeamName(n)) === targetKey);
+        if (exact) return exact;
+        const soft = existingNames.find((n) => {
+          const k = normalizeCanonicalKey(resolveCanonicalTeamName(n));
+          return k.includes(targetKey) || targetKey.includes(k);
+        });
+        return soft || null;
+      };
       const byNorm = new Map<string, { id: string; name: string; conference: string | null }>();
       for (const t of (existingTeams || [])) {
         const rawKey = normalizeTeamKey(t.name);
@@ -3801,20 +3876,31 @@ function TeamsAdminTab() {
       }
 
       const toUpdateById = new Map<string, number | null>();
+      const parkComponents = readTeamParkFactorComponents();
       const unmatchedTeams = new Set<string>();
       let processed = 0;
 
-      for (let i = headerRowIndex + 1; i < lines.length; i++) {
+      for (let i = dataStartIndex; i < lines.length; i++) {
         const cols = parseCsvLine(lines[i]);
         const originalTeam = (cols[teamIdx] || "").trim();
         const team = resolveCanonicalTeamName(originalTeam);
         if (!team) continue;
-        const pfPlus = parseNum(cols[parkPlusIdx]);
-        const parkFactor = pfPlus == null ? null : pfPlus / 100;
+        const avgPlus = parseNum(cols[parkPlusIdx]);
+        const obpPlus = parseNum(cols[obpIdx]);
+        const isoPlus = parseNum(cols[isoIdx]);
+        const avgFactor = avgPlus == null ? null : avgPlus / 100;
+        const obpFactor = obpPlus == null ? null : obpPlus / 100;
+        const isoFactor = isoPlus == null ? null : isoPlus / 100;
         const key = normalizeTeamKey(team);
         const existing = byNorm.get(key);
         if (existing) {
-          toUpdateById.set(existing.id, parkFactor);
+          toUpdateById.set(existing.id, avgFactor);
+          const storageKey = normalizeTeamKey(existing.name);
+          parkComponents[storageKey] = {
+            avg: avgFactor,
+            obp: obpFactor,
+            iso: isoFactor,
+          };
         } else {
           unmatchedTeams.add(originalTeam || team);
         }
@@ -3829,16 +3915,21 @@ function TeamsAdminTab() {
           if (error) throw error;
         }
       }
+      writeTeamParkFactorComponents(parkComponents);
       return {
         processed,
         updated: toUpdate.length,
         skippedUnmatched: unmatchedTeams.size,
         unmatchedPreview: Array.from(unmatchedTeams).slice(0, 5),
+        unmatchedDetails: Array.from(unmatchedTeams)
+          .sort((a, b) => a.localeCompare(b))
+          .map((name) => ({ csvName: name, suggestedTeam: suggestTeamName(name) })),
       };
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["admin-teams"] });
       queryClient.invalidateQueries({ queryKey: ["teams"] });
+      setLastParkImportUnmatched(res.unmatchedDetails || []);
       const suffix =
         res.skippedUnmatched > 0
           ? `, ${res.skippedUnmatched} unmatched skipped${res.unmatchedPreview.length ? ` (${res.unmatchedPreview.join(", ")})` : ""}`
@@ -4074,6 +4165,60 @@ function TeamsAdminTab() {
     }
     return list;
   }, [teams, search, confFilter, parkFilter, resolveCanonicalTeamName]);
+  const teamParkComponents = useMemo(() => readTeamParkFactorComponents(), [teams]);
+  const blankParkFactorRows = useMemo(() => {
+    return teams
+      .map((t) => {
+        const avg = resolveMetricParkFactor(t.name, t.park_factor, "avg", teamParkComponents);
+        const obp = resolveMetricParkFactor(t.name, t.park_factor, "obp", teamParkComponents);
+        const iso = resolveMetricParkFactor(t.name, t.park_factor, "iso", teamParkComponents);
+        if (avg != null && obp != null && iso != null) return null;
+        return {
+          team: t.name,
+          conference: normalizeConferenceName(t.conference),
+          avg_pf: avg == null ? "" : String(Math.round(avg * 100)),
+          obp_pf: obp == null ? "" : String(Math.round(obp * 100)),
+          iso_pf: iso == null ? "" : String(Math.round(iso * 100)),
+        };
+      })
+      .filter(Boolean) as Array<{ team: string; conference: string; avg_pf: string; obp_pf: string; iso_pf: string }>;
+  }, [teams, teamParkComponents]);
+  const equalParkFactorRows = useMemo(() => {
+    const eq = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+    return teams
+      .map((t) => {
+        const avg = resolveMetricParkFactor(t.name, t.park_factor, "avg", teamParkComponents);
+        const obp = resolveMetricParkFactor(t.name, t.park_factor, "obp", teamParkComponents);
+        const iso = resolveMetricParkFactor(t.name, t.park_factor, "iso", teamParkComponents);
+        if (avg == null || obp == null || iso == null) return null;
+        if (!eq(avg, obp) || !eq(avg, iso)) return null;
+        return {
+          team: t.name,
+          conference: normalizeConferenceName(t.conference),
+          avg_pf: String(Math.round(avg * 100)),
+          obp_pf: String(Math.round(obp * 100)),
+          iso_pf: String(Math.round(iso * 100)),
+        };
+      })
+      .filter(Boolean) as Array<{ team: string; conference: string; avg_pf: string; obp_pf: string; iso_pf: string }>;
+  }, [teams, teamParkComponents]);
+
+  const downloadCsv = useCallback((filename: string, header: string[], rows: string[][]) => {
+    const esc = (s: string) => {
+      if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+    const lines = [header.join(","), ...rows.map((r) => r.map((c) => esc(c ?? "")).join(","))];
+    const blob = new Blob([`${lines.join("\n")}\n`], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, []);
 
   const confCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -4181,6 +4326,58 @@ function TeamsAdminTab() {
             >
               {importTeamParkFactors.isPending ? "Importing CSV…" : "Import Teams CSV"}
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                if (!blankParkFactorRows.length) {
+                  toast.success("No blank AVG/OBP/ISO park factors.");
+                  return;
+                }
+                downloadCsv(
+                  `blank_park_factor_audit_${new Date().toISOString().slice(0, 10)}.csv`,
+                  ["Team", "Conference", "AVG PF", "OBP PF", "ISO PF"],
+                  blankParkFactorRows.map((r) => [r.team, r.conference, r.avg_pf, r.obp_pf, r.iso_pf]),
+                );
+                toast.success(`Exported ${blankParkFactorRows.length} blank park-factor row(s).`);
+              }}
+            >
+              Export Blank PF Audit
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                if (!equalParkFactorRows.length) {
+                  toast.success("No teams have identical AVG/OBP/ISO park factors.");
+                  return;
+                }
+                downloadCsv(
+                  `equal_park_factor_audit_${new Date().toISOString().slice(0, 10)}.csv`,
+                  ["Team", "Conference", "AVG PF", "OBP PF", "ISO PF"],
+                  equalParkFactorRows.map((r) => [r.team, r.conference, r.avg_pf, r.obp_pf, r.iso_pf]),
+                );
+                toast.success(`Exported ${equalParkFactorRows.length} equal park-factor row(s).`);
+              }}
+            >
+              Export Equal PF Audit
+            </Button>
+            {lastParkImportUnmatched.length > 0 ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  downloadCsv(
+                    `unmatched_park_factor_names_${new Date().toISOString().slice(0, 10)}.csv`,
+                    ["CSV Team Name", "Suggested Team Match"],
+                    lastParkImportUnmatched.map((r) => [r.csvName, r.suggestedTeam || ""]),
+                  );
+                  toast.success(`Exported ${lastParkImportUnmatched.length} unmatched-name row(s).`);
+                }}
+              >
+                Export Unmatched Names
+              </Button>
+            ) : null}
             <Button onClick={() => setShowAddForm((v) => !v)} size="sm" className="gap-1">
               <Plus className="h-4 w-4" />
               Add Team
@@ -4198,7 +4395,9 @@ function TeamsAdminTab() {
                 <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
                   <TableRow>
                     <TableHead className="min-w-[250px]">Team</TableHead>
-                    <TableHead className="min-w-[100px] text-center">Park Factor</TableHead>
+                    <TableHead className="min-w-[90px] text-center">AVG PF</TableHead>
+                    <TableHead className="min-w-[90px] text-center">OBP PF</TableHead>
+                    <TableHead className="min-w-[90px] text-center">ISO PF</TableHead>
                     <TableHead className="min-w-[180px]">Conference</TableHead>
                     <TableHead className="w-[100px]">Actions</TableHead>
                   </TableRow>
@@ -4223,9 +4422,28 @@ function TeamsAdminTab() {
                           />
                         ) : (
                           <span className="text-sm tabular-nums">
-                            {team.park_factor == null ? "—" : Math.round(team.park_factor * 100)}
+                            {(() => {
+                              const v = resolveMetricParkFactor(team.name, team.park_factor, "avg", teamParkComponents);
+                              return v == null ? "—" : Math.round(v * 100);
+                            })()}
                           </span>
                         )}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className="text-sm tabular-nums">
+                          {(() => {
+                            const v = resolveMetricParkFactor(team.name, team.park_factor, "obp", teamParkComponents);
+                            return v == null ? "—" : Math.round(v * 100);
+                          })()}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className="text-sm tabular-nums">
+                          {(() => {
+                            const v = resolveMetricParkFactor(team.name, team.park_factor, "iso", teamParkComponents);
+                            return v == null ? "—" : Math.round(v * 100);
+                          })()}
+                        </span>
                       </TableCell>
                       <TableCell>
                         {editingId === team.id ? (

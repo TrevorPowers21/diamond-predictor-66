@@ -12,6 +12,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Search, Building2, Edit2, Check, X, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { readTeamParkFactorComponents, resolveMetricParkFactor } from "@/lib/parkFactors";
 
 interface Team {
   id: string;
@@ -77,6 +78,7 @@ export default function Teams() {
       return allData as Team[];
     },
   });
+  const teamParkComponents = useMemo(() => readTeamParkFactorComponents(), [teams]);
 
   const updateTeam = useMutation({
     mutationFn: async ({ id, name, conference }: { id: string; name: string; conference: string }) => {
@@ -296,7 +298,9 @@ export default function Teams() {
                       <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
                         <TableRow>
                           <TableHead className="min-w-[250px]">Team</TableHead>
-                          <TableHead className="min-w-[100px] text-center">Park Factor</TableHead>
+                          <TableHead className="min-w-[90px] text-center">AVG PF</TableHead>
+                          <TableHead className="min-w-[90px] text-center">OBP PF</TableHead>
+                          <TableHead className="min-w-[90px] text-center">ISO PF</TableHead>
                           <TableHead className="min-w-[180px]">Conference</TableHead>
                           <TableHead className="w-[100px]">Actions</TableHead>
                         </TableRow>
@@ -317,7 +321,26 @@ export default function Teams() {
                             </TableCell>
                             <TableCell className="text-center">
                               <span className="text-sm tabular-nums">
-                                {team.park_factor == null ? "—" : Math.round(team.park_factor * 100)}
+                                {(() => {
+                                  const v = resolveMetricParkFactor(team.name, team.park_factor, "avg", teamParkComponents);
+                                  return v == null ? "—" : Math.round(v * 100);
+                                })()}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className="text-sm tabular-nums">
+                                {(() => {
+                                  const v = resolveMetricParkFactor(team.name, team.park_factor, "obp", teamParkComponents);
+                                  return v == null ? "—" : Math.round(v * 100);
+                                })()}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className="text-sm tabular-nums">
+                                {(() => {
+                                  const v = resolveMetricParkFactor(team.name, team.park_factor, "iso", teamParkComponents);
+                                  return v == null ? "—" : Math.round(v * 100);
+                                })()}
                               </span>
                             </TableCell>
                             <TableCell>

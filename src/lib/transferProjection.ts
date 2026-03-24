@@ -15,6 +15,12 @@ export type TransferProjectionInputs = {
   toStuff: number;
   fromPark: number;
   toPark: number;
+  fromBaPark?: number;
+  toBaPark?: number;
+  fromObpPark?: number;
+  toObpPark?: number;
+  fromIsoPark?: number;
+  toIsoPark?: number;
   ncaaAvgBA: number;
   ncaaAvgOBP: number;
   ncaaAvgISO: number;
@@ -56,6 +62,12 @@ export type TransferProjectionOutput = {
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 
 export function computeTransferProjection(input: TransferProjectionInputs): TransferProjectionOutput {
+  const fromBaPark = input.fromBaPark ?? input.fromPark;
+  const toBaPark = input.toBaPark ?? input.toPark;
+  const fromObpPark = input.fromObpPark ?? input.fromPark;
+  const toObpPark = input.toObpPark ?? input.toPark;
+  const fromIsoPark = input.fromIsoPark ?? input.fromPark;
+  const toIsoPark = input.toIsoPark ?? input.toPark;
   const safeBaStdPower = input.baStdPower === 0 ? 1 : input.baStdPower;
   const baScaled = input.ncaaAvgBA + (((input.baPR - 100) / safeBaStdPower) * input.baStdNcaa);
   const baBlended = input.lastAvg * (1 - input.baPowerWeight) + baScaled * input.baPowerWeight;
@@ -63,7 +75,7 @@ export function computeTransferProjection(input: TransferProjectionInputs): Tran
     1 +
     (input.baConferenceWeight * ((input.toAvgPlus - input.fromAvgPlus) / 100)) -
     (input.baPitchingWeight * ((input.toStuff - input.fromStuff) / 100)) +
-    (input.baParkWeight * ((input.toPark - input.fromPark) / 100));
+    (input.baParkWeight * ((toBaPark - fromBaPark) / 100));
   const pAvgRaw = baBlended * baMultiplier;
 
   const safeObpStdPower = input.obpStdPower === 0 ? 1 : input.obpStdPower;
@@ -73,7 +85,7 @@ export function computeTransferProjection(input: TransferProjectionInputs): Tran
     1 +
     (input.obpConferenceWeight * ((input.toObpPlus - input.fromObpPlus) / 100)) -
     (input.obpPitchingWeight * ((input.toStuff - input.fromStuff) / 100)) +
-    (input.obpParkWeight * ((input.toPark - input.fromPark) / 100));
+    (input.obpParkWeight * ((toObpPark - fromObpPark) / 100));
   const pObpRaw = obpBlended * obpMultiplier;
 
   const lastIso = input.lastSlg - input.lastAvg;
@@ -84,7 +96,7 @@ export function computeTransferProjection(input: TransferProjectionInputs): Tran
     1 +
     (input.isoConferenceWeight * ((input.toIsoPlus - input.fromIsoPlus) / 100)) -
     (input.isoPitchingWeight * ((input.toStuff - input.fromStuff) / 100)) +
-    (input.isoParkWeight * ((input.toPark - input.fromPark) / 100));
+    (input.isoParkWeight * ((toIsoPark - fromIsoPark) / 100));
   const pIsoRaw = isoBlended * isoMultiplier;
 
   const pSlgRaw = pAvgRaw + pIsoRaw;

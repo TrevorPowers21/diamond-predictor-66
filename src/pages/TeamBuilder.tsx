@@ -27,6 +27,7 @@ import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { updatePlayerOverride } from "@/lib/playerOverrides";
+import { readTeamParkFactorComponents, resolveMetricParkFactor } from "@/lib/parkFactors";
 
 const POSITION_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"] as const;
 const PITCHER_SLOTS = ["SP1", "SP2", "SP3", "SP4", "SP5", "RP1", "RP2", "RP3", "RP4", "CL"] as const;
@@ -1179,6 +1180,7 @@ export default function TeamBuilder() {
     }
     return map;
   }, [teams]);
+  const teamParkComponents = useMemo(() => readTeamParkFactorComponents(), [teams]);
 
   const confByKey = useMemo(() => {
     const map = new Map<string, ConferenceRow>();
@@ -1389,19 +1391,29 @@ export default function TeamBuilder() {
     const toIsoPlus = toConfStats?.iso_plus ?? null;
     const fromStuff = fromConfStats?.stuff_plus ?? null;
     const toStuff = toConfStats?.stuff_plus ?? null;
-    const fromParkRaw = fromTeamRow?.park_factor ?? null;
-    const toParkRaw = toTeamRow.park_factor ?? null;
+    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "avg", teamParkComponents);
+    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "avg", teamParkComponents);
+    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "obp", teamParkComponents);
+    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "obp", teamParkComponents);
+    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "iso", teamParkComponents);
+    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "iso", teamParkComponents);
     if (
       fromAvgPlus == null || toAvgPlus == null ||
       fromObpPlus == null || toObpPlus == null ||
       fromIsoPlus == null || toIsoPlus == null ||
       fromStuff == null || toStuff == null ||
-      fromParkRaw == null || toParkRaw == null
+      fromParkAvgRaw == null || toParkAvgRaw == null ||
+      fromParkObpRaw == null || toParkObpRaw == null ||
+      fromParkIsoRaw == null || toParkIsoRaw == null
     ) {
       return snapshotFallback;
     }
-    const fromPark = normalizeParkToIndex(fromParkRaw);
-    const toPark = normalizeParkToIndex(toParkRaw);
+    const fromPark = normalizeParkToIndex(fromParkAvgRaw);
+    const toPark = normalizeParkToIndex(toParkAvgRaw);
+    const fromObpPark = normalizeParkToIndex(fromParkObpRaw);
+    const toObpPark = normalizeParkToIndex(toParkObpRaw);
+    const fromIsoPark = normalizeParkToIndex(fromParkIsoRaw);
+    const toIsoPark = normalizeParkToIndex(toParkIsoRaw);
 
     const ncaaAvgBA = toRate(eqNum("t_ba_ncaa_avg", 0.280));
     const ncaaAvgOBP = toRate(eqNum("t_obp_ncaa_avg", 0.385));
@@ -1421,7 +1433,7 @@ export default function TeamBuilder() {
     const isoPitchingWeight = toWeight(eqNum("t_iso_pitching_weight", 1.0));
     const baParkWeight = toWeight(eqNum("t_ba_park_weight", 1.0));
     const obpParkWeight = toWeight(eqNum("t_obp_park_weight", 1.0));
-    const isoParkWeight = toWeight(eqNum("t_iso_park_weight", 1.0));
+    const isoParkWeight = toWeight(eqNum("t_iso_park_weight", 0.05));
     const isoStdPower = eqNum("r_iso_std_pr", 45.423);
     const isoStdNcaa = toRate(eqNum("r_iso_std_ncaa", 0.07849797197));
     const wObp = toRate(eqNum("r_w_obp", 0.45));
@@ -1446,6 +1458,10 @@ export default function TeamBuilder() {
       toStuff,
       fromPark,
       toPark,
+      fromObpPark,
+      toObpPark,
+      fromIsoPark,
+      toIsoPark,
       ncaaAvgBA,
       ncaaAvgOBP,
       ncaaAvgISO,
@@ -1477,7 +1493,7 @@ export default function TeamBuilder() {
     const pvm = getPositionValueMultiplier(livePlayer.position ?? p.player?.position ?? null);
     const simNilValuation = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
     return { p_avg: projected.pAvg, p_obp: projected.pObp, p_slg: projected.pSlg, p_wrc_plus: projected.pWrcPlus, owar: projected.owar, nil_valuation: simNilValuation };
-  }, [selectedTeam, teamByKey, resolveConferenceStats, internalsByPredictionId, seedByName, liveTargetPredictionByPlayerId, liveTargetPlayerById]);
+  }, [selectedTeam, teamByKey, resolveConferenceStats, internalsByPredictionId, seedByName, liveTargetPredictionByPlayerId, liveTargetPlayerById, teamParkComponents]);
 
   const inferFromTeamForPrediction = useCallback((
     firstName: string | null | undefined,
@@ -1564,8 +1580,19 @@ export default function TeamBuilder() {
       fromConfStats.avg_plus == null || toConfStats.avg_plus == null ||
       fromConfStats.obp_plus == null || toConfStats.obp_plus == null ||
       fromConfStats.iso_plus == null || toConfStats.iso_plus == null ||
-      fromConfStats.stuff_plus == null || toConfStats.stuff_plus == null ||
-      fromTeamRow?.park_factor == null || toTeamRow.park_factor == null
+      fromConfStats.stuff_plus == null || toConfStats.stuff_plus == null
+    ) return null;
+
+    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "avg", teamParkComponents);
+    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "avg", teamParkComponents);
+    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "obp", teamParkComponents);
+    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "obp", teamParkComponents);
+    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "iso", teamParkComponents);
+    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "iso", teamParkComponents);
+    if (
+      fromParkAvgRaw == null || toParkAvgRaw == null ||
+      fromParkObpRaw == null || toParkObpRaw == null ||
+      fromParkIsoRaw == null || toParkIsoRaw == null
     ) return null;
 
     const projected = computeTransferProjection({
@@ -1574,7 +1601,9 @@ export default function TeamBuilder() {
       fromObpPlus: fromConfStats.obp_plus, toObpPlus: toConfStats.obp_plus,
       fromIsoPlus: fromConfStats.iso_plus, toIsoPlus: toConfStats.iso_plus,
       fromStuff: fromConfStats.stuff_plus, toStuff: toConfStats.stuff_plus,
-      fromPark: normalizeParkToIndex(fromTeamRow.park_factor), toPark: normalizeParkToIndex(toTeamRow.park_factor),
+      fromPark: normalizeParkToIndex(fromParkAvgRaw), toPark: normalizeParkToIndex(toParkAvgRaw),
+      fromObpPark: normalizeParkToIndex(fromParkObpRaw), toObpPark: normalizeParkToIndex(toParkObpRaw),
+      fromIsoPark: normalizeParkToIndex(fromParkIsoRaw), toIsoPark: normalizeParkToIndex(toParkIsoRaw),
       ncaaAvgBA: toRate(eqNum("t_ba_ncaa_avg", 0.280)),
       ncaaAvgOBP: toRate(eqNum("t_obp_ncaa_avg", 0.385)),
       ncaaAvgISO: toRate(eqNum("t_iso_ncaa_avg", 0.162)),
@@ -1593,7 +1622,7 @@ export default function TeamBuilder() {
       isoPitchingWeight: toWeight(eqNum("t_iso_pitching_weight", 1.0)),
       baParkWeight: toWeight(eqNum("t_ba_park_weight", 1.0)),
       obpParkWeight: toWeight(eqNum("t_obp_park_weight", 1.0)),
-      isoParkWeight: toWeight(eqNum("t_iso_park_weight", 1.0)),
+      isoParkWeight: toWeight(eqNum("t_iso_park_weight", 0.05)),
       isoStdPower: eqNum("r_iso_std_pr", 45.423),
       isoStdNcaa: toRate(eqNum("r_iso_std_ncaa", 0.07849797197)),
       wObp: toRate(eqNum("r_w_obp", 0.45)),
@@ -1611,8 +1640,8 @@ export default function TeamBuilder() {
       fromTeam: fromTeamName,
       fromConference,
       toConference: toTeamRow.conference || null,
-      fromPark: fromTeamRow.park_factor,
-      toPark: toTeamRow.park_factor,
+      fromPark: fromParkAvgRaw,
+      toPark: toParkAvgRaw,
       fromAvgPlus: fromConfStats.avg_plus,
       toAvgPlus: toConfStats.avg_plus,
       fromObpPlus: fromConfStats.obp_plus,
@@ -1624,7 +1653,7 @@ export default function TeamBuilder() {
       nilValuation,
       ...projected,
     };
-  }, [eqNum, inferFromTeamForPrediction, resolveConferenceStats, teamByKey]);
+  }, [eqNum, inferFromTeamForPrediction, resolveConferenceStats, teamByKey, teamParkComponents]);
 
   const compareASimulation = useMemo(
     () => computeCompareSimulation(compareAPlayer, compareAPrediction, compareAInternals, compareADestinationTeam),
@@ -1779,11 +1808,25 @@ export default function TeamBuilder() {
         fromConfStats.avg_plus != null && toConfStats.avg_plus != null &&
         fromConfStats.obp_plus != null && toConfStats.obp_plus != null &&
         fromConfStats.iso_plus != null && toConfStats.iso_plus != null &&
-        fromConfStats.stuff_plus != null && toConfStats.stuff_plus != null &&
-        fromTeamRow?.park_factor != null && toTeamRow.park_factor != null
+        fromConfStats.stuff_plus != null && toConfStats.stuff_plus != null
       ) {
-        const fromPark = normalizeParkToIndex(fromTeamRow!.park_factor);
-        const toPark = normalizeParkToIndex(toTeamRow.park_factor);
+        const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "avg", teamParkComponents);
+        const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "avg", teamParkComponents);
+        const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "obp", teamParkComponents);
+        const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "obp", teamParkComponents);
+        const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "iso", teamParkComponents);
+        const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "iso", teamParkComponents);
+        if (
+          fromParkAvgRaw != null && toParkAvgRaw != null &&
+          fromParkObpRaw != null && toParkObpRaw != null &&
+          fromParkIsoRaw != null && toParkIsoRaw != null
+        ) {
+          const fromPark = normalizeParkToIndex(fromParkAvgRaw);
+          const toPark = normalizeParkToIndex(toParkAvgRaw);
+          const fromObpPark = normalizeParkToIndex(fromParkObpRaw);
+          const toObpPark = normalizeParkToIndex(toParkObpRaw);
+          const fromIsoPark = normalizeParkToIndex(fromParkIsoRaw);
+          const toIsoPark = normalizeParkToIndex(toParkIsoRaw);
 
         const ncaaAvgBA = toRate(eqNum("t_ba_ncaa_avg", 0.280));
         const ncaaAvgOBP = toRate(eqNum("t_obp_ncaa_avg", 0.385));
@@ -1803,7 +1846,7 @@ export default function TeamBuilder() {
         const isoPitchingWeight = toWeight(eqNum("t_iso_pitching_weight", 1.0));
         const baParkWeight = toWeight(eqNum("t_ba_park_weight", 1.0));
         const obpParkWeight = toWeight(eqNum("t_obp_park_weight", 1.0));
-        const isoParkWeight = toWeight(eqNum("t_iso_park_weight", 1.0));
+        const isoParkWeight = toWeight(eqNum("t_iso_park_weight", 0.05));
         const isoStdPower = eqNum("r_iso_std_pr", 45.423);
         const isoStdNcaa = toRate(eqNum("r_iso_std_ncaa", 0.07849797197));
         const wObp = toRate(eqNum("r_w_obp", 0.45));
@@ -1811,13 +1854,15 @@ export default function TeamBuilder() {
         const wAvg = toRate(eqNum("r_w_avg", 0.15));
         const wIso = toRate(eqNum("r_w_iso", 0.10));
 
-        const projected = computeTransferProjection({
+          const projected = computeTransferProjection({
           lastAvg, lastObp, lastSlg, baPR, obpPR, isoPR,
           fromAvgPlus: fromConfStats.avg_plus, toAvgPlus: toConfStats.avg_plus,
           fromObpPlus: fromConfStats.obp_plus, toObpPlus: toConfStats.obp_plus,
           fromIsoPlus: fromConfStats.iso_plus, toIsoPlus: toConfStats.iso_plus,
           fromStuff: fromConfStats.stuff_plus, toStuff: toConfStats.stuff_plus,
           fromPark, toPark,
+          fromObpPark, toObpPark,
+          fromIsoPark, toIsoPark,
           ncaaAvgBA, ncaaAvgOBP, ncaaAvgISO, ncaaAvgWrc,
           baStdPower, baStdNcaa, obpStdPower, obpStdNcaa,
           baPowerWeight, obpPowerWeight,
@@ -1827,21 +1872,22 @@ export default function TeamBuilder() {
           isoStdPower, isoStdNcaa, wObp, wSlg, wAvg, wIso,
         });
 
-        const basePerOwar = eqNum("nil_base_per_owar", 25000);
-        const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
-        const pvm = getPositionValueMultiplier(row.position);
-        const nilValuation = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
+          const basePerOwar = eqNum("nil_base_per_owar", 25000);
+          const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
+          const pvm = getPositionValueMultiplier(row.position);
+          const nilValuation = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
 
-        transferSnapshot = {
-          p_avg: projected.pAvg,
-          p_obp: projected.pObp,
-          p_slg: projected.pSlg,
-          p_wrc_plus: projected.pWrcPlus,
-          owar: projected.owar,
-          nil_valuation: nilValuation,
-          from_team: fromTeamName || null,
-          from_conference: fromConference,
-        };
+          transferSnapshot = {
+            p_avg: projected.pAvg,
+            p_obp: projected.pObp,
+            p_slg: projected.pSlg,
+            p_wrc_plus: projected.pWrcPlus,
+            owar: projected.owar,
+            nil_valuation: nilValuation,
+            from_team: fromTeamName || null,
+            from_conference: fromConference,
+          };
+        }
       }
     }
 
