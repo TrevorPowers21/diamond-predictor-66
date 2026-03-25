@@ -95,7 +95,7 @@ function EquationConstantsTab() {
     t_iso_ncaa_avg: "0.162",
     t_iso_std_ncaa: "0.07849797197",
     t_iso_std_power: "45.423",
-    t_iso_conference_weight: "1.000",
+    t_iso_conference_weight: "0.250",
     t_iso_pitching_weight: "1.000",
     t_iso_park_weight: "0.050",
     t_w_obp: "0.45",
@@ -2631,6 +2631,7 @@ function TeamsAdminTab() {
     lsu: "Louisiana State",
     fsu: "Florida State University",
     olemiss: "Ole Miss",
+    mississippi: "Ole Miss",
     uconn: "University of Connecticut",
     unc: "University of North Carolina",
     ucla: "University of California Los Angeles",
@@ -2642,9 +2643,18 @@ function TeamsAdminTab() {
     alabamabirmingham: "UAB",
     utsa: "UTSA",
     universityoftexassanantonio: "UTSA",
+    calstatenorthridge: "CSU Northridge",
     fau: "Florida Atlantic University",
     utrgv: "University of Texas Rio Grande Valley",
     texasriograndevalley: "University of Texas Rio Grande Valley",
+    northcarolinaatstate: "North Carolina A&T",
+    northcarolinaatstateuniversity: "North Carolina A&T",
+    massachusetts: "UMass",
+    universityofmassachusettsamherst: "UMass",
+    umassuniversityofmassachusetts: "UMass",
+    vcu: "VCU",
+    virginiacommonwealth: "VCU",
+    virginiacommonwealthuniversity: "VCU",
     ncstate: "North Carolina State University",
     kstate: "Kansas State University",
     osu: "Ohio State",
@@ -2714,11 +2724,11 @@ function TeamsAdminTab() {
     campbelluniversity: "Campbell",
     northeasternuniversity: "Northeastern",
     monmouthuniversity: "Monmouth",
-    northcarolinaat: "North Carolina State A&T",
-    northcarolinaaandt: "North Carolina State A&T",
-    northcarolinastateat: "North Carolina State A&T",
-    northcarolinastateaandt: "North Carolina State A&T",
-    ncat: "North Carolina State A&T",
+    northcarolinaat: "North Carolina A&T",
+    northcarolinaaandt: "North Carolina A&T",
+    northcarolinastateat: "North Carolina A&T",
+    northcarolinastateaandt: "North Carolina A&T",
+    ncat: "North Carolina A&T",
     hofstrauniversity: "Hofstra",
     stonybrookuniversity: "Stony Brook",
     sunystonybrook: "Stony Brook",
@@ -3823,11 +3833,6 @@ function TeamsAdminTab() {
         cell === "3-yr avg impact" ||
         cell === "3yr avg impact",
       );
-      if (!teamCell || !parkCell) {
-        throw new Error("CSV must include Team and Park Factor+ (or 3-Year AVG Impact) columns");
-      }
-      const teamIdx = teamCell.col;
-      const parkPlusIdx = parkCell.col;
       const obpCell = findColumn((cell) =>
         (cell.includes("obp") || cell.includes("on base")) &&
         (cell.includes("impact") || cell.includes("park factor")),
@@ -3836,12 +3841,45 @@ function TeamsAdminTab() {
         (cell.includes("iso") || cell.includes("isolated power")) &&
         (cell.includes("impact") || cell.includes("park factor")),
       );
-      if (!obpCell || !isoCell) {
-        throw new Error("CSV must include separate OBP and ISO park-factor columns (not just AVG).");
+      const eraCell = findColumn((cell) =>
+        (cell.includes("r/g") || cell.includes("runs per game") || cell.includes("era")) &&
+        (cell.includes("impact") || cell.includes("park factor")),
+      );
+      const whipCell = findColumn((cell) =>
+        cell.includes("whip") && (cell.includes("impact") || cell.includes("park factor")),
+      );
+      const hr9Cell = findColumn((cell) =>
+        (cell.includes("hr/9") || cell.includes("hr9") || cell.includes("home run per 9")) &&
+        (cell.includes("impact") || cell.includes("park factor")),
+      );
+      if (!teamCell) {
+        throw new Error("CSV must include a Team column.");
       }
+
+      const hasHittingColumns = !!(parkCell && obpCell && isoCell);
+      const hasPitchingColumns = !!(eraCell && whipCell && hr9Cell);
+      if (!hasHittingColumns && !hasPitchingColumns) {
+        throw new Error(
+          "CSV must include either hitting park factors (AVG/OBP/ISO) or pitching park factors (R/G+, WHIP+, HR/9+).",
+        );
+      }
+
+      const teamIdx = teamCell.col;
+      const parkPlusIdx = parkCell?.col ?? -1;
       const obpIdx = obpCell?.col ?? -1;
       const isoIdx = isoCell?.col ?? -1;
-      const dataStartIndex = Math.max(teamCell.row, parkCell.row) + 1;
+      const eraIdx = eraCell?.col ?? -1;
+      const whipIdx = whipCell?.col ?? -1;
+      const hr9Idx = hr9Cell?.col ?? -1;
+      const dataStartIndex = [
+        teamCell.row,
+        parkCell?.row ?? 0,
+        obpCell?.row ?? 0,
+        isoCell?.row ?? 0,
+        eraCell?.row ?? 0,
+        whipCell?.row ?? 0,
+        hr9Cell?.row ?? 0,
+      ].reduce((m, v) => Math.max(m, v), 0) + 1;
 
       const normalizeTeamKey = (v: string) =>
         v.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -3879,27 +3917,41 @@ function TeamsAdminTab() {
       const parkComponents = readTeamParkFactorComponents();
       const unmatchedTeams = new Set<string>();
       let processed = 0;
+      let matched = 0;
 
       for (let i = dataStartIndex; i < lines.length; i++) {
         const cols = parseCsvLine(lines[i]);
         const originalTeam = (cols[teamIdx] || "").trim();
         const team = resolveCanonicalTeamName(originalTeam);
         if (!team) continue;
-        const avgPlus = parseNum(cols[parkPlusIdx]);
-        const obpPlus = parseNum(cols[obpIdx]);
-        const isoPlus = parseNum(cols[isoIdx]);
+        const avgPlus = hasHittingColumns ? parseNum(cols[parkPlusIdx]) : null;
+        const obpPlus = hasHittingColumns ? parseNum(cols[obpIdx]) : null;
+        const isoPlus = hasHittingColumns ? parseNum(cols[isoIdx]) : null;
+        const eraPlus = hasPitchingColumns ? parseNum(cols[eraIdx]) : null;
+        const whipPlus = hasPitchingColumns ? parseNum(cols[whipIdx]) : null;
+        const hr9Plus = hasPitchingColumns ? parseNum(cols[hr9Idx]) : null;
         const avgFactor = avgPlus == null ? null : avgPlus / 100;
         const obpFactor = obpPlus == null ? null : obpPlus / 100;
         const isoFactor = isoPlus == null ? null : isoPlus / 100;
+        const eraFactor = eraPlus == null ? null : eraPlus / 100;
+        const whipFactor = whipPlus == null ? null : whipPlus / 100;
+        const hr9Factor = hr9Plus == null ? null : hr9Plus / 100;
         const key = normalizeTeamKey(team);
         const existing = byNorm.get(key);
         if (existing) {
-          toUpdateById.set(existing.id, avgFactor);
+          matched++;
+          if (hasHittingColumns) {
+            toUpdateById.set(existing.id, avgFactor);
+          }
           const storageKey = normalizeTeamKey(existing.name);
+          const prev = parkComponents[storageKey] || { avg: null, obp: null, iso: null };
           parkComponents[storageKey] = {
-            avg: avgFactor,
-            obp: obpFactor,
-            iso: isoFactor,
+            avg: hasHittingColumns ? avgFactor : (prev.avg ?? null),
+            obp: hasHittingColumns ? obpFactor : (prev.obp ?? null),
+            iso: hasHittingColumns ? isoFactor : (prev.iso ?? null),
+            era: hasPitchingColumns ? eraFactor : (prev.era ?? null),
+            whip: hasPitchingColumns ? whipFactor : (prev.whip ?? null),
+            hr9: hasPitchingColumns ? hr9Factor : (prev.hr9 ?? null),
           };
         } else {
           unmatchedTeams.add(originalTeam || team);
@@ -3918,7 +3970,7 @@ function TeamsAdminTab() {
       writeTeamParkFactorComponents(parkComponents);
       return {
         processed,
-        updated: toUpdate.length,
+        updated: hasHittingColumns ? toUpdate.length : matched,
         skippedUnmatched: unmatchedTeams.size,
         unmatchedPreview: Array.from(unmatchedTeams).slice(0, 5),
         unmatchedDetails: Array.from(unmatchedTeams)
@@ -4165,24 +4217,35 @@ function TeamsAdminTab() {
     }
     return list;
   }, [teams, search, confFilter, parkFilter, resolveCanonicalTeamName]);
-  const teamParkComponents = useMemo(() => readTeamParkFactorComponents(), [teams]);
+  const teamParkComponents = readTeamParkFactorComponents();
+  const formatParkDisplay = useCallback((value: number | null | undefined) => {
+    if (value == null || !Number.isFinite(value)) return "";
+    const scaled = Math.abs(value) <= 3 ? value * 100 : value;
+    return String(Math.round(scaled));
+  }, []);
   const blankParkFactorRows = useMemo(() => {
     return teams
       .map((t) => {
         const avg = resolveMetricParkFactor(t.name, t.park_factor, "avg", teamParkComponents);
         const obp = resolveMetricParkFactor(t.name, t.park_factor, "obp", teamParkComponents);
         const iso = resolveMetricParkFactor(t.name, t.park_factor, "iso", teamParkComponents);
-        if (avg != null && obp != null && iso != null) return null;
+        const era = resolveMetricParkFactor(t.name, t.park_factor, "era", teamParkComponents);
+        const whip = resolveMetricParkFactor(t.name, t.park_factor, "whip", teamParkComponents);
+        const hr9 = resolveMetricParkFactor(t.name, t.park_factor, "hr9", teamParkComponents);
+        if (avg != null && obp != null && iso != null && era != null && whip != null && hr9 != null) return null;
         return {
           team: t.name,
           conference: normalizeConferenceName(t.conference),
-          avg_pf: avg == null ? "" : String(Math.round(avg * 100)),
-          obp_pf: obp == null ? "" : String(Math.round(obp * 100)),
-          iso_pf: iso == null ? "" : String(Math.round(iso * 100)),
+          avg_pf: formatParkDisplay(avg),
+          obp_pf: formatParkDisplay(obp),
+          iso_pf: formatParkDisplay(iso),
+          era_pf: formatParkDisplay(era),
+          whip_pf: formatParkDisplay(whip),
+          hr9_pf: formatParkDisplay(hr9),
         };
       })
-      .filter(Boolean) as Array<{ team: string; conference: string; avg_pf: string; obp_pf: string; iso_pf: string }>;
-  }, [teams, teamParkComponents]);
+      .filter(Boolean) as Array<{ team: string; conference: string; avg_pf: string; obp_pf: string; iso_pf: string; era_pf: string; whip_pf: string; hr9_pf: string }>;
+  }, [teams, teamParkComponents, formatParkDisplay]);
   const equalParkFactorRows = useMemo(() => {
     const eq = (a: number, b: number) => Math.abs(a - b) < 1e-9;
     return teams
@@ -4195,13 +4258,34 @@ function TeamsAdminTab() {
         return {
           team: t.name,
           conference: normalizeConferenceName(t.conference),
-          avg_pf: String(Math.round(avg * 100)),
-          obp_pf: String(Math.round(obp * 100)),
-          iso_pf: String(Math.round(iso * 100)),
+          avg_pf: formatParkDisplay(avg),
+          obp_pf: formatParkDisplay(obp),
+          iso_pf: formatParkDisplay(iso),
         };
       })
       .filter(Boolean) as Array<{ team: string; conference: string; avg_pf: string; obp_pf: string; iso_pf: string }>;
-  }, [teams, teamParkComponents]);
+  }, [teams, teamParkComponents, formatParkDisplay]);
+  const equalPitchingParkFactorRows = useMemo(() => {
+    return teams
+      .map((t) => {
+        const era = resolveMetricParkFactor(t.name, t.park_factor, "era", teamParkComponents);
+        const whip = resolveMetricParkFactor(t.name, t.park_factor, "whip", teamParkComponents);
+        const hr9 = resolveMetricParkFactor(t.name, t.park_factor, "hr9", teamParkComponents);
+        const eraDisplay = formatParkDisplay(era);
+        const whipDisplay = formatParkDisplay(whip);
+        const hr9Display = formatParkDisplay(hr9);
+        if (!eraDisplay || !whipDisplay || !hr9Display) return null;
+        if (!(eraDisplay === whipDisplay && eraDisplay === hr9Display)) return null;
+        return {
+          team: t.name,
+          conference: normalizeConferenceName(t.conference),
+          rg_pf: eraDisplay,
+          whip_pf: whipDisplay,
+          hr9_pf: hr9Display,
+        };
+      })
+      .filter(Boolean) as Array<{ team: string; conference: string; rg_pf: string; whip_pf: string; hr9_pf: string }>;
+  }, [teams, teamParkComponents, formatParkDisplay]);
 
   const downloadCsv = useCallback((filename: string, header: string[], rows: string[][]) => {
     const esc = (s: string) => {
@@ -4336,8 +4420,8 @@ function TeamsAdminTab() {
                 }
                 downloadCsv(
                   `blank_park_factor_audit_${new Date().toISOString().slice(0, 10)}.csv`,
-                  ["Team", "Conference", "AVG PF", "OBP PF", "ISO PF"],
-                  blankParkFactorRows.map((r) => [r.team, r.conference, r.avg_pf, r.obp_pf, r.iso_pf]),
+                  ["Team", "Conference", "AVG PF", "OBP PF", "ISO PF", "R/G PF", "WHIP PF", "HR/9 PF"],
+                  blankParkFactorRows.map((r) => [r.team, r.conference, r.avg_pf, r.obp_pf, r.iso_pf, r.era_pf, r.whip_pf, r.hr9_pf]),
                 );
                 toast.success(`Exported ${blankParkFactorRows.length} blank park-factor row(s).`);
               }}
@@ -4361,6 +4445,24 @@ function TeamsAdminTab() {
               }}
             >
               Export Equal PF Audit
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                if (!equalPitchingParkFactorRows.length) {
+                  toast.success("No teams have identical R/G, WHIP, and HR/9 park factors.");
+                  return;
+                }
+                downloadCsv(
+                  `equal_pitching_park_factor_audit_${new Date().toISOString().slice(0, 10)}.csv`,
+                  ["Team", "Conference", "R/G PF", "WHIP PF", "HR/9 PF"],
+                  equalPitchingParkFactorRows.map((r) => [r.team, r.conference, r.rg_pf, r.whip_pf, r.hr9_pf]),
+                );
+                toast.success(`Exported ${equalPitchingParkFactorRows.length} equal pitching park-factor row(s).`);
+              }}
+            >
+              Export Equal Pitching PF
             </Button>
             {lastParkImportUnmatched.length > 0 ? (
               <Button
@@ -4398,6 +4500,9 @@ function TeamsAdminTab() {
                     <TableHead className="min-w-[90px] text-center">AVG PF</TableHead>
                     <TableHead className="min-w-[90px] text-center">OBP PF</TableHead>
                     <TableHead className="min-w-[90px] text-center">ISO PF</TableHead>
+                    <TableHead className="min-w-[90px] text-center">R/G PF</TableHead>
+                    <TableHead className="min-w-[90px] text-center">WHIP PF</TableHead>
+                    <TableHead className="min-w-[90px] text-center">HR/9 PF</TableHead>
                     <TableHead className="min-w-[180px]">Conference</TableHead>
                     <TableHead className="w-[100px]">Actions</TableHead>
                   </TableRow>
@@ -4424,7 +4529,7 @@ function TeamsAdminTab() {
                           <span className="text-sm tabular-nums">
                             {(() => {
                               const v = resolveMetricParkFactor(team.name, team.park_factor, "avg", teamParkComponents);
-                              return v == null ? "—" : Math.round(v * 100);
+                              return formatParkDisplay(v) || "—";
                             })()}
                           </span>
                         )}
@@ -4433,7 +4538,7 @@ function TeamsAdminTab() {
                         <span className="text-sm tabular-nums">
                           {(() => {
                             const v = resolveMetricParkFactor(team.name, team.park_factor, "obp", teamParkComponents);
-                            return v == null ? "—" : Math.round(v * 100);
+                            return formatParkDisplay(v) || "—";
                           })()}
                         </span>
                       </TableCell>
@@ -4441,7 +4546,31 @@ function TeamsAdminTab() {
                         <span className="text-sm tabular-nums">
                           {(() => {
                             const v = resolveMetricParkFactor(team.name, team.park_factor, "iso", teamParkComponents);
-                            return v == null ? "—" : Math.round(v * 100);
+                            return formatParkDisplay(v) || "—";
+                          })()}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className="text-sm tabular-nums">
+                          {(() => {
+                            const v = resolveMetricParkFactor(team.name, team.park_factor, "era", teamParkComponents);
+                            return formatParkDisplay(v) || "—";
+                          })()}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className="text-sm tabular-nums">
+                          {(() => {
+                            const v = resolveMetricParkFactor(team.name, team.park_factor, "whip", teamParkComponents);
+                            return formatParkDisplay(v) || "—";
+                          })()}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className="text-sm tabular-nums">
+                          {(() => {
+                            const v = resolveMetricParkFactor(team.name, team.park_factor, "hr9", teamParkComponents);
+                            return formatParkDisplay(v) || "—";
                           })()}
                         </span>
                       </TableCell>

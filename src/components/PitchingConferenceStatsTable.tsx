@@ -194,8 +194,84 @@ const calcOffensiveEnvironment = (
   wrcPlus: number | null,
 ) => {
   if (hitterTalentPlus == null || wrcPlus == null || stuffPlus == null) return null;
-  const value = 0.6 * ((hitterTalentPlus * (100 + 2 * (stuffPlus - 100))) / 100) + 0.4 * wrcPlus;
+  const value = wrcPlus + (1.25 * (stuffPlus - 100));
   return Number.isFinite(value) ? Number(value.toFixed(1)) : null;
+};
+
+const HITTER_TALENT_PLUS_BY_CONFERENCE: Record<string, number> = {
+  "Atlantic 10": 100.6,
+  "American Athletic Conference": 97.9,
+  ACC: 115.3,
+  "American East": 79.4,
+  "Atlantic Sun Conference": 88.6,
+  "Big East Conference": 102.1,
+  "Big South Conference": 100.8,
+  "Big Ten": 111.3,
+  "Big 12": 115.4,
+  "Big West": 98.8,
+  "Coastal Athletic Association": 90.6,
+  "Conference USA": 102.1,
+  "Horizon League": 100.6,
+  "Ivy League": 85.8,
+  "Metro Atlantic Athletic Conference": 80.3,
+  "Mid-American Conference": 96.3,
+  "Mountain West": 97.5,
+  "Missouri Valley Conference": 105.9,
+  "Northeast Conference": 69.9,
+  "Ohio Valley Conference": 83.3,
+  "Patriot League": 89.0,
+  "Southern Conference": 105.3,
+  SEC: 115.3,
+  "Southland Conference": 81.5,
+  "Southwestern Athletic Conference": 83.9,
+  "Summit League": 80.6,
+  "Sun Belt": 98.6,
+  "West Coast Conference": 89.0,
+  "Western Athletic Conference": 101.9,
+};
+
+const getHitterTalentPlusDefault = (conference: string | null | undefined) => {
+  const canonical = canonicalConferenceName(conference);
+  if (!canonical) return null;
+  return HITTER_TALENT_PLUS_BY_CONFERENCE[canonical] ?? null;
+};
+
+const OVERALL_HITTER_POWER_RATING_BY_CONFERENCE: Record<string, number> = {
+  "Atlantic 10": 105,
+  "American Athletic Conference": 95,
+  ACC: 110,
+  "American East": 82,
+  "Atlantic Sun Conference": 89,
+  "Big East Conference": 104,
+  "Big South Conference": 102,
+  "Big Ten": 110,
+  "Big 12": 112,
+  "Big West": 96,
+  "Coastal Athletic Association": 91,
+  "Conference USA": 102,
+  "Horizon League": 103,
+  "Ivy League": 88,
+  "Metro Atlantic Athletic Conference": 86,
+  "Mid-American Conference": 98,
+  "Mountain West": 100,
+  "Missouri Valley Conference": 107,
+  "Northeast Conference": 78,
+  "Ohio Valley Conference": 87,
+  "Patriot League": 94,
+  "Southern Conference": 106,
+  SEC: 108,
+  "Southland Conference": 83,
+  "Southwestern Athletic Conference": 93,
+  "Summit League": 82,
+  "Sun Belt": 97,
+  "West Coast Conference": 89,
+  "Western Athletic Conference": 103,
+};
+
+const getOverallHitterPowerRating = (conference: string | null | undefined) => {
+  const canonical = canonicalConferenceName(conference);
+  if (!canonical) return null;
+  return OVERALL_HITTER_POWER_RATING_BY_CONFERENCE[canonical] ?? null;
 };
 
 export default function PitchingConferenceStatsTable() {
@@ -282,7 +358,9 @@ export default function PitchingConferenceStatsTable() {
         hitter_talent_plus: (() => {
           const qVal = cols.length > hitterTalentPlusColQIdx ? num(cols[hitterTalentPlusColQIdx]) : null;
           if (qVal != null) return qVal;
-          return hitterTalentPlusIdx >= 0 ? num(cols[hitterTalentPlusIdx]) : null;
+          const headerVal = hitterTalentPlusIdx >= 0 ? num(cols[hitterTalentPlusIdx]) : null;
+          if (headerVal != null) return headerVal;
+          return getHitterTalentPlusDefault(conference);
         })(),
       };
 
@@ -295,38 +373,6 @@ export default function PitchingConferenceStatsTable() {
   };
 
   const { ncaaRow, filtered } = useMemo(() => {
-    const hasBaseStats = (row: { avg?: number | null; obp?: number | null; slg?: number | null }) =>
-      row.avg != null && row.obp != null && row.slg != null;
-
-    // Build hitter order exactly from the hitting conference source.
-    const orderByConference = new Map<string, number>();
-    const hittingByConference = new Map<string, { conference: string; avg: number | null; obp: number | null; slg: number | null }>();
-    for (const r of hittingConferenceStats) {
-      const key = canonicalConferenceName(r.conference);
-      if (!key) continue;
-      const current = hittingByConference.get(key);
-      const currentScore = current ? Number(hasBaseStats(current)) : -1;
-      const nextScore = Number(hasBaseStats(r));
-      if (!current || nextScore > currentScore) {
-        hittingByConference.set(key, {
-          conference: key,
-          avg: r.avg ?? null,
-          obp: r.obp ?? null,
-          slg: r.slg ?? null,
-        });
-      }
-    }
-    const hittingOrdered = Array.from(hittingByConference.values()).filter(hasBaseStats);
-    for (let i = 0; i < hittingOrdered.length; i++) {
-      const key = canonicalConferenceName(hittingOrdered[i].conference);
-      if (key && !orderByConference.has(key)) orderByConference.set(key, i);
-    }
-    // Keep ACC where you want it in this UI: between American East and Atlantic Sun.
-    const americanEastOrder = orderByConference.get("American East");
-    if (americanEastOrder != null) {
-      orderByConference.set("ACC", americanEastOrder + 0.5);
-    }
-
     // De-dupe pitching rows while keeping latest edit/import for each canonical conference.
     const byConference = new Map<string, PitchingRow>();
     for (const r of rows) {
@@ -335,25 +381,16 @@ export default function PitchingConferenceStatsTable() {
       if (byConference.has(canonical)) byConference.delete(canonical);
       byConference.set(canonical, { ...r, conference: canonical });
     }
-
-    // Stable sort: hitter-order first, then preserve local insertion order.
-    const baseRows = Array.from(byConference.values());
-    const indexByConference = new Map<string, number>();
-    baseRows.forEach((r, i) => indexByConference.set(r.conference, i));
-    const allRows = [...baseRows].sort((a, b) => {
-      const ao = orderByConference.get(a.conference);
-      const bo = orderByConference.get(b.conference);
-      if (ao != null && bo != null) return ao - bo;
-      if (ao != null) return -1;
-      if (bo != null) return 1;
-      return (indexByConference.get(a.conference) ?? 0) - (indexByConference.get(b.conference) ?? 0);
-    });
+    // Sort alphabetically by conference.
+    const allRows = Array.from(byConference.values()).sort((a, b) =>
+      a.conference.localeCompare(b.conference),
+    );
     const q = search.trim().toLowerCase();
     const searched = q ? allRows.filter((r) => r.conference.toLowerCase().includes(q)) : allRows;
     const ncaa = searched.find((r) => r.conference.toLowerCase().includes("ncaa")) || null;
     const rest = searched.filter((r) => !r.conference.toLowerCase().includes("ncaa"));
     return { ncaaRow: ncaa, filtered: rest };
-  }, [rows, search, hittingConferenceStats]);
+  }, [rows, search]);
   const stuffByConference = useMemo(() => {
     const map = new Map<string, number | null>();
     for (const row of hittingConferenceStats) {
@@ -362,16 +399,6 @@ export default function PitchingConferenceStatsTable() {
       const existing = map.get(key);
       // Prefer populated stuff+, otherwise keep existing.
       if (existing == null || row.stuff_plus != null) map.set(key, row.stuff_plus ?? null);
-    }
-    return map;
-  }, [hittingConferenceStats]);
-  const wrcPlusByConference = useMemo(() => {
-    const map = new Map<string, number | null>();
-    for (const row of hittingConferenceStats) {
-      const key = canonicalConferenceName(row.conference);
-      if (!key) continue;
-      const existing = map.get(key);
-      if (existing == null || row.wrc_plus != null) map.set(key, row.wrc_plus ?? null);
     }
     return map;
   }, [hittingConferenceStats]);
@@ -511,10 +538,9 @@ export default function PitchingConferenceStatsTable() {
                 <TableHead className="text-right">K/9+</TableHead>
                 <TableHead className="text-right">BB/9+</TableHead>
                 <TableHead className="text-right">HR/9+</TableHead>
-                <TableHead className="text-right">WRC+</TableHead>
-                <TableHead className="text-right">Hitter Talent+</TableHead>
+                <TableHead className="text-right">Overall Hitter PR+</TableHead>
                 <TableHead className="text-right">Stuff+</TableHead>
-                <TableHead className="text-right">Offensive Environment</TableHead>
+                <TableHead className="text-right">Hitter Talent+</TableHead>
                 <TableHead className="w-[90px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -551,25 +577,10 @@ export default function PitchingConferenceStatsTable() {
                       <TableCell className="text-right font-mono">{s.hr9Plus ?? "—"}</TableCell>
                       <TableCell className="text-right font-mono">
                         {(() => {
-                          const wrcPlus = wrcPlusByConference.get(canonicalConferenceName(r.conference));
-                          return wrcPlus == null ? "—" : Math.round(Number(wrcPlus)).toString();
+                          const canonical = canonicalConferenceName(r.conference);
+                          const overall = getOverallHitterPowerRating(canonical);
+                          return overall == null ? "—" : Math.round(Number(overall)).toString();
                         })()}
-                      </TableCell>
-                      <TableCell className="text-right font-mono">
-                        {isEditing ? (
-                          <Input
-                            type="number"
-                            step="1"
-                            value={editData.hitter_talent_plus ?? ""}
-                            onChange={(e) => setEditData((p) => ({ ...p, hitter_talent_plus: num(e.target.value) }))}
-                            className="h-7 w-[80px] text-right text-xs font-mono"
-                          />
-                        ) : (
-                          (() => {
-                            const v = r.hitter_talent_plus ?? hitterTalentByConference.get(canonicalConferenceName(r.conference)) ?? null;
-                            return v == null ? "—" : Math.round(Number(v)).toString();
-                          })()
-                        )}
                       </TableCell>
                       <TableCell className="text-right font-mono">
                         {(() => {
@@ -580,12 +591,15 @@ export default function PitchingConferenceStatsTable() {
                       <TableCell className="text-right font-mono">
                         {(() => {
                           const canonical = canonicalConferenceName(r.conference);
-                          const wrcPlusRaw = wrcPlusByConference.get(canonical);
-                          const wrcPlus = wrcPlusRaw == null ? null : Number(wrcPlusRaw);
-                          const hitterTalent = r.hitter_talent_plus ?? hitterTalentByConference.get(canonical) ?? null;
+                          const overallHitterPr = getOverallHitterPowerRating(canonical);
+                          const hitterTalent =
+                            r.hitter_talent_plus ??
+                            getHitterTalentPlusDefault(canonical) ??
+                            hitterTalentByConference.get(canonical) ??
+                            null;
                           const stuffRaw = stuffByConference.get(canonical);
                           const stuff = stuffRaw == null ? null : Number(stuffRaw);
-                          const oe = calcOffensiveEnvironment(hitterTalent, stuff, wrcPlus);
+                          const oe = calcOffensiveEnvironment(hitterTalent, stuff, overallHitterPr);
                           return oe == null ? "—" : oe.toFixed(1);
                         })()}
                       </TableCell>
@@ -628,7 +642,6 @@ export default function PitchingConferenceStatsTable() {
                           <TableCell className="text-right font-mono">{s.bb9Plus ?? "—"}</TableCell>
                           <TableCell className="text-right font-mono">{s.hr9Plus ?? "—"}</TableCell>
                           <TableCell className="text-right font-mono">100</TableCell>
-                          <TableCell className="text-right font-mono">{ncaaDisplayRow.hitter_talent_plus ?? 100}</TableCell>
                           <TableCell className="text-right font-mono">
                             100
                           </TableCell>
@@ -644,7 +657,7 @@ export default function PitchingConferenceStatsTable() {
                 </>
               ) : (
                 <TableRow>
-                  <TableCell colSpan={18} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={17} className="py-8 text-center text-muted-foreground">
                     No pitching conference rows yet. Import your CSV to begin.
                   </TableCell>
                 </TableRow>

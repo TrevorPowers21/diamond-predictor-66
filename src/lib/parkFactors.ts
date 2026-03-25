@@ -1,9 +1,12 @@
-export type ParkMetric = "avg" | "obp" | "iso";
+export type ParkMetric = "avg" | "obp" | "iso" | "era" | "whip" | "hr9";
 
 export type TeamParkFactorComponents = {
   avg: number | null;
   obp: number | null;
   iso: number | null;
+  era?: number | null;
+  whip?: number | null;
+  hr9?: number | null;
 };
 
 export const TEAM_PARK_FACTOR_COMPONENTS_KEY = "team_park_factor_components_v1";
@@ -31,6 +34,9 @@ export const readTeamParkFactorComponents = () => {
         avg: toNum(v?.avg),
         obp: toNum(v?.obp),
         iso: toNum(v?.iso),
+        era: toNum(v?.era),
+        whip: toNum(v?.whip),
+        hr9: toNum(v?.hr9),
       };
       const key = normalize(k);
       const compact = normalizeCompact(k);

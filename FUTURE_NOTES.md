@@ -132,3 +132,4 @@ Status: In testing phase. Defer cleanup until testing is complete.
 - Scouting tier scale note (2026-03-19): consider translating percentile-style scouting outputs to a baseball-standard 20-80 scale for display/communication; keep 50 anchored as average.
 - Pitching projection QA note (2026-03-19): projected `pWHIP` is still off; `K%` and `BB/9` are also off but closer. Re-trace those equation paths and inputs before locking final pitching projections.
 - Pitching import note (2026-03-20): combined pitching CSV will not include a `Role` column. During import, role should be auto-derived from usage fields using `GS/G` (`GS/G < 0.5 => RP`, otherwise `SP`).
+- Transfer portal equation QA note (2026-03-24): start by validating transfer portal equation functionality for Volchko; re-check that power rating inputs are being applied correctly in the transfer model path.

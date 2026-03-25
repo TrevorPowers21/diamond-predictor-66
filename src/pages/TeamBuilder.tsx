@@ -1427,7 +1427,7 @@ export default function TeamBuilder() {
     const obpPowerWeight = toRate(eqNum("t_obp_power_weight", 0.70));
     const baConferenceWeight = toWeight(eqNum("t_ba_conference_weight", 1.0));
     const obpConferenceWeight = toWeight(eqNum("t_obp_conference_weight", 1.0));
-    const isoConferenceWeight = toWeight(eqNum("t_iso_conference_weight", 1.0));
+    const isoConferenceWeight = toWeight(eqNum("t_iso_conference_weight", 0.25));
     const baPitchingWeight = toWeight(eqNum("t_ba_pitching_weight", 1.0));
     const obpPitchingWeight = toWeight(eqNum("t_obp_pitching_weight", 1.0));
     const isoPitchingWeight = toWeight(eqNum("t_iso_pitching_weight", 1.0));
@@ -1616,7 +1616,7 @@ export default function TeamBuilder() {
       obpPowerWeight: toRate(eqNum("t_obp_power_weight", 0.70)),
       baConferenceWeight: toWeight(eqNum("t_ba_conference_weight", 1.0)),
       obpConferenceWeight: toWeight(eqNum("t_obp_conference_weight", 1.0)),
-      isoConferenceWeight: toWeight(eqNum("t_iso_conference_weight", 1.0)),
+      isoConferenceWeight: toWeight(eqNum("t_iso_conference_weight", 0.25)),
       baPitchingWeight: toWeight(eqNum("t_ba_pitching_weight", 1.0)),
       obpPitchingWeight: toWeight(eqNum("t_obp_pitching_weight", 1.0)),
       isoPitchingWeight: toWeight(eqNum("t_iso_pitching_weight", 1.0)),
@@ -1840,7 +1840,7 @@ export default function TeamBuilder() {
         const obpPowerWeight = toRate(eqNum("t_obp_power_weight", 0.70));
         const baConferenceWeight = toWeight(eqNum("t_ba_conference_weight", 1.0));
         const obpConferenceWeight = toWeight(eqNum("t_obp_conference_weight", 1.0));
-        const isoConferenceWeight = toWeight(eqNum("t_iso_conference_weight", 1.0));
+        const isoConferenceWeight = toWeight(eqNum("t_iso_conference_weight", 0.25));
         const baPitchingWeight = toWeight(eqNum("t_ba_pitching_weight", 1.0));
         const obpPitchingWeight = toWeight(eqNum("t_obp_pitching_weight", 1.0));
         const isoPitchingWeight = toWeight(eqNum("t_iso_pitching_weight", 1.0));

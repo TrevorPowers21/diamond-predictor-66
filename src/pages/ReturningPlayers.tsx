@@ -34,6 +34,7 @@ import {
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { readPlayerOverrides } from "@/lib/playerOverrides";
+import { readTeamParkFactorComponents, resolveMetricParkFactor } from "@/lib/parkFactors";
 
 type SortKey =
   | "name"
@@ -163,6 +164,10 @@ const canShowPitchingMarketValue = (team: string | null | undefined, conference:
   const isIndependent = conf === "independent" || conf.includes("independent");
   if (!isIndependent) return true;
   return tm === "oregon state" || tm.includes("oregon state");
+};
+const parkToIndex = (v: number | null | undefined) => {
+  if (v == null || !Number.isFinite(v)) return 100;
+  return Math.abs(v) <= 3 ? v * 100 : v;
 };
 
 const toPitchingClassAdj = (
@@ -1233,9 +1238,9 @@ export default function ReturningPlayers() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("teams")
-        .select("name, conference");
+        .select("name, conference, park_factor");
       if (error) throw error;
-      return (data || []) as Array<{ name: string; conference: string | null }>;
+      return (data || []) as Array<{ name: string; conference: string | null; park_factor: number | null }>;
     },
   });
 
@@ -1414,7 +1419,7 @@ export default function ReturningPlayers() {
   };
 
   const teamsByNorm = useMemo(() => {
-    const map = new Map<string, { name: string; conference: string | null }>();
+    const map = new Map<string, { name: string; conference: string | null; park_factor: number | null }>();
     for (const t of teamsDirectory) {
       const key = normalize(t.name);
       if (!key) continue;
@@ -1422,6 +1427,7 @@ export default function ReturningPlayers() {
     }
     return map;
   }, [teamsDirectory]);
+  const teamParkComponents = useMemo(() => readTeamParkFactorComponents(), [teamsDirectory]);
   const normalizePitchingTeam = useCallback((team: string | null | undefined) => {
     const raw = (team || "").trim();
     if (!raw) return "";
@@ -1625,6 +1631,29 @@ export default function ReturningPlayers() {
             impacts: eq.hr9_damp_impacts,
             lowerIsBetter: true,
           });
+          const teamNameForPark = teamMatch?.name || normalizedTeam || null;
+          const fallbackPark = teamMatch?.park_factor ?? null;
+          const avgPark = parkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "avg", teamParkComponents));
+          const obpPark = parkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "obp", teamParkComponents));
+          const isoPark = parkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "iso", teamParkComponents));
+          const eraParkRaw = resolveMetricParkFactor(teamNameForPark, null, "era", teamParkComponents);
+          const whipParkRaw = resolveMetricParkFactor(teamNameForPark, null, "whip", teamParkComponents);
+          const hr9ParkRaw = resolveMetricParkFactor(teamNameForPark, null, "hr9", teamParkComponents);
+          // Pitching park-factor model:
+          // ERA PF = ERA component (R/G+) when present.
+          // WHIP PF = WHIP component when present.
+          // HR/9 PF = HR/9 component when present.
+          // Fallbacks: ERA -> AVG, WHIP -> 70% AVG + 30% OBP, HR/9 -> ISO.
+          // No park factor applied to K/9 or BB/9.
+          const eraParkIndex = parkToIndex(eraParkRaw ?? avgPark);
+          const whipParkIndex = parkToIndex(whipParkRaw ?? ((0.7 * avgPark) + (0.3 * obpPark)));
+          const hr9ParkIndex = parkToIndex(hr9ParkRaw ?? isoPark);
+          const eraParkFactor = eraParkIndex / 100;
+          const whipParkFactor = whipParkIndex / 100;
+          const hr9ParkFactor = hr9ParkIndex / 100;
+          const parkAdjustedEra = pEra == null ? null : pEra * eraParkFactor;
+          const parkAdjustedWhip = pWhip == null ? null : pWhip * whipParkFactor;
+          const parkAdjustedHr9 = pHr9 == null ? null : pHr9 * hr9ParkFactor;
           const roleCurve = {
             tier1Max: eq.rp_to_sp_low_better_tier1_max,
             tier2Max: eq.rp_to_sp_low_better_tier2_max,
@@ -1633,12 +1662,12 @@ export default function ReturningPlayers() {
             tier2Mult: eq.rp_to_sp_low_better_tier2_mult,
             tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
           };
-          const roleAdjustedEra = applyRoleTransitionAdjustment(pEra, eq.sp_to_rp_reg_era_pct, baseRole, projectedRole, true, roleCurve);
+          const roleAdjustedEra = applyRoleTransitionAdjustment(parkAdjustedEra, eq.sp_to_rp_reg_era_pct, baseRole, projectedRole, true, roleCurve);
           const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, eq.sp_to_rp_reg_fip_pct, baseRole, projectedRole, true, roleCurve);
-          const roleAdjustedWhip = applyRoleTransitionAdjustment(pWhip, eq.sp_to_rp_reg_whip_pct, baseRole, projectedRole, true, roleCurve);
+          const roleAdjustedWhip = applyRoleTransitionAdjustment(parkAdjustedWhip, eq.sp_to_rp_reg_whip_pct, baseRole, projectedRole, true, roleCurve);
           const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, eq.sp_to_rp_reg_k9_pct, baseRole, projectedRole, false, roleCurve);
           const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, eq.sp_to_rp_reg_bb9_pct, baseRole, projectedRole, true, roleCurve);
-          const roleAdjustedHr9 = applyRoleTransitionAdjustment(pHr9, eq.sp_to_rp_reg_hr9_pct, baseRole, projectedRole, true, roleCurve);
+          const roleAdjustedHr9 = applyRoleTransitionAdjustment(parkAdjustedHr9, eq.sp_to_rp_reg_hr9_pct, baseRole, projectedRole, true, roleCurve);
 
           const eraPlus = calcPitchingPlus(roleAdjustedEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
           const fipPlus = calcPitchingPlus(roleAdjustedFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
@@ -1710,7 +1739,7 @@ export default function ReturningPlayers() {
     } catch {
       return [];
     }
-  }, [normalizePitchingTeam, teamsByNorm]);
+  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm]);
   const filteredPitchingRows = useMemo(() => {
     const q = pitchingSearch.trim().toLowerCase();
     if (!q) return pitchingRows;

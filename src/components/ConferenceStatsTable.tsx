@@ -97,22 +97,6 @@ function canonicalConferenceName(raw: string | null | undefined): string {
   return map[key] || cleaned;
 }
 
-function placeAccBetweenAmericanEastAndAtlanticSun<T extends { conference: string }>(list: T[]): T[] {
-  const out = [...list];
-  const idxAcc = out.findIndex((r) => canonicalConferenceName(r.conference) === "ACC");
-  if (idxAcc < 0) return out;
-
-  const [accRow] = out.splice(idxAcc, 1);
-  const idxAmericanEast = out.findIndex((r) => canonicalConferenceName(r.conference) === "American East");
-  const idxAtlanticSun = out.findIndex((r) => canonicalConferenceName(r.conference) === "Atlantic Sun Conference");
-
-  let insertAt = out.length;
-  if (idxAmericanEast >= 0) insertAt = idxAmericanEast + 1;
-  if (idxAtlanticSun >= 0) insertAt = Math.min(insertAt, idxAtlanticSun);
-  out.splice(insertAt, 0, accRow);
-  return out;
-}
-
 type EditFields = Omit<ConferenceStat, "id" | "created_at" | "updated_at">;
 
 const NUM_FIELDS: (keyof EditFields)[] = [
@@ -322,7 +306,7 @@ export default function ConferenceStatsTable() {
     let list = Array.from(byConference.values()).filter(
       (s) => s.avg != null && s.obp != null && s.slg != null,
     );
-    list = placeAccBetweenAmericanEastAndAtlanticSun(list);
+    list = list.sort((a, b) => a.conference.localeCompare(b.conference));
     if (search) {
       const q = search.toLowerCase();
       list = list.filter((s) => s.conference.toLowerCase().includes(q));

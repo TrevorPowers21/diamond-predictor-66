@@ -320,7 +320,7 @@ async function loadEngineConfig(): Promise<EngineConfig> {
     obpPowerWeight: 0.7,
     baConferenceWeight: 1,
     obpConferenceWeight: 1,
-    isoConferenceWeight: 1,
+    isoConferenceWeight: 0.25,
     baPitchingWeight: 1,
     obpPitchingWeight: 1,
     isoPitchingWeight: 1,

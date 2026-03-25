@@ -30,6 +30,10 @@ const stdDevPopulation = (values: number[]) => {
 
 export default function PitchingEquationsTab() {
   const [weights, setWeights] = useState<PitchingEquationWeights>(() => readPitchingWeights());
+  const [editableBoxes, setEditableBoxes] = useState<Record<string, boolean>>({});
+  const isBoxEditable = (key?: string) => (key ? !!editableBoxes[key] : true);
+  const toggleBox = (key: string) =>
+    setEditableBoxes((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const weightTotal = useMemo(
     () =>
@@ -136,9 +140,14 @@ export default function PitchingEquationsTab() {
 
   const sectionHeadingClass = "text-[11px] uppercase tracking-wide font-semibold text-foreground";
   const sectionPanelClass = "rounded-md border bg-background/60 p-3 space-y-2";
-  const editableSectionHeader = (title = "Editable (Admin UI)") => (
+  const editableSectionHeader = (title = "Editable (Admin UI)", boxKey?: string) => (
     <div className="flex items-center justify-between">
       <p className={sectionHeadingClass}>{title}</p>
+      {boxKey ? (
+        <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={() => toggleBox(boxKey)}>
+          {isBoxEditable(boxKey) ? "Lock" : "Edit"}
+        </Button>
+      ) : null}
     </div>
   );
   const eqInput = (value: number, onChange: (v: number) => void) => (
@@ -283,6 +292,7 @@ export default function PitchingEquationsTab() {
     </div>
   );
   const renderSdConstantsCard = (
+    boxKey: string,
     prLabel: string,
     prValue: number,
     onPrChange: (v: number) => void,
@@ -291,8 +301,8 @@ export default function PitchingEquationsTab() {
     onNcaaChange: (v: number) => void,
   ) => (
     <div className={sectionPanelClass}>
-      <p className={sectionHeadingClass}>SD Constants</p>
-      <div className="space-y-2 text-xs text-muted-foreground">
+      {editableSectionHeader("SD Constants", boxKey)}
+      <fieldset disabled={!isBoxEditable(boxKey)} className="space-y-2 text-xs text-muted-foreground">
         <div className="grid grid-cols-[1fr_140px] items-center gap-3">
           <span>{prLabel}</span>
           <Input
@@ -313,12 +323,59 @@ export default function PitchingEquationsTab() {
             onChange={(e) => onNcaaChange(toNum(e.target.value))}
           />
         </div>
-      </div>
+      </fieldset>
+    </div>
+  );
+  const renderTransferConstantsSdCard = (
+    ncaaLabel: string,
+    ncaaValue: number,
+    prLabel: string,
+    prValue: number,
+    onPrChange: (v: number) => void,
+    ncaaSdLabel: string,
+    ncaaSdValue: number,
+    onNcaaSdChange: (v: number) => void,
+  ) => (
+    <div className={sectionPanelClass}>
+      {editableSectionHeader("Constants", `${ncaaLabel}-constants`)}
+      <fieldset disabled={!isBoxEditable(`${ncaaLabel}-constants`)} className="space-y-2 text-xs text-muted-foreground">
+        <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+          <span>{ncaaLabel}</span>
+          <Input
+            type="text"
+            inputMode="decimal"
+            className="h-8"
+            value={ncaaValue}
+            readOnly
+          />
+        </div>
+        <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+          <span>{prLabel}</span>
+          <Input
+            type="text"
+            inputMode="decimal"
+            className="h-8"
+            value={prValue}
+            onChange={(e) => onPrChange(toNum(e.target.value))}
+          />
+        </div>
+        <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+          <span>{ncaaSdLabel}</span>
+          <Input
+            type="text"
+            inputMode="decimal"
+            className="h-8"
+            value={ncaaSdValue}
+            onChange={(e) => onNcaaSdChange(toNum(e.target.value))}
+          />
+        </div>
+      </fieldset>
     </div>
   );
 
   return (
     <div className="space-y-4">
+      <div className="space-y-4">
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Returner Model</CardTitle>
@@ -352,10 +409,11 @@ export default function PitchingEquationsTab() {
                 <div>• NCAA Avg ERA Power Rating+ = 100</div>
               </div>
             </div>
-            {renderSdConstantsCard(
-              "Std Dev ERA Power Rating+",
-              weights.era_pr_sd,
-              (v) => setWeights((p) => ({ ...p, era_pr_sd: v })),
+              {renderSdConstantsCard(
+                "returner-era-sd",
+                "Std Dev ERA Power Rating+",
+                weights.era_pr_sd,
+                (v) => setWeights((p) => ({ ...p, era_pr_sd: v })),
               "Std Dev NCAA ERA",
               weights.era_plus_ncaa_sd,
               (v) => setWeights((p) => ({ ...p, era_plus_ncaa_sd: v })),
@@ -456,10 +514,11 @@ export default function PitchingEquationsTab() {
                 <div>• NCAA Avg FIP Power Rating+ = 100</div>
               </div>
             </div>
-            {renderSdConstantsCard(
-              "Std Dev FIP Power Rating+",
-              weights.fip_pr_sd,
-              (v) => setWeights((p) => ({ ...p, fip_pr_sd: v })),
+              {renderSdConstantsCard(
+                "returner-fip-sd",
+                "Std Dev FIP Power Rating+",
+                weights.fip_pr_sd,
+                (v) => setWeights((p) => ({ ...p, fip_pr_sd: v })),
               "Std Dev NCAA FIP",
               weights.fip_plus_ncaa_sd,
               (v) => setWeights((p) => ({ ...p, fip_plus_ncaa_sd: v })),
@@ -524,10 +583,11 @@ export default function PitchingEquationsTab() {
                 <div>• NCAA Avg WHIP Power Rating+ = 100</div>
               </div>
             </div>
-            {renderSdConstantsCard(
-              "Std Dev WHIP Power Rating+",
-              weights.whip_pr_sd,
-              (v) => setWeights((p) => ({ ...p, whip_pr_sd: v })),
+              {renderSdConstantsCard(
+                "returner-whip-sd",
+                "Std Dev WHIP Power Rating+",
+                weights.whip_pr_sd,
+                (v) => setWeights((p) => ({ ...p, whip_pr_sd: v })),
               "Std Dev NCAA WHIP",
               weights.whip_plus_ncaa_sd,
               (v) => setWeights((p) => ({ ...p, whip_plus_ncaa_sd: v })),
@@ -592,10 +652,11 @@ export default function PitchingEquationsTab() {
                 <div>• NCAA Avg K/9 Power Rating+ = 100</div>
               </div>
             </div>
-            {renderSdConstantsCard(
-              "Std Dev K/9 Power Rating+",
-              weights.k9_pr_sd,
-              (v) => setWeights((p) => ({ ...p, k9_pr_sd: v })),
+              {renderSdConstantsCard(
+                "returner-k9-sd",
+                "Std Dev K/9 Power Rating+",
+                weights.k9_pr_sd,
+                (v) => setWeights((p) => ({ ...p, k9_pr_sd: v })),
               "Std Dev NCAA K/9",
               weights.k9_plus_ncaa_sd,
               (v) => setWeights((p) => ({ ...p, k9_plus_ncaa_sd: v })),
@@ -660,10 +721,11 @@ export default function PitchingEquationsTab() {
                 <div>• NCAA Avg BB/9 Power Rating+ = 100</div>
               </div>
             </div>
-            {renderSdConstantsCard(
-              "Std Dev BB/9 Power Rating+",
-              weights.bb9_pr_sd,
-              (v) => setWeights((p) => ({ ...p, bb9_pr_sd: v })),
+              {renderSdConstantsCard(
+                "returner-bb9-sd",
+                "Std Dev BB/9 Power Rating+",
+                weights.bb9_pr_sd,
+                (v) => setWeights((p) => ({ ...p, bb9_pr_sd: v })),
               "Std Dev NCAA BB/9",
               weights.bb9_plus_ncaa_sd,
               (v) => setWeights((p) => ({ ...p, bb9_plus_ncaa_sd: v })),
@@ -728,10 +790,11 @@ export default function PitchingEquationsTab() {
                 <div>• NCAA Avg HR/9 Power Rating+ = 100</div>
               </div>
             </div>
-            {renderSdConstantsCard(
-              "Std Dev HR/9 Power Rating+",
-              weights.hr9_pr_sd,
-              (v) => setWeights((p) => ({ ...p, hr9_pr_sd: v })),
+              {renderSdConstantsCard(
+                "returner-hr9-sd",
+                "Std Dev HR/9 Power Rating+",
+                weights.hr9_pr_sd,
+                (v) => setWeights((p) => ({ ...p, hr9_pr_sd: v })),
               "Std Dev NCAA HR/9",
               weights.hr9_plus_ncaa_sd,
               (v) => setWeights((p) => ({ ...p, hr9_plus_ncaa_sd: v })),
@@ -774,6 +837,291 @@ export default function PitchingEquationsTab() {
             <p className="text-base font-semibold">pRV+</p>
             <div className="bg-muted p-4 rounded-lg space-y-1 text-sm font-mono leading-relaxed">
               <div><span className="text-muted-foreground">pRV+ =</span> ({weights.fip_plus_weight.toFixed(2)} × FIP+) + ({weights.era_plus_weight.toFixed(2)} × ERA+) + ({weights.whip_plus_weight.toFixed(2)} × WHIP+) + ({weights.k9_plus_weight.toFixed(2)} × K/9+) + ({weights.bb9_plus_weight.toFixed(2)} × BB/9+) + ({weights.hr9_plus_weight.toFixed(2)} × HR/9+)</div>
+            </div>
+          </div>
+
+          <div className={sectionPanelClass}>
+            <p className="text-base font-semibold">Transfer Model</p>
+            <p className="text-sm text-muted-foreground">Pitching transfer formulas for ERA and FIP.</p>
+
+            <div className="space-y-2">
+              <p className="text-sm font-semibold">ERA</p>
+              <div className="bg-muted p-4 rounded-lg space-y-1 text-sm font-mono leading-relaxed">
+                <div><span className="text-muted-foreground">LastERA =</span> LastERA</div>
+                <div><span className="text-muted-foreground">PowerAdj =</span> NCAAAvgERA - ((ERAPowerRating+ - 100) / StdDevERAPowerRating+) × StdDevNCAAERA</div>
+                <div><span className="text-muted-foreground">Blended =</span> (LastERA × (1 - PowerRatingWeight)) + (PowerAdj × PowerRatingWeight)</div>
+                <div><span className="text-muted-foreground">Multiplier =</span> 1 - (ConferenceWeight × ((ToERA+ - FromERA+) / 100)) + (CompetitionWeight × ((ToHitterTalent+ - FromHitterTalent+) / 100)) + (ParkFactorWeight × ((ToR/GParkFactor - FromR/GParkFactor) / 100))</div>
+                <div><span className="text-muted-foreground">ProjectedERA =</span> Blended × Multiplier</div>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 text-xs text-muted-foreground">
+              {renderTransferConstantsSdCard(
+                "NCAA Avg ERA",
+                weights.era_plus_ncaa_avg,
+                "Std Dev ERA Power Rating+",
+                weights.era_pr_sd,
+                (v) => setWeights((p) => ({ ...p, era_pr_sd: v })),
+                "Std Dev NCAA ERA",
+                weights.era_plus_ncaa_sd,
+                (v) => setWeights((p) => ({ ...p, era_plus_ncaa_sd: v })),
+              )}
+              <div className={sectionPanelClass}>
+                {editableSectionHeader("Editable (Admin UI)", "transfer-era-edit")}
+                <fieldset disabled={!isBoxEditable("transfer-era-edit")} className="space-y-2">
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>NCAA Avg ERA</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.era_plus_ncaa_avg} onChange={(e) => setWeights((p) => ({ ...p, era_plus_ncaa_avg: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Power Rating Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_era_power_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_era_power_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Conference Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_era_conference_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_era_conference_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Competition Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_era_competition_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_era_competition_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Park Factor Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_era_park_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_era_park_weight: toNum(e.target.value) }))} />
+                  </div>
+                </fieldset>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-semibold">FIP</p>
+              <div className="bg-muted p-4 rounded-lg space-y-1 text-sm font-mono leading-relaxed">
+                <div><span className="text-muted-foreground">LastFIP =</span> LastFIP</div>
+                <div><span className="text-muted-foreground">PowerAdj =</span> NCAAAvgFIP - ((FIPPowerRating+ - 100) / StdDevFIPPowerRating+) × StdDevNCAAFIP</div>
+                <div><span className="text-muted-foreground">Blended =</span> (LastFIP × (1 - PowerRatingWeight)) + (PowerAdj × PowerRatingWeight)</div>
+                <div><span className="text-muted-foreground">Multiplier =</span> 1 - (ConferenceWeight × ((ToFIP+ - FromFIP+) / 100)) + (CompetitionWeight × ((ToHitterTalent+ - FromHitterTalent+) / 100)) + (ParkFactorWeight × ((ToR/GParkFactor - FromR/GParkFactor) / 100))</div>
+                <div><span className="text-muted-foreground">ProjectedFIP =</span> Blended × Multiplier</div>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 text-xs text-muted-foreground">
+              {renderTransferConstantsSdCard(
+                "NCAA Avg FIP",
+                weights.fip_plus_ncaa_avg,
+                "Std Dev FIP Power Rating+",
+                weights.fip_pr_sd,
+                (v) => setWeights((p) => ({ ...p, fip_pr_sd: v })),
+                "Std Dev NCAA FIP",
+                weights.fip_plus_ncaa_sd,
+                (v) => setWeights((p) => ({ ...p, fip_plus_ncaa_sd: v })),
+              )}
+              <div className={sectionPanelClass}>
+                {editableSectionHeader("Editable (Admin UI)", "transfer-fip-edit")}
+                <fieldset disabled={!isBoxEditable("transfer-fip-edit")} className="space-y-2">
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>NCAA Avg FIP</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.fip_plus_ncaa_avg} onChange={(e) => setWeights((p) => ({ ...p, fip_plus_ncaa_avg: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Power Rating Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_fip_power_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_fip_power_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Conference Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_fip_conference_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_fip_conference_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Competition Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_fip_competition_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_fip_competition_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Park Factor Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_fip_park_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_fip_park_weight: toNum(e.target.value) }))} />
+                  </div>
+                </fieldset>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-semibold">WHIP</p>
+              <div className="bg-muted p-4 rounded-lg space-y-1 text-sm font-mono leading-relaxed">
+                <div><span className="text-muted-foreground">LastWHIP =</span> LastWHIP</div>
+                <div><span className="text-muted-foreground">PowerAdj =</span> NCAAAvgWHIP - ((WHIPPowerRating+ - 100) / StdDevWHIPPowerRating+) × StdDevNCAAWHIP</div>
+                <div><span className="text-muted-foreground">Blended =</span> (LastWHIP × (1 - PowerRatingWeight)) + (PowerAdj × PowerRatingWeight)</div>
+                <div><span className="text-muted-foreground">Multiplier =</span> 1 - (ConferenceWeight × ((ToWHIP+ - FromWHIP+) / 100)) + (CompetitionWeight × ((ToHitterTalent+ - FromHitterTalent+) / 100)) + (ParkFactorWeight × ((ToWHIPParkFactor - FromWHIPParkFactor) / 100))</div>
+                <div><span className="text-muted-foreground">ProjectedWHIP =</span> Blended × (1 + (Multiplier - 1) × 0.75)</div>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 text-xs text-muted-foreground">
+              {renderTransferConstantsSdCard(
+                "NCAA Avg WHIP",
+                weights.whip_plus_ncaa_avg,
+                "Std Dev WHIP Power Rating+",
+                weights.whip_pr_sd,
+                (v) => setWeights((p) => ({ ...p, whip_pr_sd: v })),
+                "Std Dev NCAA WHIP",
+                weights.whip_plus_ncaa_sd,
+                (v) => setWeights((p) => ({ ...p, whip_plus_ncaa_sd: v })),
+              )}
+              <div className={sectionPanelClass}>
+                {editableSectionHeader("Editable (Admin UI)", "transfer-whip-edit")}
+                <fieldset disabled={!isBoxEditable("transfer-whip-edit")} className="space-y-2">
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>NCAA Avg WHIP</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.whip_plus_ncaa_avg} onChange={(e) => setWeights((p) => ({ ...p, whip_plus_ncaa_avg: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Power Rating Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_whip_power_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_whip_power_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Conference Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_whip_conference_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_whip_conference_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Competition Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_whip_competition_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_whip_competition_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Park Factor Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_whip_park_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_whip_park_weight: toNum(e.target.value) }))} />
+                  </div>
+                </fieldset>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-semibold">K/9</p>
+              <div className="bg-muted p-4 rounded-lg space-y-1 text-sm font-mono leading-relaxed">
+                <div><span className="text-muted-foreground">LastK/9 =</span> LastK/9</div>
+                <div><span className="text-muted-foreground">PowerAdj =</span> NCAAAvgK/9 + ((K/9PowerRating+ - 100) / StdDevK/9PowerRating+) × StdDevNCAAK/9</div>
+                <div><span className="text-muted-foreground">Blended =</span> (LastK/9 × (1 - PowerRatingWeight)) + (PowerAdj × PowerRatingWeight)</div>
+                <div><span className="text-muted-foreground">Multiplier =</span> 1 + (ConferenceWeight × ((ToK/9+ - FromK/9+) / 100)) - (CompetitionWeight × ((ToHitterTalent+ - FromHitterTalent+) / 100))</div>
+                <div><span className="text-muted-foreground">ProjectedK/9 =</span> Blended × Multiplier</div>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 text-xs text-muted-foreground">
+              {renderTransferConstantsSdCard(
+                "NCAA Avg K/9",
+                weights.k9_plus_ncaa_avg,
+                "Std Dev K/9 Power Rating+",
+                weights.k9_pr_sd,
+                (v) => setWeights((p) => ({ ...p, k9_pr_sd: v })),
+                "Std Dev NCAA K/9",
+                weights.k9_plus_ncaa_sd,
+                (v) => setWeights((p) => ({ ...p, k9_plus_ncaa_sd: v })),
+              )}
+              <div className={sectionPanelClass}>
+                {editableSectionHeader("Editable (Admin UI)", "transfer-k9-edit")}
+                <fieldset disabled={!isBoxEditable("transfer-k9-edit")} className="space-y-2">
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>NCAA Avg K/9</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.k9_plus_ncaa_avg} onChange={(e) => setWeights((p) => ({ ...p, k9_plus_ncaa_avg: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Power Rating Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_k9_power_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_k9_power_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Conference Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_k9_conference_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_k9_conference_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Competition Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_k9_competition_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_k9_competition_weight: toNum(e.target.value) }))} />
+                  </div>
+                </fieldset>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-semibold">BB/9</p>
+              <div className="bg-muted p-4 rounded-lg space-y-1 text-sm font-mono leading-relaxed">
+                <div><span className="text-muted-foreground">LastBB/9 =</span> LastBB/9</div>
+                <div><span className="text-muted-foreground">PowerAdj =</span> NCAAAvgBB/9 - ((BB/9PowerRating+ - 100) / StdDevBB/9PowerRating+) × StdDevNCAABB/9</div>
+                <div><span className="text-muted-foreground">Blended =</span> (LastBB/9 × (1 - PowerRatingWeight)) + (PowerAdj × PowerRatingWeight)</div>
+                <div><span className="text-muted-foreground">Multiplier =</span> 1 - (ConferenceWeight × ((ToBB/9+ - FromBB/9+) / 100)) + (CompetitionWeight × ((ToHitterTalent+ - FromHitterTalent+) / 100))</div>
+                <div><span className="text-muted-foreground">ProjectedBB/9 =</span> Blended × Multiplier</div>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 text-xs text-muted-foreground">
+              {renderTransferConstantsSdCard(
+                "NCAA Avg BB/9",
+                weights.bb9_plus_ncaa_avg,
+                "Std Dev BB/9 Power Rating+",
+                weights.bb9_pr_sd,
+                (v) => setWeights((p) => ({ ...p, bb9_pr_sd: v })),
+                "Std Dev NCAA BB/9",
+                weights.bb9_plus_ncaa_sd,
+                (v) => setWeights((p) => ({ ...p, bb9_plus_ncaa_sd: v })),
+              )}
+              <div className={sectionPanelClass}>
+                {editableSectionHeader("Editable (Admin UI)", "transfer-bb9-edit")}
+                <fieldset disabled={!isBoxEditable("transfer-bb9-edit")} className="space-y-2">
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>NCAA Avg BB/9</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.bb9_plus_ncaa_avg} onChange={(e) => setWeights((p) => ({ ...p, bb9_plus_ncaa_avg: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Power Rating Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_bb9_power_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_bb9_power_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Conference Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_bb9_conference_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_bb9_conference_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Competition Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_bb9_competition_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_bb9_competition_weight: toNum(e.target.value) }))} />
+                  </div>
+                </fieldset>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-semibold">HR/9</p>
+              <div className="bg-muted p-4 rounded-lg space-y-1 text-sm font-mono leading-relaxed">
+                <div><span className="text-muted-foreground">LastHR/9 =</span> LastHR/9</div>
+                <div><span className="text-muted-foreground">PowerAdj =</span> NCAAAvgHR/9 - ((HR/9PowerRating+ - 100) / StdDevHR/9PowerRating+) × StdDevNCAAHR/9</div>
+                <div><span className="text-muted-foreground">Blended =</span> (LastHR/9 × (1 - PowerRatingWeight)) + (PowerAdj × PowerRatingWeight)</div>
+                <div><span className="text-muted-foreground">Multiplier =</span> 1 - (ConferenceWeight × ((ToHR/9+ - FromHR/9+) / 100)) + (CompetitionWeight × ((ToHitterTalent+ - FromHitterTalent+) / 100)) + (ParkFactorWeight × ((ToHR/9ParkFactor - FromHR/9ParkFactor) / 100))</div>
+                <div><span className="text-muted-foreground">ProjectedHR/9 =</span> Blended × Multiplier</div>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 text-xs text-muted-foreground">
+              {renderTransferConstantsSdCard(
+                "NCAA Avg HR/9",
+                weights.hr9_plus_ncaa_avg,
+                "Std Dev HR/9 Power Rating+",
+                weights.hr9_pr_sd,
+                (v) => setWeights((p) => ({ ...p, hr9_pr_sd: v })),
+                "Std Dev NCAA HR/9",
+                weights.hr9_plus_ncaa_sd,
+                (v) => setWeights((p) => ({ ...p, hr9_plus_ncaa_sd: v })),
+              )}
+              <div className={sectionPanelClass}>
+                {editableSectionHeader("Editable (Admin UI)", "transfer-hr9-edit")}
+                <fieldset disabled={!isBoxEditable("transfer-hr9-edit")} className="space-y-2">
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>NCAA Avg HR/9</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.hr9_plus_ncaa_avg} onChange={(e) => setWeights((p) => ({ ...p, hr9_plus_ncaa_avg: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Power Rating Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_hr9_power_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_hr9_power_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Conference Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_hr9_conference_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_hr9_conference_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Competition Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_hr9_competition_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_hr9_competition_weight: toNum(e.target.value) }))} />
+                  </div>
+                  <div className="grid grid-cols-[1fr_140px] items-center gap-3">
+                    <span>Park Factor Weight</span>
+                    <Input type="text" inputMode="decimal" className="h-8" value={weights.transfer_hr9_park_weight} onChange={(e) => setWeights((p) => ({ ...p, transfer_hr9_park_weight: toNum(e.target.value) }))} />
+                  </div>
+                </fieldset>
+              </div>
             </div>
           </div>
 
@@ -1088,6 +1436,7 @@ export default function PitchingEquationsTab() {
           </div>
         </CardContent>
       </Card>
+      </div>
 
       <div className="flex items-center gap-2 justify-end">
         <Button variant="outline" onClick={autoFillFromPitchingStorage}>Auto-fill NCAA + SD</Button>

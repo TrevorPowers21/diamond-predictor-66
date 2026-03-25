@@ -92,6 +92,28 @@ export type PitchingEquationWeights = {
   class_hr9_sj: number;
   class_hr9_js: number;
   class_hr9_gr: number;
+  transfer_era_power_weight: number;
+  transfer_era_conference_weight: number;
+  transfer_era_competition_weight: number;
+  transfer_era_park_weight: number;
+  transfer_fip_power_weight: number;
+  transfer_fip_conference_weight: number;
+  transfer_fip_competition_weight: number;
+  transfer_fip_park_weight: number;
+  transfer_whip_power_weight: number;
+  transfer_whip_conference_weight: number;
+  transfer_whip_competition_weight: number;
+  transfer_whip_park_weight: number;
+  transfer_k9_power_weight: number;
+  transfer_k9_conference_weight: number;
+  transfer_k9_competition_weight: number;
+  transfer_bb9_power_weight: number;
+  transfer_bb9_conference_weight: number;
+  transfer_bb9_competition_weight: number;
+  transfer_hr9_power_weight: number;
+  transfer_hr9_conference_weight: number;
+  transfer_hr9_competition_weight: number;
+  transfer_hr9_park_weight: number;
 };
 
 export const PITCHING_EQUATIONS_STORAGE_KEY = "admin_pitching_equations_v1";
@@ -190,6 +212,28 @@ export const DEFAULT_PITCHING_WEIGHTS: PitchingEquationWeights = {
   class_hr9_sj: 2.0,
   class_hr9_js: 1.5,
   class_hr9_gr: 1.0,
+  transfer_era_power_weight: 0.7,
+  transfer_era_conference_weight: 0.3,
+  transfer_era_competition_weight: 0.75,
+  transfer_era_park_weight: 0.075,
+  transfer_fip_power_weight: 0.7,
+  transfer_fip_conference_weight: 0.3,
+  transfer_fip_competition_weight: 0.75,
+  transfer_fip_park_weight: 0.075,
+  transfer_whip_power_weight: 0.7,
+  transfer_whip_conference_weight: 0.3,
+  transfer_whip_competition_weight: 0.75,
+  transfer_whip_park_weight: 0.15,
+  transfer_k9_power_weight: 0.7,
+  transfer_k9_conference_weight: 0.4,
+  transfer_k9_competition_weight: 0.75,
+  transfer_bb9_power_weight: 0.7,
+  transfer_bb9_conference_weight: 0.3,
+  transfer_bb9_competition_weight: 0.75,
+  transfer_hr9_power_weight: 0.7,
+  transfer_hr9_conference_weight: 0.3,
+  transfer_hr9_competition_weight: 0.75,
+  transfer_hr9_park_weight: 0.05,
 };
 
 export const readPitchingWeights = (): PitchingEquationWeights => {
@@ -306,7 +350,47 @@ export const readPitchingWeights = (): PitchingEquationWeights => {
       class_hr9_sj: Number.isFinite(parsed.class_hr9_sj) ? Number(parsed.class_hr9_sj) : DEFAULT_PITCHING_WEIGHTS.class_hr9_sj,
       class_hr9_js: Number.isFinite(parsed.class_hr9_js) ? Number(parsed.class_hr9_js) : DEFAULT_PITCHING_WEIGHTS.class_hr9_js,
       class_hr9_gr: Number.isFinite(parsed.class_hr9_gr) ? Number(parsed.class_hr9_gr) : DEFAULT_PITCHING_WEIGHTS.class_hr9_gr,
+      transfer_era_power_weight: Number.isFinite(parsed.transfer_era_power_weight) ? Number(parsed.transfer_era_power_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_era_power_weight,
+      transfer_era_conference_weight: Number.isFinite(parsed.transfer_era_conference_weight) ? Number(parsed.transfer_era_conference_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_era_conference_weight,
+      transfer_era_competition_weight: Number.isFinite(parsed.transfer_era_competition_weight) ? Number(parsed.transfer_era_competition_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_era_competition_weight,
+      transfer_era_park_weight: Number.isFinite(parsed.transfer_era_park_weight) ? Number(parsed.transfer_era_park_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_era_park_weight,
+      transfer_fip_power_weight: Number.isFinite(parsed.transfer_fip_power_weight) ? Number(parsed.transfer_fip_power_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_fip_power_weight,
+      transfer_fip_conference_weight: Number.isFinite(parsed.transfer_fip_conference_weight) ? Number(parsed.transfer_fip_conference_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_fip_conference_weight,
+      transfer_fip_competition_weight: Number.isFinite(parsed.transfer_fip_competition_weight) ? Number(parsed.transfer_fip_competition_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_fip_competition_weight,
+      transfer_fip_park_weight: Number.isFinite(parsed.transfer_fip_park_weight) ? Number(parsed.transfer_fip_park_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_fip_park_weight,
+      transfer_whip_power_weight: Number.isFinite(parsed.transfer_whip_power_weight) ? Number(parsed.transfer_whip_power_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_whip_power_weight,
+      transfer_whip_conference_weight: Number.isFinite(parsed.transfer_whip_conference_weight) ? Number(parsed.transfer_whip_conference_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_whip_conference_weight,
+      transfer_whip_competition_weight: Number.isFinite(parsed.transfer_whip_competition_weight) ? Number(parsed.transfer_whip_competition_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_whip_competition_weight,
+      transfer_whip_park_weight: Number.isFinite(parsed.transfer_whip_park_weight) ? Number(parsed.transfer_whip_park_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_whip_park_weight,
+      transfer_k9_power_weight: Number.isFinite(parsed.transfer_k9_power_weight) ? Number(parsed.transfer_k9_power_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_k9_power_weight,
+      transfer_k9_conference_weight: Number.isFinite(parsed.transfer_k9_conference_weight) ? Number(parsed.transfer_k9_conference_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_k9_conference_weight,
+      transfer_k9_competition_weight: Number.isFinite(parsed.transfer_k9_competition_weight) ? Number(parsed.transfer_k9_competition_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_k9_competition_weight,
+      transfer_bb9_power_weight: Number.isFinite(parsed.transfer_bb9_power_weight) ? Number(parsed.transfer_bb9_power_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_bb9_power_weight,
+      transfer_bb9_conference_weight: Number.isFinite(parsed.transfer_bb9_conference_weight) ? Number(parsed.transfer_bb9_conference_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_bb9_conference_weight,
+      transfer_bb9_competition_weight: Number.isFinite(parsed.transfer_bb9_competition_weight) ? Number(parsed.transfer_bb9_competition_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_bb9_competition_weight,
+      transfer_hr9_power_weight: Number.isFinite(parsed.transfer_hr9_power_weight) ? Number(parsed.transfer_hr9_power_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_hr9_power_weight,
+      transfer_hr9_conference_weight: Number.isFinite(parsed.transfer_hr9_conference_weight) ? Number(parsed.transfer_hr9_conference_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_hr9_conference_weight,
+      transfer_hr9_competition_weight: Number.isFinite(parsed.transfer_hr9_competition_weight) ? Number(parsed.transfer_hr9_competition_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_hr9_competition_weight,
+      transfer_hr9_park_weight: Number.isFinite(parsed.transfer_hr9_park_weight) ? Number(parsed.transfer_hr9_park_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_hr9_park_weight,
     };
+    // Migrate old default transfer conference weights to the new agreed defaults.
+    // (Only auto-updates when values still match the old baseline.)
+    if (
+      merged.transfer_era_conference_weight === 0.25 &&
+      merged.transfer_fip_conference_weight === 0.3 &&
+      merged.transfer_whip_conference_weight === 0.4 &&
+      merged.transfer_k9_conference_weight === 0.3 &&
+      merged.transfer_bb9_conference_weight === 0.2 &&
+      merged.transfer_hr9_conference_weight === 0.1
+    ) {
+      merged.transfer_era_conference_weight = 0.3;
+      merged.transfer_fip_conference_weight = 0.3;
+      merged.transfer_whip_conference_weight = 0.3;
+      merged.transfer_k9_conference_weight = 0.4;
+      merged.transfer_bb9_conference_weight = 0.3;
+      merged.transfer_hr9_conference_weight = 0.3;
+    }
+
     // QA lock-in: keep K/9, BB/9, and HR/9 role-impact constants fixed to agreed model values.
     // This prevents stale local edits from drifting projected pK/9, pBB/9, and pHR/9 role transitions.
     merged.k9_plus_ncaa_avg = 8.21;

@@ -47,6 +47,12 @@ const normalizeConferenceName = (input: string | null | undefined) => {
   return map[key] || raw;
 };
 
+const displayParkFactor = (value: number | null | undefined) => {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const scaled = Math.abs(value) <= 3 ? value * 100 : value;
+  return Math.round(scaled).toString();
+};
+
 export default function Teams() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
@@ -78,7 +84,7 @@ export default function Teams() {
       return allData as Team[];
     },
   });
-  const teamParkComponents = useMemo(() => readTeamParkFactorComponents(), [teams]);
+  const teamParkComponents = readTeamParkFactorComponents();
 
   const updateTeam = useMutation({
     mutationFn: async ({ id, name, conference }: { id: string; name: string; conference: string }) => {
@@ -301,6 +307,9 @@ export default function Teams() {
                           <TableHead className="min-w-[90px] text-center">AVG PF</TableHead>
                           <TableHead className="min-w-[90px] text-center">OBP PF</TableHead>
                           <TableHead className="min-w-[90px] text-center">ISO PF</TableHead>
+                          <TableHead className="min-w-[90px] text-center">R/G PF</TableHead>
+                          <TableHead className="min-w-[90px] text-center">WHIP PF</TableHead>
+                          <TableHead className="min-w-[90px] text-center">HR/9 PF</TableHead>
                           <TableHead className="min-w-[180px]">Conference</TableHead>
                           <TableHead className="w-[100px]">Actions</TableHead>
                         </TableRow>
@@ -323,7 +332,7 @@ export default function Teams() {
                               <span className="text-sm tabular-nums">
                                 {(() => {
                                   const v = resolveMetricParkFactor(team.name, team.park_factor, "avg", teamParkComponents);
-                                  return v == null ? "—" : Math.round(v * 100);
+                                  return displayParkFactor(v);
                                 })()}
                               </span>
                             </TableCell>
@@ -331,7 +340,7 @@ export default function Teams() {
                               <span className="text-sm tabular-nums">
                                 {(() => {
                                   const v = resolveMetricParkFactor(team.name, team.park_factor, "obp", teamParkComponents);
-                                  return v == null ? "—" : Math.round(v * 100);
+                                  return displayParkFactor(v);
                                 })()}
                               </span>
                             </TableCell>
@@ -339,7 +348,31 @@ export default function Teams() {
                               <span className="text-sm tabular-nums">
                                 {(() => {
                                   const v = resolveMetricParkFactor(team.name, team.park_factor, "iso", teamParkComponents);
-                                  return v == null ? "—" : Math.round(v * 100);
+                                  return displayParkFactor(v);
+                                })()}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className="text-sm tabular-nums">
+                                {(() => {
+                                  const v = resolveMetricParkFactor(team.name, team.park_factor, "era", teamParkComponents);
+                                  return displayParkFactor(v);
+                                })()}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className="text-sm tabular-nums">
+                                {(() => {
+                                  const v = resolveMetricParkFactor(team.name, team.park_factor, "whip", teamParkComponents);
+                                  return displayParkFactor(v);
+                                })()}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className="text-sm tabular-nums">
+                                {(() => {
+                                  const v = resolveMetricParkFactor(team.name, team.park_factor, "hr9", teamParkComponents);
+                                  return displayParkFactor(v);
                                 })()}
                               </span>
                             </TableCell>

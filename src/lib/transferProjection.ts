@@ -59,7 +59,55 @@ export type TransferProjectionOutput = {
   owar: number | null;
 };
 
+export type PitchingEraTransferInputs = {
+  lastEra: number;
+  ncaaAvgEra: number;
+  eraPowerRatingPlus: number;
+  stdDevEraPowerRatingPlus: number;
+  stdDevNcaaEra: number;
+  powerRatingWeight: number;
+  conferenceWeight: number;
+  competitionWeight: number;
+  parkFactorWeight: number;
+  fromEraPlus: number;
+  toEraPlus: number;
+  fromHitterTalentPlus: number;
+  toHitterTalentPlus: number;
+  fromRgParkFactor: number;
+  toRgParkFactor: number;
+};
+
+export type PitchingEraTransferOutput = {
+  powerAdj: number;
+  blended: number;
+  multiplier: number;
+  projectedEra: number;
+};
+
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+export function computePitchingEraTransferProjection(
+  input: PitchingEraTransferInputs,
+): PitchingEraTransferOutput {
+  const safeStdDevEraPr = input.stdDevEraPowerRatingPlus === 0 ? 1 : input.stdDevEraPowerRatingPlus;
+  const powerAdj =
+    input.ncaaAvgEra - (((input.eraPowerRatingPlus - 100) / safeStdDevEraPr) * input.stdDevNcaaEra);
+  const blended =
+    (input.lastEra * (1 - input.powerRatingWeight)) + (powerAdj * input.powerRatingWeight);
+  const multiplier =
+    1 -
+    (input.conferenceWeight * ((input.toEraPlus - input.fromEraPlus) / 100)) +
+    (input.competitionWeight * ((input.toHitterTalentPlus - input.fromHitterTalentPlus) / 100)) +
+    (input.parkFactorWeight * ((input.toRgParkFactor - input.fromRgParkFactor) / 100));
+  const projectedEra = blended * multiplier;
+
+  return {
+    powerAdj: round3(powerAdj),
+    blended: round3(blended),
+    multiplier: round3(multiplier),
+    projectedEra: round3(projectedEra),
+  };
+}
 
 export function computeTransferProjection(input: TransferProjectionInputs): TransferProjectionOutput {
   const fromBaPark = input.fromBaPark ?? input.fromPark;

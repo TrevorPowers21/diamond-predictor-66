@@ -13,11 +13,16 @@ import { useAuth } from "@/hooks/useAuth";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { readPlayerOverrides } from "@/lib/playerOverrides";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
+import { readTeamParkFactorComponents, resolveMetricParkFactor } from "@/lib/parkFactors";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
 const normalize = (v: string | null | undefined) =>
   (v || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+const parkToIndex = (v: number | null | undefined) => {
+  if (v == null || !Number.isFinite(v)) return 100;
+  return Math.abs(v) <= 3 ? v * 100 : v;
+};
 const PITCHER_TEAM_ALIASES: Record<string, string> = {
   "unc charlotte": "Charlotte",
   "louisiana state university": "Louisiana State",
@@ -457,7 +462,7 @@ export default function PitcherProfile() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("teams")
-        .select("name, conference");
+        .select("name, conference, park_factor");
       if (error) throw error;
       return data || [];
     },
@@ -669,13 +674,23 @@ export default function PitcherProfile() {
   const activePrediction = useMemo(() => predictions[0] || null, [predictions]);
   const conferenceByTeam = useMemo(() => {
     const map = new Map<string, string>();
-    for (const row of teamDirectory as Array<{ name: string | null; conference: string | null }>) {
+    for (const row of teamDirectory as Array<{ name: string | null; conference: string | null; park_factor: number | null }>) {
       const key = normalize(row.name);
       if (!key || !row.conference) continue;
       if (!map.has(key)) map.set(key, row.conference);
     }
     return map;
   }, [teamDirectory]);
+  const teamByName = useMemo(() => {
+    const map = new Map<string, { name: string; conference: string | null; park_factor: number | null }>();
+    for (const row of teamDirectory as Array<{ name: string | null; conference: string | null; park_factor: number | null }>) {
+      const key = normalize(row.name);
+      if (!key || !row.name) continue;
+      if (!map.has(key)) map.set(key, { name: row.name, conference: row.conference, park_factor: row.park_factor });
+    }
+    return map;
+  }, [teamDirectory]);
+  const teamParkComponents = useMemo(() => readTeamParkFactorComponents(), [teamDirectory]);
   const fullName =
     `${player?.first_name || ""} ${player?.last_name || ""}`.trim() ||
     storageRef?.playerName ||
@@ -860,6 +875,21 @@ export default function PitcherProfile() {
       impacts: eq.hr9_damp_impacts,
       lowerIsBetter: true,
     });
+    const teamMatch = teamByName.get(normalize(displayTeam));
+    const teamNameForPark = teamMatch?.name || displayTeam || null;
+    const fallbackPark = teamMatch?.park_factor ?? null;
+    const avgPark = parkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "avg", teamParkComponents));
+    const obpPark = parkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "obp", teamParkComponents));
+    const isoPark = parkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "iso", teamParkComponents));
+    const eraParkRaw = resolveMetricParkFactor(teamNameForPark, null, "era", teamParkComponents);
+    const whipParkRaw = resolveMetricParkFactor(teamNameForPark, null, "whip", teamParkComponents);
+    const hr9ParkRaw = resolveMetricParkFactor(teamNameForPark, null, "hr9", teamParkComponents);
+    const eraParkFactor = (parkToIndex(eraParkRaw ?? avgPark)) / 100;
+    const whipParkFactor = (parkToIndex(whipParkRaw ?? ((0.7 * avgPark) + (0.3 * obpPark)))) / 100;
+    const hr9ParkFactor = (parkToIndex(hr9ParkRaw ?? isoPark)) / 100;
+    const parkAdjustedEra = pEra == null ? null : pEra * eraParkFactor;
+    const parkAdjustedWhip = pWhip == null ? null : pWhip * whipParkFactor;
+    const parkAdjustedHr9 = pHr9 == null ? null : pHr9 * hr9ParkFactor;
     const roleCurve = {
       tier1Max: eq.rp_to_sp_low_better_tier1_max,
       tier2Max: eq.rp_to_sp_low_better_tier2_max,
@@ -868,12 +898,12 @@ export default function PitcherProfile() {
       tier2Mult: eq.rp_to_sp_low_better_tier2_mult,
       tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
     };
-    const roleAdjustedEra = applyRoleTransitionAdjustment(pEra, eq.sp_to_rp_reg_era_pct, derivedRole, projectedRole, true, roleCurve);
+    const roleAdjustedEra = applyRoleTransitionAdjustment(parkAdjustedEra, eq.sp_to_rp_reg_era_pct, derivedRole, projectedRole, true, roleCurve);
     const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, eq.sp_to_rp_reg_fip_pct, derivedRole, projectedRole, true, roleCurve);
-    const roleAdjustedWhip = applyRoleTransitionAdjustment(pWhip, eq.sp_to_rp_reg_whip_pct, derivedRole, projectedRole, true, roleCurve);
+    const roleAdjustedWhip = applyRoleTransitionAdjustment(parkAdjustedWhip, eq.sp_to_rp_reg_whip_pct, derivedRole, projectedRole, true, roleCurve);
     const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, eq.sp_to_rp_reg_k9_pct, derivedRole, projectedRole, false, roleCurve);
     const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, eq.sp_to_rp_reg_bb9_pct, derivedRole, projectedRole, true, roleCurve);
-    const roleAdjustedHr9 = applyRoleTransitionAdjustment(pHr9, eq.sp_to_rp_reg_hr9_pct, derivedRole, projectedRole, true, roleCurve);
+    const roleAdjustedHr9 = applyRoleTransitionAdjustment(parkAdjustedHr9, eq.sp_to_rp_reg_hr9_pct, derivedRole, projectedRole, true, roleCurve);
 
     const eraPlus = calcPitchingPlus(roleAdjustedEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale);
     const fipPlus = calcPitchingPlus(roleAdjustedFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale);
@@ -945,6 +975,9 @@ export default function PitcherProfile() {
     storageProjectionOverride?.class_transition,
     storageProjectionOverride?.dev_aggressiveness,
     storageProjectionOverride?.pitcher_role,
+    displayTeam,
+    teamByName,
+    teamParkComponents,
   ]);
 
   const pitching2025 = useMemo(() => {
