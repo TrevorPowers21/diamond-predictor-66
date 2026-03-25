@@ -15,6 +15,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, BarChart3, DollarSign, Upload, ChevronDown, ChevronUp } from "lucide-react";
 import storage2025Seed from "@/data/storage_2025_seed.json";
+import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
+import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
 import {
   calcPlayerScore,
   DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
@@ -26,8 +28,9 @@ import { computeTransferProjection } from "@/lib/transferProjection";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
-import { updatePlayerOverride } from "@/lib/playerOverrides";
+import { readPlayerOverrides, updatePlayerOverride } from "@/lib/playerOverrides";
 import { readTeamParkFactorComponents, resolveMetricParkFactor } from "@/lib/parkFactors";
+import { readPitchingWeights } from "@/lib/pitchingEquations";
 
 const POSITION_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"] as const;
 const PITCHER_SLOTS = ["SP1", "SP2", "SP3", "SP4", "SP5", "RP1", "RP2", "RP3", "RP4", "CL"] as const;
@@ -42,10 +45,19 @@ type TargetBoardEntry = {
   destinationTeam: string;
   fromTeam: string | null;
   fromConference: string | null;
+  pitcherRole?: "SP" | "RP" | null;
   pAvg: number | null;
   pObp: number | null;
   pSlg: number | null;
   pWrcPlus: number | null;
+  pEra?: number | null;
+  pFip?: number | null;
+  pWhip?: number | null;
+  pK9?: number | null;
+  pBb9?: number | null;
+  pHr9?: number | null;
+  pRvPlus?: number | null;
+  pWar?: number | null;
   owar: number | null;
   nilValuation: number | null;
   createdAt: string;
@@ -56,6 +68,14 @@ type TransferSnapshot = {
   p_obp: number | null;
   p_slg: number | null;
   p_wrc_plus: number | null;
+  p_era?: number | null;
+  p_fip?: number | null;
+  p_whip?: number | null;
+  p_k9?: number | null;
+  p_bb9?: number | null;
+  p_hr9?: number | null;
+  p_rv_plus?: number | null;
+  p_war?: number | null;
   owar: number | null;
   nil_valuation: number | null;
   from_team: string | null;
@@ -72,7 +92,7 @@ type BuildPlayer = {
   nil_value: number;
   production_notes: string | null;
   roster_status?: "returner" | "leaving" | "target";
-  depth_role?: "starter" | "utility" | "bench";
+  depth_role?: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "high_leverage_reliever" | "low_impact_reliever";
   class_transition?: string | null;
   dev_aggressiveness?: number | null;
   // joined
@@ -94,6 +114,15 @@ type BuildPlayer = {
     p_slg: number | null;
     p_ops: number | null;
     p_wrc_plus: number | null;
+    p_era?: number | null;
+    p_fip?: number | null;
+    p_whip?: number | null;
+    p_k9?: number | null;
+    p_bb9?: number | null;
+    p_hr9?: number | null;
+    p_rv_plus?: number | null;
+    p_war?: number | null;
+    nil_valuation?: number | null;
     power_rating_plus: number | null;
     model_type: "returner" | "transfer" | string | null;
     status: string | null;
@@ -167,6 +196,15 @@ type LivePredictionRow = {
   p_slg: number | null;
   p_ops: number | null;
   p_wrc_plus: number | null;
+  p_era?: number | null;
+  p_fip?: number | null;
+  p_whip?: number | null;
+  p_k9?: number | null;
+  p_bb9?: number | null;
+  p_hr9?: number | null;
+  p_rv_plus?: number | null;
+  p_war?: number | null;
+  nil_valuation?: number | null;
   power_rating_plus: number | null;
   class_transition: string | null;
   dev_aggressiveness: number | null;
@@ -206,6 +244,26 @@ const normalizeName = (value: string | null | undefined) =>
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+const isUuid = (value: string | null | undefined) =>
+  !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value).trim());
+const teamNameVariants = (team: string | null | undefined) => {
+  const base = (team || "").trim();
+  if (!base) return [] as string[];
+  const out = new Set<string>([base]);
+  const lower = base.toLowerCase();
+  if (lower.endsWith(" university")) out.add(base.replace(/\s+university$/i, "").trim());
+  else out.add(`${base} University`);
+  if (lower.startsWith("university of ")) out.add(base.replace(/^university of\s+/i, "").trim());
+  else out.add(`University of ${base}`.trim());
+  if (lower === "west virginia") out.add("West Virginia University");
+  if (lower === "west virginia university") out.add("West Virginia");
+  if (lower === "west virginia" || lower === "west virginia university" || lower === "wvu") {
+    out.add("WVU");
+    out.add("West Virginia");
+    out.add("West Virginia University");
+  }
+  return Array.from(out).filter(Boolean);
+};
 
 const parseNum = (raw: unknown): number | null => {
   if (raw == null) return null;
@@ -220,6 +278,60 @@ const splitFullName = (fullName: string) => {
   if (parts.length === 0) return { first: "", last: "" };
   if (parts.length === 1) return { first: parts[0], last: "" };
   return { first: parts[0], last: parts.slice(1).join(" ") };
+};
+
+const readStoragePitcherLocalPlayers = (
+  teamName: string | null | undefined,
+): Array<{
+  first_name: string;
+  last_name: string;
+  position: string | null;
+  team: string | null;
+  from_team: string | null;
+  conference: string | null;
+  role: "SP" | "RP" | null;
+}> => {
+  if (!teamName || typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem("pitching_stats_storage_2025_v1");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { rows?: Array<{ values?: string[] }> };
+    const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
+    const teamKey = normalizeName(teamName);
+    const out: Array<{
+      first_name: string;
+      last_name: string;
+      position: string | null;
+      team: string | null;
+      from_team: string | null;
+      conference: string | null;
+      role: "SP" | "RP" | null;
+    }> = [];
+    for (const row of rows) {
+      const values = Array.isArray(row?.values) ? row.values : [];
+      const playerName = (values[0] || "").trim();
+      const rowTeam = (values[1] || "").trim();
+      if (!playerName || !rowTeam) continue;
+      if (normalizeName(rowTeam) !== teamKey) continue;
+      const hand = (values[2] || "").trim().toUpperCase();
+      const roleRaw = (values[3] || "").trim().toUpperCase();
+      const role: "SP" | "RP" | null = roleRaw === "SP" || roleRaw === "RP" ? roleRaw : null;
+      const position = hand === "RHP" || hand === "LHP" ? hand : (role || "P");
+      const split = splitFullName(playerName);
+      out.push({
+        first_name: split.first,
+        last_name: split.last,
+        position,
+        team: rowTeam,
+        from_team: null,
+        conference: null,
+        role,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
 };
 
 const erf = (x: number) => {
@@ -334,12 +446,13 @@ const parseBuildPlayerMeta = (raw: string | null | undefined): {
   metrics: TeamMetricInputs | null;
   power: TeamPowerPlus | null;
   rosterStatus: "returner" | "leaving" | "target" | null;
-  depthRole: "starter" | "utility" | "bench" | null;
+  depthRole: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "high_leverage_reliever" | "low_impact_reliever" | null;
   classTransition: string | null;
   devAggressiveness: number | null;
   transferSnapshot: TransferSnapshot | null;
+  localPlayer: { first_name: string; last_name: string; position: string | null; team: string | null; from_team: string | null; conference: string | null } | null;
 } => {
-  if (!raw) return { notes: null, metrics: null, power: null, rosterStatus: null, depthRole: null, classTransition: null, devAggressiveness: null, transferSnapshot: null };
+  if (!raw) return { notes: null, metrics: null, power: null, rosterStatus: null, depthRole: null, classTransition: null, devAggressiveness: null, transferSnapshot: null, localPlayer: null };
   try {
     const obj = JSON.parse(raw);
     if (obj && obj.__team_builder_metrics_v1) {
@@ -352,18 +465,35 @@ const parseBuildPlayerMeta = (raw: string | null | undefined): {
             ? obj.rosterStatus
             : null,
         depthRole:
-          obj.depthRole === "starter" || obj.depthRole === "utility" || obj.depthRole === "bench"
+          obj.depthRole === "starter" ||
+          obj.depthRole === "utility" ||
+          obj.depthRole === "bench" ||
+          obj.depthRole === "weekend_starter" ||
+          obj.depthRole === "weekday_starter" ||
+          obj.depthRole === "high_leverage_reliever" ||
+          obj.depthRole === "low_impact_reliever"
             ? obj.depthRole
             : null,
         classTransition: typeof obj.classTransition === "string" ? obj.classTransition : null,
         devAggressiveness: Number.isFinite(Number(obj.devAggressiveness)) ? Number(obj.devAggressiveness) : null,
         transferSnapshot: (obj.transferSnapshot ?? null) as TransferSnapshot | null,
+        localPlayer:
+          obj.localPlayer && typeof obj.localPlayer === "object"
+            ? {
+                first_name: String(obj.localPlayer.first_name || ""),
+                last_name: String(obj.localPlayer.last_name || ""),
+                position: obj.localPlayer.position != null ? String(obj.localPlayer.position) : null,
+                team: obj.localPlayer.team != null ? String(obj.localPlayer.team) : null,
+                from_team: obj.localPlayer.from_team != null ? String(obj.localPlayer.from_team) : null,
+                conference: obj.localPlayer.conference != null ? String(obj.localPlayer.conference) : null,
+              }
+            : null,
       };
     }
   } catch {
     // legacy free-text note
   }
-  return { notes: raw, metrics: null, power: null, rosterStatus: null, depthRole: null, classTransition: null, devAggressiveness: null, transferSnapshot: null };
+  return { notes: raw, metrics: null, power: null, rosterStatus: null, depthRole: null, classTransition: null, devAggressiveness: null, transferSnapshot: null, localPlayer: null };
 };
 
 const serializeBuildPlayerMeta = (
@@ -371,12 +501,13 @@ const serializeBuildPlayerMeta = (
   metrics: TeamMetricInputs | null,
   power: TeamPowerPlus | null,
   rosterStatus: "returner" | "leaving" | "target" | null | undefined,
-  depthRole: "starter" | "utility" | "bench" | null | undefined,
+  depthRole: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "high_leverage_reliever" | "low_impact_reliever" | null | undefined,
   classTransition: string | null | undefined,
   devAggressiveness: number | null | undefined,
   transferSnapshot: TransferSnapshot | null | undefined,
+  localPlayer: { first_name: string; last_name: string; position: string | null; team: string | null; from_team: string | null; conference: string | null } | null | undefined,
 ) => {
-  if (!notes && !metrics && !power && !rosterStatus && !depthRole && !classTransition && devAggressiveness == null && !transferSnapshot) return null;
+  if (!notes && !metrics && !power && !rosterStatus && !depthRole && !classTransition && devAggressiveness == null && !transferSnapshot && !localPlayer) return null;
   return JSON.stringify({
     __team_builder_metrics_v1: true,
     notes: notes ?? null,
@@ -387,6 +518,7 @@ const serializeBuildPlayerMeta = (
     classTransition: classTransition ?? null,
     devAggressiveness: devAggressiveness ?? null,
     transferSnapshot: transferSnapshot ?? null,
+    localPlayer: localPlayer ?? null,
   });
 };
 
@@ -481,6 +613,10 @@ const projectedNilTierClass = (
 };
 
 const depthRoleMultiplier = (role: BuildPlayer["depth_role"]) => {
+  if (role === "low_impact_reliever") return 0.3;
+  if (role === "high_leverage_reliever") return 0.6;
+  if (role === "weekday_starter") return 0.8;
+  if (role === "weekend_starter") return 1.0;
   if (role === "bench") return 0.3;
   if (role === "utility") return 0.6;
   return 1.0;
@@ -494,6 +630,34 @@ const pitcherRoleFromSlot = (slot: string | null | undefined): "SP" | "RP" | "SM
   return "SM";
 };
 
+const normalizePitcherRole = (raw: string | null | undefined): "SP" | "RP" => {
+  const v = String(raw || "").toUpperCase();
+  return v.startsWith("SP") ? "SP" : "RP";
+};
+const asPitcherRole = (raw: string | null | undefined): "SP" | "RP" | null => {
+  const v = String(raw || "").toUpperCase();
+  if (v.startsWith("SP")) return "SP";
+  if (v.startsWith("RP")) return "RP";
+  return null;
+};
+
+const normalizePitcherDepthRole = (
+  role: BuildPlayer["depth_role"],
+  pitcherRole: "SP" | "RP",
+): "weekend_starter" | "weekday_starter" | "high_leverage_reliever" | "low_impact_reliever" => {
+  if (role === "weekend_starter" || role === "weekday_starter" || role === "high_leverage_reliever" || role === "low_impact_reliever") return role;
+  if (role === "starter") return "weekend_starter";
+  if (role === "utility") return pitcherRole === "SP" ? "weekday_starter" : "high_leverage_reliever";
+  if (role === "bench") return "low_impact_reliever";
+  return pitcherRole === "SP" ? "weekend_starter" : "high_leverage_reliever";
+};
+
+const storagePitcherRouteFor = (playerName: string, teamName: string | null | undefined) => {
+  const nameEnc = encodeURIComponent((playerName || "").trim());
+  const teamEnc = encodeURIComponent((teamName || "").trim());
+  return `/dashboard/pitcher/storage__${nameEnc}__${teamEnc}`;
+};
+
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 const statKey = (v: number | null | undefined) => (v == null ? "na" : round3(v).toFixed(3));
 const toRate = (n: number) => (Math.abs(n) > 1 ? n / 100 : n);
@@ -504,6 +668,164 @@ const toWeight = (n: number) => (Math.abs(n) >= 10 ? n / 100 : n);
 const normalizeParkToIndex = (n: number | null | undefined) => {
   if (n == null || !Number.isFinite(n)) return 100;
   return Math.abs(n) <= 3 ? n * 100 : n;
+};
+const parseBaseballInnings = (raw: string | null | undefined): number | null => {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  const whole = Math.trunc(n);
+  const frac = Math.round((n - whole) * 10);
+  if (frac === 1) return whole + (1 / 3);
+  if (frac === 2) return whole + (2 / 3);
+  return n;
+};
+const resolvePitchingStatsView = (values: string[]) => {
+  const legacyEra = parseNum(values[3]);
+  const isLegacy = legacyEra != null;
+  if (isLegacy) {
+    return {
+      role: values[12] || "",
+      g: values[9] || "",
+      gs: values[10] || "",
+      era: values[3] || "",
+      fip: values[4] || "",
+      whip: values[5] || "",
+      k9: values[6] || "",
+      bb9: values[7] || "",
+      hr9: values[8] || "",
+      ip: values[11] || "",
+    };
+  }
+  return {
+    role: values[3] || "",
+    g: values[5] || "",
+    gs: values[6] || "",
+    era: values[7] || "",
+    fip: values[8] || "",
+    whip: values[9] || "",
+    k9: values[10] || "",
+    bb9: values[11] || "",
+    hr9: values[12] || "",
+    ip: values[4] || "",
+  };
+};
+const toPitchingRole = (raw: string | null | undefined): "SP" | "RP" | "SM" | null => {
+  const v = String(raw || "").trim().toUpperCase();
+  if (v === "SP" || v === "RP" || v === "SM") return v;
+  return null;
+};
+const toPitchingClassAdj = (
+  classTransition: "FS" | "SJ" | "JS" | "GR",
+  fs: number,
+  sj: number,
+  js: number,
+  gr: number,
+) => {
+  const pct = classTransition === "FS" ? fs : classTransition === "SJ" ? sj : classTransition === "JS" ? js : gr;
+  return Number.isFinite(pct) ? pct / 100 : 0;
+};
+const dampFactorForProjected = (projected: number, thresholds: number[], impacts: number[]) => {
+  for (let i = 0; i < thresholds.length; i++) {
+    if (projected < thresholds[i]) return impacts[i] ?? 1;
+  }
+  return impacts[thresholds.length] ?? impacts[impacts.length - 1] ?? 1;
+};
+const projectPitchingRate = ({
+  lastStat,
+  prPlus,
+  ncaaAvg,
+  ncaaSd,
+  prSd,
+  classAdjustment,
+  devAggressiveness,
+  thresholds,
+  impacts,
+  lowerIsBetter,
+}: {
+  lastStat: number | null;
+  prPlus: number | null;
+  ncaaAvg: number;
+  ncaaSd: number;
+  prSd: number;
+  classAdjustment: number;
+  devAggressiveness: number;
+  thresholds: number[];
+  impacts: number[];
+  lowerIsBetter: boolean;
+}) => {
+  if (
+    lastStat == null ||
+    prPlus == null ||
+    !Number.isFinite(lastStat) ||
+    !Number.isFinite(prPlus) ||
+    !Number.isFinite(ncaaAvg) ||
+    !Number.isFinite(ncaaSd) ||
+    !Number.isFinite(prSd) ||
+    prSd === 0
+  ) return null;
+  const zShift = ((prPlus - 100) / prSd) * ncaaSd;
+  const powerAdjusted = lowerIsBetter ? (ncaaAvg - zShift) : (ncaaAvg + zShift);
+  const blended = (lastStat * (1 - 0.7)) + (powerAdjusted * 0.7);
+  const mult = lowerIsBetter
+    ? (1 - classAdjustment - (devAggressiveness * 0.06))
+    : (1 + classAdjustment + (devAggressiveness * 0.06));
+  const projected = blended * mult;
+  const delta = projected - lastStat;
+  const dampFactor = dampFactorForProjected(projected, thresholds, impacts);
+  return lastStat + (delta * dampFactor);
+};
+const calcPitchingPlus = (
+  value: number | null,
+  ncaaAvg: number,
+  ncaaSd: number,
+  scale: number,
+  higherIsBetter = false,
+) => {
+  if (value == null || !Number.isFinite(value) || !Number.isFinite(ncaaAvg) || !Number.isFinite(ncaaSd) || ncaaSd === 0) return null;
+  const core = higherIsBetter ? ((value - ncaaAvg) / ncaaSd) : ((ncaaAvg - value) / ncaaSd);
+  const raw = 100 + (core * scale);
+  return Number.isFinite(raw) ? raw : null;
+};
+const applyRoleTransitionAdjustment = (
+  value: number | null,
+  pct: number,
+  fromRole: "SP" | "RP" | "SM" | null,
+  toRole: "SP" | "RP" | "SM" | null,
+  lowerIsBetter: boolean,
+  rpToSpLowBetterCurve?: {
+    tier1Max: number;
+    tier2Max: number;
+    tier3Max: number;
+    tier1Mult: number;
+    tier2Mult: number;
+    tier3Mult: number;
+  },
+) => {
+  if (value == null || !Number.isFinite(value)) return null;
+  if (!fromRole || !toRole || fromRole === toRole) return value;
+  const rank: Record<"SP" | "SM" | "RP", number> = { SP: 0, SM: 1, RP: 2 };
+  const step = rank[toRole] - rank[fromRole];
+  if (step === 0) return value;
+  const movingTowardStarter = rank[toRole] < rank[fromRole];
+  const starterRegressionBoost = (() => {
+    if (!movingTowardStarter) return 1;
+    if (lowerIsBetter) {
+      const c = rpToSpLowBetterCurve;
+      if (!c) return 1;
+      if (value <= c.tier1Max) return c.tier1Mult;
+      if (value <= c.tier2Max) return c.tier2Mult;
+      if (value <= c.tier3Max) return c.tier3Mult;
+      return 1.0;
+    }
+    return 1.0;
+  })();
+  const pctMagnitude = Math.abs(pct);
+  const factor = 1 + ((pctMagnitude / 100) * (Math.abs(step) / 2) * starterRegressionBoost);
+  if (!Number.isFinite(factor) || factor <= 0) return value;
+  if (lowerIsBetter) return step > 0 ? value / factor : value * factor;
+  return step > 0 ? value * factor : value / factor;
 };
 
 const normalizeKey = (value: string | null | undefined) =>
@@ -557,6 +879,7 @@ export default function TeamBuilder() {
   const [selectedBuildId, setSelectedBuildId] = useState<string | null>(null);
   const [nilEquationOpen, setNilEquationOpen] = useState(false);
   const [metricsUploadOpen, setMetricsUploadOpen] = useState(false);
+  const pitchingEq = useMemo(() => readPitchingWeights(), []);
   const [buildName, setBuildName] = useState("My Team Build");
   const [selectedTeam, setSelectedTeam] = useState<string>("");
   const [totalBudget, setTotalBudget] = useState<number>(0);
@@ -588,6 +911,8 @@ export default function TeamBuilder() {
   const [compareBTeamOpen, setCompareBTeamOpen] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const skipAutoSeedOnceRef = useRef(false);
+  const autoSeededTeamRef = useRef<string>("");
+  const playerOverrides = useMemo(() => readPlayerOverrides(), [rosterPlayers.length]);
 
   useEffect(() => {
     setTeamSearchQuery(selectedTeam || "");
@@ -629,7 +954,7 @@ export default function TeamBuilder() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, team, from_team, conference, player_predictions(id, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant), nil_valuations(estimated_value, component_breakdown)")
+          .select("id, first_name, last_name, position, team, from_team, conference, player_predictions(id, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant), nil_valuations(estimated_value, component_breakdown)")
           .range(from, from + PAGE - 1);
         if (error) throw error;
         all = all.concat(data || []);
@@ -639,6 +964,261 @@ export default function TeamBuilder() {
       return all.filter((p) => p.first_name && p.last_name);
     },
   });
+  const storagePitchersForSearch = useMemo(() => {
+    const teamConfByKey = new Map<string, string | null>();
+    for (const t of teams as TeamRow[]) {
+      teamConfByKey.set(normalizeKey(t.name), t.conference || null);
+    }
+    try {
+      const raw = localStorage.getItem("pitching_stats_storage_2025_v1");
+      if (!raw) return [] as any[];
+      const parsed = JSON.parse(raw) as { rows?: Array<{ values?: string[] }> };
+      const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
+      return rows
+        .map((r, idx) => {
+          const values = Array.isArray(r.values) ? r.values : [];
+          const playerName = (values[0] || "").trim();
+          const teamName = (values[1] || "").trim();
+          if (!playerName) return null;
+          const split = splitFullName(playerName);
+          const statsView = resolvePitchingStatsView(values);
+          const roleRaw = toPitchingRole(statsView.role);
+          const g = parseNum(statsView.g);
+          const gs = parseNum(statsView.gs);
+          const role = roleRaw || (g != null && g > 0 && gs != null ? ((gs / g) < 0.5 ? "RP" : "SP") : "RP");
+          return {
+            id: `storage-pitcher-${normalizeName(playerName)}-${normalizeName(teamName)}-${idx}`,
+            first_name: split.first,
+            last_name: split.last,
+            position: role,
+            team: teamName || null,
+            from_team: teamName || null,
+            conference: teamConfByKey.get(normalizeKey(teamName || "")) || null,
+            __storagePitcher: true,
+            __pitching: {
+              role,
+              p_era: null as number | null,
+              p_fip: null as number | null,
+              p_whip: null as number | null,
+              p_k9: null as number | null,
+              p_bb9: null as number | null,
+              p_hr9: null as number | null,
+              p_rv_plus: null as number | null,
+              p_war: null as number | null,
+            },
+          };
+        })
+        .filter(Boolean) as any[];
+    } catch {
+      return [] as any[];
+    }
+  }, [teams]);
+  const seedHittersForSearch = useMemo(() => {
+    const teamConfByKey = new Map<string, string | null>();
+    for (const t of teams as TeamRow[]) {
+      teamConfByKey.set(normalizeKey(t.name), t.conference || null);
+    }
+    const rows = (storage2025Seed as SeedRow[]) || [];
+    const powerByNameTeam = new Map<string, TeamMetricInputs>();
+    const powerRows = (powerRatings2025Seed as Array<any>) || [];
+    for (const pr of powerRows) {
+      const key = `${normalizeName(pr?.playerName || "")}|${normalizeName(pr?.team || "")}`;
+      if (!key || key === "|") continue;
+      powerByNameTeam.set(key, {
+        contact: parseNum(pr?.contact),
+        lineDrive: parseNum(pr?.lineDrive),
+        avgExitVelo: parseNum(pr?.avgExitVelo),
+        popUp: parseNum(pr?.popUp),
+        bb: parseNum(pr?.bb),
+        chase: parseNum(pr?.chase),
+        barrel: parseNum(pr?.barrel),
+        ev90: parseNum(pr?.ev90),
+        pull: parseNum(pr?.pull),
+        la10_30: parseNum(pr?.la10_30),
+        gb: parseNum(pr?.gb),
+      });
+    }
+    const out: any[] = [];
+    const posMap = exitPositions2025Seed as Record<string, string>;
+    for (let idx = 0; idx < rows.length; idx += 1) {
+      const r = rows[idx];
+      const playerName = (r.playerName || "").trim();
+      const teamName = (r.team || "").trim();
+      if (!playerName || !teamName) continue;
+      const split = splitFullName(playerName);
+      const posKey = `${playerName}|${teamName}`;
+      const position = posMap[posKey] || posMap[playerName] || null;
+      const seedMetrics = powerByNameTeam.get(`${normalizeName(playerName)}|${normalizeName(teamName)}`) || null;
+      const seedPowerPlus = seedMetrics ? computeTeamPowerPlus(seedMetrics) : null;
+      out.push({
+        id: `seed-hitter-${normalizeName(playerName)}-${normalizeName(teamName)}-${idx}`,
+        first_name: split.first,
+        last_name: split.last,
+        position,
+        team: teamName,
+        from_team: teamName,
+        conference: teamConfByKey.get(normalizeKey(teamName)) || null,
+        __seedHitter: true,
+        __seedStats: {
+          avg: r.avg ?? null,
+          obp: r.obp ?? null,
+          slg: r.slg ?? null,
+        },
+        __seedPowerPlus: seedPowerPlus,
+      });
+    }
+    return out;
+  }, [teams]);
+  const combinedTargetSearchPlayers = useMemo(() => {
+    const byKey = new Map<string, any>();
+    const primaryKeyByNameTeam = new Map<string, string>();
+    const isPitchLike = (p: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(p?.position || ""));
+    const idKeyOf = (p: any) => (p?.id ? `id:${String(p.id).trim()}` : "");
+    const nameTeamKeyOf = (p: any) => `${normalizeName(`${p.first_name} ${p.last_name}`)}|${normalizeName(p.team || "")}`;
+
+    for (const p of allPlayersForSearch) {
+      const idKey = idKeyOf(p);
+      if (idKey) {
+        byKey.set(idKey, p);
+        const nt = nameTeamKeyOf(p);
+        if (nt && !primaryKeyByNameTeam.has(nt)) primaryKeyByNameTeam.set(nt, idKey);
+      } else {
+        const key = `local:${nameTeamKeyOf(p)}:${normalizeName(p.position || "")}`;
+        byKey.set(key, p);
+        const nt = nameTeamKeyOf(p);
+        if (nt && !primaryKeyByNameTeam.has(nt)) primaryKeyByNameTeam.set(nt, key);
+      }
+    }
+    for (const sp of storagePitchersForSearch) {
+      const nt = nameTeamKeyOf(sp);
+      const existingPrimary = nt ? primaryKeyByNameTeam.get(nt) : undefined;
+      const existing = existingPrimary ? byKey.get(existingPrimary) : null;
+      if (!existing) {
+        const key = `storage:${nt}:${normalizeName(sp.position || "")}`;
+        byKey.set(key, sp);
+        if (nt) primaryKeyByNameTeam.set(nt, key);
+        continue;
+      }
+      // Prefer storage pitcher entry when DB duplicate is not clearly pitcher-typed.
+      if (!isPitchLike(existing) || existing.__storagePitcher) {
+        if (existingPrimary) {
+          byKey.set(existingPrimary, sp);
+        }
+      }
+    }
+    for (const sh of seedHittersForSearch) {
+      const nt = nameTeamKeyOf(sh);
+      if (nt && primaryKeyByNameTeam.has(nt)) continue;
+      const key = `seed:${nt}:${normalizeName(sh.position || "")}`;
+      byKey.set(key, sh);
+      if (nt) primaryKeyByNameTeam.set(nt, key);
+    }
+    return Array.from(byKey.values());
+  }, [allPlayersForSearch, storagePitchersForSearch, seedHittersForSearch]);
+  const targetSearchIndex = useMemo(() => {
+    return combinedTargetSearchPlayers.map((p) => {
+      const fullName = normalizeName(`${p.first_name || ""} ${p.last_name || ""}`);
+      const team = normalizeName(p.team || "");
+      const position = normalizeName(p.position || "");
+      return {
+        p,
+        fullName,
+        team,
+        position,
+        hay: `${fullName} ${team} ${position}`.trim(),
+      };
+    });
+  }, [combinedTargetSearchPlayers]);
+  const allPlayersByIdForHydration = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const p of allPlayersForSearch) {
+      if (p?.id) map.set(String(p.id).trim(), p);
+    }
+    return map;
+  }, [allPlayersForSearch]);
+
+  useEffect(() => {
+    if (!allPlayersByIdForHydration.size) return;
+    const toNum = (v: unknown) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const isPitcherLike = (p: any) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(p?.position || ""));
+    const scorePitchingFingerprint = (snap: TransferSnapshot, pred: any) => {
+      const pairs: Array<[number | null, number | null, number]> = [
+        [toNum(snap.p_era), toNum(pred?.p_era), 1.0],
+        [toNum(snap.p_fip), toNum(pred?.p_fip), 1.0],
+        [toNum(snap.p_whip), toNum(pred?.p_whip), 0.7],
+        [toNum(snap.p_k9), toNum(pred?.p_k9), 0.35],
+        [toNum(snap.p_bb9), toNum(pred?.p_bb9), 0.45],
+        [toNum(snap.p_hr9), toNum(pred?.p_hr9), 0.65],
+        [toNum(snap.p_rv_plus), toNum(pred?.p_rv_plus), 0.05],
+        [toNum(snap.p_war), toNum(pred?.p_war), 0.25],
+      ];
+      let score = 0;
+      let used = 0;
+      for (const [a, b, w] of pairs) {
+        if (a == null || b == null) continue;
+        score += Math.abs(a - b) * w;
+        used += 1;
+      }
+      if (used === 0) return Number.POSITIVE_INFINITY;
+      return score;
+    };
+
+    setRosterPlayers((prev) => {
+      let changed = false;
+      const next = prev.map((p) => {
+        if (p.player && `${p.player.first_name || ""} ${p.player.last_name || ""}`.trim()) return p;
+        const rawId = typeof p.player_id === "string" ? p.player_id.trim() : "";
+        let hit = rawId ? allPlayersByIdForHydration.get(rawId) : null;
+        if (!hit && p.source === "portal" && p.transfer_snapshot) {
+          const fromKey = normalizeName(p.transfer_snapshot.from_team || "");
+          const candidates = allPlayersForSearch
+            .filter((r: any) => isPitcherLike(r))
+            .filter((r: any) => {
+              if (!fromKey) return true;
+              const cFrom = normalizeName(r.from_team || r.team || "");
+              return !!cFrom && cFrom === fromKey;
+            });
+          let best: any = null;
+          let bestScore = Number.POSITIVE_INFINITY;
+          let second = Number.POSITIVE_INFINITY;
+          for (const c of candidates) {
+            const pred = selectTransferPortalPreferredPrediction((c.player_predictions || []).filter((pr: any) => pr.variant === "regular"));
+            if (!pred) continue;
+            const s = scorePitchingFingerprint(p.transfer_snapshot, pred);
+            if (!Number.isFinite(s)) continue;
+            if (s < bestScore) {
+              second = bestScore;
+              bestScore = s;
+              best = c;
+            } else if (s < second) {
+              second = s;
+            }
+          }
+          const unambiguous = best && (bestScore < 0.35 || (second - bestScore) > 0.25);
+          if (unambiguous) hit = best;
+        }
+        if (!hit) return p;
+        changed = true;
+        const hydratedName = `${hit.first_name || ""} ${hit.last_name || ""}`.trim();
+        return {
+          ...p,
+          custom_name: (p.custom_name && p.custom_name.trim()) || hydratedName || p.custom_name,
+          player: {
+            first_name: hit.first_name || "",
+            last_name: hit.last_name || "",
+            position: hit.position || null,
+            team: hit.team || null,
+            from_team: hit.from_team || null,
+            conference: hit.conference || null,
+          },
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [allPlayersByIdForHydration]);
 
   const { data: conferenceStats = [] } = useQuery({
     queryKey: ["conference-stats-for-team-builder"],
@@ -684,12 +1264,22 @@ export default function TeamBuilder() {
   const filteredTargetPlayerSearch = useMemo(() => {
     const q = normalizeName(targetPlayerSearchQuery);
     if (!q) return [];
-    return allPlayersForSearch
-      .filter((p) =>
-        normalizeName(`${p.first_name} ${p.last_name} ${p.team || ""} ${p.position || ""}`).includes(q)
-      )
-      .slice(0, 25);
-  }, [allPlayersForSearch, targetPlayerSearchQuery]);
+    const terms = q.split(" ").filter(Boolean);
+    const scoreFor = (row: { fullName: string; team: string; position: string; hay: string }) => {
+      let score = 0;
+      if (row.fullName === q) score += 500;
+      if (row.fullName.startsWith(q)) score += 250;
+      if (row.team.startsWith(q)) score += 100;
+      if (row.position.startsWith(q)) score += 40;
+      if (row.hay.includes(q)) score += 20;
+      return score;
+    };
+    return targetSearchIndex
+      .filter((row) => terms.every((t) => row.hay.includes(t)))
+      .sort((a, b) => scoreFor(b) - scoreFor(a))
+      .map((row) => row.p)
+      .slice(0, 100);
+  }, [targetSearchIndex, targetPlayerSearchQuery]);
 
   const allPlayersById = useMemo(() => {
     const map = new Map<string, any>();
@@ -750,6 +1340,12 @@ export default function TeamBuilder() {
     queryKey: ["team-returners", selectedTeam],
     enabled: !!selectedTeam,
     queryFn: async () => {
+      const variants = teamNameVariants(selectedTeam);
+      const normVariants = new Set(variants.map((v) => normalizeName(v)));
+      const likeTerms = variants.map((v) => v.trim()).filter(Boolean);
+      const orExpr = likeTerms
+        .map((v) => `team.ilike.*${v.replace(/\*/g, "").replace(/,/g, " ")}*`)
+        .join(",");
       const { data } = await supabase
         .from("players")
         .select(`
@@ -757,63 +1353,52 @@ export default function TeamBuilder() {
           player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status),
           nil_valuations(estimated_value, component_breakdown)
         `)
-        .eq("team", selectedTeam)
+        .or(orExpr)
         .or("transfer_portal.eq.false,transfer_portal.is.null");
-      return data ?? [];
+      return (data ?? []).filter((p: any) => {
+        const normTeam = normalizeName(p.team || "");
+        if (normVariants.has(normTeam)) return true;
+        // Token fallback for variant drift (e.g., WVU/West Virginia University).
+        const teamCompact = normTeam.replace(/\buniversity\b/g, "").replace(/\s+/g, " ").trim();
+        for (const v of normVariants) {
+          const vCompact = v.replace(/\buniversity\b/g, "").replace(/\s+/g, " ").trim();
+          if (vCompact && teamCompact && (teamCompact === vCompact || teamCompact.includes(vCompact) || vCompact.includes(teamCompact))) {
+            return true;
+          }
+        }
+        return false;
+      });
     },
   });
   const storagePitchersForSelectedTeam = useMemo(() => {
     if (!selectedTeam) return [] as BuildPlayer[];
-    try {
-      const raw = localStorage.getItem("pitching_stats_storage_2025_v1");
-      if (!raw) return [] as BuildPlayer[];
-      const parsed = JSON.parse(raw) as { rows?: Array<{ values?: string[] }> };
-      const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
-      const selectedTeamKey = normalizeName(selectedTeam);
-      const out: BuildPlayer[] = [];
-      for (const row of rows) {
-        const values = Array.isArray(row?.values) ? row.values : [];
-        const playerName = (values[0] || "").trim();
-        const teamName = (values[1] || "").trim();
-        if (!playerName || !teamName) continue;
-        if (normalizeName(teamName) !== selectedTeamKey) continue;
-        const hand = (values[2] || "").trim().toUpperCase();
-        const roleRaw = (values[3] || "").trim().toUpperCase();
-        const role = roleRaw === "SP" || roleRaw === "RP" || roleRaw === "SM" ? roleRaw : null;
-        const position = hand === "RHP" || hand === "LHP" ? hand : (role || "P");
-        const name = splitFullName(playerName);
-        out.push({
-          player_id: null,
-          source: "returner",
-          custom_name: null,
-          position_slot: null,
-          depth_order: 1,
-          nil_value: 0,
-          production_notes: null,
-          roster_status: "returner",
-          depth_role: "starter",
-          class_transition: "SJ",
-          dev_aggressiveness: 0,
-          transfer_snapshot: null,
-          player: {
-            first_name: name.first,
-            last_name: name.last,
-            position,
-            team: teamName,
-            from_team: null,
-            conference: null,
-          },
-          prediction: null,
-          nilVal: null,
-          nil_owar: 0,
-          team_metrics: null,
-          team_power_plus: null,
-        });
-      }
-      return out;
-    } catch {
-      return [] as BuildPlayer[];
-    }
+    return readStoragePitcherLocalPlayers(selectedTeam).map((lp) => ({
+      player_id: null,
+      source: "returner",
+      custom_name: null,
+      position_slot: lp.role,
+      depth_order: 1,
+      nil_value: 0,
+      production_notes: null,
+      roster_status: "returner",
+      depth_role: lp.role === "SP" ? "weekend_starter" : "high_leverage_reliever",
+      class_transition: "SJ",
+      dev_aggressiveness: 0,
+      transfer_snapshot: null,
+      player: {
+        first_name: lp.first_name,
+        last_name: lp.last_name,
+        position: lp.position,
+        team: lp.team,
+        from_team: lp.from_team,
+        conference: lp.conference,
+      },
+      prediction: null,
+      nilVal: null,
+      nil_owar: 0,
+      team_metrics: null,
+      team_power_plus: null,
+    }));
   }, [selectedTeam]);
 
   // Load a saved build
@@ -832,10 +1417,12 @@ export default function TeamBuilder() {
 
     if (players) {
       // Fetch player details for each
-      const playerIds = players.filter((p) => p.player_id).map((p) => p.player_id!);
+      const playerIds = players
+        .map((p) => (typeof p.player_id === "string" ? p.player_id.trim() : p.player_id))
+        .filter((id): id is string => isUuid(id));
       let playerMap: Record<string, any> = {};
       if (playerIds.length > 0) {
-        const { data: pData } = await supabase
+        const { data: pData, error: pErr } = await supabase
           .from("players")
           .select(`
             id, first_name, last_name, position, team, from_team, conference,
@@ -843,32 +1430,117 @@ export default function TeamBuilder() {
             nil_valuations(estimated_value, component_breakdown)
           `)
           .in("id", playerIds);
+        if (pErr) {
+          console.error("TeamBuilder loadBuild players fetch failed:", pErr);
+        }
         (pData ?? []).forEach((p) => {
           playerMap[p.id] = p;
         });
       }
 
+      const fallbackPitchers = readStoragePitcherLocalPlayers(build.team || selectedTeam || "");
+      const usedFallbackIndices = new Set<number>();
+      const reserveFallbackIndexByName = (fullName: string) => {
+        const key = normalizeName(fullName);
+        if (!key) return;
+        for (let i = 0; i < fallbackPitchers.length; i += 1) {
+          if (usedFallbackIndices.has(i)) continue;
+          const fp = fallbackPitchers[i];
+          const fpName = normalizeName(`${fp.first_name || ""} ${fp.last_name || ""}`);
+          if (fpName === key) {
+            usedFallbackIndices.add(i);
+            return;
+          }
+        }
+      };
+      const claimFallbackPitcher = (preferredRole: "SP" | "RP" | null) => {
+        const pick = (idx: number) => {
+          usedFallbackIndices.add(idx);
+          const fp = fallbackPitchers[idx];
+          return {
+            first_name: fp.first_name,
+            last_name: fp.last_name,
+            position: fp.position,
+            team: fp.team,
+            from_team: fp.from_team,
+            conference: fp.conference,
+          };
+        };
+        if (preferredRole) {
+          for (let i = 0; i < fallbackPitchers.length; i += 1) {
+            if (usedFallbackIndices.has(i)) continue;
+            if (fallbackPitchers[i].role === preferredRole) return pick(i);
+          }
+        }
+        for (let i = 0; i < fallbackPitchers.length; i += 1) {
+          if (!usedFallbackIndices.has(i)) return pick(i);
+        }
+        return null;
+      };
+
       setRosterPlayers(
         players.map((bp) => {
-          const pd = bp.player_id ? playerMap[bp.player_id] : null;
+          const normalizedPlayerId = typeof bp.player_id === "string" ? bp.player_id.trim() : bp.player_id;
+          const pd = normalizedPlayerId ? playerMap[normalizedPlayerId] : null;
           const activePred = selectPreferredPrediction(pd?.player_predictions);
           const meta = parseBuildPlayerMeta(bp.production_notes);
+          const localPlayerRaw = !pd && meta.localPlayer
+            ? {
+                first_name: (meta.localPlayer.first_name || "").trim(),
+                last_name: (meta.localPlayer.last_name || "").trim(),
+                position: meta.localPlayer.position ?? null,
+                team: meta.localPlayer.team ?? null,
+                from_team: meta.localPlayer.from_team ?? null,
+                conference: meta.localPlayer.conference ?? null,
+              }
+            : null;
+          const fallbackName = (() => {
+            if (bp.custom_name && bp.custom_name.trim()) return bp.custom_name.trim();
+            if (meta.notes && meta.notes.trim()) return meta.notes.trim();
+            if (!localPlayerRaw) return null;
+            const full = `${localPlayerRaw.first_name || ""} ${localPlayerRaw.last_name || ""}`.trim();
+            return full || null;
+          })();
+          const overrideRole = asPitcherRole(pd?.id ? playerOverrides?.[pd.id]?.pitcher_role || null : null);
+          const inferredRole = overrideRole || asPitcherRole(pd?.position || null);
+          const positionForPitcherInference = pd?.position || localPlayerRaw?.position || "";
+          const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(positionForPitcherInference));
+          const fallbackRole =
+            (bp.position_slot === "SP" || bp.position_slot === "RP" ? bp.position_slot : null) ??
+            ((meta.depthRole === "weekend_starter" || meta.depthRole === "weekday_starter") ? "SP" : null) ??
+            ((meta.depthRole === "high_leverage_reliever" || meta.depthRole === "low_impact_reliever") ? "RP" : null);
+
+          if (pd) {
+            const full = `${pd.first_name || ""} ${pd.last_name || ""}`.trim();
+            reserveFallbackIndexByName(full);
+          } else if (localPlayerRaw) {
+            const full = `${localPlayerRaw.first_name || ""} ${localPlayerRaw.last_name || ""}`.trim();
+            reserveFallbackIndexByName(full);
+          } else if (fallbackName) {
+            reserveFallbackIndexByName(fallbackName);
+          }
+
+          const recoveredPitcher = !pd && !localPlayerRaw && isPitcherRow ? claimFallbackPitcher(fallbackRole) : null;
+          const resolvedLocalPlayer = localPlayerRaw || recoveredPitcher;
+          const resolvedName = fallbackName || (resolvedLocalPlayer ? `${resolvedLocalPlayer.first_name || ""} ${resolvedLocalPlayer.last_name || ""}`.trim() : null);
           return {
             ...(bp as any),
             id: bp.id,
-            player_id: bp.player_id,
+            player_id: normalizedPlayerId ?? null,
             source: bp.source as "returner" | "portal",
-            custom_name: bp.custom_name,
-            position_slot: bp.position_slot,
+            custom_name: resolvedName || null,
+            position_slot: bp.position_slot || (isPitcherRow ? (inferredRole || "RP") : null),
             depth_order: bp.depth_order ?? 1,
             nil_value: Number(bp.nil_value) || 0,
             production_notes: meta.notes,
             roster_status: meta.rosterStatus ?? ((bp.source as string) === "portal" ? "target" : "returner"),
-            depth_role: meta.depthRole ?? "starter",
+            depth_role: meta.depthRole ?? (isPitcherRow ? ((inferredRole === "SP") ? "weekend_starter" : "high_leverage_reliever") : "starter"),
             class_transition: meta.classTransition ?? activePred?.class_transition ?? "SJ",
             dev_aggressiveness: meta.devAggressiveness ?? activePred?.dev_aggressiveness ?? 0,
             transfer_snapshot: meta.transferSnapshot ?? null,
-            player: pd ? { first_name: pd.first_name, last_name: pd.last_name, position: pd.position, team: pd.team, from_team: pd.from_team, conference: pd.conference ?? null } : null,
+            player: pd
+              ? { first_name: pd.first_name, last_name: pd.last_name, position: pd.position, team: pd.team, from_team: pd.from_team, conference: pd.conference ?? null }
+              : (resolvedLocalPlayer || null),
             prediction: activePred ?? null,
             nilVal: pd?.nil_valuations?.[0]?.estimated_value ?? null,
             nil_owar: pd?.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
@@ -879,7 +1551,7 @@ export default function TeamBuilder() {
       );
     }
     setDirty(false);
-  }, [builds]);
+  }, [builds, playerOverrides]);
 
   // Auto-load returners when team changes and it's a new build
   useEffect(() => {
@@ -888,18 +1560,30 @@ export default function TeamBuilder() {
       skipAutoSeedOnceRef.current = false;
       return;
     }
+    const selectedTeamKey = normalizeName(selectedTeam);
+    const hasRoster = rosterPlayers.length > 0;
+    const hasTargets = rosterPlayers.some((p) => (p.roster_status || "returner") === "target");
+    const alreadySeededThisTeam = autoSeededTeamRef.current === selectedTeamKey;
+    // Avoid destructive reseeds that wipe user-added targets/edits.
+    if ((alreadySeededThisTeam && hasRoster) || hasTargets || (dirty && hasRoster)) return;
+
     const mapped: BuildPlayer[] = returners.map((r: any) => {
       const activePred = selectPreferredPrediction(r.player_predictions);
+      const overrideRole = asPitcherRole(playerOverrides?.[r.id]?.pitcher_role || null);
+      const inferredRole = overrideRole || asPitcherRole(r.position || null);
+      const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(r.position || ""));
       return {
         player_id: r.id,
         source: "returner" as const,
         custom_name: null,
-        position_slot: null,
+        position_slot: isPitcherRow ? (inferredRole || "RP") : null,
         depth_order: 1,
         nil_value: r.nil_valuations?.[0]?.estimated_value ? Number(r.nil_valuations[0].estimated_value) : 0,
         production_notes: null,
         roster_status: "returner",
-        depth_role: "starter",
+        depth_role: isPitcherRow
+          ? ((inferredRole === "SP") ? "weekend_starter" : "high_leverage_reliever")
+          : "starter",
         class_transition: activePred?.class_transition ?? "SJ",
         dev_aggressiveness: activePred?.dev_aggressiveness ?? 0,
         transfer_snapshot: null,
@@ -924,8 +1608,9 @@ export default function TeamBuilder() {
       merged.push(sp);
     }
     setRosterPlayers(merged);
+    autoSeededTeamRef.current = selectedTeamKey;
     setDirty(true);
-  }, [returners, selectedTeam, selectedBuildId, storagePitchersForSelectedTeam]);
+  }, [returners, selectedTeam, selectedBuildId, storagePitchersForSelectedTeam, playerOverrides, rosterPlayers, dirty]);
 
   // Restore unsaved Team Builder draft when coming back from another page.
   useEffect(() => {
@@ -1032,10 +1717,14 @@ export default function TeamBuilder() {
 
       if (rosterPlayers.length > 0) {
         const rows = rosterPlayers.map((rp) => ({
+          ...(() => {
+            const fullName = rp.player ? `${rp.player.first_name || ""} ${rp.player.last_name || ""}`.trim() : "";
+            const persistedName = (rp.custom_name && rp.custom_name.trim()) || fullName || null;
+            return { custom_name: persistedName };
+          })(),
           build_id: buildId!,
           player_id: rp.player_id,
           source: rp.source,
-          custom_name: rp.custom_name,
           position_slot: rp.position_slot,
           depth_order: rp.depth_order,
           nil_value: rp.nil_value,
@@ -1048,6 +1737,16 @@ export default function TeamBuilder() {
             rp.class_transition ?? null,
             rp.dev_aggressiveness ?? null,
             rp.transfer_snapshot ?? null,
+            rp.player
+              ? {
+                  first_name: rp.player.first_name || "",
+                  last_name: rp.player.last_name || "",
+                  position: rp.player.position ?? null,
+                  team: rp.player.team ?? null,
+                  from_team: rp.player.from_team ?? null,
+                  conference: rp.player.conference ?? null,
+                }
+              : null,
           ),
         }));
         const { error } = await supabase.from("team_build_players").insert(rows);
@@ -1117,19 +1816,25 @@ export default function TeamBuilder() {
           if (!row) continue;
           const exists = next.some((p) => p.player_id === row.id && (p.roster_status || "returner") === "target");
           if (exists) continue;
+          const overrideRole = asPitcherRole(playerOverrides?.[row.id]?.pitcher_role || null);
+          const entryRole = asPitcherRole(entry.pitcherRole || null);
+          const inferredRole = overrideRole || entryRole || asPitcherRole(row.position || null);
+          const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(row.position || ""));
           const chosenPred = selectTransferPortalPreferredPrediction(
             (row.player_predictions || []).filter((pr: any) => pr.variant === "regular"),
           );
           const newP: BuildPlayer = {
             player_id: row.id,
             source: "portal",
-            custom_name: null,
-            position_slot: null,
+            custom_name: `${row.first_name || ""} ${row.last_name || ""}`.trim() || null,
+            position_slot: isPitcherRow ? (inferredRole || "RP") : null,
             depth_order: 1,
             nil_value: row.nil_valuations?.[0]?.estimated_value ? Number(row.nil_valuations[0].estimated_value) : 0,
             production_notes: null,
             roster_status: "target",
-            depth_role: "utility",
+            depth_role: isPitcherRow
+              ? ((inferredRole === "SP") ? "weekend_starter" : "high_leverage_reliever")
+              : "utility",
             class_transition: chosenPred?.class_transition ?? "SJ",
             dev_aggressiveness: chosenPred?.dev_aggressiveness ?? 0,
             transfer_snapshot: {
@@ -1137,6 +1842,14 @@ export default function TeamBuilder() {
               p_obp: entry.pObp ?? null,
               p_slg: entry.pSlg ?? null,
               p_wrc_plus: entry.pWrcPlus ?? null,
+              p_era: entry.pEra ?? null,
+              p_fip: entry.pFip ?? null,
+              p_whip: entry.pWhip ?? null,
+              p_k9: entry.pK9 ?? null,
+              p_bb9: entry.pBb9 ?? null,
+              p_hr9: entry.pHr9 ?? null,
+              p_rv_plus: entry.pRvPlus ?? null,
+              p_war: entry.pWar ?? null,
               owar: entry.owar ?? null,
               nil_valuation: entry.nilValuation ?? null,
               from_team: entry.fromTeam ?? null,
@@ -1171,7 +1884,7 @@ export default function TeamBuilder() {
     return () => {
       cancelled = true;
     };
-  }, [selectedTeam, toast]);
+  }, [selectedTeam, toast, playerOverrides]);
 
   const teamByKey = useMemo(() => {
     const map = new Map<string, TeamRow>();
@@ -1181,6 +1894,76 @@ export default function TeamBuilder() {
     return map;
   }, [teams]);
   const teamParkComponents = useMemo(() => readTeamParkFactorComponents(), [teams]);
+  const pitchingStatsByNameTeam = useMemo(() => {
+    const byKey = new Map<string, { team: string | null; role: "SP" | "RP" | "SM" | null; era: number | null; fip: number | null; whip: number | null; k9: number | null; bb9: number | null; hr9: number | null; g: number | null; gs: number | null; ip: number | null }>();
+    const byName = new Map<string, Array<{ team: string | null; role: "SP" | "RP" | "SM" | null; era: number | null; fip: number | null; whip: number | null; k9: number | null; bb9: number | null; hr9: number | null; g: number | null; gs: number | null; ip: number | null }>>();
+    try {
+      const raw = localStorage.getItem("pitching_stats_storage_2025_v1");
+      if (!raw) return { byKey, byName };
+      const parsed = JSON.parse(raw) as { rows?: Array<{ values?: string[] }> };
+      const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
+      for (const row of rows) {
+        const values = Array.isArray(row.values) ? row.values : [];
+        const name = (values[0] || "").trim();
+        const team = (values[1] || "").trim();
+        if (!name) continue;
+        const statsView = resolvePitchingStatsView(values);
+        const rec = {
+          team: team || null,
+          role: toPitchingRole(statsView.role),
+          era: parseNum(statsView.era),
+          fip: parseNum(statsView.fip),
+          whip: parseNum(statsView.whip),
+          k9: parseNum(statsView.k9),
+          bb9: parseNum(statsView.bb9),
+          hr9: parseNum(statsView.hr9),
+          g: parseNum(statsView.g),
+          gs: parseNum(statsView.gs),
+          ip: parseBaseballInnings(statsView.ip),
+        };
+        byKey.set(`${normalizeName(name)}|${normalizeName(team)}`, rec);
+        const nKey = normalizeName(name);
+        const bucket = byName.get(nKey) || [];
+        bucket.push(rec);
+        byName.set(nKey, bucket);
+      }
+    } catch {
+      // ignore malformed local storage
+    }
+    return { byKey, byName };
+  }, []);
+  const pitchingPrByNameTeam = useMemo(() => {
+    const byKey = new Map<string, { eraPrPlus: number | null; fipPrPlus: number | null; whipPrPlus: number | null; k9PrPlus: number | null; bb9PrPlus: number | null; hr9PrPlus: number | null }>();
+    const byName = new Map<string, Array<{ eraPrPlus: number | null; fipPrPlus: number | null; whipPrPlus: number | null; k9PrPlus: number | null; bb9PrPlus: number | null; hr9PrPlus: number | null }>>();
+    try {
+      const raw = localStorage.getItem("pitching_power_ratings_storage_2025_v1");
+      if (!raw) return { byKey, byName };
+      const parsed = JSON.parse(raw) as { rows?: Array<{ values?: string[] }> };
+      const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
+      for (const row of rows) {
+        const values = Array.isArray(row.values) ? row.values : [];
+        const name = (values[0] || "").trim();
+        const team = (values[1] || "").trim();
+        if (!name) continue;
+        const rec = {
+          eraPrPlus: parseNum(values[30]),
+          fipPrPlus: parseNum(values[31]),
+          whipPrPlus: parseNum(values[32]),
+          k9PrPlus: parseNum(values[33]),
+          hr9PrPlus: parseNum(values[34]),
+          bb9PrPlus: parseNum(values[35]),
+        };
+        byKey.set(`${normalizeName(name)}|${normalizeName(team)}`, rec);
+        const nKey = normalizeName(name);
+        const bucket = byName.get(nKey) || [];
+        bucket.push(rec);
+        byName.set(nKey, bucket);
+      }
+    } catch {
+      // ignore malformed local storage
+    }
+    return { byKey, byName };
+  }, []);
 
   const confByKey = useMemo(() => {
     const map = new Map<string, ConferenceRow>();
@@ -1336,6 +2119,16 @@ export default function TeamBuilder() {
           p_obp: p.transfer_snapshot.p_obp,
           p_slg: p.transfer_snapshot.p_slg,
           p_wrc_plus: p.transfer_snapshot.p_wrc_plus,
+          p_era: p.transfer_snapshot.p_era ?? null,
+          p_fip: p.transfer_snapshot.p_fip ?? null,
+          p_whip: p.transfer_snapshot.p_whip ?? null,
+          p_k9: p.transfer_snapshot.p_k9 ?? null,
+          p_bb9: p.transfer_snapshot.p_bb9 ?? null,
+          p_hr9: p.transfer_snapshot.p_hr9 ?? null,
+          p_rv_plus: p.transfer_snapshot.p_rv_plus ?? null,
+          p_war: p.transfer_snapshot.p_war ?? null,
+          nil_valuation: p.transfer_snapshot.nil_valuation ?? null,
+          owar: p.transfer_snapshot.owar ?? null,
         }
       : null;
     if (!selectedTeam) return snapshotFallback;
@@ -1434,8 +2227,8 @@ export default function TeamBuilder() {
     const baParkWeight = toWeight(eqNum("t_ba_park_weight", 1.0));
     const obpParkWeight = toWeight(eqNum("t_obp_park_weight", 1.0));
     const isoParkWeight = toWeight(eqNum("t_iso_park_weight", 0.05));
-    const isoStdPower = eqNum("r_iso_std_pr", 45.423);
-    const isoStdNcaa = toRate(eqNum("r_iso_std_ncaa", 0.07849797197));
+    const isoStdPower = eqNum("t_iso_std_power", 45.423);
+    const isoStdNcaa = toRate(eqNum("t_iso_std_ncaa", 0.07849797197));
     const wObp = toRate(eqNum("r_w_obp", 0.45));
     const wSlg = toRate(eqNum("r_w_slg", 0.30));
     const wAvg = toRate(eqNum("r_w_avg", 0.15));
@@ -1488,11 +2281,39 @@ export default function TeamBuilder() {
       wAvg,
       wIso,
     });
+    const classKey = String(p.class_transition || livePred.class_transition || "SJ").toUpperCase();
+    const classAdj =
+      classKey === "FS" ? 0.03 :
+      classKey === "SJ" ? 0.02 :
+      classKey === "JS" ? 0.015 :
+      classKey === "GR" ? 0.01 : 0.02;
+    const devAgg = Number.isFinite(Number(p.dev_aggressiveness)) ? Number(p.dev_aggressiveness) : 0;
+    const transferMult = 1 + classAdj + (devAgg * 0.06);
+    const pAvgAdj = projected.pAvg * transferMult;
+    const pObpAdj = projected.pObp * transferMult;
+    const pIsoAdj = projected.pIso * transferMult;
+    const pSlgAdj = pAvgAdj + pIsoAdj;
+    const pWrcAdj = (wObp * pObpAdj) + (wSlg * pSlgAdj) + (wAvg * pAvgAdj) + (wIso * pIsoAdj);
+    const pWrcPlusAdj = ncaaAvgWrc === 0 ? null : Math.round((pWrcAdj / ncaaAvgWrc) * 100);
+    const offValueAdj = pWrcPlusAdj == null ? null : (pWrcPlusAdj - 100) / 100;
+    const pa = 260;
+    const runsPerPa = 0.13;
+    const replacementRuns = (pa / 600) * 25;
+    const raaAdj = offValueAdj == null ? null : offValueAdj * pa * runsPerPa;
+    const rarAdj = raaAdj == null ? null : raaAdj + replacementRuns;
+    const owarAdj = rarAdj == null ? null : rarAdj / 10;
     const basePerOwar = eqNum("nil_base_per_owar", 25000);
     const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
     const pvm = getPositionValueMultiplier(livePlayer.position ?? p.player?.position ?? null);
-    const simNilValuation = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
-    return { p_avg: projected.pAvg, p_obp: projected.pObp, p_slg: projected.pSlg, p_wrc_plus: projected.pWrcPlus, owar: projected.owar, nil_valuation: simNilValuation };
+    const simNilValuation = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
+    return {
+      p_avg: Math.round(pAvgAdj * 1000) / 1000,
+      p_obp: Math.round(pObpAdj * 1000) / 1000,
+      p_slg: Math.round(pSlgAdj * 1000) / 1000,
+      p_wrc_plus: pWrcPlusAdj,
+      owar: owarAdj,
+      nil_valuation: simNilValuation,
+    };
   }, [selectedTeam, teamByKey, resolveConferenceStats, internalsByPredictionId, seedByName, liveTargetPredictionByPlayerId, liveTargetPlayerById, teamParkComponents]);
 
   const inferFromTeamForPrediction = useCallback((
@@ -1623,8 +2444,8 @@ export default function TeamBuilder() {
       baParkWeight: toWeight(eqNum("t_ba_park_weight", 1.0)),
       obpParkWeight: toWeight(eqNum("t_obp_park_weight", 1.0)),
       isoParkWeight: toWeight(eqNum("t_iso_park_weight", 0.05)),
-      isoStdPower: eqNum("r_iso_std_pr", 45.423),
-      isoStdNcaa: toRate(eqNum("r_iso_std_ncaa", 0.07849797197)),
+      isoStdPower: eqNum("t_iso_std_power", 45.423),
+      isoStdNcaa: toRate(eqNum("t_iso_std_ncaa", 0.07849797197)),
       wObp: toRate(eqNum("r_w_obp", 0.45)),
       wSlg: toRate(eqNum("r_w_slg", 0.30)),
       wAvg: toRate(eqNum("r_w_avg", 0.15)),
@@ -1752,6 +2573,273 @@ export default function TeamBuilder() {
   };
 
   const addPlayerFromTargetSearch = async (row: any) => {
+    try {
+    if (row?.__seedHitter) {
+      // If a DB-backed player exists for this seed fallback row, always use the DB path
+      // so transfer math matches Transfer Portal exactly.
+      const matchedDb = allPlayersForSearch.find((p: any) =>
+        normalizeName(`${p.first_name || ""} ${p.last_name || ""}`) === normalizeName(`${row.first_name || ""} ${row.last_name || ""}`) &&
+        normalizeName(p.team || "") === normalizeName(row.team || ""),
+      );
+      if (matchedDb) {
+        await addPlayerFromTargetSearch(matchedDb);
+        return;
+      }
+
+      const fullName = `${row.first_name || ""} ${row.last_name || ""}`.trim();
+      const alreadyAddedSeed = rosterPlayers.some((p) => {
+        if ((p.roster_status || "returner") !== "target") return false;
+        const existingName = p.player ? `${p.player.first_name} ${p.player.last_name}`.trim() : (p.custom_name || "");
+        return normalizeName(existingName) === normalizeName(fullName) && normalizeName(p.player?.team || "") === normalizeName(row.team || "");
+      });
+      if (alreadyAddedSeed) {
+        toast({ title: "Already on target board", description: `${fullName} is already a target.` });
+        setTargetPlayerSearchQuery("");
+        setTargetPlayerSearchOpen(false);
+        return;
+      }
+      const newP: BuildPlayer = {
+        player_id: null,
+        source: "portal",
+        custom_name: fullName || null,
+        position_slot: null,
+        depth_order: 1,
+        nil_value: 0,
+        production_notes: null,
+        roster_status: "target",
+        depth_role: "utility",
+        class_transition: "SJ",
+        dev_aggressiveness: 0,
+        transfer_snapshot: {
+          p_avg: row.__seedStats?.avg ?? null,
+          p_obp: row.__seedStats?.obp ?? null,
+          p_slg: row.__seedStats?.slg ?? null,
+          p_wrc_plus: null,
+          owar: null,
+          nil_valuation: null,
+          from_team: row.team || null,
+          from_conference: row.conference || null,
+        },
+        player: {
+          first_name: row.first_name || "",
+          last_name: row.last_name || "",
+          position: row.position || null,
+          team: row.team || null,
+          from_team: row.team || null,
+          conference: row.conference || null,
+        },
+        prediction: null,
+        nilVal: null,
+        nil_owar: null,
+        team_metrics: null,
+        team_power_plus: null,
+      };
+      if (selectedTeam && row.__seedPowerPlus?.baPlus != null && row.__seedPowerPlus?.obpPlus != null && row.__seedPowerPlus?.isoPlus != null) {
+        const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
+        const fromTeamRow = row.team ? (teamByKey.get(normalizeKey(row.team)) || null) : null;
+        const fromConference = fromTeamRow?.conference || row.conference || null;
+        const fromConfStats = resolveConferenceStats(fromConference);
+        const toConfStats = resolveConferenceStats(toTeamRow?.conference || null);
+        const lastAvg = row.__seedStats?.avg ?? null;
+        const lastObp = row.__seedStats?.obp ?? null;
+        const lastSlg = row.__seedStats?.slg ?? null;
+        if (
+          toTeamRow && fromConfStats && toConfStats &&
+          lastAvg != null && lastObp != null && lastSlg != null &&
+          fromConfStats.avg_plus != null && toConfStats.avg_plus != null &&
+          fromConfStats.obp_plus != null && toConfStats.obp_plus != null &&
+          fromConfStats.iso_plus != null && toConfStats.iso_plus != null &&
+          fromConfStats.stuff_plus != null && toConfStats.stuff_plus != null
+        ) {
+          const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "avg", teamParkComponents);
+          const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "avg", teamParkComponents);
+          const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "obp", teamParkComponents);
+          const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "obp", teamParkComponents);
+          const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "iso", teamParkComponents);
+          const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "iso", teamParkComponents);
+          if (
+            fromParkAvgRaw != null && toParkAvgRaw != null &&
+            fromParkObpRaw != null && toParkObpRaw != null &&
+            fromParkIsoRaw != null && toParkIsoRaw != null
+          ) {
+            const projected = computeTransferProjection({
+              lastAvg,
+              lastObp,
+              lastSlg,
+              baPR: Number(row.__seedPowerPlus.baPlus),
+              obpPR: Number(row.__seedPowerPlus.obpPlus),
+              isoPR: Number(row.__seedPowerPlus.isoPlus),
+              fromAvgPlus: fromConfStats.avg_plus,
+              toAvgPlus: toConfStats.avg_plus,
+              fromObpPlus: fromConfStats.obp_plus,
+              toObpPlus: toConfStats.obp_plus,
+              fromIsoPlus: fromConfStats.iso_plus,
+              toIsoPlus: toConfStats.iso_plus,
+              fromStuff: fromConfStats.stuff_plus,
+              toStuff: toConfStats.stuff_plus,
+              fromPark: normalizeParkToIndex(fromParkAvgRaw),
+              toPark: normalizeParkToIndex(toParkAvgRaw),
+              fromObpPark: normalizeParkToIndex(fromParkObpRaw),
+              toObpPark: normalizeParkToIndex(toParkObpRaw),
+              fromIsoPark: normalizeParkToIndex(fromParkIsoRaw),
+              toIsoPark: normalizeParkToIndex(toParkIsoRaw),
+              ncaaAvgBA: toRate(eqNum("t_ba_ncaa_avg", 0.280)),
+              ncaaAvgOBP: toRate(eqNum("t_obp_ncaa_avg", 0.385)),
+              ncaaAvgISO: toRate(eqNum("t_iso_ncaa_avg", 0.162)),
+              ncaaAvgWrc: toRate(eqNum("t_wrc_ncaa_avg", 0.364)),
+              baStdPower: eqNum("t_ba_std_pr", 31.297),
+              baStdNcaa: toRate(eqNum("t_ba_std_ncaa", 0.043455)),
+              obpStdPower: eqNum("t_obp_std_pr", 28.889),
+              obpStdNcaa: toRate(eqNum("t_obp_std_ncaa", 0.046781)),
+              baPowerWeight: toRate(eqNum("t_ba_power_weight", 0.70)),
+              obpPowerWeight: toRate(eqNum("t_obp_power_weight", 0.70)),
+              baConferenceWeight: toWeight(eqNum("t_ba_conference_weight", 1.0)),
+              obpConferenceWeight: toWeight(eqNum("t_obp_conference_weight", 1.0)),
+              isoConferenceWeight: toWeight(eqNum("t_iso_conference_weight", 0.25)),
+              baPitchingWeight: toWeight(eqNum("t_ba_pitching_weight", 1.0)),
+              obpPitchingWeight: toWeight(eqNum("t_obp_pitching_weight", 1.0)),
+              isoPitchingWeight: toWeight(eqNum("t_iso_pitching_weight", 1.0)),
+              baParkWeight: toWeight(eqNum("t_ba_park_weight", 1.0)),
+              obpParkWeight: toWeight(eqNum("t_obp_park_weight", 1.0)),
+              isoParkWeight: toWeight(eqNum("t_iso_park_weight", 0.05)),
+              isoStdPower: eqNum("t_iso_std_power", 45.423),
+              isoStdNcaa: toRate(eqNum("t_iso_std_ncaa", 0.07849797197)),
+              wObp: toRate(eqNum("r_w_obp", 0.45)),
+              wSlg: toRate(eqNum("r_w_slg", 0.30)),
+              wAvg: toRate(eqNum("r_w_avg", 0.15)),
+              wIso: toRate(eqNum("r_w_iso", 0.10)),
+            });
+            const classKey = "SJ";
+            const classAdj = classKey === "SJ" ? 0.02 : 0.02;
+            const devAgg = 0;
+            const transferMult = 1 + classAdj + (devAgg * 0.06);
+            const pAvgAdj = projected.pAvg * transferMult;
+            const pObpAdj = projected.pObp * transferMult;
+            const pIsoAdj = projected.pIso * transferMult;
+            const pSlgAdj = pAvgAdj + pIsoAdj;
+            const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.364));
+            const wObp = toRate(eqNum("r_w_obp", 0.45));
+            const wSlg = toRate(eqNum("r_w_slg", 0.30));
+            const wAvg = toRate(eqNum("r_w_avg", 0.15));
+            const wIso = toRate(eqNum("r_w_iso", 0.10));
+            const pWrcAdj = (wObp * pObpAdj) + (wSlg * pSlgAdj) + (wAvg * pAvgAdj) + (wIso * pIsoAdj);
+            const pWrcPlusAdj = ncaaAvgWrc === 0 ? null : Math.round((pWrcAdj / ncaaAvgWrc) * 100);
+            const offValueAdj = pWrcPlusAdj == null ? null : (pWrcPlusAdj - 100) / 100;
+            const pa = 260;
+            const runsPerPa = 0.13;
+            const replacementRuns = (pa / 600) * 25;
+            const raaAdj = offValueAdj == null ? null : offValueAdj * pa * runsPerPa;
+            const rarAdj = raaAdj == null ? null : raaAdj + replacementRuns;
+            const owarAdj = rarAdj == null ? null : rarAdj / 10;
+            const basePerOwar = eqNum("nil_base_per_owar", 25000);
+            const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
+            const pvm = getPositionValueMultiplier(row.position);
+            const nilValuation = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
+            newP.transfer_snapshot = {
+              p_avg: pAvgAdj,
+              p_obp: pObpAdj,
+              p_slg: pSlgAdj,
+              p_wrc_plus: pWrcPlusAdj,
+              owar: owarAdj,
+              nil_valuation: nilValuation,
+              from_team: row.team || null,
+              from_conference: fromConference,
+            };
+          }
+        }
+      }
+      setRosterPlayers((prev) => [...prev, newP]);
+      setDirty(true);
+      setTargetPlayerSearchQuery("");
+      setTargetPlayerSearchOpen(false);
+      toast({ title: "Added to targets", description: fullName });
+      return;
+    }
+    if (row?.__storagePitcher) {
+      const fullName = `${row.first_name || ""} ${row.last_name || ""}`.trim();
+      const alreadyAddedStorage = rosterPlayers.some((p) => {
+        if ((p.roster_status || "returner") !== "target") return false;
+        const existingName = p.player ? `${p.player.first_name} ${p.player.last_name}`.trim() : (p.custom_name || "");
+        return normalizeName(existingName) === normalizeName(fullName) && normalizeName(p.player?.team || "") === normalizeName(row.team || "");
+      });
+      if (alreadyAddedStorage) {
+        toast({ title: "Already on target board", description: `${fullName} is already a target.` });
+        setTargetPlayerSearchQuery("");
+        setTargetPlayerSearchOpen(false);
+        return;
+      }
+      const inferredRole = asPitcherRole(row.__pitching?.role || row.position || "RP") || "RP";
+      let transferSnapshot: TransferSnapshot = {
+        p_avg: null,
+        p_obp: null,
+        p_slg: null,
+        p_wrc_plus: row.__pitching?.p_rv_plus ?? null,
+        p_era: row.__pitching?.p_era ?? null,
+        p_fip: row.__pitching?.p_fip ?? null,
+        p_whip: row.__pitching?.p_whip ?? null,
+        p_k9: row.__pitching?.p_k9 ?? null,
+        p_bb9: row.__pitching?.p_bb9 ?? null,
+        p_hr9: row.__pitching?.p_hr9 ?? null,
+        p_rv_plus: row.__pitching?.p_rv_plus ?? null,
+        p_war: row.__pitching?.p_war ?? null,
+        owar: row.__pitching?.p_war ?? null,
+        nil_valuation: null,
+        from_team: row.team || null,
+        from_conference: row.conference || null,
+      };
+      const newP: BuildPlayer = {
+        player_id: null,
+        source: "portal",
+        custom_name: fullName || null,
+        position_slot: inferredRole,
+        depth_order: 1,
+        nil_value: 0,
+        production_notes: null,
+        roster_status: "target",
+        depth_role: inferredRole === "SP" ? "weekend_starter" : "high_leverage_reliever",
+        class_transition: "SJ",
+        dev_aggressiveness: 0,
+        transfer_snapshot: transferSnapshot,
+        player: {
+          first_name: row.first_name || "",
+          last_name: row.last_name || "",
+          position: inferredRole,
+          team: row.team || null,
+          from_team: row.from_team || row.team || null,
+          conference: row.conference || null,
+        },
+        prediction: null,
+        nilVal: null,
+        nil_owar: null,
+        team_metrics: null,
+        team_power_plus: null,
+      };
+      const computed = computeReturnerPitchingProjection(newP);
+      if (computed) {
+        transferSnapshot = {
+          ...transferSnapshot,
+          p_era: computed.p_era ?? null,
+          p_fip: computed.p_fip ?? null,
+          p_whip: computed.p_whip ?? null,
+          p_k9: computed.p_k9 ?? null,
+          p_bb9: computed.p_bb9 ?? null,
+          p_hr9: computed.p_hr9 ?? null,
+          p_rv_plus: computed.p_rv_plus ?? null,
+          p_war: computed.p_war ?? null,
+          p_wrc_plus: computed.p_rv_plus ?? null,
+          owar: computed.p_war ?? null,
+          nil_valuation: computed.nil_valuation ?? null,
+        };
+        newP.transfer_snapshot = transferSnapshot;
+      }
+      setRosterPlayers((prev) => [...prev, newP]);
+      setDirty(true);
+      setTargetPlayerSearchQuery("");
+      setTargetPlayerSearchOpen(false);
+      toast({ title: "Added to targets", description: fullName });
+      return;
+    }
+
     const alreadyAdded = rosterPlayers.some(
       (p) => p.player_id === row.id && (p.roster_status || "returner") === "target"
     );
@@ -1765,6 +2853,9 @@ export default function TeamBuilder() {
     const chosenPred = selectTransferPortalPreferredPrediction(
       (row.player_predictions || []).filter((pr: any) => pr.variant === "regular")
     );
+    const overrideRole = asPitcherRole(playerOverrides?.[row.id]?.pitcher_role || null);
+    const inferredRole = overrideRole || asPitcherRole(row.position || null);
+    const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(row.position || ""));
 
     // Fetch prediction internals so we can run the same simulation as Transfer Portal
     let transferSnapshot: TransferSnapshot | null = null;
@@ -1847,8 +2938,8 @@ export default function TeamBuilder() {
         const baParkWeight = toWeight(eqNum("t_ba_park_weight", 1.0));
         const obpParkWeight = toWeight(eqNum("t_obp_park_weight", 1.0));
         const isoParkWeight = toWeight(eqNum("t_iso_park_weight", 0.05));
-        const isoStdPower = eqNum("r_iso_std_pr", 45.423);
-        const isoStdNcaa = toRate(eqNum("r_iso_std_ncaa", 0.07849797197));
+        const isoStdPower = eqNum("t_iso_std_power", 45.423);
+        const isoStdNcaa = toRate(eqNum("t_iso_std_ncaa", 0.07849797197));
         const wObp = toRate(eqNum("r_w_obp", 0.45));
         const wSlg = toRate(eqNum("r_w_slg", 0.30));
         const wAvg = toRate(eqNum("r_w_avg", 0.15));
@@ -1875,14 +2966,37 @@ export default function TeamBuilder() {
           const basePerOwar = eqNum("nil_base_per_owar", 25000);
           const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
           const pvm = getPositionValueMultiplier(row.position);
-          const nilValuation = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
+          const classKey = String(chosenPred?.class_transition || "SJ").toUpperCase();
+          const classAdj =
+            classKey === "FS" ? 0.03 :
+            classKey === "SJ" ? 0.02 :
+            classKey === "JS" ? 0.015 :
+            classKey === "GR" ? 0.01 : 0.02;
+          const devAgg = Number.isFinite(Number(chosenPred?.dev_aggressiveness))
+            ? Number(chosenPred?.dev_aggressiveness)
+            : 0;
+          const transferMult = 1 + classAdj + (devAgg * 0.06);
+          const pAvgAdj = projected.pAvg * transferMult;
+          const pObpAdj = projected.pObp * transferMult;
+          const pIsoAdj = projected.pIso * transferMult;
+          const pSlgAdj = pAvgAdj + pIsoAdj;
+          const pWrcAdj = (wObp * pObpAdj) + (wSlg * pSlgAdj) + (wAvg * pAvgAdj) + (wIso * pIsoAdj);
+          const pWrcPlusAdj = ncaaAvgWrc === 0 ? null : Math.round((pWrcAdj / ncaaAvgWrc) * 100);
+          const offValueAdj = pWrcPlusAdj == null ? null : (pWrcPlusAdj - 100) / 100;
+          const pa = 260;
+          const runsPerPa = 0.13;
+          const replacementRuns = (pa / 600) * 25;
+          const raaAdj = offValueAdj == null ? null : offValueAdj * pa * runsPerPa;
+          const rarAdj = raaAdj == null ? null : raaAdj + replacementRuns;
+          const owarAdj = rarAdj == null ? null : rarAdj / 10;
+          const nilValuation = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
 
           transferSnapshot = {
-            p_avg: projected.pAvg,
-            p_obp: projected.pObp,
-            p_slg: projected.pSlg,
-            p_wrc_plus: projected.pWrcPlus,
-            owar: projected.owar,
+            p_avg: pAvgAdj,
+            p_obp: pObpAdj,
+            p_slg: pSlgAdj,
+            p_wrc_plus: pWrcPlusAdj,
+            owar: owarAdj,
             nil_valuation: nilValuation,
             from_team: fromTeamName || null,
             from_conference: fromConference,
@@ -1894,13 +3008,15 @@ export default function TeamBuilder() {
     const newP: BuildPlayer = {
       player_id: row.id,
       source: "portal",
-      custom_name: null,
-      position_slot: null,
+      custom_name: `${row.first_name || ""} ${row.last_name || ""}`.trim() || null,
+      position_slot: isPitcherRow ? (inferredRole || "RP") : null,
       depth_order: 1,
       nil_value: row.nil_valuations?.[0]?.estimated_value ? Number(row.nil_valuations[0].estimated_value) : 0,
       production_notes: null,
       roster_status: "target",
-      depth_role: "utility",
+      depth_role: isPitcherRow
+        ? ((inferredRole === "SP") ? "weekend_starter" : "high_leverage_reliever")
+        : "utility",
       class_transition: chosenPred?.class_transition ?? "SJ",
       dev_aggressiveness: chosenPred?.dev_aggressiveness ?? 0,
       transfer_snapshot: transferSnapshot,
@@ -1918,11 +3034,41 @@ export default function TeamBuilder() {
       team_metrics: null,
       team_power_plus: null,
     };
+    if (isPitcherRow && !transferSnapshot) {
+      const computed = computeReturnerPitchingProjection(newP);
+      if (computed) {
+        newP.transfer_snapshot = {
+          p_avg: null,
+          p_obp: null,
+          p_slg: null,
+          p_wrc_plus: computed.p_rv_plus ?? null,
+          p_era: computed.p_era ?? null,
+          p_fip: computed.p_fip ?? null,
+          p_whip: computed.p_whip ?? null,
+          p_k9: computed.p_k9 ?? null,
+          p_bb9: computed.p_bb9 ?? null,
+          p_hr9: computed.p_hr9 ?? null,
+          p_rv_plus: computed.p_rv_plus ?? null,
+          p_war: computed.p_war ?? null,
+          owar: computed.p_war ?? null,
+          nil_valuation: computed.nil_valuation ?? null,
+          from_team: row.from_team || row.team || null,
+          from_conference: row.conference || null,
+        };
+      }
+    }
     setRosterPlayers((prev) => [...prev, newP]);
     setDirty(true);
     setTargetPlayerSearchQuery("");
     setTargetPlayerSearchOpen(false);
     toast({ title: "Added to targets", description: `${row.first_name} ${row.last_name}` });
+    } catch (err: any) {
+      toast({
+        title: "Failed to add target",
+        description: err?.message || "Unexpected error while adding player target.",
+        variant: "destructive",
+      });
+    }
   };
 
   const applyTeamMetricsCsv = async (file: File) => {
@@ -2111,14 +3257,217 @@ export default function TeamBuilder() {
   const targetPositionPlayers = targetPlayers.filter((p) => !isPitcher(p));
   const targetPitchers = targetPlayers.filter((p) => isPitcher(p));
 
+  const pitchingTierMultipliers = useMemo(
+    () => ({
+      sec: pitchingEq.market_tier_sec,
+      p4: pitchingEq.market_tier_acc_big12,
+      bigTen: pitchingEq.market_tier_big_ten,
+      strongMid: pitchingEq.market_tier_strong_mid,
+      lowMajor: pitchingEq.market_tier_low_major,
+    }),
+    [pitchingEq],
+  );
+  const pitchingPvfForRole = useCallback((role: "SP" | "RP") => {
+    return role === "SP" ? pitchingEq.market_pvf_weekend_sp : pitchingEq.market_pvf_reliever;
+  }, [pitchingEq]);
+  const computePitcherPwar = useCallback((p: BuildPlayer, source: any) => {
+    const pRvPlusRaw = source?.p_rv_plus ?? source?.p_wrc_plus ?? p.transfer_snapshot?.p_rv_plus ?? p.transfer_snapshot?.p_wrc_plus ?? null;
+    const pRvPlus = Number(pRvPlusRaw);
+    if (!Number.isFinite(pRvPlus) || pitchingEq.pwar_runs_per_win === 0) return null;
+    const currentPitcherRole = normalizePitcherRole(
+      pitcherRoleFromSlot(p.position_slot) || p.player?.position || null,
+    );
+    const pitcherDepthRole = normalizePitcherDepthRole(p.depth_role, currentPitcherRole);
+    const ipByRole = currentPitcherRole === "SP"
+      ? (pitcherDepthRole === "weekday_starter" ? pitchingEq.pwar_ip_sm : pitchingEq.pwar_ip_sp)
+      : pitchingEq.pwar_ip_rp;
+    const pitcherValue = (pRvPlus - 100) / 100;
+    const basePwar = (
+      (pitcherValue * (ipByRole / 9) * pitchingEq.pwar_r_per_9) +
+      ((ipByRole / 9) * pitchingEq.pwar_replacement_runs_per_9)
+    ) / pitchingEq.pwar_runs_per_win;
+    return basePwar * depthRoleMultiplier(p.depth_role);
+  }, [pitchingEq]);
+  const computeReturnerPitchingProjection = useCallback((p: BuildPlayer) => {
+    const fullName = p.player
+      ? `${p.player.first_name} ${p.player.last_name}`.trim()
+      : (p.custom_name || "").trim();
+    const teamName = p.player?.team || selectedTeam || "";
+    const key = `${normalizeName(fullName)}|${normalizeName(teamName)}`;
+    const stats = pitchingStatsByNameTeam.byKey.get(key) || (() => {
+      const bucket = pitchingStatsByNameTeam.byName.get(normalizeName(fullName)) || [];
+      return bucket.length === 1 ? bucket[0] : null;
+    })();
+    const pr = pitchingPrByNameTeam.byKey.get(key) || (() => {
+      const bucket = pitchingPrByNameTeam.byName.get(normalizeName(fullName)) || [];
+      return bucket.length === 1 ? bucket[0] : null;
+    })();
+    if (!stats || !pr) return null;
+
+    const currentPitcherRole = normalizePitcherRole(
+      pitcherRoleFromSlot(p.position_slot) || p.player?.position || stats.role || null,
+    );
+    const baseRole: "SP" | "RP" | "SM" | null = stats.role || (stats.g != null && stats.g > 0 && stats.gs != null ? ((stats.gs / stats.g) < 0.5 ? "RP" : "SP") : null);
+    const classTransitionRaw = String(p.class_transition || "SJ").toUpperCase();
+    const classTransition: "FS" | "SJ" | "JS" | "GR" =
+      classTransitionRaw === "FS" || classTransitionRaw === "SJ" || classTransitionRaw === "JS" || classTransitionRaw === "GR"
+        ? classTransitionRaw
+        : "SJ";
+    const devAgg = Number.isFinite(Number(p.dev_aggressiveness)) ? Number(p.dev_aggressiveness) : 0;
+
+    const classEraAdj = toPitchingClassAdj(classTransition, pitchingEq.class_era_fs, pitchingEq.class_era_sj, pitchingEq.class_era_js, pitchingEq.class_era_gr);
+    const classFipAdj = toPitchingClassAdj(classTransition, pitchingEq.class_fip_fs, pitchingEq.class_fip_sj, pitchingEq.class_fip_js, pitchingEq.class_fip_gr);
+    const classWhipAdj = toPitchingClassAdj(classTransition, pitchingEq.class_whip_fs, pitchingEq.class_whip_sj, pitchingEq.class_whip_js, pitchingEq.class_whip_gr);
+    const classK9Adj = toPitchingClassAdj(classTransition, pitchingEq.class_k9_fs, pitchingEq.class_k9_sj, pitchingEq.class_k9_js, pitchingEq.class_k9_gr);
+    const classBb9Adj = toPitchingClassAdj(classTransition, pitchingEq.class_bb9_fs, pitchingEq.class_bb9_sj, pitchingEq.class_bb9_js, pitchingEq.class_bb9_gr);
+    const classHr9Adj = toPitchingClassAdj(classTransition, pitchingEq.class_hr9_fs, pitchingEq.class_hr9_sj, pitchingEq.class_hr9_js, pitchingEq.class_hr9_gr);
+
+    const pEra = projectPitchingRate({ lastStat: stats.era, prPlus: pr.eraPrPlus, ncaaAvg: pitchingEq.era_plus_ncaa_avg, ncaaSd: pitchingEq.era_plus_ncaa_sd, prSd: pitchingEq.era_pr_sd, classAdjustment: classEraAdj, devAggressiveness: devAgg, thresholds: pitchingEq.era_damp_thresholds, impacts: pitchingEq.era_damp_impacts, lowerIsBetter: true });
+    const pFip = projectPitchingRate({ lastStat: stats.fip, prPlus: pr.fipPrPlus, ncaaAvg: pitchingEq.fip_plus_ncaa_avg, ncaaSd: pitchingEq.fip_plus_ncaa_sd, prSd: pitchingEq.fip_pr_sd, classAdjustment: classFipAdj, devAggressiveness: devAgg, thresholds: pitchingEq.fip_damp_thresholds, impacts: pitchingEq.fip_damp_impacts, lowerIsBetter: true });
+    const pWhip = projectPitchingRate({ lastStat: stats.whip, prPlus: pr.whipPrPlus, ncaaAvg: pitchingEq.whip_plus_ncaa_avg, ncaaSd: pitchingEq.whip_plus_ncaa_sd, prSd: pitchingEq.whip_pr_sd, classAdjustment: classWhipAdj, devAggressiveness: devAgg, thresholds: pitchingEq.whip_damp_thresholds, impacts: pitchingEq.whip_damp_impacts, lowerIsBetter: true });
+    const pK9 = projectPitchingRate({ lastStat: stats.k9, prPlus: pr.k9PrPlus, ncaaAvg: pitchingEq.k9_plus_ncaa_avg, ncaaSd: pitchingEq.k9_plus_ncaa_sd, prSd: pitchingEq.k9_pr_sd, classAdjustment: classK9Adj, devAggressiveness: devAgg, thresholds: pitchingEq.k9_damp_thresholds, impacts: pitchingEq.k9_damp_impacts, lowerIsBetter: false });
+    const pBb9 = projectPitchingRate({ lastStat: stats.bb9, prPlus: pr.bb9PrPlus, ncaaAvg: pitchingEq.bb9_plus_ncaa_avg, ncaaSd: pitchingEq.bb9_plus_ncaa_sd, prSd: pitchingEq.bb9_pr_sd, classAdjustment: classBb9Adj, devAggressiveness: devAgg, thresholds: pitchingEq.bb9_damp_thresholds, impacts: pitchingEq.bb9_damp_impacts, lowerIsBetter: true });
+    const pHr9 = projectPitchingRate({ lastStat: stats.hr9, prPlus: pr.hr9PrPlus, ncaaAvg: pitchingEq.hr9_plus_ncaa_avg, ncaaSd: pitchingEq.hr9_plus_ncaa_sd, prSd: pitchingEq.hr9_pr_sd, classAdjustment: classHr9Adj, devAggressiveness: devAgg, thresholds: pitchingEq.hr9_damp_thresholds, impacts: pitchingEq.hr9_damp_impacts, lowerIsBetter: true });
+
+    const teamNameForPark = teamByKey.get(normalizeKey(teamName))?.name || teamName || null;
+    const fallbackPark = teamByKey.get(normalizeKey(teamName))?.park_factor ?? null;
+    const avgPark = normalizeParkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "avg", teamParkComponents));
+    const obpPark = normalizeParkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "obp", teamParkComponents));
+    const isoPark = normalizeParkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "iso", teamParkComponents));
+    const eraParkRaw = resolveMetricParkFactor(teamNameForPark, null, "era", teamParkComponents);
+    const whipParkRaw = resolveMetricParkFactor(teamNameForPark, null, "whip", teamParkComponents);
+    const hr9ParkRaw = resolveMetricParkFactor(teamNameForPark, null, "hr9", teamParkComponents);
+    const parkAdjustedEra = pEra == null ? null : pEra * (normalizeParkToIndex(eraParkRaw ?? avgPark) / 100);
+    const parkAdjustedWhip = pWhip == null ? null : pWhip * (normalizeParkToIndex(whipParkRaw ?? ((0.7 * avgPark) + (0.3 * obpPark))) / 100);
+    const parkAdjustedHr9 = pHr9 == null ? null : pHr9 * (normalizeParkToIndex(hr9ParkRaw ?? isoPark) / 100);
+    const roleCurve = {
+      tier1Max: pitchingEq.rp_to_sp_low_better_tier1_max,
+      tier2Max: pitchingEq.rp_to_sp_low_better_tier2_max,
+      tier3Max: pitchingEq.rp_to_sp_low_better_tier3_max,
+      tier1Mult: pitchingEq.rp_to_sp_low_better_tier1_mult,
+      tier2Mult: pitchingEq.rp_to_sp_low_better_tier2_mult,
+      tier3Mult: pitchingEq.rp_to_sp_low_better_tier3_mult,
+    };
+    const roleAdjustedEra = applyRoleTransitionAdjustment(parkAdjustedEra, pitchingEq.sp_to_rp_reg_era_pct, baseRole, currentPitcherRole, true, roleCurve);
+    const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, pitchingEq.sp_to_rp_reg_fip_pct, baseRole, currentPitcherRole, true, roleCurve);
+    const roleAdjustedWhip = applyRoleTransitionAdjustment(parkAdjustedWhip, pitchingEq.sp_to_rp_reg_whip_pct, baseRole, currentPitcherRole, true, roleCurve);
+    const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, pitchingEq.sp_to_rp_reg_k9_pct, baseRole, currentPitcherRole, false, roleCurve);
+    const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, pitchingEq.sp_to_rp_reg_bb9_pct, baseRole, currentPitcherRole, true, roleCurve);
+    const roleAdjustedHr9 = applyRoleTransitionAdjustment(parkAdjustedHr9, pitchingEq.sp_to_rp_reg_hr9_pct, baseRole, currentPitcherRole, true, roleCurve);
+
+    const eraPlus = calcPitchingPlus(roleAdjustedEra, pitchingEq.era_plus_ncaa_avg, pitchingEq.era_plus_ncaa_sd, pitchingEq.era_plus_scale, false);
+    const fipPlus = calcPitchingPlus(roleAdjustedFip, pitchingEq.fip_plus_ncaa_avg, pitchingEq.fip_plus_ncaa_sd, pitchingEq.fip_plus_scale, false);
+    const whipPlus = calcPitchingPlus(roleAdjustedWhip, pitchingEq.whip_plus_ncaa_avg, pitchingEq.whip_plus_ncaa_sd, pitchingEq.whip_plus_scale, false);
+    const k9Plus = calcPitchingPlus(roleAdjustedK9, pitchingEq.k9_plus_ncaa_avg, pitchingEq.k9_plus_ncaa_sd, pitchingEq.k9_plus_scale, true);
+    const bb9Plus = calcPitchingPlus(roleAdjustedBb9, pitchingEq.bb9_plus_ncaa_avg, pitchingEq.bb9_plus_ncaa_sd, pitchingEq.bb9_plus_scale, false);
+    const hr9Plus = calcPitchingPlus(roleAdjustedHr9, pitchingEq.hr9_plus_ncaa_avg, pitchingEq.hr9_plus_ncaa_sd, pitchingEq.hr9_plus_scale, false);
+    const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
+      ? (Number(eraPlus) * pitchingEq.era_plus_weight) +
+        (Number(fipPlus) * pitchingEq.fip_plus_weight) +
+        (Number(whipPlus) * pitchingEq.whip_plus_weight) +
+        (Number(k9Plus) * pitchingEq.k9_plus_weight) +
+        (Number(bb9Plus) * pitchingEq.bb9_plus_weight) +
+        (Number(hr9Plus) * pitchingEq.hr9_plus_weight)
+      : null;
+    const ipByRole = currentPitcherRole === "SP" ? pitchingEq.pwar_ip_sp : pitchingEq.pwar_ip_rp;
+    const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);
+    const pWar = pitcherValue == null || pitchingEq.pwar_runs_per_win === 0
+      ? null
+      : (((pitcherValue * (ipByRole / 9) * pitchingEq.pwar_r_per_9) + ((ipByRole / 9) * pitchingEq.pwar_replacement_runs_per_9)) / pitchingEq.pwar_runs_per_win);
+
+    return {
+      p_era: roleAdjustedEra,
+      p_fip: roleAdjustedFip,
+      p_whip: roleAdjustedWhip,
+      p_k9: roleAdjustedK9,
+      p_bb9: roleAdjustedBb9,
+      p_hr9: roleAdjustedHr9,
+      p_rv_plus: pRvPlus,
+      p_war: pWar,
+      nil_valuation: null as number | null,
+    };
+  }, [pitchingEq, pitchingPrByNameTeam, pitchingStatsByNameTeam, selectedTeam, teamByKey, teamParkComponents]);
+
   const playerProjection = useCallback((p: BuildPlayer) => {
     const sim = p.roster_status === "target" ? simulateTransferProjection(p) : null;
-    const shown = (p.roster_status === "target") ? sim : p.prediction;
+    const shown = (p.roster_status === "target")
+      ? (sim ?? p.transfer_snapshot ?? null)
+      : (isPitcher(p) ? (computeReturnerPitchingProjection(p) ?? p.prediction) : p.prediction);
+    if (isPitcher(p)) {
+      const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
+      let source: any = sourceBase;
+      if ((p.roster_status || "returner") === "target" && sourceBase) {
+        const classTransitionRaw = String(p.class_transition || "SJ").toUpperCase();
+        const classTransition: "FS" | "SJ" | "JS" | "GR" =
+          classTransitionRaw === "FS" || classTransitionRaw === "SJ" || classTransitionRaw === "JS" || classTransitionRaw === "GR"
+            ? classTransitionRaw
+            : "SJ";
+        const devAgg = Number.isFinite(Number(p.dev_aggressiveness)) ? Number(p.dev_aggressiveness) : 0;
+        const classEraAdj = toPitchingClassAdj(classTransition, pitchingEq.class_era_fs, pitchingEq.class_era_sj, pitchingEq.class_era_js, pitchingEq.class_era_gr);
+        const classFipAdj = toPitchingClassAdj(classTransition, pitchingEq.class_fip_fs, pitchingEq.class_fip_sj, pitchingEq.class_fip_js, pitchingEq.class_fip_gr);
+        const classWhipAdj = toPitchingClassAdj(classTransition, pitchingEq.class_whip_fs, pitchingEq.class_whip_sj, pitchingEq.class_whip_js, pitchingEq.class_whip_gr);
+        const classK9Adj = toPitchingClassAdj(classTransition, pitchingEq.class_k9_fs, pitchingEq.class_k9_sj, pitchingEq.class_k9_js, pitchingEq.class_k9_gr);
+        const classBb9Adj = toPitchingClassAdj(classTransition, pitchingEq.class_bb9_fs, pitchingEq.class_bb9_sj, pitchingEq.class_bb9_js, pitchingEq.class_bb9_gr);
+        const classHr9Adj = toPitchingClassAdj(classTransition, pitchingEq.class_hr9_fs, pitchingEq.class_hr9_sj, pitchingEq.class_hr9_js, pitchingEq.class_hr9_gr);
+        const lowBetterMult = (adj: number) => 1 - adj - (devAgg * 0.06);
+        const highBetterMult = (adj: number) => 1 + adj + (devAgg * 0.06);
+        const fromRole = normalizePitcherRole(p.player?.position || null);
+        const toRole = normalizePitcherRole(pitcherRoleFromSlot(p.position_slot) || p.player?.position || null);
+        const roleCurve = {
+          tier1Max: pitchingEq.rp_to_sp_low_better_tier1_max,
+          tier2Max: pitchingEq.rp_to_sp_low_better_tier2_max,
+          tier3Max: pitchingEq.rp_to_sp_low_better_tier3_max,
+          tier1Mult: pitchingEq.rp_to_sp_low_better_tier1_mult,
+          tier2Mult: pitchingEq.rp_to_sp_low_better_tier2_mult,
+          tier3Mult: pitchingEq.rp_to_sp_low_better_tier3_mult,
+        };
+        const pEraBase = sourceBase?.p_era == null ? null : Number(sourceBase.p_era) * lowBetterMult(classEraAdj);
+        const pFipBase = sourceBase?.p_fip == null ? null : Number(sourceBase.p_fip) * lowBetterMult(classFipAdj);
+        const pWhipBase = sourceBase?.p_whip == null ? null : Number(sourceBase.p_whip) * lowBetterMult(classWhipAdj);
+        const pK9Base = sourceBase?.p_k9 == null ? null : Number(sourceBase.p_k9) * highBetterMult(classK9Adj);
+        const pBb9Base = sourceBase?.p_bb9 == null ? null : Number(sourceBase.p_bb9) * lowBetterMult(classBb9Adj);
+        const pHr9Base = sourceBase?.p_hr9 == null ? null : Number(sourceBase.p_hr9) * lowBetterMult(classHr9Adj);
+        const pEraAdj = applyRoleTransitionAdjustment(pEraBase, pitchingEq.sp_to_rp_reg_era_pct, fromRole, toRole, true, roleCurve);
+        const pFipAdj = applyRoleTransitionAdjustment(pFipBase, pitchingEq.sp_to_rp_reg_fip_pct, fromRole, toRole, true, roleCurve);
+        const pWhipAdj = applyRoleTransitionAdjustment(pWhipBase, pitchingEq.sp_to_rp_reg_whip_pct, fromRole, toRole, true, roleCurve);
+        const pK9Adj = applyRoleTransitionAdjustment(pK9Base, pitchingEq.sp_to_rp_reg_k9_pct, fromRole, toRole, false, roleCurve);
+        const pBb9Adj = applyRoleTransitionAdjustment(pBb9Base, pitchingEq.sp_to_rp_reg_bb9_pct, fromRole, toRole, true, roleCurve);
+        const pHr9Adj = applyRoleTransitionAdjustment(pHr9Base, pitchingEq.sp_to_rp_reg_hr9_pct, fromRole, toRole, true, roleCurve);
+        const eraPlus = calcPitchingPlus(pEraAdj, pitchingEq.era_plus_ncaa_avg, pitchingEq.era_plus_ncaa_sd, pitchingEq.era_plus_scale, false);
+        const fipPlus = calcPitchingPlus(pFipAdj, pitchingEq.fip_plus_ncaa_avg, pitchingEq.fip_plus_ncaa_sd, pitchingEq.fip_plus_scale, false);
+        const whipPlus = calcPitchingPlus(pWhipAdj, pitchingEq.whip_plus_ncaa_avg, pitchingEq.whip_plus_ncaa_sd, pitchingEq.whip_plus_scale, false);
+        const k9Plus = calcPitchingPlus(pK9Adj, pitchingEq.k9_plus_ncaa_avg, pitchingEq.k9_plus_ncaa_sd, pitchingEq.k9_plus_scale, true);
+        const bb9Plus = calcPitchingPlus(pBb9Adj, pitchingEq.bb9_plus_ncaa_avg, pitchingEq.bb9_plus_ncaa_sd, pitchingEq.bb9_plus_scale, false);
+        const hr9Plus = calcPitchingPlus(pHr9Adj, pitchingEq.hr9_plus_ncaa_avg, pitchingEq.hr9_plus_ncaa_sd, pitchingEq.hr9_plus_scale, false);
+        const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
+          ? (Number(eraPlus) * pitchingEq.era_plus_weight) +
+            (Number(fipPlus) * pitchingEq.fip_plus_weight) +
+            (Number(whipPlus) * pitchingEq.whip_plus_weight) +
+            (Number(k9Plus) * pitchingEq.k9_plus_weight) +
+            (Number(bb9Plus) * pitchingEq.bb9_plus_weight) +
+            (Number(hr9Plus) * pitchingEq.hr9_plus_weight)
+          : (sourceBase?.p_rv_plus ?? sourceBase?.p_wrc_plus ?? null);
+        source = {
+          ...sourceBase,
+          p_era: pEraAdj ?? sourceBase?.p_era ?? null,
+          p_fip: pFipAdj ?? sourceBase?.p_fip ?? null,
+          p_whip: pWhipAdj ?? sourceBase?.p_whip ?? null,
+          p_k9: pK9Adj ?? sourceBase?.p_k9 ?? null,
+          p_bb9: pBb9Adj ?? sourceBase?.p_bb9 ?? null,
+          p_hr9: pHr9Adj ?? sourceBase?.p_hr9 ?? null,
+          p_rv_plus: pRvPlus,
+          p_wrc_plus: pRvPlus,
+        };
+      }
+      const pwarComputed = computePitcherPwar(p, source);
+      const pwar = pwarComputed ?? source?.p_war ?? source?.owar ?? null;
+      return { sim, shown: source, shownWrc: source?.p_rv_plus ?? source?.p_wrc_plus ?? null, owar: pwar ?? 0, pwar };
+    }
     const shownWrc = shown?.p_wrc_plus ?? null;
     const baseOwar = computeOWarFromWrcPlus(shownWrc) ?? p.nil_owar ?? 0;
     const owar = baseOwar * depthRoleMultiplier(p.depth_role);
-    return { sim, shown, shownWrc, owar };
-  }, [simulateTransferProjection]);
+    return { sim, shown, shownWrc, owar, pwar: null };
+  }, [computePitcherPwar, computeReturnerPitchingProjection, simulateTransferProjection, pitchingEq]);
 
   const projectedPlayerScore = useCallback((p: BuildPlayer) => {
     const { owar } = playerProjection(p);
@@ -2132,8 +3481,25 @@ export default function TeamBuilder() {
   const nilBasePerOWar = eqNum("nil_base_per_owar", 25000);
   const projectedNilForPlayer = useCallback((p: BuildPlayer) => {
     if (!isProjectedStatus(p)) return 0;
+    if (isPitcher(p)) {
+      const projection = playerProjection(p);
+      const source: any = projection.shown ?? projection.sim ?? p.transfer_snapshot ?? p.prediction ?? null;
+      const direct = source?.nil_valuation ?? null;
+      if (Number.isFinite(Number(direct))) return Number(direct);
+      const pwar = projection.pwar;
+      if (!Number.isFinite(Number(pwar))) return 0;
+      const currentPitcherRole = normalizePitcherRole(
+        pitcherRoleFromSlot(p.position_slot) || p.player?.position || null,
+      );
+      const conference = selectedTeam
+        ? (teamByKey.get(normalizeKey(selectedTeam))?.conference ?? p.player?.conference ?? null)
+        : (p.player?.conference ?? null);
+      const ptm = getProgramTierMultiplierByConference(conference, pitchingTierMultipliers);
+      const pvm = pitchingPvfForRole(currentPitcherRole);
+      return Number(pwar) * pitchingEq.market_dollars_per_war * ptm * pvm;
+    }
     return projectedPlayerScore(p) * nilBasePerOWar;
-  }, [projectedPlayerScore, nilBasePerOWar]);
+  }, [nilBasePerOWar, pitchingEq.market_dollars_per_war, pitchingPvfForRole, pitchingTierMultipliers, projectedPlayerScore, playerProjection, selectedTeam, teamByKey]);
   const effectiveNilForPlayer = useCallback((p: BuildPlayer) => {
     if (!isProjectedStatus(p)) return 0;
     const actualNil = Number(p.nil_value) || 0;
@@ -2163,6 +3529,16 @@ export default function TeamBuilder() {
     let totalOWar = 0;
     let totalActualNil = 0;
     let totalProjectedNil = 0;
+    let sumPEra = 0;
+    let sumPWhip = 0;
+    let sumPK9 = 0;
+    let sumPBb9 = 0;
+    let sumPRvPlus = 0;
+    let weightPEra = 0;
+    let weightPWhip = 0;
+    let weightPK9 = 0;
+    let weightPBb9 = 0;
+    let weightPRvPlus = 0;
 
     for (const p of rows) {
       if (!isProjectedStatus(p)) continue;
@@ -2184,6 +3560,41 @@ export default function TeamBuilder() {
         sumWrc += shown.p_wrc_plus * mult;
         weightWrc += mult;
       }
+      if (isPitcher(p)) {
+        const source: any = shown ?? ((p.roster_status === "target") ? p.transfer_snapshot : p.prediction) ?? null;
+        const role = normalizePitcherRole(
+          pitcherRoleFromSlot(p.position_slot) || p.player?.position || null,
+        );
+        const depthRole = normalizePitcherDepthRole(p.depth_role, role);
+        const ipWeight = role === "SP"
+          ? (depthRole === "weekday_starter" ? pitchingEq.pwar_ip_sm : pitchingEq.pwar_ip_sp)
+          : pitchingEq.pwar_ip_rp;
+        const pEra = source?.p_era ?? null;
+        const pWhip = source?.p_whip ?? null;
+        const pK9 = source?.p_k9 ?? null;
+        const pBb9 = source?.p_bb9 ?? null;
+        const pRvPlus = source?.p_rv_plus ?? source?.p_wrc_plus ?? null;
+        if (pEra != null) {
+          sumPEra += Number(pEra) * ipWeight;
+          weightPEra += ipWeight;
+        }
+        if (pWhip != null) {
+          sumPWhip += Number(pWhip) * ipWeight;
+          weightPWhip += ipWeight;
+        }
+        if (pK9 != null) {
+          sumPK9 += Number(pK9) * ipWeight;
+          weightPK9 += ipWeight;
+        }
+        if (pBb9 != null) {
+          sumPBb9 += Number(pBb9) * ipWeight;
+          weightPBb9 += ipWeight;
+        }
+        if (pRvPlus != null) {
+          sumPRvPlus += Number(pRvPlus) * ipWeight;
+          weightPRvPlus += ipWeight;
+        }
+      }
       totalOWar += owar ?? 0;
       totalActualNil += effectiveNilForPlayer(p);
       totalProjectedNil += projectedNilForPlayer(p);
@@ -2194,13 +3605,21 @@ export default function TeamBuilder() {
       obp: weightObp > 0 ? sumObp / weightObp : null,
       slg: weightSlg > 0 ? sumSlg / weightSlg : null,
       wrcPlusAvg: weightWrc > 0 ? sumWrc / weightWrc : null,
+      pEraAvg: weightPEra > 0 ? sumPEra / weightPEra : null,
+      pWhipAvg: weightPWhip > 0 ? sumPWhip / weightPWhip : null,
+      pK9Avg: weightPK9 > 0 ? sumPK9 / weightPK9 : null,
+      pBb9Avg: weightPBb9 > 0 ? sumPBb9 / weightPBb9 : null,
+      pRvPlusAvg: weightPRvPlus > 0 ? sumPRvPlus / weightPRvPlus : null,
       totalOWar,
       totalActualNil,
       totalProjectedNil,
     };
-  }, [isProjectedStatus, playerProjection, effectiveNilForPlayer, projectedNilForPlayer]);
-  const tableTotals = useMemo(() => calcTotals(rosterPlayers), [calcTotals, rosterPlayers]);
-  const targetTableTotals = useMemo(() => calcTotals(targetPlayers), [calcTotals, targetPlayers]);
+  }, [isProjectedStatus, playerProjection, effectiveNilForPlayer, projectedNilForPlayer, pitchingEq]);
+  const rosterTableTotals = useMemo(() => calcTotals(rosterPlayers), [calcTotals, rosterPlayers]);
+  const positionTableTotals = useMemo(() => calcTotals(positionPlayers), [calcTotals, positionPlayers]);
+  const pitcherTableTotals = useMemo(() => calcTotals(pitchers), [calcTotals, pitchers]);
+  const targetPositionTableTotals = useMemo(() => calcTotals(targetPositionPlayers), [calcTotals, targetPositionPlayers]);
+  const targetPitcherTableTotals = useMemo(() => calcTotals(targetPitchers), [calcTotals, targetPitchers]);
 
   const depthKey = (slot: string, depth: number) => `${slot}:${depth}`;
 
@@ -2419,19 +3838,47 @@ export default function TeamBuilder() {
   const renderPlayerRow = (p: BuildPlayer, idx: number, globalIdx: number) => {
     const projection = playerProjection(p);
     const isTarget = (p.roster_status || "returner") === "target";
+    const isPitcherRow = isPitcher(p);
+    const currentPitcherRole = normalizePitcherRole(
+      pitcherRoleFromSlot(p.position_slot) || p.player?.position || null,
+    );
+    const pitcherDepthRole = normalizePitcherDepthRole(p.depth_role, currentPitcherRole);
     const sim = isTarget ? simulateTransferProjection(p) : null;
     // For target players, show raw projected oWAR/NIL (no depth role multiplier) to match Transfer Portal
     const projectedOwar = isTarget ? (sim?.owar ?? null) : (projection.owar ?? null);
-    const projectedNil = isTarget
-      ? (sim?.nil_valuation ?? projectedNilForPlayer(p))
-      : projectedNilForPlayer(p);
+    const projectedPwar = isPitcherRow ? projection.pwar : null;
+    const projectedNilRaw = isPitcherRow
+      ? projectedNilForPlayer(p)
+      : (isTarget
+          ? (sim?.nil_valuation ?? p.transfer_snapshot?.nil_valuation ?? projectedNilForPlayer(p))
+          : projectedNilForPlayer(p));
+    const projectedNil = (() => {
+      const n = Number(projectedNilRaw);
+      if (Number.isFinite(n)) return n;
+      const source: any = projection.shown ?? projection.sim ?? p.transfer_snapshot ?? null;
+      const fallback = Number(source?.nil_valuation ?? 0);
+      return Number.isFinite(fallback) ? fallback : 0;
+    })();
     return (
     <TableRow key={globalIdx}>
       <TableCell className="font-medium">
         <div className="flex items-center gap-2">
           {p.player_id ? (
             <Link
-              to={profileRouteFor(p.player_id, p.player?.position ?? null)}
+              to={profileRouteFor(
+                p.player_id,
+                isPitcherRow
+                  ? currentPitcherRole
+                  : (p.position_slot || p.player?.position || null),
+                p.player?.position || null,
+              )}
+              className="text-primary underline underline-offset-2 hover:opacity-80"
+            >
+              {getPlayerName(p)}
+            </Link>
+          ) : isPitcherRow ? (
+            <Link
+              to={storagePitcherRouteFor(getPlayerName(p), p.player?.team || null)}
               className="text-primary underline underline-offset-2 hover:opacity-80"
             >
               {getPlayerName(p)}
@@ -2452,7 +3899,19 @@ export default function TeamBuilder() {
         ) : (
           <Select
             value={p.roster_status || "returner"}
-            onValueChange={(v) => updatePlayer(globalIdx, { roster_status: v as "returner" | "leaving" })}
+            onValueChange={(v) => {
+              if (v === "leaving") {
+                const removedName = getPlayerName(p);
+                setRosterPlayers((prev) => prev.filter((_, i) => i !== globalIdx));
+                setDirty(true);
+                toast({
+                  title: "Removed from build",
+                  description: `${removedName} was removed from this build only.`,
+                });
+                return;
+              }
+              updatePlayer(globalIdx, { roster_status: "returner" });
+            }}
           >
             <SelectTrigger className="w-[110px] h-8">
               <SelectValue />
@@ -2466,32 +3925,60 @@ export default function TeamBuilder() {
       </TableCell>
       <TableCell>{p.player?.position || "—"}</TableCell>
       <TableCell>
-        <Select
-          value={p.position_slot || "none"}
-          onValueChange={(v) => {
-            const nextSlot = v === "none" ? null : v;
-            updatePlayer(globalIdx, { position_slot: nextSlot });
-            if (p.player_id) {
-              const isPitchSlot = !!nextSlot && [...PITCHER_SLOTS].includes(nextSlot as typeof PITCHER_SLOTS[number]);
-              const nextPitchRole = isPitchSlot ? pitcherRoleFromSlot(nextSlot) : null;
-              updatePlayerOverride(p.player_id, {
-                position: nextSlot,
-                pitcher_role: nextPitchRole,
+        {isPitcherRow ? (
+          <Select
+            value={currentPitcherRole}
+            onValueChange={(v) => {
+              const nextRole = v as "SP" | "RP";
+              updatePlayer(globalIdx, {
+                position_slot: nextRole,
+                depth_role: normalizePitcherDepthRole(p.depth_role, nextRole),
               });
-              writeLegacyPitchingRoleOverride(getPlayerName(p), p.player?.team || null, nextPitchRole);
-            }
-          }}
-        >
-          <SelectTrigger className="w-20 h-8">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none">—</SelectItem>
-            {[...POSITION_SLOTS, ...PITCHER_SLOTS].map((s) => (
-              <SelectItem key={s} value={s}>{s}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+              if (p.player_id) {
+                updatePlayerOverride(p.player_id, {
+                  position: nextRole,
+                  pitcher_role: nextRole,
+                });
+                writeLegacyPitchingRoleOverride(getPlayerName(p), p.player?.team || null, nextRole);
+              }
+            }}
+          >
+            <SelectTrigger className="w-20 h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="SP">SP</SelectItem>
+              <SelectItem value="RP">RP</SelectItem>
+            </SelectContent>
+          </Select>
+        ) : (
+          <Select
+            value={p.position_slot || "none"}
+            onValueChange={(v) => {
+              const nextSlot = v === "none" ? null : v;
+              updatePlayer(globalIdx, { position_slot: nextSlot });
+              if (p.player_id) {
+                const isPitchSlot = !!nextSlot && [...PITCHER_SLOTS].includes(nextSlot as typeof PITCHER_SLOTS[number]);
+                const nextPitchRole = isPitchSlot ? pitcherRoleFromSlot(nextSlot) : null;
+                updatePlayerOverride(p.player_id, {
+                  position: nextSlot,
+                  pitcher_role: nextPitchRole,
+                });
+                writeLegacyPitchingRoleOverride(getPlayerName(p), p.player?.team || null, nextPitchRole);
+              }
+            }}
+          >
+            <SelectTrigger className="w-20 h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">—</SelectItem>
+              {[...POSITION_SLOTS, ...PITCHER_SLOTS].map((s) => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </TableCell>
       <TableCell>
         <Select
@@ -2531,41 +4018,88 @@ export default function TeamBuilder() {
         </Select>
       </TableCell>
       <TableCell>
-        <Select
-          value={p.depth_role || "starter"}
-          onValueChange={(v) => updatePlayer(globalIdx, { depth_role: v as "starter" | "utility" | "bench" })}
-        >
-          <SelectTrigger className="w-[96px] h-8">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="starter">Starter</SelectItem>
-            <SelectItem value="utility">Utility</SelectItem>
-            <SelectItem value="bench">Bench</SelectItem>
-          </SelectContent>
-        </Select>
+        {isPitcherRow ? (
+          <Select
+            value={pitcherDepthRole}
+            onValueChange={(v) =>
+              updatePlayer(globalIdx, {
+                depth_role: v as "weekend_starter" | "weekday_starter" | "high_leverage_reliever" | "low_impact_reliever",
+              })
+            }
+          >
+            <SelectTrigger className="w-[170px] h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {currentPitcherRole === "SP" ? (
+                <>
+                  <SelectItem value="weekend_starter">Weekend Starter</SelectItem>
+                  <SelectItem value="weekday_starter">Weekday Starter</SelectItem>
+                </>
+              ) : (
+                <>
+                  <SelectItem value="high_leverage_reliever">High Leverage Reliever</SelectItem>
+                  <SelectItem value="low_impact_reliever">Low Leverage Reliever</SelectItem>
+                </>
+              )}
+            </SelectContent>
+          </Select>
+        ) : (
+          <Select
+            value={p.depth_role || "starter"}
+            onValueChange={(v) => updatePlayer(globalIdx, { depth_role: v as "starter" | "utility" | "bench" })}
+          >
+            <SelectTrigger className="w-[96px] h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="starter">Starter</SelectItem>
+              <SelectItem value="utility">Utility</SelectItem>
+              <SelectItem value="bench">Bench</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
       </TableCell>
       <TableCell className="text-center">
         {(() => {
-          const sim = p.roster_status === "target" ? simulateTransferProjection(p) : null;
+          const isPitcherRow = isPitcher(p);
+          const shown: any = projection.shown ?? null;
+          if (isPitcherRow) {
+            const source: any = shown ?? ((p.roster_status === "target") ? p.transfer_snapshot : p.prediction) ?? null;
+            const pEra = source?.p_era ?? null;
+            const pWhip = source?.p_whip ?? null;
+            const pK9 = source?.p_k9 ?? null;
+            const pBb9 = source?.p_bb9 ?? null;
+            if (pEra == null && pWhip == null && pK9 == null && pBb9 == null) return "—";
+            return (
+              <span className="text-xs font-mono">
+                {pEra != null ? Number(pEra).toFixed(2) : "—"} / {pWhip != null ? Number(pWhip).toFixed(2) : "—"} / {pK9 != null ? Number(pK9).toFixed(2) : "—"} / {pBb9 != null ? Number(pBb9).toFixed(2) : "—"}
+              </span>
+            );
+          }
           const projected = (p.roster_status === "target")
-            ? { p_avg: sim?.p_avg ?? null, p_obp: sim?.p_obp ?? null, p_slg: sim?.p_slg ?? null }
+            ? { p_avg: shown?.p_avg ?? null, p_obp: shown?.p_obp ?? null, p_slg: shown?.p_slg ?? null }
             : { p_avg: p.prediction?.p_avg ?? null, p_obp: p.prediction?.p_obp ?? null, p_slg: p.prediction?.p_slg ?? null };
           if (projected.p_avg == null && projected.p_obp == null && projected.p_slg == null) return "—";
           return (
-          <span className="text-xs font-mono">
-            {projected.p_avg?.toFixed(3) || "—"} / {projected.p_obp?.toFixed(3) || "—"} / {projected.p_slg?.toFixed(3) || "—"}
-          </span>
+            <span className="text-xs font-mono">
+              {projected.p_avg?.toFixed(3) || "—"} / {projected.p_obp?.toFixed(3) || "—"} / {projected.p_slg?.toFixed(3) || "—"}
+            </span>
           );
         })()}
       </TableCell>
       <TableCell className="text-center">
         {(() => {
-          const sim = p.roster_status === "target" ? simulateTransferProjection(p) : null;
-          const shownWrc = (p.roster_status === "target")
-            ? (sim?.p_wrc_plus ?? null)
-            : (p.prediction?.p_wrc_plus ?? null);
-          return shownWrc != null ? shownWrc.toFixed(0) : "—";
+          const sim = projection.sim ?? null;
+          const shown: any = projection.shown ?? null;
+          const shownMetric = isPitcherRow
+            ? ((p.roster_status === "target")
+                ? (shown?.p_rv_plus ?? shown?.p_wrc_plus ?? sim?.p_rv_plus ?? p.transfer_snapshot?.p_rv_plus ?? p.transfer_snapshot?.p_wrc_plus ?? null)
+                : (shown?.p_rv_plus ?? shown?.p_wrc_plus ?? (p.prediction as any)?.p_rv_plus ?? (p.prediction as any)?.p_wrc_plus ?? p.transfer_snapshot?.p_rv_plus ?? null))
+            : ((p.roster_status === "target")
+                ? (shown?.p_wrc_plus ?? sim?.p_wrc_plus ?? p.transfer_snapshot?.p_wrc_plus ?? null)
+                : (p.prediction?.p_wrc_plus ?? null));
+          return shownMetric != null ? shownMetric.toFixed(0) : "—";
         })()}
       </TableCell>
       <TableCell className="text-center">
@@ -2577,11 +4111,19 @@ export default function TeamBuilder() {
           onChange={(e) => updatePlayer(globalIdx, { nil_value: parseCommaNumber(e.target.value) })}
         />
       </TableCell>
-      <TableCell className={`text-center font-mono text-xs ${(p.roster_status || "returner") === "leaving" ? "text-muted-foreground" : projectedNilTierClass(projectedNil, totalBudget, fallbackRosterTotalPlayerScore)}`}>
-        {(p.roster_status || "returner") === "leaving" ? "—" : `$${Math.round(projectedNil).toLocaleString()}`}
+      <TableCell className={`text-center font-mono text-xs ${(p.roster_status || "returner") === "leaving"
+        ? "text-muted-foreground"
+        : (isPitcherRow ? "text-foreground" : projectedNilTierClass(projectedNil, totalBudget, fallbackRosterTotalPlayerScore))}`}>
+        {(p.roster_status || "returner") === "leaving"
+          ? "—"
+          : `$${Math.max(0, Math.round(Number.isFinite(Number(projectedNil)) ? Number(projectedNil) : 0)).toLocaleString()}`}
       </TableCell>
       <TableCell className="text-center font-mono text-xs">
-        {(p.roster_status || "returner") === "leaving" ? "—" : (projectedOwar != null ? projectedOwar.toFixed(2) : "—")}
+        {(p.roster_status || "returner") === "leaving"
+          ? "—"
+          : (isPitcherRow
+            ? (projectedPwar != null ? projectedPwar.toFixed(2) : "—")
+            : (projectedOwar != null ? projectedOwar.toFixed(2) : "—"))}
       </TableCell>
       <TableCell>
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => removePlayer(globalIdx)}>
@@ -2710,7 +4252,7 @@ export default function TeamBuilder() {
             <CardContent className="pt-4 pb-4 flex items-center gap-3">
               <BarChart3 className="h-5 w-5 text-muted-foreground" />
               <div>
-                <p className="text-2xl font-bold">{tableTotals.totalOWar.toFixed(2)}</p>
+                <p className="text-2xl font-bold">{rosterTableTotals.totalOWar.toFixed(2)}</p>
                 <p className="text-xs text-muted-foreground">Total WAR</p>
               </div>
             </CardContent>
@@ -2844,22 +4386,20 @@ export default function TeamBuilder() {
                     <TableRow className="bg-muted/40 font-medium">
                       <TableCell colSpan={7} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        {tableTotals.avg != null && tableTotals.obp != null && tableTotals.slg != null
-                          ? `${tableTotals.avg.toFixed(3)} / ${tableTotals.obp.toFixed(3)} / ${tableTotals.slg.toFixed(3)}`
+                        {positionTableTotals.avg != null && positionTableTotals.obp != null && positionTableTotals.slg != null
+                          ? `${positionTableTotals.avg.toFixed(3)} / ${positionTableTotals.obp.toFixed(3)} / ${positionTableTotals.slg.toFixed(3)}`
                           : "—"}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        {tableTotals.wrcPlusAvg != null ? tableTotals.wrcPlusAvg.toFixed(0) : "—"}
+                        {positionTableTotals.wrcPlusAvg != null ? positionTableTotals.wrcPlusAvg.toFixed(0) : "—"}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        ${Math.round(tableTotals.totalActualNil).toLocaleString()}
+                        ${Math.round(positionTableTotals.totalActualNil).toLocaleString()}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        ${Math.round(tableTotals.totalProjectedNil).toLocaleString()}
+                        ${Math.round(positionTableTotals.totalProjectedNil).toLocaleString()}
                       </TableCell>
-                      <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        {tableTotals.totalOWar.toFixed(2)}
-                      </TableCell>
+                      <TableCell className="font-mono text-sm font-semibold text-center py-2">—</TableCell>
                       <TableCell className="py-2"></TableCell>
                     </TableRow>
                   </TableBody>
@@ -2879,15 +4419,15 @@ export default function TeamBuilder() {
                       <TableHead>Player</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Pos</TableHead>
-                      <TableHead>Position Change</TableHead>
+                      <TableHead>Role</TableHead>
                       <TableHead>Class Adj</TableHead>
                       <TableHead>Dev Agg</TableHead>
                       <TableHead>Depth</TableHead>
-                      <TableHead className="text-center">pAVG/pOBP/pSLG</TableHead>
-                      <TableHead className="text-center">wRC+</TableHead>
+                      <TableHead className="text-center">pERA/pWHIP/pK/9/pBB/9</TableHead>
+                      <TableHead className="text-center">pRV+</TableHead>
                       <TableHead className="text-center">Actual NIL ($)</TableHead>
                       <TableHead className="text-center">Projected NIL ($)</TableHead>
-                      <TableHead className="text-center">oWAR</TableHead>
+                      <TableHead className="text-center">pWAR</TableHead>
                       <TableHead className="w-10"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -2903,21 +4443,21 @@ export default function TeamBuilder() {
                     <TableRow className="bg-muted/40 font-medium">
                       <TableCell colSpan={7} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        {tableTotals.avg != null && tableTotals.obp != null && tableTotals.slg != null
-                          ? `${tableTotals.avg.toFixed(3)} / ${tableTotals.obp.toFixed(3)} / ${tableTotals.slg.toFixed(3)}`
+                        {pitcherTableTotals.pEraAvg != null && pitcherTableTotals.pWhipAvg != null && pitcherTableTotals.pK9Avg != null && pitcherTableTotals.pBb9Avg != null
+                          ? `${pitcherTableTotals.pEraAvg.toFixed(2)} / ${pitcherTableTotals.pWhipAvg.toFixed(2)} / ${pitcherTableTotals.pK9Avg.toFixed(2)} / ${pitcherTableTotals.pBb9Avg.toFixed(2)}`
                           : "—"}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        {tableTotals.wrcPlusAvg != null ? tableTotals.wrcPlusAvg.toFixed(0) : "—"}
+                        {pitcherTableTotals.pRvPlusAvg != null ? pitcherTableTotals.pRvPlusAvg.toFixed(0) : "—"}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        ${Math.round(tableTotals.totalActualNil).toLocaleString()}
+                        ${Math.round(pitcherTableTotals.totalActualNil).toLocaleString()}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        ${Math.round(tableTotals.totalProjectedNil).toLocaleString()}
+                        ${Math.round(pitcherTableTotals.totalProjectedNil).toLocaleString()}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        {tableTotals.totalOWar.toFixed(2)}
+                        {pitcherTableTotals.totalOWar.toFixed(2)}
                       </TableCell>
                       <TableCell className="py-2"></TableCell>
                     </TableRow>
@@ -3022,16 +4562,26 @@ export default function TeamBuilder() {
                   />
                   {targetPlayerSearchOpen && filteredTargetPlayerSearch.length > 0 && (
                     <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
-                      {filteredTargetPlayerSearch.map((p) => (
+                      {filteredTargetPlayerSearch.map((p, idx) => {
+                        const stableKey = p.id
+                          ? `db-${p.id}`
+                          : `local-${normalizeName(`${p.first_name || ""} ${p.last_name || ""}`)}-${normalizeName(p.team || "")}-${normalizeName(p.position || "")}-${idx}`;
+                        return (
                         <div
-                          key={p.id}
-                          className="px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground flex justify-between items-center gap-2"
-                          onMouseDown={() => addPlayerFromTargetSearch(p)}
+                          key={stableKey}
+                          className="px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground flex items-center justify-between gap-3"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); void addPlayerFromTargetSearch(p); }}
                         >
-                          <span className="font-medium">{p.first_name} {p.last_name}</span>
-                          <span className="text-muted-foreground text-xs">{p.team || "—"} · {p.position || "—"}</span>
+                          <div className="min-w-0">
+                            <div className="font-medium truncate">{p.first_name} {p.last_name}</div>
+                            <div className="text-xs text-muted-foreground truncate">{p.team || "—"} • {p.position || "—"}</div>
+                          </div>
+                          <span className="text-[11px] px-2 py-0.5 rounded border border-border/70 text-muted-foreground shrink-0">
+                            {p.position || "—"}
+                          </span>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                   {targetPlayerSearchQuery && filteredTargetPlayerSearch.length === 0 && (
@@ -3078,22 +4628,20 @@ export default function TeamBuilder() {
                     <TableRow className="bg-muted/40 font-medium">
                       <TableCell colSpan={7} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        {targetTableTotals.avg != null && targetTableTotals.obp != null && targetTableTotals.slg != null
-                          ? `${targetTableTotals.avg.toFixed(3)} / ${targetTableTotals.obp.toFixed(3)} / ${targetTableTotals.slg.toFixed(3)}`
+                        {targetPositionTableTotals.avg != null && targetPositionTableTotals.obp != null && targetPositionTableTotals.slg != null
+                          ? `${targetPositionTableTotals.avg.toFixed(3)} / ${targetPositionTableTotals.obp.toFixed(3)} / ${targetPositionTableTotals.slg.toFixed(3)}`
                           : "—"}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        {targetTableTotals.wrcPlusAvg != null ? targetTableTotals.wrcPlusAvg.toFixed(0) : "—"}
+                        {targetPositionTableTotals.wrcPlusAvg != null ? targetPositionTableTotals.wrcPlusAvg.toFixed(0) : "—"}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        ${Math.round(targetTableTotals.totalActualNil).toLocaleString()}
+                        ${Math.round(targetPositionTableTotals.totalActualNil).toLocaleString()}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        ${Math.round(targetTableTotals.totalProjectedNil).toLocaleString()}
+                        ${Math.round(targetPositionTableTotals.totalProjectedNil).toLocaleString()}
                       </TableCell>
-                      <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        {targetTableTotals.totalOWar.toFixed(2)}
-                      </TableCell>
+                      <TableCell className="font-mono text-sm font-semibold text-center py-2">—</TableCell>
                       <TableCell className="py-2"></TableCell>
                     </TableRow>
                   </TableBody>
@@ -3112,15 +4660,15 @@ export default function TeamBuilder() {
                       <TableHead>Player</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Pos</TableHead>
-                      <TableHead>Position Change</TableHead>
+                      <TableHead>Role</TableHead>
                       <TableHead>Class Adj</TableHead>
                       <TableHead>Dev Agg</TableHead>
                       <TableHead>Depth</TableHead>
-                      <TableHead className="text-center">pAVG/pOBP/pSLG</TableHead>
-                      <TableHead className="text-center">wRC+</TableHead>
+                      <TableHead className="text-center">pERA/pWHIP/pK/9/pBB/9</TableHead>
+                      <TableHead className="text-center">pRV+</TableHead>
                       <TableHead className="text-center">Actual NIL ($)</TableHead>
                       <TableHead className="text-center">Projected NIL ($)</TableHead>
-                      <TableHead className="text-center">oWAR</TableHead>
+                      <TableHead className="text-center">pWAR</TableHead>
                       <TableHead className="w-10"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -3136,21 +4684,21 @@ export default function TeamBuilder() {
                     <TableRow className="bg-muted/40 font-medium">
                       <TableCell colSpan={7} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        {targetTableTotals.avg != null && targetTableTotals.obp != null && targetTableTotals.slg != null
-                          ? `${targetTableTotals.avg.toFixed(3)} / ${targetTableTotals.obp.toFixed(3)} / ${targetTableTotals.slg.toFixed(3)}`
+                        {targetPitcherTableTotals.pEraAvg != null && targetPitcherTableTotals.pWhipAvg != null && targetPitcherTableTotals.pK9Avg != null && targetPitcherTableTotals.pBb9Avg != null
+                          ? `${targetPitcherTableTotals.pEraAvg.toFixed(2)} / ${targetPitcherTableTotals.pWhipAvg.toFixed(2)} / ${targetPitcherTableTotals.pK9Avg.toFixed(2)} / ${targetPitcherTableTotals.pBb9Avg.toFixed(2)}`
                           : "—"}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        {targetTableTotals.wrcPlusAvg != null ? targetTableTotals.wrcPlusAvg.toFixed(0) : "—"}
+                        {targetPitcherTableTotals.pRvPlusAvg != null ? targetPitcherTableTotals.pRvPlusAvg.toFixed(0) : "—"}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        ${Math.round(targetTableTotals.totalActualNil).toLocaleString()}
+                        ${Math.round(targetPitcherTableTotals.totalActualNil).toLocaleString()}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        ${Math.round(targetTableTotals.totalProjectedNil).toLocaleString()}
+                        ${Math.round(targetPitcherTableTotals.totalProjectedNil).toLocaleString()}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        {targetTableTotals.totalOWar.toFixed(2)}
+                        {targetPitcherTableTotals.totalOWar.toFixed(2)}
                       </TableCell>
                       <TableCell className="py-2"></TableCell>
                     </TableRow>

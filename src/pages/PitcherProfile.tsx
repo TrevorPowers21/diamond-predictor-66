@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, TrendingUp } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -387,6 +387,7 @@ function ScoutGrade({ value, fullLabel }: { value: number | null; fullLabel: str
 export default function PitcherProfile() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { hasRole } = useAuth();
   const isAdmin = hasRole("admin");
   const isStorageRoute = !!id && id.startsWith(STORAGE_PREFIX);
@@ -1031,7 +1032,18 @@ export default function PitcherProfile() {
     <DashboardLayout>
       <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => {
+              const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+              if (returnTo) {
+                navigate(returnTo);
+                return;
+              }
+              navigate(-1);
+            }}
+          >
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex-1">
