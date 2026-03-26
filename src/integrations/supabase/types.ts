@@ -264,6 +264,149 @@ export type Database = {
           },
         ]
       }
+      pitching_power_ratings_storage: {
+        Row: {
+          avg_ev_score: number | null
+          avg_exit_velo: number | null
+          barrel_pct: number | null
+          barrel_score: number | null
+          bb9_pr_plus: number | null
+          bb_pct: number | null
+          bb_score: number | null
+          chase_pct: number | null
+          chase_score: number | null
+          created_at: string
+          era_pr_plus: number | null
+          ev90: number | null
+          ev90_score: number | null
+          fip_pr_plus: number | null
+          gb_pct: number | null
+          gb_score: number | null
+          hh_pct: number | null
+          hh_score: number | null
+          hr9_pr_plus: number | null
+          id: string
+          iz_pct: number | null
+          iz_score: number | null
+          iz_whiff_pct: number | null
+          iz_whiff_score: number | null
+          k9_pr_plus: number | null
+          la_10_30_pct: number | null
+          la_10_30_score: number | null
+          ld_pct: number | null
+          ld_score: number | null
+          overall_pr_plus: number | null
+          player_id: string
+          player_name: string | null
+          pull_pct: number | null
+          pull_score: number | null
+          season: number
+          stuff_plus: number | null
+          stuff_score: number | null
+          team: string | null
+          updated_at: string
+          whip_pr_plus: number | null
+          whiff_pct: number | null
+          whiff_score: number | null
+        }
+        Insert: {
+          avg_ev_score?: number | null
+          avg_exit_velo?: number | null
+          barrel_pct?: number | null
+          barrel_score?: number | null
+          bb9_pr_plus?: number | null
+          bb_pct?: number | null
+          bb_score?: number | null
+          chase_pct?: number | null
+          chase_score?: number | null
+          created_at?: string
+          era_pr_plus?: number | null
+          ev90?: number | null
+          ev90_score?: number | null
+          fip_pr_plus?: number | null
+          gb_pct?: number | null
+          gb_score?: number | null
+          hh_pct?: number | null
+          hh_score?: number | null
+          hr9_pr_plus?: number | null
+          id?: string
+          iz_pct?: number | null
+          iz_score?: number | null
+          iz_whiff_pct?: number | null
+          iz_whiff_score?: number | null
+          k9_pr_plus?: number | null
+          la_10_30_pct?: number | null
+          la_10_30_score?: number | null
+          ld_pct?: number | null
+          ld_score?: number | null
+          overall_pr_plus?: number | null
+          player_id: string
+          player_name?: string | null
+          pull_pct?: number | null
+          pull_score?: number | null
+          season: number
+          stuff_plus?: number | null
+          stuff_score?: number | null
+          team?: string | null
+          updated_at?: string
+          whip_pr_plus?: number | null
+          whiff_pct?: number | null
+          whiff_score?: number | null
+        }
+        Update: {
+          avg_ev_score?: number | null
+          avg_exit_velo?: number | null
+          barrel_pct?: number | null
+          barrel_score?: number | null
+          bb9_pr_plus?: number | null
+          bb_pct?: number | null
+          bb_score?: number | null
+          chase_pct?: number | null
+          chase_score?: number | null
+          created_at?: string
+          era_pr_plus?: number | null
+          ev90?: number | null
+          ev90_score?: number | null
+          fip_pr_plus?: number | null
+          gb_pct?: number | null
+          gb_score?: number | null
+          hh_pct?: number | null
+          hh_score?: number | null
+          hr9_pr_plus?: number | null
+          id?: string
+          iz_pct?: number | null
+          iz_score?: number | null
+          iz_whiff_pct?: number | null
+          iz_whiff_score?: number | null
+          k9_pr_plus?: number | null
+          la_10_30_pct?: number | null
+          la_10_30_score?: number | null
+          ld_pct?: number | null
+          ld_score?: number | null
+          overall_pr_plus?: number | null
+          player_id?: string
+          player_name?: string | null
+          pull_pct?: number | null
+          pull_score?: number | null
+          season?: number
+          stuff_plus?: number | null
+          stuff_score?: number | null
+          team?: string | null
+          updated_at?: string
+          whip_pr_plus?: number | null
+          whiff_pct?: number | null
+          whiff_score?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pitching_power_ratings_storage_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       park_factors: {
         Row: {
           bb_factor: number | null

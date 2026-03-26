@@ -59,6 +59,7 @@ const normalizeHandedness = (value: string) => {
 
 const normalize = (v: string | null | undefined) =>
   (v || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+const isPitcherPosition = (v: string | null | undefined) => /^(SP|RP|CL|P|RHP|LHP)/i.test((v || "").trim());
 
 const toNum = (v: string | null | undefined) => {
   if (v == null) return null;
@@ -203,6 +204,18 @@ const displayValueForCol = (values: string[], newCol: number) => {
   return values[legacyIdx] || "";
 };
 
+const splitPlayerName = (raw: string) => {
+  const name = (raw || "").trim();
+  if (!name) return { first: "", last: "" };
+  if (name.includes(",")) {
+    const [last, first] = name.split(",").map((s) => s.trim());
+    return { first: first || "", last: last || "" };
+  }
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return { first: parts[0], last: "" };
+  return { first: parts.slice(0, -1).join(" "), last: parts[parts.length - 1] };
+};
+
 export default function PitchingStatsStorageTable({ season }: { season: "2025" | "2026" }) {
   const storageKey = `pitching_stats_storage_${season}_v1`;
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -235,13 +248,13 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
   const { data: players = [] } = useQuery({
     queryKey: ["pitching-storage-player-directory"],
     queryFn: async () => {
-      const allPlayers: Array<{ id: string; first_name: string; last_name: string; team: string | null }> = [];
+      const allPlayers: Array<{ id: string; first_name: string; last_name: string; team: string | null; position: string | null }> = [];
       let from = 0;
       const pageSize = 1000;
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, team")
+          .select("id, first_name, last_name, team, position")
           .order("id", { ascending: true })
           .range(from, from + pageSize - 1);
         if (error) throw error;
@@ -259,6 +272,7 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
     const byName = new Map<string, { id: string }>();
     const byLastFirstInitial = new Map<string, { id: string }>();
     for (const p of players) {
+      if (!isPitcherPosition(p.position)) continue;
       const first = `${p.first_name || ""}`.trim();
       const last = `${p.last_name || ""}`.trim();
       const fullName = `${first} ${last}`.trim();
@@ -317,14 +331,78 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
       const seasonNum = Number(season);
       const upserts: Array<Record<string, any>> = [];
       const playerUpdates: Array<{ id: string; team: string | null; handedness: string | null }> = [];
-      const unmatched: string[] = [];
+      const unresolved: string[] = [];
+
+      const byNameTeam = new Map<string, string>();
+      const byName = new Map<string, string>();
+      for (const p of players) {
+        if (!isPitcherPosition((p as any).position)) continue;
+        const first = `${p.first_name || ""}`.trim();
+        const last = `${p.last_name || ""}`.trim();
+        const full = `${first} ${last}`.trim();
+        const nk = normalize(full);
+        const tk = normalize(p.team);
+        if (nk && !byName.has(nk)) byName.set(nk, p.id);
+        if (nk && tk && !byNameTeam.has(`${nk}|${tk}`)) byNameTeam.set(`${nk}|${tk}`, p.id);
+      }
+
+      const pendingCreate = new Map<string, { playerName: string; team: string | null; handedness: string | null; role: string | null }>();
+      for (const row of rows) {
+        const v = row.values || [];
+        const playerName = (v[0] || "").trim();
+        const team = (v[1] || "").trim() || null;
+        const handedness = normalizeHandedness((v[2] || "").trim()) || null;
+        const role = (v[3] || "").trim().toUpperCase() || null;
+        if (!playerName) continue;
+        const key = `${normalize(playerName)}|${normalize(team)}`;
+        const existing = byNameTeam.get(key) || byName.get(normalize(playerName));
+        if (!existing) pendingCreate.set(key, { playerName, team, handedness, role });
+      }
+
+      if (pendingCreate.size > 0) {
+        const inserts = Array.from(pendingCreate.values())
+          .map((m) => {
+            const parts = splitPlayerName(m.playerName);
+            if (!parts.first) return null;
+            return {
+              first_name: parts.first,
+              last_name: parts.last || "Unknown",
+              team: m.team,
+              handedness: m.handedness,
+              position: m.role === "SP" || m.role === "RP" ? m.role : "RP",
+            };
+          })
+          .filter(Boolean) as Array<Record<string, any>>;
+        if (inserts.length > 0) {
+          const CHUNK = 200;
+          for (let i = 0; i < inserts.length; i += CHUNK) {
+            const batch = inserts.slice(i, i + CHUNK);
+            const { data, error } = await supabase
+              .from("players")
+              .insert(batch)
+              .select("id, first_name, last_name, team, position");
+            if (error) throw error;
+            for (const p of data || []) {
+              const full = `${p.first_name || ""} ${p.last_name || ""}`.trim();
+              const nk = normalize(full);
+              const tk = normalize(p.team);
+              if (!isPitcherPosition((p as any).position)) continue;
+              if (nk && !byName.has(nk)) byName.set(nk, p.id);
+              if (nk && tk && !byNameTeam.has(`${nk}|${tk}`)) byNameTeam.set(`${nk}|${tk}`, p.id);
+            }
+          }
+        }
+      }
 
       for (const row of rows) {
         const values = row.values || [];
-        const playerId = resolvePlayerId(values);
         const playerName = (values[0] || "").trim() || "Unknown";
+        const team = (values[1] || "").trim() || null;
+        const nk = normalize(playerName);
+        const tk = normalize(team);
+        const playerId = byNameTeam.get(`${nk}|${tk}`) || byName.get(nk) || resolvePlayerId(values);
         if (!playerId) {
-          unmatched.push(playerName);
+          unresolved.push(playerName);
           continue;
         }
 
@@ -347,7 +425,6 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
           pitch_walks: pitchWalks,
         });
 
-        const team = (values[1] || "").trim() || null;
         const handedness = normalizeHandedness((values[2] || "").trim()) || null;
         playerUpdates.push({ id: playerId, team, handedness });
       }
@@ -357,9 +434,17 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
         return;
       }
 
+      // Avoid ON CONFLICT re-updating same key in one statement (duplicate player rows in CSV).
+      const dedupedUpserts = new Map<string, Record<string, any>>();
+      for (const row of upserts) {
+        const key = `${row.player_id}|${row.season}`;
+        dedupedUpserts.set(key, row); // last row wins
+      }
+      const upsertsUnique = Array.from(dedupedUpserts.values());
+
       const CHUNK = 250;
-      for (let i = 0; i < upserts.length; i += CHUNK) {
-        const batch = upserts.slice(i, i + CHUNK);
+      for (let i = 0; i < upsertsUnique.length; i += CHUNK) {
+        const batch = upsertsUnique.slice(i, i + CHUNK);
         const { error } = await supabase
           .from("season_stats")
           .upsert(batch, { onConflict: "player_id,season" });
@@ -383,10 +468,10 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
         );
       }
 
-      if (unmatched.length > 0) {
-        toast.success(`Synced ${upserts.length} rows. Unmatched: ${unmatched.length} (sample: ${unmatched.slice(0, 5).join(", ")})`);
+      if (unresolved.length > 0) {
+        toast.success(`Synced ${upsertsUnique.length} rows. Unmatched: ${unresolved.length} (sample: ${unresolved.slice(0, 5).join(", ")})`);
       } else {
-        toast.success(`Synced ${upserts.length} rows to Supabase.`);
+        toast.success(`Synced ${upsertsUnique.length} rows to Supabase.`);
       }
     } catch (err: any) {
       toast.error(err?.message || "Failed to sync to Supabase");

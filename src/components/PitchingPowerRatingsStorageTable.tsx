@@ -175,11 +175,24 @@ const parseCsvLine = (line: string) => {
 
 const normalize = (v: string | null | undefined) =>
   (v || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+const isPitcherPosition = (v: string | null | undefined) => /^(SP|RP|CL|P|RHP|LHP)/i.test((v || "").trim());
 const parseNumeric = (raw: string | undefined) => {
   const value = (raw || "").trim();
   if (!value || value === "-") return null;
   const n = Number(value.replace(/[%,$]/g, ""));
   return Number.isFinite(n) ? n : null;
+};
+
+const splitPlayerName = (raw: string) => {
+  const name = (raw || "").trim();
+  if (!name) return { first: "", last: "" };
+  if (name.includes(",")) {
+    const [last, first] = name.split(",").map((s) => s.trim());
+    return { first: first || "", last: last || "" };
+  }
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return { first: parts[0], last: "" };
+  return { first: parts.slice(0, -1).join(" "), last: parts[parts.length - 1] };
 };
 
 // Abramowitz-Stegun approximation for erf -> normal CDF.
@@ -400,17 +413,18 @@ export default function PitchingPowerRatingsStorageTable({ season }: { season: "
       return [];
     }
   });
+  const [syncing, setSyncing] = useState(false);
 
   const { data: players = [] } = useQuery({
     queryKey: ["pitching-power-player-directory"],
     queryFn: async () => {
-      const allPlayers: Array<{ id: string; first_name: string; last_name: string; team: string | null }> = [];
+      const allPlayers: Array<{ id: string; first_name: string; last_name: string; team: string | null; position: string | null }> = [];
       let from = 0;
       const pageSize = 1000;
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, team")
+          .select("id, first_name, last_name, team, position")
           .order("id", { ascending: true })
           .range(from, from + pageSize - 1);
         if (error) throw error;
@@ -427,6 +441,7 @@ export default function PitchingPowerRatingsStorageTable({ season }: { season: "
     const byNameTeam = new Map<string, { id: string }>();
     const byName = new Map<string, { id: string }>();
     for (const p of players) {
+      if (!isPitcherPosition(p.position)) continue;
       const fullName = `${p.first_name || ""} ${p.last_name || ""}`.trim();
       const nameKey = normalize(fullName);
       const teamKey = normalize(p.team);
@@ -436,6 +451,16 @@ export default function PitchingPowerRatingsStorageTable({ season }: { season: "
     }
     return { byNameTeam, byName };
   }, [players]);
+
+  const resolvePlayerId = (values: string[]): string | null => {
+    const playerName = (values[0] || "").trim();
+    const teamName = (values[1] || "").trim();
+    const key = `${normalize(playerName)}|${normalize(teamName)}`;
+    const direct = playerLookup.byNameTeam.get(key);
+    if (direct?.id) return direct.id;
+    const fallback = playerLookup.byName.get(normalize(playerName));
+    return fallback?.id || null;
+  };
 
   const persist = (nextHeaders: string[], nextRows: PowerRow[]) => {
     setHeaders(nextHeaders);
@@ -503,6 +528,184 @@ export default function PitchingPowerRatingsStorageTable({ season }: { season: "
     toast.success(`Imported ${nextRows.length} rows from row 8 (columns A-Q only).`);
   };
 
+  const syncToSupabase = async () => {
+    if (rows.length === 0) {
+      toast.error("No pitching power rating rows to sync.");
+      return;
+    }
+    setSyncing(true);
+    try {
+      const seasonNum = Number(season);
+      const upserts: Array<Record<string, any>> = [];
+      const playerUpdates: Array<{ id: string; team: string | null }> = [];
+      const unresolved: string[] = [];
+
+      const byNameTeam = new Map<string, string>();
+      const byName = new Map<string, string>();
+      for (const p of players) {
+        if (!isPitcherPosition((p as any).position)) continue;
+        const first = `${p.first_name || ""}`.trim();
+        const last = `${p.last_name || ""}`.trim();
+        const full = `${first} ${last}`.trim();
+        const nk = normalize(full);
+        const tk = normalize(p.team);
+        if (nk && !byName.has(nk)) byName.set(nk, p.id);
+        if (nk && tk && !byNameTeam.has(`${nk}|${tk}`)) byNameTeam.set(`${nk}|${tk}`, p.id);
+      }
+
+      const pendingCreate = new Map<string, { playerName: string; team: string | null }>();
+      for (const row of rows) {
+        const values = computeScoreColumns(row.values || []);
+        const playerName = (values[0] || "").trim();
+        const team = (values[1] || "").trim() || null;
+        if (!playerName) continue;
+        const key = `${normalize(playerName)}|${normalize(team)}`;
+        const existing = byNameTeam.get(key) || byName.get(normalize(playerName));
+        if (!existing) pendingCreate.set(key, { playerName, team });
+      }
+
+      if (pendingCreate.size > 0) {
+        const inserts = Array.from(pendingCreate.values())
+          .map((m) => {
+            const parts = splitPlayerName(m.playerName);
+            if (!parts.first) return null;
+            return {
+              first_name: parts.first,
+              last_name: parts.last || "Unknown",
+              team: m.team,
+              position: "RP",
+            };
+          })
+          .filter(Boolean) as Array<Record<string, any>>;
+        if (inserts.length > 0) {
+          const CHUNK = 200;
+          for (let i = 0; i < inserts.length; i += CHUNK) {
+            const batch = inserts.slice(i, i + CHUNK);
+            const { data, error } = await supabase
+              .from("players")
+              .insert(batch)
+              .select("id, first_name, last_name, team, position");
+            if (error) throw error;
+            for (const p of data || []) {
+              const full = `${p.first_name || ""} ${p.last_name || ""}`.trim();
+              const nk = normalize(full);
+              const tk = normalize(p.team);
+              if (!isPitcherPosition((p as any).position)) continue;
+              if (nk && !byName.has(nk)) byName.set(nk, p.id);
+              if (nk && tk && !byNameTeam.has(`${nk}|${tk}`)) byNameTeam.set(`${nk}|${tk}`, p.id);
+            }
+          }
+        }
+      }
+
+      for (const row of rows) {
+        const values = computeScoreColumns(row.values || []);
+        const playerName = (values[0] || "").trim() || "Unknown";
+        const team = (values[1] || "").trim() || null;
+        const nk = normalize(playerName);
+        const tk = normalize(team);
+        const playerId = byNameTeam.get(`${nk}|${tk}`) || byName.get(nk) || resolvePlayerId(values);
+        if (!playerId) {
+          unresolved.push(playerName);
+          continue;
+        }
+        playerUpdates.push({ id: playerId, team });
+
+        const num = (idx: number) => parseNumeric(values[idx]);
+        const intNum = (idx: number) => {
+          const n = parseNumeric(values[idx]);
+          return n == null ? null : Math.round(n);
+        };
+        upserts.push({
+          player_id: playerId,
+          season: seasonNum,
+          player_name: playerName,
+          team,
+          stuff_plus: num(2),
+          whiff_pct: num(3),
+          bb_pct: num(4),
+          hh_pct: num(5),
+          iz_whiff_pct: num(6),
+          chase_pct: num(7),
+          barrel_pct: num(8),
+          ld_pct: num(9),
+          avg_exit_velo: num(10),
+          gb_pct: num(11),
+          iz_pct: num(12),
+          ev90: num(13),
+          pull_pct: num(14),
+          la_10_30_pct: num(15),
+          stuff_score: intNum(16),
+          whiff_score: intNum(17),
+          bb_score: intNum(18),
+          hh_score: intNum(19),
+          iz_whiff_score: intNum(20),
+          chase_score: intNum(21),
+          barrel_score: intNum(22),
+          ld_score: intNum(23),
+          avg_ev_score: intNum(24),
+          gb_score: intNum(25),
+          iz_score: intNum(26),
+          ev90_score: intNum(27),
+          pull_score: intNum(28),
+          la_10_30_score: intNum(29),
+          era_pr_plus: intNum(30),
+          fip_pr_plus: intNum(31),
+          whip_pr_plus: intNum(32),
+          k9_pr_plus: intNum(33),
+          hr9_pr_plus: intNum(34),
+          bb9_pr_plus: intNum(35),
+          overall_pr_plus: intNum(36),
+        });
+      }
+
+      if (upserts.length === 0) {
+        toast.error("No matched players found to sync.");
+        return;
+      }
+
+      // Avoid ON CONFLICT re-updating same key in one statement (duplicate player rows in CSV).
+      const dedupedUpserts = new Map<string, Record<string, any>>();
+      for (const row of upserts) {
+        const key = `${row.player_id}|${row.season}`;
+        dedupedUpserts.set(key, row); // last row wins
+      }
+      const upsertsUnique = Array.from(dedupedUpserts.values());
+
+      const CHUNK = 250;
+      for (let i = 0; i < upsertsUnique.length; i += CHUNK) {
+        const batch = upsertsUnique.slice(i, i + CHUNK);
+        const { error } = await supabase
+          .from("pitching_power_ratings_storage")
+          .upsert(batch, { onConflict: "player_id,season" });
+        if (error) throw error;
+      }
+
+      const uniqueUpdates = new Map<string, { id: string; team: string | null }>();
+      for (const u of playerUpdates) uniqueUpdates.set(u.id, u);
+      const updates = Array.from(uniqueUpdates.values());
+      for (let i = 0; i < updates.length; i += CHUNK) {
+        const batch = updates.slice(i, i + CHUNK);
+        await Promise.all(
+          batch.map(async (u) => {
+            if (!u.team) return;
+            await supabase.from("players").update({ team: u.team }).eq("id", u.id);
+          }),
+        );
+      }
+
+      if (unresolved.length > 0) {
+        toast.success(`Synced ${upsertsUnique.length} rows. Unmatched: ${unresolved.length} (sample: ${unresolved.slice(0, 5).join(", ")})`);
+      } else {
+        toast.success(`Synced ${upsertsUnique.length} rows to Supabase.`);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to sync power ratings to Supabase");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
@@ -548,6 +751,9 @@ export default function PitchingPowerRatingsStorageTable({ season }: { season: "
           <Button type="button" variant="outline" onClick={() => fileRef.current?.click()}>
             <Upload className="h-4 w-4 mr-2" />
             Import CSV
+          </Button>
+          <Button type="button" onClick={syncToSupabase} disabled={syncing || rows.length === 0}>
+            {syncing ? "Syncing..." : "Sync to Supabase"}
           </Button>
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
