@@ -3484,8 +3484,9 @@ export default function TeamBuilder() {
     if (isPitcher(p)) {
       const projection = playerProjection(p);
       const source: any = projection.shown ?? projection.sim ?? p.transfer_snapshot ?? p.prediction ?? null;
-      const direct = source?.nil_valuation ?? null;
-      if (Number.isFinite(Number(direct))) return Number(direct);
+      const direct = Number(source?.nil_valuation);
+      // Ignore zero/blank seeded values so pitcher NIL is computed from pWAR inputs.
+      if (Number.isFinite(direct) && direct > 0) return direct;
       const pwar = projection.pwar;
       if (!Number.isFinite(Number(pwar))) return 0;
       const currentPitcherRole = normalizePitcherRole(
@@ -4072,7 +4073,7 @@ export default function TeamBuilder() {
             const pBb9 = source?.p_bb9 ?? null;
             if (pEra == null && pWhip == null && pK9 == null && pBb9 == null) return "—";
             return (
-              <span className="text-xs font-mono">
+              <span className="inline-block whitespace-nowrap text-[12px] font-mono">
                 {pEra != null ? Number(pEra).toFixed(2) : "—"} / {pWhip != null ? Number(pWhip).toFixed(2) : "—"} / {pK9 != null ? Number(pK9).toFixed(2) : "—"} / {pBb9 != null ? Number(pBb9).toFixed(2) : "—"}
               </span>
             );
@@ -4082,7 +4083,7 @@ export default function TeamBuilder() {
             : { p_avg: p.prediction?.p_avg ?? null, p_obp: p.prediction?.p_obp ?? null, p_slg: p.prediction?.p_slg ?? null };
           if (projected.p_avg == null && projected.p_obp == null && projected.p_slg == null) return "—";
           return (
-            <span className="text-xs font-mono">
+            <span className="inline-block whitespace-nowrap text-[12px] font-mono">
               {projected.p_avg?.toFixed(3) || "—"} / {projected.p_obp?.toFixed(3) || "—"} / {projected.p_slg?.toFixed(3) || "—"}
             </span>
           );
@@ -4111,14 +4112,14 @@ export default function TeamBuilder() {
           onChange={(e) => updatePlayer(globalIdx, { nil_value: parseCommaNumber(e.target.value) })}
         />
       </TableCell>
-      <TableCell className={`text-center font-mono text-xs ${(p.roster_status || "returner") === "leaving"
+      <TableCell className={`text-center font-mono text-[12px] whitespace-nowrap ${(p.roster_status || "returner") === "leaving"
         ? "text-muted-foreground"
         : (isPitcherRow ? "text-foreground" : projectedNilTierClass(projectedNil, totalBudget, fallbackRosterTotalPlayerScore))}`}>
         {(p.roster_status || "returner") === "leaving"
           ? "—"
           : `$${Math.max(0, Math.round(Number.isFinite(Number(projectedNil)) ? Number(projectedNil) : 0)).toLocaleString()}`}
       </TableCell>
-      <TableCell className="text-center font-mono text-xs">
+      <TableCell className="text-center font-mono text-[12px] whitespace-nowrap">
         {(p.roster_status || "returner") === "leaving"
           ? "—"
           : (isPitcherRow
@@ -4366,7 +4367,7 @@ export default function TeamBuilder() {
                       <TableHead>Class Adj</TableHead>
                       <TableHead>Dev Agg</TableHead>
                       <TableHead>Depth</TableHead>
-                      <TableHead className="text-center">pAVG/pOBP/pSLG</TableHead>
+                      <TableHead className="text-center min-w-[220px] whitespace-nowrap">pAVG/pOBP/pSLG</TableHead>
                       <TableHead className="text-center">wRC+</TableHead>
                       <TableHead className="text-center">Actual NIL ($)</TableHead>
                       <TableHead className="text-center">Projected NIL ($)</TableHead>
@@ -4385,7 +4386,7 @@ export default function TeamBuilder() {
                     )}
                     <TableRow className="bg-muted/40 font-medium">
                       <TableCell colSpan={7} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
-                      <TableCell className="font-mono text-sm font-semibold text-center py-2">
+                      <TableCell className="font-mono text-sm font-semibold text-center py-2 whitespace-nowrap">
                         {positionTableTotals.avg != null && positionTableTotals.obp != null && positionTableTotals.slg != null
                           ? `${positionTableTotals.avg.toFixed(3)} / ${positionTableTotals.obp.toFixed(3)} / ${positionTableTotals.slg.toFixed(3)}`
                           : "—"}
@@ -4423,7 +4424,7 @@ export default function TeamBuilder() {
                       <TableHead>Class Adj</TableHead>
                       <TableHead>Dev Agg</TableHead>
                       <TableHead>Depth</TableHead>
-                      <TableHead className="text-center">pERA/pWHIP/pK/9/pBB/9</TableHead>
+                      <TableHead className="text-center min-w-[240px] whitespace-nowrap">pERA/pWHIP/pK/9/pBB/9</TableHead>
                       <TableHead className="text-center">pRV+</TableHead>
                       <TableHead className="text-center">Actual NIL ($)</TableHead>
                       <TableHead className="text-center">Projected NIL ($)</TableHead>
@@ -4442,7 +4443,7 @@ export default function TeamBuilder() {
                     )}
                     <TableRow className="bg-muted/40 font-medium">
                       <TableCell colSpan={7} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
-                      <TableCell className="font-mono text-sm font-semibold text-center py-2">
+                      <TableCell className="font-mono text-sm font-semibold text-center py-2 whitespace-nowrap">
                         {pitcherTableTotals.pEraAvg != null && pitcherTableTotals.pWhipAvg != null && pitcherTableTotals.pK9Avg != null && pitcherTableTotals.pBb9Avg != null
                           ? `${pitcherTableTotals.pEraAvg.toFixed(2)} / ${pitcherTableTotals.pWhipAvg.toFixed(2)} / ${pitcherTableTotals.pK9Avg.toFixed(2)} / ${pitcherTableTotals.pBb9Avg.toFixed(2)}`
                           : "—"}
@@ -4608,7 +4609,7 @@ export default function TeamBuilder() {
                       <TableHead>Class Adj</TableHead>
                       <TableHead>Dev Agg</TableHead>
                       <TableHead>Depth</TableHead>
-                      <TableHead className="text-center">pAVG/pOBP/pSLG</TableHead>
+                      <TableHead className="text-center min-w-[220px] whitespace-nowrap">pAVG/pOBP/pSLG</TableHead>
                       <TableHead className="text-center">wRC+</TableHead>
                       <TableHead className="text-center">Actual NIL ($)</TableHead>
                       <TableHead className="text-center">Projected NIL ($)</TableHead>
@@ -4627,7 +4628,7 @@ export default function TeamBuilder() {
                     )}
                     <TableRow className="bg-muted/40 font-medium">
                       <TableCell colSpan={7} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
-                      <TableCell className="font-mono text-sm font-semibold text-center py-2">
+                      <TableCell className="font-mono text-sm font-semibold text-center py-2 whitespace-nowrap">
                         {targetPositionTableTotals.avg != null && targetPositionTableTotals.obp != null && targetPositionTableTotals.slg != null
                           ? `${targetPositionTableTotals.avg.toFixed(3)} / ${targetPositionTableTotals.obp.toFixed(3)} / ${targetPositionTableTotals.slg.toFixed(3)}`
                           : "—"}
@@ -4664,7 +4665,7 @@ export default function TeamBuilder() {
                       <TableHead>Class Adj</TableHead>
                       <TableHead>Dev Agg</TableHead>
                       <TableHead>Depth</TableHead>
-                      <TableHead className="text-center">pERA/pWHIP/pK/9/pBB/9</TableHead>
+                      <TableHead className="text-center min-w-[240px] whitespace-nowrap">pERA/pWHIP/pK/9/pBB/9</TableHead>
                       <TableHead className="text-center">pRV+</TableHead>
                       <TableHead className="text-center">Actual NIL ($)</TableHead>
                       <TableHead className="text-center">Projected NIL ($)</TableHead>
@@ -4683,7 +4684,7 @@ export default function TeamBuilder() {
                     )}
                     <TableRow className="bg-muted/40 font-medium">
                       <TableCell colSpan={7} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
-                      <TableCell className="font-mono text-sm font-semibold text-center py-2">
+                      <TableCell className="font-mono text-sm font-semibold text-center py-2 whitespace-nowrap">
                         {targetPitcherTableTotals.pEraAvg != null && targetPitcherTableTotals.pWhipAvg != null && targetPitcherTableTotals.pK9Avg != null && targetPitcherTableTotals.pBb9Avg != null
                           ? `${targetPitcherTableTotals.pEraAvg.toFixed(2)} / ${targetPitcherTableTotals.pWhipAvg.toFixed(2)} / ${targetPitcherTableTotals.pK9Avg.toFixed(2)} / ${targetPitcherTableTotals.pBb9Avg.toFixed(2)}`
                           : "—"}

@@ -11,17 +11,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  Users,
   ArrowUpDown,
   Search,
-  BarChart3,
-  Activity,
   Pencil,
   Save,
   X,
 } from "lucide-react";
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell } from "recharts";
 import { toast } from "sonner";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import storage2025Seed from "@/data/storage_2025_seed.json";
@@ -115,6 +110,41 @@ interface PitchingDashboardRow {
   p_rv_plus: number | null;
   p_war: number | null;
   market_value: number | null;
+}
+
+interface PitchingDashboardFallbackRow {
+  player_id: string;
+  first_name: string | null;
+  last_name: string | null;
+  team: string | null;
+  conference: string | null;
+  position: string | null;
+  handedness: string | null;
+  class_transition: string | null;
+  dev_aggressiveness: number | null;
+  p_era: number | null;
+  p_fip: number | null;
+  p_whip: number | null;
+  p_k9: number | null;
+  p_bb9: number | null;
+  p_hr9: number | null;
+  p_rv_plus: number | null;
+  p_war: number | null;
+}
+
+interface PitchingSeasonFallbackRow {
+  player_id: string;
+  first_name: string | null;
+  last_name: string | null;
+  team: string | null;
+  conference: string | null;
+  position: string | null;
+  handedness: string | null;
+  era: number | null;
+  whip: number | null;
+  innings_pitched: number | null;
+  pitch_strikeouts: number | null;
+  pitch_walks: number | null;
 }
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
@@ -1434,6 +1464,130 @@ export default function ReturningPlayers() {
     const alias = PITCHING_TEAM_ALIASES[normalize(raw)];
     return alias || raw;
   }, []);
+  const { data: pitchingSupabaseRows = [] } = useQuery({
+    queryKey: ["pitching-dashboard-supabase-fallback"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("player_predictions")
+        .select(`
+          player_id,
+          class_transition,
+          dev_aggressiveness,
+          p_era,
+          p_fip,
+          p_whip,
+          p_k9,
+          p_bb9,
+          p_hr9,
+          p_rv_plus,
+          p_war,
+          updated_at,
+          players!inner(
+            id,
+            first_name,
+            last_name,
+            team,
+            conference,
+            position,
+            handedness
+          )
+        `)
+        .eq("variant", "regular")
+        .in("status", ["active", "departed"])
+        .or("p_era.not.is.null,p_fip.not.is.null,p_whip.not.is.null,p_k9.not.is.null,p_bb9.not.is.null,p_hr9.not.is.null,p_rv_plus.not.is.null,p_war.not.is.null");
+      if (error) throw error;
+      const rows = (data || []) as Array<any>;
+      const byPlayer = new Map<string, any>();
+      const metricCount = (r: any) =>
+        [r?.p_era, r?.p_fip, r?.p_whip, r?.p_k9, r?.p_bb9, r?.p_hr9, r?.p_rv_plus, r?.p_war].filter((v) => v != null).length;
+      for (const r of rows) {
+        const pid = String(r.player_id || "");
+        if (!pid) continue;
+        const existing = byPlayer.get(pid);
+        if (!existing) {
+          byPlayer.set(pid, r);
+          continue;
+        }
+        const scoreNew = metricCount(r);
+        const scoreOld = metricCount(existing);
+        if (scoreNew > scoreOld) {
+          byPlayer.set(pid, r);
+          continue;
+        }
+        if (scoreNew === scoreOld) {
+          const tsNew = new Date(r.updated_at || 0).getTime();
+          const tsOld = new Date(existing.updated_at || 0).getTime();
+          if (tsNew > tsOld) byPlayer.set(pid, r);
+        }
+      }
+      return Array.from(byPlayer.values()).map((r) => {
+        const p = Array.isArray(r.players) ? r.players[0] : r.players;
+        return {
+          player_id: String(r.player_id),
+          first_name: p?.first_name ?? null,
+          last_name: p?.last_name ?? null,
+          team: p?.team ?? null,
+          conference: p?.conference ?? null,
+          position: p?.position ?? null,
+          handedness: p?.handedness ?? null,
+          class_transition: r.class_transition ?? null,
+          dev_aggressiveness: r.dev_aggressiveness ?? null,
+          p_era: r.p_era ?? null,
+          p_fip: r.p_fip ?? null,
+          p_whip: r.p_whip ?? null,
+          p_k9: r.p_k9 ?? null,
+          p_bb9: r.p_bb9 ?? null,
+          p_hr9: r.p_hr9 ?? null,
+          p_rv_plus: r.p_rv_plus ?? null,
+          p_war: r.p_war ?? null,
+        } as PitchingDashboardFallbackRow;
+      });
+    },
+  });
+  const { data: pitchingSeasonFallbackRows = [] } = useQuery({
+    queryKey: ["pitching-dashboard-season-stats-fallback"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("season_stats")
+        .select(`
+          player_id,
+          era,
+          whip,
+          innings_pitched,
+          pitch_strikeouts,
+          pitch_walks,
+          players!inner(
+            id,
+            first_name,
+            last_name,
+            team,
+            conference,
+            position,
+            handedness
+          )
+        `)
+        .eq("season", 2025)
+        .or("era.not.is.null,whip.not.is.null,innings_pitched.not.is.null,pitch_strikeouts.gt.0,pitch_walks.gt.0");
+      if (error) throw error;
+      return ((data || []) as Array<any>).map((r) => {
+        const p = Array.isArray(r.players) ? r.players[0] : r.players;
+        return {
+          player_id: String(r.player_id),
+          first_name: p?.first_name ?? null,
+          last_name: p?.last_name ?? null,
+          team: p?.team ?? null,
+          conference: p?.conference ?? null,
+          position: p?.position ?? null,
+          handedness: p?.handedness ?? null,
+          era: r.era ?? null,
+          whip: r.whip ?? null,
+          innings_pitched: r.innings_pitched ?? null,
+          pitch_strikeouts: r.pitch_strikeouts ?? null,
+          pitch_walks: r.pitch_walks ?? null,
+        } as PitchingSeasonFallbackRow;
+      });
+    },
+  });
   const pitchingRows = useMemo<PitchingDashboardRow[]>(() => {
     const eq = readPitchingWeights();
     const powerEq = readPitchingPowerEqValues();
@@ -1522,7 +1676,114 @@ export default function ReturningPlayers() {
     }
 
     const raw = localStorage.getItem("pitching_stats_storage_2025_v1");
-    if (!raw) return [];
+    if (!raw) {
+      const rowsFromPredictions = pitchingSupabaseRows
+        .map((r, idx) => {
+          const playerName = `${r.first_name || ""} ${r.last_name || ""}`.trim();
+          if (!playerName) return null;
+          const normalizedTeam = normalizePitchingTeam(r.team);
+          const teamMatch = teamsByNorm.get(normalize(normalizedTeam));
+          const projectedRole = toPitchingRole(r.position) || "SM";
+          const pitchingTierMultipliers = {
+            sec: eq.market_tier_sec,
+            p4: eq.market_tier_acc_big12,
+            bigTen: eq.market_tier_big_ten,
+            strongMid: eq.market_tier_strong_mid,
+            lowMajor: eq.market_tier_low_major,
+          };
+          const conferenceForMarket = teamMatch?.conference || r.conference || null;
+          const ptm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
+          const pvm = getPitchingPvfForRole(projectedRole, eq);
+          const marketEligible = canShowPitchingMarketValue(normalizedTeam, conferenceForMarket);
+          const pWar = r.p_war == null ? null : Number(r.p_war);
+          const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
+          return {
+            id: r.player_id || `pitching-fallback-${idx}`,
+            playerName,
+            team: normalizedTeam || null,
+            conference: conferenceForMarket,
+            handedness: (r.handedness || "").trim() || null,
+            class_transition: (r.class_transition || DEFAULT_PITCHING_CLASS_TRANSITION).toUpperCase(),
+            dev_aggressiveness: Number.isFinite(Number(r.dev_aggressiveness)) ? Number(r.dev_aggressiveness) : DEFAULT_PITCHING_DEV_AGGRESSIVENESS,
+            stuff_score: null,
+            whiff_score: null,
+            bb_score: null,
+            barrel_score: null,
+            era_pr_plus: null,
+            fip_pr_plus: null,
+            whip_pr_plus: null,
+            k9_pr_plus: null,
+            hr9_pr_plus: null,
+            bb9_pr_plus: null,
+            era: null,
+            fip: null,
+            whip: null,
+            k9: null,
+            bb9: null,
+            hr9: null,
+            p_era: r.p_era,
+            p_fip: r.p_fip,
+            p_whip: r.p_whip,
+            p_k9: r.p_k9,
+            p_bb9: r.p_bb9,
+            p_hr9: r.p_hr9,
+            p_rv_plus: r.p_rv_plus,
+            p_war: pWar,
+            market_value: marketValue,
+          } as PitchingDashboardRow;
+        })
+        .filter(Boolean) as PitchingDashboardRow[];
+      if (rowsFromPredictions.length > 0) return rowsFromPredictions;
+
+      return pitchingSeasonFallbackRows
+        .map((r, idx) => {
+          const playerName = `${r.first_name || ""} ${r.last_name || ""}`.trim();
+          if (!playerName) return null;
+          const normalizedTeam = normalizePitchingTeam(r.team);
+          const teamMatch = teamsByNorm.get(normalize(normalizedTeam));
+          const projectedRole = toPitchingRole(r.position) || "SM";
+          const innings = Number(r.innings_pitched);
+          const so = Number(r.pitch_strikeouts);
+          const bb = Number(r.pitch_walks);
+          const k9 = Number.isFinite(innings) && innings > 0 && Number.isFinite(so) ? (so / innings) * 9 : null;
+          const bb9 = Number.isFinite(innings) && innings > 0 && Number.isFinite(bb) ? (bb / innings) * 9 : null;
+          return {
+            id: r.player_id || `pitching-season-fallback-${idx}`,
+            playerName,
+            team: normalizedTeam || null,
+            conference: teamMatch?.conference ?? r.conference ?? null,
+            handedness: (r.handedness || "").trim() || null,
+            class_transition: DEFAULT_PITCHING_CLASS_TRANSITION,
+            dev_aggressiveness: DEFAULT_PITCHING_DEV_AGGRESSIVENESS,
+            stuff_score: null,
+            whiff_score: null,
+            bb_score: null,
+            barrel_score: null,
+            era_pr_plus: null,
+            fip_pr_plus: null,
+            whip_pr_plus: null,
+            k9_pr_plus: null,
+            hr9_pr_plus: null,
+            bb9_pr_plus: null,
+            era: r.era,
+            fip: null,
+            whip: r.whip,
+            k9,
+            bb9,
+            hr9: null,
+            p_era: r.era,
+            p_fip: null,
+            p_whip: r.whip,
+            p_k9: k9,
+            p_bb9: bb9,
+            p_hr9: null,
+            p_rv_plus: null,
+            p_war: null,
+            market_value: null,
+          } as PitchingDashboardRow;
+        })
+        .filter(Boolean) as PitchingDashboardRow[];
+    }
     try {
       const parsed = JSON.parse(raw) as { rows?: Array<{ id?: string; values?: string[] }> };
       const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
@@ -1739,7 +2000,7 @@ export default function ReturningPlayers() {
     } catch {
       return [];
     }
-  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm]);
+  }, [normalizePitchingTeam, pitchingSeasonFallbackRows, pitchingSupabaseRows, teamParkComponents, teamsByNorm]);
   const filteredPitchingRows = useMemo(() => {
     const q = pitchingSearch.trim().toLowerCase();
     if (!q) return pitchingRows;
@@ -1846,41 +2107,6 @@ export default function ReturningPlayers() {
     }
   }, [normalizePitchingTeam]);
 
-  // Summary stats
-  const avgOps = players.length
-    ? players.reduce((s, p) => s + (p.prediction.p_ops ?? computeDerived(p.prediction.p_avg, p.prediction.p_obp, p.prediction.p_slg).ops ?? 0), 0) / players.length
-    : 0;
-  const avgWrcPlus = players.length
-    ? players.reduce((s, p) => s + (p.prediction.p_wrc_plus ?? 0), 0) / players.length
-    : 0;
-  const topPlayer = players.length
-    ? [...players].sort((a, b) => {
-      const aw = a.prediction.p_wrc_plus ?? 0;
-      const bw = b.prediction.p_wrc_plus ?? 0;
-      return bw - aw;
-    })[0]
-    : null;
-
-  // Chart data — top 10 by pWRC+
-  const chartData = useMemo(() => {
-    return [...players]
-      .map((p) => ({
-        player: p,
-        wrcPlus: p.prediction.p_wrc_plus,
-      }))
-      .filter((p) => p.wrcPlus != null)
-      .sort((a, b) => (b.wrcPlus ?? 0) - (a.wrcPlus ?? 0))
-      .slice(0, 10)
-      .map(({ player, wrcPlus }) => ({
-        name: `${player.first_name[0]}. ${player.last_name}`,
-        wrcPlus: wrcPlus ?? 0,
-      }));
-  }, [players]);
-
-  const chartConfig = {
-    wrcPlus: { label: "Predicted wRC+", color: "hsl(var(--primary))" },
-  };
-
   const SortButton = ({ label, sortKeyVal }: { label: string; sortKeyVal: SortKey }) => (
     <Button
       variant="ghost"
@@ -1932,70 +2158,15 @@ export default function ReturningPlayers() {
 
         {dashboardView === "hitting" ? (
           <>
-        {/* Summary cards */}
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">2025 Players</CardTitle>
-              <Users className="h-4 w-4 text-primary" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{players.length}</div>
-              <p className="text-xs text-muted-foreground mt-1">All 2025 players</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Avg Predicted wRC+</CardTitle>
-              <BarChart3 className="h-4 w-4 text-accent" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{avgWrcPlus.toFixed(0)}</div>
-              <p className="text-xs text-muted-foreground mt-1">Avg pOPS: {avgOps.toFixed(3)}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Top Projected Player</CardTitle>
-              <Activity className="h-4 w-4 text-[hsl(var(--success))]" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold truncate">
-                {topPlayer ? `${topPlayer.first_name} ${topPlayer.last_name}` : "—"}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {topPlayer
-                  ? `wRC+: ${pctFormat(topPlayer.prediction.p_wrc_plus)}`
-                  : "No data"}
-              </p>
-            </CardContent>
-          </Card>
+        <div className="relative w-full max-w-md">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search players, teams..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
         </div>
-
-        {/* Chart — Top 10 by pWRC+ */}
-        {chartData.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Top 10 wRC+</CardTitle>
-              <CardDescription>Top 2025 weighted runs created plus (100 = NCAA average)</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ChartContainer config={chartConfig} className="h-[280px]">
-                <BarChart data={chartData} layout="vertical" margin={{ left: 80, right: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                  <XAxis type="number" domain={[0, "auto"]} />
-                  <YAxis type="category" dataKey="name" width={75} tick={{ fontSize: 12 }} />
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <Bar dataKey="wrcPlus" radius={[0, 4, 4, 0]} fill="hsl(var(--primary))">
-                    {chartData.map((_, i) => (
-                      <Cell key={i} fill={i === 0 ? "hsl(var(--accent))" : "hsl(var(--primary))"} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ChartContainer>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Table */}
         <Card>
@@ -2074,15 +2245,6 @@ export default function ReturningPlayers() {
                     </div>
                   );
                 })}
-              </div>
-              <div className="relative w-full sm:w-64">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search players, teams..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9"
-                />
               </div>
             </div>
           </CardHeader>

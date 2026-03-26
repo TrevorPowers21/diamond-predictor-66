@@ -230,6 +230,7 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
     }
   });
   const [weights] = useState(() => readPitchingWeights());
+  const [syncing, setSyncing] = useState(false);
 
   const { data: players = [] } = useQuery({
     queryKey: ["pitching-storage-player-directory"],
@@ -277,6 +278,122 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
     }
     return { byNameTeam, byName, byLastFirstInitial };
   }, [players]);
+
+  const resolvePlayerId = (values: string[]): string | null => {
+    const playerName = (values[0] || "").trim();
+    const teamName = (values[1] || "").trim();
+    const normalizedName = normalize(playerName);
+    const key = `${normalizedName}|${normalize(teamName)}`;
+    const direct = playerLookup.byNameTeam.get(key);
+    const fallback = playerLookup.byName.get(normalizedName);
+    const swapped =
+      playerName.includes(",")
+        ? normalize(
+            playerName
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+              .reverse()
+              .join(" "),
+          )
+        : null;
+    const swappedMatch = swapped ? playerLookup.byName.get(swapped) : null;
+    const parts = playerName.trim().split(/\s+/).filter(Boolean);
+    const firstInitial = parts[0]?.[0] ? parts[0][0].toLowerCase() : "";
+    const lastToken = parts.length > 1 ? parts[parts.length - 1] : "";
+    const lastFirstInitialKey = normalize(`${lastToken} ${firstInitial}`);
+    const lastFirstInitialMatch = playerLookup.byLastFirstInitial.get(lastFirstInitialKey);
+    const found = direct || fallback || swappedMatch || lastFirstInitialMatch;
+    return found?.id || null;
+  };
+
+  const syncToSupabase = async () => {
+    if (rows.length === 0) {
+      toast.error("No pitching rows to sync.");
+      return;
+    }
+    setSyncing(true);
+    try {
+      const seasonNum = Number(season);
+      const upserts: Array<Record<string, any>> = [];
+      const playerUpdates: Array<{ id: string; team: string | null; handedness: string | null }> = [];
+      const unmatched: string[] = [];
+
+      for (const row of rows) {
+        const values = row.values || [];
+        const playerId = resolvePlayerId(values);
+        const playerName = (values[0] || "").trim() || "Unknown";
+        if (!playerId) {
+          unmatched.push(playerName);
+          continue;
+        }
+
+        const stats = resolveStatsView(values);
+        const era = toNum(stats.era);
+        const whip = toNum(stats.whip);
+        const innings = parseBaseballInnings(displayValueForCol(values, 4));
+        const k9 = toNum(stats.k9);
+        const bb9 = toNum(stats.bb9);
+        const pitchStrikeouts = innings != null && k9 != null ? Math.round((k9 * innings) / 9) : null;
+        const pitchWalks = innings != null && bb9 != null ? Math.round((bb9 * innings) / 9) : null;
+
+        upserts.push({
+          player_id: playerId,
+          season: seasonNum,
+          era,
+          whip,
+          innings_pitched: innings,
+          pitch_strikeouts: pitchStrikeouts,
+          pitch_walks: pitchWalks,
+        });
+
+        const team = (values[1] || "").trim() || null;
+        const handedness = normalizeHandedness((values[2] || "").trim()) || null;
+        playerUpdates.push({ id: playerId, team, handedness });
+      }
+
+      if (upserts.length === 0) {
+        toast.error("No matched players found to sync.");
+        return;
+      }
+
+      const CHUNK = 250;
+      for (let i = 0; i < upserts.length; i += CHUNK) {
+        const batch = upserts.slice(i, i + CHUNK);
+        const { error } = await supabase
+          .from("season_stats")
+          .upsert(batch, { onConflict: "player_id,season" });
+        if (error) throw error;
+      }
+
+      // Update team + handedness on players (best-effort, chunked).
+      const uniqueUpdates = new Map<string, { id: string; team: string | null; handedness: string | null }>();
+      for (const u of playerUpdates) uniqueUpdates.set(u.id, u);
+      const updates = Array.from(uniqueUpdates.values());
+      for (let i = 0; i < updates.length; i += CHUNK) {
+        const batch = updates.slice(i, i + CHUNK);
+        await Promise.all(
+          batch.map(async (u) => {
+            const payload: Record<string, any> = {};
+            if (u.team != null) payload.team = u.team;
+            if (u.handedness != null) payload.handedness = u.handedness;
+            if (Object.keys(payload).length === 0) return;
+            await supabase.from("players").update(payload).eq("id", u.id);
+          }),
+        );
+      }
+
+      if (unmatched.length > 0) {
+        toast.success(`Synced ${upserts.length} rows. Unmatched: ${unmatched.length} (sample: ${unmatched.slice(0, 5).join(", ")})`);
+      } else {
+        toast.success(`Synced ${upserts.length} rows to Supabase.`);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to sync to Supabase");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // Keep headers fixed to the required schema and heal any stale local storage.
   useEffect(() => {
@@ -450,6 +567,9 @@ export default function PitchingStatsStorageTable({ season }: { season: "2025" |
           <Button type="button" variant="outline" onClick={() => fileRef.current?.click()}>
             <Upload className="h-4 w-4 mr-2" />
             Import CSV
+          </Button>
+          <Button type="button" onClick={syncToSupabase} disabled={syncing || rows.length === 0}>
+            {syncing ? "Syncing..." : "Sync to Supabase"}
           </Button>
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
