@@ -7,6 +7,7 @@ import ConferenceStatsTable from "@/components/ConferenceStatsTable";
 import PitchingConferenceStatsTable from "@/components/PitchingConferenceStatsTable";
 import PitchingStatsStorageTable from "@/components/PitchingStatsStorageTable";
 import PitchingPowerRatingsStorageTable from "@/components/PitchingPowerRatingsStorageTable";
+import PitchingStuffPlusStorageTable from "@/components/PitchingStuffPlusStorageTable";
 import PitchingEquationsTab from "@/components/PitchingEquationsTab";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6475,12 +6476,16 @@ function DataStorage2025Tab() {
                 <TabsList>
                   <TabsTrigger value="stats">Stats Storage</TabsTrigger>
                   <TabsTrigger value="power">Power Ratings Storage</TabsTrigger>
+                  <TabsTrigger value="stuff">Stuff+</TabsTrigger>
                 </TabsList>
                 <TabsContent value="stats" className="mt-3">
                   <PitchingStatsStorageTable season={selectedSeason} />
                 </TabsContent>
                 <TabsContent value="power" className="mt-3">
                   <PitchingPowerRatingsStorageTable season={selectedSeason} />
+                </TabsContent>
+                <TabsContent value="stuff" className="mt-3">
+                  <PitchingStuffPlusStorageTable season={selectedSeason} />
                 </TabsContent>
               </Tabs>
             </TabsContent>

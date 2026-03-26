@@ -197,6 +197,33 @@ const OVERALL_PITCHER_POWER_WEIGHTS = {
   hr9: 0.15,
 } as const;
 
+type PitchArsenalRow = {
+  season: number | null;
+  player_id: string | null;
+  player_name: string | null;
+  hand: string | null;
+  pitch_type: string | null;
+  stuff_plus: number | null;
+  usage_pct: number | null;
+  whiff_pct: number | null;
+  pitch_count: number | null;
+  total_pitches: number | null;
+  overall_stuff_plus: number | null;
+};
+
+const PITCH_TYPE_LABELS: Record<string, string> = {
+  "4S": "4-Seam",
+  SI: "Sinker",
+  SL: "Slider",
+  SWP: "Sweeper",
+  CB: "Curveball",
+  CT: "Cutter",
+  CH: "Changeup",
+  SP: "Splitter",
+};
+
+const PITCH_DISPLAY_ORDER = ["4S", "SI", "SL", "SWP", "CB", "CT", "CH", "SP"] as const;
+
 const PITCHING_POWER_RATING_WEIGHT = 0.7;
 const PITCHING_DEV_FACTOR = 0.06;
 const PITCHER_PROFILE_STORAGE_OVERRIDE_KEY = "pitcher_profile_projection_overrides_v1";
@@ -477,6 +504,37 @@ export default function PitcherProfile() {
     if (storageRef?.teamName) return storageRef.teamName;
     return normalizePitcherTeamName(player?.team || "");
   }, [player?.team, storageRef?.teamName]);
+  const { data: pitchArsenalRows = [] } = useQuery({
+    queryKey: ["pitcher-profile-pitch-arsenal", id, lookupPlayerName],
+    enabled: !!lookupPlayerName,
+    queryFn: async () => {
+      const byPlayerId = async () => {
+        if (!isDbRoute || !id) return [];
+        const { data, error } = await supabase
+          .from("pitch_arsenal" as any)
+          .select("season, player_id, player_name, hand, pitch_type, stuff_plus, usage_pct, whiff_pct, pitch_count, total_pitches, overall_stuff_plus")
+          .eq("player_id", id)
+          .eq("season", 2025)
+          .order("pitch_count", { ascending: false });
+        if (error) throw error;
+        return (data || []) as PitchArsenalRow[];
+      };
+      const byPlayerName = async () => {
+        if (!lookupPlayerName) return [];
+        const { data, error } = await supabase
+          .from("pitch_arsenal" as any)
+          .select("season, player_id, player_name, hand, pitch_type, stuff_plus, usage_pct, whiff_pct, pitch_count, total_pitches, overall_stuff_plus")
+          .eq("player_name", lookupPlayerName)
+          .eq("season", 2025)
+          .order("pitch_count", { ascending: false });
+        if (error) throw error;
+        return (data || []) as PitchArsenalRow[];
+      };
+      const firstPass = await byPlayerId();
+      if (firstPass.length > 0) return firstPass;
+      return byPlayerName();
+    },
+  });
   const storageRow = useMemo(() => {
     if (!lookupPlayerName) return null;
     const keys = ["pitching_stats_storage_2025_v1", "pitching_stats_storage_2026_v1"];
@@ -1019,6 +1077,83 @@ export default function PitcherProfile() {
     storageK9,
     storageWhip,
   ]);
+  const pitchArsenal = useMemo(() => {
+    let sourceRows = pitchArsenalRows || [];
+    if (sourceRows.length === 0) {
+      try {
+        const raw = localStorage.getItem("pitching_stuff_plus_storage_2025_v1");
+        const parsed = raw ? (JSON.parse(raw) as { rows?: Array<Record<string, unknown>> }) : null;
+        const localRows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+        sourceRows = localRows
+          .filter((row) => normalize(String(row.playerName || "")) === normalize(lookupPlayerName))
+          .map((row) => ({
+            season: 2025,
+            player_id: null,
+            player_name: String(row.playerName || ""),
+            hand: String(row.hand || "") || null,
+            pitch_type: String(row.pitchType || "") || null,
+            stuff_plus: row.stuffPlus == null ? null : Number(row.stuffPlus),
+            usage_pct: row.usagePct == null ? null : Number(row.usagePct),
+            whiff_pct: row.whiffPct == null ? null : Number(row.whiffPct),
+            pitch_count: row.pitchCount == null ? null : Number(row.pitchCount),
+            total_pitches: row.totalPitches == null ? null : Number(row.totalPitches),
+            overall_stuff_plus: row.overallStuffPlus == null ? null : Number(row.overallStuffPlus),
+          })) as PitchArsenalRow[];
+      } catch {
+        sourceRows = [];
+      }
+    }
+
+    const normalized = sourceRows
+      .map((row) => ({
+        pitchType: String(row.pitch_type || "").trim().toUpperCase(),
+        stuffPlus: row.stuff_plus == null ? null : Number(row.stuff_plus),
+        usagePct: row.usage_pct == null ? null : Number(row.usage_pct),
+        whiffPct: row.whiff_pct == null ? null : Number(row.whiff_pct),
+        pitchCount: row.pitch_count == null ? null : Number(row.pitch_count),
+        totalPitches: row.total_pitches == null ? null : Number(row.total_pitches),
+        overallStuffPlus: row.overall_stuff_plus == null ? null : Number(row.overall_stuff_plus),
+      }))
+      .filter((r) => r.pitchType.length > 0);
+
+    const byPitch = new Map<string, typeof normalized[number]>();
+    for (const row of normalized) byPitch.set(row.pitchType, row);
+    const sorted = Array.from(byPitch.values()).sort((a, b) => {
+      const ai = PITCH_DISPLAY_ORDER.indexOf(a.pitchType as any);
+      const bi = PITCH_DISPLAY_ORDER.indexOf(b.pitchType as any);
+      const aOrder = ai === -1 ? 999 : ai;
+      const bOrder = bi === -1 ? 999 : bi;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return (b.pitchCount || 0) - (a.pitchCount || 0);
+    });
+
+    const maxTotalPitches = sorted.reduce<number | null>((acc, row) => {
+      if (row.totalPitches == null || !Number.isFinite(row.totalPitches)) return acc;
+      if (acc == null) return row.totalPitches;
+      return Math.max(acc, row.totalPitches);
+    }, null);
+    const overallStuffPlus =
+      sorted.find((r) => r.overallStuffPlus != null)?.overallStuffPlus ??
+      (() => {
+        const valid = sorted.filter((r) => r.stuffPlus != null && r.usagePct != null);
+        if (valid.length === 0) return null;
+        const weighted = valid.reduce((sum, row) => sum + Number(row.stuffPlus) * Number(row.usagePct), 0);
+        const usage = valid.reduce((sum, row) => sum + Number(row.usagePct), 0);
+        if (!Number.isFinite(usage) || usage <= 0) return null;
+        return weighted / usage;
+      })();
+    const usageTotal = sorted.reduce((sum, row) => sum + (row.usagePct || 0), 0);
+    const overallWhiffPct = (() => {
+      const valid = sorted.filter((r) => r.whiffPct != null && r.usagePct != null);
+      if (valid.length === 0) return null;
+      const weighted = valid.reduce((sum, row) => sum + Number(row.whiffPct) * Number(row.usagePct), 0);
+      const usage = valid.reduce((sum, row) => sum + Number(row.usagePct), 0);
+      if (!Number.isFinite(usage) || usage <= 0) return null;
+      return weighted / usage;
+    })();
+
+    return { rows: sorted, overallStuffPlus, usageTotal: usageTotal > 0 ? usageTotal : null, overallWhiffPct, totalPitches: maxTotalPitches };
+  }, [pitchArsenalRows, lookupPlayerName]);
 
   if (isLoading) {
     return (
@@ -1195,6 +1330,69 @@ export default function PitcherProfile() {
                   <ScoutGrade value={internalPowerRatings?.scores?.whiff ?? null} fullLabel="Whiff% Score" />
                   <ScoutGrade value={internalPowerRatings?.scores?.bb ?? null} fullLabel="BB% Score" />
                   <ScoutGrade value={internalPowerRatings?.scores?.barrel ?? null} fullLabel="Barrel% Score" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Pitch Arsenal</CardTitle>
+                <CardDescription>Per-pitch pitch count, usage%, whiff%, and Stuff+ shown horizontally by pitch.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                  <div className="rounded border p-2">
+                    <div className="text-muted-foreground text-xs">Overall Stuff+</div>
+                    <div className="font-semibold">{fmtWhole(pitchArsenal.overallStuffPlus)}</div>
+                  </div>
+                  <div className="rounded border p-2">
+                    <div className="text-muted-foreground text-xs">Overall Usage%</div>
+                    <div className="font-semibold">{pitchArsenal.usageTotal == null ? "—" : `${pitchArsenal.usageTotal.toFixed(1)}%`}</div>
+                  </div>
+                  <div className="rounded border p-2">
+                    <div className="text-muted-foreground text-xs">Overall Whiff%</div>
+                    <div className="font-semibold">{pitchArsenal.overallWhiffPct == null ? "—" : `${pitchArsenal.overallWhiffPct.toFixed(1)}%`}</div>
+                  </div>
+                  <div className="rounded border p-2">
+                    <div className="text-muted-foreground text-xs">Total Pitches</div>
+                    <div className="font-semibold">{pitchArsenal.totalPitches == null ? "—" : Math.round(pitchArsenal.totalPitches).toString()}</div>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  {pitchArsenal.rows.length === 0 ? (
+                    <div className="rounded-lg border px-3 py-3 text-sm text-muted-foreground">No pitch arsenal rows found yet.</div>
+                  ) : (
+                    <div className="flex gap-2 min-w-max">
+                      {pitchArsenal.rows.map((row) => (
+                        <div
+                          key={`arsenal-${row.pitchType}`}
+                          className="w-[150px] rounded-lg border bg-background/70 p-3 space-y-2"
+                        >
+                          <div className="border-b pb-2">
+                            <div className="text-sm font-semibold">{PITCH_TYPE_LABELS[row.pitchType] || row.pitchType}</div>
+                          </div>
+                          <div className="space-y-1.5 text-sm">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-muted-foreground text-xs">Pitch Count</span>
+                              <span className="font-medium">{row.pitchCount == null ? "—" : Math.round(row.pitchCount).toString()}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-muted-foreground text-xs">Usage%</span>
+                              <span className="font-medium">{row.usagePct == null ? "—" : `${row.usagePct.toFixed(1)}%`}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-muted-foreground text-xs">Whiff%</span>
+                              <span className="font-medium">{row.whiffPct == null ? "—" : `${row.whiffPct.toFixed(1)}%`}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-muted-foreground text-xs">Stuff+</span>
+                              <span className="font-medium">{fmtWhole(row.stuffPlus)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
