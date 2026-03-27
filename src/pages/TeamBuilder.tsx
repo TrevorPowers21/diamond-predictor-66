@@ -36,7 +36,7 @@ const POSITION_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"] as 
 const PITCHER_SLOTS = ["SP1", "SP2", "SP3", "SP4", "SP5", "RP1", "RP2", "RP3", "RP4", "CL"] as const;
 const MAX_DEPTH = 3;
 const DEV_AGGRESSIVENESS_OPTIONS = [0, 0.5, 1] as const;
-const TEAM_BUILDER_DRAFT_KEY = "team_builder_draft_v1";
+const TEAM_BUILDER_DRAFT_KEY = "team_builder_draft_v3";
 const TARGET_BOARD_STORAGE_KEY = "team_builder_target_board_v1";
 const LEGACY_PITCHING_ROLE_OVERRIDE_KEY = "pitching_role_overrides_v1";
 type TargetBoardEntry = {
@@ -95,6 +95,8 @@ type BuildPlayer = {
   depth_role?: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "high_leverage_reliever" | "low_impact_reliever";
   class_transition?: string | null;
   dev_aggressiveness?: number | null;
+  class_transition_overridden?: boolean;
+  dev_aggressiveness_overridden?: boolean;
   // joined
   player?: {
     first_name: string;
@@ -265,6 +267,23 @@ const teamNameVariants = (team: string | null | undefined) => {
   return Array.from(out).filter(Boolean);
 };
 
+const teamMatchesSelectedTeam = (candidateTeam: string | null | undefined, selectedTeam: string | null | undefined) => {
+  const candidate = (candidateTeam || "").trim();
+  const selected = (selectedTeam || "").trim();
+  if (!candidate || !selected) return false;
+
+  const candidateVariants = teamNameVariants(candidate);
+  const selectedVariants = teamNameVariants(selected);
+  const selectedNorms = new Set(selectedVariants.map((v) => normalizeName(v)));
+
+  for (const variant of candidateVariants) {
+    const norm = normalizeName(variant);
+    if (selectedNorms.has(norm)) return true;
+  }
+
+  return false;
+};
+
 const parseNum = (raw: unknown): number | null => {
   if (raw == null) return null;
   const s = String(raw).trim();
@@ -297,7 +316,6 @@ const readStoragePitcherLocalPlayers = (
     if (!raw) return [];
     const parsed = JSON.parse(raw) as { rows?: Array<{ values?: string[] }> };
     const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
-    const teamKey = normalizeName(teamName);
     const out: Array<{
       first_name: string;
       last_name: string;
@@ -312,7 +330,7 @@ const readStoragePitcherLocalPlayers = (
       const playerName = (values[0] || "").trim();
       const rowTeam = (values[1] || "").trim();
       if (!playerName || !rowTeam) continue;
-      if (normalizeName(rowTeam) !== teamKey) continue;
+      if (!teamMatchesSelectedTeam(rowTeam, teamName)) continue;
       const hand = (values[2] || "").trim().toUpperCase();
       const roleRaw = (values[3] || "").trim().toUpperCase();
       const role: "SP" | "RP" | null = roleRaw === "SP" || roleRaw === "RP" ? roleRaw : null;
@@ -449,10 +467,12 @@ const parseBuildPlayerMeta = (raw: string | null | undefined): {
   depthRole: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "high_leverage_reliever" | "low_impact_reliever" | null;
   classTransition: string | null;
   devAggressiveness: number | null;
+  classTransitionOverridden: boolean;
+  devAggressivenessOverridden: boolean;
   transferSnapshot: TransferSnapshot | null;
   localPlayer: { first_name: string; last_name: string; position: string | null; team: string | null; from_team: string | null; conference: string | null } | null;
 } => {
-  if (!raw) return { notes: null, metrics: null, power: null, rosterStatus: null, depthRole: null, classTransition: null, devAggressiveness: null, transferSnapshot: null, localPlayer: null };
+  if (!raw) return { notes: null, metrics: null, power: null, rosterStatus: null, depthRole: null, classTransition: null, devAggressiveness: null, classTransitionOverridden: false, devAggressivenessOverridden: false, transferSnapshot: null, localPlayer: null };
   try {
     const obj = JSON.parse(raw);
     if (obj && obj.__team_builder_metrics_v1) {
@@ -476,6 +496,8 @@ const parseBuildPlayerMeta = (raw: string | null | undefined): {
             : null,
         classTransition: typeof obj.classTransition === "string" ? obj.classTransition : null,
         devAggressiveness: Number.isFinite(Number(obj.devAggressiveness)) ? Number(obj.devAggressiveness) : null,
+        classTransitionOverridden: Boolean(obj.classTransitionOverridden),
+        devAggressivenessOverridden: Boolean(obj.devAggressivenessOverridden),
         transferSnapshot: (obj.transferSnapshot ?? null) as TransferSnapshot | null,
         localPlayer:
           obj.localPlayer && typeof obj.localPlayer === "object"
@@ -493,7 +515,7 @@ const parseBuildPlayerMeta = (raw: string | null | undefined): {
   } catch {
     // legacy free-text note
   }
-  return { notes: raw, metrics: null, power: null, rosterStatus: null, depthRole: null, classTransition: null, devAggressiveness: null, transferSnapshot: null, localPlayer: null };
+  return { notes: raw, metrics: null, power: null, rosterStatus: null, depthRole: null, classTransition: null, devAggressiveness: null, classTransitionOverridden: false, devAggressivenessOverridden: false, transferSnapshot: null, localPlayer: null };
 };
 
 const serializeBuildPlayerMeta = (
@@ -504,6 +526,8 @@ const serializeBuildPlayerMeta = (
   depthRole: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "high_leverage_reliever" | "low_impact_reliever" | null | undefined,
   classTransition: string | null | undefined,
   devAggressiveness: number | null | undefined,
+  classTransitionOverridden: boolean | null | undefined,
+  devAggressivenessOverridden: boolean | null | undefined,
   transferSnapshot: TransferSnapshot | null | undefined,
   localPlayer: { first_name: string; last_name: string; position: string | null; team: string | null; from_team: string | null; conference: string | null } | null | undefined,
 ) => {
@@ -517,6 +541,8 @@ const serializeBuildPlayerMeta = (
     depthRole: depthRole ?? null,
     classTransition: classTransition ?? null,
     devAggressiveness: devAggressiveness ?? null,
+    classTransitionOverridden: Boolean(classTransitionOverridden),
+    devAggressivenessOverridden: Boolean(devAggressivenessOverridden),
     transferSnapshot: transferSnapshot ?? null,
     localPlayer: localPlayer ?? null,
   });
@@ -528,16 +554,40 @@ const hasSystemPredictionStats = (p: BuildPlayer) =>
   p.prediction?.p_slg != null ||
   p.prediction?.p_wrc_plus != null;
 
-const selectPreferredPrediction = (predictions: any[] | null | undefined) => {
-  const list = (predictions || []).filter(Boolean);
+const scorePredictionLikeDashboard = (row: any, isTransferPlayer: boolean) => {
+  const rowHasFrom = row.from_avg != null || row.from_obp != null || row.from_slg != null;
+  const rowHasPred =
+    row.p_avg != null &&
+    row.p_obp != null &&
+    row.p_slg != null &&
+    row.p_ops != null &&
+    row.p_iso != null &&
+    row.p_wrc_plus != null;
+  const rowHasScout =
+    row.ev_score != null ||
+    row.barrel_score != null ||
+    row.whiff_score != null ||
+    row.chase_score != null;
+  return (
+    (((isTransferPlayer && row.model_type === "transfer") || (!isTransferPlayer && row.model_type === "returner")) ? 6 : 0) +
+    (rowHasPred ? 5 : 0) +
+    (rowHasScout ? 2 : 0) +
+    (row.model_type === "transfer" ? 3 : 0) +
+    (row.status === "active" ? 2 : 0) +
+    (rowHasFrom ? 1 : 0)
+  );
+};
+
+const selectPreferredReturnerPrediction = (predictions: any[] | null | undefined) => {
+  const list = (predictions || []).filter((row) => row && row.model_type === "returner");
   if (!list.length) return null;
-  const rank = (row: any) => {
-    const hasFrom = row.from_avg != null || row.from_obp != null || row.from_slg != null;
-    const hasPower = row.power_rating_plus != null;
-    const statusBoost = row.status === "active" ? 2 : row.status === "departed" ? 1 : 0;
-    return (row.model_type === "transfer" ? 3 : 1) + (hasFrom ? 2 : 0) + (hasPower ? 1 : 0) + statusBoost;
-  };
-  return [...list].sort((a, b) => rank(b) - rank(a))[0] ?? null;
+  return [...list].sort((a, b) => {
+    const diff = scorePredictionLikeDashboard(b, false) - scorePredictionLikeDashboard(a, false);
+    if (diff !== 0) return diff;
+    const tsA = new Date(a.updated_at || 0).getTime();
+    const tsB = new Date(b.updated_at || 0).getTime();
+    return tsB - tsA;
+  })[0] ?? null;
 };
 
 const selectTransferPortalPreferredPrediction = (predictions: any[] | null | undefined) => {
@@ -954,7 +1004,7 @@ export default function TeamBuilder() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, team, from_team, conference, player_predictions(id, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant), nil_valuations(estimated_value, component_breakdown)")
+          .select("id, first_name, last_name, position, team, from_team, conference, transfer_portal, player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at), nil_valuations(estimated_value, component_breakdown)")
           .range(from, from + PAGE - 1);
         if (error) throw error;
         all = all.concat(data || []);
@@ -1287,6 +1337,40 @@ export default function TeamBuilder() {
     return map;
   }, [allPlayersForSearch]);
 
+  const resolveTeamBuilderPlayer = useCallback((
+    rawPlayerId: string | null | undefined,
+    fullName: string | null | undefined,
+    teamName: string | null | undefined,
+    pitcherOnly: boolean | null = null,
+  ) => {
+    const normalizedId = typeof rawPlayerId === "string" ? rawPlayerId.trim() : rawPlayerId;
+    if (normalizedId && allPlayersById.has(normalizedId)) return allPlayersById.get(normalizedId);
+
+    const normalizedFullName = normalizeName(fullName || "");
+    if (!normalizedFullName) return null;
+
+    let candidates = allPlayersForSearch.filter((row: any) =>
+      normalizeName(`${row.first_name || ""} ${row.last_name || ""}`) === normalizedFullName,
+    );
+
+    if (pitcherOnly === true) {
+      candidates = candidates.filter((row: any) => isPitcherLike(row));
+    } else if (pitcherOnly === false) {
+      candidates = candidates.filter((row: any) => !isPitcherLike(row));
+    }
+
+    if (teamName) {
+      const byTeam = candidates.filter((row: any) =>
+        teamMatchesSelectedTeam(row.team || row.from_team || "", teamName),
+      );
+      if (byTeam.length === 1) return byTeam[0];
+      if (byTeam.length > 1) candidates = byTeam;
+    }
+
+    if (candidates.length === 1) return candidates[0];
+    return null;
+  }, [allPlayersById, allPlayersForSearch]);
+
   const filterPlayersForCompare = useCallback((q: string) => {
     const nq = normalizeName(q);
     if (!nq) return [] as any[];
@@ -1335,39 +1419,54 @@ export default function TeamBuilder() {
     },
   });
 
-  // Fetch returners for selected team
   const { data: returners = [] } = useQuery({
-    queryKey: ["team-returners", selectedTeam],
+    queryKey: ["team-builder-returners-dashboard-source", selectedTeam],
     enabled: !!selectedTeam,
     queryFn: async () => {
-      const variants = teamNameVariants(selectedTeam);
-      const normVariants = new Set(variants.map((v) => normalizeName(v)));
-      const likeTerms = variants.map((v) => v.trim()).filter(Boolean);
-      const orExpr = likeTerms
-        .map((v) => `team.ilike.*${v.replace(/\*/g, "").replace(/,/g, " ")}*`)
-        .join(",");
-      const { data } = await supabase
-        .from("players")
-        .select(`
-          id, first_name, last_name, position, team, from_team, conference,
-          player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status),
-          nil_valuations(estimated_value, component_breakdown)
-        `)
-        .or(orExpr)
-        .or("transfer_portal.eq.false,transfer_portal.is.null");
-      return (data ?? []).filter((p: any) => {
-        const normTeam = normalizeName(p.team || "");
-        if (normVariants.has(normTeam)) return true;
-        // Token fallback for variant drift (e.g., WVU/West Virginia University).
-        const teamCompact = normTeam.replace(/\buniversity\b/g, "").replace(/\s+/g, " ").trim();
-        for (const v of normVariants) {
-          const vCompact = v.replace(/\buniversity\b/g, "").replace(/\s+/g, " ").trim();
-          if (vCompact && teamCompact && (teamCompact === vCompact || teamCompact.includes(vCompact) || vCompact.includes(teamCompact))) {
-            return true;
-          }
-        }
-        return false;
+      let allData: any[] = [];
+      let predFrom = 0;
+      const PRED_PAGE_SIZE = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("player_predictions")
+          .select("id, player_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at, players!inner(id, first_name, last_name, position, team, from_team, conference, transfer_portal)")
+          .eq("model_type", "returner")
+          .eq("variant", "regular")
+          .in("status", ["active", "departed"])
+          .range(predFrom, predFrom + PRED_PAGE_SIZE - 1);
+        if (error) throw error;
+        allData = allData.concat(data || []);
+        if (!data || data.length < PRED_PAGE_SIZE) break;
+        predFrom += PRED_PAGE_SIZE;
+      }
+
+      const filtered = allData.filter((row: any) => {
+        const player = row.players;
+        if (!player || player.transfer_portal === true) return false;
+        return teamMatchesSelectedTeam(player.team || "", selectedTeam || "");
       });
+
+      const byPlayer = new Map<string, any>();
+      for (const row of filtered) {
+        const pid = row.player_id;
+        const existing = byPlayer.get(pid);
+        if (!existing) {
+          byPlayer.set(pid, row);
+          continue;
+        }
+        const rowScore = scorePredictionLikeDashboard(row, false);
+        const existingScore = scorePredictionLikeDashboard(existing, false);
+        if (rowScore > existingScore) {
+          byPlayer.set(pid, row);
+          continue;
+        }
+        if (rowScore === existingScore) {
+          const rowTs = new Date(row.updated_at || 0).getTime();
+          const existingTs = new Date(existing.updated_at || 0).getTime();
+          if (rowTs > existingTs) byPlayer.set(pid, row);
+        }
+      }
+      return Array.from(byPlayer.values());
     },
   });
   const storagePitchersForSelectedTeam = useMemo(() => {
@@ -1384,6 +1483,8 @@ export default function TeamBuilder() {
       depth_role: lp.role === "SP" ? "weekend_starter" : "high_leverage_reliever",
       class_transition: "SJ",
       dev_aggressiveness: 0,
+      class_transition_overridden: false,
+      dev_aggressiveness_overridden: false,
       transfer_snapshot: null,
       player: {
         first_name: lp.first_name,
@@ -1400,6 +1501,69 @@ export default function TeamBuilder() {
       team_power_plus: null,
     }));
   }, [selectedTeam]);
+  const seedHittersForSelectedTeam = useMemo(() => {
+    if (!selectedTeam) return [] as BuildPlayer[];
+    return seedHittersForSearch
+      .filter((row: any) => teamMatchesSelectedTeam(row.team || "", selectedTeam))
+      .filter((row: any) => !/^(SP|RP|CL|P|LHP|RHP)/i.test(String(row.position || "")))
+      .filter((row: any) => {
+        const fullName = normalizeName(`${row.first_name || ""} ${row.last_name || ""}`);
+        return !allPlayersForSearch.some((p: any) => {
+          const dbFullName = normalizeName(`${p.first_name || ""} ${p.last_name || ""}`);
+          const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(p.position || ""));
+          return !isPitcherRow && dbFullName === fullName;
+        });
+      })
+      .map((row: any) => ({
+        player_id: isUuid(row.id) ? row.id : null,
+        source: "returner" as const,
+        custom_name: null,
+        position_slot: null,
+        depth_order: 1,
+        nil_value: 0,
+        production_notes: null,
+        roster_status: "returner" as const,
+        depth_role: "starter" as const,
+        class_transition: "SJ",
+        dev_aggressiveness: 0,
+        class_transition_overridden: false,
+        dev_aggressiveness_overridden: false,
+        transfer_snapshot: null,
+        player: {
+          first_name: row.first_name,
+          last_name: row.last_name,
+          position: row.position,
+          team: row.team,
+          from_team: row.from_team,
+          conference: row.conference ?? null,
+        },
+        prediction: row.__seedStats
+          ? {
+              id: null,
+              from_avg: row.__seedStats.avg ?? null,
+              from_obp: row.__seedStats.obp ?? null,
+              from_slg: row.__seedStats.slg ?? null,
+              p_avg: row.__seedStats.avg ?? null,
+              p_obp: row.__seedStats.obp ?? null,
+              p_slg: row.__seedStats.slg ?? null,
+              p_ops:
+                row.__seedStats.obp != null && row.__seedStats.slg != null
+                  ? Number(row.__seedStats.obp) + Number(row.__seedStats.slg)
+                  : null,
+              p_wrc_plus: null,
+              power_rating_plus: row.__seedPowerPlus?.overallPlus ?? null,
+              class_transition: "SJ",
+              dev_aggressiveness: 0,
+              model_type: "returner",
+              status: "active",
+            }
+          : null,
+        nilVal: null,
+        nil_owar: null,
+        team_metrics: null,
+        team_power_plus: row.__seedPowerPlus ?? null,
+      }));
+  }, [allPlayersForSearch, seedHittersForSearch, selectedTeam]);
 
   // Load a saved build
   const loadBuild = useCallback(async (buildId: string) => {
@@ -1421,12 +1585,13 @@ export default function TeamBuilder() {
         .map((p) => (typeof p.player_id === "string" ? p.player_id.trim() : p.player_id))
         .filter((id): id is string => isUuid(id));
       let playerMap: Record<string, any> = {};
+      let predictionMap: Record<string, any> = {};
       if (playerIds.length > 0) {
         const { data: pData, error: pErr } = await supabase
           .from("players")
           .select(`
             id, first_name, last_name, position, team, from_team, conference,
-            player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status),
+            player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at),
             nil_valuations(estimated_value, component_breakdown)
           `)
           .in("id", playerIds);
@@ -1436,6 +1601,32 @@ export default function TeamBuilder() {
         (pData ?? []).forEach((p) => {
           playerMap[p.id] = p;
         });
+
+        const { data: predData, error: predErr } = await supabase
+          .from("player_predictions")
+          .select("id, player_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at")
+          .in("player_id", playerIds)
+          .in("model_type", ["returner", "transfer"])
+          .eq("variant", "regular")
+          .in("status", ["active", "departed"]);
+        if (predErr) {
+          console.error("TeamBuilder loadBuild predictions fetch failed:", predErr);
+        }
+        const grouped = new Map<string, any[]>();
+        for (const row of predData || []) {
+          const pid = String(row.player_id || "");
+          if (!pid) continue;
+          const list = grouped.get(pid) || [];
+          list.push(row);
+          grouped.set(pid, list);
+        }
+        for (const [pid, rows] of grouped.entries()) {
+          const player = playerMap[pid];
+          if (!player) continue;
+          predictionMap[pid] = player.transfer_portal === true
+            ? selectTransferPortalPreferredPrediction(rows)
+            : selectPreferredReturnerPrediction(rows);
+        }
       }
 
       const fallbackPitchers = readStoragePitcherLocalPlayers(build.team || selectedTeam || "");
@@ -1480,10 +1671,29 @@ export default function TeamBuilder() {
 
       setRosterPlayers(
         players.map((bp) => {
-          const normalizedPlayerId = typeof bp.player_id === "string" ? bp.player_id.trim() : bp.player_id;
-          const pd = normalizedPlayerId ? playerMap[normalizedPlayerId] : null;
-          const activePred = selectPreferredPrediction(pd?.player_predictions);
           const meta = parseBuildPlayerMeta(bp.production_notes);
+          const fallbackName = (() => {
+            if (bp.custom_name && bp.custom_name.trim()) return bp.custom_name.trim();
+            if (meta.notes && meta.notes.trim()) return meta.notes.trim();
+            if (!meta.localPlayer) return null;
+            const full = `${meta.localPlayer.first_name || ""} ${meta.localPlayer.last_name || ""}`.trim();
+            return full || null;
+          })();
+          const fallbackTeam = meta.localPlayer?.team ?? build.team ?? selectedTeam ?? null;
+          const fallbackPosition = meta.localPlayer?.position ?? bp.position_slot ?? null;
+          const fallbackPitcherLike = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(fallbackPosition || ""));
+          const normalizedPlayerIdRaw = typeof bp.player_id === "string" ? bp.player_id.trim() : bp.player_id;
+          const recoveredPlayer = !normalizedPlayerIdRaw && fallbackName
+            ? resolveTeamBuilderPlayer(
+                null,
+                fallbackName,
+                fallbackTeam,
+                fallbackPitcherLike ? true : false,
+              )
+            : null;
+          const normalizedPlayerId = normalizedPlayerIdRaw || recoveredPlayer?.id || null;
+          const pd = normalizedPlayerId ? (playerMap[normalizedPlayerId] || recoveredPlayer || null) : null;
+          const activePred = normalizedPlayerId ? (predictionMap[normalizedPlayerId] ?? null) : null;
           const localPlayerRaw = !pd && meta.localPlayer
             ? {
                 first_name: (meta.localPlayer.first_name || "").trim(),
@@ -1494,13 +1704,6 @@ export default function TeamBuilder() {
                 conference: meta.localPlayer.conference ?? null,
               }
             : null;
-          const fallbackName = (() => {
-            if (bp.custom_name && bp.custom_name.trim()) return bp.custom_name.trim();
-            if (meta.notes && meta.notes.trim()) return meta.notes.trim();
-            if (!localPlayerRaw) return null;
-            const full = `${localPlayerRaw.first_name || ""} ${localPlayerRaw.last_name || ""}`.trim();
-            return full || null;
-          })();
           const overrideRole = asPitcherRole(pd?.id ? playerOverrides?.[pd.id]?.pitcher_role || null : null);
           const inferredRole = overrideRole || asPitcherRole(pd?.position || null);
           const positionForPitcherInference = pd?.position || localPlayerRaw?.position || "";
@@ -1535,8 +1738,10 @@ export default function TeamBuilder() {
             production_notes: meta.notes,
             roster_status: meta.rosterStatus ?? ((bp.source as string) === "portal" ? "target" : "returner"),
             depth_role: meta.depthRole ?? (isPitcherRow ? ((inferredRole === "SP") ? "weekend_starter" : "high_leverage_reliever") : "starter"),
-            class_transition: meta.classTransition ?? activePred?.class_transition ?? "SJ",
-            dev_aggressiveness: meta.devAggressiveness ?? activePred?.dev_aggressiveness ?? 0,
+            class_transition: meta.classTransitionOverridden ? (meta.classTransition ?? "SJ") : (activePred?.class_transition ?? "SJ"),
+            dev_aggressiveness: meta.devAggressivenessOverridden ? (meta.devAggressiveness ?? 0) : (activePred?.dev_aggressiveness ?? 0),
+            class_transition_overridden: meta.classTransitionOverridden,
+            dev_aggressiveness_overridden: meta.devAggressivenessOverridden,
             transfer_snapshot: meta.transferSnapshot ?? null,
             player: pd
               ? { first_name: pd.first_name, last_name: pd.last_name, position: pd.position, team: pd.team, from_team: pd.from_team, conference: pd.conference ?? null }
@@ -1551,7 +1756,7 @@ export default function TeamBuilder() {
       );
     }
     setDirty(false);
-  }, [builds, playerOverrides]);
+  }, [builds, playerOverrides, allPlayersForSearch, selectedTeam, resolveTeamBuilderPlayer]);
 
   // Auto-load returners when team changes and it's a new build
   useEffect(() => {
@@ -1568,17 +1773,20 @@ export default function TeamBuilder() {
     if ((alreadySeededThisTeam && hasRoster) || hasTargets || (dirty && hasRoster)) return;
 
     const mapped: BuildPlayer[] = returners.map((r: any) => {
-      const activePred = selectPreferredPrediction(r.player_predictions);
-      const overrideRole = asPitcherRole(playerOverrides?.[r.id]?.pitcher_role || null);
-      const inferredRole = overrideRole || asPitcherRole(r.position || null);
-      const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(r.position || ""));
+      const player = r.players || allPlayersById.get(String(r.player_id)) || null;
+      if (!player) return null;
+      const activePred = r;
+      const nilRow = allPlayersById.get(String(r.player_id));
+      const overrideRole = asPitcherRole(playerOverrides?.[player.id]?.pitcher_role || null);
+      const inferredRole = overrideRole || asPitcherRole(player.position || null);
+      const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(player.position || ""));
       return {
-        player_id: r.id,
+        player_id: player.id,
         source: "returner" as const,
         custom_name: null,
         position_slot: isPitcherRow ? (inferredRole || "RP") : null,
         depth_order: 1,
-        nil_value: r.nil_valuations?.[0]?.estimated_value ? Number(r.nil_valuations[0].estimated_value) : 0,
+        nil_value: nilRow?.nil_valuations?.[0]?.estimated_value ? Number(nilRow.nil_valuations[0].estimated_value) : 0,
         production_notes: null,
         roster_status: "returner",
         depth_role: isPitcherRow
@@ -1586,13 +1794,15 @@ export default function TeamBuilder() {
           : "starter",
         class_transition: activePred?.class_transition ?? "SJ",
         dev_aggressiveness: activePred?.dev_aggressiveness ?? 0,
+        class_transition_overridden: false,
+        dev_aggressiveness_overridden: false,
         transfer_snapshot: null,
-        player: { first_name: r.first_name, last_name: r.last_name, position: r.position, team: r.team, from_team: r.from_team, conference: r.conference ?? null },
+        player: { first_name: player.first_name, last_name: player.last_name, position: player.position, team: player.team, from_team: player.from_team, conference: player.conference ?? null },
         prediction: activePred ?? null,
-        nilVal: r.nil_valuations?.[0]?.estimated_value ?? null,
-        nil_owar: r.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
+        nilVal: nilRow?.nil_valuations?.[0]?.estimated_value ?? null,
+        nil_owar: nilRow?.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
       };
-    });
+    }).filter(Boolean) as BuildPlayer[];
     const existing = new Set(
       mapped.map((p) => {
         const full = `${p.player?.first_name || ""} ${p.player?.last_name || ""}`.trim();
@@ -1600,6 +1810,13 @@ export default function TeamBuilder() {
       }),
     );
     const merged = [...mapped];
+    for (const sh of seedHittersForSelectedTeam) {
+      const full = `${sh.player?.first_name || ""} ${sh.player?.last_name || ""}`.trim();
+      const key = `${normalizeName(full)}|${normalizeName(sh.player?.team || selectedTeam)}`;
+      if (existing.has(key)) continue;
+      existing.add(key);
+      merged.push(sh);
+    }
     for (const sp of storagePitchersForSelectedTeam) {
       const full = `${sp.player?.first_name || ""} ${sp.player?.last_name || ""}`.trim();
       const key = `${normalizeName(full)}|${normalizeName(sp.player?.team || selectedTeam)}`;
@@ -1610,7 +1827,7 @@ export default function TeamBuilder() {
     setRosterPlayers(merged);
     autoSeededTeamRef.current = selectedTeamKey;
     setDirty(true);
-  }, [returners, selectedTeam, selectedBuildId, storagePitchersForSelectedTeam, playerOverrides, rosterPlayers, dirty]);
+  }, [returners, selectedTeam, selectedBuildId, seedHittersForSelectedTeam, storagePitchersForSelectedTeam, playerOverrides, rosterPlayers, dirty, allPlayersById]);
 
   // Restore unsaved Team Builder draft when coming back from another page.
   useEffect(() => {
@@ -1736,6 +1953,8 @@ export default function TeamBuilder() {
             rp.depth_role ?? null,
             rp.class_transition ?? null,
             rp.dev_aggressiveness ?? null,
+            rp.class_transition_overridden ?? false,
+            rp.dev_aggressiveness_overridden ?? false,
             rp.transfer_snapshot ?? null,
             rp.player
               ? {
@@ -1795,7 +2014,7 @@ export default function TeamBuilder() {
         .from("players")
         .select(`
           id, first_name, last_name, position, team, from_team, conference,
-          player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant),
+          player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at),
           nil_valuations(estimated_value, component_breakdown)
         `)
         .in("id", ids);
@@ -2008,7 +2227,7 @@ export default function TeamBuilder() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("player_predictions")
-        .select("id, player_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at")
+        .select("id, player_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at")
         .in("model_type", ["returner", "transfer"])
         .in("player_id", targetPlayerIds);
       if (error) throw error;
@@ -2550,6 +2769,8 @@ export default function TeamBuilder() {
       depth_role: "bench",
       class_transition: "FS",
       dev_aggressiveness: 0,
+      class_transition_overridden: false,
+      dev_aggressiveness_overridden: false,
       transfer_snapshot: null,
       player: {
         first_name: name,
@@ -2610,6 +2831,8 @@ export default function TeamBuilder() {
         depth_role: "utility",
         class_transition: "SJ",
         dev_aggressiveness: 0,
+        class_transition_overridden: false,
+        dev_aggressiveness_overridden: false,
         transfer_snapshot: {
           p_avg: row.__seedStats?.avg ?? null,
           p_obp: row.__seedStats?.obp ?? null,
@@ -2799,6 +3022,8 @@ export default function TeamBuilder() {
         depth_role: inferredRole === "SP" ? "weekend_starter" : "high_leverage_reliever",
         class_transition: "SJ",
         dev_aggressiveness: 0,
+        class_transition_overridden: false,
+        dev_aggressiveness_overridden: false,
         transfer_snapshot: transferSnapshot,
         player: {
           first_name: row.first_name || "",
@@ -3463,11 +3688,26 @@ export default function TeamBuilder() {
       const pwar = pwarComputed ?? source?.p_war ?? source?.owar ?? null;
       return { sim, shown: source, shownWrc: source?.p_rv_plus ?? source?.p_wrc_plus ?? null, owar: pwar ?? 0, pwar };
     }
-    const shownWrc = shown?.p_wrc_plus ?? null;
+    const shownWrc = (() => {
+      if (shown?.p_wrc_plus != null) return shown.p_wrc_plus;
+      const pAvg = Number(shown?.p_avg);
+      const pObp = Number(shown?.p_obp);
+      const pSlg = Number(shown?.p_slg);
+      const pIso = Number(shown?.p_iso ?? ((Number.isFinite(pSlg) && Number.isFinite(pAvg)) ? (pSlg - pAvg) : NaN));
+      if (![pAvg, pObp, pSlg, pIso].every(Number.isFinite)) return null;
+      const wObp = eqNum("r_w_obp", 0.45);
+      const wSlg = eqNum("r_w_slg", 0.3);
+      const wAvg = eqNum("r_w_avg", 0.15);
+      const wIso = eqNum("r_w_iso", 0.1);
+      const ncaaWrc = eqNum("r_ncaa_avg_wrc", 0.364);
+      if (!Number.isFinite(ncaaWrc) || ncaaWrc <= 0) return null;
+      const pWrc = (wObp * pObp) + (wSlg * pSlg) + (wAvg * pAvg) + (wIso * pIso);
+      return Math.round((pWrc / ncaaWrc) * 100);
+    })();
     const baseOwar = computeOWarFromWrcPlus(shownWrc) ?? p.nil_owar ?? 0;
     const owar = baseOwar * depthRoleMultiplier(p.depth_role);
     return { sim, shown, shownWrc, owar, pwar: null };
-  }, [computePitcherPwar, computeReturnerPitchingProjection, simulateTransferProjection, pitchingEq]);
+  }, [computePitcherPwar, computeReturnerPitchingProjection, simulateTransferProjection, pitchingEq, eqNum]);
 
   const projectedPlayerScore = useCallback((p: BuildPlayer) => {
     const { owar } = playerProjection(p);
@@ -3840,6 +4080,17 @@ export default function TeamBuilder() {
     const projection = playerProjection(p);
     const isTarget = (p.roster_status || "returner") === "target";
     const isPitcherRow = isPitcher(p);
+    const linkedPlayerId = (() => {
+      const fullName = p.player ? `${p.player.first_name || ""} ${p.player.last_name || ""}`.trim() : (p.custom_name || "").trim();
+      const teamName = p.player?.team || p.player?.from_team || selectedTeam || "";
+      const match = resolveTeamBuilderPlayer(
+        p.player_id,
+        fullName,
+        teamName,
+        isPitcherRow ? true : false,
+      );
+      return match?.id ?? null;
+    })();
     const currentPitcherRole = normalizePitcherRole(
       pitcherRoleFromSlot(p.position_slot) || p.player?.position || null,
     );
@@ -3862,25 +4113,25 @@ export default function TeamBuilder() {
     })();
     return (
     <TableRow key={globalIdx}>
-      <TableCell className="font-medium">
+      <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
         <div className="flex items-center gap-2">
-          {p.player_id ? (
+          {linkedPlayerId ? (
             <Link
               to={profileRouteFor(
-                p.player_id,
+                linkedPlayerId,
                 isPitcherRow
                   ? currentPitcherRole
                   : (p.position_slot || p.player?.position || null),
                 p.player?.position || null,
               )}
-              className="text-primary underline underline-offset-2 hover:opacity-80"
+              className="hover:text-primary hover:underline transition-colors"
             >
               {getPlayerName(p)}
             </Link>
           ) : isPitcherRow ? (
             <Link
               to={storagePitcherRouteFor(getPlayerName(p), p.player?.team || null)}
-              className="text-primary underline underline-offset-2 hover:opacity-80"
+              className="hover:text-primary hover:underline transition-colors"
             >
               {getPlayerName(p)}
             </Link>
@@ -3984,7 +4235,7 @@ export default function TeamBuilder() {
       <TableCell>
         <Select
           value={p.class_transition || "SJ"}
-          onValueChange={(v) => updatePlayerWithRecalc(globalIdx, { class_transition: v })}
+          onValueChange={(v) => updatePlayerWithRecalc(globalIdx, { class_transition: v, class_transition_overridden: true })}
         >
           <SelectTrigger className="w-[90px] h-8">
             <SelectValue />
@@ -4004,7 +4255,7 @@ export default function TeamBuilder() {
               ? p.dev_aggressiveness
               : 0
           )}
-          onValueChange={(v) => updatePlayerWithRecalc(globalIdx, { dev_aggressiveness: Number(v) })}
+          onValueChange={(v) => updatePlayerWithRecalc(globalIdx, { dev_aggressiveness: Number(v), dev_aggressiveness_overridden: true })}
         >
           <SelectTrigger className="w-[90px] h-8">
             <SelectValue />
@@ -4078,9 +4329,11 @@ export default function TeamBuilder() {
               </span>
             );
           }
-          const projected = (p.roster_status === "target")
-            ? { p_avg: shown?.p_avg ?? null, p_obp: shown?.p_obp ?? null, p_slg: shown?.p_slg ?? null }
-            : { p_avg: p.prediction?.p_avg ?? null, p_obp: p.prediction?.p_obp ?? null, p_slg: p.prediction?.p_slg ?? null };
+          const projected = {
+            p_avg: shown?.p_avg ?? null,
+            p_obp: shown?.p_obp ?? null,
+            p_slg: shown?.p_slg ?? null,
+          };
           if (projected.p_avg == null && projected.p_obp == null && projected.p_slg == null) return "—";
           return (
             <span className="inline-block whitespace-nowrap text-[12px] font-mono">
@@ -4096,10 +4349,10 @@ export default function TeamBuilder() {
           const shownMetric = isPitcherRow
             ? ((p.roster_status === "target")
                 ? (shown?.p_rv_plus ?? shown?.p_wrc_plus ?? sim?.p_rv_plus ?? p.transfer_snapshot?.p_rv_plus ?? p.transfer_snapshot?.p_wrc_plus ?? null)
-                : (shown?.p_rv_plus ?? shown?.p_wrc_plus ?? (p.prediction as any)?.p_rv_plus ?? (p.prediction as any)?.p_wrc_plus ?? p.transfer_snapshot?.p_rv_plus ?? null))
+                : (shown?.p_rv_plus ?? shown?.p_wrc_plus ?? p.transfer_snapshot?.p_rv_plus ?? null))
             : ((p.roster_status === "target")
                 ? (shown?.p_wrc_plus ?? sim?.p_wrc_plus ?? p.transfer_snapshot?.p_wrc_plus ?? null)
-                : (p.prediction?.p_wrc_plus ?? null));
+                : (shown?.p_wrc_plus ?? null));
           return shownMetric != null ? shownMetric.toFixed(0) : "—";
         })()}
       </TableCell>
