@@ -1,3 +1,4 @@
+// TODO: Route is commented out in App.tsx — page is unreachable. Reconnect or remove.
 import { useState, useMemo } from "react";
 import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
 import DashboardLayout from "@/components/DashboardLayout";
