@@ -49,6 +49,7 @@ type ConferenceRow = {
   obp_plus: number | null;
   iso_plus: number | null;
   stuff_plus: number | null;
+  wrc_plus?: number | null;
   offensive_power_rating?: number | null;
 };
 
@@ -430,14 +431,17 @@ const calcPitchingPlus = (
 const calcHitterTalentPlusFromConference = (
   overallHitterPowerRatingPlus: number | null | undefined,
   stuffPlus: number | null | undefined,
+  wrcPlus: number | null | undefined,
 ) => {
   if (
     overallHitterPowerRatingPlus == null ||
     !Number.isFinite(overallHitterPowerRatingPlus) ||
     stuffPlus == null ||
-    !Number.isFinite(stuffPlus)
+    !Number.isFinite(stuffPlus) ||
+    wrcPlus == null ||
+    !Number.isFinite(wrcPlus)
   ) return null;
-  const value = overallHitterPowerRatingPlus + (1.25 * (stuffPlus - 100));
+  const value = overallHitterPowerRatingPlus + (1.25 * (stuffPlus - 100)) + (0.75 * (100 - wrcPlus));
   return Number.isFinite(value) ? Number(value.toFixed(1)) : null;
 };
 
@@ -658,7 +662,7 @@ export default function TransferPortal() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("conference_stats")
-        .select("conference, season, avg_plus, obp_plus, iso_plus, stuff_plus, offensive_power_rating")
+        .select("conference, season, avg_plus, obp_plus, iso_plus, stuff_plus, wrc_plus, offensive_power_rating")
         .eq("season", 2025);
       if (error) throw error;
       // keep best row per conference key inside 2025 only.
@@ -671,6 +675,7 @@ export default function TransferPortal() {
           (row.obp_plus != null ? 1 : 0) +
           (row.iso_plus != null ? 1 : 0) +
           (row.stuff_plus != null ? 1 : 0) +
+          (row.wrc_plus != null ? 1 : 0) +
           (row.offensive_power_rating != null ? 1 : 0);
         const existing = byConf.get(key);
         if (!existing || score > existing.score) {
@@ -893,6 +898,7 @@ export default function TransferPortal() {
           matchingHittingConference?.offensive_power_rating ??
             getOverallHitterPowerForPitching(canonicalKey),
           matchingHittingConference?.stuff_plus ?? null,
+          matchingHittingConference?.wrc_plus ?? null,
         );
         const hitterTalentPlusNum = (() => {
           if (hitterTalentFromEquation != null) return hitterTalentFromEquation;
@@ -1712,10 +1718,6 @@ export default function TransferPortal() {
       <div className="space-y-6">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Transfer Portal</h2>
-          <p className="text-muted-foreground">
-            Simulate any player's projected outcomes at a destination school using conference/park/stuff deltas,
-            internal power ratings, oWAR, and NIL. All active roster players are eligible — not limited to portal entries.
-          </p>
           <div className="mt-3 inline-flex rounded-md border p-1">
             <Button
               size="sm"

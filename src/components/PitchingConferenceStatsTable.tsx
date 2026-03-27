@@ -188,13 +188,13 @@ const calcHr9Plus = (hr9: number | null, ncaaAvgHr9: number, ncaaHr9Sd: number, 
 
 const fmt2 = (value: number | null) => (value == null ? "—" : Number(value).toFixed(2));
 
-const calcOffensiveEnvironment = (
-  hitterTalentPlus: number | null,
+const calcHitterTalentPlus = (
+  overallHitterPrPlus: number | null,
   stuffPlus: number | null,
   wrcPlus: number | null,
 ) => {
-  if (hitterTalentPlus == null || wrcPlus == null || stuffPlus == null) return null;
-  const value = wrcPlus + (1.25 * (stuffPlus - 100));
+  if (overallHitterPrPlus == null || stuffPlus == null || wrcPlus == null) return null;
+  const value = overallHitterPrPlus + (1.25 * (stuffPlus - 100)) + (0.75 * (100 - wrcPlus));
   return Number.isFinite(value) ? Number(value.toFixed(1)) : null;
 };
 
@@ -414,6 +414,18 @@ export default function PitchingConferenceStatsTable() {
     }
     return map;
   }, [hittingConferenceStats]);
+  const wrcByConference = useMemo(() => {
+    const map = new Map<string, number | null>();
+    for (const row of hittingConferenceStats) {
+      const key = canonicalConferenceName(row.conference);
+      if (!key) continue;
+      const existing = map.get(key);
+      if (existing == null || row.wrc_plus != null) {
+        map.set(key, row.wrc_plus ?? null);
+      }
+    }
+    return map;
+  }, [hittingConferenceStats]);
 
   const startEdit = (row: PitchingRow) => {
     setEditingConference(row.conference);
@@ -540,6 +552,7 @@ export default function PitchingConferenceStatsTable() {
                 <TableHead className="text-right">HR/9+</TableHead>
                 <TableHead className="text-right">Overall Hitter PR+</TableHead>
                 <TableHead className="text-right">Stuff+</TableHead>
+                <TableHead className="text-right">WRC+</TableHead>
                 <TableHead className="text-right">Hitter Talent+</TableHead>
                 <TableHead className="w-[90px]">Actions</TableHead>
               </TableRow>
@@ -590,17 +603,28 @@ export default function PitchingConferenceStatsTable() {
                       </TableCell>
                       <TableCell className="text-right font-mono">
                         {(() => {
+                          const wrc = wrcByConference.get(canonicalConferenceName(r.conference));
+                          return wrc == null ? "—" : Number(wrc).toFixed(1);
+                        })()}
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        {(() => {
                           const canonical = canonicalConferenceName(r.conference);
                           const overallHitterPr = getOverallHitterPowerRating(canonical);
+                          const stuff = stuffByConference.get(canonical);
+                          const wrc = wrcByConference.get(canonical);
+                          const hitterTalentFromEquation = calcHitterTalentPlus(
+                            overallHitterPr,
+                            stuff == null ? null : Number(stuff),
+                            wrc == null ? null : Number(wrc),
+                          );
                           const hitterTalent =
+                            hitterTalentFromEquation ??
                             r.hitter_talent_plus ??
                             getHitterTalentPlusDefault(canonical) ??
                             hitterTalentByConference.get(canonical) ??
                             null;
-                          const stuffRaw = stuffByConference.get(canonical);
-                          const stuff = stuffRaw == null ? null : Number(stuffRaw);
-                          const oe = calcOffensiveEnvironment(hitterTalent, stuff, overallHitterPr);
-                          return oe == null ? "—" : oe.toFixed(1);
+                          return hitterTalent == null ? "—" : Number(hitterTalent).toFixed(1);
                         })()}
                       </TableCell>
                       <TableCell>
@@ -646,7 +670,10 @@ export default function PitchingConferenceStatsTable() {
                             100
                           </TableCell>
                           <TableCell className="text-right font-mono">
-                            {calcOffensiveEnvironment(ncaaDisplayRow.hitter_talent_plus ?? 100, 100, 100)?.toFixed(1) ?? "100.0"}
+                            100
+                          </TableCell>
+                          <TableCell className="text-right font-mono">
+                            {Number(ncaaDisplayRow.hitter_talent_plus ?? 100).toFixed(1)}
                           </TableCell>
                           <TableCell />
                         </>
@@ -657,7 +684,7 @@ export default function PitchingConferenceStatsTable() {
                 </>
               ) : (
                 <TableRow>
-                  <TableCell colSpan={17} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={18} className="py-8 text-center text-muted-foreground">
                     No pitching conference rows yet. Import your CSV to begin.
                   </TableCell>
                 </TableRow>
