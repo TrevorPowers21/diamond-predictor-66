@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -316,6 +316,7 @@ function simulate(args: {
 
 export default function PlayerComparison() {
   const { toast } = useToast();
+  const location = useLocation();
   const [compareAPlayerId, setCompareAPlayerId] = useState("");
   const [compareAPlayerSearch, setCompareAPlayerSearch] = useState("");
   const [compareAPlayerOpen, setCompareAPlayerOpen] = useState(false);
@@ -575,7 +576,7 @@ export default function PlayerComparison() {
         {panel.player?.id && (
           <div className="text-xs text-muted-foreground rounded-md border bg-muted/30 px-2.5 py-2">
             Selected:{" "}
-            <Link className="underline underline-offset-2 text-primary" to={profileRouteFor(panel.player.id, panel.player.position)}>
+            <Link className="underline underline-offset-2 text-primary" to={profileRouteFor(panel.player.id, panel.player.position)} state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}>
               {panel.player.first_name} {panel.player.last_name}
             </Link>
             <div className="mt-1">
@@ -592,7 +593,7 @@ export default function PlayerComparison() {
         <div className="flex items-center gap-2">
           {panel.player?.id ? (
             <Button asChild size="sm" variant="outline">
-              <Link to={profileRouteFor(panel.player.id, panel.player.position)}>View Player Profile</Link>
+              <Link to={profileRouteFor(panel.player.id, panel.player.position)} state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}>View Player Profile</Link>
             </Button>
           ) : null}
           <Button size="sm" onClick={onAddToTargetBoard} disabled={!panel.player || !panel.simulation}>

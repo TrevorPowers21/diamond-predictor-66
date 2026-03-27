@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -271,6 +271,8 @@ function StatRow({ label, from, predicted }: { label: string; from: number | nul
 export default function PlayerProfile() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = (location.state as any)?.returnTo as string | undefined;
   const queryClient = useQueryClient();
   const { hasRole } = useAuth();
   const isAdmin = hasRole("admin");
@@ -623,7 +625,7 @@ export default function PlayerProfile() {
       <div className="space-y-4 max-w-[1400px] mx-auto">
         {/* Back + Header */}
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+          <Button variant="ghost" size="icon" onClick={() => returnTo ? navigate(returnTo) : navigate(-1)}>
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex-1">

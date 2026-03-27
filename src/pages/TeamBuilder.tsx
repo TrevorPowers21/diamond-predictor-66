@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -922,6 +922,7 @@ export default function TeamBuilder() {
   const queryClient = useQueryClient();
   const isAdmin = hasRole("admin");
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const validTabs = new Set(["roster", "target-board", "compare", "depth"]);
   const requestedTab = (searchParams.get("tab") || "").trim().toLowerCase();
   const initialTab = validTabs.has(requestedTab) ? requestedTab : "roster";
@@ -4130,6 +4131,7 @@ export default function TeamBuilder() {
                   : (p.position_slot || p.player?.position || null),
                 p.player?.position || null,
               )}
+              state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}
               className="hover:text-primary hover:underline transition-colors"
             >
               {getPlayerName(p)}
@@ -5046,6 +5048,7 @@ export default function TeamBuilder() {
                       <Link
                         className="underline underline-offset-2 text-primary"
                         to={profileRouteFor(compareAPlayer.id, compareAPlayer.position ?? null)}
+                        state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}
                       >
                         {compareAPlayer.first_name} {compareAPlayer.last_name}
                       </Link>
@@ -5167,6 +5170,7 @@ export default function TeamBuilder() {
                       <Link
                         className="underline underline-offset-2 text-primary"
                         to={profileRouteFor(compareBPlayer.id, compareBPlayer.position ?? null)}
+                        state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}
                       >
                         {compareBPlayer.first_name} {compareBPlayer.last_name}
                       </Link>
