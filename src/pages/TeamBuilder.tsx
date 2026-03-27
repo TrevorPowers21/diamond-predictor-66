@@ -14,6 +14,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, BarChart3, DollarSign, Upload, ChevronDown, ChevronUp } from "lucide-react";
+// TODO: Seed JSON files are static local data — migrate to Supabase tables for live updates.
 import storage2025Seed from "@/data/storage_2025_seed.json";
 import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
 import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";

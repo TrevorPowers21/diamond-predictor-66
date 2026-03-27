@@ -12,6 +12,7 @@ import { computeTransferProjection } from "@/lib/transferProjection";
 import { DEFAULT_NIL_TIER_MULTIPLIERS, getPositionValueMultiplier, getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
+// TODO: Seed JSON is static local data — migrate to Supabase table for live updates.
 import storage2025Seed from "@/data/storage_2025_seed.json";
 import { readTeamParkFactorComponents, resolveMetricParkFactor } from "@/lib/parkFactors";
 

@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { Pencil, RefreshCw, Scale, Sliders, Trophy, Plus, Trash2, Building2, Check, Edit2, Save, X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { bulkRecalculatePredictionsLocal } from "@/lib/predictionEngine";
+// TODO: Seed JSON files are static local data — migrate to Supabase tables for live updates.
 import storage2025Seed from "@/data/storage_2025_seed.json";
 import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
 import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";

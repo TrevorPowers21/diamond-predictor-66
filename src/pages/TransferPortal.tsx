@@ -9,6 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Search } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
+// TODO: Seed JSON is static local data — migrate to Supabase table for live updates.
 import storage2025Seed from "@/data/storage_2025_seed.json";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -440,6 +441,7 @@ const calcHitterTalentPlusFromConference = (
   return Number.isFinite(value) ? Number(value.toFixed(1)) : null;
 };
 
+// TODO: Hardcoded conference power ratings — migrate to Supabase or derive from conference_stats.
 const OVERALL_HITTER_POWER_RATING_BY_CONFERENCE_CANONICAL: Record<string, number> = {
   "atlantic 10": 105,
   "american athletic conference": 95,

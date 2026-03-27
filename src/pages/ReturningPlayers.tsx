@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
+// TODO: Seed JSON files are static local data — migrate to Supabase tables for live updates.
 import storage2025Seed from "@/data/storage_2025_seed.json";
 import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
 import {

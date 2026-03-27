@@ -14,6 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { ArrowLeft, Pencil, Save, X, TrendingUp, TrendingDown, ShieldCheck, Target } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
+// TODO: Seed JSON files are static local data — migrate to Supabase tables for live updates.
 import storage2025Seed from "@/data/storage_2025_seed.json";
 import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
 import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
