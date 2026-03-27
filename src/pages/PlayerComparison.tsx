@@ -33,6 +33,14 @@ type PlayerLite = {
     from_avg: number | null;
     from_obp: number | null;
     from_slg: number | null;
+    p_era: number | null;
+    p_fip: number | null;
+    p_whip: number | null;
+    p_k9: number | null;
+    p_bb9: number | null;
+    p_hr9: number | null;
+    p_rv_plus: number | null;
+    p_war: number | null;
     model_type: string | null;
     variant: string | null;
     status: string | null;
@@ -86,6 +94,9 @@ const writeTargetBoard = (rows: TargetBoardEntry[]) => {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(TARGET_BOARD_STORAGE_KEY, JSON.stringify(rows));
 };
+
+const isPitcherPosition = (pos: string | null | undefined) =>
+  /^(SP|RP|CL|P|LHP|RHP|TWP)/i.test(String(pos || ""));
 
 const normalizeName = (value: string | null | undefined) =>
   (value || "")
@@ -373,7 +384,7 @@ export default function PlayerComparison() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, team, from_team, conference, player_predictions(id, from_avg, from_obp, from_slg, model_type, variant, status, updated_at)")
+          .select("id, first_name, last_name, position, team, from_team, conference, player_predictions(id, from_avg, from_obp, from_slg, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, model_type, variant, status, updated_at)")
           .range(from, from + PAGE - 1);
         if (error) throw error;
         all = all.concat(data || []);
@@ -589,7 +600,63 @@ export default function PlayerComparison() {
           </Button>
         </div>
 
-        {panel.simulation ? (
+        {(() => {
+          const playerIsPitcher = isPitcherPosition(panel.player?.position);
+          if (playerIsPitcher && panel.player) {
+            // Pitcher comparison — show DB prediction stats (ERA, FIP, WHIP, K/9, BB/9, HR/9, RV+, pWAR)
+            const pred = selectTransferPortalPreferredPrediction(
+              (panel.player.player_predictions || []).filter((pr) => pr.variant === "regular"),
+            ) as (typeof panel.player.player_predictions[0]) | null;
+            const fmt = (v: number | null | undefined, d = 2) => v != null ? Number(v).toFixed(d) : "—";
+            return pred ? (
+              <div className="space-y-3">
+                <div className="rounded-md border p-3">
+                  <p className="text-xs font-semibold mb-2 uppercase tracking-wide">Pitcher Projected Stats</p>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className={`rounded-md border px-2 py-2 bg-muted/20 ${metricTone(pred.p_era != null ? -Number(pred.p_era) : null, -5.0, -3.5)}`}>
+                      <div className="text-[12px] font-semibold">ERA</div>
+                      <div className="font-mono text-xl font-bold leading-none mt-1">{fmt(pred.p_era)}</div>
+                    </div>
+                    <div className={`rounded-md border px-2 py-2 bg-muted/20 ${metricTone(pred.p_fip != null ? -Number(pred.p_fip) : null, -5.0, -3.5)}`}>
+                      <div className="text-[12px] font-semibold">FIP</div>
+                      <div className="font-mono text-xl font-bold leading-none mt-1">{fmt(pred.p_fip)}</div>
+                    </div>
+                    <div className={`rounded-md border px-2 py-2 bg-muted/20 ${metricTone(pred.p_whip != null ? -Number(pred.p_whip) : null, -1.5, -1.2)}`}>
+                      <div className="text-[12px] font-semibold">WHIP</div>
+                      <div className="font-mono text-xl font-bold leading-none mt-1">{fmt(pred.p_whip)}</div>
+                    </div>
+                    <div className={`rounded-md border px-2 py-2 bg-muted/20 ${metricTone(pred.p_k9, 7.5, 9.0)}`}>
+                      <div className="text-[12px] font-semibold">K/9</div>
+                      <div className="font-mono text-xl font-bold leading-none mt-1">{fmt(pred.p_k9, 1)}</div>
+                    </div>
+                    <div className={`rounded-md border px-2 py-2 bg-muted/20 ${metricTone(pred.p_bb9 != null ? -Number(pred.p_bb9) : null, -5.0, -3.5)}`}>
+                      <div className="text-[12px] font-semibold">BB/9</div>
+                      <div className="font-mono text-xl font-bold leading-none mt-1">{fmt(pred.p_bb9, 1)}</div>
+                    </div>
+                    <div className={`rounded-md border px-2 py-2 bg-muted/20 ${metricTone(pred.p_hr9 != null ? -Number(pred.p_hr9) : null, -1.2, -0.8)}`}>
+                      <div className="text-[12px] font-semibold">HR/9</div>
+                      <div className="font-mono text-xl font-bold leading-none mt-1">{fmt(pred.p_hr9, 1)}</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs mt-2">
+                    <div className={`rounded-md border px-2 py-2 bg-muted/20 ${metricTone(pred.p_rv_plus, 100, 110)}`}>
+                      <div className="text-[12px] font-semibold">pRV+</div>
+                      <div className="font-mono text-xl font-bold leading-none mt-1">{pred.p_rv_plus != null ? Math.round(Number(pred.p_rv_plus)).toString() : "—"}</div>
+                    </div>
+                    <div className={`rounded-md border px-2 py-2 bg-muted/20 ${metricTone(pred.p_war, 0.5, 1.5)}`}>
+                      <div className="text-[12px] font-semibold">pWAR</div>
+                      <div className="font-mono text-xl font-bold leading-none mt-1">{fmt(pred.p_war)}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+                No pitcher projection data available for this player.
+              </div>
+            );
+          }
+          return panel.simulation ? (
           <div className="space-y-3">
             <div className="rounded-md border p-3">
               <p className="text-xs font-semibold mb-2 uppercase tracking-wide">Projected Outcomes</p>
@@ -636,7 +703,8 @@ export default function PlayerComparison() {
           <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
             Select player and destination team to run this panel.
           </div>
-        )}
+        );
+        })()}
       </CardContent>
     </Card>
   )};

@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, Pencil, Save, X, TrendingUp, TrendingDown, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Pencil, Save, X, TrendingUp, TrendingDown, ShieldCheck, Target } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import storage2025Seed from "@/data/storage_2025_seed.json";
@@ -24,6 +24,35 @@ import {
   getProgramTierMultiplierByConference,
 } from "@/lib/nilProgramSpecific";
 import { readPlayerOverrides } from "@/lib/playerOverrides";
+
+const TARGET_BOARD_STORAGE_KEY = "team_builder_target_board_v1";
+type TargetBoardEntry = {
+  playerId: string;
+  playerName: string;
+  destinationTeam: string;
+  fromTeam: string | null;
+  fromConference: string | null;
+  pAvg: number | null;
+  pObp: number | null;
+  pSlg: number | null;
+  pWrcPlus: number | null;
+  owar: number | null;
+  nilValuation: number | null;
+  createdAt: string;
+};
+const readTargetBoard = (): TargetBoardEntry[] => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(TARGET_BOARD_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+};
+const writeTargetBoard = (rows: TargetBoardEntry[]) => {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(TARGET_BOARD_STORAGE_KEY, JSON.stringify(rows));
+};
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -608,6 +637,36 @@ export default function PlayerProfile() {
               {player.transfer_portal && <Badge className="bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]">Transfer Portal</Badge>}
             </div>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const board = readTargetBoard();
+              if (board.some((e) => e.playerId === player.id)) {
+                toast.info("Already on target board");
+                return;
+              }
+              const pred = regularPred;
+              board.push({
+                playerId: player.id,
+                playerName: `${player.first_name} ${player.last_name}`,
+                destinationTeam: "",
+                fromTeam: player.from_team || player.team || null,
+                fromConference: player.conference || null,
+                pAvg: pred?.p_avg ?? null,
+                pObp: pred?.p_obp ?? null,
+                pSlg: pred?.p_slg ?? null,
+                pWrcPlus: pred?.p_wrc_plus ?? null,
+                owar: null,
+                nilValuation: null,
+                createdAt: new Date().toISOString(),
+              });
+              writeTargetBoard(board);
+              toast.success("Added to Target Board");
+            }}
+          >
+            <Target className="mr-2 h-3.5 w-3.5" />Target Board
+          </Button>
           {!editing ? (
             <Button variant="outline" size="sm" onClick={startEdit}>
               <Pencil className="mr-2 h-3.5 w-3.5" />Edit

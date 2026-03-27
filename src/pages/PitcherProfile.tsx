@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, TrendingUp } from "lucide-react";
+import { ArrowLeft, Target, TrendingUp } from "lucide-react";
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -410,6 +411,23 @@ function ScoutGrade({ value, fullLabel }: { value: number | null; fullLabel: str
     </div>
   );
 }
+
+const TARGET_BOARD_STORAGE_KEY = "team_builder_target_board_v1";
+type TargetBoardEntry = {
+  playerId: string; playerName: string; destinationTeam: string;
+  fromTeam: string | null; fromConference: string | null;
+  pAvg: number | null; pObp: number | null; pSlg: number | null;
+  pWrcPlus: number | null; owar: number | null; nilValuation: number | null;
+  createdAt: string;
+};
+const readTargetBoard = (): TargetBoardEntry[] => {
+  if (typeof window === "undefined") return [];
+  try { const raw = window.localStorage.getItem(TARGET_BOARD_STORAGE_KEY); if (!raw) return []; return JSON.parse(raw) || []; } catch { return []; }
+};
+const writeTargetBoard = (rows: TargetBoardEntry[]) => {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(TARGET_BOARD_STORAGE_KEY, JSON.stringify(rows));
+};
 
 export default function PitcherProfile() {
   const { id } = useParams<{ id: string }>();
@@ -1189,6 +1207,32 @@ export default function PitcherProfile() {
               <Badge variant="secondary">{displayHandedness}</Badge>
             </div>
           </div>
+          {player && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const board = readTargetBoard();
+                if (board.some((e) => e.playerId === player.id)) {
+                  toast.info("Already on target board");
+                  return;
+                }
+                board.push({
+                  playerId: player.id,
+                  playerName: fullName,
+                  destinationTeam: "",
+                  fromTeam: player.from_team || player.team || null,
+                  fromConference: player.conference || null,
+                  pAvg: null, pObp: null, pSlg: null, pWrcPlus: null, owar: null, nilValuation: null,
+                  createdAt: new Date().toISOString(),
+                });
+                writeTargetBoard(board);
+                toast.success("Added to Target Board");
+              }}
+            >
+              <Target className="mr-2 h-3.5 w-3.5" />Target Board
+            </Button>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

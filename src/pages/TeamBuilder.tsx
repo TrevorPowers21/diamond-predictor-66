@@ -1508,10 +1508,16 @@ export default function TeamBuilder() {
       .filter((row: any) => !/^(SP|RP|CL|P|LHP|RHP)/i.test(String(row.position || "")))
       .filter((row: any) => {
         const fullName = normalizeName(`${row.first_name || ""} ${row.last_name || ""}`);
+        // Only exclude seed hitter if a DB player with the same name has a returner
+        // prediction — i.e., they will appear in the `returners` query. Without this
+        // check, DB players that exist but lack returner predictions silently block
+        // the seed fallback, leaving zero position players (e.g. West Virginia).
         return !allPlayersForSearch.some((p: any) => {
           const dbFullName = normalizeName(`${p.first_name || ""} ${p.last_name || ""}`);
           const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(p.position || ""));
-          return !isPitcherRow && dbFullName === fullName;
+          if (isPitcherRow || dbFullName !== fullName) return false;
+          const preds = Array.isArray(p.player_predictions) ? p.player_predictions : [];
+          return preds.some((pr: any) => pr.model_type === "returner" && pr.variant === "regular" && (pr.status === "active" || pr.status === "departed"));
         });
       })
       .map((row: any) => ({
