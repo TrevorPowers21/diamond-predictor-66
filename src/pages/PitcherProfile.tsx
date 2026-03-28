@@ -394,15 +394,18 @@ function MetricCard({ title, value, subtitle }: { title: string; value: string; 
 function ScoutGrade({ value, fullLabel }: { value: number | null; fullLabel: string }) {
   if (value == null) return null;
   const tier =
-    value >= 80 ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]" :
-    value >= 50 ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]" :
+    value >= 90 ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]" :
+    value >= 75 ? "bg-[hsl(142,71%,45%,0.12)] text-[hsl(142,71%,35%)] border-[hsl(142,71%,45%,0.25)]" :
+    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,35%)] border-[hsl(200,80%,50%,0.25)]" :
+    value >= 45 ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]" :
+    value >= 35 ? "bg-[hsl(25,90%,50%,0.12)] text-[hsl(25,90%,38%)] border-[hsl(25,90%,50%,0.25)]" :
     "bg-destructive/15 text-destructive border-destructive/30";
   const grade =
-    value >= 80 ? "Elite" :
-    value >= 70 ? "Plus-Plus" :
+    value >= 90 ? "Elite" :
+    value >= 75 ? "Plus-Plus" :
     value >= 60 ? "Plus" :
-    value >= 50 ? "Average" :
-    value >= 40 ? "Below Avg" : "Poor";
+    value >= 45 ? "Average" :
+    value >= 35 ? "Below Avg" : "Poor";
   return (
     <div className={`rounded-lg border p-3 ${tier}`}>
       <div className="text-xs font-medium opacity-80">{fullLabel}</div>

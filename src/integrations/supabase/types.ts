@@ -154,6 +154,7 @@ export type Database = {
       hitter_stats_storage: {
         Row: {
           id: string
+          player_id: string | null
           player_name: string
           team: string | null
           conference: string | null
@@ -167,6 +168,7 @@ export type Database = {
         }
         Insert: {
           id?: string
+          player_id?: string | null
           player_name: string
           team?: string | null
           conference?: string | null
@@ -180,6 +182,7 @@ export type Database = {
         }
         Update: {
           id?: string
+          player_id?: string | null
           player_name?: string
           team?: string | null
           conference?: string | null
@@ -196,6 +199,7 @@ export type Database = {
       hitting_power_ratings_storage: {
         Row: {
           id: string
+          player_id: string | null
           player_name: string
           team: string | null
           season: number
@@ -217,6 +221,7 @@ export type Database = {
         }
         Insert: {
           id?: string
+          player_id?: string | null
           player_name: string
           team?: string | null
           season?: number
@@ -238,6 +243,7 @@ export type Database = {
         }
         Update: {
           id?: string
+          player_id?: string | null
           player_name?: string
           team?: string | null
           season?: number

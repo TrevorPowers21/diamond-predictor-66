@@ -2198,16 +2198,18 @@ export default function TeamBuilder() {
     return map;
   }, [conferenceStats]);
 
-  const seedByName = useMemo(() => {
+  const [seedByName, seedByPlayerId] = useMemo(() => {
     const map = new Map<string, SeedRow[]>();
+    const byId = new Map<string, SeedRow>();
     for (const row of hitterStats as SeedRow[]) {
       const nameKey = normalizeKey(row.playerName);
       if (!nameKey || !row.team) continue;
       const list = map.get(nameKey) || [];
       list.push(row);
       map.set(nameKey, list);
+      if ((row as any).player_id) byId.set((row as any).player_id, row);
     }
-    return map;
+    return [map, byId];
   }, [hitterStats]);
 
   const targetPredictionIds = useMemo(
@@ -2371,14 +2373,18 @@ export default function TeamBuilder() {
     }
 
     const fullName = `${livePlayer.first_name} ${livePlayer.last_name}`;
+    // Fast path: UUID match
+    const byId = bp.player_id ? seedByPlayerId.get(bp.player_id) : undefined;
+    let inferredFromTeam: string | null = byId?.team ?? null;
+    if (!inferredFromTeam) {
     const candidates = seedByName.get(normalizeKey(fullName)) || [];
-    let inferredFromTeam: string | null = null;
     if (candidates.length === 1) {
       inferredFromTeam = candidates[0].team;
     } else if (candidates.length > 1) {
       const key = `${statKey(lastAvg)}|${statKey(lastObp)}|${statKey(lastSlg)}`;
       const exact = candidates.find((r) => `${statKey(r.avg)}|${statKey(r.obp)}|${statKey(r.slg)}` === key);
       inferredFromTeam = exact?.team || candidates[0].team;
+    }
     }
 
     const fromTeamName = livePlayer.from_team || inferredFromTeam || livePlayer.team;
@@ -3106,14 +3112,18 @@ export default function TeamBuilder() {
       const lastSlg = chosenPred.from_slg ?? null;
 
       const fullName = `${row.first_name} ${row.last_name}`;
+      // Fast path: UUID match
+      const byId = row.id ? seedByPlayerId.get(row.id) : undefined;
+      let inferredFromTeam: string | null = byId?.team ?? null;
+      if (!inferredFromTeam) {
       const candidates = seedByName.get(normalizeKey(fullName)) || [];
-      let inferredFromTeam: string | null = null;
       if (candidates.length === 1) {
         inferredFromTeam = candidates[0].team;
       } else if (candidates.length > 1 && lastAvg != null) {
         const key = `${statKey(lastAvg)}|${statKey(lastObp)}|${statKey(lastSlg)}`;
         const exact = candidates.find((r) => `${statKey(r.avg)}|${statKey(r.obp)}|${statKey(r.slg)}` === key);
         inferredFromTeam = exact?.team || candidates[0].team;
+      }
       }
 
       const fromTeamName = row.from_team || inferredFromTeam || row.team;

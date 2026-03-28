@@ -4771,7 +4771,7 @@ function QuickActionsTab() {
     unresolvedSample: string[];
   } | null>(null);
   const [syncSeedLoading, setSyncSeedLoading] = useState(false);
-  const [syncSeedResult, setSyncSeedResult] = useState<{ stats: number; power: number } | null>(null);
+  const [syncSeedResult, setSyncSeedResult] = useState<{ stats: number; power: number; linked: number } | null>(null);
 
   const syncSeedDataToSupabase = async () => {
     setSyncSeedLoading(true);
@@ -4822,8 +4822,90 @@ function QuickActionsTab() {
         if (error) throw error;
       }
 
-      setSyncSeedResult({ stats: statsRows.length, power: powerRows.length });
-      toast.success(`Synced ${statsRows.length} hitter stats and ${powerRows.length} power ratings to Supabase`);
+      // --- Player ID linking pass ---
+      // Fetch all players and match by normalized name+team to write player_id
+      const normalize = (v: string | null | undefined) =>
+        (v || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+      const allPlayers: Array<{ id: string; first_name: string; last_name: string; team: string | null }> = [];
+      let from = 0;
+      const playerPageSize = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("players")
+          .select("id, first_name, last_name, team")
+          .order("id", { ascending: true })
+          .range(from, from + playerPageSize - 1);
+        if (error) throw error;
+        const batch = data || [];
+        allPlayers.push(...batch);
+        if (batch.length < playerPageSize) break;
+        from += playerPageSize;
+      }
+
+      // Build lookup: "normalizedName|normalizedTeam" → player_id
+      const playerIdByNameTeam = new Map<string, string>();
+      const playerIdByName = new Map<string, string | null>();
+      for (const p of allPlayers) {
+        const fullName = normalize(`${p.first_name} ${p.last_name}`);
+        const ntKey = `${fullName}|${normalize(p.team)}`;
+        playerIdByNameTeam.set(ntKey, p.id);
+        // Track name-only: null means ambiguous (multiple players with same name)
+        if (playerIdByName.has(fullName)) {
+          playerIdByName.set(fullName, null); // ambiguous
+        } else {
+          playerIdByName.set(fullName, p.id);
+        }
+      }
+
+      let linkedCount = 0;
+      const linkChunkSize = 300;
+
+      // Link hitter_stats_storage rows
+      const { data: unlinkedStats } = await supabase
+        .from("hitter_stats_storage")
+        .select("id, player_name, team")
+        .is("player_id", null)
+        .eq("season", 2025);
+      if (unlinkedStats && unlinkedStats.length > 0) {
+        const updates: Array<{ id: string; player_id: string }> = [];
+        for (const row of unlinkedStats) {
+          const ntKey = `${normalize(row.player_name)}|${normalize(row.team)}`;
+          const pid = playerIdByNameTeam.get(ntKey) ?? playerIdByName.get(normalize(row.player_name));
+          if (pid) updates.push({ id: row.id, player_id: pid });
+        }
+        for (let i = 0; i < updates.length; i += linkChunkSize) {
+          const batch = updates.slice(i, i + linkChunkSize);
+          for (const u of batch) {
+            await supabase.from("hitter_stats_storage").update({ player_id: u.player_id }).eq("id", u.id);
+          }
+        }
+        linkedCount += updates.length;
+      }
+
+      // Link hitting_power_ratings_storage rows
+      const { data: unlinkedPower } = await supabase
+        .from("hitting_power_ratings_storage")
+        .select("id, player_name, team")
+        .is("player_id", null)
+        .eq("season", 2025);
+      if (unlinkedPower && unlinkedPower.length > 0) {
+        const updates: Array<{ id: string; player_id: string }> = [];
+        for (const row of unlinkedPower) {
+          const ntKey = `${normalize(row.player_name)}|${normalize(row.team)}`;
+          const pid = playerIdByNameTeam.get(ntKey) ?? playerIdByName.get(normalize(row.player_name));
+          if (pid) updates.push({ id: row.id, player_id: pid });
+        }
+        for (let i = 0; i < updates.length; i += linkChunkSize) {
+          const batch = updates.slice(i, i + linkChunkSize);
+          for (const u of batch) {
+            await supabase.from("hitting_power_ratings_storage").update({ player_id: u.player_id }).eq("id", u.id);
+          }
+        }
+        linkedCount += updates.length;
+      }
+
+      setSyncSeedResult({ stats: statsRows.length, power: powerRows.length, linked: linkedCount });
+      toast.success(`Synced ${statsRows.length} stats, ${powerRows.length} power ratings, linked ${linkedCount} to player IDs`);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -5213,7 +5295,7 @@ function QuickActionsTab() {
           </Button>
           {syncSeedResult && (
             <p className="text-sm text-muted-foreground">
-              Synced {syncSeedResult.stats} hitter stat rows and {syncSeedResult.power} power rating rows.
+              Synced {syncSeedResult.stats} hitter stat rows and {syncSeedResult.power} power rating rows. Linked {syncSeedResult.linked} rows to player IDs.
             </p>
           )}
         </CardContent>

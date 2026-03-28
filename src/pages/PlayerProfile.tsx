@@ -206,15 +206,18 @@ const classTransitionToYear: Record<string, string> = {
 function ScoutGrade({ label, value, fullLabel }: { label: string; value: number | null; fullLabel: string }) {
   if (value == null) return null;
   const tier =
-    value >= 80 ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]" :
-    value >= 50 ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]" :
+    value >= 90 ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]" :
+    value >= 75 ? "bg-[hsl(142,71%,45%,0.12)] text-[hsl(142,71%,35%)] border-[hsl(142,71%,45%,0.25)]" :
+    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,35%)] border-[hsl(200,80%,50%,0.25)]" :
+    value >= 45 ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]" :
+    value >= 35 ? "bg-[hsl(25,90%,50%,0.12)] text-[hsl(25,90%,38%)] border-[hsl(25,90%,50%,0.25)]" :
     "bg-destructive/15 text-destructive border-destructive/30";
   const grade =
-    value >= 80 ? "Elite" :
-    value >= 70 ? "Plus-Plus" :
+    value >= 90 ? "Elite" :
+    value >= 75 ? "Plus-Plus" :
     value >= 60 ? "Plus" :
-    value >= 50 ? "Average" :
-    value >= 40 ? "Below Avg" : "Poor";
+    value >= 45 ? "Average" :
+    value >= 35 ? "Below Avg" : "Poor";
   return (
     <div className={`rounded-lg border p-3 ${tier}`}>
       <div className="text-xs font-medium opacity-80">{fullLabel}</div>
@@ -254,9 +257,10 @@ export default function PlayerProfile() {
   const isAdmin = hasRole("admin");
   const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
 
-  const [storageByName, storageByNameTeam] = useMemo(() => {
+  const [storageByName, storageByNameTeam, storageByPlayerId] = useMemo(() => {
     const byName = new Map<string, Array<any>>();
     const byNameTeam = new Map<string, any>();
+    const byPlayerId = new Map<string, any>();
     for (const row of hitterStats) {
       const key = normalizeName(row.playerName);
       const arr = byName.get(key) || [];
@@ -264,13 +268,15 @@ export default function PlayerProfile() {
       byName.set(key, arr);
       const ntKey = nameTeamKey(row.playerName, row.team);
       if (!byNameTeam.has(ntKey)) byNameTeam.set(ntKey, row);
+      if (row.player_id) byPlayerId.set(row.player_id, row);
     }
-    return [byName, byNameTeam];
+    return [byName, byNameTeam, byPlayerId];
   }, [hitterStats]);
 
-  const [powerByName, powerByNameTeam] = useMemo(() => {
+  const [powerByName, powerByNameTeam, powerByPlayerId] = useMemo(() => {
     const byName = new Map<string, Array<any>>();
     const byNameTeam = new Map<string, any>();
+    const byPlayerId = new Map<string, any>();
     for (const row of powerRatingsData) {
       const key = normalizeName(row.playerName);
       const arr = byName.get(key) || [];
@@ -278,8 +284,9 @@ export default function PlayerProfile() {
       byName.set(key, arr);
       const ntKey = nameTeamKey(row.playerName, row.team);
       if (!byNameTeam.has(ntKey)) byNameTeam.set(ntKey, row);
+      if (row.player_id) byPlayerId.set(row.player_id, row);
     }
-    return [byName, byNameTeam];
+    return [byName, byNameTeam, byPlayerId];
   }, [powerRatingsData]);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, any>>({});
@@ -533,6 +540,9 @@ export default function PlayerProfile() {
   const statCandidates = storageByName.get(fullName) || [];
   const round3 = (v: number | null | undefined) => (v == null ? null : Math.round(v * 1000) / 1000);
   const resolvedSeedStatRow = (() => {
+    // Fast path: UUID match (instant, unambiguous)
+    const byId = id ? storageByPlayerId.get(id) : undefined;
+    if (byId) return byId;
     const byFromTeam = storageByNameTeam.get(nameTeamKey(fullNameRaw, player.from_team));
     if (byFromTeam) return byFromTeam;
     const byPlayerTeam = storageByNameTeam.get(nameTeamKey(fullNameRaw, player.team));
@@ -554,6 +564,9 @@ export default function PlayerProfile() {
   const seedStatRow = resolvedSeedStatRow;
   const powerCandidates = powerByName.get(fullName) || [];
   const seedPowerRow = (() => {
+    // Fast path: UUID match (instant, unambiguous)
+    const byId = id ? powerByPlayerId.get(id) : undefined;
+    if (byId) return byId;
     const bySeedTeam = powerByNameTeam.get(nameTeamKey(fullNameRaw, seedStatRow?.team));
     if (bySeedTeam) return bySeedTeam;
     const byFromTeam = powerByNameTeam.get(nameTeamKey(fullNameRaw, player.from_team));

@@ -6,6 +6,7 @@ import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
 
 export type StorageSeedRow = {
   id: string;
+  player_id: string | null;
   playerName: string;
   team: string | null;
   conference: string | null;
@@ -17,6 +18,7 @@ export type StorageSeedRow = {
 
 export type PowerRatingsSeedRow = {
   id: string;
+  player_id: string | null;
   playerName: string;
   team: string | null;
   contact: number | null;
@@ -39,6 +41,8 @@ export type ExitPositionsSeed = Record<string, string>;
  * Returns hitter seed data sourced from Supabase when available,
  * falling back to the local JSON seed files. The returned shape is
  * identical to the seed JSON so all existing lookup logic is unchanged.
+ * When player_id is available (linked via admin sync), it is included
+ * on each row for instant UUID-based lookups.
  */
 export function useHitterSeedData() {
   const { data: dbStats = [] } = useQuery({
@@ -46,7 +50,7 @@ export function useHitterSeedData() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("hitter_stats_storage")
-        .select("player_name, team, conference, avg, obp, slg, source")
+        .select("player_id, player_name, team, conference, avg, obp, slg, source")
         .eq("season", 2025);
       if (error) throw error;
       return data || [];
@@ -59,7 +63,7 @@ export function useHitterSeedData() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("hitting_power_ratings_storage")
-        .select("player_name, team, position, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb, source")
+        .select("player_id, player_name, team, position, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb, source")
         .eq("season", 2025);
       if (error) throw error;
       return data || [];
@@ -70,6 +74,7 @@ export function useHitterSeedData() {
   const hitterStats: StorageSeedRow[] = dbStats.length > 0
     ? dbStats.map((r) => ({
         id: `db-${r.player_name}-${r.team ?? ""}`,
+        player_id: r.player_id ?? null,
         playerName: r.player_name,
         team: r.team,
         conference: r.conference,
@@ -78,11 +83,12 @@ export function useHitterSeedData() {
         slg: r.slg,
         source: r.source ?? "supabase",
       }))
-    : (storage2025Seed as StorageSeedRow[]);
+    : (storage2025Seed as any[]).map((r) => ({ ...r, player_id: null })) as StorageSeedRow[];
 
   const powerRatings: PowerRatingsSeedRow[] = dbPower.length > 0
     ? dbPower.map((r) => ({
         id: `db-${r.player_name}-${r.team ?? ""}`,
+        player_id: r.player_id ?? null,
         playerName: r.player_name,
         team: r.team,
         contact: r.contact,
@@ -98,7 +104,7 @@ export function useHitterSeedData() {
         gb: r.gb,
         source: r.source ?? "supabase",
       }))
-    : (powerRatings2025Seed as PowerRatingsSeedRow[]);
+    : (powerRatings2025Seed as any[]).map((r) => ({ ...r, player_id: null })) as PowerRatingsSeedRow[];
 
   const exitPositions: ExitPositionsSeed = dbPower.length > 0
     ? Object.fromEntries(

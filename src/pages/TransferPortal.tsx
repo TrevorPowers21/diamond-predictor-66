@@ -924,20 +924,25 @@ export default function TransferPortal() {
     return map;
   }, [conferenceStats]);
 
-  const seedByName = useMemo(() => {
+  const [seedByName, seedByPlayerId] = useMemo(() => {
     const map = new Map<string, SeedRow[]>();
+    const byId = new Map<string, SeedRow>();
     for (const row of hitterStats as SeedRow[]) {
       const nameKey = normalizeKey(row.playerName);
       if (!nameKey || !row.team) continue;
       const list = map.get(nameKey) || [];
       list.push(row);
       map.set(nameKey, list);
+      if ((row as any).player_id) byId.set((row as any).player_id, row);
     }
-    return map;
+    return [map, byId];
   }, [hitterStats]);
 
   const inferredFromTeam = useMemo(() => {
     if (!selectedPlayer) return null;
+    // Fast path: UUID match
+    const byId = seedByPlayerId.get(selectedPlayer.id);
+    if (byId) return byId.team;
     const fullName = `${selectedPlayer.first_name} ${selectedPlayer.last_name}`;
     const candidates = seedByName.get(normalizeKey(fullName)) || [];
     if (candidates.length === 0) return null;

@@ -651,9 +651,10 @@ export default function ReturningPlayers() {
   const { hitterStats, powerRatings: powerRatingsData } = useHitterSeedData();
   const seedSource = powerRatingsData.length > 0 && (powerRatingsData[0] as any).source === "supabase" ? "supabase" : "seed";
 
-  const [powerSeedByName, powerSeedByNameTeam] = useMemo(() => {
+  const [powerSeedByName, powerSeedByNameTeam, powerSeedByPlayerId] = useMemo(() => {
     const byName = new Map<string, Array<any>>();
     const byNameTeam = new Map<string, any>();
+    const byPlayerId = new Map<string, any>();
     for (const row of powerRatingsData) {
       const key = normalizeName(row.playerName);
       const arr = byName.get(key) || [];
@@ -661,8 +662,9 @@ export default function ReturningPlayers() {
       byName.set(key, arr);
       const ntKey = nameTeamKey(row.playerName, row.team);
       if (!byNameTeam.has(ntKey)) byNameTeam.set(ntKey, row);
+      if (row.player_id) byPlayerId.set(row.player_id, row);
     }
-    return [byName, byNameTeam];
+    return [byName, byNameTeam, byPlayerId];
   }, [powerRatingsData]);
 
   const [search, setSearch] = useState("");
@@ -876,6 +878,9 @@ export default function ReturningPlayers() {
       ): ReturnerPlayer => {
         const fullName = `${player.first_name} ${player.last_name}`;
         const seedPowerRow = (() => {
+          // Fast path: UUID match
+          const byId = player.id ? powerSeedByPlayerId.get(player.id) : undefined;
+          if (byId) return byId;
           const direct = powerSeedByNameTeam.get(nameTeamKey(fullName, player.team));
           if (direct) return direct;
 

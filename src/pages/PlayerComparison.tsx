@@ -181,9 +181,10 @@ function simulate(args: {
   teamByKey: Map<string, TeamRow>;
   confByKey: Map<string, ConferenceRow>;
   seedByName: Map<string, SeedRow[]>;
+  seedByPlayerId: Map<string, SeedRow>;
   eqNum: (key: string, fallback: number) => number;
 }): SimOut | null {
-  const { player, destinationTeam, prediction, internals, teamByKey, confByKey, seedByName, eqNum } = args;
+  const { player, destinationTeam, prediction, internals, teamByKey, confByKey, seedByName, seedByPlayerId, eqNum } = args;
   const baPR = internals?.avg_power_rating ?? null;
   const obpPR = internals?.obp_power_rating ?? null;
   const isoPR = internals?.slg_power_rating ?? null;
@@ -193,13 +194,17 @@ function simulate(args: {
   if (baPR == null || obpPR == null || isoPR == null || lastAvg == null || lastObp == null || lastSlg == null) return null;
 
   const fullName = `${player.first_name || ""} ${player.last_name || ""}`.trim();
-  const candidates = seedByName.get(normalizeKey(fullName)) || [];
-  let inferredFromTeam: string | null = null;
-  if (candidates.length === 1) inferredFromTeam = candidates[0].team;
-  else if (candidates.length > 1) {
-    const key = `${statKey(lastAvg)}|${statKey(lastObp)}|${statKey(lastSlg)}`;
-    const exact = candidates.find((r) => `${statKey(r.avg)}|${statKey(r.obp)}|${statKey(r.slg)}` === key);
-    inferredFromTeam = exact?.team || candidates[0].team;
+  // Fast path: UUID match
+  const byId = seedByPlayerId.get(player.id);
+  let inferredFromTeam: string | null = byId?.team ?? null;
+  if (!inferredFromTeam) {
+    const candidates = seedByName.get(normalizeKey(fullName)) || [];
+    if (candidates.length === 1) inferredFromTeam = candidates[0].team;
+    else if (candidates.length > 1) {
+      const key = `${statKey(lastAvg)}|${statKey(lastObp)}|${statKey(lastSlg)}`;
+      const exact = candidates.find((r) => `${statKey(r.avg)}|${statKey(r.obp)}|${statKey(r.slg)}` === key);
+      inferredFromTeam = exact?.team || candidates[0].team;
+    }
   }
 
   const fromTeamName = player.from_team || inferredFromTeam || player.team || null;
@@ -427,16 +432,18 @@ export default function PlayerComparison() {
   }, [internals]);
   const teamByKey = useMemo(() => new Map((teams || []).map((t) => [normalizeKey(t.name), t as TeamRow])), [teams]);
   const confByKey = useMemo(() => new Map((conferenceStats || []).map((c) => [normalizeKey(c.conference), c as ConferenceRow])), [conferenceStats]);
-  const seedByName = useMemo(() => {
+  const [seedByName, seedByPlayerId] = useMemo(() => {
     const map = new Map<string, SeedRow[]>();
+    const byId = new Map<string, SeedRow>();
     for (const row of hitterStats as SeedRow[]) {
       const key = normalizeKey(row.playerName);
       if (!key || !row.team) continue;
       const list = map.get(key) || [];
       list.push(row);
       map.set(key, list);
+      if ((row as any).player_id) byId.set((row as any).player_id, row);
     }
-    return map;
+    return [map, byId];
   }, [hitterStats]);
   const eqNum = useCallback((key: string, fallback: number) => readLocalNum(key, fallback, remoteEquationValues), [remoteEquationValues]);
 
@@ -474,10 +481,11 @@ export default function PlayerComparison() {
         teamByKey,
         confByKey,
         seedByName,
+        seedByPlayerId,
         eqNum,
       }),
     };
-  }, [compareAPlayer, compareADestinationTeam, compareAPrediction, internalsByPrediction, teamByKey, confByKey, seedByName, eqNum]);
+  }, [compareAPlayer, compareADestinationTeam, compareAPrediction, internalsByPrediction, teamByKey, confByKey, seedByName, seedByPlayerId, eqNum]);
 
   const panelB: SimPanel = useMemo(() => {
     const previous = compareBPrediction
@@ -495,10 +503,11 @@ export default function PlayerComparison() {
         teamByKey,
         confByKey,
         seedByName,
+        seedByPlayerId,
         eqNum,
       }),
     };
-  }, [compareBPlayer, compareBDestinationTeam, compareBPrediction, internalsByPrediction, teamByKey, confByKey, seedByName, eqNum]);
+  }, [compareBPlayer, compareBDestinationTeam, compareBPrediction, internalsByPrediction, teamByKey, confByKey, seedByName, seedByPlayerId, eqNum]);
 
   const renderPanel = (
     title: string,
