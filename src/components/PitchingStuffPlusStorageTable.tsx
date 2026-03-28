@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { Upload, Search } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { parseCsvLine, normalize } from "@/lib/csvUtils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,34 +47,7 @@ const PITCH_TYPE_LABELS: Record<string, string> = {
   SP: "Splitter",
 };
 
-const normalize = (v: string | null | undefined) =>
-  (v || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-
 const isPitcherPosition = (v: string | null | undefined) => /^(SP|RP|CL|P|RHP|LHP)/i.test((v || "").trim());
-
-const parseCsvLine = (line: string) => {
-  const out: string[] = [];
-  let cur = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === "\"") {
-      if (inQuotes && line[i + 1] === "\"") {
-        cur += "\"";
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (ch === "," && !inQuotes) {
-      out.push(cur.trim());
-      cur = "";
-    } else {
-      cur += ch;
-    }
-  }
-  out.push(cur.trim());
-  return out.map((v) => v.replace(/^"(.*)"$/, "$1").trim());
-};
 
 const parseNumeric = (raw: string | undefined) => {
   const value = (raw || "").trim();

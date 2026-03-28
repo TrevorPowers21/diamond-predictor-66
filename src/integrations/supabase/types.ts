@@ -151,6 +151,114 @@ export type Database = {
         }
         Relationships: []
       }
+      hitter_stats_storage: {
+        Row: {
+          id: string
+          player_name: string
+          team: string | null
+          conference: string | null
+          season: number
+          avg: number | null
+          obp: number | null
+          slg: number | null
+          source: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          player_name: string
+          team?: string | null
+          conference?: string | null
+          season?: number
+          avg?: number | null
+          obp?: number | null
+          slg?: number | null
+          source?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          player_name?: string
+          team?: string | null
+          conference?: string | null
+          season?: number
+          avg?: number | null
+          obp?: number | null
+          slg?: number | null
+          source?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      hitting_power_ratings_storage: {
+        Row: {
+          id: string
+          player_name: string
+          team: string | null
+          season: number
+          position: string | null
+          contact: number | null
+          line_drive: number | null
+          avg_exit_velo: number | null
+          pop_up: number | null
+          bb: number | null
+          chase: number | null
+          barrel: number | null
+          ev90: number | null
+          pull: number | null
+          la_10_30: number | null
+          gb: number | null
+          source: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          player_name: string
+          team?: string | null
+          season?: number
+          position?: string | null
+          contact?: number | null
+          line_drive?: number | null
+          avg_exit_velo?: number | null
+          pop_up?: number | null
+          bb?: number | null
+          chase?: number | null
+          barrel?: number | null
+          ev90?: number | null
+          pull?: number | null
+          la_10_30?: number | null
+          gb?: number | null
+          source?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          player_name?: string
+          team?: string | null
+          season?: number
+          position?: string | null
+          contact?: number | null
+          line_drive?: number | null
+          avg_exit_velo?: number | null
+          pop_up?: number | null
+          bb?: number | null
+          chase?: number | null
+          barrel?: number | null
+          ev90?: number | null
+          pull?: number | null
+          la_10_30?: number | null
+          gb?: number | null
+          source?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       developmental_weights: {
         Row: {
           created_at: string

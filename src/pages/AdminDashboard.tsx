@@ -4770,6 +4770,66 @@ function QuickActionsTab() {
     unmatched: number;
     unresolvedSample: string[];
   } | null>(null);
+  const [syncSeedLoading, setSyncSeedLoading] = useState(false);
+  const [syncSeedResult, setSyncSeedResult] = useState<{ stats: number; power: number } | null>(null);
+
+  const syncSeedDataToSupabase = async () => {
+    setSyncSeedLoading(true);
+    setSyncSeedResult(null);
+    try {
+      const chunkSize = 500;
+      const statsRows = (storage2025Seed as Array<any>).map((r: any) => ({
+        player_name: r.playerName,
+        team: r.team ?? null,
+        conference: r.conference ?? null,
+        season: 2025,
+        avg: r.avg ?? null,
+        obp: r.obp ?? null,
+        slg: r.slg ?? null,
+        source: r.source ?? "storage_2025_seed",
+      }));
+      for (let i = 0; i < statsRows.length; i += chunkSize) {
+        const { error } = await supabase
+          .from("hitter_stats_storage")
+          .upsert(statsRows.slice(i, i + chunkSize), { onConflict: "player_name,team,season" });
+        if (error) throw error;
+      }
+
+      const powerRows = (powerRatings2025Seed as Array<any>).map((r: any) => ({
+        player_name: r.playerName,
+        team: r.team ?? null,
+        season: 2025,
+        position: (exitPositions2025Seed as Record<string, string>)[`${r.playerName}|${r.team}`]
+          ?? (exitPositions2025Seed as Record<string, string>)[r.playerName]
+          ?? null,
+        contact: r.contact ?? null,
+        line_drive: r.lineDrive ?? null,
+        avg_exit_velo: r.avgExitVelo ?? null,
+        pop_up: r.popUp ?? null,
+        bb: r.bb ?? null,
+        chase: r.chase ?? null,
+        barrel: r.barrel ?? null,
+        ev90: r.ev90 ?? null,
+        pull: r.pull ?? null,
+        la_10_30: r.la10_30 ?? null,
+        gb: r.gb ?? null,
+        source: r.source ?? "power_ratings_2025_seed",
+      }));
+      for (let i = 0; i < powerRows.length; i += chunkSize) {
+        const { error } = await supabase
+          .from("hitting_power_ratings_storage")
+          .upsert(powerRows.slice(i, i + chunkSize), { onConflict: "player_name,team,season" });
+        if (error) throw error;
+      }
+
+      setSyncSeedResult({ stats: statsRows.length, power: powerRows.length });
+      toast.success(`Synced ${statsRows.length} hitter stats and ${powerRows.length} power ratings to Supabase`);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSyncSeedLoading(false);
+    }
+  };
 
   const runBulkRecalculate = async () => {
     setBulkLoading(true);
@@ -5134,6 +5194,26 @@ function QuickActionsTab() {
           {syncTeamsResult && syncTeamsResult.unresolvedSample.length > 0 && (
             <p className="text-xs text-muted-foreground">
               Unresolved sample: {syncTeamsResult.unresolvedSample.join(", ")}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-6 space-y-4">
+          <div>
+            <p className="font-medium">Sync 2025 Hitter Seed Data to Supabase</p>
+            <p className="text-sm text-muted-foreground">
+              Uploads the local 2025 hitter stats and power ratings JSON seed files to Supabase so all networks can access them. Safe to re-run — uses upsert.
+            </p>
+          </div>
+          <Button onClick={syncSeedDataToSupabase} disabled={syncSeedLoading} variant="outline" className="gap-2">
+            {syncSeedLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            {syncSeedLoading ? "Syncing Seed Data…" : "Sync 2025 Hitter Seed Data"}
+          </Button>
+          {syncSeedResult && (
+            <p className="text-sm text-muted-foreground">
+              Synced {syncSeedResult.stats} hitter stat rows and {syncSeedResult.power} power rating rows.
             </p>
           )}
         </CardContent>

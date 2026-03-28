@@ -19,9 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
-// TODO: Seed JSON files are static local data — migrate to Supabase tables for live updates.
-import storage2025Seed from "@/data/storage_2025_seed.json";
-import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
+import { useHitterSeedData } from "@/hooks/useHitterSeedData";
 import {
   DEFAULT_NIL_TIER_MULTIPLIERS,
   getProgramTierMultiplierByConference,
@@ -612,17 +610,6 @@ const scoreFromNormal = (x: number | null, mean: number, sd: number, invert = fa
   const pct = cdf * 100;
   return invert ? 100 - pct : pct;
 };
-const powerSeedByName = new Map<string, Array<any>>();
-const powerSeedByNameTeam = new Map<string, any>();
-for (const row of powerRatings2025Seed as Array<any>) {
-  const key = normalizeName(row.playerName);
-  const arr = powerSeedByName.get(key) || [];
-  arr.push(row);
-  powerSeedByName.set(key, arr);
-  const ntKey = nameTeamKey(row.playerName, row.team);
-  if (!powerSeedByNameTeam.has(ntKey)) powerSeedByNameTeam.set(ntKey, row);
-}
-
 const PITCHING_TEAM_ALIASES: Record<string, string> = {
   "unc charlotte": "Charlotte",
   "louisiana state university": "Louisiana State",
@@ -661,6 +648,23 @@ export default function ReturningPlayers() {
       },
     );
   }, [queryClient]);
+  const { hitterStats, powerRatings: powerRatingsData } = useHitterSeedData();
+  const seedSource = powerRatingsData.length > 0 && (powerRatingsData[0] as any).source === "supabase" ? "supabase" : "seed";
+
+  const [powerSeedByName, powerSeedByNameTeam] = useMemo(() => {
+    const byName = new Map<string, Array<any>>();
+    const byNameTeam = new Map<string, any>();
+    for (const row of powerRatingsData) {
+      const key = normalizeName(row.playerName);
+      const arr = byName.get(key) || [];
+      arr.push(row);
+      byName.set(key, arr);
+      const ntKey = nameTeamKey(row.playerName, row.team);
+      if (!byNameTeam.has(ntKey)) byNameTeam.set(ntKey, row);
+    }
+    return [byName, byNameTeam];
+  }, [powerRatingsData]);
+
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [positionFilter, setPositionFilter] = useState<string>("all");
@@ -843,11 +847,12 @@ export default function ReturningPlayers() {
         debouncedSearch,
         sortKey,
         sortDir,
+        seedSource,
       },
     ],
     queryFn: async () => {
       const nameTeamKey = (name: string, team: string | null | undefined) => `${normalize(name)}|${normalize(team || "")}`;
-      const statSeedRows = storage2025Seed as Array<{
+      const statSeedRows = hitterStats as Array<{
         playerName: string;
         team: string | null;
         avg: number | null;

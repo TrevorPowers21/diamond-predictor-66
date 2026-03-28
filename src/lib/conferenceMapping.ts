@@ -6,6 +6,91 @@ const normalize = (value: string | null | undefined) =>
     .replace(/\s+/g, " ")
     .trim();
 
+export const normalizeConferenceName = (raw: string | null | undefined): string => {
+  if (!raw) return "";
+  return raw.replace(/^'?\s*25\s+/i, "").replace(/\*/g, "").replace(/\s+/g, " ").trim();
+};
+
+export const canonicalConferenceName = (raw: string | null | undefined): string => {
+  const cleaned = normalizeConferenceName(raw);
+  if (!cleaned) return "";
+  const key = cleaned.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (key.includes("atlanticcoastconference")) return "ACC";
+  if (key.includes("southeasternconference")) return "SEC";
+  if (key.includes("americanathleticconference")) return "American Athletic Conference";
+  if (key.includes("coastalathleticassociation")) return "Coastal Athletic Association";
+  if (key.includes("missourivalleyconference")) return "Missouri Valley Conference";
+  if (key.includes("metroatlanticathleticconference")) return "Metro Atlantic Athletic Conference";
+  if (key.includes("midamericanconference")) return "Mid-American Conference";
+  if (key.includes("northeastconference")) return "Northeast Conference";
+  if (key.includes("southlandconference")) return "Southland Conference";
+  if (key.includes("southwesternathleticconference")) return "Southwestern Athletic Conference";
+  if (key.includes("westernathleticconference")) return "Western Athletic Conference";
+
+  const map: Record<string, string> = {
+    aac: "American Athletic Conference",
+    americanathleticconference: "American Athletic Conference",
+    a10: "Atlantic 10",
+    atlantic10: "Atlantic 10",
+    caa: "Coastal Athletic Association",
+    coastalathleticassociation: "Coastal Athletic Association",
+    acc: "ACC",
+    atlanticcoastconference: "ACC",
+    sec: "SEC",
+    southeasternconference: "SEC",
+    big10: "Big Ten",
+    bigten: "Big Ten",
+    bigtenconference: "Big Ten",
+    big12: "Big 12",
+    big12conference: "Big 12",
+    bigeast: "Big East Conference",
+    bigeastconference: "Big East Conference",
+    bigsouth: "Big South Conference",
+    bigsouthconference: "Big South Conference",
+    bigwest: "Big West",
+    cusa: "Conference USA",
+    conferenceusa: "Conference USA",
+    mwc: "Mountain West",
+    mountainwest: "Mountain West",
+    mountainwestconference: "Mountain West",
+    mvc: "Missouri Valley Conference",
+    missourivalleyconference: "Missouri Valley Conference",
+    nec: "Northeast Conference",
+    northeastconference: "Northeast Conference",
+    socon: "Southern Conference",
+    southern: "Southern Conference",
+    southernconference: "Southern Conference",
+    swac: "Southwestern Athletic Conference",
+    southwesternathleticconference: "Southwestern Athletic Conference",
+    wcc: "West Coast Conference",
+    westcoastconference: "West Coast Conference",
+    wac: "Western Athletic Conference",
+    westernathleticconference: "Western Athletic Conference",
+    asun: "Atlantic Sun Conference",
+    atlanticsunconference: "Atlantic Sun Conference",
+    maac: "Metro Atlantic Athletic Conference",
+    metroatlanticathleticconference: "Metro Atlantic Athletic Conference",
+    mac: "Mid-American Conference",
+    midamericanconference: "Mid-American Conference",
+    ovc: "Ohio Valley Conference",
+    ohiovalleyconference: "Ohio Valley Conference",
+    americaeast: "American East",
+    ameast: "American East",
+    ivyleague: "Ivy League",
+    horizonleague: "Horizon League",
+    meac: "MEAC",
+    pac12: "Pac-12",
+    patriotleague: "Patriot League",
+    southlandconference: "Southland Conference",
+    southland: "Southland Conference",
+    summitleague: "Summit League",
+    sunbelt: "Sun Belt",
+    sunbeltconference: "Sun Belt",
+    westernathleticconferencewac: "Western Athletic Conference",
+  };
+  return map[key] || cleaned;
+};
+
 export const getConferenceAliases = (conference: string | null | undefined): string[] => {
   const key = normalize(conference);
   if (!key) return [];

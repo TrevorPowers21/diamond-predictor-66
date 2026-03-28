@@ -14,10 +14,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, BarChart3, DollarSign, Upload, ChevronDown, ChevronUp } from "lucide-react";
-// TODO: Seed JSON files are static local data — migrate to Supabase tables for live updates.
-import storage2025Seed from "@/data/storage_2025_seed.json";
-import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
-import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
+import { useHitterSeedData } from "@/hooks/useHitterSeedData";
 import {
   calcPlayerScore,
   DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
@@ -920,6 +917,7 @@ function readLocalNum(key: string, fallback: number, remoteValues?: Record<strin
 export default function TeamBuilder() {
   const { user, hasRole } = useAuth();
   const { toast } = useToast();
+  const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
   const queryClient = useQueryClient();
   const isAdmin = hasRole("admin");
   const [searchParams] = useSearchParams();
@@ -1070,9 +1068,9 @@ export default function TeamBuilder() {
     for (const t of teams as TeamRow[]) {
       teamConfByKey.set(normalizeKey(t.name), t.conference || null);
     }
-    const rows = (storage2025Seed as SeedRow[]) || [];
+    const rows = (hitterStats as SeedRow[]) || [];
     const powerByNameTeam = new Map<string, TeamMetricInputs>();
-    const powerRows = (powerRatings2025Seed as Array<any>) || [];
+    const powerRows = (powerRatingsData as Array<any>) || [];
     for (const pr of powerRows) {
       const key = `${normalizeName(pr?.playerName || "")}|${normalizeName(pr?.team || "")}`;
       if (!key || key === "|") continue;
@@ -1091,7 +1089,7 @@ export default function TeamBuilder() {
       });
     }
     const out: any[] = [];
-    const posMap = exitPositions2025Seed as Record<string, string>;
+    const posMap = exitPositions as Record<string, string>;
     for (let idx = 0; idx < rows.length; idx += 1) {
       const r = rows[idx];
       const playerName = (r.playerName || "").trim();
@@ -1120,7 +1118,7 @@ export default function TeamBuilder() {
       });
     }
     return out;
-  }, [teams]);
+  }, [teams, hitterStats, powerRatingsData, exitPositions]);
   const combinedTargetSearchPlayers = useMemo(() => {
     const byKey = new Map<string, any>();
     const primaryKeyByNameTeam = new Map<string, string>();
@@ -2202,7 +2200,7 @@ export default function TeamBuilder() {
 
   const seedByName = useMemo(() => {
     const map = new Map<string, SeedRow[]>();
-    for (const row of storage2025Seed as SeedRow[]) {
+    for (const row of hitterStats as SeedRow[]) {
       const nameKey = normalizeKey(row.playerName);
       if (!nameKey || !row.team) continue;
       const list = map.get(nameKey) || [];
@@ -2210,7 +2208,7 @@ export default function TeamBuilder() {
       map.set(nameKey, list);
     }
     return map;
-  }, []);
+  }, [hitterStats]);
 
   const targetPredictionIds = useMemo(
     () =>

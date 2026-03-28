@@ -14,10 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { ArrowLeft, Pencil, Save, X, TrendingUp, TrendingDown, ShieldCheck, Target } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-// TODO: Seed JSON files are static local data — migrate to Supabase tables for live updates.
-import storage2025Seed from "@/data/storage_2025_seed.json";
-import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
-import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
+import { useHitterSeedData } from "@/hooks/useHitterSeedData";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import {
   DEFAULT_NIL_TIER_MULTIPLIERS,
@@ -192,28 +189,6 @@ const getNameVariants = (fullName: string) => {
 const nameTeamKey = (name: string | null | undefined, team: string | null | undefined) =>
   `${normalizeName(name)}|${normalizeName(team)}`;
 
-const storageByName = new Map<string, Array<any>>();
-const storageByNameTeam = new Map<string, any>();
-for (const row of storage2025Seed as Array<any>) {
-  const key = normalizeName(row.playerName);
-  const arr = storageByName.get(key) || [];
-  arr.push(row);
-  storageByName.set(key, arr);
-  const ntKey = nameTeamKey(row.playerName, row.team);
-  if (!storageByNameTeam.has(ntKey)) storageByNameTeam.set(ntKey, row);
-}
-
-const powerByName = new Map<string, Array<any>>();
-const powerByNameTeam = new Map<string, any>();
-for (const row of powerRatings2025Seed as Array<any>) {
-  const key = normalizeName(row.playerName);
-  const arr = powerByName.get(key) || [];
-  arr.push(row);
-  powerByName.set(key, arr);
-  const ntKey = nameTeamKey(row.playerName, row.team);
-  if (!powerByNameTeam.has(ntKey)) powerByNameTeam.set(ntKey, row);
-}
-
 const classTransitionLabel: Record<string, string> = {
   FS: "Freshman → Sophomore",
   SJ: "Sophomore → Junior",
@@ -277,6 +252,35 @@ export default function PlayerProfile() {
   const queryClient = useQueryClient();
   const { hasRole } = useAuth();
   const isAdmin = hasRole("admin");
+  const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
+
+  const [storageByName, storageByNameTeam] = useMemo(() => {
+    const byName = new Map<string, Array<any>>();
+    const byNameTeam = new Map<string, any>();
+    for (const row of hitterStats) {
+      const key = normalizeName(row.playerName);
+      const arr = byName.get(key) || [];
+      arr.push(row);
+      byName.set(key, arr);
+      const ntKey = nameTeamKey(row.playerName, row.team);
+      if (!byNameTeam.has(ntKey)) byNameTeam.set(ntKey, row);
+    }
+    return [byName, byNameTeam];
+  }, [hitterStats]);
+
+  const [powerByName, powerByNameTeam] = useMemo(() => {
+    const byName = new Map<string, Array<any>>();
+    const byNameTeam = new Map<string, any>();
+    for (const row of powerRatingsData) {
+      const key = normalizeName(row.playerName);
+      const arr = byName.get(key) || [];
+      arr.push(row);
+      byName.set(key, arr);
+      const ntKey = nameTeamKey(row.playerName, row.team);
+      if (!byNameTeam.has(ntKey)) byNameTeam.set(ntKey, row);
+    }
+    return [byName, byNameTeam];
+  }, [powerRatingsData]);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, any>>({});
   const [editingPrediction, setEditingPrediction] = useState(false);
@@ -579,9 +583,9 @@ export default function PlayerProfile() {
   const displayTeam2025 = seedStatRow?.team || player.from_team || player.team || null;
   const abbrevName = `${player.first_name?.[0] || ""}. ${player.last_name || ""}`.trim();
   const seedPos =
-    (exitPositions2025Seed as Record<string, string>)[`${player.first_name} ${player.last_name}|${player.team || ""}`] ||
-    (exitPositions2025Seed as Record<string, string>)[`${player.first_name} ${player.last_name}`] ||
-    (exitPositions2025Seed as Record<string, string>)[abbrevName] ||
+    exitPositions[`${player.first_name} ${player.last_name}|${player.team || ""}`] ||
+    exitPositions[`${player.first_name} ${player.last_name}`] ||
+    exitPositions[abbrevName] ||
     null;
   const seedDerived = seedStatRow ? computeDerived(seedStatRow.avg, seedStatRow.obp, seedStatRow.slg) : null;
   const seedPowerDerived = seedPowerRow ? computePowerRatings({

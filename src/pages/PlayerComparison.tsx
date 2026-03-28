@@ -12,8 +12,7 @@ import { computeTransferProjection } from "@/lib/transferProjection";
 import { DEFAULT_NIL_TIER_MULTIPLIERS, getPositionValueMultiplier, getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
-// TODO: Seed JSON is static local data — migrate to Supabase table for live updates.
-import storage2025Seed from "@/data/storage_2025_seed.json";
+import { useHitterSeedData } from "@/hooks/useHitterSeedData";
 import { readTeamParkFactorComponents, resolveMetricParkFactor } from "@/lib/parkFactors";
 
 type TeamRow = { name: string; conference: string | null; park_factor: number | null };
@@ -317,6 +316,7 @@ function simulate(args: {
 
 export default function PlayerComparison() {
   const { toast } = useToast();
+  const { hitterStats } = useHitterSeedData();
   const location = useLocation();
   const [compareAPlayerId, setCompareAPlayerId] = useState("");
   const [compareAPlayerSearch, setCompareAPlayerSearch] = useState("");
@@ -429,7 +429,7 @@ export default function PlayerComparison() {
   const confByKey = useMemo(() => new Map((conferenceStats || []).map((c) => [normalizeKey(c.conference), c as ConferenceRow])), [conferenceStats]);
   const seedByName = useMemo(() => {
     const map = new Map<string, SeedRow[]>();
-    for (const row of storage2025Seed as SeedRow[]) {
+    for (const row of hitterStats as SeedRow[]) {
       const key = normalizeKey(row.playerName);
       if (!key || !row.team) continue;
       const list = map.get(key) || [];
@@ -437,7 +437,7 @@ export default function PlayerComparison() {
       map.set(key, list);
     }
     return map;
-  }, []);
+  }, [hitterStats]);
   const eqNum = useCallback((key: string, fallback: number) => readLocalNum(key, fallback, remoteEquationValues), [remoteEquationValues]);
 
   const filterPlayers = useCallback((q: string) => {

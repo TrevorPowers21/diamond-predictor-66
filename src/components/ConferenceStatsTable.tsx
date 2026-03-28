@@ -8,6 +8,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Search, Edit2, Check, X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { parseCsvLine } from "@/lib/csvUtils";
+import { normalizeConferenceName, canonicalConferenceName } from "@/lib/conferenceMapping";
 
 interface ConferenceStat {
   id: string;
@@ -32,69 +34,6 @@ interface ConferenceStat {
   wrc_plus: number | null;
   power_rating_plus: number | null;
   stuff_plus: number | null;
-}
-
-function normalizeConferenceName(raw: string | null | undefined): string {
-  if (!raw) return "";
-  return raw
-    .replace(/^'?\s*25\s+/i, "")
-    .replace(/\*/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function canonicalConferenceName(raw: string | null | undefined): string {
-  const cleaned = normalizeConferenceName(raw);
-  if (!cleaned) return "";
-  const key = cleaned.toLowerCase().replace(/[^a-z0-9]/g, "");
-  if (key.includes("atlanticcoastconference")) return "ACC";
-  if (key.includes("americaneast")) return "American East";
-  if (key.includes("atlanticsunconference")) return "Atlantic Sun Conference";
-  const map: Record<string, string> = {
-    aac: "American Athletic Conference",
-    americanathleticconference: "American Athletic Conference",
-    a10: "Atlantic 10",
-    atlantic10: "Atlantic 10",
-    caa: "Coastal Athletic Association",
-    coastalathleticassociation: "Coastal Athletic Association",
-    acc: "ACC",
-    atlanticcoastconference: "ACC",
-    sec: "SEC",
-    southeasternconference: "SEC",
-    big10: "Big Ten",
-    bigten: "Big Ten",
-    bigtenconference: "Big Ten",
-    big12: "Big 12",
-    big12conference: "Big 12",
-    cusa: "Conference USA",
-    conferenceusa: "Conference USA",
-    mwc: "Mountain West",
-    mountainwest: "Mountain West",
-    mountainwestconference: "Mountain West",
-    mvc: "Missouri Valley Conference",
-    missourivalleyconference: "Missouri Valley Conference",
-    nec: "Northeast Conference",
-    northeastconference: "Northeast Conference",
-    socon: "Southern Conference",
-    southernconference: "Southern Conference",
-    swac: "Southwestern Athletic Conference",
-    southwesternathleticconference: "Southwestern Athletic Conference",
-    wcc: "West Coast Conference",
-    westcoastconference: "West Coast Conference",
-    wac: "Western Athletic Conference",
-    westernathleticconference: "Western Athletic Conference",
-    asun: "Atlantic Sun Conference",
-    atlanticsunconference: "Atlantic Sun Conference",
-    maac: "Metro Atlantic Athletic Conference",
-    metroatlanticathleticconference: "Metro Atlantic Athletic Conference",
-    mac: "Mid-American Conference",
-    midamericanconference: "Mid-American Conference",
-    ovc: "Ohio Valley Conference",
-    ohiovalleyconference: "Ohio Valley Conference",
-    americaeast: "American East",
-    ameast: "American East",
-  };
-  return map[key] || cleaned;
 }
 
 type EditFields = Omit<ConferenceStat, "id" | "created_at" | "updated_at">;
@@ -177,30 +116,6 @@ export default function ConferenceStatsTable() {
       const text = await file.text();
       const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
       if (lines.length < 2) throw new Error("CSV has no data rows");
-
-      const parseCsvLine = (line: string) => {
-        const out: string[] = [];
-        let cur = "";
-        let inQuotes = false;
-        for (let i = 0; i < line.length; i++) {
-          const ch = line[i];
-          if (ch === "\"") {
-            if (inQuotes && line[i + 1] === "\"") {
-              cur += "\"";
-              i++;
-            } else {
-              inQuotes = !inQuotes;
-            }
-          } else if (ch === "," && !inQuotes) {
-            out.push(cur.trim());
-            cur = "";
-          } else {
-            cur += ch;
-          }
-        }
-        out.push(cur.trim());
-        return out.map((v) => v.replace(/^"(.*)"$/, "$1").trim());
-      };
 
       const header = parseCsvLine(lines[0]).map((h) => h.toLowerCase().replace(/\s+/g, " ").trim());
       const idx = (names: string[]) => {

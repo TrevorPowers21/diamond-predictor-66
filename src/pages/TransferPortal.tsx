@@ -9,8 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Search } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
-// TODO: Seed JSON is static local data — migrate to Supabase table for live updates.
-import storage2025Seed from "@/data/storage_2025_seed.json";
+import { useHitterSeedData } from "@/hooks/useHitterSeedData";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -528,6 +527,7 @@ export default function TransferPortal() {
   const location = useLocation();
   const { toast } = useToast();
   const { hasRole } = useAuth();
+  const { hitterStats } = useHitterSeedData();
   const isAdmin = hasRole("admin");
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>("");
   const [playerSearch, setPlayerSearch] = useState<string>("");
@@ -926,7 +926,7 @@ export default function TransferPortal() {
 
   const seedByName = useMemo(() => {
     const map = new Map<string, SeedRow[]>();
-    for (const row of storage2025Seed as SeedRow[]) {
+    for (const row of hitterStats as SeedRow[]) {
       const nameKey = normalizeKey(row.playerName);
       if (!nameKey || !row.team) continue;
       const list = map.get(nameKey) || [];
@@ -934,7 +934,7 @@ export default function TransferPortal() {
       map.set(nameKey, list);
     }
     return map;
-  }, []);
+  }, [hitterStats]);
 
   const inferredFromTeam = useMemo(() => {
     if (!selectedPlayer) return null;
