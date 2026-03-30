@@ -151,6 +151,183 @@ export type Database = {
         }
         Relationships: []
       }
+      hitter_stats_storage: {
+        Row: {
+          id: string
+          player_id: string | null
+          player_name: string
+          team: string | null
+          conference: string | null
+          season: number
+          avg: number | null
+          obp: number | null
+          slg: number | null
+          source: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          player_id?: string | null
+          player_name: string
+          team?: string | null
+          conference?: string | null
+          season?: number
+          avg?: number | null
+          obp?: number | null
+          slg?: number | null
+          source?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          player_id?: string | null
+          player_name?: string
+          team?: string | null
+          conference?: string | null
+          season?: number
+          avg?: number | null
+          obp?: number | null
+          slg?: number | null
+          source?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      hitting_power_ratings_storage: {
+        Row: {
+          id: string
+          player_id: string | null
+          player_name: string
+          team: string | null
+          season: number
+          position: string | null
+          contact: number | null
+          line_drive: number | null
+          avg_exit_velo: number | null
+          pop_up: number | null
+          bb: number | null
+          chase: number | null
+          barrel: number | null
+          ev90: number | null
+          pull: number | null
+          la_10_30: number | null
+          gb: number | null
+          source: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          player_id?: string | null
+          player_name: string
+          team?: string | null
+          season?: number
+          position?: string | null
+          contact?: number | null
+          line_drive?: number | null
+          avg_exit_velo?: number | null
+          pop_up?: number | null
+          bb?: number | null
+          chase?: number | null
+          barrel?: number | null
+          ev90?: number | null
+          pull?: number | null
+          la_10_30?: number | null
+          gb?: number | null
+          source?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          player_id?: string | null
+          player_name?: string
+          team?: string | null
+          season?: number
+          position?: string | null
+          contact?: number | null
+          line_drive?: number | null
+          avg_exit_velo?: number | null
+          pop_up?: number | null
+          bb?: number | null
+          chase?: number | null
+          barrel?: number | null
+          ev90?: number | null
+          pull?: number | null
+          la_10_30?: number | null
+          gb?: number | null
+          source?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      pitching_stats_storage: {
+        Row: {
+          id: string
+          player_id: string | null
+          player_name: string
+          team: string | null
+          handedness: string | null
+          role: string | null
+          season: number
+          era: number | null
+          fip: number | null
+          whip: number | null
+          k9: number | null
+          bb9: number | null
+          hr9: number | null
+          ip: number | null
+          g: number | null
+          gs: number | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          player_id?: string | null
+          player_name: string
+          team?: string | null
+          handedness?: string | null
+          role?: string | null
+          season?: number
+          era?: number | null
+          fip?: number | null
+          whip?: number | null
+          k9?: number | null
+          bb9?: number | null
+          hr9?: number | null
+          ip?: number | null
+          g?: number | null
+          gs?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          player_id?: string | null
+          player_name?: string
+          team?: string | null
+          handedness?: string | null
+          role?: string | null
+          season?: number
+          era?: number | null
+          fip?: number | null
+          whip?: number | null
+          k9?: number | null
+          bb9?: number | null
+          hr9?: number | null
+          ip?: number | null
+          g?: number | null
+          gs?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       developmental_weights: {
         Row: {
           created_at: string
@@ -257,6 +434,149 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "nil_valuations_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pitching_power_ratings_storage: {
+        Row: {
+          avg_ev_score: number | null
+          avg_exit_velo: number | null
+          barrel_pct: number | null
+          barrel_score: number | null
+          bb9_pr_plus: number | null
+          bb_pct: number | null
+          bb_score: number | null
+          chase_pct: number | null
+          chase_score: number | null
+          created_at: string
+          era_pr_plus: number | null
+          ev90: number | null
+          ev90_score: number | null
+          fip_pr_plus: number | null
+          gb_pct: number | null
+          gb_score: number | null
+          hh_pct: number | null
+          hh_score: number | null
+          hr9_pr_plus: number | null
+          id: string
+          iz_pct: number | null
+          iz_score: number | null
+          iz_whiff_pct: number | null
+          iz_whiff_score: number | null
+          k9_pr_plus: number | null
+          la_10_30_pct: number | null
+          la_10_30_score: number | null
+          ld_pct: number | null
+          ld_score: number | null
+          overall_pr_plus: number | null
+          player_id: string
+          player_name: string | null
+          pull_pct: number | null
+          pull_score: number | null
+          season: number
+          stuff_plus: number | null
+          stuff_score: number | null
+          team: string | null
+          updated_at: string
+          whip_pr_plus: number | null
+          whiff_pct: number | null
+          whiff_score: number | null
+        }
+        Insert: {
+          avg_ev_score?: number | null
+          avg_exit_velo?: number | null
+          barrel_pct?: number | null
+          barrel_score?: number | null
+          bb9_pr_plus?: number | null
+          bb_pct?: number | null
+          bb_score?: number | null
+          chase_pct?: number | null
+          chase_score?: number | null
+          created_at?: string
+          era_pr_plus?: number | null
+          ev90?: number | null
+          ev90_score?: number | null
+          fip_pr_plus?: number | null
+          gb_pct?: number | null
+          gb_score?: number | null
+          hh_pct?: number | null
+          hh_score?: number | null
+          hr9_pr_plus?: number | null
+          id?: string
+          iz_pct?: number | null
+          iz_score?: number | null
+          iz_whiff_pct?: number | null
+          iz_whiff_score?: number | null
+          k9_pr_plus?: number | null
+          la_10_30_pct?: number | null
+          la_10_30_score?: number | null
+          ld_pct?: number | null
+          ld_score?: number | null
+          overall_pr_plus?: number | null
+          player_id: string
+          player_name?: string | null
+          pull_pct?: number | null
+          pull_score?: number | null
+          season: number
+          stuff_plus?: number | null
+          stuff_score?: number | null
+          team?: string | null
+          updated_at?: string
+          whip_pr_plus?: number | null
+          whiff_pct?: number | null
+          whiff_score?: number | null
+        }
+        Update: {
+          avg_ev_score?: number | null
+          avg_exit_velo?: number | null
+          barrel_pct?: number | null
+          barrel_score?: number | null
+          bb9_pr_plus?: number | null
+          bb_pct?: number | null
+          bb_score?: number | null
+          chase_pct?: number | null
+          chase_score?: number | null
+          created_at?: string
+          era_pr_plus?: number | null
+          ev90?: number | null
+          ev90_score?: number | null
+          fip_pr_plus?: number | null
+          gb_pct?: number | null
+          gb_score?: number | null
+          hh_pct?: number | null
+          hh_score?: number | null
+          hr9_pr_plus?: number | null
+          id?: string
+          iz_pct?: number | null
+          iz_score?: number | null
+          iz_whiff_pct?: number | null
+          iz_whiff_score?: number | null
+          k9_pr_plus?: number | null
+          la_10_30_pct?: number | null
+          la_10_30_score?: number | null
+          ld_pct?: number | null
+          ld_score?: number | null
+          overall_pr_plus?: number | null
+          player_id?: string
+          player_name?: string | null
+          pull_pct?: number | null
+          pull_score?: number | null
+          season?: number
+          stuff_plus?: number | null
+          stuff_score?: number | null
+          team?: string | null
+          updated_at?: string
+          whip_pr_plus?: number | null
+          whiff_pct?: number | null
+          whiff_score?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pitching_power_ratings_storage_player_id_fkey"
             columns: ["player_id"]
             isOneToOne: false
             referencedRelation: "players"
@@ -494,7 +814,10 @@ export type Database = {
           notes: string | null
           portal_entry_date: string | null
           position: string | null
+          source_player_id: string | null
+          source_team_id: string | null
           team: string | null
+          team_id: string | null
           throws_hand: string | null
           transfer_portal: boolean
           updated_at: string
@@ -518,7 +841,10 @@ export type Database = {
           notes?: string | null
           portal_entry_date?: string | null
           position?: string | null
+          source_player_id?: string | null
+          source_team_id?: string | null
           team?: string | null
+          team_id?: string | null
           throws_hand?: string | null
           transfer_portal?: boolean
           updated_at?: string
@@ -542,7 +868,10 @@ export type Database = {
           notes?: string | null
           portal_entry_date?: string | null
           position?: string | null
+          source_player_id?: string | null
+          source_team_id?: string | null
           team?: string | null
+          team_id?: string | null
           throws_hand?: string | null
           transfer_portal?: boolean
           updated_at?: string
@@ -830,6 +1159,7 @@ export type Database = {
           id: string
           name: string
           park_factor: number | null
+          source_team_id: string | null
           updated_at: string
         }
         Insert: {
@@ -839,6 +1169,7 @@ export type Database = {
           id?: string
           name: string
           park_factor?: number | null
+          source_team_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -848,6 +1179,7 @@ export type Database = {
           id?: string
           name?: string
           park_factor?: number | null
+          source_team_id?: string | null
           updated_at?: string
         }
         Relationships: []

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Search, Edit2, Check, X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { parseCsvLine } from "@/lib/csvUtils";
+import { normalizeConferenceName, canonicalConferenceName } from "@/lib/conferenceMapping";
 
 interface ConferenceStat {
   id: string;
@@ -47,12 +49,27 @@ const LABELS: Record<string, string> = {
   ops_plus: "OPS+", iso_plus: "ISO+", wrc_plus: "WRC+", stuff_plus: "Stuff+",
 };
 
+const isWholePlusField = (field: keyof EditFields) =>
+  field.includes("plus") && field !== "stuff_plus";
+
+function computeDerivedConferenceStats(avg: number | null, obp: number | null, slg: number | null) {
+  if (avg == null || obp == null || slg == null) {
+    return { ops: null, iso: null, wrc: null };
+  }
+  const iso = slg - avg;
+  const ops = obp + slg;
+  const wrc = (0.45 * obp) + (0.30 * slg) + (0.15 * avg) + (0.10 * iso);
+  const round3 = (v: number) => Math.round(v * 1000) / 1000;
+  return { ops: round3(ops), iso: round3(iso), wrc: round3(wrc) };
+}
+
 export default function ConferenceStatsTable() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editData, setEditData] = useState<Partial<EditFields>>({});
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const { data: stats = [], isLoading } = useQuery({
     queryKey: ["conference_stats"],
@@ -94,8 +111,117 @@ export default function ConferenceStatsTable() {
     onError: (e) => toast.error(`Failed: ${e.message}`),
   });
 
+  const importCsv = useMutation({
+    mutationFn: async (file: File) => {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      if (lines.length < 2) throw new Error("CSV has no data rows");
+
+      const header = parseCsvLine(lines[0]).map((h) => h.toLowerCase().replace(/\s+/g, " ").trim());
+      const idx = (names: string[]) => {
+        for (const n of names) {
+          const i = header.findIndex((h) => h === n);
+          if (i >= 0) return i;
+        }
+        return -1;
+      };
+      const parseNum = (v: string | undefined) => {
+        if (!v) return null;
+        const cleaned = v.replace(/[%,$]/g, "").trim();
+        if (!cleaned) return null;
+        const n = Number.parseFloat(cleaned);
+        return Number.isFinite(n) ? n : null;
+      };
+      const round3 = (v: number) => Math.round(v * 1000) / 1000;
+
+      const conferenceIdx = idx(["team", "conference"]);
+      const avgIdx = idx(["avg"]);
+      const obpIdx = idx(["obp"]);
+      const slgIdx = idx(["slg"]);
+      const avgPlusIdx = idx(["avg+", "avg plus"]);
+      const obpPlusIdx = idx(["obp+", "obp plus"]);
+      const slgPlusIdx = idx(["slg+", "slg plus"]);
+      const opsPlusIdx = idx(["ops+", "ops plus"]);
+      const isoPlusIdx = idx(["iso+", "iso plus"]);
+      const wrcPlusIdx = idx(["wrc+", "wrc plus"]);
+      const powerRatingPlusIdx = idx(["power rating+", "power rating plus"]);
+      const stuffPlusIdx = idx(["stuff+", "stuff plus"]);
+
+      if (conferenceIdx < 0 || avgIdx < 0 || obpIdx < 0 || slgIdx < 0) {
+        throw new Error("CSV must include Team/Conference, AVG, OBP, and SLG columns");
+      }
+
+      const records: Array<Record<string, unknown>> = [];
+      for (let r = 1; r < lines.length; r++) {
+        const cols = parseCsvLine(lines[r]);
+        const conference = canonicalConferenceName(cols[conferenceIdx]);
+        if (!conference) continue;
+        const avg = parseNum(cols[avgIdx]);
+        const obp = parseNum(cols[obpIdx]);
+        const slg = parseNum(cols[slgIdx]);
+        if (avg == null || obp == null || slg == null) continue;
+        const iso = slg - avg;
+        const ops = obp + slg;
+        const wrc = (0.45 * obp) + (0.30 * slg) + (0.15 * avg) + (0.10 * iso);
+        records.push({
+          conference,
+          season: 2025,
+          avg: round3(avg),
+          obp: round3(obp),
+          slg: round3(slg),
+          ops: round3(ops),
+          iso: round3(iso),
+          wrc: round3(wrc),
+          avg_plus: avgPlusIdx >= 0 ? parseNum(cols[avgPlusIdx]) : null,
+          obp_plus: obpPlusIdx >= 0 ? parseNum(cols[obpPlusIdx]) : null,
+          slg_plus: slgPlusIdx >= 0 ? parseNum(cols[slgPlusIdx]) : null,
+          ops_plus: opsPlusIdx >= 0 ? parseNum(cols[opsPlusIdx]) : null,
+          iso_plus: isoPlusIdx >= 0 ? parseNum(cols[isoPlusIdx]) : null,
+          wrc_plus: wrcPlusIdx >= 0 ? parseNum(cols[wrcPlusIdx]) : null,
+          power_rating_plus: powerRatingPlusIdx >= 0 ? parseNum(cols[powerRatingPlusIdx]) : null,
+          stuff_plus: stuffPlusIdx >= 0 ? parseNum(cols[stuffPlusIdx]) : null,
+        });
+      }
+
+      if (records.length === 0) throw new Error("No valid conference rows found in CSV");
+
+      const { error } = await supabase
+        .from("conference_stats")
+        .upsert(records, { onConflict: "conference,season" });
+      if (error) throw error;
+      return records.length;
+    },
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ["conference_stats"] });
+      toast.success(`Imported ${count} conference rows from CSV`);
+    },
+    onError: (e: unknown) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`CSV import failed: ${msg}`);
+    },
+  });
+
   const { ncaaRow, filtered } = useMemo(() => {
-    let list = stats;
+    // Collapse alias duplicates to one canonical conference row.
+    const byConference = new Map<string, ConferenceStat>();
+    const score = (s: ConferenceStat) =>
+      NUM_FIELDS.reduce((acc, f) => acc + ((s[f] as number | null) != null ? 1 : 0), 0) +
+      (s.stuff_plus != null ? 1 : 0);
+    for (const s of stats) {
+      const canonical = canonicalConferenceName(s.conference) || normalizeConferenceName(s.conference);
+      const key = canonical.toLowerCase();
+      if (!key) continue;
+      const current = byConference.get(key);
+      if (!current || score(s) > score(current)) {
+        byConference.set(key, { ...s, conference: canonical });
+      }
+    }
+
+    // Keep the table focused: only rows that already have the base stats needed.
+    let list = Array.from(byConference.values()).filter(
+      (s) => s.avg != null && s.obp != null && s.slg != null,
+    );
+    list = list.sort((a, b) => a.conference.localeCompare(b.conference));
     if (search) {
       const q = search.toLowerCase();
       list = list.filter((s) => s.conference.toLowerCase().includes(q));
@@ -107,7 +233,7 @@ export default function ConferenceStatsTable() {
 
   const startEdit = (stat: ConferenceStat) => {
     setEditingId(stat.id);
-    setEditName(stat.conference);
+    setEditName(canonicalConferenceName(stat.conference));
     const fields: Record<string, number | null> = {};
     NUM_FIELDS.forEach((f) => { fields[f] = stat[f] as number | null; });
     setEditData(fields);
@@ -120,9 +246,9 @@ export default function ConferenceStatsTable() {
     }));
   };
 
-  const fmt = (val: number | null, isPlus = false) => {
+  const fmt = (val: number | null, isPlus = false, digits = 3) => {
     if (val === null || val === undefined) return "—";
-    return isPlus ? val.toFixed(0) : val.toFixed(3);
+    return isPlus ? val.toFixed(0) : val.toFixed(digits);
   };
 
   const renderRow = (stat: ConferenceStat, pinned = false) => (
@@ -135,7 +261,7 @@ export default function ConferenceStatsTable() {
             className="h-7 w-full max-w-[160px] text-xs"
           />
         ) : (
-          stat.conference
+          pinned ? "NCAA Average" : normalizeConferenceName(stat.conference)
         )}
       </TableCell>
       {NUM_FIELDS.map((f) => (
@@ -143,14 +269,18 @@ export default function ConferenceStatsTable() {
           {editingId === stat.id ? (
             <Input
               type="number"
-              step={f.includes("plus") || f === "offensive_power_rating" ? "1" : "0.001"}
+              step={isWholePlusField(f) || f === "offensive_power_rating" ? "1" : f === "stuff_plus" ? "0.1" : "0.001"}
               value={editData[f] ?? ""}
               onChange={(e) => handleFieldChange(f, e.target.value)}
               className="h-7 w-[70px] text-center text-xs"
             />
           ) : (
             <span className="text-sm tabular-nums">
-              {fmt(stat[f] as number | null, f.includes("plus") || f === "offensive_power_rating")}
+              {fmt(
+                stat[f] as number | null,
+                isWholePlusField(f) || f === "offensive_power_rating",
+                f === "stuff_plus" ? 1 : 3,
+              )}
             </span>
           )}
         </TableCell>
@@ -162,7 +292,16 @@ export default function ConferenceStatsTable() {
               size="icon"
               variant="ghost"
               className="h-7 w-7"
-              onClick={() => updateStat.mutate({ id: stat.id, updates: { ...editData, conference: editName } })}
+              onClick={() => {
+                const avg = (editData.avg as number | null | undefined) ?? stat.avg;
+                const obp = (editData.obp as number | null | undefined) ?? stat.obp;
+                const slg = (editData.slg as number | null | undefined) ?? stat.slg;
+                const derived = computeDerivedConferenceStats(avg ?? null, obp ?? null, slg ?? null);
+                updateStat.mutate({
+                  id: stat.id,
+                  updates: { ...editData, ...derived, conference: canonicalConferenceName(editName) },
+                });
+              }}
             >
               <Check className="h-3.5 w-3.5 text-primary" />
             </Button>
@@ -195,19 +334,41 @@ export default function ConferenceStatsTable() {
     <Card>
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <CardTitle className="text-base">Conference Stats (2025)</CardTitle>
+          <CardTitle className="text-base">Conference Stats (NCAA)</CardTitle>
           <p className="text-sm text-muted-foreground mt-1">
-            Plus stats (AVG+ through WRC+) drive the transfer portal equation
+            Shared table for Teams and Admin. Plus stats (AVG+ through WRC+) drive the transfer portal equation.
           </p>
         </div>
-        <div className="relative w-full sm:w-64">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search conferences..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
+        <div className="flex w-full sm:w-auto items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              importCsv.mutate(f);
+              e.currentTarget.value = "";
+            }}
           />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importCsv.isPending}
+          >
+            {importCsv.isPending ? "Importing CSV…" : "Import CSV"}
+          </Button>
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search conferences..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-0">

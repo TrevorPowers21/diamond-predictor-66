@@ -7,30 +7,28 @@ import {
   Activity,
   BarChart3,
   Users,
-  DollarSign,
   GitCompare,
   Settings,
   LogOut,
   Menu,
   X,
-  FileSpreadsheet,
   Scale,
   Building2,
   Hammer,
   ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
+import { useEffect } from "react";
 
 const navItems = [
   { label: "Overview", href: "/dashboard", icon: BarChart3 },
   { label: "Transfer Portal", href: "/dashboard/portal", icon: Users },
-  { label: "Returning Players", href: "/dashboard/returning", icon: Activity },
-  { label: "NIL Valuations", href: "/dashboard/nil", icon: DollarSign },
-  { label: "Compare", href: "/dashboard/compare", icon: GitCompare },
-  { label: "Teams", href: "/dashboard/teams", icon: Building2 },
   { label: "Team Builder", href: "/dashboard/team-builder", icon: Hammer },
+  { label: "Player Dashboard", href: "/dashboard/returning", icon: Activity },
+  // { label: "NIL Valuations", href: "/dashboard/nil", icon: DollarSign, badge: "Coming Soon" },
+  // Temporarily hidden during testing; keep page code for later rework.
+  { label: "Compare (Coming soon)", href: "/dashboard/compare", icon: GitCompare, disabled: true },
   { label: "Admin", href: "/dashboard/admin", icon: ShieldCheck },
-  { label: "Data Sync", href: "/dashboard/sync", icon: FileSpreadsheet },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
@@ -40,6 +38,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  useEffect(() => {
+    setSidebarOpen(false);
+    // Defensive reset: sometimes UI libraries can leave body pointer lock behind.
+    if (typeof document !== "undefined") {
+      document.body.style.pointerEvents = "auto";
+    }
+  }, [location.pathname]);
+
   const handleSignOut = async () => {
     await signOut();
     navigate("/auth");
@@ -48,10 +54,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-screen bg-background">
       {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} />
-      )}
-
       {/* Sidebar */}
       <aside
         className={cn(
@@ -67,6 +69,18 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         <nav className="flex-1 space-y-1 px-3 py-4">
           {navItems.map((item) => {
             const isActive = location.pathname === item.href;
+            const isDisabled = "disabled" in item && item.disabled;
+            if (isDisabled) {
+              return (
+                <div
+                  key={item.href}
+                  className="flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium text-muted-foreground/50 cursor-default"
+                >
+                  <item.icon className="h-4 w-4" />
+                  {item.label}
+                </div>
+              );
+            }
             return (
               <Link
                 key={item.href}
@@ -81,6 +95,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               >
                 <item.icon className="h-4 w-4" />
                 {item.label}
+                {"badge" in item && item.badge && (
+                  <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{item.badge}</span>
+                )}
               </Link>
             );
           })}

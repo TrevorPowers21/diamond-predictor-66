@@ -22,12 +22,28 @@ function round3(val: number): number {
 
 interface ModelConfig {
   ncaaAvg: number; ncaaObp: number; ncaaSlg: number;
-  ncaaPR: number; powerWeight: number; ncaaWrc: number;
+  ncaaPR: number; powerWeight: number; ncaaWrc: number; defaultDevAgg: number;
+}
+
+function toRate(v: number): number {
+  return Math.abs(v) > 1 ? v / 100 : v;
+}
+
+function normalizeClassTransition(raw?: string | null): string {
+  const value = (raw || "").trim().toUpperCase();
+  if (!value) return "SJ";
+  if (["FS", "SJ", "JS", "GR"].includes(value)) return value;
+  if (value.includes("FRESHMAN") || value.includes("FS")) return "FS";
+  if (value.includes("SOPHOMORE") || value.includes("SJ")) return "SJ";
+  if (value.includes("JUNIOR") || value.includes("JS")) return "JS";
+  if (value.includes("GRAD") || value.includes("GR")) return "GR";
+  return "SJ";
 }
 
 function recalcPrediction(pred: any, config: ModelConfig) {
-  const ct = pred.class_transition || "SJ";
-  const devAgg = Number(pred.dev_aggressiveness) || 0;
+  const ct = normalizeClassTransition(pred.class_transition || "SJ");
+  const rawDevAgg = pred.dev_aggressiveness ?? config.defaultDevAgg;
+  const devAgg = Number.isFinite(Number(rawDevAgg)) ? Number(rawDevAgg) : config.defaultDevAgg;
   const bases = CLASS_BASES[ct] || CLASS_BASES.GR;
   const fromAvg = Number(pred.from_avg) || 0;
   const fromObp = Number(pred.from_obp) || 0;
@@ -103,16 +119,18 @@ Deno.serve(async (req) => {
       .from("model_config")
       .select("config_key, config_value")
       .eq("model_type", "returner")
-      .in("config_key", ["ncaa_avg", "ncaa_obp", "ncaa_slg", "ncaa_power_rating", "park_weight_slg", "ncaa_wrc"]);
+      .in("config_key", ["ncaa_avg", "ncaa_obp", "ncaa_slg", "ncaa_power_rating", "park_weight_slg", "power_rating_weight", "ncaa_wrc", "dev_aggressiveness_expected"]);
 
-    const mConfig: ModelConfig = { ncaaAvg: 0.28, ncaaObp: 0.385, ncaaSlg: 0.442, ncaaPR: 100, powerWeight: 0.4, ncaaWrc: 0.364 };
+    const mConfig: ModelConfig = { ncaaAvg: 0.28, ncaaObp: 0.385, ncaaSlg: 0.442, ncaaPR: 100, powerWeight: 0.4, ncaaWrc: 0.364, defaultDevAgg: 0.5 };
     for (const row of configRows || []) {
       if (row.config_key === "ncaa_avg") mConfig.ncaaAvg = Number(row.config_value);
       if (row.config_key === "ncaa_obp") mConfig.ncaaObp = Number(row.config_value);
       if (row.config_key === "ncaa_slg") mConfig.ncaaSlg = Number(row.config_value);
       if (row.config_key === "ncaa_power_rating") mConfig.ncaaPR = Number(row.config_value);
+      if (row.config_key === "power_rating_weight") mConfig.powerWeight = Number(row.config_value);
       if (row.config_key === "park_weight_slg") mConfig.powerWeight = Number(row.config_value);
       if (row.config_key === "ncaa_wrc") mConfig.ncaaWrc = Number(row.config_value);
+      if (row.config_key === "dev_aggressiveness_expected") mConfig.defaultDevAgg = toRate(Number(row.config_value));
     }
 
     const lines = csv_content.split(/\r?\n/).filter((l: string) => l.trim());
