@@ -2189,7 +2189,14 @@ export default function TeamBuilder() {
       const short = shorten(t.name);
       if (short && !map.has(short)) map.set(short, t);
     }
-    return map;
+    return {
+      get(key: string) {
+        return map.get(key) ?? map.get(shorten(key)) ?? undefined;
+      },
+      has(key: string) {
+        return map.has(key) || map.has(shorten(key));
+      },
+    };
   }, [teams]);
   const teamParkComponents = useMemo(() => readTeamParkFactorComponents(), [teams]);
   const pitchingStatsByNameTeam = useMemo(() => {

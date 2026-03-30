@@ -339,6 +339,15 @@ export default function PlayerProfile() {
     enabled: !!id,
   });
 
+  const { data: teamsForConference = [] } = useQuery({
+    queryKey: ["teams-conference-lookup"],
+    queryFn: async () => {
+      const { data } = await supabase.from("teams").select("name, conference");
+      return (data || []) as Array<{ name: string; conference: string | null }>;
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+
   const { data: nilValuation } = useQuery({
     queryKey: ["player-nil", id],
     queryFn: async () => {
@@ -625,9 +634,14 @@ export default function PlayerProfile() {
     ((nilValuation as any)?.war as number | null) ??
     historicalOWar;
   const nilBasePerOWar = 25000;
+  const resolvedConference = (() => {
+    if (player.conference) return player.conference;
+    const norm = (v: string) => (v || "").trim().toLowerCase().replace(/\b(university|college|of)\b/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+    return teamsForConference.find(t => norm(t.name) === norm(player.team || ""))?.conference || null;
+  })();
   const fallbackNilValuation = (() => {
     if (displayOWar == null) return null;
-    const ptm = getProgramTierMultiplierByConference(player.conference, DEFAULT_NIL_TIER_MULTIPLIERS);
+    const ptm = getProgramTierMultiplierByConference(resolvedConference, DEFAULT_NIL_TIER_MULTIPLIERS);
     const pvm = getPositionValueMultiplier(effectivePosition);
     return displayOWar * nilBasePerOWar * ptm * pvm;
   })();
@@ -657,7 +671,12 @@ export default function PlayerProfile() {
               <div className="flex items-center gap-2 mt-1 flex-wrap">
               {effectivePosition && <Badge variant="secondary">{effectivePosition}</Badge>}
               {displayTeam2025 && <Badge variant="outline">{displayTeam2025}</Badge>}
-              {player.conference && <Badge variant="outline" className="text-muted-foreground">{player.conference}</Badge>}
+              {(() => {
+                const norm = (v: string) => (v || "").trim().toLowerCase().replace(/\b(university|college|of)\b/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+                const teamConf = teamsForConference.find(t => norm(t.name) === norm(player.team || ""))?.conference;
+                const conf = player.conference || teamConf || null;
+                return conf ? <Badge variant="outline" className="text-muted-foreground">{conf}</Badge> : null;
+              })()}
               {player.transfer_portal && <Badge className="bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]">Transfer Portal</Badge>}
             </div>
           </div>
