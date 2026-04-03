@@ -39,6 +39,42 @@ import { useParkFactors } from "@/hooks/useParkFactors";
 
 // ─── Sync & Compute Buttons ──────────────────────────────────────────────────
 
+function ImportPaAbButton() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ hitterMasterUpdated: number; playersUpdated: number; notFound: number; errors: string[] } | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  return (
+    <>
+      <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setLoading(true);
+        setResult(null);
+        try {
+          const text = await file.text();
+          const { importPaAbFromCsv } = await import("@/lib/importPaAbData");
+          const r = await importPaAbFromCsv(text);
+          setResult(r);
+        } catch (err: any) {
+          setResult({ hitterMasterUpdated: 0, playersUpdated: 0, notFound: 0, errors: [err.message] });
+        }
+        setLoading(false);
+        if (fileRef.current) fileRef.current.value = "";
+      }} />
+      <Button onClick={() => fileRef.current?.click()} disabled={loading} variant="outline" className="gap-2">
+        {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+        {loading ? "Importing PA/AB…" : "Import PA/AB from CSV"}
+      </Button>
+      {result && (
+        <p className="text-sm text-muted-foreground">
+          Updated {result.hitterMasterUpdated} in Hitter Master, {result.playersUpdated} in players. {result.notFound} not found.
+          {result.errors.length > 0 && ` Errors: ${result.errors.slice(0, 3).join("; ")}${result.errors.length > 3 ? `... +${result.errors.length - 3} more` : ""}`}
+        </p>
+      )}
+    </>
+  );
+}
+
 function SyncMasterButton() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ hittersInserted: number; pitchersInserted: number; hittersSkipped: number; pitchersSkipped: number; errors: string[] } | null>(null);
@@ -6528,6 +6564,13 @@ function QuickActionsTab() {
             </p>
           </div>
           <CreatePredictionsButton />
+          <div className="border-t pt-4">
+            <p className="font-medium">Import PA/AB from CSV</p>
+            <p className="text-sm text-muted-foreground">
+              Upload a CSV with playerId, AB, and PA columns. Updates Hitter Master and players tables by source_player_id.
+            </p>
+          </div>
+          <ImportPaAbButton />
         </CardContent>
       </Card>
 

@@ -1389,6 +1389,8 @@ export type Database = {
           obp_plus: number | null
           iso_plus: number | null
           overall_plus: number | null
+          pa: number | null
+          ab: number | null
         }
         Insert: {
           id?: string
@@ -1432,6 +1434,8 @@ export type Database = {
           obp_plus?: number | null
           iso_plus?: number | null
           overall_plus?: number | null
+          pa?: number | null
+          ab?: number | null
         }
         Update: {
           id?: string
@@ -1475,6 +1479,8 @@ export type Database = {
           obp_plus?: number | null
           iso_plus?: number | null
           overall_plus?: number | null
+          pa?: number | null
+          ab?: number | null
         }
         Relationships: [
           {
