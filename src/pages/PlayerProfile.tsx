@@ -15,6 +15,7 @@ import { ArrowLeft, Pencil, Save, X, TrendingUp, TrendingDown, ShieldCheck, Targ
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useHitterSeedData } from "@/hooks/useHitterSeedData";
+import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import {
   DEFAULT_NIL_TIER_MULTIPLIERS,
@@ -22,6 +23,7 @@ import {
   getProgramTierMultiplierByConference,
 } from "@/lib/nilProgramSpecific";
 import { readPlayerOverrides } from "@/lib/playerOverrides";
+import { useTeamsTable } from "@/hooks/useTeamsTable";
 
 const TARGET_BOARD_STORAGE_KEY = "team_builder_target_board_v1";
 type TargetBoardEntry = {
@@ -73,9 +75,9 @@ const computeDerived = (avg: number | null, obp: number | null, slg: number | nu
   return { ops, iso, wrc, wrcPlus };
 };
 
-const computeOWarFromWrcPlus = (wrcPlus: number | null) => {
+const computeOWarFromWrcPlus = (wrcPlus: number | null, actualPa?: number | null) => {
   if (wrcPlus == null) return null;
-  const pa = 260;
+  const pa = actualPa ?? 260;
   const runsPerPa = 0.13;
   const replacementRuns = (pa / 600) * 25;
   const offValue = (wrcPlus - 100) / 100;
@@ -98,67 +100,7 @@ const powerTierClass = (value: number | null | undefined) => {
   return "text-destructive";
 };
 
-const erf = (x: number) => {
-  const sign = x < 0 ? -1 : 1;
-  const ax = Math.abs(x);
-  const t = 1 / (1 + 0.3275911 * ax);
-  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-ax * ax);
-  return sign * y;
-};
-
-const scoreFromNormal = (x: number | null, mean: number, sd: number, invert = false) => {
-  if (x == null || sd <= 0) return null;
-  const cdf = 0.5 * (1 + erf((x - mean) / (sd * Math.SQRT2)));
-  const pct = cdf * 100;
-  return invert ? 100 - pct : pct;
-};
-
-const computePowerRatings = (raw: {
-  contact: number | null;
-  lineDrive: number | null;
-  avgExitVelo: number | null;
-  popUp: number | null;
-  bb: number | null;
-  chase: number | null;
-  barrel: number | null;
-  ev90: number | null;
-  pull: number | null;
-  la10_30: number | null;
-  gb: number | null;
-}) => {
-  const contactScore = scoreFromNormal(raw.contact, 77.1, 6.6);
-  const lineDriveScore = scoreFromNormal(raw.lineDrive, 20.9, 4.31);
-  const avgEVScore = scoreFromNormal(raw.avgExitVelo, 86.2, 4.28);
-  const popUpScore = scoreFromNormal(raw.popUp, 7.9, 3.37, true);
-  const bbScore = scoreFromNormal(raw.bb, 11.4, 3.57);
-  const chaseScore = scoreFromNormal(raw.chase, 23.1, 5.58, true);
-  const barrelScore = scoreFromNormal(raw.barrel, 17.3, 7.89);
-  const ev90Score = scoreFromNormal(raw.ev90, 103.1, 3.97);
-  const pullScore = scoreFromNormal(raw.pull, 36.5, 8.03);
-  const laScore = scoreFromNormal(raw.la10_30, 29, 6.81);
-  const gbScore = scoreFromNormal(raw.gb, 43.2, 8.0, true);
-
-  const baPower = contactScore == null || lineDriveScore == null || avgEVScore == null || popUpScore == null
-    ? null
-    : (0.4 * contactScore) + (0.25 * lineDriveScore) + (0.2 * avgEVScore) + (0.15 * popUpScore);
-  const obpPower = contactScore == null || lineDriveScore == null || avgEVScore == null || popUpScore == null || bbScore == null || chaseScore == null
-    ? null
-    : (0.35 * contactScore) + (0.2 * lineDriveScore) + (0.15 * avgEVScore) + (0.1 * popUpScore) + (0.15 * bbScore) + (0.05 * chaseScore);
-  const isoPower = barrelScore == null || ev90Score == null || pullScore == null || laScore == null || gbScore == null
-    ? null
-    : (0.45 * barrelScore) + (0.3 * ev90Score) + (0.15 * pullScore) + (0.05 * laScore) + (0.05 * gbScore);
-  const toPlus = (v: number | null) => (v == null ? null : (v / 50) * 100);
-  const overallPower = baPower == null || obpPower == null || isoPower == null
-    ? null
-    : (0.25 * toPlus(baPower)) + (0.4 * toPlus(obpPower)) + (0.35 * toPlus(isoPower));
-  return {
-    contactScore, lineDriveScore, avgEVScore, popUpScore, bbScore, chaseScore, barrelScore, ev90Score, pullScore, laScore, gbScore,
-    baPlus: toPlus(baPower),
-    obpPlus: toPlus(obpPower),
-    isoPlus: toPlus(isoPower),
-    overallPlus: overallPower,
-  };
-};
+const computePowerRatings = computeHitterPowerRatings;
 
 const normalizeName = (value: string | null | undefined) =>
   (value || "")
@@ -339,14 +281,7 @@ export default function PlayerProfile() {
     enabled: !!id,
   });
 
-  const { data: teamsForConference = [] } = useQuery({
-    queryKey: ["teams-conference-lookup"],
-    queryFn: async () => {
-      const { data } = await supabase.from("teams").select("name, conference");
-      return (data || []) as Array<{ name: string; conference: string | null }>;
-    },
-    staleTime: 10 * 60 * 1000,
-  });
+  const { teams: teamsForConference } = useTeamsTable();
 
   const { data: nilValuation } = useQuery({
     queryKey: ["player-nil", id],

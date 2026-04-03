@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { computeAndStoreAllScores } from "@/lib/computeAndStoreScores";
+// Expose score computation to browser console: window.computeAllScores(2025)
+(window as any).computeAllScores = computeAndStoreAllScores;
 import DashboardLayout from "@/components/DashboardLayout";
 import ConferenceStatsTable from "@/components/ConferenceStatsTable";
 import PitchingConferenceStatsTable from "@/components/PitchingConferenceStatsTable";
@@ -28,7 +31,8 @@ import storage2025Seed from "@/data/storage_2025_seed.json";
 import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
 import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
 import { profileRouteFor } from "@/lib/profileRoutes";
-import { readTeamParkFactorComponents, resolveMetricParkFactor, writeTeamParkFactorComponents } from "@/lib/parkFactors";
+import { resolveMetricParkFactor } from "@/lib/parkFactors";
+import { useParkFactors } from "@/hooks/useParkFactors";
 
 // ─── Equation Constants Tab ───────────────────────────────────────────────────
 
@@ -2570,6 +2574,7 @@ function DevWeightsTab() {
 // ─── Teams Tab ────────────────────────────────────────────────────────────────
 
 function TeamsAdminTab() {
+  const { parkMap } = useParkFactors();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [confFilter, setConfFilter] = useState<string>("all");
@@ -3917,7 +3922,6 @@ function TeamsAdminTab() {
       }
 
       const toUpdateById = new Map<string, number | null>();
-      const parkComponents = readTeamParkFactorComponents();
       const unmatchedTeams = new Set<string>();
       let processed = 0;
       let matched = 0;
@@ -3946,16 +3950,8 @@ function TeamsAdminTab() {
           if (hasHittingColumns) {
             toUpdateById.set(existing.id, avgFactor);
           }
-          const storageKey = normalizeTeamKey(existing.name);
-          const prev = parkComponents[storageKey] || { avg: null, obp: null, iso: null };
-          parkComponents[storageKey] = {
-            avg: hasHittingColumns ? avgFactor : (prev.avg ?? null),
-            obp: hasHittingColumns ? obpFactor : (prev.obp ?? null),
-            iso: hasHittingColumns ? isoFactor : (prev.iso ?? null),
-            era: hasPitchingColumns ? eraFactor : (prev.era ?? null),
-            whip: hasPitchingColumns ? whipFactor : (prev.whip ?? null),
-            hr9: hasPitchingColumns ? hr9Factor : (prev.hr9 ?? null),
-          };
+          // TODO: Write per-metric park factors (obp, iso, era, whip, hr9) to Supabase park_factors table
+          // Previously stored in localStorage via writeTeamParkFactorComponents — now handled by Supabase
         } else {
           unmatchedTeams.add(originalTeam || team);
         }
@@ -3970,7 +3966,6 @@ function TeamsAdminTab() {
           if (error) throw error;
         }
       }
-      writeTeamParkFactorComponents(parkComponents);
       return {
         processed,
         updated: hasHittingColumns ? toUpdate.length : matched,
@@ -4220,7 +4215,7 @@ function TeamsAdminTab() {
     }
     return list;
   }, [teams, search, confFilter, parkFilter, resolveCanonicalTeamName]);
-  const teamParkComponents = readTeamParkFactorComponents();
+  const teamParkComponents = parkMap;
   const formatParkDisplay = useCallback((value: number | null | undefined) => {
     if (value == null || !Number.isFinite(value)) return "";
     const scaled = Math.abs(value) <= 3 ? value * 100 : value;
@@ -4229,12 +4224,12 @@ function TeamsAdminTab() {
   const blankParkFactorRows = useMemo(() => {
     return teams
       .map((t) => {
-        const avg = resolveMetricParkFactor(t.name, t.park_factor, "avg", teamParkComponents);
-        const obp = resolveMetricParkFactor(t.name, t.park_factor, "obp", teamParkComponents);
-        const iso = resolveMetricParkFactor(t.name, t.park_factor, "iso", teamParkComponents);
-        const era = resolveMetricParkFactor(t.name, t.park_factor, "era", teamParkComponents);
-        const whip = resolveMetricParkFactor(t.name, t.park_factor, "whip", teamParkComponents);
-        const hr9 = resolveMetricParkFactor(t.name, t.park_factor, "hr9", teamParkComponents);
+        const avg = resolveMetricParkFactor(t.id, "avg", teamParkComponents, t.name);
+        const obp = resolveMetricParkFactor(t.id, "obp", teamParkComponents, t.name);
+        const iso = resolveMetricParkFactor(t.id, "iso", teamParkComponents, t.name);
+        const era = resolveMetricParkFactor(t.id, "era", teamParkComponents, t.name);
+        const whip = resolveMetricParkFactor(t.id, "whip", teamParkComponents, t.name);
+        const hr9 = resolveMetricParkFactor(t.id, "hr9", teamParkComponents, t.name);
         if (avg != null && obp != null && iso != null && era != null && whip != null && hr9 != null) return null;
         return {
           team: t.name,
@@ -4253,9 +4248,9 @@ function TeamsAdminTab() {
     const eq = (a: number, b: number) => Math.abs(a - b) < 1e-9;
     return teams
       .map((t) => {
-        const avg = resolveMetricParkFactor(t.name, t.park_factor, "avg", teamParkComponents);
-        const obp = resolveMetricParkFactor(t.name, t.park_factor, "obp", teamParkComponents);
-        const iso = resolveMetricParkFactor(t.name, t.park_factor, "iso", teamParkComponents);
+        const avg = resolveMetricParkFactor(t.id, "avg", teamParkComponents, t.name);
+        const obp = resolveMetricParkFactor(t.id, "obp", teamParkComponents, t.name);
+        const iso = resolveMetricParkFactor(t.id, "iso", teamParkComponents, t.name);
         if (avg == null || obp == null || iso == null) return null;
         if (!eq(avg, obp) || !eq(avg, iso)) return null;
         return {
@@ -4271,9 +4266,9 @@ function TeamsAdminTab() {
   const equalPitchingParkFactorRows = useMemo(() => {
     return teams
       .map((t) => {
-        const era = resolveMetricParkFactor(t.name, t.park_factor, "era", teamParkComponents);
-        const whip = resolveMetricParkFactor(t.name, t.park_factor, "whip", teamParkComponents);
-        const hr9 = resolveMetricParkFactor(t.name, t.park_factor, "hr9", teamParkComponents);
+        const era = resolveMetricParkFactor(t.id, "era", teamParkComponents, t.name);
+        const whip = resolveMetricParkFactor(t.id, "whip", teamParkComponents, t.name);
+        const hr9 = resolveMetricParkFactor(t.id, "hr9", teamParkComponents, t.name);
         const eraDisplay = formatParkDisplay(era);
         const whipDisplay = formatParkDisplay(whip);
         const hr9Display = formatParkDisplay(hr9);
@@ -4531,7 +4526,7 @@ function TeamsAdminTab() {
                         ) : (
                           <span className="text-sm tabular-nums">
                             {(() => {
-                              const v = resolveMetricParkFactor(team.name, team.park_factor, "avg", teamParkComponents);
+                              const v = resolveMetricParkFactor(team.id, "avg", teamParkComponents, team.name);
                               return formatParkDisplay(v) || "—";
                             })()}
                           </span>
@@ -4540,7 +4535,7 @@ function TeamsAdminTab() {
                       <TableCell className="text-center">
                         <span className="text-sm tabular-nums">
                           {(() => {
-                            const v = resolveMetricParkFactor(team.name, team.park_factor, "obp", teamParkComponents);
+                            const v = resolveMetricParkFactor(team.id, "obp", teamParkComponents, team.name);
                             return formatParkDisplay(v) || "—";
                           })()}
                         </span>
@@ -4548,7 +4543,7 @@ function TeamsAdminTab() {
                       <TableCell className="text-center">
                         <span className="text-sm tabular-nums">
                           {(() => {
-                            const v = resolveMetricParkFactor(team.name, team.park_factor, "iso", teamParkComponents);
+                            const v = resolveMetricParkFactor(team.id, "iso", teamParkComponents, team.name);
                             return formatParkDisplay(v) || "—";
                           })()}
                         </span>
@@ -4556,7 +4551,7 @@ function TeamsAdminTab() {
                       <TableCell className="text-center">
                         <span className="text-sm tabular-nums">
                           {(() => {
-                            const v = resolveMetricParkFactor(team.name, team.park_factor, "era", teamParkComponents);
+                            const v = resolveMetricParkFactor(team.id, "era", teamParkComponents, team.name);
                             return formatParkDisplay(v) || "—";
                           })()}
                         </span>
@@ -4564,7 +4559,7 @@ function TeamsAdminTab() {
                       <TableCell className="text-center">
                         <span className="text-sm tabular-nums">
                           {(() => {
-                            const v = resolveMetricParkFactor(team.name, team.park_factor, "whip", teamParkComponents);
+                            const v = resolveMetricParkFactor(team.id, "whip", teamParkComponents, team.name);
                             return formatParkDisplay(v) || "—";
                           })()}
                         </span>
@@ -4572,7 +4567,7 @@ function TeamsAdminTab() {
                       <TableCell className="text-center">
                         <span className="text-sm tabular-nums">
                           {(() => {
-                            const v = resolveMetricParkFactor(team.name, team.park_factor, "hr9", teamParkComponents);
+                            const v = resolveMetricParkFactor(team.id, "hr9", teamParkComponents, team.name);
                             return formatParkDisplay(v) || "—";
                           })()}
                         </span>

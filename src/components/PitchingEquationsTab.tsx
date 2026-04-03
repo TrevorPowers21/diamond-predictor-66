@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 import {
   DEFAULT_PITCHING_WEIGHTS,
   PITCHING_EQUATIONS_STORAGE_KEY,
@@ -15,17 +16,11 @@ const toNum = (v: string) => {
   return Number.isFinite(n) ? n : 0;
 };
 
-const parseNum = (v: string | null | undefined) => {
-  const n = Number(String(v ?? "").replace(/[%,$]/g, "").trim());
-  return Number.isFinite(n) ? n : null;
-};
-
-const mean = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length;
-const stdDevPopulation = (values: number[]) => {
-  if (values.length === 0) return null;
-  const m = mean(values);
-  const variance = values.reduce((acc, v) => acc + (v - m) ** 2, 0) / values.length;
-  return Math.sqrt(variance);
+const mean = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length;
+const stdDevPopulation = (arr: number[]) => {
+  if (arr.length < 2) return null;
+  const m = mean(arr);
+  return Math.sqrt(arr.reduce((sum, v) => sum + (v - m) ** 2, 0) / arr.length);
 };
 
 export default function PitchingEquationsTab() {
@@ -65,15 +60,17 @@ export default function PitchingEquationsTab() {
     }
   };
 
-  const autoFillFromPitchingStorage = () => {
+  const autoFillFromPitchingStorage = async () => {
     try {
-      const raw = localStorage.getItem("pitching_stats_storage_2025_v1");
-      if (!raw) {
-        toast.error("No 2025 pitching stats storage found.");
+      const { data, error } = await supabase
+        .from("Pitching Master")
+        .select("ERA, FIP, WHIP, K9, BB9, HR9")
+        .eq("Season", 2025);
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        toast.error("No 2025 pitching stats found in Pitching Master table.");
         return;
       }
-      const parsed = JSON.parse(raw) as { rows?: Array<{ values?: string[] }> };
-      const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
 
       const eraVals: number[] = [];
       const fipVals: number[] = [];
@@ -82,20 +79,13 @@ export default function PitchingEquationsTab() {
       const bb9Vals: number[] = [];
       const hr9Vals: number[] = [];
 
-      for (const row of rows) {
-        const values = Array.isArray(row.values) ? row.values : [];
-        const era = parseNum(values[3]);
-        const fip = parseNum(values[4]);
-        const whip = parseNum(values[5]);
-        const k9 = parseNum(values[6]);
-        const bb9 = parseNum(values[7]);
-        const hr9 = parseNum(values[8]);
-        if (era != null) eraVals.push(era);
-        if (fip != null) fipVals.push(fip);
-        if (whip != null) whipVals.push(whip);
-        if (k9 != null) k9Vals.push(k9);
-        if (bb9 != null) bb9Vals.push(bb9);
-        if (hr9 != null) hr9Vals.push(hr9);
+      for (const row of data) {
+        if (row.ERA != null) eraVals.push(row.ERA);
+        if (row.FIP != null) fipVals.push(row.FIP);
+        if (row.WHIP != null) whipVals.push(row.WHIP);
+        if (row.K9 != null) k9Vals.push(row.K9);
+        if (row.BB9 != null) bb9Vals.push(row.BB9);
+        if (row.HR9 != null) hr9Vals.push(row.HR9);
       }
 
       const next: PitchingEquationWeights = { ...weights };
@@ -132,9 +122,9 @@ export default function PitchingEquationsTab() {
 
       setWeights(next);
       localStorage.setItem(PITCHING_EQUATIONS_STORAGE_KEY, JSON.stringify(next));
-      toast.success("Auto-filled NCAA averages and SD from 2025 pitching stats storage.");
+      toast.success("Auto-filled NCAA averages and SD from Pitching Master table.");
     } catch {
-      toast.error("Failed to auto-fill from pitching stats storage.");
+      toast.error("Failed to auto-fill from Pitching Master table.");
     }
   };
 

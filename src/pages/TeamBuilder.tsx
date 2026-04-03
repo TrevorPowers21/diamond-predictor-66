@@ -15,6 +15,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, BarChart3, DollarSign, Upload, ChevronDown, ChevronUp } from "lucide-react";
 import { useHitterSeedData } from "@/hooks/useHitterSeedData";
+import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import {
   calcPlayerScore,
   DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
@@ -27,8 +28,11 @@ import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { readPlayerOverrides, updatePlayerOverride } from "@/lib/playerOverrides";
-import { readTeamParkFactorComponents, resolveMetricParkFactor } from "@/lib/parkFactors";
+import { resolveMetricParkFactor } from "@/lib/parkFactors";
+import { useTeamsTable } from "@/hooks/useTeamsTable";
+import { useParkFactors } from "@/hooks/useParkFactors";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { useConferenceStats } from "@/hooks/useConferenceStats";
 
 const POSITION_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"] as const;
 const PITCHER_SLOTS = ["SP1", "SP2", "SP3", "SP4", "SP5", "RP1", "RP2", "RP3", "RP4", "CL"] as const;
@@ -139,6 +143,8 @@ type TeamRow = {
   name: string;
   conference: string | null;
   park_factor: number | null;
+  conference_id?: string | null;
+  source_team_id?: string | null;
 };
 
 type ConferenceRow = {
@@ -300,6 +306,7 @@ const splitFullName = (fullName: string) => {
 
 const readStoragePitcherLocalPlayers = (
   teamName: string | null | undefined,
+  masterRows: Array<{ playerName: string; team: string | null; throwHand: string | null; role: string | null; conference: string | null }> = [],
 ): Array<{
   first_name: string;
   last_name: string;
@@ -309,46 +316,37 @@ const readStoragePitcherLocalPlayers = (
   conference: string | null;
   role: "SP" | "RP" | null;
 }> => {
-  if (!teamName || typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem("pitching_stats_storage_2025_v1");
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as { rows?: Array<{ values?: string[] }> };
-    const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
-    const out: Array<{
-      first_name: string;
-      last_name: string;
-      position: string | null;
-      team: string | null;
-      from_team: string | null;
-      conference: string | null;
-      role: "SP" | "RP" | null;
-    }> = [];
-    for (const row of rows) {
-      const values = Array.isArray(row?.values) ? row.values : [];
-      const playerName = (values[0] || "").trim();
-      const rowTeam = (values[1] || "").trim();
-      if (!playerName || !rowTeam) continue;
-      if (!teamMatchesSelectedTeam(rowTeam, teamName)) continue;
-      const hand = (values[2] || "").trim().toUpperCase();
-      const roleRaw = (values[3] || "").trim().toUpperCase();
-      const role: "SP" | "RP" | null = roleRaw === "SP" || roleRaw === "RP" ? roleRaw : null;
-      const position = hand === "RHP" || hand === "LHP" ? hand : (role || "P");
-      const split = splitFullName(playerName);
-      out.push({
-        first_name: split.first,
-        last_name: split.last,
-        position,
-        team: rowTeam,
-        from_team: null,
-        conference: null,
-        role,
-      });
-    }
-    return out;
-  } catch {
-    return [];
+  if (!teamName) return [];
+  const out: Array<{
+    first_name: string;
+    last_name: string;
+    position: string | null;
+    team: string | null;
+    from_team: string | null;
+    conference: string | null;
+    role: "SP" | "RP" | null;
+  }> = [];
+  for (const r of masterRows) {
+    const playerName = (r.playerName || "").trim();
+    const rowTeam = (r.team || "").trim();
+    if (!playerName || !rowTeam) continue;
+    if (!teamMatchesSelectedTeam(rowTeam, teamName)) continue;
+    const hand = (r.throwHand || "").trim().toUpperCase();
+    const roleRaw = (r.role || "").trim().toUpperCase();
+    const role: "SP" | "RP" | null = roleRaw === "SP" || roleRaw === "RP" ? roleRaw : null;
+    const position = hand === "RHP" || hand === "LHP" ? hand : (role || "P");
+    const split = splitFullName(playerName);
+    out.push({
+      first_name: split.first,
+      last_name: split.last,
+      position,
+      team: rowTeam,
+      from_team: null,
+      conference: r.conference || null,
+      role,
+    });
   }
+  return out;
 };
 
 const erf = (x: number) => {
@@ -628,9 +626,9 @@ const writeTargetBoard = (rows: TargetBoardEntry[]) => {
   window.localStorage.setItem(TARGET_BOARD_STORAGE_KEY, JSON.stringify(rows));
 };
 
-const computeOWarFromWrcPlus = (wrcPlus: number | null | undefined) => {
+const computeOWarFromWrcPlus = (wrcPlus: number | null | undefined, actualPa?: number | null) => {
   if (wrcPlus == null) return null;
-  const pa = 260;
+  const pa = actualPa ?? 260;
   const runsPerPa = 0.13;
   const replacementRuns = (pa / 600) * 25;
   const offValue = (wrcPlus - 100) / 100;
@@ -919,6 +917,7 @@ export default function TeamBuilder() {
   const { user, hasRole } = useAuth();
   const { toast } = useToast();
   const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
+  const { pitchers: pitchingMasterRows } = usePitchingSeedData();
   const queryClient = useQueryClient();
   const isAdmin = hasRole("admin");
   const [searchParams] = useSearchParams();
@@ -931,6 +930,48 @@ export default function TeamBuilder() {
   const [nilEquationOpen, setNilEquationOpen] = useState(false);
   const [metricsUploadOpen, setMetricsUploadOpen] = useState(false);
   const pitchingEq = useMemo(() => readPitchingWeights(), []);
+  const { conferenceStats: newConfStats } = useConferenceStats(2025);
+
+  // Derive pitching conference plus-stats lookup from Supabase conference stats
+  const pitchingConfLookup = useMemo(() => {
+    const normConf = (c: string | null) => (c || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+    const eq = pitchingEq;
+    const map = new Map<string, { conference: string; era_plus: number; fip_plus: number; whip_plus: number; k9_plus: number; bb9_plus: number; hr9_plus: number; hitter_talent_plus: number }>();
+    for (const cs of newConfStats) {
+      const toPlus = (value: number | null, ncaaAvg: number, ncaaSd: number, scale: number, higherIsBetter: boolean): number | null => {
+        if (value == null || !Number.isFinite(value) || !Number.isFinite(ncaaAvg) || !Number.isFinite(ncaaSd) || ncaaSd === 0) return null;
+        const core = higherIsBetter ? ((value - ncaaAvg) / ncaaSd) : ((ncaaAvg - value) / ncaaSd);
+        const raw = 100 + (core * scale);
+        return Number.isFinite(raw) ? raw : null;
+      };
+      const eraPlus = toPlus(cs.era, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
+      const fipPlus = toPlus(cs.fip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
+      const whipPlus = toPlus(cs.whip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
+      const k9Plus = toPlus(cs.k9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
+      const bb9Plus = toPlus(cs.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
+      const hr9Plus = toPlus(cs.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
+      if (eraPlus == null || fipPlus == null || whipPlus == null || k9Plus == null || bb9Plus == null || hr9Plus == null) continue;
+      const stuffPlus = cs.stuff_plus ?? 100;
+      const wrcPlus = cs.wrc_plus ?? 100;
+      const overallPowerRating = cs.overall_power_rating ?? 100;
+      const hitterTalentPlus = overallPowerRating + (1.25 * (stuffPlus - 100)) + (0.75 * (100 - wrcPlus));
+      const key = normConf(cs.conference);
+      if (key) {
+        map.set(key, {
+          conference: cs.conference,
+          era_plus: Math.round(eraPlus),
+          fip_plus: Math.round(fipPlus),
+          whip_plus: Math.round(whipPlus),
+          k9_plus: Math.round(k9Plus),
+          bb9_plus: Math.round(bb9Plus),
+          hr9_plus: Math.round(hr9Plus),
+          hitter_talent_plus: Math.round(hitterTalentPlus * 10) / 10,
+        });
+      }
+    }
+    return map;
+  }, [newConfStats, pitchingEq]);
+
   const [buildName, setBuildName] = useState("My Team Build");
   const [selectedTeam, setSelectedTeam] = useState<string>("Arizona State");
   const [totalBudget, setTotalBudget] = useState<number>(0);
@@ -969,14 +1010,8 @@ export default function TeamBuilder() {
     setTeamSearchQuery(selectedTeam || "");
   }, [selectedTeam]);
 
-  // Fetch teams
-  const { data: teams = [] } = useQuery({
-    queryKey: ["teams-list"],
-    queryFn: async () => {
-      const { data } = await supabase.from("teams").select("id, name, conference, park_factor").order("name");
-      return (data ?? []) as TeamRow[];
-    },
-  });
+  // Fetch teams from Teams Table
+  const { teams } = useTeamsTable();
 
   const selectedTeamRow = useMemo(() => {
     if (!selectedTeam) return null;
@@ -1027,52 +1062,27 @@ export default function TeamBuilder() {
     },
   });
 
-  // Fetch pitchers from Supabase for target board search
-  const { data: dbPitchersForSearch = [] } = useQuery({
-    queryKey: ["team-builder-db-pitchers-search"],
-    queryFn: async () => {
-      const all: any[] = [];
-      let from = 0;
-      while (true) {
-        const { data, error } = await supabase
-          .from("pitching_stats_storage")
-          .select("player_id, player_name, team, handedness, role, era, fip, whip, k9, bb9, hr9, ip, g, gs")
-          .eq("season", 2025)
-          .range(from, from + 999);
-        if (error) throw error;
-        all.push(...(data || []));
-        if (!data || data.length < 1000) break;
-        from += 1000;
-      }
-      return all;
-    },
-    staleTime: 10 * 60 * 1000,
-  });
-
+  // Pitchers for target board search — derived from Pitching Master hook
   const storagePitchersForSearch = useMemo(() => {
-    const teamConfByKey = new Map<string, string | null>();
-    for (const t of teams as TeamRow[]) {
-      teamConfByKey.set(normalizeKey(t.name), t.conference || null);
-    }
     const out: any[] = [];
-    // Primary source: Supabase pitching_stats_storage
-    for (let idx = 0; idx < dbPitchersForSearch.length; idx++) {
-      const r = dbPitchersForSearch[idx];
-      const playerName = (r.player_name || "").trim();
+    for (let idx = 0; idx < pitchingMasterRows.length; idx++) {
+      const r = pitchingMasterRows[idx];
+      const playerName = (r.playerName || "").trim();
       const teamName = (r.team || "").trim();
       if (!playerName) continue;
       const split = splitFullName(playerName);
       const g = r.g != null ? Number(r.g) : null;
       const gs = r.gs != null ? Number(r.gs) : null;
-      const role = r.role === "SP" || r.role === "RP" ? r.role : (g != null && g > 0 && gs != null ? ((gs / g) < 0.5 ? "RP" : "SP") : "RP");
+      const roleRaw = toPitchingRole(r.role);
+      const role = roleRaw === "SP" || roleRaw === "RP" ? roleRaw : (g != null && g > 0 && gs != null ? ((gs / g) < 0.5 ? "RP" : "SP") : "RP");
       out.push({
-        id: r.player_id || `db-pitcher-${normalizeName(playerName)}-${normalizeName(teamName)}-${idx}`,
+        id: r.id || `pm-pitcher-${normalizeName(playerName)}-${normalizeName(teamName)}-${idx}`,
         first_name: split.first,
         last_name: split.last,
         position: role,
         team: teamName || null,
         from_team: teamName || null,
-        conference: teamConfByKey.get(normalizeKey(teamName || "")) || null,
+        conference: r.conference || null,
         __storagePitcher: true,
         __pitching: {
           role,
@@ -1087,52 +1097,8 @@ export default function TeamBuilder() {
         },
       });
     }
-    // Fallback: localStorage pitching (for any not in Supabase)
-    const dbKeys = new Set(out.map((p) => `${normalizeName(`${p.first_name} ${p.last_name}`)}|${normalizeName(p.team || "")}`));
-    try {
-      const raw = localStorage.getItem("pitching_stats_storage_2025_v1");
-      if (raw) {
-        const parsed = JSON.parse(raw) as { rows?: Array<{ values?: string[] }> };
-        const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
-        for (let idx = 0; idx < rows.length; idx++) {
-          const values = Array.isArray(rows[idx].values) ? rows[idx].values! : [];
-          const playerName = (values[0] || "").trim();
-          const teamName = (values[1] || "").trim();
-          if (!playerName) continue;
-          const key = `${normalizeName(playerName)}|${normalizeName(teamName)}`;
-          if (dbKeys.has(key)) continue;
-          const split = splitFullName(playerName);
-          const statsView = resolvePitchingStatsView(values);
-          const roleRaw = toPitchingRole(statsView.role);
-          const g = parseNum(statsView.g);
-          const gs = parseNum(statsView.gs);
-          const role = roleRaw || (g != null && g > 0 && gs != null ? ((gs / g) < 0.5 ? "RP" : "SP") : "RP");
-          out.push({
-            id: `storage-pitcher-${normalizeName(playerName)}-${normalizeName(teamName)}-${idx}`,
-            first_name: split.first,
-            last_name: split.last,
-            position: role,
-            team: teamName || null,
-            from_team: teamName || null,
-            conference: teamConfByKey.get(normalizeKey(teamName || "")) || null,
-            __storagePitcher: true,
-            __pitching: {
-              role,
-              p_era: null as number | null,
-              p_fip: null as number | null,
-              p_whip: null as number | null,
-              p_k9: null as number | null,
-              p_bb9: null as number | null,
-              p_hr9: null as number | null,
-              p_rv_plus: null as number | null,
-              p_war: null as number | null,
-            },
-          });
-        }
-      }
-    } catch { /* ignore */ }
     return out;
-  }, [teams, dbPitchersForSearch]);
+  }, [pitchingMasterRows]);
   const seedHittersForSearch = useMemo(() => {
     const teamConfByKey = new Map<string, string | null>();
     for (const t of teams as TeamRow[]) {
@@ -1529,7 +1495,7 @@ export default function TeamBuilder() {
   });
   const storagePitchersForSelectedTeam = useMemo(() => {
     if (!selectedTeam) return [] as BuildPlayer[];
-    return readStoragePitcherLocalPlayers(selectedTeam).map((lp) => ({
+    return readStoragePitcherLocalPlayers(selectedTeam, pitchingMasterRows).map((lp) => ({
       player_id: null,
       source: "returner",
       custom_name: null,
@@ -1558,7 +1524,7 @@ export default function TeamBuilder() {
       team_metrics: null,
       team_power_plus: null,
     }));
-  }, [selectedTeam]);
+  }, [selectedTeam, pitchingMasterRows]);
   const seedHittersForSelectedTeam = useMemo(() => {
     if (!selectedTeam) return [] as BuildPlayer[];
     return seedHittersForSearch
@@ -1694,7 +1660,7 @@ export default function TeamBuilder() {
         }
       }
 
-      const fallbackPitchers = readStoragePitcherLocalPlayers(build.team || selectedTeam || "");
+      const fallbackPitchers = readStoragePitcherLocalPlayers(build.team || selectedTeam || "", pitchingMasterRows);
       const usedFallbackIndices = new Set<number>();
       const reserveFallbackIndexByName = (fullName: string) => {
         const key = normalizeName(fullName);
@@ -2198,7 +2164,7 @@ export default function TeamBuilder() {
       },
     };
   }, [teams]);
-  const teamParkComponents = useMemo(() => readTeamParkFactorComponents(), [teams]);
+  const { parkMap: teamParkComponents } = useParkFactors();
   const pitchingStatsByNameTeam = useMemo(() => {
     type PStatRec = { team: string | null; role: "SP" | "RP" | "SM" | null; era: number | null; fip: number | null; whip: number | null; k9: number | null; bb9: number | null; hr9: number | null; g: number | null; gs: number | null; ip: number | null };
     const byKey = new Map<string, PStatRec>();
@@ -2211,9 +2177,8 @@ export default function TeamBuilder() {
       bucket.push(rec);
       byName.set(nKey, bucket);
     };
-    // Primary: Supabase pitching stats
-    for (const r of dbPitchersForSearch) {
-      const name = (r.player_name || "").trim();
+    for (const r of pitchingMasterRows) {
+      const name = (r.playerName || "").trim();
       const team = (r.team || "").trim();
       if (!name) continue;
       addRec(name, team, {
@@ -2230,59 +2195,8 @@ export default function TeamBuilder() {
         ip: r.ip != null ? Number(r.ip) : null,
       });
     }
-    // Fallback: localStorage
-    try {
-      const raw = localStorage.getItem("pitching_stats_storage_2025_v1");
-      if (raw) {
-        const parsed = JSON.parse(raw) as { rows?: Array<{ values?: string[] }> };
-        const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
-        for (const row of rows) {
-          const values = Array.isArray(row.values) ? row.values : [];
-          const name = (values[0] || "").trim();
-          const team = (values[1] || "").trim();
-          if (!name) continue;
-          const key = `${normalizeName(name)}|${normalizeName(team)}`;
-          if (byKey.has(key)) continue;
-          const statsView = resolvePitchingStatsView(values);
-          addRec(name, team, {
-            team: team || null,
-            role: toPitchingRole(statsView.role),
-            era: parseNum(statsView.era),
-            fip: parseNum(statsView.fip),
-            whip: parseNum(statsView.whip),
-            k9: parseNum(statsView.k9),
-            bb9: parseNum(statsView.bb9),
-            hr9: parseNum(statsView.hr9),
-            g: parseNum(statsView.g),
-            gs: parseNum(statsView.gs),
-            ip: parseBaseballInnings(statsView.ip),
-          });
-        }
-      }
-    } catch { /* ignore */ }
     return { byKey, byName };
-  }, [dbPitchersForSearch]);
-  // Fetch pitching power ratings from Supabase
-  const { data: dbPitchingPowerForTB = [] } = useQuery({
-    queryKey: ["team-builder-db-pitching-power"],
-    queryFn: async () => {
-      const all: any[] = [];
-      let from = 0;
-      while (true) {
-        const { data, error } = await supabase
-          .from("pitching_power_ratings_storage")
-          .select("player_name, team, stuff_plus, whiff_pct, bb_pct, hh_pct, iz_whiff_pct, chase_pct, barrel_pct, ld_pct, avg_exit_velo, gb_pct, iz_pct, ev90, pull_pct, la_10_30_pct, stuff_score, whiff_score, bb_score, hh_score, iz_whiff_score, chase_score, barrel_score, ld_score, avg_ev_score, gb_score, iz_score, ev90_score, pull_score, la_10_30_score, era_pr_plus, fip_pr_plus, whip_pr_plus, k9_pr_plus, hr9_pr_plus, bb9_pr_plus")
-          .eq("season", 2025)
-          .range(from, from + 999);
-        if (error) throw error;
-        all.push(...(data || []));
-        if (!data || data.length < 1000) break;
-        from += 1000;
-      }
-      return all;
-    },
-    staleTime: 10 * 60 * 1000,
-  });
+  }, [pitchingMasterRows]);
 
   const pitchingPrByNameTeam = useMemo(() => {
     type PRec = { eraPrPlus: number | null; fipPrPlus: number | null; whipPrPlus: number | null; k9PrPlus: number | null; bb9PrPlus: number | null; hr9PrPlus: number | null };
@@ -2304,25 +2218,26 @@ export default function TeamBuilder() {
     const s = (v: number | null | undefined) => v == null ? null : Number(v);
     const nws = (items: Array<{ v: number; w: number }>) => { const wt = items.reduce((a, i) => a + (i.v * i.w), 0); const tw = items.reduce((a, i) => a + i.w, 0); return tw > 0 ? wt / tw : null; };
 
-    // Primary: Supabase — compute PR+ from raw metrics
-    for (const pr of dbPitchingPowerForTB) {
-      const name = (pr.player_name || "").trim();
+    // Compute PR+ from raw metrics in Pitching Master
+    for (const pr of pitchingMasterRows) {
+      const name = (pr.playerName || "").trim();
       const team = (pr.team || "").trim();
       if (!name) continue;
-      const stuff = cs(pr.stuff_plus, EQ.p_ncaa_avg_stuff_plus, EQ.p_sd_stuff_plus) ?? pr.stuff_score;
-      const whiff = pr.whiff_score ?? cs(pr.whiff_pct, EQ.p_ncaa_avg_whiff_pct, EQ.p_sd_whiff_pct);
-      const bb = pr.bb_score ?? cs(pr.bb_pct, EQ.p_ncaa_avg_bb_pct, EQ.p_sd_bb_pct, true);
-      const hh = pr.hh_score ?? cs(pr.hh_pct, EQ.p_ncaa_avg_hh_pct, EQ.p_sd_hh_pct, true);
-      const izWhiff = pr.iz_whiff_score ?? cs(pr.iz_whiff_pct, EQ.p_ncaa_avg_in_zone_whiff_pct, EQ.p_sd_in_zone_whiff_pct);
-      const chase = pr.chase_score ?? cs(pr.chase_pct, EQ.p_ncaa_avg_chase_pct, EQ.p_sd_chase_pct);
-      const barrel = pr.barrel_score ?? cs(pr.barrel_pct, EQ.p_ncaa_avg_barrel_pct, EQ.p_sd_barrel_pct, true);
-      const ld = pr.ld_score ?? cs(pr.ld_pct, EQ.p_ncaa_avg_ld_pct, EQ.p_sd_ld_pct, true);
-      const avgEv = pr.avg_ev_score ?? cs(pr.avg_exit_velo, EQ.p_ncaa_avg_avg_ev, EQ.p_sd_avg_ev, true);
-      const gb = pr.gb_score ?? cs(pr.gb_pct, EQ.p_ncaa_avg_gb_pct, EQ.p_sd_gb_pct);
-      const iz = pr.iz_score ?? cs(pr.iz_pct, EQ.p_ncaa_avg_in_zone_pct, EQ.p_sd_in_zone_pct);
-      const ev90 = pr.ev90_score ?? cs(pr.ev90, EQ.p_ncaa_avg_ev90, EQ.p_sd_ev90, true);
-      const pull = pr.pull_score ?? cs(pr.pull_pct, EQ.p_ncaa_avg_pull_pct, EQ.p_sd_pull_pct, true);
-      const la1030 = pr.la_10_30_score ?? cs(pr.la_10_30_pct, EQ.p_ncaa_avg_la_10_30_pct, EQ.p_sd_la_10_30_pct, true);
+      // stuff_plus is NOT in Pitching Master — use null
+      const stuff = cs(null, EQ.p_ncaa_avg_stuff_plus, EQ.p_sd_stuff_plus);
+      const whiff = cs(pr.miss_pct, EQ.p_ncaa_avg_whiff_pct, EQ.p_sd_whiff_pct);
+      const bb = cs(pr.bb_pct, EQ.p_ncaa_avg_bb_pct, EQ.p_sd_bb_pct, true);
+      const hh = cs(pr.hard_hit_pct, EQ.p_ncaa_avg_hh_pct, EQ.p_sd_hh_pct, true);
+      const izWhiff = cs(pr.in_zone_whiff_pct, EQ.p_ncaa_avg_in_zone_whiff_pct, EQ.p_sd_in_zone_whiff_pct);
+      const chase = cs(pr.chase_pct, EQ.p_ncaa_avg_chase_pct, EQ.p_sd_chase_pct);
+      const barrel = cs(pr.barrel_pct, EQ.p_ncaa_avg_barrel_pct, EQ.p_sd_barrel_pct, true);
+      const ld = cs(pr.line_pct, EQ.p_ncaa_avg_ld_pct, EQ.p_sd_ld_pct, true);
+      const avgEv = cs(pr.exit_vel, EQ.p_ncaa_avg_avg_ev, EQ.p_sd_avg_ev, true);
+      const gb = cs(pr.ground_pct, EQ.p_ncaa_avg_gb_pct, EQ.p_sd_gb_pct);
+      const iz = cs(pr.in_zone_pct, EQ.p_ncaa_avg_in_zone_pct, EQ.p_sd_in_zone_pct);
+      const ev90 = cs(pr.vel_90th, EQ.p_ncaa_avg_ev90, EQ.p_sd_ev90, true);
+      const pull = cs(pr.h_pull_pct, EQ.p_ncaa_avg_pull_pct, EQ.p_sd_pull_pct, true);
+      const la1030 = cs(pr.la_10_30_pct, EQ.p_ncaa_avg_la_10_30_pct, EQ.p_sd_la_10_30_pct, true);
       const eraPr = [stuff, whiff, bb, hh, izWhiff, chase, barrel].every((v) => v != null)
         ? ((s(stuff)! * EQ.p_era_stuff_plus_weight) + (s(whiff)! * EQ.p_era_whiff_pct_weight) + (s(bb)! * EQ.p_era_bb_pct_weight) + (s(hh)! * EQ.p_era_hh_pct_weight) + (s(izWhiff)! * EQ.p_era_in_zone_whiff_pct_weight) + (s(chase)! * EQ.p_era_chase_pct_weight) + (s(barrel)! * EQ.p_era_barrel_pct_weight)) / EQ.p_era_ncaa_avg_power_rating * 100
         : null;
@@ -2342,40 +2257,16 @@ export default function TeamBuilder() {
         ? (hr9Pr * EQ.p_fip_hr9_power_rating_plus_weight) + (bb9Pr * EQ.p_fip_bb9_power_rating_plus_weight) + (k9Pr * EQ.p_fip_k9_power_rating_plus_weight)
         : null;
       addRec(name, team, {
-        eraPrPlus: eraPr ?? pr.era_pr_plus,
-        fipPrPlus: fipPr ?? pr.fip_pr_plus,
-        whipPrPlus: whipPr ?? pr.whip_pr_plus,
-        k9PrPlus: k9Pr ?? pr.k9_pr_plus,
-        hr9PrPlus: hr9Pr ?? pr.hr9_pr_plus,
-        bb9PrPlus: bb9Pr ?? pr.bb9_pr_plus,
+        eraPrPlus: eraPr,
+        fipPrPlus: fipPr,
+        whipPrPlus: whipPr,
+        k9PrPlus: k9Pr,
+        hr9PrPlus: hr9Pr,
+        bb9PrPlus: bb9Pr,
       });
     }
-    // Fallback: localStorage
-    try {
-      const raw = localStorage.getItem("pitching_power_ratings_storage_2025_v1");
-      if (raw) {
-        const parsed = JSON.parse(raw) as { rows?: Array<{ values?: string[] }> };
-        const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
-        for (const row of rows) {
-          const values = Array.isArray(row.values) ? row.values : [];
-          const name = (values[0] || "").trim();
-          const team = (values[1] || "").trim();
-          if (!name) continue;
-          const key = `${normalizeName(name)}|${normalizeName(team)}`;
-          if (byKey.has(key)) continue;
-          addRec(name, team, {
-            eraPrPlus: parseNum(values[30]),
-            fipPrPlus: parseNum(values[31]),
-            whipPrPlus: parseNum(values[32]),
-            k9PrPlus: parseNum(values[33]),
-            hr9PrPlus: parseNum(values[34]),
-            bb9PrPlus: parseNum(values[35]),
-          });
-        }
-      }
-    } catch { /* ignore */ }
     return { byKey, byName };
-  }, [dbPitchingPowerForTB]);
+  }, [pitchingMasterRows]);
 
   const confByKey = useMemo(() => {
     const map = new Map<string, ConferenceRow>();
@@ -2602,12 +2493,12 @@ export default function TeamBuilder() {
     const toIsoPlus = toConfStats?.iso_plus ?? null;
     const fromStuff = fromConfStats?.stuff_plus ?? null;
     const toStuff = toConfStats?.stuff_plus ?? null;
-    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "avg", teamParkComponents);
-    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "avg", teamParkComponents);
-    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "obp", teamParkComponents);
-    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "obp", teamParkComponents);
-    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "iso", teamParkComponents);
-    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "iso", teamParkComponents);
+    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name);
+    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name);
+    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name);
+    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name);
+    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name);
+    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name);
     if (
       fromAvgPlus == null || toAvgPlus == null ||
       fromObpPlus == null || toObpPlus == null ||
@@ -2822,12 +2713,12 @@ export default function TeamBuilder() {
       fromConfStats.stuff_plus == null || toConfStats.stuff_plus == null
     ) return null;
 
-    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "avg", teamParkComponents);
-    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "avg", teamParkComponents);
-    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "obp", teamParkComponents);
-    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "obp", teamParkComponents);
-    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "iso", teamParkComponents);
-    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "iso", teamParkComponents);
+    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name);
+    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name);
+    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name);
+    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name);
+    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name);
+    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name);
     if (
       fromParkAvgRaw == null || toParkAvgRaw == null ||
       fromParkObpRaw == null || toParkObpRaw == null ||
@@ -3073,12 +2964,12 @@ export default function TeamBuilder() {
           fromConfStats.iso_plus != null && toConfStats.iso_plus != null &&
           fromConfStats.stuff_plus != null && toConfStats.stuff_plus != null
         ) {
-          const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "avg", teamParkComponents);
-          const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "avg", teamParkComponents);
-          const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "obp", teamParkComponents);
-          const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "obp", teamParkComponents);
-          const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "iso", teamParkComponents);
-          const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "iso", teamParkComponents);
+          const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name);
+          const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name);
+          const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name);
+          const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name);
+          const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name);
+          const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name);
           if (
             fromParkAvgRaw != null && toParkAvgRaw != null &&
             fromParkObpRaw != null && toParkObpRaw != null &&
@@ -3254,46 +3145,13 @@ export default function TeamBuilder() {
         return bucket.length === 1 ? bucket[0] : null;
       })();
       if (pStats && pPower) {
-        // Pitching conference stats (hardcoded, same as TransferPortal)
-        const PITCHING_CONF_DATA: Array<{ conference: string; era_plus: number; fip_plus: number; whip_plus: number; k9_plus: number; bb9_plus: number; hr9_plus: number; hitter_talent_plus: number }> = [
-          { conference: "Atlantic 10", era_plus: 94, fip_plus: 91, whip_plus: 98, k9_plus: 94, bb9_plus: 100, hr9_plus: 92, hitter_talent_plus: 98.4 },
-          { conference: "American Athletic Conference", era_plus: 107, fip_plus: 104, whip_plus: 112, k9_plus: 98, bb9_plus: 111, hr9_plus: 95, hitter_talent_plus: 103.1 },
-          { conference: "Atlantic Coast Conference", era_plus: 103, fip_plus: 97, whip_plus: 104, k9_plus: 104, bb9_plus: 104, hr9_plus: 89, hitter_talent_plus: 115.3 },
-          { conference: "American East", era_plus: 102, fip_plus: 103, whip_plus: 102, k9_plus: 97, bb9_plus: 109, hr9_plus: 100, hitter_talent_plus: 79.4 },
-          { conference: "America East", era_plus: 102, fip_plus: 103, whip_plus: 102, k9_plus: 97, bb9_plus: 109, hr9_plus: 100, hitter_talent_plus: 79.4 },
-          { conference: "Big East Conference", era_plus: 99, fip_plus: 95, whip_plus: 95, k9_plus: 96, bb9_plus: 94, hr9_plus: 97, hitter_talent_plus: 100.6 },
-          { conference: "Big Ten", era_plus: 101, fip_plus: 95, whip_plus: 104, k9_plus: 96, bb9_plus: 103, hr9_plus: 92, hitter_talent_plus: 111.3 },
-          { conference: "Big 12", era_plus: 104, fip_plus: 106, whip_plus: 106, k9_plus: 103, bb9_plus: 108, hr9_plus: 98, hitter_talent_plus: 116.1 },
-          { conference: "Big West", era_plus: 108, fip_plus: 114, whip_plus: 109, k9_plus: 99, bb9_plus: 114, hr9_plus: 112, hitter_talent_plus: 101.8 },
-          { conference: "Coastal Athletic Association", era_plus: 101, fip_plus: 101, whip_plus: 106, k9_plus: 94, bb9_plus: 109, hr9_plus: 96, hitter_talent_plus: 92.1 },
-          { conference: "Conference USA", era_plus: 104, fip_plus: 100, whip_plus: 103, k9_plus: 102, bb9_plus: 99, hr9_plus: 97, hitter_talent_plus: 103.6 },
-          { conference: "Ivy League", era_plus: 109, fip_plus: 108, whip_plus: 108, k9_plus: 99, bb9_plus: 106, hr9_plus: 109, hitter_talent_plus: 88.8 },
-          { conference: "Mid American Conference", era_plus: 102, fip_plus: 104, whip_plus: 99, k9_plus: 95, bb9_plus: 103, hr9_plus: 106, hitter_talent_plus: 94.2 },
-          { conference: "Missouri Valley Conference", era_plus: 104, fip_plus: 99, whip_plus: 102, k9_plus: 94, bb9_plus: 101, hr9_plus: 100, hitter_talent_plus: 102.1 },
-          { conference: "Mountain West", era_plus: 104, fip_plus: 101, whip_plus: 103, k9_plus: 97, bb9_plus: 105, hr9_plus: 95, hitter_talent_plus: 103.1 },
-          { conference: "Patriot League", era_plus: 88, fip_plus: 90, whip_plus: 91, k9_plus: 93, bb9_plus: 93, hr9_plus: 95, hitter_talent_plus: 85.1 },
-          { conference: "SEC", era_plus: 100, fip_plus: 98, whip_plus: 99, k9_plus: 102, bb9_plus: 100, hr9_plus: 96, hitter_talent_plus: 120.5 },
-          { conference: "Southern Conference", era_plus: 98, fip_plus: 98, whip_plus: 99, k9_plus: 94, bb9_plus: 104, hr9_plus: 97, hitter_talent_plus: 100.1 },
-          { conference: "Sun Belt Conference", era_plus: 104, fip_plus: 104, whip_plus: 107, k9_plus: 98, bb9_plus: 108, hr9_plus: 101, hitter_talent_plus: 103.8 },
-          { conference: "West Coast Conference", era_plus: 109, fip_plus: 111, whip_plus: 111, k9_plus: 97, bb9_plus: 112, hr9_plus: 105, hitter_talent_plus: 96.1 },
-          { conference: "ACC", era_plus: 103, fip_plus: 97, whip_plus: 104, k9_plus: 104, bb9_plus: 104, hr9_plus: 89, hitter_talent_plus: 115.3 },
-          { conference: "Southeastern Conference", era_plus: 100, fip_plus: 98, whip_plus: 99, k9_plus: 102, bb9_plus: 100, hr9_plus: 96, hitter_talent_plus: 120.5 },
-          { conference: "Northeast Conference", era_plus: 83, fip_plus: 84, whip_plus: 85, k9_plus: 87, bb9_plus: 87, hr9_plus: 94, hitter_talent_plus: 73.1 },
-          { conference: "Ohio Valley Conference", era_plus: 93, fip_plus: 89, whip_plus: 92, k9_plus: 88, bb9_plus: 98, hr9_plus: 93, hitter_talent_plus: 86.1 },
-          { conference: "Southland Conference", era_plus: 100, fip_plus: 105, whip_plus: 102, k9_plus: 99, bb9_plus: 107, hr9_plus: 106, hitter_talent_plus: 95.3 },
-          { conference: "Summit League", era_plus: 93, fip_plus: 91, whip_plus: 93, k9_plus: 96, bb9_plus: 89, hr9_plus: 95, hitter_talent_plus: 89.1 },
-          { conference: "WAC", era_plus: 109, fip_plus: 113, whip_plus: 108, k9_plus: 102, bb9_plus: 107, hr9_plus: 114, hitter_talent_plus: 95.8 },
-          { conference: "Atlantic Sun Conference", era_plus: 111, fip_plus: 106, whip_plus: 106, k9_plus: 96, bb9_plus: 106, hr9_plus: 105, hitter_talent_plus: 91.6 },
-          { conference: "Horizon League", era_plus: 85, fip_plus: 89, whip_plus: 88, k9_plus: 101, bb9_plus: 87, hr9_plus: 93, hitter_talent_plus: 96.1 },
-          { conference: "Big South Conference", era_plus: 79, fip_plus: 83, whip_plus: 86, k9_plus: 92, bb9_plus: 96, hr9_plus: 86, hitter_talent_plus: 93.3 },
-        ];
+        // Pitching conference stats — derived from Supabase "Conference Stats" table via pitchingConfLookup
         const normConf = (c: string | null) => (c || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-        const pcLookup = new Map(PITCHING_CONF_DATA.map(c => [normConf(c.conference), c]));
         const fromConf = row.conference || null;
         const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
         const toConf = toTeamRow?.conference || null;
-        const fromPC = pcLookup.get(normConf(fromConf));
-        const toPC = pcLookup.get(normConf(toConf));
+        const fromPC = pitchingConfLookup.get(normConf(fromConf));
+        const toPC = pitchingConfLookup.get(normConf(toConf));
 
         if (fromPC && toPC) {
           const eq = pitchingEq;
@@ -3317,12 +3175,12 @@ export default function TeamBuilder() {
           };
 
           const fromTeamRowPark = row.team ? (teamByKey.get(normalizeKey(row.team)) || null) : null;
-          const fromRg = normalizeParkToIndex(resolveMetricParkFactor(fromTeamRowPark?.name, null, "era", teamParkComponents));
-          const toRg = normalizeParkToIndex(resolveMetricParkFactor(toTeamRow?.name, null, "era", teamParkComponents));
-          const fromWhipPf = normalizeParkToIndex(resolveMetricParkFactor(fromTeamRowPark?.name, null, "whip", teamParkComponents));
-          const toWhipPf = normalizeParkToIndex(resolveMetricParkFactor(toTeamRow?.name, null, "whip", teamParkComponents));
-          const fromHr9Pf = normalizeParkToIndex(resolveMetricParkFactor(fromTeamRowPark?.name, null, "hr9", teamParkComponents));
-          const toHr9Pf = normalizeParkToIndex(resolveMetricParkFactor(toTeamRow?.name, null, "hr9", teamParkComponents));
+          const fromRg = normalizeParkToIndex(resolveMetricParkFactor(fromTeamRowPark?.id, "era", teamParkComponents, fromTeamRowPark?.name));
+          const toRg = normalizeParkToIndex(resolveMetricParkFactor(toTeamRow?.id, "era", teamParkComponents, toTeamRow?.name));
+          const fromWhipPf = normalizeParkToIndex(resolveMetricParkFactor(fromTeamRowPark?.id, "whip", teamParkComponents, fromTeamRowPark?.name));
+          const toWhipPf = normalizeParkToIndex(resolveMetricParkFactor(toTeamRow?.id, "whip", teamParkComponents, toTeamRow?.name));
+          const fromHr9Pf = normalizeParkToIndex(resolveMetricParkFactor(fromTeamRowPark?.id, "hr9", teamParkComponents, fromTeamRowPark?.name));
+          const toHr9Pf = normalizeParkToIndex(resolveMetricParkFactor(toTeamRow?.id, "hr9", teamParkComponents, toTeamRow?.name));
 
           const pEra = pStats.era != null ? calcLower(pStats.era, pPower.eraPrPlus!, eq.era_plus_ncaa_avg, eq.era_pr_sd, eq.era_plus_ncaa_sd, eq.transfer_era_power_weight ?? 0.7, eq.transfer_era_conference_weight ?? 0.3, fromPC.era_plus, toPC.era_plus, eq.transfer_era_competition_weight ?? 0.75, fromPC.hitter_talent_plus, toPC.hitter_talent_plus, eq.transfer_era_park_weight ?? 0.075, fromRg, toRg) : null;
           const pFip = pStats.fip != null ? calcLower(pStats.fip, pPower.fipPrPlus!, eq.fip_plus_ncaa_avg, eq.fip_pr_sd, eq.fip_plus_ncaa_sd, eq.transfer_fip_power_weight ?? 0.7, eq.transfer_fip_conference_weight ?? 0.3, fromPC.fip_plus, toPC.fip_plus, eq.transfer_fip_competition_weight ?? 0.75, fromPC.hitter_talent_plus, toPC.hitter_talent_plus, eq.transfer_fip_park_weight ?? 0.075, fromRg, toRg) : null;
@@ -3450,12 +3308,12 @@ export default function TeamBuilder() {
         fromConfStats.iso_plus != null && toConfStats.iso_plus != null &&
         fromConfStats.stuff_plus != null && toConfStats.stuff_plus != null
       ) {
-        const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "avg", teamParkComponents);
-        const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "avg", teamParkComponents);
-        const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "obp", teamParkComponents);
-        const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "obp", teamParkComponents);
-        const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "iso", teamParkComponents);
-        const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "iso", teamParkComponents);
+        const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name);
+        const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name);
+        const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name);
+        const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name);
+        const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name);
+        const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name);
         if (
           fromParkAvgRaw != null && toParkAvgRaw != null &&
           fromParkObpRaw != null && toParkObpRaw != null &&
@@ -3878,14 +3736,16 @@ export default function TeamBuilder() {
     const pBb9 = projectPitchingRate({ lastStat: stats.bb9, prPlus: pr.bb9PrPlus, ncaaAvg: pitchingEq.bb9_plus_ncaa_avg, ncaaSd: pitchingEq.bb9_plus_ncaa_sd, prSd: pitchingEq.bb9_pr_sd, classAdjustment: classBb9Adj, devAggressiveness: devAgg, thresholds: pitchingEq.bb9_damp_thresholds, impacts: pitchingEq.bb9_damp_impacts, lowerIsBetter: true });
     const pHr9 = projectPitchingRate({ lastStat: stats.hr9, prPlus: pr.hr9PrPlus, ncaaAvg: pitchingEq.hr9_plus_ncaa_avg, ncaaSd: pitchingEq.hr9_plus_ncaa_sd, prSd: pitchingEq.hr9_pr_sd, classAdjustment: classHr9Adj, devAggressiveness: devAgg, thresholds: pitchingEq.hr9_damp_thresholds, impacts: pitchingEq.hr9_damp_impacts, lowerIsBetter: true });
 
-    const teamNameForPark = teamByKey.get(normalizeKey(teamName))?.name || teamName || null;
-    const fallbackPark = teamByKey.get(normalizeKey(teamName))?.park_factor ?? null;
-    const avgPark = normalizeParkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "avg", teamParkComponents));
-    const obpPark = normalizeParkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "obp", teamParkComponents));
-    const isoPark = normalizeParkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "iso", teamParkComponents));
-    const eraParkRaw = resolveMetricParkFactor(teamNameForPark, null, "era", teamParkComponents);
-    const whipParkRaw = resolveMetricParkFactor(teamNameForPark, null, "whip", teamParkComponents);
-    const hr9ParkRaw = resolveMetricParkFactor(teamNameForPark, null, "hr9", teamParkComponents);
+    const teamRowForPark = teamByKey.get(normalizeKey(teamName)) || null;
+    const teamNameForPark = teamRowForPark?.name || teamName || null;
+    const fallbackPark = teamRowForPark?.park_factor ?? null;
+    const teamIdForPark = teamRowForPark?.id;
+    const avgPark = normalizeParkToIndex(resolveMetricParkFactor(teamIdForPark, "avg", teamParkComponents, teamNameForPark));
+    const obpPark = normalizeParkToIndex(resolveMetricParkFactor(teamIdForPark, "obp", teamParkComponents, teamNameForPark));
+    const isoPark = normalizeParkToIndex(resolveMetricParkFactor(teamIdForPark, "iso", teamParkComponents, teamNameForPark));
+    const eraParkRaw = resolveMetricParkFactor(teamIdForPark, "era", teamParkComponents, teamNameForPark);
+    const whipParkRaw = resolveMetricParkFactor(teamIdForPark, "whip", teamParkComponents, teamNameForPark);
+    const hr9ParkRaw = resolveMetricParkFactor(teamIdForPark, "hr9", teamParkComponents, teamNameForPark);
     const parkAdjustedEra = pEra == null ? null : pEra * (normalizeParkToIndex(eraParkRaw ?? avgPark) / 100);
     const parkAdjustedWhip = pWhip == null ? null : pWhip * (normalizeParkToIndex(whipParkRaw ?? ((0.7 * avgPark) + (0.3 * obpPark))) / 100);
     const parkAdjustedHr9 = pHr9 == null ? null : pHr9 * (normalizeParkToIndex(hr9ParkRaw ?? isoPark) / 100);

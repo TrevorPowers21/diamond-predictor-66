@@ -5,11 +5,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Upload, Search, Edit2, Check, X } from "lucide-react";
 import { toast } from "sonner";
-import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { parseCsvLine } from "@/lib/csvUtils";
 import { normalizeConferenceName, canonicalConferenceName } from "@/lib/conferenceMapping";
+import { useConferenceStats } from "@/hooks/useConferenceStats";
 
 type PitchingRow = {
   conference: string;
@@ -22,7 +22,6 @@ type PitchingRow = {
   hitter_talent_plus: number | null;
 };
 
-const STORAGE_KEY_ROWS = "pitching_conference_stats_rows_v1";
 const defaultNcaaAverages = {
   era: 6.14,
   fip: 5.07,
@@ -41,12 +40,6 @@ const num = (v: string | number | null | undefined) => {
 };
 
 const roundWhole = (v: number | null) => (v == null ? null : Math.round(v));
-
-const calcScore = (baseline: number, value: number | null, invert = false) => {
-  if (value == null || value === 0) return null;
-  if (invert) return roundWhole((value / baseline) * 100); // K/9 (higher is better)
-  return roundWhole((baseline / value) * 100); // ERA/FIP/WHIP/BB9/HR9 (lower is better)
-};
 
 const calcEraPlus = (era: number | null, ncaaAvgEra: number, ncaaEraSd: number, scale: number) => {
   if (era == null || ncaaEraSd === 0) return null;
@@ -78,7 +71,7 @@ const calcHr9Plus = (hr9: number | null, ncaaAvgHr9: number, ncaaHr9Sd: number, 
   return roundWhole(100 + (((ncaaAvgHr9 - hr9) / ncaaHr9Sd) * scale));
 };
 
-const fmt2 = (value: number | null) => (value == null ? "—" : Number(value).toFixed(2));
+const fmt2 = (value: number | null) => (value == null ? "\u2014" : Number(value).toFixed(2));
 
 const calcHitterTalentPlus = (
   overallHitterPrPlus: number | null,
@@ -90,119 +83,47 @@ const calcHitterTalentPlus = (
   return Number.isFinite(value) ? Number(value.toFixed(1)) : null;
 };
 
-const HITTER_TALENT_PLUS_BY_CONFERENCE: Record<string, number> = {
-  "Atlantic 10": 98.4,
-  "American Athletic Conference": 103.1,
-  ACC: 115.3,
-  "American East": 79.4,
-  "Atlantic Sun Conference": 91.6,
-  "Big East Conference": 100.6,
-  "Big South Conference": 93.3,
-  "Big Ten": 111.3,
-  "Big 12": 116.1,
-  "Big West": 101.8,
-  "Coastal Athletic Association": 92.1,
-  "Conference USA": 103.6,
-  "Horizon League": 96.1,
-  "Ivy League": 88.8,
-  "Metro Atlantic Athletic Conference": 80.3,
-  "Mid-American Conference": 94.8,
-  "Mountain West": 95.3,
-  "Missouri Valley Conference": 102.1,
-  "Northeast Conference": 69.9,
-  "Ohio Valley Conference": 84.8,
-  "Patriot League": 92.0,
-  "Southern Conference": 103.8,
-  SEC: 116.8,
-  "Southland Conference": 84.5,
-  "Southwestern Athletic Conference": 77.1,
-  "Summit League": 84.4,
-  "Sun Belt": 103.1,
-  "West Coast Conference": 88.3,
-  "Western Athletic Conference": 99.6,
-};
-
-const getHitterTalentPlusDefault = (conference: string | null | undefined) => {
-  const canonical = canonicalConferenceName(conference);
-  if (!canonical) return null;
-  return HITTER_TALENT_PLUS_BY_CONFERENCE[canonical] ?? null;
-};
-
-const OVERALL_HITTER_POWER_RATING_BY_CONFERENCE: Record<string, number> = {
-  "Atlantic 10": 105,
-  "American Athletic Conference": 95,
-  ACC: 110,
-  "American East": 82,
-  "Atlantic Sun Conference": 89,
-  "Big East Conference": 104,
-  "Big South Conference": 102,
-  "Big Ten": 110,
-  "Big 12": 112,
-  "Big West": 96,
-  "Coastal Athletic Association": 91,
-  "Conference USA": 102,
-  "Horizon League": 103,
-  "Ivy League": 88,
-  "Metro Atlantic Athletic Conference": 86,
-  "Mid-American Conference": 98,
-  "Mountain West": 100,
-  "Missouri Valley Conference": 107,
-  "Northeast Conference": 78,
-  "Ohio Valley Conference": 87,
-  "Patriot League": 94,
-  "Southern Conference": 106,
-  SEC: 108,
-  "Southland Conference": 83,
-  "Southwestern Athletic Conference": 93,
-  "Summit League": 82,
-  "Sun Belt": 97,
-  "West Coast Conference": 89,
-  "Western Athletic Conference": 103,
-};
-
-const getOverallHitterPowerRating = (conference: string | null | undefined) => {
-  const canonical = canonicalConferenceName(conference);
-  if (!canonical) return null;
-  return OVERALL_HITTER_POWER_RATING_BY_CONFERENCE[canonical] ?? null;
-};
-
 export default function PitchingConferenceStatsTable() {
   const [search, setSearch] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [editingConference, setEditingConference] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editData, setEditData] = useState<Partial<PitchingRow>>({});
-  const [rows, setRows] = useState<PitchingRow[]>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_ROWS);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw) as PitchingRow[];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
   const [weights] = useState(() => readPitchingWeights());
-  const { data: hittingConferenceStats = [] } = useQuery({
-    queryKey: ["conference_stats_stuff_plus_pitching_view"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("conference_stats")
-        .select("conference, season, avg, obp, slg, stuff_plus, wrc_plus, offensive_power_rating")
-        .eq("season", 2025);
-      if (error) throw error;
-      return data || [];
-    },
-  });
 
-  const persistRows = (next: PitchingRow[]) => {
-    setRows(next);
-    try {
-      localStorage.setItem(STORAGE_KEY_ROWS, JSON.stringify(next));
-    } catch {
-      // ignore localStorage errors
+  // --- Unified conference stats from Supabase ---
+  const { conferenceStats, conferenceStatsByKey, loading } = useConferenceStats(2025);
+
+  // Build a lookup map keyed by canonical conference name for easy access
+  const statsByCanonical = useMemo(() => {
+    const map = new Map<string, typeof conferenceStats[number]>();
+    for (const row of conferenceStats) {
+      const canonical = canonicalConferenceName(row.conference);
+      if (canonical) map.set(canonical, row);
     }
-  };
+    return map;
+  }, [conferenceStats]);
+
+  // Map conference stats to PitchingRow format
+  const rows: PitchingRow[] = useMemo(() => {
+    return conferenceStats.map((cs) => {
+      const canonical = canonicalConferenceName(cs.conference);
+      const overallPr = cs.overall_power_rating ?? null;
+      const stuff = cs.stuff_plus ?? null;
+      const wrc = cs.wrc_plus ?? null;
+      const hitterTalent = calcHitterTalentPlus(overallPr, stuff, wrc);
+      return {
+        conference: canonical || cs.conference,
+        era: cs.era,
+        fip: cs.fip,
+        whip: cs.whip,
+        k9: cs.k9,
+        bb9: cs.bb9,
+        hr9: cs.hr9,
+        hitter_talent_plus: hitterTalent,
+      };
+    });
+  }, [conferenceStats]);
 
   const importCsv = async (file: File) => {
     const text = await file.text();
@@ -225,47 +146,58 @@ export default function PitchingConferenceStatsTable() {
     const k9Idx = idx(["k/9", "k9"]);
     const bb9Idx = idx(["bb/9", "bb9"]);
     const hr9Idx = idx(["hr/9", "hr9"]);
-    const hitterTalentPlusIdx = idx(["hitter talent+", "hitter talent plus"]);
-    const hitterTalentPlusColQIdx = 16; // Column Q (0-based index) in the provided sheet format.
 
     if ([confIdx, eraIdx, fipIdx, whipIdx, k9Idx, bb9Idx, hr9Idx].some((i) => i < 0)) {
       throw new Error("CSV must include Team/Conference and ERA/FIP/WHIP/K/9/BB/9/HR/9 columns.");
     }
 
-    const importedByConference = new Map<string, PitchingRow>();
+    const upsertRows: Array<{
+      "conference abbreviation": string;
+      season: number;
+      ERA: number | null;
+      FIP: number | null;
+      WHIP: number | null;
+      K9: number | null;
+      BB9: number | null;
+      HR9: number | null;
+    }> = [];
+
+    const seen = new Set<string>();
     for (let r = 1; r < lines.length; r++) {
       const cols = parseCsvLine(lines[r]);
       const conference = canonicalConferenceName(cols[confIdx]);
-      if (!conference) continue;
+      if (!conference || seen.has(conference)) continue;
+      seen.add(conference);
 
-      const row: PitchingRow = {
-        conference,
-        era: num(cols[eraIdx]),
-        fip: num(cols[fipIdx]),
-        whip: num(cols[whipIdx]),
-        k9: num(cols[k9Idx]),
-        bb9: num(cols[bb9Idx]),
-        hr9: num(cols[hr9Idx]),
-        // Pull Hitter Talent+ from Column Q first, then fallback to header match.
-        hitter_talent_plus: (() => {
-          const qVal = cols.length > hitterTalentPlusColQIdx ? num(cols[hitterTalentPlusColQIdx]) : null;
-          if (qVal != null) return qVal;
-          const headerVal = hitterTalentPlusIdx >= 0 ? num(cols[hitterTalentPlusIdx]) : null;
-          if (headerVal != null) return headerVal;
-          return getHitterTalentPlusDefault(conference);
-        })(),
-      };
-
-      importedByConference.set(conference, row);
+      upsertRows.push({
+        "conference abbreviation": conference,
+        season: 2025,
+        ERA: num(cols[eraIdx]),
+        FIP: num(cols[fipIdx]),
+        WHIP: num(cols[whipIdx]),
+        K9: num(cols[k9Idx]),
+        BB9: num(cols[bb9Idx]),
+        HR9: num(cols[hr9Idx]),
+      });
     }
-    const imported = Array.from(importedByConference.values()).sort((a, b) => a.conference.localeCompare(b.conference));
 
-    persistRows(imported);
-    toast.success(`Imported ${imported.length} pitching conference rows`);
+    if (upsertRows.length === 0) throw new Error("No valid rows found in CSV");
+
+    const { error } = await supabase
+      .from("Conference Stats")
+      .upsert(upsertRows as any, { onConflict: "conference abbreviation,season" });
+
+    if (error) {
+      console.error("Supabase upsert error:", error);
+      throw new Error(`Failed to save to Supabase: ${error.message}`);
+    }
+
+    toast.success(`Imported ${upsertRows.length} pitching conference rows to Supabase`);
+    // Reload the page to re-fetch from Supabase (the hook will pick up new data)
+    window.location.reload();
   };
 
   const { ncaaRow, filtered } = useMemo(() => {
-    // De-dupe pitching rows while keeping latest edit/import for each canonical conference.
     const byConference = new Map<string, PitchingRow>();
     for (const r of rows) {
       const canonical = canonicalConferenceName(r.conference);
@@ -273,7 +205,6 @@ export default function PitchingConferenceStatsTable() {
       if (byConference.has(canonical)) byConference.delete(canonical);
       byConference.set(canonical, { ...r, conference: canonical });
     }
-    // Sort alphabetically by conference.
     const allRows = Array.from(byConference.values()).sort((a, b) =>
       a.conference.localeCompare(b.conference),
     );
@@ -283,41 +214,6 @@ export default function PitchingConferenceStatsTable() {
     const rest = searched.filter((r) => !r.conference.toLowerCase().includes("ncaa"));
     return { ncaaRow: ncaa, filtered: rest };
   }, [rows, search]);
-  const stuffByConference = useMemo(() => {
-    const map = new Map<string, number | null>();
-    for (const row of hittingConferenceStats) {
-      const key = canonicalConferenceName(row.conference);
-      if (!key) continue;
-      const existing = map.get(key);
-      // Prefer populated stuff+, otherwise keep existing.
-      if (existing == null || row.stuff_plus != null) map.set(key, row.stuff_plus ?? null);
-    }
-    return map;
-  }, [hittingConferenceStats]);
-  const hitterTalentByConference = useMemo(() => {
-    const map = new Map<string, number | null>();
-    for (const row of hittingConferenceStats) {
-      const key = canonicalConferenceName(row.conference);
-      if (!key) continue;
-      const existing = map.get(key);
-      if (existing == null || row.offensive_power_rating != null) {
-        map.set(key, row.offensive_power_rating ?? null);
-      }
-    }
-    return map;
-  }, [hittingConferenceStats]);
-  const wrcByConference = useMemo(() => {
-    const map = new Map<string, number | null>();
-    for (const row of hittingConferenceStats) {
-      const key = canonicalConferenceName(row.conference);
-      if (!key) continue;
-      const existing = map.get(key);
-      if (existing == null || row.wrc_plus != null) {
-        map.set(key, row.wrc_plus ?? null);
-      }
-    }
-    return map;
-  }, [hittingConferenceStats]);
 
   const startEdit = (row: PitchingRow) => {
     setEditingConference(row.conference);
@@ -325,29 +221,39 @@ export default function PitchingConferenceStatsTable() {
     setEditData({ ...row });
   };
 
-  const saveEdit = (row: PitchingRow) => {
+  const saveEdit = async (row: PitchingRow) => {
     const canonicalName = canonicalConferenceName(editName);
     if (!canonicalName) {
       toast.error("Conference name cannot be blank");
       return;
     }
-    const next = rows.map((r) => {
-      if (r.conference !== row.conference) return r;
-      return {
-        conference: canonicalName,
-        era: num(editData.era),
-        fip: num(editData.fip),
-        whip: num(editData.whip),
-        k9: num(editData.k9),
-        bb9: num(editData.bb9),
-        hr9: num(editData.hr9),
-        hitter_talent_plus: num(editData.hitter_talent_plus),
-      };
-    });
-    persistRows(next);
+
+    const { error } = await supabase
+      .from("Conference Stats")
+      .upsert(
+        {
+          "conference abbreviation": canonicalName,
+          season: 2025,
+          ERA: num(editData.era),
+          FIP: num(editData.fip),
+          WHIP: num(editData.whip),
+          K9: num(editData.k9),
+          BB9: num(editData.bb9),
+          HR9: num(editData.hr9),
+        } as any,
+        { onConflict: "conference abbreviation,season" },
+      );
+
+    if (error) {
+      toast.error(`Failed to save: ${error.message}`);
+      return;
+    }
+
+    toast.success(`Updated ${canonicalName}`);
     setEditingConference(null);
     setEditName("");
     setEditData({});
+    window.location.reload();
   };
 
   const baselines = useMemo(() => ({
@@ -358,6 +264,7 @@ export default function PitchingConferenceStatsTable() {
     bb9: ncaaRow?.bb9 ?? defaultNcaaAverages.bb9,
     hr9: ncaaRow?.hr9 ?? defaultNcaaAverages.hr9,
   }), [ncaaRow]);
+
   const ncaaDisplayRow: PitchingRow = useMemo(
     () =>
       ncaaRow ?? {
@@ -388,7 +295,7 @@ export default function PitchingConferenceStatsTable() {
         <div>
           <CardTitle className="text-base">Conference Stats (Pitching)</CardTitle>
           <CardDescription className="mt-1">
-            Columns B-G are statistical inputs. Columns H-M are score fields.
+            {loading ? "Loading from Supabase..." : "Columns B-G are statistical inputs. Columns H-M are score fields."}
           </CardDescription>
         </div>
         <div className="flex w-full sm:w-auto items-center gap-2">
@@ -455,6 +362,12 @@ export default function PitchingConferenceStatsTable() {
                 {filtered.map((r) => {
                   const s = score(r);
                   const isEditing = editingConference === r.conference;
+                  const canonical = canonicalConferenceName(r.conference);
+                  const csRow = statsByCanonical.get(canonical);
+                  const overallPr = csRow?.overall_power_rating ?? null;
+                  const stuff = csRow?.stuff_plus ?? null;
+                  const wrc = csRow?.wrc_plus ?? null;
+                  const hitterTalent = calcHitterTalentPlus(overallPr, stuff, wrc) ?? r.hitter_talent_plus;
                   return (
                     <TableRow key={r.conference}>
                       <TableCell className="sticky left-0 z-10 bg-background font-medium">
@@ -474,50 +387,23 @@ export default function PitchingConferenceStatsTable() {
                       <TableCell className="text-right font-mono">{isEditing ? <Input type="number" step="0.01" value={editData.k9 ?? ""} onChange={(e) => setEditData((p) => ({ ...p, k9: num(e.target.value) }))} className="h-7 w-[80px] text-right text-xs font-mono" /> : fmt2(r.k9)}</TableCell>
                       <TableCell className="text-right font-mono">{isEditing ? <Input type="number" step="0.01" value={editData.bb9 ?? ""} onChange={(e) => setEditData((p) => ({ ...p, bb9: num(e.target.value) }))} className="h-7 w-[80px] text-right text-xs font-mono" /> : fmt2(r.bb9)}</TableCell>
                       <TableCell className="text-right font-mono">{isEditing ? <Input type="number" step="0.01" value={editData.hr9 ?? ""} onChange={(e) => setEditData((p) => ({ ...p, hr9: num(e.target.value) }))} className="h-7 w-[80px] text-right text-xs font-mono" /> : fmt2(r.hr9)}</TableCell>
-                      <TableCell className="text-right font-mono">{s.eraPlus ?? "—"}</TableCell>
-                      <TableCell className="text-right font-mono">{s.fipPlus ?? "—"}</TableCell>
-                      <TableCell className="text-right font-mono">{s.whipPlus ?? "—"}</TableCell>
-                      <TableCell className="text-right font-mono">{s.k9Plus ?? "—"}</TableCell>
-                      <TableCell className="text-right font-mono">{s.bb9Plus ?? "—"}</TableCell>
-                      <TableCell className="text-right font-mono">{s.hr9Plus ?? "—"}</TableCell>
+                      <TableCell className="text-right font-mono">{s.eraPlus ?? "\u2014"}</TableCell>
+                      <TableCell className="text-right font-mono">{s.fipPlus ?? "\u2014"}</TableCell>
+                      <TableCell className="text-right font-mono">{s.whipPlus ?? "\u2014"}</TableCell>
+                      <TableCell className="text-right font-mono">{s.k9Plus ?? "\u2014"}</TableCell>
+                      <TableCell className="text-right font-mono">{s.bb9Plus ?? "\u2014"}</TableCell>
+                      <TableCell className="text-right font-mono">{s.hr9Plus ?? "\u2014"}</TableCell>
                       <TableCell className="text-right font-mono">
-                        {(() => {
-                          const canonical = canonicalConferenceName(r.conference);
-                          const overall = getOverallHitterPowerRating(canonical);
-                          return overall == null ? "—" : Math.round(Number(overall)).toString();
-                        })()}
+                        {overallPr == null ? "\u2014" : Math.round(Number(overallPr)).toString()}
                       </TableCell>
                       <TableCell className="text-right font-mono">
-                        {(() => {
-                          const stuff = stuffByConference.get(canonicalConferenceName(r.conference));
-                          return stuff == null ? "—" : Number(stuff).toFixed(1);
-                        })()}
+                        {stuff == null ? "\u2014" : Number(stuff).toFixed(1)}
                       </TableCell>
                       <TableCell className="text-right font-mono">
-                        {(() => {
-                          const wrc = wrcByConference.get(canonicalConferenceName(r.conference));
-                          return wrc == null ? "—" : Number(wrc).toFixed(1);
-                        })()}
+                        {wrc == null ? "\u2014" : Number(wrc).toFixed(1)}
                       </TableCell>
                       <TableCell className="text-right font-mono">
-                        {(() => {
-                          const canonical = canonicalConferenceName(r.conference);
-                          const overallHitterPr = getOverallHitterPowerRating(canonical);
-                          const stuff = stuffByConference.get(canonical);
-                          const wrc = wrcByConference.get(canonical);
-                          const hitterTalentFromEquation = calcHitterTalentPlus(
-                            overallHitterPr,
-                            stuff == null ? null : Number(stuff),
-                            wrc == null ? null : Number(wrc),
-                          );
-                          const hitterTalent =
-                            hitterTalentFromEquation ??
-                            r.hitter_talent_plus ??
-                            getHitterTalentPlusDefault(canonical) ??
-                            hitterTalentByConference.get(canonical) ??
-                            null;
-                          return hitterTalent == null ? "—" : Number(hitterTalent).toFixed(1);
-                        })()}
+                        {hitterTalent == null ? "\u2014" : Number(hitterTalent).toFixed(1)}
                       </TableCell>
                       <TableCell>
                         {isEditing ? (
@@ -551,19 +437,15 @@ export default function PitchingConferenceStatsTable() {
                           <TableCell className="text-right font-mono">{fmt2(ncaaDisplayRow.k9)}</TableCell>
                           <TableCell className="text-right font-mono">{fmt2(ncaaDisplayRow.bb9)}</TableCell>
                           <TableCell className="text-right font-mono">{fmt2(ncaaDisplayRow.hr9)}</TableCell>
-                          <TableCell className="text-right font-mono">{s.eraPlus ?? "—"}</TableCell>
-                          <TableCell className="text-right font-mono">{s.fipPlus ?? "—"}</TableCell>
-                          <TableCell className="text-right font-mono">{s.whipPlus ?? "—"}</TableCell>
-                          <TableCell className="text-right font-mono">{s.k9Plus ?? "—"}</TableCell>
-                          <TableCell className="text-right font-mono">{s.bb9Plus ?? "—"}</TableCell>
-                          <TableCell className="text-right font-mono">{s.hr9Plus ?? "—"}</TableCell>
+                          <TableCell className="text-right font-mono">{s.eraPlus ?? "\u2014"}</TableCell>
+                          <TableCell className="text-right font-mono">{s.fipPlus ?? "\u2014"}</TableCell>
+                          <TableCell className="text-right font-mono">{s.whipPlus ?? "\u2014"}</TableCell>
+                          <TableCell className="text-right font-mono">{s.k9Plus ?? "\u2014"}</TableCell>
+                          <TableCell className="text-right font-mono">{s.bb9Plus ?? "\u2014"}</TableCell>
+                          <TableCell className="text-right font-mono">{s.hr9Plus ?? "\u2014"}</TableCell>
                           <TableCell className="text-right font-mono">100</TableCell>
-                          <TableCell className="text-right font-mono">
-                            100
-                          </TableCell>
-                          <TableCell className="text-right font-mono">
-                            100
-                          </TableCell>
+                          <TableCell className="text-right font-mono">100</TableCell>
+                          <TableCell className="text-right font-mono">100</TableCell>
                           <TableCell className="text-right font-mono">
                             {Number(ncaaDisplayRow.hitter_talent_plus ?? 100).toFixed(1)}
                           </TableCell>
@@ -577,7 +459,7 @@ export default function PitchingConferenceStatsTable() {
               ) : (
                 <TableRow>
                   <TableCell colSpan={18} className="py-8 text-center text-muted-foreground">
-                    No pitching conference rows yet. Import your CSV to begin.
+                    {loading ? "Loading conference stats..." : "No pitching conference rows yet. Import your CSV to begin."}
                   </TableCell>
                 </TableRow>
               )}

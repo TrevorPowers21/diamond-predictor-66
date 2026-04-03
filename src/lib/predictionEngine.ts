@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
 
 type PredictionRow = {
   id: string;
@@ -176,14 +177,23 @@ function normalizeClassTransition(raw?: string | null): string {
 }
 
 async function loadEngineConfig(): Promise<EngineConfig> {
+  // Load from "Equation Weights" table (primary), fall back to "model_config" (legacy)
+  let eqWeights: Map<string, number>;
+  try {
+    eqWeights = await loadEquationWeightsMap(2025);
+  } catch {
+    eqWeights = new Map();
+  }
+  const eq = (key: string) => eqWeights.get(key) ?? eqWeights.get(key.toLowerCase());
+
   const { data, error } = await supabase
     .from("model_config")
     .select("model_type, config_key, config_value");
 
-  if (error) throw error;
+  if (error && eqWeights.size === 0) throw error;
 
-  const returnerRows = (data || []).filter((row) => row.model_type === "returner");
-  const transferRows = (data || []).filter((row) => row.model_type === "transfer");
+  const returnerRows = ((data || []) as any[]).filter((row) => row.model_type === "returner");
+  const transferRows = ((data || []) as any[]).filter((row) => row.model_type === "transfer");
 
   const returner: ReturnerConfig = {
     ncaaAvg: 0.28,
@@ -258,7 +268,33 @@ async function loadEngineConfig(): Promise<EngineConfig> {
     }
   }
 
-  // Prefer equation values saved in Admin UI local storage (current source of truth for testing phase).
+  // Override with "Equation Weights" table values (Supabase, primary source)
+  if (eqWeights.size > 0) {
+    const eqn = (key: string) => eq(key);
+    const applyEq = (key: string, apply: (v: number) => void) => {
+      const v = eqn(key);
+      if (v != null && Number.isFinite(v)) apply(v);
+    };
+    applyEq("ncaa_avg_ba", (v) => { returner.ncaaAvg = toStatRate(v); });
+    applyEq("ba_std_power", (v) => { returner.baStdPower = v; });
+    applyEq("ba_std_ncaa", (v) => { returner.baStdNcaa = toStatRate(v); });
+    applyEq("obp_std_power", (v) => { returner.obpStdPower = v; });
+    applyEq("obp_std_ncaa", (v) => { returner.obpStdNcaa = toStatRate(v); });
+    applyEq("ncaa_avg_obp", (v) => { returner.ncaaObp = toStatRate(v); });
+    applyEq("ncaa_avg_iso", (v) => { returner.ncaaIso = toStatRate(v); });
+    applyEq("ncaa_avg_wrc", (v) => {
+      const normalized = toStatRate(v);
+      if (normalized > 0 && normalized < 0.8) returner.ncaaWrc = normalized;
+    });
+    applyEq("iso_std_ncaa", (v) => { returner.isoStdNcaa = toStatRate(v); });
+    applyEq("iso_std_power", (v) => { returner.isoStdPower = v; });
+    applyEq("w_obp", (v) => { returner.wrcWeights.obp = toWeight(v); });
+    applyEq("w_slg", (v) => { returner.wrcWeights.slg = toWeight(v); });
+    applyEq("w_avg", (v) => { returner.wrcWeights.avg = toWeight(v); });
+    applyEq("w_iso", (v) => { returner.wrcWeights.iso = toWeight(v); });
+  }
+
+  // Fall back to Admin UI local storage values (legacy, will be removed in Phase 7)
   const local = readLocalEquationValues();
   const n = (key: string) => Number(local[key]);
   const applyIfFinite = (value: number, apply: (v: number) => void) => {
@@ -633,13 +669,13 @@ export async function bulkRecalculatePredictionsLocal() {
   const config = await loadEngineConfig();
   const preds = await fetchAllPredictionsForReturnerMode();
 
-  // Pre-fetch power ratings by player_id for fallback when internals are missing
+  // Pre-fetch power ratings by source_player_id from Hitter Master for fallback when internals are missing
   const powerByPlayerId = new Map<string, { contact: number | null; lineDrive: number | null; avgExitVelo: number | null; popUp: number | null; bb: number | null; chase: number | null; barrel: number | null; ev90: number | null; pull: number | null; la10_30: number | null; gb: number | null }>();
   let pfrom = 0;
   while (true) {
-    const { data } = await supabase.from("hitting_power_ratings_storage").select("player_id, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb").eq("season", 2025).not("player_id", "is", null).range(pfrom, pfrom + 999);
+    const { data } = await supabase.from("Hitter Master").select("source_player_id, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb").eq("Season", 2025).not("source_player_id", "is", null).range(pfrom, pfrom + 999);
     for (const r of data || []) {
-      if (r.player_id) powerByPlayerId.set(r.player_id, { contact: r.contact, lineDrive: r.line_drive, avgExitVelo: r.avg_exit_velo, popUp: r.pop_up, bb: r.bb, chase: r.chase, barrel: r.barrel, ev90: r.ev90, pull: r.pull, la10_30: r.la_10_30, gb: r.gb });
+      if (r.source_player_id) powerByPlayerId.set(r.source_player_id, { contact: r.contact, lineDrive: r.line_drive, avgExitVelo: r.avg_exit_velo, popUp: r.pop_up, bb: r.bb, chase: r.chase, barrel: r.barrel, ev90: r.ev90, pull: r.pull, la10_30: r.la_10_30, gb: r.gb });
     }
     if (!data || data.length < 1000) break;
     pfrom += 1000;
@@ -696,7 +732,7 @@ export async function bulkRecalculatePredictionsLocal() {
           } else {
             const internal = internalByPredictionId.get(pred.id);
             const manual = MANUAL_INTERNAL_OVERRIDES[pred.id];
-            // Fallback: derive power from hitting_power_ratings_storage if internals are all null
+            // Fallback: derive power from Hitter Master if internals are all null
             let fallbackPower: ReturnerPowerContext | null = null;
             if (!readSpecificPlus(internal?.avg_power_rating) && !manual?.baPlus && pred.player_id) {
               const raw = powerByPlayerId.get(pred.player_id);

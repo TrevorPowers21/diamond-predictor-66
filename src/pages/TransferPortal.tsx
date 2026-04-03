@@ -20,8 +20,13 @@ import {
 import { computeTransferProjection } from "@/lib/transferProjection";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
-import { readTeamParkFactorComponents, resolveMetricParkFactor } from "@/lib/parkFactors";
+import { resolveMetricParkFactor } from "@/lib/parkFactors";
+import { useParkFactors } from "@/hooks/useParkFactors";
+import { computeHitterPowerRatings } from "@/lib/powerRatings";
+import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { useConferenceStats } from "@/hooks/useConferenceStats";
+import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 
 type SimPlayer = {
   prediction_id: string | null;
@@ -53,9 +58,12 @@ type ConferenceRow = {
 };
 
 type TeamRow = {
+  id?: string;
   name: string;
   conference: string | null;
+  conference_id?: string | null;
   park_factor: number | null;
+  source_team_id?: string | null;
 };
 
 type SeedRow = {
@@ -364,16 +372,21 @@ const normalizeParkToIndex = (n: number | null | undefined) => {
   return Math.abs(n) <= 3 ? n * 100 : n;
 };
 const resolveParkFactorFromCandidates = (
+  teamId: string | null | undefined,
   names: Array<string | null | undefined>,
-  fallbackParkFactor: number | null | undefined,
   metric: "avg" | "obp" | "iso" | "era" | "whip" | "hr9",
   map: Record<string, any>,
 ) => {
-  for (const name of names) {
-    const v = resolveMetricParkFactor(name, null, metric, map);
+  // Try UUID first
+  if (teamId) {
+    const v = resolveMetricParkFactor(teamId, metric, map);
     if (v != null && Number.isFinite(v)) return v;
   }
-  return resolveMetricParkFactor(names[0] || null, fallbackParkFactor ?? null, metric, map);
+  for (const name of names) {
+    const v = resolveMetricParkFactor(null, metric, map, name);
+    if (v != null && Number.isFinite(v)) return v;
+  }
+  return resolveMetricParkFactor(null, metric, map, names[0] || null);
 };
 
 const resolveTeamRowFromCandidates = (
@@ -413,7 +426,7 @@ const resolveTeamRowFromCandidates = (
 };
 const statKey = (v: number | null | undefined) => (v == null ? "na" : round3(v).toFixed(3));
 const TARGET_BOARD_STORAGE_KEY = "team_builder_target_board_v1";
-const PITCHING_CONFERENCE_STATS_STORAGE_KEY = "pitching_conference_stats_rows_v1";
+
 
 const calcPitchingPlus = (
   statValue: number | null,
@@ -445,46 +458,6 @@ const calcHitterTalentPlusFromConference = (
   const value = overallHitterPowerRatingPlus + (1.25 * (stuffPlus - 100)) + (0.75 * (100 - wrcPlus));
   return Number.isFinite(value) ? Number(value.toFixed(1)) : null;
 };
-
-// TODO: Hardcoded conference power ratings — migrate to Supabase or derive from conference_stats.
-const OVERALL_HITTER_POWER_RATING_BY_CONFERENCE_CANONICAL: Record<string, number> = {
-  "atlantic 10": 105,
-  "american athletic conference": 95,
-  acc: 110,
-  "american east": 82,
-  "atlantic sun conference": 89,
-  "big east conference": 104,
-  "big south conference": 102,
-  "big ten": 110,
-  "big 12": 112,
-  "big west": 96,
-  "coastal athletic association": 91,
-  "conference usa": 102,
-  "horizon league": 103,
-  "ivy league": 88,
-  "metro atlantic athletic conference": 86,
-  "mid american conference": 98,
-  "mountain west": 100,
-  "missouri valley conference": 107,
-  "northeast conference": 78,
-  "ohio valley conference": 87,
-  "patriot league": 94,
-  "southern conference": 106,
-  sec: 108,
-  "southland conference": 83,
-  "southwestern athletic conference": 93,
-  "summit league": 82,
-  "sun belt": 97,
-  "west coast conference": 89,
-  "western athletic conference": 103,
-};
-
-const getOverallHitterPowerForPitching = (conference: string | null | undefined) => {
-  const key = canonicalConferencePitching(conference);
-  if (!key) return null;
-  return OVERALL_HITTER_POWER_RATING_BY_CONFERENCE_CANONICAL[key] ?? null;
-};
-
 
 type TargetBoardEntry = {
   playerId: string;
@@ -529,7 +502,7 @@ export default function TransferPortal() {
   const location = useLocation();
   const { toast } = useToast();
   const { hasRole } = useAuth();
-  const { hitterStats } = useHitterSeedData();
+  const { hitterStats, powerRatings } = useHitterSeedData();
   const isAdmin = hasRole("admin");
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>("");
   const [playerSearch, setPlayerSearch] = useState<string>("");
@@ -540,6 +513,7 @@ export default function TransferPortal() {
   const [pitcherSearch, setPitcherSearch] = useState<string>("");
   const [pitchingRoleOverride, setPitchingRoleOverride] = useState<"SP" | "RP">("RP");
   const pitchingEqForTiers = useMemo(() => readPitchingWeights(), []);
+  const { conferenceStats: newConfStats } = useConferenceStats(2025);
 
   const { data: players = [], isLoading: playersLoading } = useQuery({
     queryKey: ["transfer-sim-players"],
@@ -650,14 +624,45 @@ export default function TransferPortal() {
     },
   });
 
-  const { data: teams = [] } = useQuery({
-    queryKey: ["transfer-sim-teams"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("teams").select("name, conference, park_factor").order("name");
-      if (error) throw error;
-      return (data || []) as TeamRow[];
-    },
-  });
+  // Merge Hitter Master players not already in the players table
+  const mergedPlayers = useMemo(() => {
+    const existingNames = new Set(
+      players.map((p) => normalizeKey(`${p.first_name} ${p.last_name}|${p.team || ""}`))
+    );
+    const extras: SimPlayer[] = [];
+    for (const seed of hitterStats) {
+      const parts = seed.playerName.trim().split(/\s+/);
+      if (parts.length < 2) continue;
+      const firstName = parts[0];
+      const lastName = parts.slice(1).join(" ");
+      const checkKey = normalizeKey(`${firstName} ${lastName}|${seed.team || ""}`);
+      if (existingNames.has(checkKey)) continue;
+      extras.push({
+        prediction_id: null,
+        player_id: seed.player_id || `hm-${seed.playerName}-${seed.team}`,
+        model_type: null,
+        first_name: firstName,
+        last_name: lastName,
+        position: (seed as any).position ?? null,
+        team: seed.team,
+        from_team: seed.team,
+        conference: seed.conference,
+        from_avg: seed.avg,
+        from_obp: seed.obp,
+        from_slg: seed.slg,
+        power_rating_plus: null,
+        class_transition: null,
+        dev_aggressiveness: null,
+      });
+      existingNames.add(checkKey);
+    }
+    if (extras.length === 0) return players;
+    return [...players, ...extras].sort((a, b) =>
+      `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`)
+    );
+  }, [players, hitterStats]);
+
+  const { teams } = useTeamsTable();
 
   const { data: conferenceStats = [] } = useQuery({
     queryKey: ["transfer-sim-conference-stats"],
@@ -712,13 +717,13 @@ export default function TransferPortal() {
     const isPitcher = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP|TWP)/i.test(String(pos || ""));
     const q = normalizeKey(playerSearch);
     const pool = (q
-      ? players.filter((p) =>
+      ? mergedPlayers.filter((p) =>
           normalizeKey(`${p.first_name} ${p.last_name} ${(p.from_team || p.team || "")} ${(p.position || "")}`).includes(q),
         )
-      : players
+      : mergedPlayers
     ).filter((p) => !isPitcher(p.position));
     return pool.slice(0, 25);
-  }, [players, playerSearch]);
+  }, [mergedPlayers, playerSearch]);
 
   const filteredTeams = useMemo(() => {
     const q = normalizeKey(teamSearch);
@@ -729,37 +734,20 @@ export default function TransferPortal() {
       : teams;
     return pool.slice(0, 30);
   }, [teams, teamSearch]);
-  const teamParkComponents = readTeamParkFactorComponents();
+  const { parkMap: teamParkComponents } = useParkFactors();
 
-  const { data: dbPitchingStatsTP = [] } = useQuery({
-    queryKey: ["transfer-portal-pitching-stats"],
-    queryFn: async () => {
-      const all: any[] = [];
-      let from = 0;
-      while (true) {
-        const { data, error } = await supabase.from("pitching_stats_storage")
-          .select("player_id, player_name, team, handedness, role, era, fip, whip, k9, bb9, hr9, g, gs")
-          .eq("season", 2025).range(from, from + 999);
-        if (error) throw error;
-        all.push(...(data || []));
-        if (!data || data.length < 1000) break;
-        from += 1000;
-      }
-      return all;
-    },
-    staleTime: 10 * 60 * 1000,
-  });
+  const { pitchers: pitchingMasterRows } = usePitchingSeedData();
 
   const pitchingPlayers = useMemo<PitchingStorageRow[]>(() => {
-    return dbPitchingStatsTP.map((r: any, idx: number) => {
+    return pitchingMasterRows.map((r, idx) => {
       const games = r.g != null ? Number(r.g) : null;
       const starts = r.gs != null ? Number(r.gs) : null;
       const derivedRole = toPitchingRole(r.role) || (games != null && games > 0 && starts != null ? ((starts / games) < 0.5 ? "RP" : "SP") : null);
       return {
-        id: r.player_id || `pitching-tp-${idx}`,
-        player_name: (r.player_name || "").trim(),
+        id: r.id || `pitching-tp-${idx}`,
+        player_name: (r.playerName || "").trim(),
         team: (r.team || "").trim() || null,
-        handedness: (r.handedness || "").trim() || null,
+        handedness: (r.throwHand || "").trim() || null,
         role: derivedRole,
         era: r.era != null ? Number(r.era) : null,
         fip: r.fip != null ? Number(r.fip) : null,
@@ -769,31 +757,12 @@ export default function TransferPortal() {
         hr9: r.hr9 != null ? Number(r.hr9) : null,
       };
     }).filter((r) => !!r.player_name);
-  }, [dbPitchingStatsTP]);
+  }, [pitchingMasterRows]);
 
   const selectedPitcher = useMemo(
     () => pitchingPlayers.find((p) => p.id === selectedPitcherId) || null,
     [pitchingPlayers, selectedPitcherId],
   );
-
-  const { data: dbPitchingPowerTP = [] } = useQuery({
-    queryKey: ["transfer-portal-pitching-power"],
-    queryFn: async () => {
-      const all: any[] = [];
-      let from = 0;
-      while (true) {
-        const { data, error } = await supabase.from("pitching_power_ratings_storage")
-          .select("player_name, team, stuff_plus, whiff_pct, bb_pct, hh_pct, iz_whiff_pct, chase_pct, barrel_pct, ld_pct, avg_exit_velo, gb_pct, iz_pct, ev90, pull_pct, la_10_30_pct, stuff_score, whiff_score, bb_score, hh_score, iz_whiff_score, chase_score, barrel_score, ld_score, avg_ev_score, gb_score, iz_score, ev90_score, pull_score, la_10_30_score, era_pr_plus, fip_pr_plus, whip_pr_plus, k9_pr_plus, hr9_pr_plus, bb9_pr_plus")
-          .eq("season", 2025).range(from, from + 999);
-        if (error) throw error;
-        all.push(...(data || []));
-        if (!data || data.length < 1000) break;
-        from += 1000;
-      }
-      return all;
-    },
-    staleTime: 10 * 60 * 1000,
-  });
 
   const pitchingPowerByKey = useMemo(() => {
     const byNameTeam = new Map<string, PitchingPowerSnapshot>();
@@ -805,25 +774,25 @@ export default function TransferPortal() {
     const s = (v: number | null | undefined) => v == null ? null : Number(v);
     const nws = (items: Array<{ v: number; w: number }>) => { const wt = items.reduce((a, i) => a + (i.v * i.w), 0); const tw = items.reduce((a, i) => a + i.w, 0); return tw > 0 ? wt / tw : null; };
 
-    for (const pr of dbPitchingPowerTP) {
-      const name = (pr.player_name || "").trim();
+    for (const pr of pitchingMasterRows) {
+      const name = (pr.playerName || "").trim();
       const team = (pr.team || "").trim();
       if (!name) continue;
-      // Calculate scores from raw metrics
-      const stuff = cs(pr.stuff_plus, EQ.p_ncaa_avg_stuff_plus, EQ.p_sd_stuff_plus) ?? pr.stuff_score;
-      const whiff = pr.whiff_score ?? cs(pr.whiff_pct, EQ.p_ncaa_avg_whiff_pct, EQ.p_sd_whiff_pct);
-      const bb = pr.bb_score ?? cs(pr.bb_pct, EQ.p_ncaa_avg_bb_pct, EQ.p_sd_bb_pct, true);
-      const hh = pr.hh_score ?? cs(pr.hh_pct, EQ.p_ncaa_avg_hh_pct, EQ.p_sd_hh_pct, true);
-      const izWhiff = pr.iz_whiff_score ?? cs(pr.iz_whiff_pct, EQ.p_ncaa_avg_in_zone_whiff_pct, EQ.p_sd_in_zone_whiff_pct);
-      const chase = pr.chase_score ?? cs(pr.chase_pct, EQ.p_ncaa_avg_chase_pct, EQ.p_sd_chase_pct);
-      const barrel = pr.barrel_score ?? cs(pr.barrel_pct, EQ.p_ncaa_avg_barrel_pct, EQ.p_sd_barrel_pct, true);
-      const ld = pr.ld_score ?? cs(pr.ld_pct, EQ.p_ncaa_avg_ld_pct, EQ.p_sd_ld_pct, true);
-      const avgEv = pr.avg_ev_score ?? cs(pr.avg_exit_velo, EQ.p_ncaa_avg_avg_ev, EQ.p_sd_avg_ev, true);
-      const gb = pr.gb_score ?? cs(pr.gb_pct, EQ.p_ncaa_avg_gb_pct, EQ.p_sd_gb_pct);
-      const iz = pr.iz_score ?? cs(pr.iz_pct, EQ.p_ncaa_avg_in_zone_pct, EQ.p_sd_in_zone_pct);
-      const ev90 = pr.ev90_score ?? cs(pr.ev90, EQ.p_ncaa_avg_ev90, EQ.p_sd_ev90, true);
-      const pull = pr.pull_score ?? cs(pr.pull_pct, EQ.p_ncaa_avg_pull_pct, EQ.p_sd_pull_pct, true);
-      const la1030 = pr.la_10_30_score ?? cs(pr.la_10_30_pct, EQ.p_ncaa_avg_la_10_30_pct, EQ.p_sd_la_10_30_pct, true);
+      // Calculate scores from raw metrics (stuff_plus not in Pitching Master — use null)
+      const stuff = cs(null, EQ.p_ncaa_avg_stuff_plus, EQ.p_sd_stuff_plus);
+      const whiff = cs(pr.miss_pct, EQ.p_ncaa_avg_whiff_pct, EQ.p_sd_whiff_pct);
+      const bb = cs(pr.bb_pct, EQ.p_ncaa_avg_bb_pct, EQ.p_sd_bb_pct, true);
+      const hh = cs(pr.hard_hit_pct, EQ.p_ncaa_avg_hh_pct, EQ.p_sd_hh_pct, true);
+      const izWhiff = cs(pr.in_zone_whiff_pct, EQ.p_ncaa_avg_in_zone_whiff_pct, EQ.p_sd_in_zone_whiff_pct);
+      const chase = cs(pr.chase_pct, EQ.p_ncaa_avg_chase_pct, EQ.p_sd_chase_pct);
+      const barrel = cs(pr.barrel_pct, EQ.p_ncaa_avg_barrel_pct, EQ.p_sd_barrel_pct, true);
+      const ld = cs(pr.line_pct, EQ.p_ncaa_avg_ld_pct, EQ.p_sd_ld_pct, true);
+      const avgEv = cs(pr.exit_vel, EQ.p_ncaa_avg_avg_ev, EQ.p_sd_avg_ev, true);
+      const gb = cs(pr.ground_pct, EQ.p_ncaa_avg_gb_pct, EQ.p_sd_gb_pct);
+      const iz = cs(pr.in_zone_pct, EQ.p_ncaa_avg_in_zone_pct, EQ.p_sd_in_zone_pct);
+      const ev90 = cs(pr.vel_90th, EQ.p_ncaa_avg_ev90, EQ.p_sd_ev90, true);
+      const pull = cs(pr.h_pull_pct, EQ.p_ncaa_avg_pull_pct, EQ.p_sd_pull_pct, true);
+      const la1030 = cs(pr.la_10_30_pct, EQ.p_ncaa_avg_la_10_30_pct, EQ.p_sd_la_10_30_pct, true);
       // Calculate PR+ from scores
       const eraPr = [stuff, whiff, bb, hh, izWhiff, chase, barrel].every((v) => v != null)
         ? ((s(stuff)! * EQ.p_era_stuff_plus_weight) + (s(whiff)! * EQ.p_era_whiff_pct_weight) + (s(bb)! * EQ.p_era_bb_pct_weight) + (s(hh)! * EQ.p_era_hh_pct_weight) + (s(izWhiff)! * EQ.p_era_in_zone_whiff_pct_weight) + (s(chase)! * EQ.p_era_chase_pct_weight) + (s(barrel)! * EQ.p_era_barrel_pct_weight)) / EQ.p_era_ncaa_avg_power_rating * 100
@@ -844,12 +813,12 @@ export default function TransferPortal() {
         ? (hr9Pr * EQ.p_fip_hr9_power_rating_plus_weight) + (bb9Pr * EQ.p_fip_bb9_power_rating_plus_weight) + (k9Pr * EQ.p_fip_k9_power_rating_plus_weight)
         : null;
       const snapshot: PitchingPowerSnapshot = {
-        eraPrPlus: eraPr ?? pr.era_pr_plus,
-        fipPrPlus: fipPr ?? pr.fip_pr_plus,
-        whipPrPlus: whipPr ?? pr.whip_pr_plus,
-        k9PrPlus: k9Pr ?? pr.k9_pr_plus,
-        hr9PrPlus: hr9Pr ?? pr.hr9_pr_plus,
-        bb9PrPlus: bb9Pr ?? pr.bb9_pr_plus,
+        eraPrPlus: eraPr,
+        fipPrPlus: fipPr,
+        whipPrPlus: whipPr,
+        k9PrPlus: k9Pr,
+        hr9PrPlus: hr9Pr,
+        bb9PrPlus: bb9Pr,
       };
       const nameKey = normalizeKey(name);
       const teamKey = normalizeKey(team);
@@ -859,7 +828,7 @@ export default function TransferPortal() {
       }
     }
     return { byNameTeam, byName };
-  }, [dbPitchingPowerTP]);
+  }, [pitchingMasterRows]);
 
   const selectedPitcherPower = useMemo<PitchingPowerSnapshot | null>(() => {
     if (!selectedPitcher) return null;
@@ -923,110 +892,38 @@ export default function TransferPortal() {
       hr9_plus: number | null;
       hitter_talent_plus: number | null;
     }>();
-    // Hardcoded 2025 pitching conference stats from master CSV
-    const CONF_DATA: Array<{ conference: string; era_plus: number; fip_plus: number; whip_plus: number; k9_plus: number; bb9_plus: number; hr9_plus: number; hitter_talent_plus: number }> = [
-      { conference: "Atlantic 10", era_plus: 94, fip_plus: 91, whip_plus: 98, k9_plus: 94, bb9_plus: 100, hr9_plus: 92, hitter_talent_plus: 98.4 },
-      { conference: "American Athletic Conference", era_plus: 107, fip_plus: 104, whip_plus: 112, k9_plus: 98, bb9_plus: 111, hr9_plus: 95, hitter_talent_plus: 103.1 },
-      { conference: "Atlantic Coast Conference", era_plus: 103, fip_plus: 97, whip_plus: 104, k9_plus: 104, bb9_plus: 104, hr9_plus: 89, hitter_talent_plus: 115.3 },
-      { conference: "American East", era_plus: 102, fip_plus: 103, whip_plus: 102, k9_plus: 97, bb9_plus: 109, hr9_plus: 100, hitter_talent_plus: 79.4 },
-      { conference: "Atlantic Sun Conference", era_plus: 111, fip_plus: 106, whip_plus: 106, k9_plus: 96, bb9_plus: 106, hr9_plus: 105, hitter_talent_plus: 91.6 },
-      { conference: "Big East Conference", era_plus: 99, fip_plus: 95, whip_plus: 95, k9_plus: 96, bb9_plus: 94, hr9_plus: 97, hitter_talent_plus: 100.6 },
-      { conference: "Big South Conference", era_plus: 79, fip_plus: 83, whip_plus: 86, k9_plus: 92, bb9_plus: 96, hr9_plus: 86, hitter_talent_plus: 93.3 },
-      { conference: "Big Ten", era_plus: 101, fip_plus: 95, whip_plus: 104, k9_plus: 96, bb9_plus: 103, hr9_plus: 92, hitter_talent_plus: 111.3 },
-      { conference: "Big 12", era_plus: 104, fip_plus: 106, whip_plus: 106, k9_plus: 103, bb9_plus: 108, hr9_plus: 98, hitter_talent_plus: 116.1 },
-      { conference: "Big West", era_plus: 108, fip_plus: 114, whip_plus: 109, k9_plus: 99, bb9_plus: 114, hr9_plus: 112, hitter_talent_plus: 101.8 },
-      { conference: "Coastal Athletic Conference", era_plus: 101, fip_plus: 101, whip_plus: 106, k9_plus: 94, bb9_plus: 109, hr9_plus: 96, hitter_talent_plus: 92.1 },
-      { conference: "Conference USA", era_plus: 104, fip_plus: 100, whip_plus: 103, k9_plus: 102, bb9_plus: 99, hr9_plus: 97, hitter_talent_plus: 103.6 },
-      { conference: "Horizon League", era_plus: 85, fip_plus: 89, whip_plus: 88, k9_plus: 101, bb9_plus: 87, hr9_plus: 93, hitter_talent_plus: 96.1 },
-      { conference: "Ivy League", era_plus: 109, fip_plus: 108, whip_plus: 108, k9_plus: 99, bb9_plus: 106, hr9_plus: 109, hitter_talent_plus: 88.8 },
-      { conference: "MAAC", era_plus: 102, fip_plus: 93, whip_plus: 99, k9_plus: 88, bb9_plus: 98, hr9_plus: 100, hitter_talent_plus: 80.3 },
-      { conference: "MAC", era_plus: 95, fip_plus: 97, whip_plus: 98, k9_plus: 93, bb9_plus: 104, hr9_plus: 98, hitter_talent_plus: 94.8 },
-      { conference: "Mountain West", era_plus: 96, fip_plus: 106, whip_plus: 96, k9_plus: 93, bb9_plus: 113, hr9_plus: 101, hitter_talent_plus: 95.3 },
-      { conference: "Missouri Valley Conference", era_plus: 94, fip_plus: 89, whip_plus: 94, k9_plus: 93, bb9_plus: 98, hr9_plus: 86, hitter_talent_plus: 102.1 },
-      { conference: "Northeast Conference", era_plus: 97, fip_plus: 100, whip_plus: 90, k9_plus: 96, bb9_plus: 90, hr9_plus: 108, hitter_talent_plus: 69.9 },
-      { conference: "Ohio Valley Conference", era_plus: 107, fip_plus: 103, whip_plus: 104, k9_plus: 87, bb9_plus: 109, hr9_plus: 102, hitter_talent_plus: 84.8 },
-      { conference: "Patriot League", era_plus: 105, fip_plus: 109, whip_plus: 100, k9_plus: 98, bb9_plus: 95, hr9_plus: 119, hitter_talent_plus: 92.0 },
-      { conference: "Southern Conference", era_plus: 102, fip_plus: 106, whip_plus: 103, k9_plus: 97, bb9_plus: 115, hr9_plus: 100, hitter_talent_plus: 103.8 },
-      { conference: "Southeastern Conference", era_plus: 107, fip_plus: 103, whip_plus: 113, k9_plus: 119, bb9_plus: 110, hr9_plus: 84, hitter_talent_plus: 116.8 },
-      { conference: "Southland Conference", era_plus: 107, fip_plus: 108, whip_plus: 103, k9_plus: 95, bb9_plus: 107, hr9_plus: 107, hitter_talent_plus: 84.5 },
-      { conference: "Southwestern Athletic Conference", era_plus: 81, fip_plus: 87, whip_plus: 81, k9_plus: 88, bb9_plus: 87, hr9_plus: 100, hitter_talent_plus: 77.1 },
-      { conference: "Summit League", era_plus: 107, fip_plus: 114, whip_plus: 106, k9_plus: 94, bb9_plus: 113, hr9_plus: 110, hitter_talent_plus: 84.4 },
-      { conference: "Sun Belt", era_plus: 111, fip_plus: 106, whip_plus: 113, k9_plus: 98, bb9_plus: 110, hr9_plus: 103, hitter_talent_plus: 103.1 },
-      { conference: "West Coast Conference", era_plus: 101, fip_plus: 97, whip_plus: 105, k9_plus: 93, bb9_plus: 111, hr9_plus: 94, hitter_talent_plus: 88.3 },
-      { conference: "Western Athletic Conference", era_plus: 98, fip_plus: 100, whip_plus: 99, k9_plus: 93, bb9_plus: 112, hr9_plus: 95, hitter_talent_plus: 99.6 },
-    ];
-    for (const row of CONF_DATA) {
+    if (newConfStats.length === 0) return map;
+    const eq = readPitchingWeights();
+    for (const row of newConfStats) {
       const directKey = normalizeKey(row.conference);
       const canonicalKey = canonicalConferencePitching(row.conference);
-      const entry = { conference: row.conference, era_plus: row.era_plus, fip_plus: row.fip_plus, whip_plus: row.whip_plus, k9_plus: row.k9_plus, bb9_plus: row.bb9_plus, hr9_plus: row.hr9_plus, hitter_talent_plus: row.hitter_talent_plus };
-      if (directKey) map.set(directKey, entry);
+      if (!directKey) continue;
+      const eraPlus = calcPitchingPlus(row.era, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
+      const fipPlus = calcPitchingPlus(row.fip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
+      const whipPlus = calcPitchingPlus(row.whip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
+      const k9Plus = calcPitchingPlus(row.k9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
+      const bb9Plus = calcPitchingPlus(row.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
+      const hr9Plus = calcPitchingPlus(row.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
+      const hitterTalentPlus = calcHitterTalentPlusFromConference(
+        row.overall_power_rating,
+        row.stuff_plus,
+        row.wrc_plus,
+      );
+      const entry = {
+        conference: row.conference,
+        era_plus: eraPlus,
+        fip_plus: fipPlus,
+        whip_plus: whipPlus,
+        k9_plus: k9Plus,
+        bb9_plus: bb9Plus,
+        hr9_plus: hr9Plus,
+        hitter_talent_plus: hitterTalentPlus,
+      };
+      map.set(directKey, entry);
       if (canonicalKey && !map.has(canonicalKey)) map.set(canonicalKey, entry);
     }
-    // Also try localStorage overrides
-    try {
-      const raw = window.localStorage.getItem(PITCHING_CONFERENCE_STATS_STORAGE_KEY);
-      if (!raw) return map;
-      const parsed = JSON.parse(raw) as Array<{
-        conference: string;
-        era: number | null;
-        fip: number | null;
-        whip: number | null;
-        k9: number | null;
-        bb9: number | null;
-        hr9: number | null;
-        hitter_talent_plus?: number | null;
-      }>;
-      const eq = readPitchingWeights();
-      const hittingByCanonical = new Map<string, ConferenceRow>();
-      for (const c of conferenceStats) {
-        const k = canonicalConferencePitching(c.conference);
-        if (k) hittingByCanonical.set(k, c);
-      }
-      const rows = Array.isArray(parsed) ? parsed : [];
-      for (const row of rows) {
-        const directKey = normalizeKey(row.conference);
-        const canonicalKey = canonicalConferencePitching(row.conference);
-        if (!directKey) continue;
-        const eraPlus = calcPitchingPlus(row.era, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
-        const fipPlus = calcPitchingPlus(row.fip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
-        const whipPlus = calcPitchingPlus(row.whip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
-        const k9Plus = calcPitchingPlus(row.k9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
-        const bb9Plus = calcPitchingPlus(row.bb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
-        const hr9Plus = calcPitchingPlus(row.hr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
-        const matchingHittingConference = canonicalKey ? hittingByCanonical.get(canonicalKey) : null;
-        const rawManualHitterTalent = (() => {
-          const n = Number(row.hitter_talent_plus);
-          return Number.isFinite(n) ? n : null;
-        })();
-        const hitterTalentFromEquation = calcHitterTalentPlusFromConference(
-          matchingHittingConference?.offensive_power_rating ??
-            getOverallHitterPowerForPitching(canonicalKey),
-          matchingHittingConference?.stuff_plus ?? null,
-          matchingHittingConference?.wrc_plus ?? null,
-        );
-        const hitterTalentPlusNum = (() => {
-          if (hitterTalentFromEquation != null) return hitterTalentFromEquation;
-          if (rawManualHitterTalent != null) return rawManualHitterTalent;
-          return null;
-        })();
-        const nextRow = {
-          conference: row.conference,
-          era_plus: eraPlus,
-          fip_plus: fipPlus,
-          whip_plus: whipPlus,
-          k9_plus: k9Plus,
-          bb9_plus: bb9Plus,
-          hr9_plus: hr9Plus,
-          hitter_talent_plus: hitterTalentPlusNum,
-        };
-        map.set(directKey, nextRow);
-        if (canonicalKey) map.set(canonicalKey, nextRow);
-      }
-    } catch {
-      // ignore malformed storage
-    }
     return map;
-  }, [conferenceStats]);
+  }, [newConfStats]);
 
   const [seedByName, seedByPlayerId] = useMemo(() => {
     const map = new Map<string, SeedRow[]>();
@@ -1041,6 +938,17 @@ export default function TransferPortal() {
     }
     return [map, byId];
   }, [hitterStats]);
+
+  const powerByNameTeam = useMemo(() => {
+    const map = new Map<string, typeof powerRatings[0]>();
+    for (const row of powerRatings) {
+      const key = `${normalizeKey(row.playerName)}|${normalizeKey(row.team)}`;
+      if (key.length > 1) map.set(key, row);
+      const nameOnly = normalizeKey(row.playerName);
+      if (nameOnly && !map.has(nameOnly)) map.set(nameOnly, row);
+    }
+    return map;
+  }, [powerRatings]);
 
   const inferredFromTeam = useMemo(() => {
     if (!selectedPlayer) return null;
@@ -1122,10 +1030,28 @@ export default function TransferPortal() {
     if (lastObp == null) missingInputs.push("Last OBP");
     if (lastSlg == null) missingInputs.push("Last SLG");
 
-    // Use stat-specific power rating+ only (no fallback to overall power_rating_plus).
-    const baPR = internals?.avg_power_rating ?? null;
-    const obpPR = internals?.obp_power_rating ?? null;
-    const isoPR = internals?.slg_power_rating ?? null;
+    // Use stat-specific power rating+ from internals first, then compute from seed data
+    let baPR = internals?.avg_power_rating ?? null;
+    let obpPR = internals?.obp_power_rating ?? null;
+    let isoPR = internals?.slg_power_rating ?? null;
+
+    if (baPR == null || obpPR == null || isoPR == null) {
+      const fullName = `${selectedPlayer.first_name} ${selectedPlayer.last_name}`;
+      const nameTeamKey = `${normalizeKey(fullName)}|${normalizeKey(fromTeam)}`;
+      const seedPower = powerByNameTeam.get(nameTeamKey) ?? powerByNameTeam.get(normalizeKey(fullName));
+      if (seedPower) {
+        const computed = computeHitterPowerRatings({
+          contact: seedPower.contact, lineDrive: seedPower.lineDrive,
+          avgExitVelo: seedPower.avgExitVelo, popUp: seedPower.popUp,
+          bb: seedPower.bb, chase: seedPower.chase,
+          barrel: seedPower.barrel, ev90: seedPower.ev90,
+          pull: seedPower.pull, la10_30: seedPower.la10_30, gb: seedPower.gb,
+        });
+        if (baPR == null) baPR = computed.baPlus;
+        if (obpPR == null) obpPR = computed.obpPlus;
+        if (isoPR == null) isoPR = computed.isoPlus;
+      }
+    }
 
     if (baPR == null) missingInputs.push("BA Power Rating+");
     if (obpPR == null) missingInputs.push("OBP Power Rating+");
@@ -1141,12 +1067,12 @@ export default function TransferPortal() {
     const fromStuff = fromConfStats?.stuff_plus ?? null;
     const toStuff = toConfStats?.stuff_plus ?? null;
 
-    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "avg", teamParkComponents);
-    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "avg", teamParkComponents);
-    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "obp", teamParkComponents);
-    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "obp", teamParkComponents);
-    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "iso", teamParkComponents);
-    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "iso", teamParkComponents);
+    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name);
+    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name);
+    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name);
+    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name);
+    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name);
+    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name);
     if (fromAvgPlus == null) missingInputs.push("From AVG+");
     if (toAvgPlus == null) missingInputs.push("To AVG+");
     if (fromObpPlus == null) missingInputs.push("From OBP+");
@@ -1436,7 +1362,7 @@ export default function TransferPortal() {
         multiplier: isoMultiplier,
       },
     };
-  }, [selectedPlayer, toTeamRow, internals, fromConfStats, toConfStats, fromTeamRow, toConference, remoteEquationValues, teamParkComponents]);
+  }, [selectedPlayer, toTeamRow, internals, fromConfStats, toConfStats, fromTeamRow, toConference, remoteEquationValues, teamParkComponents, powerByNameTeam]);
 
   const pitchingSimulation = useMemo<PitchingSim | null>(() => {
     if (!selectedPitcher || !selectedDestinationTeam) return null;
@@ -1449,7 +1375,7 @@ export default function TransferPortal() {
     const toPitchConference = toPitchTeamRow?.conference || null;
     const fromPitchConfStats = resolvePitchingConferenceStats(fromPitchConference);
     const toPitchConfStats = resolvePitchingConferenceStats(toPitchConference);
-    console.log("[DEBUG pitching sim]", { fromPitchConference, toPitchConference, fromPitchConfStats, toPitchConfStats, confMapSize: pitchingConfByKey.size, fromTeam: selectedPitcher?.team, toTeam: selectedDestinationTeam, fromPitchTeamRow, toPitchTeamRow });
+
 
     const missing: string[] = [];
     const requireNum = (label: string, value: number | null | undefined) => {
@@ -1495,12 +1421,12 @@ export default function TransferPortal() {
 
     // Pitching transfer must use pitching-specific park factors only (R/G, WHIP, HR/9).
     // Do not fallback to generic park_factor so bad mappings are exposed instead of silently masked.
-    const fromEraParkRaw = resolveParkFactorFromCandidates([selectedPitcher.team, fromPitchTeamRow?.name], null, "era", teamParkComponents);
-    const toEraParkRaw = resolveParkFactorFromCandidates([selectedDestinationTeam, toPitchTeamRow?.name], null, "era", teamParkComponents);
-    const fromWhipParkRaw = resolveParkFactorFromCandidates([selectedPitcher.team, fromPitchTeamRow?.name], null, "whip", teamParkComponents);
-    const toWhipParkRaw = resolveParkFactorFromCandidates([selectedDestinationTeam, toPitchTeamRow?.name], null, "whip", teamParkComponents);
-    const fromHr9ParkRaw = resolveParkFactorFromCandidates([selectedPitcher.team, fromPitchTeamRow?.name], null, "hr9", teamParkComponents);
-    const toHr9ParkRaw = resolveParkFactorFromCandidates([selectedDestinationTeam, toPitchTeamRow?.name], null, "hr9", teamParkComponents);
+    const fromEraParkRaw = resolveParkFactorFromCandidates(fromPitchTeamRow?.id, [selectedPitcher.team, fromPitchTeamRow?.name], "era", teamParkComponents);
+    const toEraParkRaw = resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "era", teamParkComponents);
+    const fromWhipParkRaw = resolveParkFactorFromCandidates(fromPitchTeamRow?.id, [selectedPitcher.team, fromPitchTeamRow?.name], "whip", teamParkComponents);
+    const toWhipParkRaw = resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "whip", teamParkComponents);
+    const fromHr9ParkRaw = resolveParkFactorFromCandidates(fromPitchTeamRow?.id, [selectedPitcher.team, fromPitchTeamRow?.name], "hr9", teamParkComponents);
+    const toHr9ParkRaw = resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "hr9", teamParkComponents);
     requireNum("From R/G Park Factor", fromEraParkRaw);
     requireNum("To R/G Park Factor", toEraParkRaw);
     requireNum("From WHIP Park Factor", fromWhipParkRaw);

@@ -14,7 +14,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { readPlayerOverrides } from "@/lib/playerOverrides";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
-import { readTeamParkFactorComponents, resolveMetricParkFactor } from "@/lib/parkFactors";
+import { resolveMetricParkFactor } from "@/lib/parkFactors";
+import { useParkFactors } from "@/hooks/useParkFactors";
+import { useTeamsTable } from "@/hooks/useTeamsTable";
+import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
@@ -42,33 +45,6 @@ const normalizePitcherTeamName = (team: string | null | undefined) => {
   const alias = PITCHER_TEAM_ALIASES[normalize(raw)];
   return alias || raw;
 };
-const hasAnyNumericValue = (values: string[] | undefined, indexes: number[]) =>
-  indexes.some((idx) => {
-    const n = Number((values?.[idx] || "").replace(/[%,$]/g, "").trim());
-    return Number.isFinite(n);
-  });
-
-const pickBestNameTeamRow = (
-  rows: Array<{ values?: string[] }>,
-  playerName: string,
-  teamName: string,
-  numericSignalIndexes: number[],
-) => {
-  const normName = normalize(playerName);
-  const normTeam = normalize(teamName);
-  if (!normName) return null;
-
-  const byName = rows.filter((r) => normalize(r.values?.[0]) === normName);
-  if (byName.length === 0) return null;
-
-  const exactTeam = byName.find((r) => normalize(r.values?.[1]) === normTeam);
-  if (exactTeam) return exactTeam;
-
-  const withSignal = byName.find((r) => hasAnyNumericValue(r.values, numericSignalIndexes));
-  if (withSignal) return withSignal;
-
-  return byName[0] || null;
-};
 const isUuid = (v: string | undefined) =>
   !!v && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 const STORAGE_PREFIX = "storage__";
@@ -83,41 +59,6 @@ const parseBaseballInnings = (v: string | null | undefined) => {
   if (frac === 1) return whole + (1 / 3);
   if (frac === 2) return whole + (2 / 3);
   return n;
-};
-
-const resolvePitchingStatsView = (values: string[]) => {
-  const toNum = (v: string | undefined) => {
-    const n = Number((v || "").replace(/[%,$]/g, "").trim());
-    return Number.isFinite(n) ? n : null;
-  };
-  const legacyEra = toNum(values[3]);
-  const isLegacy = legacyEra != null;
-  if (isLegacy) {
-    return {
-      role: values[12] || "",
-      g: values[9] || "",
-      gs: values[10] || "",
-      era: values[3] || "",
-      fip: values[4] || "",
-      whip: values[5] || "",
-      k9: values[6] || "",
-      bb9: values[7] || "",
-      hr9: values[8] || "",
-      ip: values[11] || "",
-    };
-  }
-  return {
-    role: values[3] || "",
-    g: values[5] || "",
-    gs: values[6] || "",
-    era: values[7] || "",
-    fip: values[8] || "",
-    whip: values[9] || "",
-    k9: values[10] || "",
-    bb9: values[11] || "",
-    hr9: values[12] || "",
-    ip: values[4] || "",
-  };
 };
 
 const PITCHING_EQ_DEFAULTS: Record<string, number> = {
@@ -506,16 +447,7 @@ export default function PitcherProfile() {
       return data;
     },
   });
-  const { data: teamDirectory = [] } = useQuery({
-    queryKey: ["pitcher-profile-team-directory"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("teams")
-        .select("name, conference, park_factor");
-      if (error) throw error;
-      return data || [];
-    },
-  });
+  const { teams: teamDirectory } = useTeamsTable();
   const lookupPlayerName = useMemo(() => {
     if (storageRef?.playerName) return storageRef.playerName;
     const fullName = `${player?.first_name || ""} ${player?.last_name || ""}`.trim();
@@ -556,76 +488,54 @@ export default function PitcherProfile() {
       return byPlayerName();
     },
   });
-  // Fetch pitching stats from Supabase
-  const { data: dbPitchingStats } = useQuery({
-    queryKey: ["pitcher-profile-stats-storage", id, lookupPlayerName, lookupTeamName],
-    enabled: !!lookupPlayerName,
-    queryFn: async () => {
-      const cols = "player_id, player_name, team, handedness, role, season, era, fip, whip, k9, bb9, hr9, ip, g, gs";
-      // Try player_id match first
-      if (isDbRoute && id) {
-        const { data } = await supabase.from("pitching_stats_storage").select(cols).eq("player_id", id).eq("season", 2025).limit(1);
-        if (data && data.length > 0) return data[0];
-      }
-      // Fallback: name match
-      const { data, error } = await supabase.from("pitching_stats_storage").select(cols).eq("player_name", lookupPlayerName!).eq("season", 2025).limit(1);
-      if (error) console.warn("[PitcherProfile] stats query error:", error.message, error.details);
-      return data?.[0] || null;
-    },
-    staleTime: 10 * 60 * 1000,
-  });
-  // Fetch pitching power ratings from Supabase
-  const { data: dbPitchingPower } = useQuery({
-    queryKey: ["pitcher-profile-power-storage", id, lookupPlayerName, lookupTeamName],
-    enabled: !!lookupPlayerName,
-    queryFn: async () => {
-      const cols = "player_id, player_name, team, season, stuff_plus, whiff_pct, bb_pct, hh_pct, iz_whiff_pct, chase_pct, barrel_pct, ld_pct, avg_exit_velo, gb_pct, iz_pct, ev90, pull_pct, la_10_30_pct, stuff_score, whiff_score, bb_score, hh_score, iz_whiff_score, chase_score, barrel_score, ld_score, avg_ev_score, gb_score, iz_score, ev90_score, pull_score, la_10_30_score";
-      if (isDbRoute && id) {
-        const { data } = await supabase.from("pitching_power_ratings_storage").select(cols).eq("player_id", id).eq("season", 2025).limit(1);
-        if (data && data.length > 0) return data[0];
-      }
-      const { data, error } = await supabase.from("pitching_power_ratings_storage").select(cols).eq("player_name", lookupPlayerName!).eq("season", 2025).limit(1);
-      if (error) console.warn("[PitcherProfile] power query error:", error.message, error.details);
-      return data?.[0] || null;
-    },
-    staleTime: 10 * 60 * 1000,
-  });
-
+  // ── Pitching Master (replaces pitching_stats_storage + pitching_power_ratings_storage) ──
+  const { pitchers: pitchingMasterRows } = usePitchingSeedData();
+  const masterRow = useMemo(() => {
+    if (!lookupPlayerName && !id) return null;
+    // Try source_player_id match first (UUID route)
+    if (isDbRoute && id) {
+      const byId = pitchingMasterRows.find((r) => r.source_player_id === id);
+      if (byId) return byId;
+    }
+    // Fallback: name match (+ optional team match)
+    const normName = normalize(lookupPlayerName);
+    if (!normName) return null;
+    const byName = pitchingMasterRows.filter((r) => normalize(r.playerName) === normName);
+    if (byName.length === 0) return null;
+    if (byName.length === 1) return byName[0];
+    const normTeam = normalize(lookupTeamName);
+    const exactTeam = byName.find((r) => normalize(r.team) === normTeam);
+    return exactTeam || byName[0];
+  }, [pitchingMasterRows, id, isDbRoute, lookupPlayerName, lookupTeamName]);
 
   const storageRow = useMemo(() => {
-    if (dbPitchingStats) {
-      const s = dbPitchingStats;
-      // Must match resolvePitchingStatsView non-legacy format:
-      // [0]=name, [1]=team, [2]=hand, [3]=role, [4]=ip, [5]=g, [6]=gs,
-      // [7]=era, [8]=fip, [9]=whip, [10]=k9, [11]=bb9, [12]=hr9
-      const arr: string[] = [
-        s.player_name || "", s.team || "", s.handedness || "", s.role || "",
-        String(s.ip ?? ""), String(s.g ?? ""), String(s.gs ?? ""),
-        String(s.era ?? ""), String(s.fip ?? ""), String(s.whip ?? ""),
-        String(s.k9 ?? ""), String(s.bb9 ?? ""), String(s.hr9 ?? ""),
-      ];
-      return arr;
-    }
-    return null;
-  }, [dbPitchingStats]);
+    if (!masterRow) return null;
+    const m = masterRow;
+    // Build the same shape the downstream code expects:
+    // [0]=name, [1]=team, [2]=hand, [3]=role, [4]=ip, [5]=g, [6]=gs,
+    // [7]=era, [8]=fip, [9]=whip, [10]=k9, [11]=bb9, [12]=hr9
+    return [
+      m.playerName || "", m.team || "", m.throwHand || "", m.role || "",
+      String(m.ip ?? ""), String(m.g ?? ""), String(m.gs ?? ""),
+      String(m.era ?? ""), String(m.fip ?? ""), String(m.whip ?? ""),
+      String(m.k9 ?? ""), String(m.bb9 ?? ""), String(m.hr9 ?? ""),
+    ] as string[];
+  }, [masterRow]);
   const powerRatingsRow = useMemo(() => {
-    if (dbPitchingPower) {
-      const p = dbPitchingPower;
-      const arr: string[] = [
-        p.player_name || "", p.team || "",
-        String(p.stuff_plus ?? ""), String(p.whiff_pct ?? ""), String(p.bb_pct ?? ""), String(p.hh_pct ?? ""),
-        String(p.iz_whiff_pct ?? ""), String(p.chase_pct ?? ""), String(p.barrel_pct ?? ""), String(p.ld_pct ?? ""),
-        String(p.avg_exit_velo ?? ""), String(p.gb_pct ?? ""), String(p.iz_pct ?? ""), String(p.ev90 ?? ""),
-        String(p.pull_pct ?? ""), String(p.la_10_30_pct ?? ""),
-        String(p.stuff_score ?? ""), String(p.whiff_score ?? ""), String(p.bb_score ?? ""), String(p.hh_score ?? ""),
-        String(p.iz_whiff_score ?? ""), String(p.chase_score ?? ""), String(p.barrel_score ?? ""), String(p.ld_score ?? ""),
-        String(p.avg_ev_score ?? ""), String(p.gb_score ?? ""), String(p.iz_score ?? ""), String(p.ev90_score ?? ""),
-        String(p.pull_score ?? ""), String(p.la_10_30_score ?? ""),
-      ];
-      return arr;
-    }
-    return null;
-  }, [dbPitchingPower]);
+    if (!masterRow) return null;
+    const m = masterRow;
+    // [0]=name, [1]=team,
+    // [2..15] = raw metrics (stuff_plus not in master, so "")
+    // [16..29] = stored scores (not in master, so all "")
+    return [
+      m.playerName || "", m.team || "",
+      /* stuff_plus */ "", String(m.miss_pct ?? ""), String(m.bb_pct ?? ""), String(m.hard_hit_pct ?? ""),
+      String(m.in_zone_whiff_pct ?? ""), String(m.chase_pct ?? ""), String(m.barrel_pct ?? ""), String(m.line_pct ?? ""),
+      String(m.exit_vel ?? ""), String(m.ground_pct ?? ""), String(m.in_zone_pct ?? ""), String(m.vel_90th ?? ""),
+      String(m.h_pull_pct ?? ""), String(m.la_10_30_pct ?? ""),
+      /* scores 16-29: not stored in master */ "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+    ] as string[];
+  }, [masterRow]);
 
   const pitchingEq = useMemo(() => {
     const merged = { ...PITCHING_EQ_DEFAULTS };
@@ -808,12 +718,12 @@ export default function PitcherProfile() {
     }
     return map;
   }, [teamDirectory]);
-  const teamParkComponents = useMemo(() => readTeamParkFactorComponents(), [teamDirectory]);
+  const { parkMap: teamParkComponents } = useParkFactors();
   const fullName =
     `${player?.first_name || ""} ${player?.last_name || ""}`.trim() ||
     storageRef?.playerName ||
     "Pitcher";
-  const displayTeam = normalizePitcherTeamName(player?.team || storageRow?.[1] || storageRef?.teamName || "") || "—";
+  const displayTeam = normalizePitcherTeamName(player?.team || masterRow?.team || storageRef?.teamName || "") || "—";
   const playerOverride = useMemo(
     () => (isDbRoute && id ? readPlayerOverrides()[id] : undefined),
     [id, isDbRoute],
@@ -833,19 +743,19 @@ export default function PitcherProfile() {
     }
   }, [isDbRoute, storageOverrideKey]);
   const displayConference = player?.conference || conferenceByTeam.get(normalize(displayTeam)) || "—";
-  const displayHandedness = player?.handedness || storageRow?.[2] || "—";
-  const storageStats = useMemo(() => resolvePitchingStatsView(storageRow || []), [storageRow]);
-  const storageEra = storageStats.era ? Number(storageStats.era) : null;
-  const storageFip = storageStats.fip ? Number(storageStats.fip) : null;
-  const storageWhip = storageStats.whip ? Number(storageStats.whip) : null;
-  const storageK9 = storageStats.k9 ? Number(storageStats.k9) : null;
-  const storageBb9 = storageStats.bb9 ? Number(storageStats.bb9) : null;
-  const storageHr9 = storageStats.hr9 ? Number(storageStats.hr9) : null;
-  const storageIp = parseBaseballInnings(storageStats.ip);
-  const storageGames = storageStats.g ? Number(storageStats.g) : null;
-  const storageGamesStarted = storageStats.gs ? Number(storageStats.gs) : null;
+  const displayHandedness = player?.handedness || masterRow?.throwHand || storageRow?.[2] || "—";
+  // Read pitching stats directly from masterRow (no intermediate parse needed)
+  const storageEra = masterRow?.era ?? null;
+  const storageFip = masterRow?.fip ?? null;
+  const storageWhip = masterRow?.whip ?? null;
+  const storageK9 = masterRow?.k9 ?? null;
+  const storageBb9 = masterRow?.bb9 ?? null;
+  const storageHr9 = masterRow?.hr9 ?? null;
+  const storageIp = parseBaseballInnings(masterRow?.ip != null ? String(masterRow.ip) : null);
+  const storageGames = masterRow?.g ?? null;
+  const storageGamesStarted = masterRow?.gs ?? null;
   const derivedRole = (() => {
-    const roleRaw = toPitchingRole(storageStats.role);
+    const roleRaw = toPitchingRole(masterRow?.role);
     if (roleRaw) return roleRaw;
     if (storageGames != null && storageGames > 0 && storageGamesStarted != null) {
       return (storageGamesStarted / storageGames) < 0.5 ? "RP" : "SP";
@@ -996,12 +906,12 @@ export default function PitcherProfile() {
     const teamMatch = teamByName.get(normalize(displayTeam));
     const teamNameForPark = teamMatch?.name || displayTeam || null;
     const fallbackPark = teamMatch?.park_factor ?? null;
-    const avgPark = parkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "avg", teamParkComponents));
-    const obpPark = parkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "obp", teamParkComponents));
-    const isoPark = parkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "iso", teamParkComponents));
-    const eraParkRaw = resolveMetricParkFactor(teamNameForPark, null, "era", teamParkComponents);
-    const whipParkRaw = resolveMetricParkFactor(teamNameForPark, null, "whip", teamParkComponents);
-    const hr9ParkRaw = resolveMetricParkFactor(teamNameForPark, null, "hr9", teamParkComponents);
+    const avgPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "avg", teamParkComponents, teamNameForPark, fallbackPark));
+    const obpPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "obp", teamParkComponents, teamNameForPark, fallbackPark));
+    const isoPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "iso", teamParkComponents, teamNameForPark, fallbackPark));
+    const eraParkRaw = resolveMetricParkFactor(teamMatch?.id, "era", teamParkComponents, teamNameForPark);
+    const whipParkRaw = resolveMetricParkFactor(teamMatch?.id, "whip", teamParkComponents, teamNameForPark);
+    const hr9ParkRaw = resolveMetricParkFactor(teamMatch?.id, "hr9", teamParkComponents, teamNameForPark);
     const eraParkFactor = (parkToIndex(eraParkRaw ?? avgPark)) / 100;
     const whipParkFactor = (parkToIndex(whipParkRaw ?? ((0.7 * avgPark) + (0.3 * obpPark)))) / 100;
     const hr9ParkFactor = (parkToIndex(hr9ParkRaw ?? isoPark)) / 100;
@@ -1137,31 +1047,7 @@ export default function PitcherProfile() {
     storageWhip,
   ]);
   const pitchArsenal = useMemo(() => {
-    let sourceRows = pitchArsenalRows || [];
-    if (sourceRows.length === 0) {
-      try {
-        const raw = localStorage.getItem("pitching_stuff_plus_storage_2025_v1");
-        const parsed = raw ? (JSON.parse(raw) as { rows?: Array<Record<string, unknown>> }) : null;
-        const localRows = Array.isArray(parsed?.rows) ? parsed.rows : [];
-        sourceRows = localRows
-          .filter((row) => normalize(String(row.playerName || "")) === normalize(lookupPlayerName))
-          .map((row) => ({
-            season: 2025,
-            player_id: null,
-            player_name: String(row.playerName || ""),
-            hand: String(row.hand || "") || null,
-            pitch_type: String(row.pitchType || "") || null,
-            stuff_plus: row.stuffPlus == null ? null : Number(row.stuffPlus),
-            usage_pct: row.usagePct == null ? null : Number(row.usagePct),
-            whiff_pct: row.whiffPct == null ? null : Number(row.whiffPct),
-            pitch_count: row.pitchCount == null ? null : Number(row.pitchCount),
-            total_pitches: row.totalPitches == null ? null : Number(row.totalPitches),
-            overall_stuff_plus: row.overallStuffPlus == null ? null : Number(row.overallStuffPlus),
-          })) as PitchArsenalRow[];
-      } catch {
-        sourceRows = [];
-      }
-    }
+    const sourceRows = pitchArsenalRows || [];
 
     const normalized = sourceRows
       .map((row) => ({
@@ -1212,7 +1098,7 @@ export default function PitcherProfile() {
     })();
 
     return { rows: sorted, overallStuffPlus, usageTotal: usageTotal > 0 ? usageTotal : null, overallWhiffPct, totalPitches: maxTotalPitches };
-  }, [pitchArsenalRows, lookupPlayerName]);
+  }, [pitchArsenalRows]);
 
   if (isLoading) {
     return (
@@ -1297,7 +1183,7 @@ export default function PitcherProfile() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">2025 Pitching Stats</CardTitle>
-                <CardDescription>Storage-backed pitching metrics for 2025.</CardDescription>
+                <CardDescription>Pitching Master metrics for 2025.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
                 <div className="grid grid-cols-2 gap-2 text-sm">

@@ -1184,6 +1184,528 @@ export type Database = {
         }
         Relationships: []
       }
+      "Conference Names": {
+        Row: {
+          id: string
+          "conference abbreviation": string
+        }
+        Insert: {
+          id?: string
+          "conference abbreviation": string
+        }
+        Update: {
+          id?: string
+          "conference abbreviation"?: string
+        }
+        Relationships: []
+      }
+      "Conference Stats": {
+        Row: {
+          conference_id: string | null
+          "conference abbreviation": string
+          season: number
+          AVG: number | null
+          OBP: number | null
+          ISO: number | null
+          ERA: number | null
+          FIP: number | null
+          WHIP: number | null
+          K9: number | null
+          BB9: number | null
+          HR9: number | null
+          Stuff_plus: number | null
+          WRC_plus: number | null
+          Overall_Power_Rating: number | null
+        }
+        Insert: {
+          conference_id?: string | null
+          "conference abbreviation": string
+          season: number
+          AVG?: number | null
+          OBP?: number | null
+          ISO?: number | null
+          ERA?: number | null
+          FIP?: number | null
+          WHIP?: number | null
+          K9?: number | null
+          BB9?: number | null
+          HR9?: number | null
+          stuff_plus?: number | null
+          wrc_plus?: number | null
+          overall_power_rating?: number | null
+        }
+        Update: {
+          conference_id?: string | null
+          "conference abbreviation"?: string
+          season?: number
+          AVG?: number | null
+          OBP?: number | null
+          ISO?: number | null
+          ERA?: number | null
+          FIP?: number | null
+          WHIP?: number | null
+          K9?: number | null
+          BB9?: number | null
+          HR9?: number | null
+          stuff_plus?: number | null
+          wrc_plus?: number | null
+          overall_power_rating?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_stats_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "Conference Names"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      "Teams Table": {
+        Row: {
+          id: string
+          full_name: string
+          abbreviation: string | null
+          mascot: string | null
+          season: number
+          conference_id: string | null
+          conference: string | null
+          source_id: string | null
+        }
+        Insert: {
+          id?: string
+          full_name: string
+          abbreviation?: string | null
+          mascot?: string | null
+          season: number
+          conference_id?: string | null
+          conference?: string | null
+          source_id?: string | null
+        }
+        Update: {
+          id?: string
+          full_name?: string
+          abbreviation?: string | null
+          mascot?: string | null
+          season?: number
+          conference_id?: string | null
+          conference?: string | null
+          source_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "teams_table_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "Conference Names"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      "Park Factors": {
+        Row: {
+          team_name: string
+          team_id: string | null
+          season: number
+          avg_factor: number | null
+          obp_factor: number | null
+          iso_factor: number | null
+          rg_factor: number | null
+          whip_factor: number | null
+          hr9_factor: number | null
+        }
+        Insert: {
+          team_name: string
+          team_id?: string | null
+          season: number
+          avg_factor?: number | null
+          obp_factor?: number | null
+          iso_factor?: number | null
+          rg_factor?: number | null
+          whip_factor?: number | null
+          hr9_factor?: number | null
+        }
+        Update: {
+          team_name?: string
+          team_id?: string | null
+          season?: number
+          avg_factor?: number | null
+          obp_factor?: number | null
+          iso_factor?: number | null
+          rg_factor?: number | null
+          whip_factor?: number | null
+          hr9_factor?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "park_factors_new_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "Teams Table"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      "Hitter Master": {
+        Row: {
+          id: string
+          source_player_id: string | null
+          playerFullName: string
+          Team: string | null
+          TeamID: string | null
+          Conference: string | null
+          conference_id: string | null
+          Season: number
+          Pos: string | null
+          BatHand: string | null
+          ThrowHand: string | null
+          AVG: number | null
+          OBP: number | null
+          SLG: number | null
+          ISO: number | null
+          contact: number | null
+          line_drive: number | null
+          avg_exit_velo: number | null
+          pop_up: number | null
+          bb: number | null
+          chase: number | null
+          barrel: number | null
+          ev90: number | null
+          pull: number | null
+          la_10_30: number | null
+          gb: number | null
+          contact_score: number | null
+          line_drive_score: number | null
+          avg_ev_score: number | null
+          pop_up_score: number | null
+          bb_score: number | null
+          chase_score: number | null
+          barrel_score: number | null
+          ev90_score: number | null
+          pull_score: number | null
+          la_score: number | null
+          gb_score: number | null
+          ba_plus: number | null
+          obp_plus: number | null
+          iso_plus: number | null
+          overall_plus: number | null
+        }
+        Insert: {
+          id?: string
+          source_player_id?: string | null
+          playerFullName: string
+          Team?: string | null
+          TeamID?: string | null
+          Conference?: string | null
+          conference_id?: string | null
+          Season: number
+          Pos?: string | null
+          BatHand?: string | null
+          ThrowHand?: string | null
+          AVG?: number | null
+          OBP?: number | null
+          SLG?: number | null
+          ISO?: number | null
+          contact?: number | null
+          line_drive?: number | null
+          avg_exit_velo?: number | null
+          pop_up?: number | null
+          bb?: number | null
+          chase?: number | null
+          barrel?: number | null
+          ev90?: number | null
+          pull?: number | null
+          la_10_30?: number | null
+          gb?: number | null
+          contact_score?: number | null
+          line_drive_score?: number | null
+          avg_ev_score?: number | null
+          pop_up_score?: number | null
+          bb_score?: number | null
+          chase_score?: number | null
+          barrel_score?: number | null
+          ev90_score?: number | null
+          pull_score?: number | null
+          la_score?: number | null
+          gb_score?: number | null
+          ba_plus?: number | null
+          obp_plus?: number | null
+          iso_plus?: number | null
+          overall_plus?: number | null
+        }
+        Update: {
+          id?: string
+          source_player_id?: string | null
+          playerFullName?: string
+          Team?: string | null
+          TeamID?: string | null
+          Conference?: string | null
+          conference_id?: string | null
+          Season?: number
+          Pos?: string | null
+          BatHand?: string | null
+          ThrowHand?: string | null
+          AVG?: number | null
+          OBP?: number | null
+          SLG?: number | null
+          ISO?: number | null
+          contact?: number | null
+          line_drive?: number | null
+          avg_exit_velo?: number | null
+          pop_up?: number | null
+          bb?: number | null
+          chase?: number | null
+          barrel?: number | null
+          ev90?: number | null
+          pull?: number | null
+          la_10_30?: number | null
+          gb?: number | null
+          contact_score?: number | null
+          line_drive_score?: number | null
+          avg_ev_score?: number | null
+          pop_up_score?: number | null
+          bb_score?: number | null
+          chase_score?: number | null
+          barrel_score?: number | null
+          ev90_score?: number | null
+          pull_score?: number | null
+          la_score?: number | null
+          gb_score?: number | null
+          ba_plus?: number | null
+          obp_plus?: number | null
+          iso_plus?: number | null
+          overall_plus?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hitter_master_team_id_fkey"
+            columns: ["TeamID"]
+            isOneToOne: false
+            referencedRelation: "Teams Table"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hitter_master_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "Conference Names"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      "Pitching Master": {
+        Row: {
+          id: string
+          source_player_id: string | null
+          playerFullName: string
+          Team: string | null
+          TeamID: string | null
+          Conference: string | null
+          conference_id: string | null
+          Season: number
+          ThrowHand: string | null
+          Role: string | null
+          IP: number | null
+          G: number | null
+          GS: number | null
+          ERA: number | null
+          FIP: number | null
+          WHIP: number | null
+          K9: number | null
+          BB9: number | null
+          HR9: number | null
+          miss_pct: number | null
+          bb_pct: number | null
+          hard_hit_pct: number | null
+          in_zone_whiff_pct: number | null
+          chase_pct: number | null
+          barrel_pct: number | null
+          line_pct: number | null
+          exit_vel: number | null
+          ground_pct: number | null
+          in_zone_pct: number | null
+          "90th_vel": number | null
+          h_pull_pct: number | null
+          la_10_30_pct: number | null
+          whiff_score: number | null
+          bb_score: number | null
+          hh_score: number | null
+          iz_whiff_score: number | null
+          chase_score: number | null
+          barrel_score: number | null
+          ld_score: number | null
+          ev_score: number | null
+          gb_score: number | null
+          iz_score: number | null
+          ev90_score: number | null
+          pull_score: number | null
+          la_score: number | null
+          era_pr_plus: number | null
+          fip_pr_plus: number | null
+          whip_pr_plus: number | null
+          k9_pr_plus: number | null
+          bb9_pr_plus: number | null
+          hr9_pr_plus: number | null
+          overall_pr_plus: number | null
+        }
+        Insert: {
+          id?: string
+          source_player_id?: string | null
+          playerFullName: string
+          Team?: string | null
+          TeamID?: string | null
+          Conference?: string | null
+          conference_id?: string | null
+          Season: number
+          ThrowHand?: string | null
+          Role?: string | null
+          IP?: number | null
+          G?: number | null
+          GS?: number | null
+          ERA?: number | null
+          FIP?: number | null
+          WHIP?: number | null
+          K9?: number | null
+          BB9?: number | null
+          HR9?: number | null
+          miss_pct?: number | null
+          bb_pct?: number | null
+          hard_hit_pct?: number | null
+          in_zone_whiff_pct?: number | null
+          chase_pct?: number | null
+          barrel_pct?: number | null
+          line_pct?: number | null
+          exit_vel?: number | null
+          ground_pct?: number | null
+          in_zone_pct?: number | null
+          "90th_vel"?: number | null
+          h_pull_pct?: number | null
+          la_10_30_pct?: number | null
+          whiff_score?: number | null
+          bb_score?: number | null
+          hh_score?: number | null
+          iz_whiff_score?: number | null
+          chase_score?: number | null
+          barrel_score?: number | null
+          ld_score?: number | null
+          ev_score?: number | null
+          gb_score?: number | null
+          iz_score?: number | null
+          ev90_score?: number | null
+          pull_score?: number | null
+          la_score?: number | null
+          era_pr_plus?: number | null
+          fip_pr_plus?: number | null
+          whip_pr_plus?: number | null
+          k9_pr_plus?: number | null
+          bb9_pr_plus?: number | null
+          hr9_pr_plus?: number | null
+          overall_pr_plus?: number | null
+        }
+        Update: {
+          id?: string
+          source_player_id?: string | null
+          playerFullName?: string
+          Team?: string | null
+          TeamID?: string | null
+          Conference?: string | null
+          conference_id?: string | null
+          Season?: number
+          ThrowHand?: string | null
+          Role?: string | null
+          IP?: number | null
+          G?: number | null
+          GS?: number | null
+          ERA?: number | null
+          FIP?: number | null
+          WHIP?: number | null
+          K9?: number | null
+          BB9?: number | null
+          HR9?: number | null
+          miss_pct?: number | null
+          bb_pct?: number | null
+          hard_hit_pct?: number | null
+          in_zone_whiff_pct?: number | null
+          chase_pct?: number | null
+          barrel_pct?: number | null
+          line_pct?: number | null
+          exit_vel?: number | null
+          ground_pct?: number | null
+          in_zone_pct?: number | null
+          "90th_vel"?: number | null
+          h_pull_pct?: number | null
+          la_10_30_pct?: number | null
+          whiff_score?: number | null
+          bb_score?: number | null
+          hh_score?: number | null
+          iz_whiff_score?: number | null
+          chase_score?: number | null
+          barrel_score?: number | null
+          ld_score?: number | null
+          ev_score?: number | null
+          gb_score?: number | null
+          iz_score?: number | null
+          ev90_score?: number | null
+          pull_score?: number | null
+          la_score?: number | null
+          era_pr_plus?: number | null
+          fip_pr_plus?: number | null
+          whip_pr_plus?: number | null
+          k9_pr_plus?: number | null
+          bb9_pr_plus?: number | null
+          hr9_pr_plus?: number | null
+          overall_pr_plus?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pitching_master_team_id_fkey"
+            columns: ["TeamID"]
+            isOneToOne: false
+            referencedRelation: "Teams Table"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pitching_master_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "Conference Names"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      "Equation Weights": {
+        Row: {
+          id: string
+          Name: string
+          Category: string | null
+          Season: number | null
+          Equation: string | null
+          sub_metric: string | null
+          Value: number | null
+          Description: string | null
+        }
+        Insert: {
+          id?: string
+          Name: string
+          Category?: string | null
+          Season?: number | null
+          Equation?: string | null
+          sub_metric?: string | null
+          Value?: number | null
+          Description?: string | null
+        }
+        Update: {
+          id?: string
+          Name?: string
+          Category?: string | null
+          Season?: number | null
+          Equation?: string | null
+          sub_metric?: string | null
+          Value?: number | null
+          Description?: string | null
+        }
+        Relationships: []
+      }
       temp_csv_players: {
         Row: {
           first_name: string

@@ -46,6 +46,7 @@ export type TransferProjectionInputs = {
   wSlg: number;
   wAvg: number;
   wIso: number;
+  actualPa?: number | null;
 };
 
 export type TransferProjectionOutput = {
@@ -105,7 +106,7 @@ export function computeTransferProjection(input: TransferProjectionInputs): Tran
   const pWrcPlus = input.ncaaAvgWrc === 0 ? null : Math.round((pWrcRaw / input.ncaaAvgWrc) * 100);
 
   const offValue = pWrcPlus == null ? null : (pWrcPlus - 100) / 100;
-  const pa = 260;
+  const pa = input.actualPa ?? 260;
   const runsPerPa = 0.13;
   const replacementRuns = (pa / 600) * 25;
   const raa = offValue == null ? null : offValue * pa * runsPerPa;

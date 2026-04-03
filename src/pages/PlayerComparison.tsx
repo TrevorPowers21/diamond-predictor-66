@@ -13,9 +13,11 @@ import { DEFAULT_NIL_TIER_MULTIPLIERS, getPositionValueMultiplier, getProgramTie
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { useHitterSeedData } from "@/hooks/useHitterSeedData";
-import { readTeamParkFactorComponents, resolveMetricParkFactor } from "@/lib/parkFactors";
+import { resolveMetricParkFactor, type ParkFactorsMap } from "@/lib/parkFactors";
+import { useParkFactors } from "@/hooks/useParkFactors";
+import { useTeamsTable } from "@/hooks/useTeamsTable";
 
-type TeamRow = { name: string; conference: string | null; park_factor: number | null };
+type TeamRow = { name: string; conference: string | null; park_factor: number | null; id?: string; conference_id?: string | null };
 type ConferenceRow = { conference: string; season: number | null; avg_plus: number | null; obp_plus: number | null; iso_plus: number | null; stuff_plus: number | null };
 type SeedRow = { playerName: string; team: string | null; avg: number | null; obp: number | null; slg: number | null };
 type PredictionInternal = { prediction_id: string; avg_power_rating: number | null; obp_power_rating: number | null; slg_power_rating: number | null };
@@ -182,9 +184,10 @@ function simulate(args: {
   confByKey: Map<string, ConferenceRow>;
   seedByName: Map<string, SeedRow[]>;
   seedByPlayerId: Map<string, SeedRow>;
+  parkMap: ParkFactorsMap;
   eqNum: (key: string, fallback: number) => number;
 }): SimOut | null {
-  const { player, destinationTeam, prediction, internals, teamByKey, confByKey, seedByName, seedByPlayerId, eqNum } = args;
+  const { player, destinationTeam, prediction, internals, teamByKey, confByKey, seedByName, seedByPlayerId, parkMap, eqNum } = args;
   const baPR = internals?.avg_power_rating ?? null;
   const obpPR = internals?.obp_power_rating ?? null;
   const isoPR = internals?.slg_power_rating ?? null;
@@ -235,13 +238,12 @@ function simulate(args: {
   const fromConference = fromTeamRow?.conference || player.conference || null;
   const fromConfStats = resolveConferenceStats(fromConference);
   const toConfStats = resolveConferenceStats(toTeamRow.conference || null);
-  const parkMap = readTeamParkFactorComponents();
-  const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "avg", parkMap);
-  const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "avg", parkMap);
-  const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "obp", parkMap);
-  const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "obp", parkMap);
-  const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.name, fromTeamRow?.park_factor ?? null, "iso", parkMap);
-  const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.name, toTeamRow?.park_factor ?? null, "iso", parkMap);
+  const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", parkMap, fromTeamRow?.name);
+  const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", parkMap, toTeamRow?.name);
+  const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", parkMap, fromTeamRow?.name);
+  const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", parkMap, toTeamRow?.name);
+  const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", parkMap, fromTeamRow?.name);
+  const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", parkMap, toTeamRow?.name);
   if (
     !fromConfStats || !toConfStats ||
     fromConfStats.avg_plus == null || toConfStats.avg_plus == null ||
@@ -321,6 +323,7 @@ function simulate(args: {
 
 export default function PlayerComparison() {
   const { toast } = useToast();
+  const { parkMap } = useParkFactors();
   const { hitterStats } = useHitterSeedData();
   const location = useLocation();
   const [compareAPlayerId, setCompareAPlayerId] = useState("");
@@ -336,14 +339,7 @@ export default function PlayerComparison() {
   const [compareBTeamOpen, setCompareBTeamOpen] = useState(false);
   const [compareBDestinationTeam, setCompareBDestinationTeam] = useState("Arizona State");
 
-  const { data: teams = [] } = useQuery({
-    queryKey: ["compare-teams-list"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("teams").select("name, conference, park_factor").order("name");
-      if (error) throw error;
-      return (data || []) as TeamRow[];
-    },
-  });
+  const { teams } = useTeamsTable();
   const { data: conferenceStats = [] } = useQuery({
     queryKey: ["compare-conference-stats"],
     queryFn: async () => {
@@ -482,10 +478,11 @@ export default function PlayerComparison() {
         confByKey,
         seedByName,
         seedByPlayerId,
+        parkMap,
         eqNum,
       }),
     };
-  }, [compareAPlayer, compareADestinationTeam, compareAPrediction, internalsByPrediction, teamByKey, confByKey, seedByName, seedByPlayerId, eqNum]);
+  }, [compareAPlayer, compareADestinationTeam, compareAPrediction, internalsByPrediction, teamByKey, confByKey, seedByName, seedByPlayerId, parkMap, eqNum]);
 
   const panelB: SimPanel = useMemo(() => {
     const previous = compareBPrediction
@@ -504,10 +501,11 @@ export default function PlayerComparison() {
         confByKey,
         seedByName,
         seedByPlayerId,
+        parkMap,
         eqNum,
       }),
     };
-  }, [compareBPlayer, compareBDestinationTeam, compareBPrediction, internalsByPrediction, teamByKey, confByKey, seedByName, seedByPlayerId, eqNum]);
+  }, [compareBPlayer, compareBDestinationTeam, compareBPrediction, internalsByPrediction, teamByKey, confByKey, seedByName, seedByPlayerId, parkMap, eqNum]);
 
   const renderPanel = (
     title: string,

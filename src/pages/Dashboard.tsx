@@ -75,9 +75,9 @@ const tickFormat = (metric: MetricKey, value: number) => {
   return value.toFixed(3);
 };
 
-const computeOWar = (wrcPlus: number | null | undefined): number | null => {
+const computeOWar = (wrcPlus: number | null | undefined, actualPa?: number | null): number | null => {
   if (wrcPlus == null) return null;
-  const pa = 260;
+  const pa = actualPa ?? 260;
   const runsPerPa = 0.13;
   const replacementRuns = (pa / 600) * 25;
   const offValue = (wrcPlus - 100) / 100;

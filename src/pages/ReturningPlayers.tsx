@@ -20,6 +20,7 @@ import {
 import { toast } from "sonner";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { useHitterSeedData } from "@/hooks/useHitterSeedData";
+import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import {
   DEFAULT_NIL_TIER_MULTIPLIERS,
   getProgramTierMultiplierByConference,
@@ -28,7 +29,9 @@ import {
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { readPlayerOverrides } from "@/lib/playerOverrides";
-import { readTeamParkFactorComponents, resolveMetricParkFactor } from "@/lib/parkFactors";
+import { useTeamsTable } from "@/hooks/useTeamsTable";
+import { resolveMetricParkFactor } from "@/lib/parkFactors";
+import { useParkFactors } from "@/hooks/useParkFactors";
 
 type SortKey =
   | "name"
@@ -555,9 +558,9 @@ const computeDerived = (avg: number | null, obp: number | null, slg: number | nu
   return { ops, iso, wrcPlus };
 };
 
-const computeOWarFromWrcPlus = (wrcPlus: number | null) => {
+const computeOWarFromWrcPlus = (wrcPlus: number | null, actualPa?: number | null) => {
   if (wrcPlus == null) return null;
-  const pa = 260;
+  const pa = actualPa ?? 260;
   const runsPerPa = 0.13;
   const replacementRuns = (pa / 600) * 25;
   const offValue = (wrcPlus - 100) / 100;
@@ -1307,16 +1310,7 @@ export default function ReturningPlayers() {
       .filter(Boolean) as Array<{ player: string; school: string; conference: string; source: string }>;
   }, [players, playerOverrides]);
 
-  const { data: teamsDirectory = [] } = useQuery({
-    queryKey: ["teams-directory-for-player-dashboard-edit"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("teams")
-        .select("name, conference, park_factor");
-      if (error) throw error;
-      return (data || []) as Array<{ name: string; conference: string | null; park_factor: number | null }>;
-    },
-  });
+  const { teams: teamsDirectory } = useTeamsTable();
 
   const bulkSave = useMutation({
     mutationFn: async () => {
@@ -1501,7 +1495,7 @@ export default function ReturningPlayers() {
     }
     return map;
   }, [teamsDirectory]);
-  const teamParkComponents = useMemo(() => readTeamParkFactorComponents(), [teamsDirectory]);
+  const { parkMap: teamParkComponents } = useParkFactors();
   const normalizePitchingTeam = useCallback((team: string | null | undefined) => {
     const raw = (team || "").trim();
     if (!raw) return "";
@@ -1632,43 +1626,8 @@ export default function ReturningPlayers() {
       });
     },
   });
-  // Supabase pitching storage queries
-  const { data: dbPitchingStatsAll = [] } = useQuery({
-    queryKey: ["returning-pitching-stats-storage"],
-    queryFn: async () => {
-      const all: any[] = [];
-      let from = 0;
-      while (true) {
-        const { data, error } = await supabase.from("pitching_stats_storage")
-          .select("player_name, team, handedness, role, era, fip, whip, k9, bb9, hr9, ip, g, gs")
-          .eq("season", 2025).range(from, from + 999);
-        if (error) throw error;
-        all.push(...(data || []));
-        if (!data || data.length < 1000) break;
-        from += 1000;
-      }
-      return all;
-    },
-    staleTime: 10 * 60 * 1000,
-  });
-  const { data: dbPitchingPowerAll = [] } = useQuery({
-    queryKey: ["returning-pitching-power-storage"],
-    queryFn: async () => {
-      const all: any[] = [];
-      let from = 0;
-      while (true) {
-        const { data, error } = await supabase.from("pitching_power_ratings_storage")
-          .select("player_name, team, stuff_plus, whiff_pct, bb_pct, hh_pct, iz_whiff_pct, chase_pct, barrel_pct, ld_pct, avg_exit_velo, gb_pct, iz_pct, ev90, pull_pct, la_10_30_pct, stuff_score, whiff_score, bb_score, hh_score, iz_whiff_score, chase_score, barrel_score, ld_score, avg_ev_score, gb_score, iz_score, ev90_score, pull_score, la_10_30_score, era_pr_plus, fip_pr_plus, whip_pr_plus, k9_pr_plus, hr9_pr_plus, bb9_pr_plus")
-          .eq("season", 2025).range(from, from + 999);
-        if (error) throw error;
-        all.push(...(data || []));
-        if (!data || data.length < 1000) break;
-        from += 1000;
-      }
-      return all;
-    },
-    staleTime: 10 * 60 * 1000,
-  });
+  // Pitching Master – single source for stats + power metrics
+  const { pitchers: pitchingMasterRows } = usePitchingSeedData();
 
   const pitchingRows = useMemo<PitchingDashboardRow[]>(() => {
     const eq = readPitchingWeights();
@@ -1683,31 +1642,7 @@ export default function ReturningPlayers() {
     } catch {
       // ignore malformed role overrides
     }
-    const scoringByNameTeam = new Map<string, {
-      stuff: number | null;
-      whiff: number | null;
-      bb: number | null;
-      barrel: number | null;
-      eraPrPlus: number | null;
-      fipPrPlus: number | null;
-      whipPrPlus: number | null;
-      k9PrPlus: number | null;
-      hr9PrPlus: number | null;
-      bb9PrPlus: number | null;
-    }>();
-    const scoringByName = new Map<string, Array<{
-      stuff: number | null;
-      whiff: number | null;
-      bb: number | null;
-      barrel: number | null;
-      eraPrPlus: number | null;
-      fipPrPlus: number | null;
-      whipPrPlus: number | null;
-      k9PrPlus: number | null;
-      hr9PrPlus: number | null;
-      bb9PrPlus: number | null;
-    }>>();
-    // Calculate scores from raw metrics when stored scores are null
+    // Calculate scores from raw metrics
     const normalCdf = (x: number) => {
       const sign = x < 0 ? -1 : 1;
       const ax = Math.abs(x) / Math.sqrt(2);
@@ -1721,53 +1656,10 @@ export default function ReturningPlayers() {
       return lowerIsBetter ? 100 - pct : pct;
     };
 
-    for (const pr of dbPitchingPowerAll) {
-      const name = (pr.player_name || "").trim();
-      const team = normalizePitchingTeam(pr.team);
-      if (!name) continue;
-      const scoreObj = {
-        stuff: pr.stuff_score ?? calcScore(pr.stuff_plus, powerEq.p_ncaa_avg_stuff_plus, powerEq.p_sd_stuff_plus),
-        whiff: pr.whiff_score ?? calcScore(pr.whiff_pct, powerEq.p_ncaa_avg_whiff_pct, powerEq.p_sd_whiff_pct),
-        bb: pr.bb_score ?? calcScore(pr.bb_pct, powerEq.p_ncaa_avg_bb_pct, powerEq.p_sd_bb_pct, true),
-        hh: pr.hh_score ?? calcScore(pr.hh_pct, powerEq.p_ncaa_avg_hh_pct, powerEq.p_sd_hh_pct, true),
-        izWhiff: pr.iz_whiff_score ?? calcScore(pr.iz_whiff_pct, powerEq.p_ncaa_avg_in_zone_whiff_pct, powerEq.p_sd_in_zone_whiff_pct),
-        chase: pr.chase_score ?? calcScore(pr.chase_pct, powerEq.p_ncaa_avg_chase_pct, powerEq.p_sd_chase_pct),
-        barrel: pr.barrel_score ?? calcScore(pr.barrel_pct, powerEq.p_ncaa_avg_barrel_pct, powerEq.p_sd_barrel_pct, true),
-        ld: pr.ld_score ?? calcScore(pr.ld_pct, powerEq.p_ncaa_avg_ld_pct, powerEq.p_sd_ld_pct, true),
-        avgEv: pr.avg_ev_score ?? calcScore(pr.avg_exit_velo, powerEq.p_ncaa_avg_avg_ev, powerEq.p_sd_avg_ev, true),
-        gb: pr.gb_score ?? calcScore(pr.gb_pct, powerEq.p_ncaa_avg_gb_pct, powerEq.p_sd_gb_pct),
-        iz: pr.iz_score ?? calcScore(pr.iz_pct, powerEq.p_ncaa_avg_in_zone_pct, powerEq.p_sd_in_zone_pct),
-        ev90: pr.ev90_score ?? calcScore(pr.ev90, powerEq.p_ncaa_avg_ev90, powerEq.p_sd_ev90, true),
-        pull: pr.pull_score ?? calcScore(pr.pull_pct, powerEq.p_ncaa_avg_pull_pct, powerEq.p_sd_pull_pct, true),
-        la1030: pr.la_10_30_score ?? calcScore(pr.la_10_30_pct, powerEq.p_ncaa_avg_la_10_30_pct, powerEq.p_sd_la_10_30_pct, true),
-        eraPrPlus: null as number | null,
-        fipPrPlus: null as number | null,
-        whipPrPlus: null as number | null,
-        k9PrPlus: null as number | null,
-        hr9PrPlus: null as number | null,
-        bb9PrPlus: null as number | null,
-      };
-      const recomputed = computePitchingPrPlusFromScores(scoreObj, powerEq);
-      scoreObj.eraPrPlus = recomputed.eraPrPlus ?? pr.era_pr_plus ?? null;
-      scoreObj.fipPrPlus = recomputed.fipPrPlus ?? pr.fip_pr_plus ?? null;
-      scoreObj.whipPrPlus = recomputed.whipPrPlus ?? pr.whip_pr_plus ?? null;
-      scoreObj.k9PrPlus = recomputed.k9PrPlus ?? pr.k9_pr_plus ?? null;
-      scoreObj.hr9PrPlus = recomputed.hr9PrPlus ?? pr.hr9_pr_plus ?? null;
-      scoreObj.bb9PrPlus = recomputed.bb9PrPlus ?? pr.bb9_pr_plus ?? null;
-      scoringByNameTeam.set(nameTeamKey(name, team), scoreObj);
-      const nameKey = normalizeName(name);
-      const bucket = scoringByName.get(nameKey) || [];
-      bucket.push(scoreObj);
-      scoringByName.set(nameKey, bucket);
-    }
-
-    // DEBUG: remove after fixing
-    console.log("[DEBUG pitching dashboard]", { dbStatsCount: dbPitchingStatsAll.length, dbPowerCount: dbPitchingPowerAll.length, scoringMapSize: scoringByNameTeam.size, sampleScore: Array.from(scoringByNameTeam.entries()).slice(0, 1) });
-    if (dbPitchingStatsAll.length > 0) {
-      console.log("[DEBUG using db stats]", dbPitchingStatsAll.length);
-      return dbPitchingStatsAll
-        .map((r: any, idx: number) => {
-          const playerName = (r.player_name || "").trim();
+    if (pitchingMasterRows.length > 0) {
+      return pitchingMasterRows
+        .map((r, idx) => {
+          const playerName = (r.playerName || "").trim();
           const normalizedTeam = normalizePitchingTeam(r.team);
           const teamMatch = teamsByNorm.get(normalize(normalizedTeam));
           const era = r.era != null ? Number(r.era) : null;
@@ -1782,11 +1674,38 @@ export default function ReturningPlayers() {
           const roleKey = `${normalizeName(playerName)}|${normalize(normalizedTeam)}`;
           const projectedRole = roleOverrides[roleKey] || baseRole || "SM";
           const projectedIp = projectedRole === "SP" ? eq.pwar_ip_sp : projectedRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
-          const byNameTeam = scoringByNameTeam.get(nameTeamKey(playerName, normalizedTeam));
-          const byNameBucket = scoringByName.get(normalizeName(playerName)) || [];
-          const byNameUnique = byNameBucket.length === 1 ? byNameBucket[0] : null;
-          const chosenScores = byNameTeam || byNameUnique || null;
-          if (idx === 0) console.log("[DEBUG row0 scoring]", { playerName, normalizedTeam, lookupKey: nameTeamKey(playerName, normalizedTeam), byNameTeam, byNameUnique, chosenScores, scoringMapSample: Array.from(scoringByNameTeam.keys()).slice(0, 3) });
+
+          // Compute power-rating scores from Pitching Master raw metrics
+          const scoreObj = {
+            stuff: calcScore(r.miss_pct, powerEq.p_ncaa_avg_stuff_plus, powerEq.p_sd_stuff_plus),
+            whiff: calcScore(r.miss_pct, powerEq.p_ncaa_avg_whiff_pct, powerEq.p_sd_whiff_pct),
+            bb: calcScore(r.bb_pct, powerEq.p_ncaa_avg_bb_pct, powerEq.p_sd_bb_pct, true),
+            hh: calcScore(r.hard_hit_pct, powerEq.p_ncaa_avg_hh_pct, powerEq.p_sd_hh_pct, true),
+            izWhiff: calcScore(r.in_zone_whiff_pct, powerEq.p_ncaa_avg_in_zone_whiff_pct, powerEq.p_sd_in_zone_whiff_pct),
+            chase: calcScore(r.chase_pct, powerEq.p_ncaa_avg_chase_pct, powerEq.p_sd_chase_pct),
+            barrel: calcScore(r.barrel_pct, powerEq.p_ncaa_avg_barrel_pct, powerEq.p_sd_barrel_pct, true),
+            ld: calcScore(r.line_pct, powerEq.p_ncaa_avg_ld_pct, powerEq.p_sd_ld_pct, true),
+            avgEv: calcScore(r.exit_vel, powerEq.p_ncaa_avg_avg_ev, powerEq.p_sd_avg_ev, true),
+            gb: calcScore(r.ground_pct, powerEq.p_ncaa_avg_gb_pct, powerEq.p_sd_gb_pct),
+            iz: calcScore(r.in_zone_pct, powerEq.p_ncaa_avg_in_zone_pct, powerEq.p_sd_in_zone_pct),
+            ev90: calcScore(r.vel_90th, powerEq.p_ncaa_avg_ev90, powerEq.p_sd_ev90, true),
+            pull: calcScore(r.h_pull_pct, powerEq.p_ncaa_avg_pull_pct, powerEq.p_sd_pull_pct, true),
+            la1030: calcScore(r.la_10_30_pct, powerEq.p_ncaa_avg_la_10_30_pct, powerEq.p_sd_la_10_30_pct, true),
+            eraPrPlus: null as number | null,
+            fipPrPlus: null as number | null,
+            whipPrPlus: null as number | null,
+            k9PrPlus: null as number | null,
+            hr9PrPlus: null as number | null,
+            bb9PrPlus: null as number | null,
+          };
+          const recomputed = computePitchingPrPlusFromScores(scoreObj, powerEq);
+          scoreObj.eraPrPlus = recomputed.eraPrPlus ?? null;
+          scoreObj.fipPrPlus = recomputed.fipPrPlus ?? null;
+          scoreObj.whipPrPlus = recomputed.whipPrPlus ?? null;
+          scoreObj.k9PrPlus = recomputed.k9PrPlus ?? null;
+          scoreObj.hr9PrPlus = recomputed.hr9PrPlus ?? null;
+          scoreObj.bb9PrPlus = recomputed.bb9PrPlus ?? null;
+
           const classTransition = DEFAULT_PITCHING_CLASS_TRANSITION;
           const devAggressiveness = DEFAULT_PITCHING_DEV_AGGRESSIVENESS;
 
@@ -1797,21 +1716,21 @@ export default function ReturningPlayers() {
           const classBb9Adj = toPitchingClassAdj(classTransition, eq.class_bb9_fs, eq.class_bb9_sj, eq.class_bb9_js, eq.class_bb9_gr);
           const classHr9Adj = toPitchingClassAdj(classTransition, eq.class_hr9_fs, eq.class_hr9_sj, eq.class_hr9_js, eq.class_hr9_gr);
 
-          const pEra = projectPitchingRate({ lastStat: era, prPlus: chosenScores?.eraPrPlus ?? null, ncaaAvg: eq.era_plus_ncaa_avg, ncaaSd: eq.era_plus_ncaa_sd, prSd: eq.era_pr_sd, classAdjustment: classEraAdj, devAggressiveness, thresholds: eq.era_damp_thresholds, impacts: eq.era_damp_impacts, lowerIsBetter: true });
-          const pFip = projectPitchingRate({ lastStat: fip, prPlus: chosenScores?.fipPrPlus ?? null, ncaaAvg: eq.fip_plus_ncaa_avg, ncaaSd: eq.fip_plus_ncaa_sd, prSd: eq.fip_pr_sd, classAdjustment: classFipAdj, devAggressiveness, thresholds: eq.fip_damp_thresholds, impacts: eq.fip_damp_impacts, lowerIsBetter: true });
-          const pWhip = projectPitchingRate({ lastStat: whip, prPlus: chosenScores?.whipPrPlus ?? null, ncaaAvg: eq.whip_plus_ncaa_avg, ncaaSd: eq.whip_plus_ncaa_sd, prSd: eq.whip_pr_sd, classAdjustment: classWhipAdj, devAggressiveness, thresholds: eq.whip_damp_thresholds, impacts: eq.whip_damp_impacts, lowerIsBetter: true });
-          const pK9 = projectPitchingRate({ lastStat: k9, prPlus: chosenScores?.k9PrPlus ?? null, ncaaAvg: eq.k9_plus_ncaa_avg, ncaaSd: eq.k9_plus_ncaa_sd, prSd: eq.k9_pr_sd, classAdjustment: classK9Adj, devAggressiveness, thresholds: eq.k9_damp_thresholds, impacts: eq.k9_damp_impacts, lowerIsBetter: false });
-          const pBb9 = projectPitchingRate({ lastStat: bb9, prPlus: chosenScores?.bb9PrPlus ?? null, ncaaAvg: eq.bb9_plus_ncaa_avg, ncaaSd: eq.bb9_plus_ncaa_sd, prSd: eq.bb9_pr_sd, classAdjustment: classBb9Adj, devAggressiveness, thresholds: eq.bb9_damp_thresholds, impacts: eq.bb9_damp_impacts, lowerIsBetter: true });
-          const pHr9 = projectPitchingRate({ lastStat: hr9, prPlus: chosenScores?.hr9PrPlus ?? null, ncaaAvg: eq.hr9_plus_ncaa_avg, ncaaSd: eq.hr9_plus_ncaa_sd, prSd: eq.hr9_pr_sd, classAdjustment: classHr9Adj, devAggressiveness, thresholds: eq.hr9_damp_thresholds, impacts: eq.hr9_damp_impacts, lowerIsBetter: true });
+          const pEra = projectPitchingRate({ lastStat: era, prPlus: scoreObj.eraPrPlus, ncaaAvg: eq.era_plus_ncaa_avg, ncaaSd: eq.era_plus_ncaa_sd, prSd: eq.era_pr_sd, classAdjustment: classEraAdj, devAggressiveness, thresholds: eq.era_damp_thresholds, impacts: eq.era_damp_impacts, lowerIsBetter: true });
+          const pFip = projectPitchingRate({ lastStat: fip, prPlus: scoreObj.fipPrPlus, ncaaAvg: eq.fip_plus_ncaa_avg, ncaaSd: eq.fip_plus_ncaa_sd, prSd: eq.fip_pr_sd, classAdjustment: classFipAdj, devAggressiveness, thresholds: eq.fip_damp_thresholds, impacts: eq.fip_damp_impacts, lowerIsBetter: true });
+          const pWhip = projectPitchingRate({ lastStat: whip, prPlus: scoreObj.whipPrPlus, ncaaAvg: eq.whip_plus_ncaa_avg, ncaaSd: eq.whip_plus_ncaa_sd, prSd: eq.whip_pr_sd, classAdjustment: classWhipAdj, devAggressiveness, thresholds: eq.whip_damp_thresholds, impacts: eq.whip_damp_impacts, lowerIsBetter: true });
+          const pK9 = projectPitchingRate({ lastStat: k9, prPlus: scoreObj.k9PrPlus, ncaaAvg: eq.k9_plus_ncaa_avg, ncaaSd: eq.k9_plus_ncaa_sd, prSd: eq.k9_pr_sd, classAdjustment: classK9Adj, devAggressiveness, thresholds: eq.k9_damp_thresholds, impacts: eq.k9_damp_impacts, lowerIsBetter: false });
+          const pBb9 = projectPitchingRate({ lastStat: bb9, prPlus: scoreObj.bb9PrPlus, ncaaAvg: eq.bb9_plus_ncaa_avg, ncaaSd: eq.bb9_plus_ncaa_sd, prSd: eq.bb9_pr_sd, classAdjustment: classBb9Adj, devAggressiveness, thresholds: eq.bb9_damp_thresholds, impacts: eq.bb9_damp_impacts, lowerIsBetter: true });
+          const pHr9 = projectPitchingRate({ lastStat: hr9, prPlus: scoreObj.hr9PrPlus, ncaaAvg: eq.hr9_plus_ncaa_avg, ncaaSd: eq.hr9_plus_ncaa_sd, prSd: eq.hr9_pr_sd, classAdjustment: classHr9Adj, devAggressiveness, thresholds: eq.hr9_damp_thresholds, impacts: eq.hr9_damp_impacts, lowerIsBetter: true });
 
           const teamNameForPark = teamMatch?.name || normalizedTeam || null;
           const fallbackPark = teamMatch?.park_factor ?? null;
-          const avgPark = parkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "avg", teamParkComponents));
-          const obpPark = parkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "obp", teamParkComponents));
-          const isoPark = parkToIndex(resolveMetricParkFactor(teamNameForPark, fallbackPark, "iso", teamParkComponents));
-          const eraParkRaw = resolveMetricParkFactor(teamNameForPark, null, "era", teamParkComponents);
-          const whipParkRaw = resolveMetricParkFactor(teamNameForPark, null, "whip", teamParkComponents);
-          const hr9ParkRaw = resolveMetricParkFactor(teamNameForPark, null, "hr9", teamParkComponents);
+          const avgPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "avg", teamParkComponents, teamNameForPark, fallbackPark));
+          const obpPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "obp", teamParkComponents, teamNameForPark, fallbackPark));
+          const isoPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "iso", teamParkComponents, teamNameForPark, fallbackPark));
+          const eraParkRaw = resolveMetricParkFactor(teamMatch?.id, "era", teamParkComponents, teamNameForPark);
+          const whipParkRaw = resolveMetricParkFactor(teamMatch?.id, "whip", teamParkComponents, teamNameForPark);
+          const hr9ParkRaw = resolveMetricParkFactor(teamMatch?.id, "hr9", teamParkComponents, teamNameForPark);
           const eraParkFactor = parkToIndex(eraParkRaw ?? avgPark) / 100;
           const whipParkFactor = parkToIndex(whipParkRaw ?? ((0.7 * avgPark) + (0.3 * obpPark))) / 100;
           const hr9ParkFactor = parkToIndex(hr9ParkRaw ?? isoPark) / 100;
@@ -1819,35 +1738,35 @@ export default function ReturningPlayers() {
           const parkAdjustedWhip = pWhip == null ? null : pWhip * whipParkFactor;
           const parkAdjustedHr9 = pHr9 == null ? null : pHr9 * hr9ParkFactor;
 
-          const pRvPlus = chosenScores?.eraPrPlus != null ? chosenScores.eraPrPlus : null;
+          const pRvPlus = scoreObj.eraPrPlus;
           const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);
           const pWar = pitcherValue == null || eq.pwar_runs_per_win === 0 ? null : ((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
 
           const pitchingTierMultipliers = { sec: eq.market_tier_sec, p4: eq.market_tier_acc_big12, bigTen: eq.market_tier_big_ten, strongMid: eq.market_tier_strong_mid, lowMajor: eq.market_tier_low_major };
-          const conferenceForMarket = teamMatch?.conference || null;
+          const conferenceForMarket = teamMatch?.conference ?? r.conference ?? null;
           const ptm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
           const pvm = getPitchingPvfForRole(projectedRole, eq);
           const marketEligible = canShowPitchingMarketValue(normalizedTeam, conferenceForMarket);
           const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
 
           return {
-            id: `pitching-db-${idx}`,
+            id: r.id || `pitching-master-${idx}`,
             playerName,
             team: normalizedTeam || null,
-            conference: teamMatch?.conference ?? null,
-            handedness: (r.handedness || "").trim() || null,
+            conference: teamMatch?.conference ?? r.conference ?? null,
+            handedness: (r.throwHand || "").trim() || null,
             class_transition: classTransition,
             dev_aggressiveness: devAggressiveness,
-            stuff_score: chosenScores?.stuff ?? null,
-            whiff_score: chosenScores?.whiff ?? null,
-            bb_score: chosenScores?.bb ?? null,
-            barrel_score: chosenScores?.barrel ?? null,
-            era_pr_plus: chosenScores?.eraPrPlus ?? null,
-            fip_pr_plus: chosenScores?.fipPrPlus ?? null,
-            whip_pr_plus: chosenScores?.whipPrPlus ?? null,
-            k9_pr_plus: chosenScores?.k9PrPlus ?? null,
-            hr9_pr_plus: chosenScores?.hr9PrPlus ?? null,
-            bb9_pr_plus: chosenScores?.bb9PrPlus ?? null,
+            stuff_score: scoreObj.stuff,
+            whiff_score: scoreObj.whiff,
+            bb_score: scoreObj.bb,
+            barrel_score: scoreObj.barrel,
+            era_pr_plus: scoreObj.eraPrPlus,
+            fip_pr_plus: scoreObj.fipPrPlus,
+            whip_pr_plus: scoreObj.whipPrPlus,
+            k9_pr_plus: scoreObj.k9PrPlus,
+            hr9_pr_plus: scoreObj.hr9PrPlus,
+            bb9_pr_plus: scoreObj.bb9PrPlus,
             era, fip, whip, k9, bb9, hr9,
             p_era: parkAdjustedEra, p_fip: pFip, p_whip: parkAdjustedWhip,
             p_k9: pK9, p_bb9: pBb9, p_hr9: parkAdjustedHr9,
@@ -1965,9 +1884,7 @@ export default function ReturningPlayers() {
         .filter(Boolean) as PitchingDashboardRow[];
     }
     return [] as PitchingDashboardRow[];
-  }, [normalizePitchingTeam, pitchingSeasonFallbackRows, pitchingSupabaseRows, teamParkComponents, teamsByNorm, dbPitchingStatsAll, dbPitchingPowerAll]);
-  // DEBUG: remove after fixing
-  console.log("[DEBUG pitchingRows]", { count: pitchingRows.length, sample: pitchingRows.slice(0, 1) });
+  }, [normalizePitchingTeam, pitchingSeasonFallbackRows, pitchingSupabaseRows, teamParkComponents, teamsByNorm, pitchingMasterRows]);
   const filteredPitchingRows = useMemo(() => {
     const q = pitchingSearch.trim().toLowerCase();
     if (!q) return pitchingRows;
@@ -2061,31 +1978,6 @@ export default function ReturningPlayers() {
     URL.revokeObjectURL(url);
     toast.success(`Exported ${rows.length} blank market value row(s).`);
   }, [hittingBlankMarketRows, pitchingBlankMarketRows]);
-  useEffect(() => {
-    const key = "pitching_stats_storage_2025_v1";
-    const raw = localStorage.getItem(key);
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw) as { headers?: string[]; rows?: Array<{ id?: string; values?: string[] }> };
-      const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
-      let changed = false;
-      const nextRows = rows.map((r) => {
-        const values = Array.isArray(r.values) ? [...r.values] : [];
-        const before = (values[1] || "").trim();
-        const after = normalizePitchingTeam(before);
-        if (after !== before) {
-          changed = true;
-          values[1] = after;
-        }
-        return { ...r, values };
-      });
-      if (!changed) return;
-      localStorage.setItem(key, JSON.stringify({ headers: parsed.headers, rows: nextRows }));
-    } catch {
-      // ignore localStorage parse errors
-    }
-  }, [normalizePitchingTeam]);
-
   const SortButton = ({ label, sortKeyVal }: { label: string; sortKeyVal: SortKey }) => (
     <Button
       variant="ghost"

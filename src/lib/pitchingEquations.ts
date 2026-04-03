@@ -116,7 +116,79 @@ export type PitchingEquationWeights = {
   transfer_hr9_park_weight: number;
 };
 
+import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
+
 export const PITCHING_EQUATIONS_STORAGE_KEY = "admin_pitching_equations_v1";
+
+// Supabase-backed cache for pitching weights
+let _supabaseWeightsCache: Partial<PitchingEquationWeights> | null = null;
+let _supabaseCacheLoading = false;
+
+function _loadSupabasePitchingWeights() {
+  if (_supabaseCacheLoading || _supabaseWeightsCache) return;
+  _supabaseCacheLoading = true;
+  loadEquationWeightsMap(2025)
+    .then((map) => {
+      const partial: Partial<PitchingEquationWeights> = {};
+      const get = (key: string) => {
+        const v = map.get(key) ?? map.get(key.toLowerCase());
+        return v != null && Number.isFinite(v) ? v : undefined;
+      };
+      // Map Supabase "Equation Weights" names to PitchingEquationWeights fields
+      const fields: Array<[keyof PitchingEquationWeights, string]> = [
+        ["era_plus_ncaa_avg", "era_plus_ncaa_avg"],
+        ["era_plus_ncaa_sd", "era_plus_ncaa_sd"],
+        ["era_plus_scale", "era_plus_scale"],
+        ["fip_plus_ncaa_avg", "fip_plus_ncaa_avg"],
+        ["fip_plus_ncaa_sd", "fip_plus_ncaa_sd"],
+        ["fip_plus_scale", "fip_plus_scale"],
+        ["whip_plus_ncaa_avg", "whip_plus_ncaa_avg"],
+        ["whip_plus_ncaa_sd", "whip_plus_ncaa_sd"],
+        ["whip_plus_scale", "whip_plus_scale"],
+        ["k9_plus_ncaa_avg", "k9_plus_ncaa_avg"],
+        ["k9_plus_ncaa_sd", "k9_plus_ncaa_sd"],
+        ["k9_plus_scale", "k9_plus_scale"],
+        ["bb9_plus_ncaa_avg", "bb9_plus_ncaa_avg"],
+        ["bb9_plus_ncaa_sd", "bb9_plus_ncaa_sd"],
+        ["bb9_plus_scale", "bb9_plus_scale"],
+        ["hr9_plus_ncaa_avg", "hr9_plus_ncaa_avg"],
+        ["hr9_plus_ncaa_sd", "hr9_plus_ncaa_sd"],
+        ["hr9_plus_scale", "hr9_plus_scale"],
+        ["transfer_era_power_weight", "transfer_era_power_weight"],
+        ["transfer_era_conference_weight", "transfer_era_conference_weight"],
+        ["transfer_era_competition_weight", "transfer_era_competition_weight"],
+        ["transfer_era_park_weight", "transfer_era_park_weight"],
+        ["transfer_fip_power_weight", "transfer_fip_power_weight"],
+        ["transfer_fip_conference_weight", "transfer_fip_conference_weight"],
+        ["transfer_fip_competition_weight", "transfer_fip_competition_weight"],
+        ["transfer_fip_park_weight", "transfer_fip_park_weight"],
+        ["transfer_whip_power_weight", "transfer_whip_power_weight"],
+        ["transfer_whip_conference_weight", "transfer_whip_conference_weight"],
+        ["transfer_whip_competition_weight", "transfer_whip_competition_weight"],
+        ["transfer_whip_park_weight", "transfer_whip_park_weight"],
+        ["transfer_k9_power_weight", "transfer_k9_power_weight"],
+        ["transfer_k9_conference_weight", "transfer_k9_conference_weight"],
+        ["transfer_k9_competition_weight", "transfer_k9_competition_weight"],
+        ["transfer_bb9_power_weight", "transfer_bb9_power_weight"],
+        ["transfer_bb9_conference_weight", "transfer_bb9_conference_weight"],
+        ["transfer_bb9_competition_weight", "transfer_bb9_competition_weight"],
+        ["transfer_hr9_power_weight", "transfer_hr9_power_weight"],
+        ["transfer_hr9_conference_weight", "transfer_hr9_conference_weight"],
+        ["transfer_hr9_competition_weight", "transfer_hr9_competition_weight"],
+        ["transfer_hr9_park_weight", "transfer_hr9_park_weight"],
+      ];
+      for (const [field, key] of fields) {
+        const v = get(key);
+        if (v !== undefined) (partial as any)[field] = v;
+      }
+      _supabaseWeightsCache = partial;
+    })
+    .catch(() => { _supabaseWeightsCache = {}; })
+    .finally(() => { _supabaseCacheLoading = false; });
+}
+
+// Kick off the cache load immediately on module import
+_loadSupabasePitchingWeights();
 
 export const DEFAULT_PITCHING_WEIGHTS: PitchingEquationWeights = {
   fip_plus_weight: 0.3,
@@ -237,84 +309,91 @@ export const DEFAULT_PITCHING_WEIGHTS: PitchingEquationWeights = {
 };
 
 export const readPitchingWeights = (): PitchingEquationWeights => {
+  // Start with defaults, overlay Supabase cache, then localStorage
+  const base = { ...DEFAULT_PITCHING_WEIGHTS };
+  if (_supabaseWeightsCache) {
+    for (const [k, v] of Object.entries(_supabaseWeightsCache)) {
+      if (v != null && Number.isFinite(v as any)) (base as any)[k] = v;
+    }
+  }
   try {
     const raw = localStorage.getItem(PITCHING_EQUATIONS_STORAGE_KEY);
-    if (!raw) return DEFAULT_PITCHING_WEIGHTS;
+    if (!raw) return base;
     const parsed = JSON.parse(raw) as Partial<PitchingEquationWeights>;
     const asNumArray = (v: unknown) => Array.isArray(v) ? v.map((n) => Number(n)).filter((n) => Number.isFinite(n)) : [];
     const withFallbackArray = (arr: number[], fallback: number[], expectedLength: number) =>
       arr.length === expectedLength ? arr : fallback;
     const merged = {
-      fip_plus_weight: Number.isFinite(parsed.fip_plus_weight) ? Number(parsed.fip_plus_weight) : DEFAULT_PITCHING_WEIGHTS.fip_plus_weight,
-      era_plus_weight: Number.isFinite(parsed.era_plus_weight) ? Number(parsed.era_plus_weight) : DEFAULT_PITCHING_WEIGHTS.era_plus_weight,
-      whip_plus_weight: Number.isFinite(parsed.whip_plus_weight) ? Number(parsed.whip_plus_weight) : DEFAULT_PITCHING_WEIGHTS.whip_plus_weight,
-      k9_plus_weight: Number.isFinite(parsed.k9_plus_weight) ? Number(parsed.k9_plus_weight) : DEFAULT_PITCHING_WEIGHTS.k9_plus_weight,
-      bb9_plus_weight: Number.isFinite(parsed.bb9_plus_weight) ? Number(parsed.bb9_plus_weight) : DEFAULT_PITCHING_WEIGHTS.bb9_plus_weight,
-      hr9_plus_weight: Number.isFinite(parsed.hr9_plus_weight) ? Number(parsed.hr9_plus_weight) : DEFAULT_PITCHING_WEIGHTS.hr9_plus_weight,
-      era_plus_ncaa_avg: Number.isFinite(parsed.era_plus_ncaa_avg) ? Number(parsed.era_plus_ncaa_avg) : DEFAULT_PITCHING_WEIGHTS.era_plus_ncaa_avg,
-      era_plus_ncaa_sd: Number.isFinite(parsed.era_plus_ncaa_sd) ? Number(parsed.era_plus_ncaa_sd) : DEFAULT_PITCHING_WEIGHTS.era_plus_ncaa_sd,
-      era_pr_sd: Number.isFinite(parsed.era_pr_sd) ? Number(parsed.era_pr_sd) : DEFAULT_PITCHING_WEIGHTS.era_pr_sd,
-      era_plus_scale: Number.isFinite(parsed.era_plus_scale) ? Number(parsed.era_plus_scale) : DEFAULT_PITCHING_WEIGHTS.era_plus_scale,
-      fip_plus_ncaa_avg: Number.isFinite(parsed.fip_plus_ncaa_avg) ? Number(parsed.fip_plus_ncaa_avg) : DEFAULT_PITCHING_WEIGHTS.fip_plus_ncaa_avg,
-      fip_plus_ncaa_sd: Number.isFinite(parsed.fip_plus_ncaa_sd) ? Number(parsed.fip_plus_ncaa_sd) : DEFAULT_PITCHING_WEIGHTS.fip_plus_ncaa_sd,
-      fip_pr_sd: Number.isFinite(parsed.fip_pr_sd) ? Number(parsed.fip_pr_sd) : DEFAULT_PITCHING_WEIGHTS.fip_pr_sd,
-      fip_plus_scale: Number.isFinite(parsed.fip_plus_scale) ? Number(parsed.fip_plus_scale) : DEFAULT_PITCHING_WEIGHTS.fip_plus_scale,
-      whip_plus_ncaa_avg: Number.isFinite(parsed.whip_plus_ncaa_avg) ? Number(parsed.whip_plus_ncaa_avg) : DEFAULT_PITCHING_WEIGHTS.whip_plus_ncaa_avg,
-      whip_plus_ncaa_sd: Number.isFinite(parsed.whip_plus_ncaa_sd) ? Number(parsed.whip_plus_ncaa_sd) : DEFAULT_PITCHING_WEIGHTS.whip_plus_ncaa_sd,
-      whip_pr_sd: Number.isFinite(parsed.whip_pr_sd) ? Number(parsed.whip_pr_sd) : DEFAULT_PITCHING_WEIGHTS.whip_pr_sd,
-      whip_plus_scale: Number.isFinite(parsed.whip_plus_scale) ? Number(parsed.whip_plus_scale) : DEFAULT_PITCHING_WEIGHTS.whip_plus_scale,
-      k9_plus_ncaa_avg: Number.isFinite(parsed.k9_plus_ncaa_avg) ? Number(parsed.k9_plus_ncaa_avg) : DEFAULT_PITCHING_WEIGHTS.k9_plus_ncaa_avg,
-      k9_plus_ncaa_sd: Number.isFinite(parsed.k9_plus_ncaa_sd) ? Number(parsed.k9_plus_ncaa_sd) : DEFAULT_PITCHING_WEIGHTS.k9_plus_ncaa_sd,
-      k9_pr_sd: Number.isFinite(parsed.k9_pr_sd) ? Number(parsed.k9_pr_sd) : DEFAULT_PITCHING_WEIGHTS.k9_pr_sd,
-      k9_plus_scale: Number.isFinite(parsed.k9_plus_scale) ? Number(parsed.k9_plus_scale) : DEFAULT_PITCHING_WEIGHTS.k9_plus_scale,
-      bb9_plus_ncaa_avg: Number.isFinite(parsed.bb9_plus_ncaa_avg) ? Number(parsed.bb9_plus_ncaa_avg) : DEFAULT_PITCHING_WEIGHTS.bb9_plus_ncaa_avg,
-      bb9_plus_ncaa_sd: Number.isFinite(parsed.bb9_plus_ncaa_sd) ? Number(parsed.bb9_plus_ncaa_sd) : DEFAULT_PITCHING_WEIGHTS.bb9_plus_ncaa_sd,
-      bb9_pr_sd: Number.isFinite(parsed.bb9_pr_sd) ? Number(parsed.bb9_pr_sd) : DEFAULT_PITCHING_WEIGHTS.bb9_pr_sd,
-      bb9_plus_scale: Number.isFinite(parsed.bb9_plus_scale) ? Number(parsed.bb9_plus_scale) : DEFAULT_PITCHING_WEIGHTS.bb9_plus_scale,
-      hr9_plus_ncaa_avg: Number.isFinite(parsed.hr9_plus_ncaa_avg) ? Number(parsed.hr9_plus_ncaa_avg) : DEFAULT_PITCHING_WEIGHTS.hr9_plus_ncaa_avg,
-      hr9_plus_ncaa_sd: Number.isFinite(parsed.hr9_plus_ncaa_sd) ? Number(parsed.hr9_plus_ncaa_sd) : DEFAULT_PITCHING_WEIGHTS.hr9_plus_ncaa_sd,
-      hr9_pr_sd: Number.isFinite(parsed.hr9_pr_sd) ? Number(parsed.hr9_pr_sd) : DEFAULT_PITCHING_WEIGHTS.hr9_pr_sd,
-      hr9_plus_scale: Number.isFinite(parsed.hr9_plus_scale) ? Number(parsed.hr9_plus_scale) : DEFAULT_PITCHING_WEIGHTS.hr9_plus_scale,
-      era_damp_thresholds: withFallbackArray(asNumArray(parsed.era_damp_thresholds), DEFAULT_PITCHING_WEIGHTS.era_damp_thresholds, DEFAULT_PITCHING_WEIGHTS.era_damp_thresholds.length),
-      era_damp_impacts: withFallbackArray(asNumArray(parsed.era_damp_impacts), DEFAULT_PITCHING_WEIGHTS.era_damp_impacts, DEFAULT_PITCHING_WEIGHTS.era_damp_impacts.length),
-      fip_damp_thresholds: withFallbackArray(asNumArray(parsed.fip_damp_thresholds), DEFAULT_PITCHING_WEIGHTS.fip_damp_thresholds, DEFAULT_PITCHING_WEIGHTS.fip_damp_thresholds.length),
-      fip_damp_impacts: withFallbackArray(asNumArray(parsed.fip_damp_impacts), DEFAULT_PITCHING_WEIGHTS.fip_damp_impacts, DEFAULT_PITCHING_WEIGHTS.fip_damp_impacts.length),
-      whip_damp_thresholds: withFallbackArray(asNumArray(parsed.whip_damp_thresholds), DEFAULT_PITCHING_WEIGHTS.whip_damp_thresholds, DEFAULT_PITCHING_WEIGHTS.whip_damp_thresholds.length),
-      whip_damp_impacts: withFallbackArray(asNumArray(parsed.whip_damp_impacts), DEFAULT_PITCHING_WEIGHTS.whip_damp_impacts, DEFAULT_PITCHING_WEIGHTS.whip_damp_impacts.length),
-      k9_damp_thresholds: withFallbackArray(asNumArray(parsed.k9_damp_thresholds), DEFAULT_PITCHING_WEIGHTS.k9_damp_thresholds, DEFAULT_PITCHING_WEIGHTS.k9_damp_thresholds.length),
-      k9_damp_impacts: withFallbackArray(asNumArray(parsed.k9_damp_impacts), DEFAULT_PITCHING_WEIGHTS.k9_damp_impacts, DEFAULT_PITCHING_WEIGHTS.k9_damp_impacts.length),
-      bb9_damp_thresholds: withFallbackArray(asNumArray(parsed.bb9_damp_thresholds), DEFAULT_PITCHING_WEIGHTS.bb9_damp_thresholds, DEFAULT_PITCHING_WEIGHTS.bb9_damp_thresholds.length),
-      bb9_damp_impacts: withFallbackArray(asNumArray(parsed.bb9_damp_impacts), DEFAULT_PITCHING_WEIGHTS.bb9_damp_impacts, DEFAULT_PITCHING_WEIGHTS.bb9_damp_impacts.length),
-      hr9_damp_thresholds: withFallbackArray(asNumArray(parsed.hr9_damp_thresholds), DEFAULT_PITCHING_WEIGHTS.hr9_damp_thresholds, DEFAULT_PITCHING_WEIGHTS.hr9_damp_thresholds.length),
-      hr9_damp_impacts: withFallbackArray(asNumArray(parsed.hr9_damp_impacts), DEFAULT_PITCHING_WEIGHTS.hr9_damp_impacts, DEFAULT_PITCHING_WEIGHTS.hr9_damp_impacts.length),
-      pwar_ip_sp: Number.isFinite(parsed.pwar_ip_sp) ? Number(parsed.pwar_ip_sp) : DEFAULT_PITCHING_WEIGHTS.pwar_ip_sp,
-      pwar_ip_rp: Number.isFinite(parsed.pwar_ip_rp) ? Number(parsed.pwar_ip_rp) : DEFAULT_PITCHING_WEIGHTS.pwar_ip_rp,
-      pwar_ip_sm: Number.isFinite(parsed.pwar_ip_sm) ? Number(parsed.pwar_ip_sm) : DEFAULT_PITCHING_WEIGHTS.pwar_ip_sm,
-      pwar_r_per_9: Number.isFinite(parsed.pwar_r_per_9) ? Number(parsed.pwar_r_per_9) : DEFAULT_PITCHING_WEIGHTS.pwar_r_per_9,
-      pwar_replacement_runs_per_9: Number.isFinite(parsed.pwar_replacement_runs_per_9) ? Number(parsed.pwar_replacement_runs_per_9) : DEFAULT_PITCHING_WEIGHTS.pwar_replacement_runs_per_9,
-      pwar_runs_per_win: Number.isFinite(parsed.pwar_runs_per_win) ? Number(parsed.pwar_runs_per_win) : DEFAULT_PITCHING_WEIGHTS.pwar_runs_per_win,
-      sp_to_rp_reg_era_pct: Number.isFinite(parsed.sp_to_rp_reg_era_pct) ? Number(parsed.sp_to_rp_reg_era_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_era_pct,
-      sp_to_rp_reg_fip_pct: Number.isFinite(parsed.sp_to_rp_reg_fip_pct) ? Number(parsed.sp_to_rp_reg_fip_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_fip_pct,
-      sp_to_rp_reg_whip_pct: Number.isFinite(parsed.sp_to_rp_reg_whip_pct) ? Number(parsed.sp_to_rp_reg_whip_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_whip_pct,
-      sp_to_rp_reg_k9_pct: Number.isFinite(parsed.sp_to_rp_reg_k9_pct) ? Number(parsed.sp_to_rp_reg_k9_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_k9_pct,
-      sp_to_rp_reg_bb9_pct: Number.isFinite(parsed.sp_to_rp_reg_bb9_pct) ? Number(parsed.sp_to_rp_reg_bb9_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_bb9_pct,
-      sp_to_rp_reg_hr9_pct: Number.isFinite(parsed.sp_to_rp_reg_hr9_pct) ? Number(parsed.sp_to_rp_reg_hr9_pct) : DEFAULT_PITCHING_WEIGHTS.sp_to_rp_reg_hr9_pct,
-      rp_to_sp_low_better_tier1_max: Number.isFinite(parsed.rp_to_sp_low_better_tier1_max) ? Number(parsed.rp_to_sp_low_better_tier1_max) : DEFAULT_PITCHING_WEIGHTS.rp_to_sp_low_better_tier1_max,
-      rp_to_sp_low_better_tier2_max: Number.isFinite(parsed.rp_to_sp_low_better_tier2_max) ? Number(parsed.rp_to_sp_low_better_tier2_max) : DEFAULT_PITCHING_WEIGHTS.rp_to_sp_low_better_tier2_max,
-      rp_to_sp_low_better_tier3_max: Number.isFinite(parsed.rp_to_sp_low_better_tier3_max) ? Number(parsed.rp_to_sp_low_better_tier3_max) : DEFAULT_PITCHING_WEIGHTS.rp_to_sp_low_better_tier3_max,
-      rp_to_sp_low_better_tier1_mult: Number.isFinite(parsed.rp_to_sp_low_better_tier1_mult) ? Number(parsed.rp_to_sp_low_better_tier1_mult) : DEFAULT_PITCHING_WEIGHTS.rp_to_sp_low_better_tier1_mult,
-      rp_to_sp_low_better_tier2_mult: Number.isFinite(parsed.rp_to_sp_low_better_tier2_mult) ? Number(parsed.rp_to_sp_low_better_tier2_mult) : DEFAULT_PITCHING_WEIGHTS.rp_to_sp_low_better_tier2_mult,
-      rp_to_sp_low_better_tier3_mult: Number.isFinite(parsed.rp_to_sp_low_better_tier3_mult) ? Number(parsed.rp_to_sp_low_better_tier3_mult) : DEFAULT_PITCHING_WEIGHTS.rp_to_sp_low_better_tier3_mult,
-      market_tier_sec: Number.isFinite(parsed.market_tier_sec) ? Number(parsed.market_tier_sec) : DEFAULT_PITCHING_WEIGHTS.market_tier_sec,
-      market_tier_acc_big12: Number.isFinite(parsed.market_tier_acc_big12) ? Number(parsed.market_tier_acc_big12) : DEFAULT_PITCHING_WEIGHTS.market_tier_acc_big12,
-      market_tier_big_ten: Number.isFinite(parsed.market_tier_big_ten) ? Number(parsed.market_tier_big_ten) : DEFAULT_PITCHING_WEIGHTS.market_tier_big_ten,
-      market_tier_strong_mid: Number.isFinite(parsed.market_tier_strong_mid) ? Number(parsed.market_tier_strong_mid) : DEFAULT_PITCHING_WEIGHTS.market_tier_strong_mid,
-      market_tier_low_major: Number.isFinite(parsed.market_tier_low_major) ? Number(parsed.market_tier_low_major) : DEFAULT_PITCHING_WEIGHTS.market_tier_low_major,
+      fip_plus_weight: Number.isFinite(parsed.fip_plus_weight) ? Number(parsed.fip_plus_weight) : base.fip_plus_weight,
+      era_plus_weight: Number.isFinite(parsed.era_plus_weight) ? Number(parsed.era_plus_weight) : base.era_plus_weight,
+      whip_plus_weight: Number.isFinite(parsed.whip_plus_weight) ? Number(parsed.whip_plus_weight) : base.whip_plus_weight,
+      k9_plus_weight: Number.isFinite(parsed.k9_plus_weight) ? Number(parsed.k9_plus_weight) : base.k9_plus_weight,
+      bb9_plus_weight: Number.isFinite(parsed.bb9_plus_weight) ? Number(parsed.bb9_plus_weight) : base.bb9_plus_weight,
+      hr9_plus_weight: Number.isFinite(parsed.hr9_plus_weight) ? Number(parsed.hr9_plus_weight) : base.hr9_plus_weight,
+      era_plus_ncaa_avg: Number.isFinite(parsed.era_plus_ncaa_avg) ? Number(parsed.era_plus_ncaa_avg) : base.era_plus_ncaa_avg,
+      era_plus_ncaa_sd: Number.isFinite(parsed.era_plus_ncaa_sd) ? Number(parsed.era_plus_ncaa_sd) : base.era_plus_ncaa_sd,
+      era_pr_sd: Number.isFinite(parsed.era_pr_sd) ? Number(parsed.era_pr_sd) : base.era_pr_sd,
+      era_plus_scale: Number.isFinite(parsed.era_plus_scale) ? Number(parsed.era_plus_scale) : base.era_plus_scale,
+      fip_plus_ncaa_avg: Number.isFinite(parsed.fip_plus_ncaa_avg) ? Number(parsed.fip_plus_ncaa_avg) : base.fip_plus_ncaa_avg,
+      fip_plus_ncaa_sd: Number.isFinite(parsed.fip_plus_ncaa_sd) ? Number(parsed.fip_plus_ncaa_sd) : base.fip_plus_ncaa_sd,
+      fip_pr_sd: Number.isFinite(parsed.fip_pr_sd) ? Number(parsed.fip_pr_sd) : base.fip_pr_sd,
+      fip_plus_scale: Number.isFinite(parsed.fip_plus_scale) ? Number(parsed.fip_plus_scale) : base.fip_plus_scale,
+      whip_plus_ncaa_avg: Number.isFinite(parsed.whip_plus_ncaa_avg) ? Number(parsed.whip_plus_ncaa_avg) : base.whip_plus_ncaa_avg,
+      whip_plus_ncaa_sd: Number.isFinite(parsed.whip_plus_ncaa_sd) ? Number(parsed.whip_plus_ncaa_sd) : base.whip_plus_ncaa_sd,
+      whip_pr_sd: Number.isFinite(parsed.whip_pr_sd) ? Number(parsed.whip_pr_sd) : base.whip_pr_sd,
+      whip_plus_scale: Number.isFinite(parsed.whip_plus_scale) ? Number(parsed.whip_plus_scale) : base.whip_plus_scale,
+      k9_plus_ncaa_avg: Number.isFinite(parsed.k9_plus_ncaa_avg) ? Number(parsed.k9_plus_ncaa_avg) : base.k9_plus_ncaa_avg,
+      k9_plus_ncaa_sd: Number.isFinite(parsed.k9_plus_ncaa_sd) ? Number(parsed.k9_plus_ncaa_sd) : base.k9_plus_ncaa_sd,
+      k9_pr_sd: Number.isFinite(parsed.k9_pr_sd) ? Number(parsed.k9_pr_sd) : base.k9_pr_sd,
+      k9_plus_scale: Number.isFinite(parsed.k9_plus_scale) ? Number(parsed.k9_plus_scale) : base.k9_plus_scale,
+      bb9_plus_ncaa_avg: Number.isFinite(parsed.bb9_plus_ncaa_avg) ? Number(parsed.bb9_plus_ncaa_avg) : base.bb9_plus_ncaa_avg,
+      bb9_plus_ncaa_sd: Number.isFinite(parsed.bb9_plus_ncaa_sd) ? Number(parsed.bb9_plus_ncaa_sd) : base.bb9_plus_ncaa_sd,
+      bb9_pr_sd: Number.isFinite(parsed.bb9_pr_sd) ? Number(parsed.bb9_pr_sd) : base.bb9_pr_sd,
+      bb9_plus_scale: Number.isFinite(parsed.bb9_plus_scale) ? Number(parsed.bb9_plus_scale) : base.bb9_plus_scale,
+      hr9_plus_ncaa_avg: Number.isFinite(parsed.hr9_plus_ncaa_avg) ? Number(parsed.hr9_plus_ncaa_avg) : base.hr9_plus_ncaa_avg,
+      hr9_plus_ncaa_sd: Number.isFinite(parsed.hr9_plus_ncaa_sd) ? Number(parsed.hr9_plus_ncaa_sd) : base.hr9_plus_ncaa_sd,
+      hr9_pr_sd: Number.isFinite(parsed.hr9_pr_sd) ? Number(parsed.hr9_pr_sd) : base.hr9_pr_sd,
+      hr9_plus_scale: Number.isFinite(parsed.hr9_plus_scale) ? Number(parsed.hr9_plus_scale) : base.hr9_plus_scale,
+      era_damp_thresholds: withFallbackArray(asNumArray(parsed.era_damp_thresholds), base.era_damp_thresholds, base.era_damp_thresholds.length),
+      era_damp_impacts: withFallbackArray(asNumArray(parsed.era_damp_impacts), base.era_damp_impacts, base.era_damp_impacts.length),
+      fip_damp_thresholds: withFallbackArray(asNumArray(parsed.fip_damp_thresholds), base.fip_damp_thresholds, base.fip_damp_thresholds.length),
+      fip_damp_impacts: withFallbackArray(asNumArray(parsed.fip_damp_impacts), base.fip_damp_impacts, base.fip_damp_impacts.length),
+      whip_damp_thresholds: withFallbackArray(asNumArray(parsed.whip_damp_thresholds), base.whip_damp_thresholds, base.whip_damp_thresholds.length),
+      whip_damp_impacts: withFallbackArray(asNumArray(parsed.whip_damp_impacts), base.whip_damp_impacts, base.whip_damp_impacts.length),
+      k9_damp_thresholds: withFallbackArray(asNumArray(parsed.k9_damp_thresholds), base.k9_damp_thresholds, base.k9_damp_thresholds.length),
+      k9_damp_impacts: withFallbackArray(asNumArray(parsed.k9_damp_impacts), base.k9_damp_impacts, base.k9_damp_impacts.length),
+      bb9_damp_thresholds: withFallbackArray(asNumArray(parsed.bb9_damp_thresholds), base.bb9_damp_thresholds, base.bb9_damp_thresholds.length),
+      bb9_damp_impacts: withFallbackArray(asNumArray(parsed.bb9_damp_impacts), base.bb9_damp_impacts, base.bb9_damp_impacts.length),
+      hr9_damp_thresholds: withFallbackArray(asNumArray(parsed.hr9_damp_thresholds), base.hr9_damp_thresholds, base.hr9_damp_thresholds.length),
+      hr9_damp_impacts: withFallbackArray(asNumArray(parsed.hr9_damp_impacts), base.hr9_damp_impacts, base.hr9_damp_impacts.length),
+      pwar_ip_sp: Number.isFinite(parsed.pwar_ip_sp) ? Number(parsed.pwar_ip_sp) : base.pwar_ip_sp,
+      pwar_ip_rp: Number.isFinite(parsed.pwar_ip_rp) ? Number(parsed.pwar_ip_rp) : base.pwar_ip_rp,
+      pwar_ip_sm: Number.isFinite(parsed.pwar_ip_sm) ? Number(parsed.pwar_ip_sm) : base.pwar_ip_sm,
+      pwar_r_per_9: Number.isFinite(parsed.pwar_r_per_9) ? Number(parsed.pwar_r_per_9) : base.pwar_r_per_9,
+      pwar_replacement_runs_per_9: Number.isFinite(parsed.pwar_replacement_runs_per_9) ? Number(parsed.pwar_replacement_runs_per_9) : base.pwar_replacement_runs_per_9,
+      pwar_runs_per_win: Number.isFinite(parsed.pwar_runs_per_win) ? Number(parsed.pwar_runs_per_win) : base.pwar_runs_per_win,
+      sp_to_rp_reg_era_pct: Number.isFinite(parsed.sp_to_rp_reg_era_pct) ? Number(parsed.sp_to_rp_reg_era_pct) : base.sp_to_rp_reg_era_pct,
+      sp_to_rp_reg_fip_pct: Number.isFinite(parsed.sp_to_rp_reg_fip_pct) ? Number(parsed.sp_to_rp_reg_fip_pct) : base.sp_to_rp_reg_fip_pct,
+      sp_to_rp_reg_whip_pct: Number.isFinite(parsed.sp_to_rp_reg_whip_pct) ? Number(parsed.sp_to_rp_reg_whip_pct) : base.sp_to_rp_reg_whip_pct,
+      sp_to_rp_reg_k9_pct: Number.isFinite(parsed.sp_to_rp_reg_k9_pct) ? Number(parsed.sp_to_rp_reg_k9_pct) : base.sp_to_rp_reg_k9_pct,
+      sp_to_rp_reg_bb9_pct: Number.isFinite(parsed.sp_to_rp_reg_bb9_pct) ? Number(parsed.sp_to_rp_reg_bb9_pct) : base.sp_to_rp_reg_bb9_pct,
+      sp_to_rp_reg_hr9_pct: Number.isFinite(parsed.sp_to_rp_reg_hr9_pct) ? Number(parsed.sp_to_rp_reg_hr9_pct) : base.sp_to_rp_reg_hr9_pct,
+      rp_to_sp_low_better_tier1_max: Number.isFinite(parsed.rp_to_sp_low_better_tier1_max) ? Number(parsed.rp_to_sp_low_better_tier1_max) : base.rp_to_sp_low_better_tier1_max,
+      rp_to_sp_low_better_tier2_max: Number.isFinite(parsed.rp_to_sp_low_better_tier2_max) ? Number(parsed.rp_to_sp_low_better_tier2_max) : base.rp_to_sp_low_better_tier2_max,
+      rp_to_sp_low_better_tier3_max: Number.isFinite(parsed.rp_to_sp_low_better_tier3_max) ? Number(parsed.rp_to_sp_low_better_tier3_max) : base.rp_to_sp_low_better_tier3_max,
+      rp_to_sp_low_better_tier1_mult: Number.isFinite(parsed.rp_to_sp_low_better_tier1_mult) ? Number(parsed.rp_to_sp_low_better_tier1_mult) : base.rp_to_sp_low_better_tier1_mult,
+      rp_to_sp_low_better_tier2_mult: Number.isFinite(parsed.rp_to_sp_low_better_tier2_mult) ? Number(parsed.rp_to_sp_low_better_tier2_mult) : base.rp_to_sp_low_better_tier2_mult,
+      rp_to_sp_low_better_tier3_mult: Number.isFinite(parsed.rp_to_sp_low_better_tier3_mult) ? Number(parsed.rp_to_sp_low_better_tier3_mult) : base.rp_to_sp_low_better_tier3_mult,
+      market_tier_sec: Number.isFinite(parsed.market_tier_sec) ? Number(parsed.market_tier_sec) : base.market_tier_sec,
+      market_tier_acc_big12: Number.isFinite(parsed.market_tier_acc_big12) ? Number(parsed.market_tier_acc_big12) : base.market_tier_acc_big12,
+      market_tier_big_ten: Number.isFinite(parsed.market_tier_big_ten) ? Number(parsed.market_tier_big_ten) : base.market_tier_big_ten,
+      market_tier_strong_mid: Number.isFinite(parsed.market_tier_strong_mid) ? Number(parsed.market_tier_strong_mid) : base.market_tier_strong_mid,
+      market_tier_low_major: Number.isFinite(parsed.market_tier_low_major) ? Number(parsed.market_tier_low_major) : base.market_tier_low_major,
       market_dollars_per_war: Number.isFinite((parsed as any).market_dollars_per_war)
         ? Number((parsed as any).market_dollars_per_war)
-        : DEFAULT_PITCHING_WEIGHTS.market_dollars_per_war,
-      market_pvf_weekend_sp: Number.isFinite(parsed.market_pvf_weekend_sp) ? Number(parsed.market_pvf_weekend_sp) : DEFAULT_PITCHING_WEIGHTS.market_pvf_weekend_sp,
-      market_pvf_weekday_sp: Number.isFinite(parsed.market_pvf_weekday_sp) ? Number(parsed.market_pvf_weekday_sp) : DEFAULT_PITCHING_WEIGHTS.market_pvf_weekday_sp,
+        : base.market_dollars_per_war,
+      market_pvf_weekend_sp: Number.isFinite(parsed.market_pvf_weekend_sp) ? Number(parsed.market_pvf_weekend_sp) : base.market_pvf_weekend_sp,
+      market_pvf_weekday_sp: Number.isFinite(parsed.market_pvf_weekday_sp) ? Number(parsed.market_pvf_weekday_sp) : base.market_pvf_weekday_sp,
       market_pvf_reliever: Number.isFinite((parsed as any).market_pvf_reliever)
         ? Number((parsed as any).market_pvf_reliever)
         : (
@@ -323,55 +402,55 @@ export const readPitchingWeights = (): PitchingEquationWeights => {
             : (
               Number.isFinite((parsed as any).market_pvf_low_impact_rp)
                 ? Number((parsed as any).market_pvf_low_impact_rp)
-                : DEFAULT_PITCHING_WEIGHTS.market_pvf_reliever
+                : base.market_pvf_reliever
             )
         ),
-      class_era_fs: Number.isFinite(parsed.class_era_fs) ? Number(parsed.class_era_fs) : DEFAULT_PITCHING_WEIGHTS.class_era_fs,
-      class_era_sj: Number.isFinite(parsed.class_era_sj) ? Number(parsed.class_era_sj) : DEFAULT_PITCHING_WEIGHTS.class_era_sj,
-      class_era_js: Number.isFinite(parsed.class_era_js) ? Number(parsed.class_era_js) : DEFAULT_PITCHING_WEIGHTS.class_era_js,
-      class_era_gr: Number.isFinite(parsed.class_era_gr) ? Number(parsed.class_era_gr) : DEFAULT_PITCHING_WEIGHTS.class_era_gr,
-      class_fip_fs: Number.isFinite(parsed.class_fip_fs) ? Number(parsed.class_fip_fs) : DEFAULT_PITCHING_WEIGHTS.class_fip_fs,
-      class_fip_sj: Number.isFinite(parsed.class_fip_sj) ? Number(parsed.class_fip_sj) : DEFAULT_PITCHING_WEIGHTS.class_fip_sj,
-      class_fip_js: Number.isFinite(parsed.class_fip_js) ? Number(parsed.class_fip_js) : DEFAULT_PITCHING_WEIGHTS.class_fip_js,
-      class_fip_gr: Number.isFinite(parsed.class_fip_gr) ? Number(parsed.class_fip_gr) : DEFAULT_PITCHING_WEIGHTS.class_fip_gr,
-      class_whip_fs: Number.isFinite(parsed.class_whip_fs) ? Number(parsed.class_whip_fs) : DEFAULT_PITCHING_WEIGHTS.class_whip_fs,
-      class_whip_sj: Number.isFinite(parsed.class_whip_sj) ? Number(parsed.class_whip_sj) : DEFAULT_PITCHING_WEIGHTS.class_whip_sj,
-      class_whip_js: Number.isFinite(parsed.class_whip_js) ? Number(parsed.class_whip_js) : DEFAULT_PITCHING_WEIGHTS.class_whip_js,
-      class_whip_gr: Number.isFinite(parsed.class_whip_gr) ? Number(parsed.class_whip_gr) : DEFAULT_PITCHING_WEIGHTS.class_whip_gr,
-      class_k9_fs: Number.isFinite(parsed.class_k9_fs) ? Number(parsed.class_k9_fs) : DEFAULT_PITCHING_WEIGHTS.class_k9_fs,
-      class_k9_sj: Number.isFinite(parsed.class_k9_sj) ? Number(parsed.class_k9_sj) : DEFAULT_PITCHING_WEIGHTS.class_k9_sj,
-      class_k9_js: Number.isFinite(parsed.class_k9_js) ? Number(parsed.class_k9_js) : DEFAULT_PITCHING_WEIGHTS.class_k9_js,
-      class_k9_gr: Number.isFinite(parsed.class_k9_gr) ? Number(parsed.class_k9_gr) : DEFAULT_PITCHING_WEIGHTS.class_k9_gr,
-      class_bb9_fs: Number.isFinite(parsed.class_bb9_fs) ? Number(parsed.class_bb9_fs) : DEFAULT_PITCHING_WEIGHTS.class_bb9_fs,
-      class_bb9_sj: Number.isFinite(parsed.class_bb9_sj) ? Number(parsed.class_bb9_sj) : DEFAULT_PITCHING_WEIGHTS.class_bb9_sj,
-      class_bb9_js: Number.isFinite(parsed.class_bb9_js) ? Number(parsed.class_bb9_js) : DEFAULT_PITCHING_WEIGHTS.class_bb9_js,
-      class_bb9_gr: Number.isFinite(parsed.class_bb9_gr) ? Number(parsed.class_bb9_gr) : DEFAULT_PITCHING_WEIGHTS.class_bb9_gr,
-      class_hr9_fs: Number.isFinite(parsed.class_hr9_fs) ? Number(parsed.class_hr9_fs) : DEFAULT_PITCHING_WEIGHTS.class_hr9_fs,
-      class_hr9_sj: Number.isFinite(parsed.class_hr9_sj) ? Number(parsed.class_hr9_sj) : DEFAULT_PITCHING_WEIGHTS.class_hr9_sj,
-      class_hr9_js: Number.isFinite(parsed.class_hr9_js) ? Number(parsed.class_hr9_js) : DEFAULT_PITCHING_WEIGHTS.class_hr9_js,
-      class_hr9_gr: Number.isFinite(parsed.class_hr9_gr) ? Number(parsed.class_hr9_gr) : DEFAULT_PITCHING_WEIGHTS.class_hr9_gr,
-      transfer_era_power_weight: Number.isFinite(parsed.transfer_era_power_weight) ? Number(parsed.transfer_era_power_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_era_power_weight,
-      transfer_era_conference_weight: Number.isFinite(parsed.transfer_era_conference_weight) ? Number(parsed.transfer_era_conference_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_era_conference_weight,
-      transfer_era_competition_weight: Number.isFinite(parsed.transfer_era_competition_weight) ? Number(parsed.transfer_era_competition_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_era_competition_weight,
-      transfer_era_park_weight: Number.isFinite(parsed.transfer_era_park_weight) ? Number(parsed.transfer_era_park_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_era_park_weight,
-      transfer_fip_power_weight: Number.isFinite(parsed.transfer_fip_power_weight) ? Number(parsed.transfer_fip_power_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_fip_power_weight,
-      transfer_fip_conference_weight: Number.isFinite(parsed.transfer_fip_conference_weight) ? Number(parsed.transfer_fip_conference_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_fip_conference_weight,
-      transfer_fip_competition_weight: Number.isFinite(parsed.transfer_fip_competition_weight) ? Number(parsed.transfer_fip_competition_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_fip_competition_weight,
-      transfer_fip_park_weight: Number.isFinite(parsed.transfer_fip_park_weight) ? Number(parsed.transfer_fip_park_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_fip_park_weight,
-      transfer_whip_power_weight: Number.isFinite(parsed.transfer_whip_power_weight) ? Number(parsed.transfer_whip_power_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_whip_power_weight,
-      transfer_whip_conference_weight: Number.isFinite(parsed.transfer_whip_conference_weight) ? Number(parsed.transfer_whip_conference_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_whip_conference_weight,
-      transfer_whip_competition_weight: Number.isFinite(parsed.transfer_whip_competition_weight) ? Number(parsed.transfer_whip_competition_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_whip_competition_weight,
-      transfer_whip_park_weight: Number.isFinite(parsed.transfer_whip_park_weight) ? Number(parsed.transfer_whip_park_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_whip_park_weight,
-      transfer_k9_power_weight: Number.isFinite(parsed.transfer_k9_power_weight) ? Number(parsed.transfer_k9_power_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_k9_power_weight,
-      transfer_k9_conference_weight: Number.isFinite(parsed.transfer_k9_conference_weight) ? Number(parsed.transfer_k9_conference_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_k9_conference_weight,
-      transfer_k9_competition_weight: Number.isFinite(parsed.transfer_k9_competition_weight) ? Number(parsed.transfer_k9_competition_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_k9_competition_weight,
-      transfer_bb9_power_weight: Number.isFinite(parsed.transfer_bb9_power_weight) ? Number(parsed.transfer_bb9_power_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_bb9_power_weight,
-      transfer_bb9_conference_weight: Number.isFinite(parsed.transfer_bb9_conference_weight) ? Number(parsed.transfer_bb9_conference_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_bb9_conference_weight,
-      transfer_bb9_competition_weight: Number.isFinite(parsed.transfer_bb9_competition_weight) ? Number(parsed.transfer_bb9_competition_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_bb9_competition_weight,
-      transfer_hr9_power_weight: Number.isFinite(parsed.transfer_hr9_power_weight) ? Number(parsed.transfer_hr9_power_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_hr9_power_weight,
-      transfer_hr9_conference_weight: Number.isFinite(parsed.transfer_hr9_conference_weight) ? Number(parsed.transfer_hr9_conference_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_hr9_conference_weight,
-      transfer_hr9_competition_weight: Number.isFinite(parsed.transfer_hr9_competition_weight) ? Number(parsed.transfer_hr9_competition_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_hr9_competition_weight,
-      transfer_hr9_park_weight: Number.isFinite(parsed.transfer_hr9_park_weight) ? Number(parsed.transfer_hr9_park_weight) : DEFAULT_PITCHING_WEIGHTS.transfer_hr9_park_weight,
+      class_era_fs: Number.isFinite(parsed.class_era_fs) ? Number(parsed.class_era_fs) : base.class_era_fs,
+      class_era_sj: Number.isFinite(parsed.class_era_sj) ? Number(parsed.class_era_sj) : base.class_era_sj,
+      class_era_js: Number.isFinite(parsed.class_era_js) ? Number(parsed.class_era_js) : base.class_era_js,
+      class_era_gr: Number.isFinite(parsed.class_era_gr) ? Number(parsed.class_era_gr) : base.class_era_gr,
+      class_fip_fs: Number.isFinite(parsed.class_fip_fs) ? Number(parsed.class_fip_fs) : base.class_fip_fs,
+      class_fip_sj: Number.isFinite(parsed.class_fip_sj) ? Number(parsed.class_fip_sj) : base.class_fip_sj,
+      class_fip_js: Number.isFinite(parsed.class_fip_js) ? Number(parsed.class_fip_js) : base.class_fip_js,
+      class_fip_gr: Number.isFinite(parsed.class_fip_gr) ? Number(parsed.class_fip_gr) : base.class_fip_gr,
+      class_whip_fs: Number.isFinite(parsed.class_whip_fs) ? Number(parsed.class_whip_fs) : base.class_whip_fs,
+      class_whip_sj: Number.isFinite(parsed.class_whip_sj) ? Number(parsed.class_whip_sj) : base.class_whip_sj,
+      class_whip_js: Number.isFinite(parsed.class_whip_js) ? Number(parsed.class_whip_js) : base.class_whip_js,
+      class_whip_gr: Number.isFinite(parsed.class_whip_gr) ? Number(parsed.class_whip_gr) : base.class_whip_gr,
+      class_k9_fs: Number.isFinite(parsed.class_k9_fs) ? Number(parsed.class_k9_fs) : base.class_k9_fs,
+      class_k9_sj: Number.isFinite(parsed.class_k9_sj) ? Number(parsed.class_k9_sj) : base.class_k9_sj,
+      class_k9_js: Number.isFinite(parsed.class_k9_js) ? Number(parsed.class_k9_js) : base.class_k9_js,
+      class_k9_gr: Number.isFinite(parsed.class_k9_gr) ? Number(parsed.class_k9_gr) : base.class_k9_gr,
+      class_bb9_fs: Number.isFinite(parsed.class_bb9_fs) ? Number(parsed.class_bb9_fs) : base.class_bb9_fs,
+      class_bb9_sj: Number.isFinite(parsed.class_bb9_sj) ? Number(parsed.class_bb9_sj) : base.class_bb9_sj,
+      class_bb9_js: Number.isFinite(parsed.class_bb9_js) ? Number(parsed.class_bb9_js) : base.class_bb9_js,
+      class_bb9_gr: Number.isFinite(parsed.class_bb9_gr) ? Number(parsed.class_bb9_gr) : base.class_bb9_gr,
+      class_hr9_fs: Number.isFinite(parsed.class_hr9_fs) ? Number(parsed.class_hr9_fs) : base.class_hr9_fs,
+      class_hr9_sj: Number.isFinite(parsed.class_hr9_sj) ? Number(parsed.class_hr9_sj) : base.class_hr9_sj,
+      class_hr9_js: Number.isFinite(parsed.class_hr9_js) ? Number(parsed.class_hr9_js) : base.class_hr9_js,
+      class_hr9_gr: Number.isFinite(parsed.class_hr9_gr) ? Number(parsed.class_hr9_gr) : base.class_hr9_gr,
+      transfer_era_power_weight: Number.isFinite(parsed.transfer_era_power_weight) ? Number(parsed.transfer_era_power_weight) : base.transfer_era_power_weight,
+      transfer_era_conference_weight: Number.isFinite(parsed.transfer_era_conference_weight) ? Number(parsed.transfer_era_conference_weight) : base.transfer_era_conference_weight,
+      transfer_era_competition_weight: Number.isFinite(parsed.transfer_era_competition_weight) ? Number(parsed.transfer_era_competition_weight) : base.transfer_era_competition_weight,
+      transfer_era_park_weight: Number.isFinite(parsed.transfer_era_park_weight) ? Number(parsed.transfer_era_park_weight) : base.transfer_era_park_weight,
+      transfer_fip_power_weight: Number.isFinite(parsed.transfer_fip_power_weight) ? Number(parsed.transfer_fip_power_weight) : base.transfer_fip_power_weight,
+      transfer_fip_conference_weight: Number.isFinite(parsed.transfer_fip_conference_weight) ? Number(parsed.transfer_fip_conference_weight) : base.transfer_fip_conference_weight,
+      transfer_fip_competition_weight: Number.isFinite(parsed.transfer_fip_competition_weight) ? Number(parsed.transfer_fip_competition_weight) : base.transfer_fip_competition_weight,
+      transfer_fip_park_weight: Number.isFinite(parsed.transfer_fip_park_weight) ? Number(parsed.transfer_fip_park_weight) : base.transfer_fip_park_weight,
+      transfer_whip_power_weight: Number.isFinite(parsed.transfer_whip_power_weight) ? Number(parsed.transfer_whip_power_weight) : base.transfer_whip_power_weight,
+      transfer_whip_conference_weight: Number.isFinite(parsed.transfer_whip_conference_weight) ? Number(parsed.transfer_whip_conference_weight) : base.transfer_whip_conference_weight,
+      transfer_whip_competition_weight: Number.isFinite(parsed.transfer_whip_competition_weight) ? Number(parsed.transfer_whip_competition_weight) : base.transfer_whip_competition_weight,
+      transfer_whip_park_weight: Number.isFinite(parsed.transfer_whip_park_weight) ? Number(parsed.transfer_whip_park_weight) : base.transfer_whip_park_weight,
+      transfer_k9_power_weight: Number.isFinite(parsed.transfer_k9_power_weight) ? Number(parsed.transfer_k9_power_weight) : base.transfer_k9_power_weight,
+      transfer_k9_conference_weight: Number.isFinite(parsed.transfer_k9_conference_weight) ? Number(parsed.transfer_k9_conference_weight) : base.transfer_k9_conference_weight,
+      transfer_k9_competition_weight: Number.isFinite(parsed.transfer_k9_competition_weight) ? Number(parsed.transfer_k9_competition_weight) : base.transfer_k9_competition_weight,
+      transfer_bb9_power_weight: Number.isFinite(parsed.transfer_bb9_power_weight) ? Number(parsed.transfer_bb9_power_weight) : base.transfer_bb9_power_weight,
+      transfer_bb9_conference_weight: Number.isFinite(parsed.transfer_bb9_conference_weight) ? Number(parsed.transfer_bb9_conference_weight) : base.transfer_bb9_conference_weight,
+      transfer_bb9_competition_weight: Number.isFinite(parsed.transfer_bb9_competition_weight) ? Number(parsed.transfer_bb9_competition_weight) : base.transfer_bb9_competition_weight,
+      transfer_hr9_power_weight: Number.isFinite(parsed.transfer_hr9_power_weight) ? Number(parsed.transfer_hr9_power_weight) : base.transfer_hr9_power_weight,
+      transfer_hr9_conference_weight: Number.isFinite(parsed.transfer_hr9_conference_weight) ? Number(parsed.transfer_hr9_conference_weight) : base.transfer_hr9_conference_weight,
+      transfer_hr9_competition_weight: Number.isFinite(parsed.transfer_hr9_competition_weight) ? Number(parsed.transfer_hr9_competition_weight) : base.transfer_hr9_competition_weight,
+      transfer_hr9_park_weight: Number.isFinite(parsed.transfer_hr9_park_weight) ? Number(parsed.transfer_hr9_park_weight) : base.transfer_hr9_park_weight,
     };
     // Migrate old default transfer conference weights to the new agreed defaults.
     // (Only auto-updates when values still match the old baseline.)
@@ -402,6 +481,6 @@ export const readPitchingWeights = (): PitchingEquationWeights => {
     merged.sp_to_rp_reg_hr9_pct = 8;
     return merged;
   } catch {
-    return DEFAULT_PITCHING_WEIGHTS;
+    return base;
   }
 };

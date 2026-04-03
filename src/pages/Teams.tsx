@@ -8,16 +8,19 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Search, Building2, Edit2, Check, X, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { readTeamParkFactorComponents, resolveMetricParkFactor } from "@/lib/parkFactors";
+import { resolveMetricParkFactor } from "@/lib/parkFactors";
+import { useParkFactors } from "@/hooks/useParkFactors";
+import { useTeamsTable } from "@/hooks/useTeamsTable";
 
 interface Team {
   id: string;
   name: string;
   conference: string | null;
+  conference_id?: string | null;
   division: string | null;
   park_factor: number | null;
 }
@@ -64,27 +67,8 @@ export default function Teams() {
   const [newTeamConf, setNewTeamConf] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
 
-  const { data: teams = [], isLoading } = useQuery({
-    queryKey: ["teams"],
-    queryFn: async () => {
-      let allData: any[] = [];
-      let from = 0;
-      const PAGE_SIZE = 1000;
-      while (true) {
-        const { data, error } = await supabase
-          .from("teams")
-          .select("*")
-          .order("name")
-          .range(from, from + PAGE_SIZE - 1);
-        if (error) throw error;
-        allData = allData.concat(data || []);
-        if (!data || data.length < PAGE_SIZE) break;
-        from += PAGE_SIZE;
-      }
-      return allData as Team[];
-    },
-  });
-  const teamParkComponents = readTeamParkFactorComponents();
+  const { teams, loading: isLoading } = useTeamsTable();
+  const { parkMap } = useParkFactors();
 
   const updateTeam = useMutation({
     mutationFn: async ({ id, name, conference }: { id: string; name: string; conference: string }) => {
@@ -331,7 +315,7 @@ export default function Teams() {
                             <TableCell className="text-center">
                               <span className="text-sm tabular-nums">
                                 {(() => {
-                                  const v = resolveMetricParkFactor(team.name, team.park_factor, "avg", teamParkComponents);
+                                  const v = resolveMetricParkFactor(team.id, "avg", parkMap, team.name);
                                   return displayParkFactor(v);
                                 })()}
                               </span>
@@ -339,7 +323,7 @@ export default function Teams() {
                             <TableCell className="text-center">
                               <span className="text-sm tabular-nums">
                                 {(() => {
-                                  const v = resolveMetricParkFactor(team.name, team.park_factor, "obp", teamParkComponents);
+                                  const v = resolveMetricParkFactor(team.id, "obp", parkMap, team.name);
                                   return displayParkFactor(v);
                                 })()}
                               </span>
@@ -347,7 +331,7 @@ export default function Teams() {
                             <TableCell className="text-center">
                               <span className="text-sm tabular-nums">
                                 {(() => {
-                                  const v = resolveMetricParkFactor(team.name, team.park_factor, "iso", teamParkComponents);
+                                  const v = resolveMetricParkFactor(team.id, "iso", parkMap, team.name);
                                   return displayParkFactor(v);
                                 })()}
                               </span>
@@ -355,7 +339,7 @@ export default function Teams() {
                             <TableCell className="text-center">
                               <span className="text-sm tabular-nums">
                                 {(() => {
-                                  const v = resolveMetricParkFactor(team.name, team.park_factor, "era", teamParkComponents);
+                                  const v = resolveMetricParkFactor(team.id, "era", parkMap, team.name);
                                   return displayParkFactor(v);
                                 })()}
                               </span>
@@ -363,7 +347,7 @@ export default function Teams() {
                             <TableCell className="text-center">
                               <span className="text-sm tabular-nums">
                                 {(() => {
-                                  const v = resolveMetricParkFactor(team.name, team.park_factor, "whip", teamParkComponents);
+                                  const v = resolveMetricParkFactor(team.id, "whip", parkMap, team.name);
                                   return displayParkFactor(v);
                                 })()}
                               </span>
@@ -371,7 +355,7 @@ export default function Teams() {
                             <TableCell className="text-center">
                               <span className="text-sm tabular-nums">
                                 {(() => {
-                                  const v = resolveMetricParkFactor(team.name, team.park_factor, "hr9", teamParkComponents);
+                                  const v = resolveMetricParkFactor(team.id, "hr9", parkMap, team.name);
                                   return displayParkFactor(v);
                                 })()}
                               </span>
