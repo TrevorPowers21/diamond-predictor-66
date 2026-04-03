@@ -33,6 +33,7 @@ export type PitchingMasterSeedRow = {
   vel_90th: number | null;
   h_pull_pct: number | null;
   la_10_30_pct: number | null;
+  stuffPlus: number | null;
 };
 
 /**
@@ -96,6 +97,7 @@ export function usePitchingSeedData(season = 2025) {
     vel_90th: r["90th_vel"] ?? null,
     h_pull_pct: r.h_pull_pct ?? null,
     la_10_30_pct: r.la_10_30_pct ?? null,
+    stuffPlus: r.stuff_plus ?? null,
   }));
 
   return { pitchers, loading: isLoading };

@@ -1533,6 +1533,7 @@ export type Database = {
           "90th_vel": number | null
           h_pull_pct: number | null
           la_10_30_pct: number | null
+          stuff_plus: number | null
           whiff_score: number | null
           bb_score: number | null
           hh_score: number | null
@@ -1587,6 +1588,7 @@ export type Database = {
           "90th_vel"?: number | null
           h_pull_pct?: number | null
           la_10_30_pct?: number | null
+          stuff_plus?: number | null
           whiff_score?: number | null
           bb_score?: number | null
           hh_score?: number | null
@@ -1641,6 +1643,7 @@ export type Database = {
           "90th_vel"?: number | null
           h_pull_pct?: number | null
           la_10_30_pct?: number | null
+          stuff_plus?: number | null
           whiff_score?: number | null
           bb_score?: number | null
           hh_score?: number | null

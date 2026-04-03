@@ -41,7 +41,7 @@ import { useParkFactors } from "@/hooks/useParkFactors";
 
 function ImportPitchArsenalButton() {
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<{ pitchesImported: number; playersProcessed: number; errors: string[] } | null>(null);
+  const [result, setResult] = useState<{ pitchesImported: number; playersProcessed: number; stuffPlusUpdated: number; errors: string[] } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   return (
     <>
@@ -56,7 +56,7 @@ function ImportPitchArsenalButton() {
           const r = await importPitchArsenalFromCsv(text);
           setResult(r);
         } catch (err: any) {
-          setResult({ pitchesImported: 0, playersProcessed: 0, errors: [err.message] });
+          setResult({ pitchesImported: 0, playersProcessed: 0, stuffPlusUpdated: 0, errors: [err.message] });
         }
         setLoading(false);
         if (fileRef.current) fileRef.current.value = "";
@@ -67,7 +67,7 @@ function ImportPitchArsenalButton() {
       </Button>
       {result && (
         <p className="text-sm text-muted-foreground">
-          Imported {result.pitchesImported} pitch rows for {result.playersProcessed} players.
+          Imported {result.pitchesImported} pitch rows for {result.playersProcessed} players. {result.stuffPlusUpdated} Pitching Master rows updated with Stuff+.
           {result.errors.length > 0 && ` Errors: ${result.errors.slice(0, 3).join("; ")}${result.errors.length > 3 ? `... +${result.errors.length - 3} more` : ""}`}
         </p>
       )}

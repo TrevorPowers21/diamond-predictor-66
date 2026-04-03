@@ -141,15 +141,15 @@ const OVERALL_PITCHER_POWER_WEIGHTS = {
 
 type PitchArsenalRow = {
   season: number | null;
-  player_id: string | null;
+  source_player_id: string | null;
   player_name: string | null;
   hand: string | null;
   pitch_type: string | null;
   stuff_plus: number | null;
   usage_pct: number | null;
   whiff_pct: number | null;
-  pitch_count: number | null;
   total_pitches: number | null;
+  total_pitches_all: number | null;
   overall_stuff_plus: number | null;
 };
 
@@ -458,32 +458,35 @@ export default function PitcherProfile() {
     return normalizePitcherTeamName(player?.team || "");
   }, [player?.team, storageRef?.teamName]);
   const { data: pitchArsenalRows = [] } = useQuery({
-    queryKey: ["pitcher-profile-pitch-arsenal", id, lookupPlayerName],
-    enabled: !!lookupPlayerName,
+    queryKey: ["pitcher-profile-pitch-arsenal", id, lookupPlayerName, (player as any)?.source_player_id],
+    enabled: !!lookupPlayerName || !!(player as any)?.source_player_id,
     queryFn: async () => {
-      const byPlayerId = async () => {
-        if (!isDbRoute || !id) return [];
+      // Try source_player_id first, then player_name
+      const bySourceId = async () => {
+        // Get the source_player_id from the player record
+        const sourceId = (player as any)?.source_player_id;
+        if (!sourceId) return [];
         const { data, error } = await supabase
-          .from("pitch_arsenal" as any)
-          .select("season, player_id, player_name, hand, pitch_type, stuff_plus, usage_pct, whiff_pct, pitch_count, total_pitches, overall_stuff_plus")
-          .eq("player_id", id)
+          .from("Pitch Arsenal")
+          .select("season, source_player_id, player_name, hand, pitch_type, stuff_plus, whiff_pct, total_pitches, total_pitches_all, overall_stuff_plus")
+          .eq("source_player_id", sourceId)
           .eq("season", 2025)
-          .order("pitch_count", { ascending: false });
+          .order("total_pitches", { ascending: false });
         if (error) throw error;
-        return (data || []) as PitchArsenalRow[];
+        return (data || []).map((r: any) => ({ ...r, usage_pct: null })) as PitchArsenalRow[];
       };
       const byPlayerName = async () => {
         if (!lookupPlayerName) return [];
         const { data, error } = await supabase
-          .from("pitch_arsenal" as any)
-          .select("season, player_id, player_name, hand, pitch_type, stuff_plus, usage_pct, whiff_pct, pitch_count, total_pitches, overall_stuff_plus")
+          .from("Pitch Arsenal")
+          .select("season, source_player_id, player_name, hand, pitch_type, stuff_plus, whiff_pct, total_pitches, total_pitches_all, overall_stuff_plus")
           .eq("player_name", lookupPlayerName)
           .eq("season", 2025)
-          .order("pitch_count", { ascending: false });
+          .order("total_pitches", { ascending: false });
         if (error) throw error;
-        return (data || []) as PitchArsenalRow[];
+        return (data || []).map((r: any) => ({ ...r, usage_pct: null })) as PitchArsenalRow[];
       };
-      const firstPass = await byPlayerId();
+      const firstPass = await bySourceId();
       if (firstPass.length > 0) return firstPass;
       return byPlayerName();
     },
@@ -1050,16 +1053,22 @@ export default function PitcherProfile() {
     const sourceRows = pitchArsenalRows || [];
 
     const normalized = sourceRows
-      .map((row) => ({
-        pitchType: String(row.pitch_type || "").trim().toUpperCase(),
-        stuffPlus: row.stuff_plus == null ? null : Number(row.stuff_plus),
-        usagePct: row.usage_pct == null ? null : Number(row.usage_pct),
-        whiffPct: row.whiff_pct == null ? null : Number(row.whiff_pct),
-        pitchCount: row.pitch_count == null ? null : Number(row.pitch_count),
-        totalPitches: row.total_pitches == null ? null : Number(row.total_pitches),
-        overallStuffPlus: row.overall_stuff_plus == null ? null : Number(row.overall_stuff_plus),
-      }))
-      .filter((r) => r.pitchType.length > 0);
+      .map((row) => {
+        const totalAll = row.total_pitches_all == null ? null : Number(row.total_pitches_all);
+        const pitchCount = row.total_pitches == null ? null : Number(row.total_pitches);
+        const usagePct = pitchCount != null && totalAll != null && totalAll > 0 ? (pitchCount / totalAll) * 100 : null;
+        return {
+          pitchType: String(row.pitch_type || "").trim().toUpperCase(),
+          hand: row.hand ?? null,
+          stuffPlus: row.stuff_plus == null ? null : Number(row.stuff_plus),
+          usagePct,
+          whiffPct: row.whiff_pct == null ? null : Number(row.whiff_pct),
+          pitchCount,
+          totalPitches: totalAll,
+          overallStuffPlus: row.overall_stuff_plus == null ? null : Number(row.overall_stuff_plus),
+        };
+      })
+      .filter((r) => r.pitchType.length > 0 && (r.pitchCount == null || r.pitchCount >= 5));
 
     const byPitch = new Map<string, typeof normalized[number]>();
     for (const row of normalized) byPitch.set(row.pitchType, row);

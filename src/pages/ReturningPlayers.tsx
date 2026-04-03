@@ -1555,7 +1555,7 @@ export default function ReturningPlayers() {
 
           // Compute power-rating scores from Pitching Master raw metrics
           const scoreObj = {
-            stuff: null, // Stuff+ not available in Pitching Master — requires separate Stuff+ table
+            stuff: r.stuffPlus != null ? calcScore(r.stuffPlus, powerEq.p_ncaa_avg_stuff_plus, powerEq.p_sd_stuff_plus) : null,
             whiff: calcScore(r.miss_pct, powerEq.p_ncaa_avg_whiff_pct, powerEq.p_sd_whiff_pct),
             bb: calcScore(r.bb_pct, powerEq.p_ncaa_avg_bb_pct, powerEq.p_sd_bb_pct, true),
             hh: calcScore(r.hard_hit_pct, powerEq.p_ncaa_avg_hh_pct, powerEq.p_sd_hh_pct, true),

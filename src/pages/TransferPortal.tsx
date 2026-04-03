@@ -78,6 +78,9 @@ type PitchingStorageRow = {
   id: string;
   player_name: string;
   team: string | null;
+  teamId: string | null;
+  conference: string | null;
+  conferenceId: string | null;
   handedness: string | null;
   role: "SP" | "RP" | "SM" | null;
   era: number | null;
@@ -710,6 +713,9 @@ export default function TransferPortal() {
         id: r.id || `pitching-tp-${idx}`,
         player_name: (r.playerName || "").trim(),
         team: (r.team || "").trim() || null,
+        teamId: r.teamId ?? null,
+        conference: r.conference ?? null,
+        conferenceId: r.conferenceId ?? null,
         handedness: (r.throwHand || "").trim() || null,
         role: derivedRole,
         era: r.era != null ? Number(r.era) : null,
@@ -741,8 +747,8 @@ export default function TransferPortal() {
       const name = (pr.playerName || "").trim();
       const team = (pr.team || "").trim();
       if (!name) continue;
-      // Calculate scores from raw metrics (stuff_plus not in Pitching Master — use null)
-      const stuff = cs(null, EQ.p_ncaa_avg_stuff_plus, EQ.p_sd_stuff_plus);
+      // Calculate scores from raw metrics — use stuff_plus from Pitching Master when available
+      const stuff = pr.stuffPlus != null ? cs(pr.stuffPlus, EQ.p_ncaa_avg_stuff_plus, EQ.p_sd_stuff_plus) : null;
       const whiff = cs(pr.miss_pct, EQ.p_ncaa_avg_whiff_pct, EQ.p_sd_whiff_pct);
       const bb = cs(pr.bb_pct, EQ.p_ncaa_avg_bb_pct, EQ.p_sd_bb_pct, true);
       const hh = cs(pr.hard_hit_pct, EQ.p_ncaa_avg_hh_pct, EQ.p_sd_hh_pct, true);
@@ -855,6 +861,8 @@ export default function TransferPortal() {
       hr9_plus: number | null;
       hitter_talent_plus: number | null;
     }>();
+    // Also index by conference_id for UUID-based lookups
+    const byId = new Map<string, typeof map extends Map<string, infer V> ? V : never>();
     if (newConfStats.length === 0) return map;
     const eq = readPitchingWeights();
     for (const row of newConfStats) {
@@ -884,7 +892,10 @@ export default function TransferPortal() {
       };
       map.set(directKey, entry);
       if (canonicalKey && !map.has(canonicalKey)) map.set(canonicalKey, entry);
+      if (row.conference_id) byId.set(row.conference_id, entry);
     }
+    // Attach byId to the map for UUID lookups
+    (map as any)._byId = byId;
     return map;
   }, [newConfStats]);
 
@@ -968,7 +979,11 @@ export default function TransferPortal() {
   const fromConfStats = resolveConferenceStats(fromConference);
   const toConfStats = resolveConferenceStats(toConference);
 
-  const resolvePitchingConferenceStats = (conference: string | null | undefined) => {
+  const resolvePitchingConferenceStats = (conference: string | null | undefined, conferenceId?: string | null) => {
+    // UUID lookup first
+    const byId = (pitchingConfByKey as any)?._byId as Map<string, any> | undefined;
+    if (conferenceId && byId?.has(conferenceId)) return byId.get(conferenceId)!;
+    // Name-based fallback
     const directKey = normalizeKey(conference || "");
     const canonicalKey = canonicalConferencePitching(conference || "");
     if (directKey) {
@@ -1332,12 +1347,14 @@ export default function TransferPortal() {
     const eq = readPitchingWeights();
     const toPitchTeamRow = resolveTeamRowFromCandidates([selectedDestinationTeam], teamByKey, teams);
     if (!toPitchTeamRow) return null;
-    const fromPitchTeam = selectedPitcher.team;
-    const fromPitchTeamRow = resolveTeamRowFromCandidates([fromPitchTeam], teamByKey, teams);
-    const fromPitchConference = fromPitchTeamRow?.conference || null;
+    // Resolve from-team by UUID first, then name fallback
+    const fromPitchTeamRow = selectedPitcher.teamId
+      ? (teams.find((t) => t.id === selectedPitcher.teamId) ?? resolveTeamRowFromCandidates([selectedPitcher.team], teamByKey, teams))
+      : resolveTeamRowFromCandidates([selectedPitcher.team], teamByKey, teams);
+    const fromPitchConference = selectedPitcher.conference || fromPitchTeamRow?.conference || null;
     const toPitchConference = toPitchTeamRow?.conference || null;
-    const fromPitchConfStats = resolvePitchingConferenceStats(fromPitchConference);
-    const toPitchConfStats = resolvePitchingConferenceStats(toPitchConference);
+    const fromPitchConfStats = resolvePitchingConferenceStats(fromPitchConference, selectedPitcher.conferenceId);
+    const toPitchConfStats = resolvePitchingConferenceStats(toPitchConference, toPitchTeamRow?.conference_id);
 
 
     const missing: string[] = [];

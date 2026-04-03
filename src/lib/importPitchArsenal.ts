@@ -135,10 +135,24 @@ export async function importPitchArsenalFromCsv(csvText: string, season = 2025):
   }
 
   // Update Pitching Master with Overall Stuff+
-  console.log(`[importArsenal] Updating ${stuffPlusUpdates.length} pitchers with Overall Stuff+...`);
-  // Note: Pitching Master may not have a stuff_plus column yet — we store on Pitch Arsenal
-  // But we can use it for the pitching power ratings if the column exists
+  console.log(`[importArsenal] Updating ${stuffPlusUpdates.length} pitchers with Overall Stuff+ on Pitching Master...`);
+  const BATCH_SP = 50;
+  for (let i = 0; i < stuffPlusUpdates.length; i += BATCH_SP) {
+    const batch = stuffPlusUpdates.slice(i, i + BATCH_SP);
+    await Promise.all(batch.map(async (row) => {
+      const { error } = await supabase
+        .from("Pitching Master")
+        .update({ stuff_plus: row.overallStuffPlus })
+        .eq("source_player_id", row.sourcePlayerId)
+        .eq("Season", season);
+      if (error) {
+        result.errors.push(`PM ${row.sourcePlayerId}: ${error.message}`);
+      } else {
+        result.stuffPlusUpdated++;
+      }
+    }));
+  }
 
-  console.log(`[importArsenal] Done!`, result);
+  console.log(`[importArsenal] Done! ${result.stuffPlusUpdated} Pitching Master rows updated with Stuff+`, result);
   return result;
 }

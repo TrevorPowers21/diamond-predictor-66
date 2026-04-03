@@ -87,7 +87,7 @@ export async function computeAndStorePitchingScores(season = 2025): Promise<{ up
   while (true) {
     const { data: rows, error } = await supabase
       .from("Pitching Master")
-      .select("id, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, \"90th_vel\", h_pull_pct, la_10_30_pct")
+      .select("id, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, \"90th_vel\", h_pull_pct, la_10_30_pct, stuff_plus")
       .eq("Season", season)
       .range(from, from + pageSize - 1);
 
@@ -109,7 +109,7 @@ export async function computeAndStorePitchingScores(season = 2025): Promise<{ up
         vel_90th: (row as any)["90th_vel"],
         h_pull_pct: row.h_pull_pct,
         la_10_30_pct: row.la_10_30_pct,
-      });
+      }, (row as any).stuff_plus ?? null);
 
       const { error: updateErr } = await supabase
         .from("Pitching Master")
