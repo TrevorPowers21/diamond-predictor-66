@@ -624,74 +624,37 @@ export default function TransferPortal() {
     },
   });
 
-  // Merge Hitter Master players not already in the players table
-  const mergedPlayers = useMemo(() => {
-    const existingNames = new Set(
-      players.map((p) => normalizeKey(`${p.first_name} ${p.last_name}|${p.team || ""}`))
-    );
-    const extras: SimPlayer[] = [];
-    for (const seed of hitterStats) {
-      const parts = seed.playerName.trim().split(/\s+/);
-      if (parts.length < 2) continue;
-      const firstName = parts[0];
-      const lastName = parts.slice(1).join(" ");
-      const checkKey = normalizeKey(`${firstName} ${lastName}|${seed.team || ""}`);
-      if (existingNames.has(checkKey)) continue;
-      extras.push({
-        prediction_id: null,
-        player_id: seed.player_id || `hm-${seed.playerName}-${seed.team}`,
-        model_type: null,
-        first_name: firstName,
-        last_name: lastName,
-        position: (seed as any).position ?? null,
-        team: seed.team,
-        from_team: seed.team,
-        conference: seed.conference,
-        from_avg: seed.avg,
-        from_obp: seed.obp,
-        from_slg: seed.slg,
-        power_rating_plus: null,
-        class_transition: null,
-        dev_aggressiveness: null,
-      });
-      existingNames.add(checkKey);
-    }
-    if (extras.length === 0) return players;
-    return [...players, ...extras].sort((a, b) =>
-      `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`)
-    );
-  }, [players, hitterStats]);
-
   const { teams } = useTeamsTable();
 
-  const { data: conferenceStats = [] } = useQuery({
-    queryKey: ["transfer-sim-conference-stats"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("conference_stats")
-        .select("conference, season, avg_plus, obp_plus, iso_plus, stuff_plus, wrc_plus, offensive_power_rating")
-        .eq("season", 2025);
-      if (error) throw error;
-      // keep best row per conference key inside 2025 only.
-      const byConf = new Map<string, { row: ConferenceRow; score: number }>();
-      for (const row of (data || []) as ConferenceRow[]) {
-        const key = normalizeKey(row.conference);
-        if (!key) continue;
-        const score =
-          (row.avg_plus != null ? 1 : 0) +
-          (row.obp_plus != null ? 1 : 0) +
-          (row.iso_plus != null ? 1 : 0) +
-          (row.stuff_plus != null ? 1 : 0) +
-          (row.wrc_plus != null ? 1 : 0) +
-          (row.offensive_power_rating != null ? 1 : 0);
-        const existing = byConf.get(key);
-        if (!existing || score > existing.score) {
-          byConf.set(key, { row, score });
-        }
+  const conferenceStats: ConferenceRow[] = useMemo(() => {
+    const byConf = new Map<string, { row: ConferenceRow; score: number }>();
+    for (const raw of newConfStats) {
+      const key = normalizeKey(raw.conference);
+      if (!key) continue;
+      const row: ConferenceRow = {
+        conference: raw.conference,
+        season: raw.season,
+        avg_plus: raw.avg != null ? Math.round((raw.avg / 0.280) * 100) : null,
+        obp_plus: raw.obp != null ? Math.round((raw.obp / 0.385) * 100) : null,
+        iso_plus: raw.iso != null ? Math.round((raw.iso / 0.162) * 100) : null,
+        stuff_plus: raw.stuff_plus,
+        wrc_plus: raw.wrc_plus ?? null,
+        offensive_power_rating: raw.overall_power_rating ?? null,
+      };
+      const score =
+        (row.avg_plus != null ? 1 : 0) +
+        (row.obp_plus != null ? 1 : 0) +
+        (row.iso_plus != null ? 1 : 0) +
+        (row.stuff_plus != null ? 1 : 0) +
+        (row.wrc_plus != null ? 1 : 0) +
+        (row.offensive_power_rating != null ? 1 : 0);
+      const existing = byConf.get(key);
+      if (!existing || score > existing.score) {
+        byConf.set(key, { row, score });
       }
-      return Array.from(byConf.values()).map((v) => v.row);
-    },
-  });
+    }
+    return Array.from(byConf.values()).map((v) => v.row);
+  }, [newConfStats]);
 
   const { data: remoteEquationValues = {} } = useQuery({
     queryKey: ["admin-ui-equation-values"],
@@ -717,13 +680,13 @@ export default function TransferPortal() {
     const isPitcher = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP|TWP)/i.test(String(pos || ""));
     const q = normalizeKey(playerSearch);
     const pool = (q
-      ? mergedPlayers.filter((p) =>
+      ? players.filter((p) =>
           normalizeKey(`${p.first_name} ${p.last_name} ${(p.from_team || p.team || "")} ${(p.position || "")}`).includes(q),
         )
-      : mergedPlayers
+      : players
     ).filter((p) => !isPitcher(p.position));
     return pool.slice(0, 25);
-  }, [mergedPlayers, playerSearch]);
+  }, [players, playerSearch]);
 
   const filteredTeams = useMemo(() => {
     const q = normalizeKey(teamSearch);

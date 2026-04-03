@@ -1,7 +1,5 @@
-import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { autoComputeUnscoredRows } from "@/lib/computeAndStoreScores";
 
 export type PitchingMasterSeedRow = {
   id: string;
@@ -61,13 +59,10 @@ export function usePitchingSeedData(season = 2025) {
       }
       return all;
     },
-    staleTime: 10 * 60 * 1000,
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
-
-  // Auto-compute scores for any unscored rows when data loads
-  useEffect(() => {
-    if (dbRows.length > 0) autoComputeUnscoredRows(season);
-  }, [dbRows.length, season]);
 
   const pitchers: PitchingMasterSeedRow[] = dbRows.map((r: any) => ({
     id: r.source_player_id || `pm-${r.playerFullName}-${r.Team ?? ""}`,

@@ -16,6 +16,7 @@ import { useHitterSeedData } from "@/hooks/useHitterSeedData";
 import { resolveMetricParkFactor, type ParkFactorsMap } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
+import { useConferenceStats } from "@/hooks/useConferenceStats";
 
 type TeamRow = { name: string; conference: string | null; park_factor: number | null; id?: string; conference_id?: string | null };
 type ConferenceRow = { conference: string; season: number | null; avg_plus: number | null; obp_plus: number | null; iso_plus: number | null; stuff_plus: number | null };
@@ -340,30 +341,31 @@ export default function PlayerComparison() {
   const [compareBDestinationTeam, setCompareBDestinationTeam] = useState("Arizona State");
 
   const { teams } = useTeamsTable();
-  const { data: conferenceStats = [] } = useQuery({
-    queryKey: ["compare-conference-stats"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("conference_stats")
-        .select("conference, season, avg_plus, obp_plus, iso_plus, stuff_plus")
-        .order("season", { ascending: false });
-      if (error) throw error;
-      const byConf = new Map<string, { row: ConferenceRow; score: number }>();
-      for (const row of (data || []) as ConferenceRow[]) {
-        const key = normalizeKey(row.conference);
-        if (!key) continue;
-        const score =
-          (row.avg_plus != null ? 1 : 0) +
-          (row.obp_plus != null ? 1 : 0) +
-          (row.iso_plus != null ? 1 : 0) +
-          (row.stuff_plus != null ? 1 : 0) +
-          (row.season === 2025 ? 2 : 0);
-        const ex = byConf.get(key);
-        if (!ex || score > ex.score) byConf.set(key, { row, score });
-      }
-      return Array.from(byConf.values()).map((v) => v.row);
-    },
-  });
+  const { conferenceStats: rawConfStats } = useConferenceStats(2025);
+  const conferenceStats: ConferenceRow[] = useMemo(() => {
+    const byConf = new Map<string, { row: ConferenceRow; score: number }>();
+    for (const raw of rawConfStats) {
+      const key = normalizeKey(raw.conference);
+      if (!key) continue;
+      const row: ConferenceRow = {
+        conference: raw.conference,
+        season: raw.season,
+        avg_plus: raw.avg != null ? Math.round((raw.avg / 0.280) * 100) : null,
+        obp_plus: raw.obp != null ? Math.round((raw.obp / 0.385) * 100) : null,
+        iso_plus: raw.iso != null ? Math.round((raw.iso / 0.162) * 100) : null,
+        stuff_plus: raw.stuff_plus,
+      };
+      const score =
+        (row.avg_plus != null ? 1 : 0) +
+        (row.obp_plus != null ? 1 : 0) +
+        (row.iso_plus != null ? 1 : 0) +
+        (row.stuff_plus != null ? 1 : 0) +
+        (row.season === 2025 ? 2 : 0);
+      const ex = byConf.get(key);
+      if (!ex || score > ex.score) byConf.set(key, { row, score });
+    }
+    return Array.from(byConf.values()).map((v) => v.row);
+  }, [rawConfStats]);
   const { data: remoteEquationValues = {} } = useQuery({
     queryKey: ["compare-admin-ui-equation-values"],
     queryFn: async () => {

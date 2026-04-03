@@ -6,18 +6,15 @@ export type NormalizedConferenceStats = {
   conference: string;
   conference_id: string | null;
   season: number;
-  // Hitting raw stats
   avg: number | null;
   obp: number | null;
   iso: number | null;
-  // Pitching raw stats
   era: number | null;
   fip: number | null;
   whip: number | null;
   k9: number | null;
   bb9: number | null;
   hr9: number | null;
-  // Unified plus stats & ratings
   stuff_plus: number | null;
   wrc_plus: number | null;
   overall_power_rating: number | null;
@@ -48,27 +45,34 @@ function rowToNormalized(row: ConferenceStatsRow): NormalizedConferenceStats {
 
 export type ConferenceStatsMap = Map<string, NormalizedConferenceStats>;
 
+let _cache: NormalizedConferenceStats[] | null = null;
+let _cachePromise: Promise<NormalizedConferenceStats[]> | null = null;
+
+function getCached(season?: number): Promise<NormalizedConferenceStats[]> {
+  if (_cache) return Promise.resolve(_cache);
+  if (_cachePromise) return _cachePromise;
+  _cachePromise = fetchConferenceStats(season).then((data) => {
+    _cache = data.map(rowToNormalized);
+    return _cache;
+  });
+  return _cachePromise;
+}
+
 export function useConferenceStats(season?: number) {
-  const [rows, setRows] = useState<NormalizedConferenceStats[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState<NormalizedConferenceStats[]>(_cache ?? []);
+  const [loading, setLoading] = useState(!_cache);
 
   useEffect(() => {
+    if (_cache) { setRows(_cache); setLoading(false); return; }
     let cancelled = false;
     setLoading(true);
-    fetchConferenceStats(season)
-      .then((data) => {
-        if (!cancelled) setRows(data.map(rowToNormalized));
-      })
-      .catch(() => {
-        if (!cancelled) setRows([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    getCached(season)
+      .then((data) => { if (!cancelled) setRows(data); })
+      .catch(() => { if (!cancelled) setRows([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [season]);
 
-  /** Map keyed by normalized conference abbreviation */
   const byKey = useMemo(() => {
     const map = new Map<string, NormalizedConferenceStats>();
     for (const row of rows) {

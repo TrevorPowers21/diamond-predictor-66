@@ -3,8 +3,11 @@ import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { computeAndStoreAllScores } from "@/lib/computeAndStoreScores";
-// Expose score computation to browser console: window.computeAllScores(2025)
+import { syncMasterToPlayers } from "@/lib/syncMasterToPlayers";
+import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
 (window as any).computeAllScores = computeAndStoreAllScores;
+(window as any).syncMasterToPlayers = syncMasterToPlayers;
+(window as any).createPredictions = createPredictionsFromMaster;
 import DashboardLayout from "@/components/DashboardLayout";
 import ConferenceStatsTable from "@/components/ConferenceStatsTable";
 import PitchingConferenceStatsTable from "@/components/PitchingConferenceStatsTable";
@@ -33,6 +36,110 @@ import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
+
+// ─── Sync & Compute Buttons ──────────────────────────────────────────────────
+
+function SyncMasterButton() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ hittersInserted: number; pitchersInserted: number; hittersSkipped: number; pitchersSkipped: number; errors: string[] } | null>(null);
+  return (
+    <>
+      <Button
+        onClick={async () => {
+          setLoading(true);
+          setResult(null);
+          try {
+            const r = await syncMasterToPlayers(2025);
+            setResult(r);
+          } catch (e: any) {
+            setResult({ hittersInserted: 0, pitchersInserted: 0, hittersSkipped: 0, pitchersSkipped: 0, errors: [e.message] });
+          }
+          setLoading(false);
+        }}
+        disabled={loading}
+        variant="outline"
+        className="gap-2"
+      >
+        {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+        {loading ? "Syncing Master → Players…" : "Sync Master → Players"}
+      </Button>
+      {result && (
+        <p className="text-sm text-muted-foreground">
+          Inserted {result.hittersInserted} hitters, {result.pitchersInserted} pitchers. Skipped {result.hittersSkipped + result.pitchersSkipped} existing.
+          {result.errors.length > 0 && ` Errors: ${result.errors.join("; ")}`}
+        </p>
+      )}
+    </>
+  );
+}
+
+function ComputeScoresButton() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ hitters: { updated: number; errors: number }; pitchers: { updated: number; errors: number } } | null>(null);
+  return (
+    <>
+      <Button
+        onClick={async () => {
+          setLoading(true);
+          setResult(null);
+          try {
+            const r = await computeAndStoreAllScores(2025);
+            setResult(r);
+          } catch {
+            setResult({ hitters: { updated: 0, errors: -1 }, pitchers: { updated: 0, errors: -1 } });
+          }
+          setLoading(false);
+        }}
+        disabled={loading}
+        variant="outline"
+        className="gap-2"
+      >
+        {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+        {loading ? "Computing Scores…" : "Compute All Scores"}
+      </Button>
+      {result && (
+        <p className="text-sm text-muted-foreground">
+          Hitters: {result.hitters.updated} scored. Pitchers: {result.pitchers.updated} scored.
+          {(result.hitters.errors > 0 || result.pitchers.errors > 0) && ` Errors: ${result.hitters.errors + result.pitchers.errors}`}
+        </p>
+      )}
+    </>
+  );
+}
+
+function CreatePredictionsButton() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ predictionsCreated: number; internalsCreated: number; errors: string[] } | null>(null);
+  return (
+    <>
+      <Button
+        onClick={async () => {
+          setLoading(true);
+          setResult(null);
+          try {
+            const r = await createPredictionsFromMaster(2025);
+            setResult(r);
+          } catch (e: any) {
+            setResult({ predictionsCreated: 0, internalsCreated: 0, errors: [e.message] });
+          }
+          setLoading(false);
+        }}
+        disabled={loading}
+        variant="outline"
+        className="gap-2"
+      >
+        {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+        {loading ? "Creating Predictions…" : "Create Predictions from Master"}
+      </Button>
+      {result && (
+        <p className="text-sm text-muted-foreground">
+          Created {result.predictionsCreated} predictions, {result.internalsCreated} internals.
+          {result.errors.length > 0 && ` Errors: ${result.errors.join("; ")}`}
+        </p>
+      )}
+    </>
+  );
+}
 
 // ─── Equation Constants Tab ───────────────────────────────────────────────────
 
@@ -6395,6 +6502,32 @@ function QuickActionsTab() {
               Imported {masterPitchingResult.stats} stat rows and {masterPitchingResult.power} power rating rows. Linked {masterPitchingResult.linked} to player IDs.
             </p>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-6 space-y-4">
+          <div>
+            <p className="font-medium">Sync Master Tables → Players</p>
+            <p className="text-sm text-muted-foreground">
+              Creates a players row for every hitter and pitcher in Hitter Master / Pitching Master that doesn't already exist. Links by source_player_id. Safe to re-run.
+            </p>
+          </div>
+          <SyncMasterButton />
+          <div className="border-t pt-4">
+            <p className="font-medium">Compute All Scores</p>
+            <p className="text-sm text-muted-foreground">
+              Computes power rating scores (BA+, OBP+, ISO+, ERA PR+, etc.) for all unscored players and writes them to Supabase. Runs automatically on data load, but can be triggered manually.
+            </p>
+          </div>
+          <ComputeScoresButton />
+          <div className="border-t pt-4">
+            <p className="font-medium">Create Predictions from Master</p>
+            <p className="text-sm text-muted-foreground">
+              Creates returner predictions and power rating internals for all hitters in the players table using Hitter Master data. Skips players who already have predictions. Then run "Bulk Recalculate" to compute projected stats.
+            </p>
+          </div>
+          <CreatePredictionsButton />
         </CardContent>
       </Card>
 

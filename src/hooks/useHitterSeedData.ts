@@ -1,7 +1,5 @@
-import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { autoComputeUnscoredRows } from "@/lib/computeAndStoreScores";
 
 export type StorageSeedRow = {
   id: string;
@@ -63,13 +61,10 @@ export function useHitterSeedData() {
       }
       return all;
     },
-    staleTime: 10 * 60 * 1000,
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
-
-  // Auto-compute scores for any unscored rows when data loads
-  useEffect(() => {
-    if (dbRows.length > 0) autoComputeUnscoredRows(2025);
-  }, [dbRows.length]);
 
   const hitterStats: StorageSeedRow[] = dbRows.map((r: any) => ({
     id: `hm-${r.source_player_id ?? r.playerFullName}-${r.Team ?? ""}`,

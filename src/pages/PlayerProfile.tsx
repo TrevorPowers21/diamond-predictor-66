@@ -242,13 +242,43 @@ export default function PlayerProfile() {
   const { data: player, isLoading } = useQuery({
     queryKey: ["player-profile", id],
     queryFn: async () => {
+      // Try players table first
       const { data, error } = await supabase
         .from("players")
         .select("*")
         .eq("id", id!)
-        .single();
+        .maybeSingle();
+      if (data) return data;
+      // Fallback: look up in Hitter Master by source_player_id
+      const { data: hmRow } = await supabase
+        .from("Hitter Master")
+        .select("*")
+        .eq("source_player_id", id!)
+        .limit(1)
+        .maybeSingle();
+      if (hmRow) {
+        const parts = (hmRow.playerFullName || "").trim().split(/\s+/);
+        return {
+          id: hmRow.source_player_id || hmRow.id,
+          first_name: parts[0] || "",
+          last_name: parts.slice(1).join(" ") || "",
+          team: hmRow.Team,
+          from_team: hmRow.Team,
+          conference: hmRow.Conference,
+          position: hmRow.Pos,
+          bats_hand: hmRow.BatHand,
+          throws_hand: hmRow.ThrowHand,
+          class_year: null,
+          transfer_portal: false,
+          source_player_id: hmRow.source_player_id,
+          source_team_id: hmRow.TeamID,
+          age: null, height_inches: null, weight: null, high_school: null, home_state: null,
+          headshot_url: null, notes: null, portal_entry_date: null, handedness: null, team_id: hmRow.TeamID,
+          created_at: "", updated_at: "",
+        } as any;
+      }
       if (error) throw error;
-      return data;
+      return null;
     },
     enabled: !!id,
   });
