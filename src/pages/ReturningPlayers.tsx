@@ -58,6 +58,7 @@ interface ReturnerPlayer {
   transfer_portal?: boolean | null;
   model_type: "returner" | "transfer";
   status: "active" | "departed" | "archived";
+  pa: number | null;
   nil_value: number | null;
   prediction: {
     from_avg: number | null;
@@ -960,6 +961,7 @@ export default function ReturningPlayers() {
           transfer_portal: player.transfer_portal,
           model_type: row.model_type,
           status: row.status,
+          pa: player.pa ?? null,
           nil_value: nilByPlayer.get(player.id) ?? null,
           prediction: {
             from_avg: row.from_avg,
@@ -998,7 +1000,7 @@ export default function ReturningPlayers() {
         const to = from + pageSize - 1;
         const { data: pageData, error: pageErr, count } = await supabase
           .from("player_predictions")
-          .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal)", { count: "exact" })
+          .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal, pa)", { count: "exact" })
           .in("model_type", ["returner", "transfer"])
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
@@ -1041,7 +1043,7 @@ export default function ReturningPlayers() {
         while (true) {
           const { data, error } = await supabase
             .from("player_predictions")
-            .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal)")
+            .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal, pa)")
             .in("model_type", ["returner", "transfer"])
             .eq("variant", "regular")
             .in("status", ["active", "departed"])
@@ -1155,7 +1157,7 @@ export default function ReturningPlayers() {
       const to = from + pageSize - 1;
       let playersQuery = supabase
         .from("players")
-        .select("id, first_name, last_name, team, conference, position, class_year, transfer_portal", { count: "exact" })
+        .select("id, first_name, last_name, team, conference, position, class_year, transfer_portal, pa", { count: "exact" })
         .order("last_name", { ascending: true })
         .order("first_name", { ascending: true })
         .range(from, to);

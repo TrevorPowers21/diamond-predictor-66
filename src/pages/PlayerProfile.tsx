@@ -593,7 +593,7 @@ export default function PlayerProfile() {
     gb: seedPowerRow.gb,
   }) : null;
   const projectedOWar = computeOWarFromWrcPlus(regularPred?.p_wrc_plus ?? null);
-  const historicalOWar = computeOWarFromWrcPlus(seedDerived?.wrcPlus ?? null);
+  const historicalOWar = computeOWarFromWrcPlus(seedDerived?.wrcPlus ?? null, (player as any)?.pa ?? null);
   const displayOWar =
     projectedOWar ??
     ((nilValuation as any)?.war as number | null) ??
@@ -822,12 +822,14 @@ export default function PlayerProfile() {
                 </CardHeader>
                 <CardContent className="space-y-3 pt-0">
                   <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div><span className="text-muted-foreground">PA</span><div className="font-bold">{(player as any)?.pa ?? "—"}</div></div>
                     <div><span className="text-muted-foreground">AVG</span><div className="font-bold">{statFormat(seedStatRow.avg)}</div></div>
                     <div><span className="text-muted-foreground">OBP</span><div className="font-bold">{statFormat(seedStatRow.obp)}</div></div>
                     <div><span className="text-muted-foreground">SLG</span><div className="font-bold">{statFormat(seedStatRow.slg)}</div></div>
                     <div><span className="text-muted-foreground">OPS</span><div className="font-bold">{statFormat(seedDerived.ops)}</div></div>
                     <div><span className="text-muted-foreground">ISO</span><div className="font-bold">{statFormat(seedDerived.iso)}</div></div>
                     <div><span className="text-muted-foreground">wRC+</span><div className="font-bold">{pctFormat(seedDerived.wrcPlus)}</div></div>
+                    <div><span className="text-muted-foreground">2025 oWAR</span><div className="font-bold">{historicalOWar != null ? historicalOWar.toFixed(2) : "—"}</div></div>
                   </div>
                 </CardContent>
               </Card>
