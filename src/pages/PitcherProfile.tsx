@@ -154,17 +154,31 @@ type PitchArsenalRow = {
 };
 
 const PITCH_TYPE_LABELS: Record<string, string> = {
-  "4S": "4-Seam",
+  "4S": "4-Seam Fastball",
+  "4S FB": "4-Seam Fastball",
+  "FOUR-SEAM": "4-Seam Fastball",
+  "FF": "4-Seam Fastball",
   SI: "Sinker",
+  SINKER: "Sinker",
   SL: "Slider",
+  SLIDER: "Slider",
   SWP: "Sweeper",
+  SWEEPER: "Sweeper",
   CB: "Curveball",
+  CURVEBALL: "Curveball",
+  CU: "Curveball",
   CT: "Cutter",
+  CUTTER: "Cutter",
+  FC: "Cutter",
   CH: "Changeup",
+  "CHANGE-UP": "Changeup",
+  CHANGEUP: "Changeup",
   SP: "Splitter",
+  SPLITTER: "Splitter",
+  FS: "Splitter",
 };
 
-const PITCH_DISPLAY_ORDER = ["4S", "SI", "SL", "SWP", "CB", "CT", "CH", "SP"] as const;
+const PITCH_DISPLAY_ORDER = ["4S", "4S FB", "SI", "SINKER", "CT", "CUTTER", "SL", "SLIDER", "SWP", "SWEEPER", "CB", "CURVEBALL", "CH", "CHANGE-UP", "SP", "SPLITTER"] as const;
 
 const PITCHING_POWER_RATING_WEIGHT = 0.7;
 const PITCHING_DEV_FACTOR = 0.06;
@@ -528,11 +542,11 @@ export default function PitcherProfile() {
     if (!masterRow) return null;
     const m = masterRow;
     // [0]=name, [1]=team,
-    // [2..15] = raw metrics (stuff_plus not in master, so "")
+    // [2..15] = raw metrics
     // [16..29] = stored scores (not in master, so all "")
     return [
       m.playerName || "", m.team || "",
-      /* stuff_plus */ "", String(m.miss_pct ?? ""), String(m.bb_pct ?? ""), String(m.hard_hit_pct ?? ""),
+      String(m.stuffPlus ?? ""), String(m.miss_pct ?? ""), String(m.bb_pct ?? ""), String(m.hard_hit_pct ?? ""),
       String(m.in_zone_whiff_pct ?? ""), String(m.chase_pct ?? ""), String(m.barrel_pct ?? ""), String(m.line_pct ?? ""),
       String(m.exit_vel ?? ""), String(m.ground_pct ?? ""), String(m.in_zone_pct ?? ""), String(m.vel_90th ?? ""),
       String(m.h_pull_pct ?? ""), String(m.la_10_30_pct ?? ""),
@@ -1320,23 +1334,31 @@ export default function PitcherProfile() {
                 <CardDescription>Per-pitch pitch count, usage%, whiff%, and Stuff+ shown horizontally by pitch.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-                  <div className="rounded border p-2">
-                    <div className="text-muted-foreground text-xs">Overall Stuff+</div>
-                    <div className="font-semibold">{fmtWhole(pitchArsenal.overallStuffPlus)}</div>
-                  </div>
-                  <div className="rounded border p-2">
-                    <div className="text-muted-foreground text-xs">Overall Usage%</div>
-                    <div className="font-semibold">{pitchArsenal.usageTotal == null ? "—" : `${pitchArsenal.usageTotal.toFixed(1)}%`}</div>
-                  </div>
-                  <div className="rounded border p-2">
-                    <div className="text-muted-foreground text-xs">Overall Whiff%</div>
-                    <div className="font-semibold">{pitchArsenal.overallWhiffPct == null ? "—" : `${pitchArsenal.overallWhiffPct.toFixed(1)}%`}</div>
-                  </div>
-                  <div className="rounded border p-2">
-                    <div className="text-muted-foreground text-xs">Total Pitches</div>
-                    <div className="font-semibold">{pitchArsenal.totalPitches == null ? "—" : Math.round(pitchArsenal.totalPitches).toString()}</div>
-                  </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {(() => {
+                    const sp = pitchArsenal.overallStuffPlus;
+                    const stuffColor = sp == null ? "border-border" : sp >= 103 ? "border-green-500 bg-green-500/10" : sp >= 98 ? "border-blue-500 bg-blue-500/10" : sp >= 93 ? "border-yellow-500 bg-yellow-500/10" : "border-red-500 bg-red-500/10";
+                    const stuffText = sp == null ? "text-muted-foreground" : sp >= 103 ? "text-green-600" : sp >= 98 ? "text-blue-600" : sp >= 93 ? "text-yellow-600" : "text-red-600";
+                    return (
+                      <div className={`rounded-lg border-2 p-4 text-center ${stuffColor}`}>
+                        <div className="text-muted-foreground text-xs uppercase tracking-wide">Overall Stuff+</div>
+                        <div className={`text-3xl font-bold tracking-tight mt-1 ${stuffText}`}>{fmtWhole(sp)}</div>
+                        <div className="text-[10px] text-muted-foreground mt-1">NCAA Avg: 100</div>
+                      </div>
+                    );
+                  })()}
+                  {(() => {
+                    const wp = pitchArsenal.overallWhiffPct;
+                    const whiffColor = wp == null ? "border-border" : wp >= 27 ? "border-green-500 bg-green-500/10" : wp >= 21 ? "border-blue-500 bg-blue-500/10" : wp >= 16 ? "border-yellow-500 bg-yellow-500/10" : "border-red-500 bg-red-500/10";
+                    const whiffText = wp == null ? "text-muted-foreground" : wp >= 27 ? "text-green-600" : wp >= 21 ? "text-blue-600" : wp >= 16 ? "text-yellow-600" : "text-red-600";
+                    return (
+                      <div className={`rounded-lg border-2 p-4 text-center ${whiffColor}`}>
+                        <div className="text-muted-foreground text-xs uppercase tracking-wide">Overall Whiff%</div>
+                        <div className={`text-3xl font-bold tracking-tight mt-1 ${whiffText}`}>{wp == null ? "—" : `${wp.toFixed(1)}%`}</div>
+                        <div className="text-[10px] text-muted-foreground mt-1">NCAA Avg: 22.9%</div>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="overflow-x-auto">
                   {pitchArsenal.rows.length === 0 ? (
@@ -1362,11 +1384,27 @@ export default function PitcherProfile() {
                             </div>
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-muted-foreground text-xs">Whiff%</span>
-                              <span className="font-medium">{row.whiffPct == null ? "—" : `${row.whiffPct.toFixed(1)}%`}</span>
+                              {(() => {
+                                const wp = row.whiffPct;
+                                if (wp == null) return <span className="font-bold">—</span>;
+                                // Per-pitch whiff% thresholds (NCAA D1 averages vary by pitch type)
+                                const pt = row.pitchType;
+                                const isFB = pt === "4S FB" || pt === "SINKER" || pt === "4-SEAM" || pt === "FOUR-SEAM" || pt === "SI" || pt === "FF";
+                                const isCutter = pt === "CUTTER" || pt === "FC" || pt === "CT";
+                                const isBreaking = pt === "SLIDER" || pt === "CURVEBALL" || pt === "SWEEPER" || pt === "SL" || pt === "CB" || pt === "CU" || pt === "SW";
+                                const isOffspeed = pt === "CHANGE-UP" || pt === "SPLITTER" || pt === "CH" || pt === "FS" || pt === "CHANGEUP";
+                                // Fastball: avg ~15%, good 20%+, elite 25%+
+                                // Cutter: avg ~20%, good 28%+, elite 35%+
+                                // Breaking: avg ~28%, good 35%+, elite 42%+
+                                // Offspeed: avg ~30%, good 38%+, elite 45%+
+                                const [green, blue, yellow] = isFB ? [22, 15, 10] : isCutter ? [30, 20, 14] : isBreaking ? [38, 28, 20] : isOffspeed ? [40, 30, 20] : [35, 25, 18];
+                                const color = wp >= green ? "text-green-600" : wp >= blue ? "text-blue-600" : wp >= yellow ? "text-yellow-600" : "text-red-600";
+                                return <span className={`font-bold ${color}`}>{`${wp.toFixed(1)}%`}</span>;
+                              })()}
                             </div>
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-muted-foreground text-xs">Stuff+</span>
-                              <span className="font-medium">{fmtWhole(row.stuffPlus)}</span>
+                              <span className={`font-bold ${row.stuffPlus == null ? "" : row.stuffPlus >= 103 ? "text-green-600" : row.stuffPlus >= 98 ? "text-blue-600" : row.stuffPlus >= 93 ? "text-yellow-600" : "text-red-600"}`}>{fmtWhole(row.stuffPlus)}</span>
                             </div>
                           </div>
                         </div>
