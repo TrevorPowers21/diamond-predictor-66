@@ -1,0 +1,46 @@
+PLANNING QUESTIONS — March 11, 2026
+=====================================
+
+1. Page responsiveness
+   Which pages are worst? Mobile, tablet, or just narrow desktop?
+   Or is this more about re-render performance (slowness) than layout breakpoints?
+
+2. Search on Player Dashboard
+   The "Player Dashboard" page (/dashboard/returning) has a search/filter bar.
+   Is that what you mean, or are you referring to a global search across all players?
+
+3. Chart on the player page
+   PlayerProfile has a "Season Stats" section and a "Predicted Stats" section
+   but no chart component found in code. Can you screenshot what you're seeing?
+   Or is this the bar chart on the Overview page leaking into another view?
+
+4. "Sort by NIL on the player page"
+   The player profile is a single player's page.
+   Did you mean sort the player LIST on the Player Dashboard by NIL?
+   Or is there a table on the player profile page you want sorted?
+
+5. NIL Valuations page
+   You said both "Scrap it" and "Agent Only View."
+   Is the intent: delete the page from nav but keep the data accessible inside Admin?
+   Or are these two separate ideas — scrap the current page, build a new Agent-only version?
+
+6. "Agent Only"
+   Does "Agent" mean a specific user role (like a sports agent), or an AI agent?
+   Is this different from the existing admin role?
+
+7. Compare view on Team Builder
+   Pull from target board or all players?
+   Should it be scoped to what's already on your board, or open search?
+
+8. AI target board
+   Is there an AI/LLM integration already wired into this project, or would this be net new?
+   What defines "team needs" as an input — roster holes by position, budget remaining, oWAR gap?
+
+9. "Teams (admin only)"
+   The Teams page currently exists in the nav.
+   Move it inside the Admin section entirely, or just hide it behind an admin gate on its own route?
+
+10. Account page / access management
+    Is this just name/email editing for the logged-in user?
+    Or do you need the ability to invite/remove other users (multi-seat access)?
+    The latter is a bigger auth flow.

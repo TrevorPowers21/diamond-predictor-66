@@ -4211,13 +4211,13 @@ export default function TeamBuilder() {
   };
 
   const classColor = (ct: string | null | undefined, isPlaceholder?: boolean) => {
-    if (isPlaceholder) return "border-blue-500/50 bg-blue-500/10 text-blue-900";
-    if (!ct) return "border-white/40 bg-white/90 text-black";
-    if (ct === "FS") return "border-blue-500/50 bg-blue-500/15 text-blue-900";
-    if (ct === "SJ") return "border-green-500/50 bg-green-500/15 text-green-900";
-    if (ct === "JS") return "border-yellow-500/50 bg-yellow-500/15 text-yellow-900";
-    if (ct === "GR") return "border-red-500/50 bg-red-500/15 text-red-900";
-    return "border-white/40 bg-white/90 text-black";
+    if (isPlaceholder) return "border-blue-500 bg-blue-100 text-blue-900";
+    if (!ct) return "border-slate-300 bg-white text-black";
+    if (ct === "FS") return "border-blue-500 bg-blue-100 text-blue-900";
+    if (ct === "SJ") return "border-green-600 bg-green-200 text-green-900";
+    if (ct === "JS") return "border-yellow-500 bg-yellow-100 text-yellow-900";
+    if (ct === "GR") return "border-red-500 bg-red-100 text-red-900";
+    return "border-slate-300 bg-white text-black";
   };
 
   const renderDepthStack = (
@@ -4235,7 +4235,7 @@ export default function TeamBuilder() {
             const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
             const ct = selectedPlayer?.class_transition;
             const isPlaceholder = placeholder === "freshman" || placeholder === "transfer";
-            const colorCls = currentIdx != null ? classColor(ct) : isPlaceholder ? classColor(null, true) : "border-white/30 bg-white/80 text-black";
+            const colorCls = currentIdx != null ? classColor(ct) : isPlaceholder ? classColor(null, true) : "border-slate-300 bg-white text-black";
             return (
               <Select key={`${slot}-${depth}`} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, depth, v)}>
                 <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
@@ -4272,7 +4272,7 @@ export default function TeamBuilder() {
             const currentIdx = depthAssignments[depthKey(slot, 1)];
             const placeholder = depthPlaceholders[depthKey(slot, 1)] ?? null;
             const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
-            const colorCls = currentIdx != null ? classColor(selectedPlayer?.class_transition) : "border-white/30 bg-white/80 text-black";
+            const colorCls = currentIdx != null ? classColor(selectedPlayer?.class_transition) : "border-slate-300 bg-white text-black";
             return (
               <Select key={slot} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, 1, v)}>
                 <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
@@ -4309,7 +4309,7 @@ export default function TeamBuilder() {
             const currentIdx = depthAssignments[depthKey(slot, 1)];
             const placeholder = depthPlaceholders[depthKey(slot, 1)] ?? null;
             const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
-            const colorCls = currentIdx != null ? classColor(selectedPlayer?.class_transition) : "border-white/30 bg-white/80 text-black";
+            const colorCls = currentIdx != null ? classColor(selectedPlayer?.class_transition) : "border-slate-300 bg-white text-black";
             return (
               <Select key={slot} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, 1, v)}>
                 <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
