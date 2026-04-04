@@ -5483,37 +5483,40 @@ export default function TeamBuilder() {
                   <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm bg-yellow-500/20 border border-yellow-500"></span> JR</span>
                   <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm bg-red-500/20 border border-red-500"></span> SR/GR</span>
                 </div>
-                <div className="mx-auto relative h-[780px] w-full max-w-[980px] overflow-hidden rounded-xl border border-green-800/40 bg-gradient-to-b from-green-800/90 to-green-700/80">
+                <div className="mx-auto relative h-[780px] w-full max-w-[980px] overflow-hidden rounded-xl border border-green-800/40 bg-[#2d5a27]">
                   <svg className="absolute inset-0 h-full w-full" viewBox="0 0 980 760" preserveAspectRatio="none">
-                    {/* Outfield grass arc */}
-                    <path
-                      d="M90 210 Q490 -180 890 210 L490 610 Z"
-                      fill="rgba(34,139,34,0.25)"
-                    />
-                    {/* Infield dirt */}
-                    <path d="M350 470 L490 330 L630 470 L490 610 Z" fill="#c4a265" stroke="#8b6914" strokeWidth="2" />
+                    {/* Full outfield grass */}
+                    <path d="M90 210 Q490 -180 890 210 L490 610 Z" fill="#3a7a32" />
+                    {/* Infield grass (lighter) */}
+                    <path d="M350 470 L490 330 L630 470 L490 610 Z" fill="#4a8a42" />
+                    {/* Dirt arc from 1B to 3B through outfield edge */}
+                    <path d="M264 384 L272 392 Q490 100 708 392 L716 384 Q490 130 264 384 Z" fill="#b8945a" opacity="0.6" />
+                    {/* Dirt base paths */}
+                    <line x1="490" y1="610" x2="350" y2="470" stroke="#b8945a" strokeWidth="12" strokeLinecap="round" />
+                    <line x1="490" y1="610" x2="630" y2="470" stroke="#b8945a" strokeWidth="12" strokeLinecap="round" />
+                    <line x1="350" y1="470" x2="490" y2="330" stroke="#b8945a" strokeWidth="12" strokeLinecap="round" />
+                    <line x1="630" y1="470" x2="490" y2="330" stroke="#b8945a" strokeWidth="12" strokeLinecap="round" />
+                    {/* Dirt circles at bases */}
+                    <circle cx="350" cy="470" r="18" fill="#b8945a" />
+                    <circle cx="630" cy="470" r="18" fill="#b8945a" />
+                    <circle cx="490" cy="330" r="18" fill="#b8945a" />
+                    {/* Home plate dirt circle */}
+                    <circle cx="490" cy="610" r="32" fill="#b8945a" />
+                    {/* Mound dirt circle */}
+                    <circle cx="490" cy="470" r="28" fill="#b8945a" />
                     {/* Outfield fence */}
                     <path d="M90 210 Q490 -180 890 210" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="3" />
                     {/* Foul lines */}
-                    <line x1="490" y1="610" x2="90" y2="210" stroke="rgba(255,255,255,0.7)" strokeWidth="2" />
-                    <line x1="490" y1="610" x2="890" y2="210" stroke="rgba(255,255,255,0.7)" strokeWidth="2" />
-                    {/* Base paths */}
-                    <line x1="490" y1="610" x2="390" y2="510" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" />
-                    <line x1="490" y1="610" x2="590" y2="510" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" />
-                    <line x1="390" y1="510" x2="490" y2="410" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" />
-                    <line x1="590" y1="510" x2="490" y2="410" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" />
-                    {/* Infield arc */}
-                    <path d="M264 384 L272 392 Q490 100 708 392 L716 384" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="2" strokeLinecap="round" />
-                    {/* Mound */}
-                    <circle cx="490" cy="470" r="26" fill="#c4a265" stroke="#8b6914" strokeWidth="1.5" />
+                    <line x1="490" y1="610" x2="90" y2="210" stroke="rgba(255,255,255,0.8)" strokeWidth="2" />
+                    <line x1="490" y1="610" x2="890" y2="210" stroke="rgba(255,255,255,0.8)" strokeWidth="2" />
+                    {/* Mound rubber */}
                     <rect x="484" y="467" width="12" height="6" rx="1.5" fill="white" />
                     {/* Home plate */}
-                    <circle cx="490" cy="620" r="38" fill="#c4a265" stroke="#8b6914" strokeWidth="1.5" />
-                    <polygon points="490,624 500,616 500,604 480,604 480,616" fill="white" stroke="#8b6914" strokeWidth="1.5" />
-                    {/* Bases */}
-                    <rect x="383" y="503" width="14" height="14" rx="1" fill="white" transform="rotate(45 390 510)" />
-                    <rect x="483" y="403" width="14" height="14" rx="1" fill="white" transform="rotate(45 490 410)" />
-                    <rect x="583" y="503" width="14" height="14" rx="1" fill="white" transform="rotate(45 590 510)" />
+                    <polygon points="490,616 500,608 500,596 480,596 480,608" fill="white" />
+                    {/* Bases — on the diamond corners */}
+                    <rect x="343" y="463" width="14" height="14" rx="1" fill="white" transform="rotate(45 350 470)" />
+                    <rect x="483" y="323" width="14" height="14" rx="1" fill="white" transform="rotate(45 490 330)" />
+                    <rect x="623" y="463" width="14" height="14" rx="1" fill="white" transform="rotate(45 630 470)" />
                   </svg>
 
                   {renderDepthStack("CF", eligiblePositionPlayers, "left-[50%] top-[58px]")}
@@ -5541,10 +5544,19 @@ export default function TeamBuilder() {
               const posGroups: Record<string, { count: number; nilTotal: number; warTotal: number }> = {};
               for (const p of rosterPlayers) {
                 if ((p.roster_status || "returner") === "leaving") continue;
-                const pos = p.position || "Unknown";
-                const group = /^(SP|RP|P|LHP|RHP|CL|TWP)/i.test(pos) ? "Pitchers" :
-                  /^(C|1B|2B|3B|SS|IF)/i.test(pos) ? "Infield" :
-                  /^(LF|CF|RF|OF|DH)/i.test(pos) ? "Outfield" : "Other";
+                const pos = (p.position || "").toUpperCase().trim();
+                // Group by positional value factor categories
+                const group =
+                  /^(SP)/.test(pos) ? "Starting Pitchers" :
+                  /^(RP|CL|LHP|RHP|TWP|P$)/.test(pos) ? "Relievers" :
+                  /^(C)$/.test(pos) ? "Catcher" :
+                  /^(SS|2B)/.test(pos) ? "Up the Middle" :
+                  /^(1B|3B)/.test(pos) ? "Corner Infield" :
+                  /^(CF)/.test(pos) ? "Center Field" :
+                  /^(LF|RF|OF|DH)/.test(pos) ? "Corner Outfield" :
+                  /^(IF)/.test(pos) ? "Up the Middle" :
+                  /^(UTL)/.test(pos) ? "Utility" :
+                  "Other";
                 if (!posGroups[group]) posGroups[group] = { count: 0, nilTotal: 0, warTotal: 0 };
                 posGroups[group].count++;
                 posGroups[group].nilTotal += (p.nil_value || 0);
