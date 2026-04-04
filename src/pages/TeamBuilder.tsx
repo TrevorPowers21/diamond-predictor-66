@@ -4774,7 +4774,7 @@ export default function TeamBuilder() {
           </div>
           <div className={`rounded-lg border-2 p-4 text-center ${budgetRemaining < 0 ? "border-destructive/30 bg-destructive/5" : "border-primary/20 bg-primary/5"}`}>
             <div className="text-muted-foreground text-xs uppercase tracking-wide">Remaining</div>
-            <div className={`text-2xl font-bold tracking-tight mt-1 ${budgetRemaining < 0 ? "text-destructive" : ""}`}>${budgetRemaining.toLocaleString()}</div>
+            <div className={`text-2xl font-bold tracking-tight mt-1 ${budgetRemaining < 0 ? "text-destructive" : ""}`}>${Math.round(budgetRemaining).toLocaleString()}</div>
           </div>
         </div>
 
@@ -4784,6 +4784,7 @@ export default function TeamBuilder() {
               <TabsTrigger value="roster">Roster</TabsTrigger>
               <TabsTrigger value="target-board">Target Board</TabsTrigger>
               <TabsTrigger value="depth">Depth Chart</TabsTrigger>
+              <TabsTrigger value="analytics">Program Analytics</TabsTrigger>
             </TabsList>
             <Button
               variant="secondary"
@@ -5498,6 +5499,138 @@ export default function TeamBuilder() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="analytics" className="space-y-6">
+            {(() => {
+              const posGroups: Record<string, { count: number; nilTotal: number; warTotal: number }> = {};
+              for (const p of rosterPlayers) {
+                if ((p.roster_status || "returner") === "leaving") continue;
+                const pos = p.position || "Unknown";
+                const group = /^(SP|RP|P|LHP|RHP|CL|TWP)/i.test(pos) ? "Pitchers" :
+                  /^(C|1B|2B|3B|SS|IF)/i.test(pos) ? "Infield" :
+                  /^(LF|CF|RF|OF|DH)/i.test(pos) ? "Outfield" : "Other";
+                if (!posGroups[group]) posGroups[group] = { count: 0, nilTotal: 0, warTotal: 0 };
+                posGroups[group].count++;
+                posGroups[group].nilTotal += (p.nil_value || 0);
+                const war = p.projected_war ?? 0;
+                posGroups[group].warTotal += war;
+              }
+              const activeCount = rosterPlayers.filter(p => (p.roster_status || "returner") !== "leaving").length;
+              const leavingCount = rosterPlayers.filter(p => (p.roster_status || "returner") === "leaving").length;
+              const groups = Object.entries(posGroups).sort((a, b) => b[1].nilTotal - a[1].nilTotal);
+              return (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded-lg border p-4 text-center">
+                      <div className="text-muted-foreground text-xs uppercase tracking-wide">Active Roster</div>
+                      <div className="text-3xl font-bold mt-1">{activeCount}</div>
+                    </div>
+                    <div className="rounded-lg border p-4 text-center">
+                      <div className="text-muted-foreground text-xs uppercase tracking-wide">Leaving</div>
+                      <div className="text-3xl font-bold mt-1">{leavingCount}</div>
+                    </div>
+                    <div className="rounded-lg border p-4 text-center">
+                      <div className="text-muted-foreground text-xs uppercase tracking-wide">Avg NIL / Player</div>
+                      <div className="text-2xl font-bold mt-1">{activeCount > 0 ? `$${Math.round(totalEffectiveNil / activeCount).toLocaleString()}` : "—"}</div>
+                    </div>
+                    <div className="rounded-lg border p-4 text-center">
+                      <div className="text-muted-foreground text-xs uppercase tracking-wide">Avg WAR / Player</div>
+                      <div className="text-2xl font-bold mt-1">{activeCount > 0 ? (rosterTableTotals.totalOWar / activeCount).toFixed(2) : "—"}</div>
+                    </div>
+                  </div>
+
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base">Spending by Position Group</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        {groups.map(([group, data]) => {
+                          const pct = totalEffectiveNil > 0 ? (data.nilTotal / totalEffectiveNil) * 100 : 0;
+                          return (
+                            <div key={group}>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-sm font-medium">{group}</span>
+                                <div className="flex items-center gap-3 text-sm">
+                                  <span className="text-muted-foreground">{data.count} players</span>
+                                  <span className="font-semibold">${Math.round(data.nilTotal).toLocaleString()}</span>
+                                  <span className="text-muted-foreground text-xs w-12 text-right">{pct.toFixed(1)}%</span>
+                                </div>
+                              </div>
+                              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                                <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.min(pct, 100)}%` }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base">WAR by Position Group</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        {groups.map(([group, data]) => {
+                          const totalWar = rosterTableTotals.totalOWar || 1;
+                          const pct = (data.warTotal / totalWar) * 100;
+                          return (
+                            <div key={group}>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-sm font-medium">{group}</span>
+                                <div className="flex items-center gap-3 text-sm">
+                                  <span className="text-muted-foreground">{data.count} players</span>
+                                  <span className="font-semibold">{data.warTotal.toFixed(2)} WAR</span>
+                                  <span className="text-muted-foreground text-xs w-12 text-right">{pct.toFixed(1)}%</span>
+                                </div>
+                              </div>
+                              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                                <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${Math.min(Math.max(pct, 0), 100)}%` }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base">Cost Efficiency</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="text-left py-2 text-xs text-muted-foreground font-medium">Group</th>
+                            <th className="text-right py-2 text-xs text-muted-foreground font-medium">Players</th>
+                            <th className="text-right py-2 text-xs text-muted-foreground font-medium">Total NIL</th>
+                            <th className="text-right py-2 text-xs text-muted-foreground font-medium">Total WAR</th>
+                            <th className="text-right py-2 text-xs text-muted-foreground font-medium">$/WAR</th>
+                            <th className="text-right py-2 text-xs text-muted-foreground font-medium">NIL/Player</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {groups.map(([group, data]) => (
+                            <tr key={group} className="border-b last:border-0">
+                              <td className="py-2 font-medium">{group}</td>
+                              <td className="py-2 text-right text-muted-foreground">{data.count}</td>
+                              <td className="py-2 text-right tabular-nums">${Math.round(data.nilTotal).toLocaleString()}</td>
+                              <td className="py-2 text-right tabular-nums">{data.warTotal.toFixed(2)}</td>
+                              <td className="py-2 text-right tabular-nums">{data.warTotal > 0 ? `$${Math.round(data.nilTotal / data.warTotal).toLocaleString()}` : "—"}</td>
+                              <td className="py-2 text-right tabular-nums">{data.count > 0 ? `$${Math.round(data.nilTotal / data.count).toLocaleString()}` : "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </CardContent>
+                  </Card>
+                </>
+              );
+            })()}
           </TabsContent>
         </Tabs>
 
