@@ -4210,6 +4210,16 @@ export default function TeamBuilder() {
     setDirty(true);
   };
 
+  const classColor = (ct: string | null | undefined, isPlaceholder?: boolean) => {
+    if (isPlaceholder) return "border-blue-500/50 bg-blue-500/10 text-blue-900";
+    if (!ct) return "border-white/40 bg-white/90 text-black";
+    if (ct === "FS") return "border-blue-500/50 bg-blue-500/15 text-blue-900";
+    if (ct === "SJ") return "border-green-500/50 bg-green-500/15 text-green-900";
+    if (ct === "JS") return "border-yellow-500/50 bg-yellow-500/15 text-yellow-900";
+    if (ct === "GR") return "border-red-500/50 bg-red-500/15 text-red-900";
+    return "border-white/40 bg-white/90 text-black";
+  };
+
   const renderDepthStack = (
     slot: string,
     eligible: Array<{ rp: BuildPlayer; idx: number }>,
@@ -4217,14 +4227,18 @@ export default function TeamBuilder() {
   ) => {
     return (
       <div className={`absolute -translate-x-1/2 ${className}`}>
-        <p className="mb-1 text-[10px] font-semibold tracking-wide text-slate-700 text-center">{slot}</p>
+        <p className="mb-1 text-[10px] font-bold tracking-wide text-white/90 text-center drop-shadow-sm">{slot}</p>
         <div className="w-[106px] space-y-1">
           {[1, 2, 3].map((depth) => {
             const currentIdx = depthAssignments[depthKey(slot, depth)];
             const placeholder = depthPlaceholders[depthKey(slot, depth)] ?? null;
+            const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
+            const ct = selectedPlayer?.class_transition;
+            const isPlaceholder = placeholder === "freshman" || placeholder === "transfer";
+            const colorCls = currentIdx != null ? classColor(ct) : isPlaceholder ? classColor(null, true) : "border-white/30 bg-white/80 text-black";
             return (
               <Select key={`${slot}-${depth}`} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, depth, v)}>
-                <SelectTrigger className="h-6 rounded-sm border-slate-300 bg-white/95 px-1 text-[10px] text-black shadow-sm">
+                <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
                   <SelectValue placeholder={`${depth}`} />
                 </SelectTrigger>
                 <SelectContent>
@@ -4251,15 +4265,17 @@ export default function TeamBuilder() {
   ) => {
     return (
       <div className={`absolute -translate-x-1/2 ${className}`}>
-        <p className="mb-1 text-[10px] font-semibold tracking-wide text-slate-700 text-center">Starting Rotation</p>
+        <p className="mb-1 text-[10px] font-bold tracking-wide text-white/90 text-center drop-shadow-sm">Starting Rotation</p>
         <div className="w-[120px] space-y-1">
           {[1, 2, 3, 4, 5].map((sp) => {
             const slot = `SP${sp}`;
             const currentIdx = depthAssignments[depthKey(slot, 1)];
             const placeholder = depthPlaceholders[depthKey(slot, 1)] ?? null;
+            const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
+            const colorCls = currentIdx != null ? classColor(selectedPlayer?.class_transition) : "border-white/30 bg-white/80 text-black";
             return (
               <Select key={slot} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, 1, v)}>
-                <SelectTrigger className="h-6 rounded-sm border-slate-300 bg-white/95 px-1 text-[10px] text-black shadow-sm">
+                <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
                   <SelectValue placeholder={slot} />
                 </SelectTrigger>
                 <SelectContent>
@@ -4286,15 +4302,17 @@ export default function TeamBuilder() {
   ) => {
     return (
       <div className={`absolute -translate-x-1/2 ${className}`}>
-        <p className="mb-1 text-[10px] font-semibold tracking-wide text-slate-700 text-center">Relievers</p>
+        <p className="mb-1 text-[10px] font-bold tracking-wide text-white/90 text-center drop-shadow-sm">Relievers</p>
         <div className="w-[120px] space-y-1">
           {[1, 2, 3, 4, 5, 6, 7, 8].map((rpNum) => {
             const slot = `RP${rpNum}`;
             const currentIdx = depthAssignments[depthKey(slot, 1)];
             const placeholder = depthPlaceholders[depthKey(slot, 1)] ?? null;
+            const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
+            const colorCls = currentIdx != null ? classColor(selectedPlayer?.class_transition) : "border-white/30 bg-white/80 text-black";
             return (
               <Select key={slot} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, 1, v)}>
-                <SelectTrigger className="h-6 rounded-sm border-slate-300 bg-white/95 px-1 text-[10px] text-black shadow-sm">
+                <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
                   <SelectValue placeholder={slot} />
                 </SelectTrigger>
                 <SelectContent>
@@ -5458,27 +5476,44 @@ export default function TeamBuilder() {
                 <CardTitle className="text-base">Depth Chart Board</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="mx-auto relative h-[780px] w-full max-w-[980px] overflow-hidden rounded-xl border border-slate-400 bg-[#e5e5e5]">
+                <div className="mb-3 flex items-center gap-4 text-xs">
+                  <span className="font-medium text-muted-foreground">Class Legend:</span>
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm bg-blue-500/20 border border-blue-500"></span> FR</span>
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm bg-green-500/20 border border-green-500"></span> SO</span>
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm bg-yellow-500/20 border border-yellow-500"></span> JR</span>
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm bg-red-500/20 border border-red-500"></span> SR/GR</span>
+                </div>
+                <div className="mx-auto relative h-[780px] w-full max-w-[980px] overflow-hidden rounded-xl border border-green-800/40 bg-gradient-to-b from-green-800/90 to-green-700/80">
                   <svg className="absolute inset-0 h-full w-full" viewBox="0 0 980 760" preserveAspectRatio="none">
+                    {/* Outfield grass arc */}
                     <path
-                      d="M90 210 Q490 -180 890 210 L490 610 Z
-                         M350 470 L490 330 L630 470 L490 610 Z"
-                      fill="#f2f2f2"
-                      fillRule="evenodd"
+                      d="M90 210 Q490 -180 890 210 L490 610 Z"
+                      fill="rgba(34,139,34,0.25)"
                     />
-                    <path d="M90 210 Q490 -180 890 210" fill="none" stroke="#525252" strokeWidth="2" />
-                    <line x1="490" y1="610" x2="90" y2="210" stroke="#525252" strokeWidth="2" />
-                    <line x1="490" y1="610" x2="890" y2="210" stroke="#525252" strokeWidth="2" />
-
-                    <path d="M350 470 L490 330 L630 470 L490 610 Z" fill="#d1d5db" stroke="#4b5563" strokeWidth="2" />
-                    <path d="M264 384 L272 392 Q490 100 708 392 L716 384" fill="none" stroke="#4b5563" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    <line x1="490" y1="610" x2="390" y2="510" stroke="#4b5563" strokeWidth="1.5" />
-                    <line x1="490" y1="610" x2="590" y2="510" stroke="#4b5563" strokeWidth="1.5" />
-
-                    <circle cx="490" cy="470" r="26" fill="#f2f2f2" stroke="#6b7280" strokeWidth="1.5" />
-                    <rect x="484" y="467" width="12" height="6" rx="1.5" fill="#9ca3af" />
-                    <circle cx="490" cy="620" r="38" fill="#f2f2f2" stroke="#6b7280" strokeWidth="1.5" />
-                    <polygon points="490,624 500,616 500,604 480,604 480,616" fill="#ffffff" stroke="#6b7280" strokeWidth="1.5" />
+                    {/* Infield dirt */}
+                    <path d="M350 470 L490 330 L630 470 L490 610 Z" fill="#c4a265" stroke="#8b6914" strokeWidth="2" />
+                    {/* Outfield fence */}
+                    <path d="M90 210 Q490 -180 890 210" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="3" />
+                    {/* Foul lines */}
+                    <line x1="490" y1="610" x2="90" y2="210" stroke="rgba(255,255,255,0.7)" strokeWidth="2" />
+                    <line x1="490" y1="610" x2="890" y2="210" stroke="rgba(255,255,255,0.7)" strokeWidth="2" />
+                    {/* Base paths */}
+                    <line x1="490" y1="610" x2="390" y2="510" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" />
+                    <line x1="490" y1="610" x2="590" y2="510" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" />
+                    <line x1="390" y1="510" x2="490" y2="410" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" />
+                    <line x1="590" y1="510" x2="490" y2="410" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" />
+                    {/* Infield arc */}
+                    <path d="M264 384 L272 392 Q490 100 708 392 L716 384" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="2" strokeLinecap="round" />
+                    {/* Mound */}
+                    <circle cx="490" cy="470" r="26" fill="#c4a265" stroke="#8b6914" strokeWidth="1.5" />
+                    <rect x="484" y="467" width="12" height="6" rx="1.5" fill="white" />
+                    {/* Home plate */}
+                    <circle cx="490" cy="620" r="38" fill="#c4a265" stroke="#8b6914" strokeWidth="1.5" />
+                    <polygon points="490,624 500,616 500,604 480,604 480,616" fill="white" stroke="#8b6914" strokeWidth="1.5" />
+                    {/* Bases */}
+                    <rect x="383" y="503" width="14" height="14" rx="1" fill="white" transform="rotate(45 390 510)" />
+                    <rect x="483" y="403" width="14" height="14" rx="1" fill="white" transform="rotate(45 490 410)" />
+                    <rect x="583" y="503" width="14" height="14" rx="1" fill="white" transform="rotate(45 590 510)" />
                   </svg>
 
                   {renderDepthStack("CF", eligiblePositionPlayers, "left-[50%] top-[58px]")}
