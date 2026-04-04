@@ -75,9 +75,47 @@ export function useConferenceStats(season?: number) {
 
   const byKey = useMemo(() => {
     const map = new Map<string, NormalizedConferenceStats>();
+    // Conference name aliases: full name → abbreviation used in Conference Stats table
+    const ALIASES: Record<string, string[]> = {
+      "american": ["american athletic conference", "american athletic", "aac"],
+      "a-10": ["atlantic 10", "atlantic 10 conference", "a10"],
+      "caa": ["coastal athletic association", "coastal athletic conference", "coastal athletic"],
+      "horizon": ["horizon league"],
+      "mwc": ["mountain west", "mountain west conference"],
+      "patriot": ["patriot league"],
+      "the summit": ["summit league", "summit"],
+      "sbc": ["sun belt", "sun belt conference"],
+      "acc": ["atlantic coast conference"],
+      "sec": ["southeastern conference"],
+      "big east": ["big east conference"],
+      "big south": ["big south conference"],
+      "socon": ["southern conference"],
+      "maac": ["metro atlantic athletic conference"],
+      "mac": ["mid american conference", "mid-american conference"],
+      "mvc": ["missouri valley conference"],
+      "nec": ["northeast conference"],
+      "ovc": ["ohio valley conference"],
+      "cusa": ["conference usa"],
+      "swac": ["southwestern athletic conference"],
+      "wcc": ["west coast conference"],
+      "wac": ["western athletic conference"],
+      "asun": ["atlantic sun conference"],
+      "southland": ["southland conference"],
+    };
     for (const row of rows) {
       const key = normalize(row.conference);
       if (key) map.set(key, row);
+      // Index by conference_id UUID for direct lookups
+      if (row.conference_id) map.set(row.conference_id, row);
+    }
+    // Add aliases so full conference names resolve
+    for (const [abbr, aliases] of Object.entries(ALIASES)) {
+      const row = map.get(normalize(abbr));
+      if (!row) continue;
+      for (const alias of aliases) {
+        const ak = normalize(alias);
+        if (ak && !map.has(ak)) map.set(ak, row);
+      }
     }
     return map;
   }, [rows]);
