@@ -4,6 +4,7 @@ import { fetchTeamsTable, type TeamsTableRow } from "@/lib/supabaseQueries";
 export type TeamRowCompat = {
   id: string;
   name: string;
+  fullName: string;
   conference: string | null;
   conference_id: string | null;
   park_factor: number | null;
@@ -15,7 +16,8 @@ export type TeamRowCompat = {
 function toCompat(row: TeamsTableRow): TeamRowCompat {
   return {
     id: row.id,
-    name: row.full_name,
+    name: row.abbreviation || row.full_name,
+    fullName: row.full_name,
     conference: row.conference,
     conference_id: row.conference_id,
     park_factor: null,
@@ -56,7 +58,15 @@ export function useTeamsTable(season?: number) {
   const teamsByName = useMemo(() => {
     const map = new Map<string, TeamRowCompat>();
     for (const t of teams) {
+      // Index by abbreviation (primary name used across the app)
       map.set(t.name.toLowerCase().trim(), t);
+      // Also index by full_name so "Coastal Carolina University" → same row as "Coastal Carolina"
+      const fullKey = (t.fullName || "").toLowerCase().trim();
+      if (fullKey && !map.has(fullKey)) map.set(fullKey, t);
+      // Index by UUID for direct team ID lookups
+      if (t.id) map.set(t.id, t);
+      // Index by source_team_id
+      if (t.source_team_id) map.set(t.source_team_id, t);
     }
     return map;
   }, [teams]);

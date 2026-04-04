@@ -1729,535 +1729,300 @@ export default function TransferPortal() {
     }
   };
 
+  const [playerDropdownOpen, setPlayerDropdownOpen] = useState(false);
+  const [teamDropdownOpen, setTeamDropdownOpen] = useState(false);
+  const [pitcherDropdownOpen, setPitcherDropdownOpen] = useState(false);
+
   return (
     <DashboardLayout>
-      <div className="space-y-6">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Transfer Portal</h2>
-          <div className="mt-3 inline-flex rounded-md border p-1">
-            <Button
-              size="sm"
-              variant={simType === "hitting" ? "default" : "ghost"}
-              onClick={() => setSimType("hitting")}
-            >
-              Hitting
-            </Button>
-            <Button
-              size="sm"
-              variant={simType === "pitching" ? "default" : "ghost"}
-              onClick={() => setSimType("pitching")}
-            >
-              Pitching
-            </Button>
+      <div className="space-y-4 max-w-[1400px] mx-auto">
+        {/* ─── Header ─── */}
+        <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">Transfer Portal</h2>
+            <p className="text-muted-foreground text-sm">Simulate player projections at a new school.</p>
+          </div>
+          <div className="flex gap-1 rounded-lg border bg-muted p-1">
+            <button className={`px-4 py-1.5 text-sm rounded-md font-medium transition-colors ${simType === "hitting" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`} onClick={() => setSimType("hitting")}>Hitting</button>
+            <button className={`px-4 py-1.5 text-sm rounded-md font-medium transition-colors ${simType === "pitching" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`} onClick={() => setSimType("pitching")}>Pitching</button>
           </div>
         </div>
 
+        {/* ═══════════ HITTING ═══════════ */}
         {simType === "hitting" && (
           <>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Transfer Simulator</CardTitle>
-            <CardDescription>Select a player and destination school.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Player</Label>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={playerSearch}
-                  onChange={(e) => setPlayerSearch(e.target.value)}
-                  className="pl-8"
-                  placeholder={playersLoading ? "Loading players..." : "Search player by name/team/position"}
-                />
-              </div>
-              <div className="max-h-56 overflow-auto rounded-md border">
-                {filteredPlayers.length === 0 ? (
-                  <div className="p-2 text-sm text-muted-foreground">No players found.</div>
-                ) : (
-                  filteredPlayers.map((p) => {
-                    const isActive = p.player_id === selectedPlayerId;
-                    return (
-                      <button
-                        key={p.player_id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedPlayerId(p.player_id);
-                          setPlayerSearch(`${p.first_name} ${p.last_name}`);
-                        }}
-                        className={`w-full px-3 py-2 text-left text-sm hover:bg-muted ${
-                          isActive ? "bg-muted font-medium" : ""
-                        }`}
-                      >
-                        <div>{p.first_name} {p.last_name}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {[p.position, p.from_team || p.team].filter(Boolean).join(" · ") || "-"}
-                        </div>
-                        <div className="text-xs font-mono text-muted-foreground">
-                          {`${stat(p.from_avg)}/${stat(p.from_obp)}/${stat(p.from_slg)}`}
-                        </div>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Destination School</Label>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={teamSearch}
-                  onChange={(e) => setTeamSearch(e.target.value)}
-                  className="pl-8"
-                  placeholder="Search destination team"
-                />
-              </div>
-              <div className="max-h-56 overflow-auto rounded-md border">
-                {filteredTeams.length === 0 ? (
-                  <div className="p-2 text-sm text-muted-foreground">No teams found.</div>
-                ) : (
-                  filteredTeams.map((t) => {
-                    const isActive = t.name === selectedDestinationTeam;
-                    return (
-                      <button
-                        key={t.name}
-                        type="button"
-                        onClick={() => {
-                          setSelectedDestinationTeam(t.name);
-                          setTeamSearch(t.name);
-                        }}
-                        className={`w-full px-3 py-2 text-left text-sm hover:bg-muted ${
-                          isActive ? "bg-muted font-medium" : ""
-                        }`}
-                      >
-                        <div>{t.name}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {t.conference || "-"}
-                        </div>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-            <div className="md:col-span-2 flex justify-end">
-              <Button
-                onClick={addToTargetBoard}
-                disabled={!selectedPlayer || !selectedDestinationTeam || !!simulation?.blocked}
-              >
-                Add To Target Board
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle className="text-base">Projected Outcomes</CardTitle>
-              {selectedPlayer && simulation && !simulation.blocked && (
-                <Button asChild variant="outline" size="sm">
-                  <Link
-                    to={profileRouteFor(selectedPlayer.player_id, selectedPlayer.position)}
-                    state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}
-                  >
-                    View Player Page
-                  </Link>
-                </Button>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {simulation?.blocked && (
-              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                Equation stopped. Missing inputs: {simulation.missingInputs.join(", ")}
-              </div>
-            )}
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("avg", simulation?.pAvg))}`}>
-                <div className="text-xs font-medium tracking-wide">pAVG</div>
-                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pAvg) : "-"}</div>
-              </div>
-              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("obp", simulation?.pObp))}`}>
-                <div className="text-xs font-medium tracking-wide">pOBP</div>
-                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pObp) : "-"}</div>
-              </div>
-              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("slg", simulation?.pSlg))}`}>
-                <div className="text-xs font-medium tracking-wide">pSLG</div>
-                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pSlg) : "-"}</div>
-              </div>
-              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("ops", simulation?.pOps))}`}>
-                <div className="text-xs font-medium tracking-wide">pOPS</div>
-                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pOps) : "-"}</div>
-              </div>
-              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("iso", simulation?.pIso))}`}>
-                <div className="text-xs font-medium tracking-wide">pISO</div>
-                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? stat(simulation.pIso) : "-"}</div>
-              </div>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("wrc_plus", simulation?.pWrcPlus))}`}>
-                <div className="text-xs font-medium tracking-wide">pWRC+</div>
-                <div className="mt-1 font-mono text-2xl font-semibold">{simulation ? whole(simulation.pWrcPlus) : "-"}</div>
-              </div>
-              <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("owar", simulation?.owar))}`}>
-                <div className="text-xs font-medium tracking-wide">oWAR</div>
-                <div className="mt-1 font-mono text-3xl font-bold">{simulation ? stat(simulation.owar, 2) : "-"}</div>
-              </div>
-              <div className="rounded-lg border border-accent/40 bg-accent/12 p-4 shadow-sm">
-                <div className="text-xs font-medium tracking-wide text-accent-foreground">Market Value</div>
-                <div className="mt-1 font-mono text-4xl font-extrabold text-foreground">{simulation ? money(simulation.nilValuation) : "-"}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Context</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2 lg:grid-cols-4 text-sm">
-            <div><span className="text-muted-foreground">From Team:</span> {fromTeam || "-"}</div>
-            <div><span className="text-muted-foreground">From Conference:</span> {fromConference || "-"}</div>
-            <div><span className="text-muted-foreground">To Team:</span> {selectedDestinationTeam || "-"}</div>
-            <div><span className="text-muted-foreground">To Conference:</span> {toConference || "-"}</div>
-            <div>
-              <span className="text-muted-foreground">From Park Factor (AVG/OBP/ISO):</span>{" "}
-              {simulation
-                ? `${formatPark(simulation.fromParkRaw)} / ${formatPark(simulation.fromObpParkRaw)} / ${formatPark(simulation.fromIsoParkRaw)}`
-                : "-"}
-            </div>
-            <div>
-              <span className="text-muted-foreground">To Park Factor (AVG/OBP/ISO):</span>{" "}
-              {simulation
-                ? `${formatPark(simulation.toParkRaw)} / ${formatPark(simulation.toObpParkRaw)} / ${formatPark(simulation.toIsoParkRaw)}`
-                : "-"}
-            </div>
-            <div><span className="text-muted-foreground">From Stuff+:</span> {simulation ? whole(simulation.fromStuff) : "-"}</div>
-            <div><span className="text-muted-foreground">To Stuff+:</span> {simulation ? whole(simulation.toStuff) : "-"}</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Multipliers Used</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
-            <div><span className="text-muted-foreground">AVG+ Delta:</span> {simulation ? `${whole(simulation.fromAvgPlus)} -> ${whole(simulation.toAvgPlus)}` : "-"}</div>
-            <div><span className="text-muted-foreground">OBP+ Delta:</span> {simulation ? `${whole(simulation.fromObpPlus)} -> ${whole(simulation.toObpPlus)}` : "-"}</div>
-            <div><span className="text-muted-foreground">ISO+ Delta:</span> {simulation ? `${whole(simulation.fromIsoPlus)} -> ${whole(simulation.toIsoPlus)}` : "-"}</div>
-            <div><span className="text-muted-foreground">NIL PTM/PVM:</span> {simulation && simulation.ptm != null && simulation.pvm != null ? `${simulation.ptm.toFixed(2)} / ${simulation.pvm.toFixed(2)}` : "-"}</div>
-          </CardContent>
-        </Card>
-
-        {isAdmin && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Show Work</CardTitle>
-              <CardDescription>Uses the live Context + Multipliers values above for pAVG/pOBP/pISO.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm font-mono">
-              {!simulation || simulation.blocked || !simulation.baWork ? (
-                <div className="text-muted-foreground">Select player + destination with all required inputs.</div>
-              ) : (
-                <>
-                  <div className="font-semibold">pAVG</div>
-                  <div>LastStat = {stat(simulation.baWork.lastStat)}</div>
-                  <div>PowerAdj = {stat(simulation.baWork.ncaaAvgBA)} + ((({stat(simulation.baWork.baPR, 2)} - 100) / {stat(simulation.baWork.baStdPower, 3)}) × {stat(simulation.baWork.baStdNcaa, 5)}) = {stat(simulation.baWork.powerAdj)}</div>
-                  <div>Blended = ({stat(simulation.baWork.lastStat)} × (1 - {stat(simulation.baWork.baPowerWeight, 2)})) + ({stat(simulation.baWork.powerAdj)} × {stat(simulation.baWork.baPowerWeight, 2)}) = {stat(simulation.baWork.blended)}</div>
-                  <div>Multiplier = 1 + ({stat(simulation.baWork.baConferenceWeight, 2)} × (({whole(simulation.baWork.toAvgPlus)} - {whole(simulation.baWork.fromAvgPlus)}) / 100)) - ({stat(simulation.baWork.baPitchingWeight, 2)} × (({whole(simulation.baWork.toStuff)} - {whole(simulation.baWork.fromStuff)}) / 100)) + ({stat(simulation.baWork.baParkWeight, 2)} × ((ToAVGParkFactor {whole(simulation.baWork.toPark)} - FromAVGParkFactor {whole(simulation.baWork.fromPark)}) / 100)) = {stat(simulation.baWork.multiplier, 4)}</div>
-                  <div className="font-semibold">ProjectedBA = {stat(simulation.baWork.blended)} × {stat(simulation.baWork.multiplier, 4)} = {stat(simulation.pAvg)}</div>
-                  <div className="pt-2 font-semibold">pOBP</div>
-                  <div>LastStat = {stat(simulation.obpWork.lastStat)}</div>
-                  <div>PowerAdj = {stat(simulation.obpWork.ncaaAvgOBP)} + ((({stat(simulation.obpWork.obpPR, 2)} - 100) / {stat(simulation.obpWork.obpStdPower, 3)}) × {stat(simulation.obpWork.obpStdNcaa, 5)}) = {stat(simulation.obpWork.powerAdj)}</div>
-                  <div>Blended = ({stat(simulation.obpWork.lastStat)} × (1 - {stat(simulation.obpWork.obpPowerWeight, 2)})) + ({stat(simulation.obpWork.powerAdj)} × {stat(simulation.obpWork.obpPowerWeight, 2)}) = {stat(simulation.obpWork.blended)}</div>
-                  <div>Multiplier = 1 + ({stat(simulation.obpWork.obpConferenceWeight, 2)} × (({whole(simulation.obpWork.toObpPlus)} - {whole(simulation.obpWork.fromObpPlus)}) / 100)) - ({stat(simulation.obpWork.obpPitchingWeight, 2)} × (({whole(simulation.obpWork.toStuff)} - {whole(simulation.obpWork.fromStuff)}) / 100)) + ({stat(simulation.obpWork.obpParkWeight, 2)} × ((ToOBPParkFactor {whole(simulation.obpWork.toPark)} - FromOBPParkFactor {whole(simulation.obpWork.fromPark)}) / 100)) = {stat(simulation.obpWork.multiplier, 4)}</div>
-                  <div className="font-semibold">ProjectedOBP = {stat(simulation.obpWork.blended)} × {stat(simulation.obpWork.multiplier, 4)} = {stat(simulation.pObp)}</div>
-                  <div className="pt-2 font-semibold">pISO</div>
-                  <div>LastISO = {stat(simulation.isoWork.lastIso)}</div>
-                  <div>RatingZ = ({stat(simulation.isoWork.isoPR, 2)} - 100) / {stat(simulation.isoWork.isoStdPower, 3)} = {stat(simulation.isoWork.ratingZ, 4)}</div>
-                  <div>PowerAdj = {stat(simulation.isoWork.ncaaAvgISO)} + ({stat(simulation.isoWork.ratingZ, 4)} × {stat(simulation.isoWork.isoStdNcaa, 5)}) = {stat(simulation.isoWork.powerAdj)}</div>
-                  <div>Blended = ({stat(simulation.isoWork.lastIso)} × (1 - {stat(simulation.isoWork.isoPowerWeight, 2)})) + ({stat(simulation.isoWork.powerAdj)} × {stat(simulation.isoWork.isoPowerWeight, 2)}) = {stat(simulation.isoWork.blended)}</div>
-                  <div>Multiplier = 1 + ({stat(simulation.isoWork.isoConferenceWeight, 2)} × (({whole(simulation.isoWork.toIsoPlus)} - {whole(simulation.isoWork.fromIsoPlus)}) / 100)) - ({stat(simulation.isoWork.isoPitchingWeight, 2)} × (({whole(simulation.isoWork.toStuff)} - {whole(simulation.isoWork.fromStuff)}) / 100)) + ({stat(simulation.isoWork.isoParkWeight, 2)} × ((ToISOParkFactor {whole(simulation.isoWork.toPark)} - FromISOParkFactor {whole(simulation.isoWork.fromPark)}) / 100)) = {stat(simulation.isoWork.multiplier, 4)}</div>
-                  <div className="font-semibold">ProjectedISO = {stat(simulation.isoWork.blended)} × {stat(simulation.isoWork.multiplier, 4)} = {stat(simulation.pIso)}</div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        )}
-          </>
-        )}
-
-        {simType === "pitching" && (
-          <>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Transfer Simulator</CardTitle>
-                <CardDescription>Select a pitcher and destination school.</CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Pitcher</Label>
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      value={pitcherSearch}
-                      onChange={(e) => setPitcherSearch(e.target.value)}
-                      className="pl-8"
-                      placeholder="Search pitcher by name/team/handedness"
-                    />
-                  </div>
-                  <div className="max-h-56 overflow-auto rounded-md border">
-                    {filteredPitchers.length === 0 ? (
-                      <div className="p-2 text-sm text-muted-foreground">No pitchers found.</div>
-                    ) : (
-                      filteredPitchers.map((p) => {
-                        const isActive = p.id === selectedPitcherId;
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedPitcherId(p.id);
-                              setPitcherSearch(p.player_name);
-                              setPitchingRoleOverride(p.role === "SP" ? "SP" : "RP");
-                            }}
-                            className={`w-full px-3 py-1.5 text-left text-sm hover:bg-muted ${isActive ? "bg-muted font-medium" : ""}`}
-                          >
-                            <div>{p.player_name}</div>
-                            <div className="text-[11px] leading-tight text-muted-foreground">
-                              {[p.handedness, p.team].filter(Boolean).join(" · ") || "-"}
-                            </div>
-                            <div className="text-[11px] leading-tight font-mono text-muted-foreground">
-                              {`${stat(p.era, 2)} / ${stat(p.fip, 2)} / ${stat(p.whip, 2)} / ${stat(p.k9, 2)} / ${stat(p.bb9, 2)} / ${stat(p.hr9, 2)}`}
-                            </div>
-                          </button>
-                        );
-                      })
+            {/* ─── Input bar ─── */}
+            <Card className="overflow-visible">
+              <CardContent className="pt-4 pb-3">
+                <div className="flex flex-wrap items-end gap-3">
+                  {/* Player search */}
+                  <div className="relative flex-1 min-w-[200px]">
+                    <Label className="text-xs mb-1 block">Player</Label>
+                    <Input placeholder={playersLoading ? "Loading..." : "Search hitter..."} value={playerSearch} onChange={(e) => { setPlayerSearch(e.target.value); setPlayerDropdownOpen(true); }} onFocus={() => setPlayerDropdownOpen(true)} onBlur={() => setTimeout(() => setPlayerDropdownOpen(false), 150)} />
+                    {playerDropdownOpen && filteredPlayers.length > 0 && (
+                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
+                        {filteredPlayers.map((p) => (
+                          <div key={p.player_id} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent flex justify-between" onMouseDown={() => { setSelectedPlayerId(p.player_id); setPlayerSearch(`${p.first_name} ${p.last_name}`); setPlayerDropdownOpen(false); }}>
+                            <span className="font-medium">{p.first_name} {p.last_name}</span>
+                            <span className="text-muted-foreground text-xs">{p.from_team || p.team || "-"} · {p.position || "-"}</span>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Destination School</Label>
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      value={teamSearch}
-                      onChange={(e) => setTeamSearch(e.target.value)}
-                      className="pl-8"
-                      placeholder="Search destination team"
-                    />
-                  </div>
-                  <div className="max-h-56 overflow-auto rounded-md border">
-                    {filteredTeams.length === 0 ? (
-                      <div className="p-2 text-sm text-muted-foreground">No teams found.</div>
-                    ) : (
-                      filteredTeams.map((t) => {
-                        const isActive = t.name === selectedDestinationTeam;
-                        return (
-                          <button
-                            key={t.name}
-                            type="button"
-                            onClick={() => {
-                              setSelectedDestinationTeam(t.name);
-                              setTeamSearch(t.name);
-                            }}
-                            className={`w-full px-3 py-2 text-left text-sm hover:bg-muted ${isActive ? "bg-muted font-medium" : ""}`}
-                          >
-                            <div>{t.name}</div>
-                            <div className="text-xs text-muted-foreground">{t.conference || "-"}</div>
-                          </button>
-                        );
-                      })
+                  {/* Destination team */}
+                  <div className="relative flex-1 min-w-[200px]">
+                    <Label className="text-xs mb-1 block">Destination</Label>
+                    <Input placeholder="Search team..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamDropdownOpen(true); }} onFocus={() => setTeamDropdownOpen(true)} onBlur={() => setTimeout(() => setTeamDropdownOpen(false), 150)} />
+                    {teamDropdownOpen && filteredTeams.length > 0 && (
+                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
+                        {filteredTeams.map((t) => (
+                          <div key={t.name} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => { setSelectedDestinationTeam(t.name); setTeamSearch(t.name); setTeamDropdownOpen(false); }}>
+                            {t.name} <span className="text-muted-foreground text-xs">{t.conference || ""}</span>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
-                </div>
-                <div className="md:col-span-2 flex justify-end">
-                  <Button
-                    onClick={addPitcherToTargetBoard}
-                    disabled={!selectedPitcher || !selectedDestinationTeam || !!pitchingSimulation?.blocked}
-                  >
-                    Add To Target Board
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between gap-3">
-                  <CardTitle className="text-base">Projected Outcomes</CardTitle>
-                  <div className="flex items-end gap-2">
-                    <div className="w-[220px] space-y-1">
-                      <Label className="text-xs text-muted-foreground">Role Change</Label>
-                      <Select
-                        value={pitchingRoleOverride}
-                        onValueChange={(v) => setPitchingRoleOverride(v as "SP" | "RP")}
-                      >
-                        <SelectTrigger className="h-9">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="SP">SP</SelectItem>
-                          <SelectItem value="RP">RP</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {selectedPitcher && pitchingSimulation && !pitchingSimulation.blocked && (
+                  <div className="flex gap-2">
+                    {selectedPlayer && (
                       <Button asChild variant="outline" size="sm">
-                        <Link
-                          to={storagePitcherRouteFor(selectedPitcher.player_name, selectedPitcher.team)}
-                          state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}
-                        >
-                          View Player Page
-                        </Link>
+                        <Link to={profileRouteFor(selectedPlayer.player_id, selectedPlayer.position)} state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}>Profile</Link>
                       </Button>
                     )}
+                    <Button size="sm" onClick={addToTargetBoard} disabled={!selectedPlayer || !selectedDestinationTeam || !!simulation?.blocked}>Add to Board</Button>
                   </div>
                 </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {pitchingSimulation?.blocked && (
-                  <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                    Equation stopped. Missing inputs: {pitchingSimulation.missingInputs.join(", ")}
+                {/* Selected player info */}
+                {selectedPlayer && (
+                  <div className="mt-3 text-xs text-muted-foreground border-t pt-2 flex items-center gap-4">
+                    <span className="font-medium text-foreground">{selectedPlayer.first_name} {selectedPlayer.last_name}</span>
+                    <span>{selectedPlayer.position || "-"} · {fromTeam || "-"} · {fromConference || "-"}</span>
+                    <span className="font-mono tabular-nums">Previous: {stat(selectedPlayer.from_avg)} / {stat(selectedPlayer.from_obp)} / {stat(selectedPlayer.from_slg)}</span>
                   </div>
                 )}
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-                  <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(pitchingOutcomeTier("era", pitchingSimulation?.pEra, pitchingEqForTiers))}`}>
-                    <div className="text-xs font-medium tracking-wide">pERA</div>
-                    <div className="mt-1 font-mono text-2xl font-semibold">{pitchingSimulation ? stat(pitchingSimulation.pEra, 2) : "-"}</div>
-                  </div>
-                  <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(pitchingOutcomeTier("fip", pitchingSimulation?.pFip, pitchingEqForTiers))}`}>
-                    <div className="text-xs font-medium tracking-wide">pFIP</div>
-                    <div className="mt-1 font-mono text-2xl font-semibold">{pitchingSimulation ? stat(pitchingSimulation.pFip, 2) : "-"}</div>
-                  </div>
-                  <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(pitchingOutcomeTier("whip", pitchingSimulation?.pWhip, pitchingEqForTiers))}`}>
-                    <div className="text-xs font-medium tracking-wide">pWHIP</div>
-                    <div className="mt-1 font-mono text-2xl font-semibold">{pitchingSimulation ? stat(pitchingSimulation.pWhip, 2) : "-"}</div>
-                  </div>
-                  <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(pitchingOutcomeTier("k9", pitchingSimulation?.pK9, pitchingEqForTiers))}`}>
-                    <div className="text-xs font-medium tracking-wide">pK/9</div>
-                    <div className="mt-1 font-mono text-2xl font-semibold">{pitchingSimulation ? stat(pitchingSimulation.pK9, 2) : "-"}</div>
-                  </div>
-                  <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(pitchingOutcomeTier("bb9", pitchingSimulation?.pBb9, pitchingEqForTiers))}`}>
-                    <div className="text-xs font-medium tracking-wide">pBB/9</div>
-                    <div className="mt-1 font-mono text-2xl font-semibold">{pitchingSimulation ? stat(pitchingSimulation.pBb9, 2) : "-"}</div>
-                  </div>
-                  <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(pitchingOutcomeTier("hr9", pitchingSimulation?.pHr9, pitchingEqForTiers))}`}>
-                    <div className="text-xs font-medium tracking-wide">pHR/9</div>
-                    <div className="mt-1 font-mono text-2xl font-semibold">{pitchingSimulation ? stat(pitchingSimulation.pHr9, 2) : "-"}</div>
-                  </div>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  <div className="rounded-lg border p-4 shadow-sm">
-                    <div className="text-xs font-medium tracking-wide">pRV+</div>
-                    <div className="mt-1 font-mono text-3xl font-bold">{pitchingSimulation ? whole(pitchingSimulation.pRvPlus) : "-"}</div>
-                  </div>
-                  <div className={`rounded-lg border p-4 shadow-sm ${tierStyle(statTier("owar", pitchingSimulation?.pWar))}`}>
-                    <div className="text-xs font-medium tracking-wide">pWAR</div>
-                    <div className="mt-1 font-mono text-3xl font-bold">{pitchingSimulation ? stat(pitchingSimulation.pWar, 2) : "-"}</div>
-                  </div>
-                  <div className="rounded-lg border border-accent/40 bg-accent/12 p-4 shadow-sm">
-                    <div className="text-xs font-medium tracking-wide">Market Value</div>
-                    <div className="mt-1 font-mono text-3xl font-bold">{pitchingSimulation ? money(pitchingSimulation.marketValue) : "-"}</div>
-                  </div>
-                </div>
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Context</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-3 md:grid-cols-2 lg:grid-cols-4 text-sm">
-                <div><span className="text-muted-foreground">From Team:</span> {selectedPitcher?.team || "-"}</div>
-                <div><span className="text-muted-foreground">From Conference:</span> {pitchingSimulation?.fromConference || "-"}</div>
-                <div><span className="text-muted-foreground">To Team:</span> {selectedDestinationTeam || "-"}</div>
-                <div><span className="text-muted-foreground">To Conference:</span> {pitchingSimulation?.toConference || "-"}</div>
-                <div><span className="text-muted-foreground">From Park Factor (R/G, WHIP, HR/9):</span> {pitchingSimulation ? `${formatPark(pitchingSimulation.fromEraParkRaw)} / ${formatPark(pitchingSimulation.fromWhipParkRaw)} / ${formatPark(pitchingSimulation.fromHr9ParkRaw)}` : "-"}</div>
-                <div><span className="text-muted-foreground">To Park Factor (R/G, WHIP, HR/9):</span> {pitchingSimulation ? `${formatPark(pitchingSimulation.toEraParkRaw)} / ${formatPark(pitchingSimulation.toWhipParkRaw)} / ${formatPark(pitchingSimulation.toHr9ParkRaw)}` : "-"}</div>
-                <div><span className="text-muted-foreground">From Hitter Talent+:</span> {pitchingSimulation ? stat(pitchingSimulation.fromHitterTalent, 1) : "-"}</div>
-                <div><span className="text-muted-foreground">To Hitter Talent+:</span> {pitchingSimulation ? stat(pitchingSimulation.toHitterTalent, 1) : "-"}</div>
-              </CardContent>
-            </Card>
+            {/* ─── Missing inputs ─── */}
+            {simulation?.blocked && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                Missing inputs: {simulation.missingInputs.join(", ")}
+              </div>
+            )}
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Multipliers Used</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                  <div><span className="text-muted-foreground">ERA:</span> {pitchingSimulation ? `${whole(pitchingSimulation.fromEraPlus)} -> ${whole(pitchingSimulation.toEraPlus)}` : "-"}</div>
-                  <div><span className="text-muted-foreground">FIP:</span> {pitchingSimulation ? `${whole(pitchingSimulation.fromFipPlus)} -> ${whole(pitchingSimulation.toFipPlus)}` : "-"}</div>
-                  <div><span className="text-muted-foreground">WHIP:</span> {pitchingSimulation ? `${whole(pitchingSimulation.fromWhipPlus)} -> ${whole(pitchingSimulation.toWhipPlus)}` : "-"}</div>
-                  <div><span className="text-muted-foreground">K/9:</span> {pitchingSimulation ? `${whole(pitchingSimulation.fromK9Plus)} -> ${whole(pitchingSimulation.toK9Plus)}` : "-"}</div>
-                  <div><span className="text-muted-foreground">BB/9:</span> {pitchingSimulation ? `${whole(pitchingSimulation.fromBb9Plus)} -> ${whole(pitchingSimulation.toBb9Plus)}` : "-"}</div>
-                  <div><span className="text-muted-foreground">HR/9:</span> {pitchingSimulation ? `${whole(pitchingSimulation.fromHr9Plus)} -> ${whole(pitchingSimulation.toHr9Plus)}` : "-"}</div>
+            {/* ─── Hero cards ─── */}
+            <div className="grid gap-3 grid-cols-3">
+              <div className={`rounded-lg border-2 p-4 text-center ${simulation?.pWrcPlus != null ? (simulation.pWrcPlus >= 115 ? "border-emerald-500 bg-emerald-500/10" : simulation.pWrcPlus >= 90 ? "border-blue-500 bg-blue-500/10" : "border-rose-500 bg-rose-500/10") : "border-border bg-muted/10"}`}>
+                <div className="text-muted-foreground text-xs uppercase tracking-wide">pWRC+</div>
+                <div className="text-3xl font-bold tracking-tight tabular-nums mt-1">{simulation ? whole(simulation.pWrcPlus) : "-"}</div>
+              </div>
+              <div className={`rounded-lg border-2 p-4 text-center ${simulation?.owar != null ? (simulation.owar > 1.5 ? "border-emerald-500 bg-emerald-500/10" : simulation.owar >= 0.5 ? "border-blue-500 bg-blue-500/10" : "border-rose-500 bg-rose-500/10") : "border-border bg-muted/10"}`}>
+                <div className="text-muted-foreground text-xs uppercase tracking-wide">oWAR</div>
+                <div className="text-3xl font-bold tracking-tight tabular-nums mt-1">{simulation ? stat(simulation.owar, 2) : "-"}</div>
+              </div>
+              <div className={`rounded-lg border-2 p-4 text-center ${simulation?.nilValuation != null ? (simulation.nilValuation >= 75000 ? "border-emerald-500 bg-emerald-500/10" : simulation.nilValuation >= 25000 ? "border-blue-500 bg-blue-500/10" : "border-amber-500 bg-amber-500/10") : "border-border bg-muted/10"}`}>
+                <div className="text-muted-foreground text-xs uppercase tracking-wide">Market Value</div>
+                <div className="text-3xl font-bold tracking-tight tabular-nums mt-1">{simulation ? money(simulation.nilValuation) : "-"}</div>
+              </div>
+            </div>
+
+            {/* ─── Projected stats grid ─── */}
+            <div className="grid gap-2 grid-cols-5">
+              {([["pAVG", simulation?.pAvg, "avg"], ["pOBP", simulation?.pObp, "obp"], ["pSLG", simulation?.pSlg, "slg"], ["pOPS", simulation?.pOps, "ops"], ["pISO", simulation?.pIso, "iso"]] as const).map(([label, val, key]) => (
+                <div key={label} className={`rounded-lg border p-3 text-center ${tierStyle(statTier(key, val))}`}>
+                  <div className="text-muted-foreground text-xs uppercase tracking-wide">{label}</div>
+                  <div className="text-xl font-bold tabular-nums mt-1">{val != null ? val.toFixed(3) : "-"}</div>
                 </div>
-              </CardContent>
-            </Card>
+              ))}
+            </div>
 
+            {/* ─── Context (collapsible) ─── */}
+            <details className="rounded-lg border p-3">
+              <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-muted-foreground">Context + Multipliers</summary>
+              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1.5 text-xs">
+                <div><span className="text-muted-foreground">From:</span> {fromTeam || "-"}</div>
+                <div><span className="text-muted-foreground">To:</span> {selectedDestinationTeam || "-"}</div>
+                <div><span className="text-muted-foreground">From Conf:</span> {fromConference || "-"}</div>
+                <div><span className="text-muted-foreground">To Conf:</span> {toConference || "-"}</div>
+                <div><span className="text-muted-foreground">Park (AVG):</span> {simulation ? `${formatPark(simulation.fromParkRaw)} → ${formatPark(simulation.toParkRaw)}` : "-"}</div>
+                <div><span className="text-muted-foreground">Park (OBP):</span> {simulation ? `${formatPark(simulation.fromObpParkRaw)} → ${formatPark(simulation.toObpParkRaw)}` : "-"}</div>
+                <div><span className="text-muted-foreground">Park (ISO):</span> {simulation ? `${formatPark(simulation.fromIsoParkRaw)} → ${formatPark(simulation.toIsoParkRaw)}` : "-"}</div>
+                <div><span className="text-muted-foreground">Stuff+:</span> {simulation ? `${whole(simulation.fromStuff)} → ${whole(simulation.toStuff)}` : "-"}</div>
+                <div><span className="text-muted-foreground">AVG+:</span> {simulation ? `${whole(simulation.fromAvgPlus)} → ${whole(simulation.toAvgPlus)}` : "-"}</div>
+                <div><span className="text-muted-foreground">OBP+:</span> {simulation ? `${whole(simulation.fromObpPlus)} → ${whole(simulation.toObpPlus)}` : "-"}</div>
+                <div><span className="text-muted-foreground">ISO+:</span> {simulation ? `${whole(simulation.fromIsoPlus)} → ${whole(simulation.toIsoPlus)}` : "-"}</div>
+                <div><span className="text-muted-foreground">NIL PTM/PVM:</span> {simulation && simulation.ptm != null && simulation.pvm != null ? `${simulation.ptm.toFixed(2)} / ${simulation.pvm.toFixed(2)}` : "-"}</div>
+              </div>
+            </details>
+
+            {/* ─── Show Work (admin) ─── */}
             {isAdmin && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Show Work (Pitching)</CardTitle>
-                  <CardDescription>Uses the live Context + Multipliers values above.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm">
-                  {!pitchingSimulation?.showWork ? (
-                    <div className="text-muted-foreground">No calculation available.</div>
+              <details className="rounded-lg border p-3">
+                <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-muted-foreground">Show Work</summary>
+                <div className="mt-3 space-y-2 text-sm font-mono">
+                  {!simulation || simulation.blocked || !simulation.baWork ? (
+                    <div className="text-muted-foreground">Select player + destination with all required inputs.</div>
                   ) : (
-                    <div className="rounded-md bg-muted/20 p-3 font-mono text-sm space-y-4">
-                      {([
-                      { label: "pERA", key: "era", ncaaAvg: "NCAAAvgERA", prSd: "StdDevERAPowerRating+", ncaaSd: "StdDevNCAAERA", fromLabel: "ToERA+", toLabel: "FromERA+", parkLabel: "RGParkFactor", projected: "ProjectedERA", finalLabel: "RoleAdjustedERA", lower: true, hasPark: true },
-                      { label: "pFIP", key: "fip", ncaaAvg: "NCAAAvgFIP", prSd: "StdDevFIPPowerRating+", ncaaSd: "StdDevNCAAFIP", fromLabel: "ToFIP+", toLabel: "FromFIP+", parkLabel: "RGParkFactor", projected: "ProjectedFIP", finalLabel: "RoleAdjustedFIP", lower: true, hasPark: true },
-                      { label: "pWHIP", key: "whip", ncaaAvg: "NCAAAvgWHIP", prSd: "StdDevWHIPPowerRating+", ncaaSd: "StdDevNCAAWHIP", fromLabel: "ToWHIP+", toLabel: "FromWHIP+", parkLabel: "WHIPParkFactor", projected: "ProjectedWHIP", finalLabel: "RoleAdjustedWHIP", lower: true, hasPark: true },
-                      { label: "pK/9", key: "k9", ncaaAvg: "NCAAAvgK/9", prSd: "StdDevK/9PowerRating+", ncaaSd: "StdDevNCAAK/9", fromLabel: "ToK/9+", toLabel: "FromK/9+", parkLabel: "", projected: "ProjectedK/9", finalLabel: "RoleAdjustedK/9", lower: false, hasPark: false },
-                      { label: "pBB/9", key: "bb9", ncaaAvg: "NCAAAvgBB/9", prSd: "StdDevBB/9PowerRating+", ncaaSd: "StdDevNCAABB/9", fromLabel: "ToBB/9+", toLabel: "FromBB/9+", parkLabel: "", projected: "ProjectedBB/9", finalLabel: "RoleAdjustedBB/9", lower: true, hasPark: false },
-                      { label: "pHR/9", key: "hr9", ncaaAvg: "NCAAAvgHR/9", prSd: "StdDevHR/9PowerRating+", ncaaSd: "StdDevNCAAHR/9", fromLabel: "ToHR/9+", toLabel: "FromHR/9+", parkLabel: "HR/9ParkFactor", projected: "ProjectedHR/9", finalLabel: "RoleAdjustedHR/9", lower: true, hasPark: true },
-                    ] as const).map((m) => {
-                      const w = pitchingSimulation.showWork?.[m.key];
-                      if (!w) return null;
-                      const multiplierLine = (() => {
-                        if (!pitchingSimulation?.weights) return `Multiplier = ${stat(w.mult, 4)}`;
-                        if (m.key === "era") {
-                          return `Multiplier = 1 - (${stat(pitchingSimulation.weights.eraConference, 3)} × ((${whole(pitchingSimulation.toEraPlus)} - ${whole(pitchingSimulation.fromEraPlus)}) / 100)) + (${stat(pitchingSimulation.weights.eraCompetition, 3)} × ((${whole(pitchingSimulation.toHitterTalent)} - ${whole(pitchingSimulation.fromHitterTalent)}) / 100)) + (${stat(pitchingSimulation.weights.eraPark, 3)} × ((ToRGParkFactor ${formatPark(pitchingSimulation.toEraParkRaw)} - FromRGParkFactor ${formatPark(pitchingSimulation.fromEraParkRaw)}) / 100)) = ${stat(w.mult, 4)}`;
-                        }
-                        if (m.key === "fip") {
-                          return `Multiplier = 1 - (${stat(pitchingSimulation.weights.fipConference, 3)} × ((${whole(pitchingSimulation.toFipPlus)} - ${whole(pitchingSimulation.fromFipPlus)}) / 100)) + (${stat(pitchingSimulation.weights.fipCompetition, 3)} × ((${whole(pitchingSimulation.toHitterTalent)} - ${whole(pitchingSimulation.fromHitterTalent)}) / 100)) + (${stat(pitchingSimulation.weights.fipPark, 3)} × ((ToRGParkFactor ${formatPark(pitchingSimulation.toEraParkRaw)} - FromRGParkFactor ${formatPark(pitchingSimulation.fromEraParkRaw)}) / 100)) = ${stat(w.mult, 4)}`;
-                        }
-                        if (m.key === "whip") {
-                          return `Multiplier = 1 - (${stat(pitchingSimulation.weights.whipConference, 3)} × ((${whole(pitchingSimulation.toWhipPlus)} - ${whole(pitchingSimulation.fromWhipPlus)}) / 100)) + (${stat(pitchingSimulation.weights.whipCompetition, 3)} × ((${whole(pitchingSimulation.toHitterTalent)} - ${whole(pitchingSimulation.fromHitterTalent)}) / 100)) + (${stat(pitchingSimulation.weights.whipPark, 3)} × ((ToWHIPParkFactor ${formatPark(pitchingSimulation.toWhipParkRaw)} - FromWHIPParkFactor ${formatPark(pitchingSimulation.fromWhipParkRaw)}) / 100)) = ${stat(w.mult, 4)}`;
-                        }
-                        if (m.key === "k9") {
-                          return `Multiplier = 1 + (${stat(pitchingSimulation.weights.k9Conference, 3)} × ((${whole(pitchingSimulation.toK9Plus)} - ${whole(pitchingSimulation.fromK9Plus)}) / 100)) - (${stat(pitchingSimulation.weights.k9Competition, 3)} × ((${whole(pitchingSimulation.toHitterTalent)} - ${whole(pitchingSimulation.fromHitterTalent)}) / 100)) = ${stat(w.mult, 4)}`;
-                        }
-                        if (m.key === "bb9") {
-                          return `Multiplier = 1 - (${stat(pitchingSimulation.weights.bb9Conference, 3)} × ((${whole(pitchingSimulation.toBb9Plus)} - ${whole(pitchingSimulation.fromBb9Plus)}) / 100)) + (${stat(pitchingSimulation.weights.bb9Competition, 3)} × ((${whole(pitchingSimulation.toHitterTalent)} - ${whole(pitchingSimulation.fromHitterTalent)}) / 100)) = ${stat(w.mult, 4)}`;
-                        }
-                        return `Multiplier = 1 - (${stat(pitchingSimulation.weights.hr9Conference, 3)} × ((${whole(pitchingSimulation.toHr9Plus)} - ${whole(pitchingSimulation.fromHr9Plus)}) / 100)) + (${stat(pitchingSimulation.weights.hr9Competition, 3)} × ((${whole(pitchingSimulation.toHitterTalent)} - ${whole(pitchingSimulation.fromHitterTalent)}) / 100)) + (${stat(pitchingSimulation.weights.hr9Park, 3)} × ((ToHR9ParkFactor ${formatPark(pitchingSimulation.toHr9ParkRaw)} - FromHR9ParkFactor ${formatPark(pitchingSimulation.fromHr9ParkRaw)}) / 100)) = ${stat(w.mult, 4)}`;
-                      })();
-                      return (
-                        <div key={m.key} className="space-y-1">
-                          <div className="font-semibold">{m.label}</div>
-                          <div>{`LastStat = ${stat(w.last, 2)}`}</div>
-                          <div>{`PowerAdj = ${stat(w.ncaaAvg, 3)} ${m.lower ? "-" : "+"} (((${stat(w.powerRatingPlus, 2)} - 100) / ${stat(w.powerRatingStdDev, 3)}) × ${stat(w.ncaaStatStdDev, 6)}) = ${stat(w.powerAdj, 2)}`}</div>
-                          <div>{`Blended = (LastStat × (1 - PowerRatingWeight)) + (PowerAdj × PowerRatingWeight) = ${stat(w.blended, 2)}`}</div>
-                          <div>{multiplierLine}</div>
-                          <div className="font-semibold">{`${m.projected} = ${stat(w.blended, 2)} × ${stat(w.mult, 4)} = ${stat(w.projected, 2)}`}</div>
-                          <div className="font-semibold">{`${m.finalLabel} = ${stat(w.roleAdjusted, 2)}`}</div>
-                        </div>
-                      );
-                      })}
-                    </div>
+                    <>
+                      <div className="font-semibold">pAVG</div>
+                      <div>LastStat = {stat(simulation.baWork.lastStat)}</div>
+                      <div>PowerAdj = {stat(simulation.baWork.ncaaAvgBA)} + ((({stat(simulation.baWork.baPR, 2)} - 100) / {stat(simulation.baWork.baStdPower, 3)}) x {stat(simulation.baWork.baStdNcaa, 5)}) = {stat(simulation.baWork.powerAdj)}</div>
+                      <div>Blended = ({stat(simulation.baWork.lastStat)} x (1 - {stat(simulation.baWork.baPowerWeight, 2)})) + ({stat(simulation.baWork.powerAdj)} x {stat(simulation.baWork.baPowerWeight, 2)}) = {stat(simulation.baWork.blended)}</div>
+                      <div>Multiplier = {stat(simulation.baWork.multiplier, 4)}</div>
+                      <div className="font-semibold">ProjectedBA = {stat(simulation.baWork.blended)} x {stat(simulation.baWork.multiplier, 4)} = {stat(simulation.pAvg)}</div>
+                      <div className="pt-2 font-semibold">pOBP</div>
+                      <div>PowerAdj = {stat(simulation.obpWork.powerAdj)} | Blended = {stat(simulation.obpWork.blended)} | Mult = {stat(simulation.obpWork.multiplier, 4)}</div>
+                      <div className="font-semibold">ProjectedOBP = {stat(simulation.pObp)}</div>
+                      <div className="pt-2 font-semibold">pISO</div>
+                      <div>RatingZ = {stat(simulation.isoWork.ratingZ, 4)} | PowerAdj = {stat(simulation.isoWork.powerAdj)} | Blended = {stat(simulation.isoWork.blended)} | Mult = {stat(simulation.isoWork.multiplier, 4)}</div>
+                      <div className="font-semibold">ProjectedISO = {stat(simulation.pIso)}</div>
+                    </>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </details>
             )}
           </>
         )}
 
+        {/* ═══════════ PITCHING ═══════════ */}
+        {simType === "pitching" && (
+          <>
+            {/* ─── Input bar ─── */}
+            <Card className="overflow-visible">
+              <CardContent className="pt-4 pb-3">
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="relative flex-1 min-w-[180px]">
+                    <Label className="text-xs mb-1 block">Pitcher</Label>
+                    <Input placeholder="Search pitcher..." value={pitcherSearch} onChange={(e) => { setPitcherSearch(e.target.value); setPitcherDropdownOpen(true); }} onFocus={() => setPitcherDropdownOpen(true)} onBlur={() => setTimeout(() => setPitcherDropdownOpen(false), 150)} />
+                    {pitcherDropdownOpen && filteredPitchers.length > 0 && (
+                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
+                        {filteredPitchers.map((p) => (
+                          <div key={p.id} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent flex justify-between" onMouseDown={() => { setSelectedPitcherId(p.id); setPitcherSearch(p.player_name); setPitchingRoleOverride(p.role === "SP" ? "SP" : "RP"); setPitcherDropdownOpen(false); }}>
+                            <span className="font-medium">{p.player_name}</span>
+                            <span className="text-muted-foreground text-xs">{p.team || "-"} · {p.role || "-"} · {p.handedness || "-"}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="relative flex-1 min-w-[180px]">
+                    <Label className="text-xs mb-1 block">Destination</Label>
+                    <Input placeholder="Search team..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamDropdownOpen(true); }} onFocus={() => setTeamDropdownOpen(true)} onBlur={() => setTimeout(() => setTeamDropdownOpen(false), 150)} />
+                    {teamDropdownOpen && filteredTeams.length > 0 && (
+                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
+                        {filteredTeams.map((t) => (
+                          <div key={t.name} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => { setSelectedDestinationTeam(t.name); setTeamSearch(t.name); setTeamDropdownOpen(false); }}>
+                            {t.name} <span className="text-muted-foreground text-xs">{t.conference || ""}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="w-[110px]">
+                    <Label className="text-xs mb-1 block">Role</Label>
+                    <Select value={pitchingRoleOverride} onValueChange={(v) => setPitchingRoleOverride(v as "SP" | "RP")}>
+                      <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="SP">Starter</SelectItem>
+                        <SelectItem value="RP">Reliever</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex gap-2">
+                    {selectedPitcher && (
+                      <Button asChild variant="outline" size="sm">
+                        <Link to={storagePitcherRouteFor(selectedPitcher.player_name, selectedPitcher.team)} state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}>Profile</Link>
+                      </Button>
+                    )}
+                    <Button size="sm" onClick={addPitcherToTargetBoard} disabled={!selectedPitcher || !selectedDestinationTeam || !!pitchingSimulation?.blocked}>Add to Board</Button>
+                  </div>
+                </div>
+                {selectedPitcher && (
+                  <div className="mt-3 text-xs text-muted-foreground border-t pt-2 flex items-center gap-4">
+                    <span className="font-medium text-foreground">{selectedPitcher.player_name}</span>
+                    <span>{selectedPitcher.handedness === "R" ? "RHP" : selectedPitcher.handedness === "L" ? "LHP" : selectedPitcher.handedness || "-"} · {selectedPitcher.team || "-"} · {selectedPitcher.role || "-"}</span>
+                    <span className="font-mono tabular-nums">2025: {stat(selectedPitcher.era, 2)} ERA · {stat(selectedPitcher.fip, 2)} FIP · {stat(selectedPitcher.whip, 2)} WHIP · {stat(selectedPitcher.k9, 1)} K/9</span>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* ─── Missing inputs ─── */}
+            {pitchingSimulation?.blocked && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                Missing inputs: {pitchingSimulation.missingInputs.join(", ")}
+              </div>
+            )}
+
+            {/* ─── Hero cards ─── */}
+            <div className="grid gap-3 grid-cols-3">
+              <div className={`rounded-lg border-2 p-4 text-center ${pitchingSimulation?.pRvPlus != null ? (pitchingSimulation.pRvPlus >= 110 ? "border-emerald-500 bg-emerald-500/10" : pitchingSimulation.pRvPlus >= 95 ? "border-blue-500 bg-blue-500/10" : "border-rose-500 bg-rose-500/10") : "border-border bg-muted/10"}`}>
+                <div className="text-muted-foreground text-xs uppercase tracking-wide">pRV+</div>
+                <div className="text-3xl font-bold tracking-tight tabular-nums mt-1">{pitchingSimulation ? whole(pitchingSimulation.pRvPlus) : "-"}</div>
+              </div>
+              <div className={`rounded-lg border-2 p-4 text-center ${pitchingSimulation?.pWar != null ? (pitchingSimulation.pWar >= 1.5 ? "border-emerald-500 bg-emerald-500/10" : pitchingSimulation.pWar >= 0.5 ? "border-blue-500 bg-blue-500/10" : "border-rose-500 bg-rose-500/10") : "border-border bg-muted/10"}`}>
+                <div className="text-muted-foreground text-xs uppercase tracking-wide">pWAR</div>
+                <div className="text-3xl font-bold tracking-tight tabular-nums mt-1">{pitchingSimulation ? stat(pitchingSimulation.pWar, 2) : "-"}</div>
+              </div>
+              <div className={`rounded-lg border-2 p-4 text-center ${pitchingSimulation?.marketValue != null ? (pitchingSimulation.marketValue >= 75000 ? "border-emerald-500 bg-emerald-500/10" : pitchingSimulation.marketValue >= 25000 ? "border-blue-500 bg-blue-500/10" : "border-amber-500 bg-amber-500/10") : "border-border bg-muted/10"}`}>
+                <div className="text-muted-foreground text-xs uppercase tracking-wide">Market Value</div>
+                <div className="text-3xl font-bold tracking-tight tabular-nums mt-1">{pitchingSimulation ? money(pitchingSimulation.marketValue) : "-"}</div>
+              </div>
+            </div>
+
+            {/* ─── Pitching stat grid ─── */}
+            <div className="grid gap-2 grid-cols-6">
+              {([["pERA", pitchingSimulation?.pEra, "era", false], ["pFIP", pitchingSimulation?.pFip, "fip", false], ["pWHIP", pitchingSimulation?.pWhip, "whip", false], ["pK/9", pitchingSimulation?.pK9, "k9", true], ["pBB/9", pitchingSimulation?.pBb9, "bb9", false], ["pHR/9", pitchingSimulation?.pHr9, "hr9", false]] as const).map(([label, val, key, hib]) => (
+                <div key={label} className={`rounded-lg border p-3 text-center ${tierStyle(pitchingOutcomeTier(key, val, pitchingEqForTiers))}`}>
+                  <div className="text-muted-foreground text-xs uppercase tracking-wide">{label}</div>
+                  <div className="text-xl font-bold tabular-nums mt-1">{val != null ? val.toFixed(2) : "-"}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* ─── Context (collapsible) ─── */}
+            <details className="rounded-lg border p-3">
+              <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-muted-foreground">Context + Multipliers</summary>
+              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1.5 text-xs">
+                <div><span className="text-muted-foreground">From:</span> {selectedPitcher?.team || "-"}</div>
+                <div><span className="text-muted-foreground">To:</span> {selectedDestinationTeam || "-"}</div>
+                <div><span className="text-muted-foreground">From Conf:</span> {pitchingSimulation?.fromConference || "-"}</div>
+                <div><span className="text-muted-foreground">To Conf:</span> {pitchingSimulation?.toConference || "-"}</div>
+                <div><span className="text-muted-foreground">Park (R/G):</span> {pitchingSimulation ? `${formatPark(pitchingSimulation.fromEraParkRaw)} → ${formatPark(pitchingSimulation.toEraParkRaw)}` : "-"}</div>
+                <div><span className="text-muted-foreground">Park (WHIP):</span> {pitchingSimulation ? `${formatPark(pitchingSimulation.fromWhipParkRaw)} → ${formatPark(pitchingSimulation.toWhipParkRaw)}` : "-"}</div>
+                <div><span className="text-muted-foreground">Park (HR/9):</span> {pitchingSimulation ? `${formatPark(pitchingSimulation.fromHr9ParkRaw)} → ${formatPark(pitchingSimulation.toHr9ParkRaw)}` : "-"}</div>
+                <div><span className="text-muted-foreground">Hitter Talent+:</span> {pitchingSimulation ? `${stat(pitchingSimulation.fromHitterTalent, 1)} → ${stat(pitchingSimulation.toHitterTalent, 1)}` : "-"}</div>
+                <div><span className="text-muted-foreground">ERA+:</span> {pitchingSimulation ? `${whole(pitchingSimulation.fromEraPlus)} → ${whole(pitchingSimulation.toEraPlus)}` : "-"}</div>
+                <div><span className="text-muted-foreground">FIP+:</span> {pitchingSimulation ? `${whole(pitchingSimulation.fromFipPlus)} → ${whole(pitchingSimulation.toFipPlus)}` : "-"}</div>
+                <div><span className="text-muted-foreground">K/9+:</span> {pitchingSimulation ? `${whole(pitchingSimulation.fromK9Plus)} → ${whole(pitchingSimulation.toK9Plus)}` : "-"}</div>
+                <div><span className="text-muted-foreground">BB/9+:</span> {pitchingSimulation ? `${whole(pitchingSimulation.fromBb9Plus)} → ${whole(pitchingSimulation.toBb9Plus)}` : "-"}</div>
+              </div>
+            </details>
+
+            {/* ─── Show Work (admin) ─── */}
+            {isAdmin && pitchingSimulation?.showWork && (
+              <details className="rounded-lg border p-3">
+                <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-muted-foreground">Show Work (Pitching)</summary>
+                <div className="mt-3 rounded-md bg-muted/20 p-3 font-mono text-sm space-y-4">
+                  {(["era", "fip", "whip", "k9", "bb9", "hr9"] as const).map((key) => {
+                    const w = pitchingSimulation.showWork?.[key];
+                    if (!w) return null;
+                    const labels: Record<string, string> = { era: "pERA", fip: "pFIP", whip: "pWHIP", k9: "pK/9", bb9: "pBB/9", hr9: "pHR/9" };
+                    const lower = key !== "k9";
+                    return (
+                      <div key={key} className="space-y-1">
+                        <div className="font-semibold">{labels[key]}</div>
+                        <div>Last = {stat(w.last, 2)} | PowerAdj = {stat(w.powerAdj, 2)} | Blended = {stat(w.blended, 2)} | Mult = {stat(w.mult, 4)}</div>
+                        <div className="font-semibold">Projected = {stat(w.projected, 2)} | RoleAdj = {stat(w.roleAdjusted, 2)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </details>
+            )}
+          </>
+        )}
       </div>
     </DashboardLayout>
   );

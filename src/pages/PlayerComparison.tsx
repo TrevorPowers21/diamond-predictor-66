@@ -3,7 +3,6 @@ import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -960,6 +959,11 @@ export default function PlayerComparison() {
   }, [bPitcher, bPitcherPower, bDestTeam, bRoleOverride, teamByKey, teams, pitchingConfByKey, parkMap, resolvePitchingConf]);
 
   /* ─── render helpers ─── */
+  const heroColor = (val: number | null | undefined, goodCut: number, avgCut: number) => {
+    if (val == null) return "border-border bg-muted/10";
+    return val >= goodCut ? "border-emerald-500 bg-emerald-500/10" : val >= avgCut ? "border-blue-500 bg-blue-500/10" : "border-rose-500 bg-rose-500/10";
+  };
+
   const renderHitterPanel = (
     title: string,
     playerSearch: string, setPlayerSearch: (v: string) => void,
@@ -971,23 +975,24 @@ export default function PlayerComparison() {
     player: PlayerLite | null,
     sim: HitterSimOut | null,
     prediction: ReturnType<typeof selectPreferredPrediction>,
+    otherSim: HitterSimOut | null,
   ) => (
-    <Card className="overflow-hidden border-border/70 shadow-sm bg-card">
-      <CardHeader className="pb-3 border-b bg-muted/20">
+    <Card className="overflow-visible border-border/70 shadow-sm bg-card">
+      <CardHeader className="pb-2 border-b bg-muted/20">
         <CardTitle className="text-base">{title}</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4 pt-4">
-        {/* Player search */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <CardContent className="space-y-3 pt-3">
+        {/* Inputs */}
+        <div className="grid grid-cols-2 gap-2">
           <div className="relative">
             <Label className="text-xs mb-1 block">Player</Label>
-            <Input placeholder="Search hitter by name..." value={playerSearch} onChange={(e) => { setPlayerSearch(e.target.value); setPlayerOpen(true); }} onFocus={() => setPlayerOpen(true)} onBlur={() => setTimeout(() => setPlayerOpen(false), 150)} />
+            <Input className="h-8 text-sm" placeholder="Search hitter..." value={playerSearch} onChange={(e) => { setPlayerSearch(e.target.value); setPlayerOpen(true); }} onFocus={() => setPlayerOpen(true)} onBlur={() => setTimeout(() => setPlayerOpen(false), 150)} />
             {playerOpen && filterHitters(playerSearch).length > 0 && (
-              <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
+              <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-64 overflow-auto">
                 {filterHitters(playerSearch).map((p) => (
-                  <div key={p.id} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent flex justify-between" onMouseDown={() => onPickPlayer(p)}>
+                  <div key={p.id} className="px-3 py-1.5 text-sm cursor-pointer hover:bg-accent flex justify-between" onMouseDown={() => onPickPlayer(p)}>
                     <span className="font-medium">{p.first_name} {p.last_name}</span>
-                    <span className="text-muted-foreground text-xs">{p.team || "-"} · {p.position || "-"}</span>
+                    <span className="text-muted-foreground text-[11px]">{p.team || "-"}</span>
                   </div>
                 ))}
               </div>
@@ -995,12 +1000,12 @@ export default function PlayerComparison() {
           </div>
           <div className="relative">
             <Label className="text-xs mb-1 block">To Team</Label>
-            <Input placeholder="Search destination team..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamOpen(true); }} onFocus={() => setTeamOpen(true)} onBlur={() => setTimeout(() => setTeamOpen(false), 150)} />
+            <Input className="h-8 text-sm" placeholder="Destination..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamOpen(true); }} onFocus={() => setTeamOpen(true)} onBlur={() => setTimeout(() => setTeamOpen(false), 150)} />
             {teamOpen && filterTeams(teamSearch).length > 0 && (
-              <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
+              <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-64 overflow-auto">
                 {filterTeams(teamSearch).map((t) => (
-                  <div key={t.name} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => onPickTeam(t)}>
-                    {t.name} {t.conference ? `· ${t.conference}` : ""}
+                  <div key={t.name} className="px-3 py-1.5 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => onPickTeam(t)}>
+                    {t.name} <span className="text-muted-foreground text-[11px]">{t.conference || ""}</span>
                   </div>
                 ))}
               </div>
@@ -1008,60 +1013,46 @@ export default function PlayerComparison() {
           </div>
         </div>
 
-        {/* Selected player info */}
+        {/* Selected info */}
         {player && (
-          <div className="text-xs text-muted-foreground rounded-md border bg-muted/30 px-2.5 py-2">
-            <Link className="underline underline-offset-2 text-primary font-medium" to={profileRouteFor(player.id, player.position)} state={{ returnTo: location.pathname }}>
+          <div className="text-xs text-muted-foreground flex items-center gap-2">
+            <Link className="text-primary font-medium underline-offset-2 hover:underline" to={profileRouteFor(player.id, player.position)} state={{ returnTo: location.pathname }}>
               {player.first_name} {player.last_name}
             </Link>
-            <span className="ml-2">{player.team || "-"} · {player.position || "-"}</span>
-            {prediction && (
-              <div className="mt-1 font-mono tabular-nums">
-                Previous: {prediction.from_avg?.toFixed(3) ?? "-"} / {prediction.from_obp?.toFixed(3) ?? "-"} / {prediction.from_slg?.toFixed(3) ?? "-"}
-              </div>
-            )}
+            <span>{player.position || "-"} · {player.team || "-"}</span>
+            {prediction && <span className="font-mono tabular-nums">{prediction.from_avg?.toFixed(3) ?? "-"}/{prediction.from_obp?.toFixed(3) ?? "-"}/{prediction.from_slg?.toFixed(3) ?? "-"}</span>}
           </div>
         )}
 
-        {/* Simulation results */}
+        {/* Hero cards */}
         {sim ? (
-          <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              {([["pAVG", sim.pAvg, "avg"], ["pOBP", sim.pObp, "obp"], ["pSLG", sim.pSlg, "slg"]] as const).map(([label, val, key]) => (
-                <div key={label} className={`rounded-md border px-2 py-2 ${tierStyle(hitterStatTier(key, val))}`}>
-                  <div className="text-[11px] font-semibold">{label}</div>
-                  <div className="font-mono text-lg font-bold tabular-nums">{val.toFixed(3)}</div>
+          <>
+            <div className="grid grid-cols-3 gap-2">
+              <div className={`rounded-lg border-2 p-3 text-center ${heroColor(sim.pWrcPlus, 115, 90)}`}>
+                <div className="text-muted-foreground text-[10px] uppercase tracking-wide">pWRC+</div>
+                <div className="text-2xl font-bold tabular-nums">{sim.pWrcPlus?.toFixed(0) ?? "-"}</div>
+              </div>
+              <div className={`rounded-lg border-2 p-3 text-center ${heroColor(sim.owar, 1.5, 0.5)}`}>
+                <div className="text-muted-foreground text-[10px] uppercase tracking-wide">oWAR</div>
+                <div className="text-2xl font-bold tabular-nums">{sim.owar?.toFixed(2) ?? "-"}</div>
+              </div>
+              <div className={`rounded-lg border-2 p-3 text-center ${heroColor(sim.nilValuation, 75000, 25000)}`}>
+                <div className="text-muted-foreground text-[10px] uppercase tracking-wide">NIL Value</div>
+                <div className="text-xl font-bold tabular-nums">{money(sim.nilValuation)}</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-5 gap-1.5">
+              {([["AVG", sim.pAvg, "avg"], ["OBP", sim.pObp, "obp"], ["SLG", sim.pSlg, "slg"], ["OPS", sim.pOps, "ops"], ["ISO", sim.pIso, "iso"]] as const).map(([label, val, key]) => (
+                <div key={label} className={`rounded border p-2 text-center ${tierStyle(hitterStatTier(key, val))}`}>
+                  <div className="text-muted-foreground text-[10px] uppercase tracking-wide">{label}</div>
+                  <div className="text-sm font-bold tabular-nums">{val.toFixed(3)}</div>
                 </div>
               ))}
             </div>
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <div className={`rounded-md border px-2 py-2 ${tierStyle(hitterStatTier("wrc_plus", sim.pWrcPlus))}`}>
-                <div className="text-[11px] font-semibold">pWRC+</div>
-                <div className="font-mono text-xl font-bold tabular-nums">{sim.pWrcPlus?.toFixed(0) ?? "-"}</div>
-              </div>
-              <div className={`rounded-md border px-2 py-2 ${tierStyle(hitterStatTier("owar", sim.owar))}`}>
-                <div className="text-[11px] font-semibold">oWAR</div>
-                <div className="font-mono text-xl font-bold tabular-nums">{sim.owar?.toFixed(2) ?? "-"}</div>
-              </div>
-              <div className={`rounded-md border px-2 py-2 ${tierStyle(hitterStatTier("nil", sim.nilValuation))}`}>
-                <div className="text-[11px] font-semibold">NIL Value</div>
-                <div className="font-mono text-lg font-bold tabular-nums">{money(sim.nilValuation)}</div>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className={`rounded-md border px-2 py-2 ${tierStyle(hitterStatTier("ops", sim.pOps))}`}>
-                <div className="text-[11px] font-semibold">pOPS</div>
-                <div className="font-mono text-lg font-bold tabular-nums">{sim.pOps.toFixed(3)}</div>
-              </div>
-              <div className={`rounded-md border px-2 py-2 ${tierStyle(hitterStatTier("iso", sim.pIso))}`}>
-                <div className="text-[11px] font-semibold">pISO</div>
-                <div className="font-mono text-lg font-bold tabular-nums">{sim.pIso.toFixed(3)}</div>
-              </div>
-            </div>
-          </div>
+          </>
         ) : (
-          <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-            {player ? "Missing data to run simulation — ensure prediction and power ratings exist." : "Select a hitter and destination team."}
+          <div className="rounded-md border border-dashed p-4 text-xs text-muted-foreground text-center">
+            {player ? "Missing data for simulation." : "Select a hitter and destination."}
           </div>
         )}
       </CardContent>
@@ -1080,108 +1071,104 @@ export default function PlayerComparison() {
     pitcher: PitchingStorageRow | null,
     sim: PitchingSimOut | null,
   ) => (
-    <Card className="overflow-hidden border-border/70 shadow-sm bg-card">
-      <CardHeader className="pb-3 border-b bg-muted/20">
+    <Card className="overflow-visible border-border/70 shadow-sm bg-card">
+      <CardHeader className="pb-2 border-b bg-muted/20">
         <CardTitle className="text-base">{title}</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4 pt-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="relative md:col-span-1">
+      <CardContent className="space-y-3 pt-3">
+        {/* Inputs */}
+        <div className="grid grid-cols-5 gap-2">
+          <div className="relative col-span-2">
             <Label className="text-xs mb-1 block">Pitcher</Label>
-            <Input placeholder="Search pitcher..." value={pitcherSearch} onChange={(e) => { setPitcherSearch(e.target.value); setPitcherOpen(true); }} onFocus={() => setPitcherOpen(true)} onBlur={() => setTimeout(() => setPitcherOpen(false), 150)} />
+            <Input className="h-8 text-sm" placeholder="Search pitcher..." value={pitcherSearch} onChange={(e) => { setPitcherSearch(e.target.value); setPitcherOpen(true); }} onFocus={() => setPitcherOpen(true)} onBlur={() => setTimeout(() => setPitcherOpen(false), 150)} />
             {pitcherOpen && filterPitchers(pitcherSearch).length > 0 && (
-              <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
+              <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-64 overflow-auto">
                 {filterPitchers(pitcherSearch).map((p) => (
-                  <div key={p.id} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent flex justify-between" onMouseDown={() => onPickPitcher(p)}>
+                  <div key={p.id} className="px-3 py-1.5 text-sm cursor-pointer hover:bg-accent flex justify-between" onMouseDown={() => onPickPitcher(p)}>
                     <span className="font-medium">{p.player_name}</span>
-                    <span className="text-muted-foreground text-xs">{p.team || "-"} · {p.role || "-"} · {p.handedness || "-"}</span>
+                    <span className="text-muted-foreground text-[11px]">{p.team || "-"} · {p.role || "-"}</span>
                   </div>
                 ))}
               </div>
             )}
           </div>
-          <div className="relative">
+          <div className="relative col-span-2">
             <Label className="text-xs mb-1 block">To Team</Label>
-            <Input placeholder="Destination team..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamOpen(true); }} onFocus={() => setTeamOpen(true)} onBlur={() => setTimeout(() => setTeamOpen(false), 150)} />
+            <Input className="h-8 text-sm" placeholder="Destination..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamOpen(true); }} onFocus={() => setTeamOpen(true)} onBlur={() => setTimeout(() => setTeamOpen(false), 150)} />
             {teamOpen && filterTeams(teamSearch).length > 0 && (
-              <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
+              <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-64 overflow-auto">
                 {filterTeams(teamSearch).map((t) => (
-                  <div key={t.name} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => onPickTeam(t)}>
-                    {t.name} {t.conference ? `· ${t.conference}` : ""}
+                  <div key={t.name} className="px-3 py-1.5 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => onPickTeam(t)}>
+                    {t.name} <span className="text-muted-foreground text-[11px]">{t.conference || ""}</span>
                   </div>
                 ))}
               </div>
             )}
           </div>
           <div>
-            <Label className="text-xs mb-1 block">Projected Role</Label>
+            <Label className="text-xs mb-1 block">Role</Label>
             <Select value={roleOverride} onValueChange={(v) => setRoleOverride(v as "SP" | "RP")}>
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="SP">Starter (SP)</SelectItem>
-                <SelectItem value="RP">Reliever (RP)</SelectItem>
+                <SelectItem value="SP">SP</SelectItem>
+                <SelectItem value="RP">RP</SelectItem>
               </SelectContent>
             </Select>
           </div>
         </div>
 
-        {/* Selected pitcher info */}
+        {/* Selected info */}
         {pitcher && (
-          <div className="text-xs text-muted-foreground rounded-md border bg-muted/30 px-2.5 py-2">
+          <div className="text-xs text-muted-foreground flex items-center gap-2">
             <span className="font-medium text-foreground">{pitcher.player_name}</span>
-            <span className="ml-2">{pitcher.team || "-"} · {pitcher.role || "-"} · {pitcher.handedness === "R" ? "RHP" : pitcher.handedness === "L" ? "LHP" : pitcher.handedness || "-"}</span>
-            <div className="mt-1 font-mono tabular-nums">
-              2025: {pitcher.era?.toFixed(2) ?? "-"} ERA · {pitcher.fip?.toFixed(2) ?? "-"} FIP · {pitcher.whip?.toFixed(2) ?? "-"} WHIP · {pitcher.k9?.toFixed(1) ?? "-"} K/9
-            </div>
+            <span>{pitcher.handedness === "R" ? "RHP" : pitcher.handedness === "L" ? "LHP" : "-"} · {pitcher.team || "-"}</span>
+            <span className="font-mono tabular-nums">{pitcher.era?.toFixed(2) ?? "-"} ERA · {pitcher.k9?.toFixed(1) ?? "-"} K/9</span>
           </div>
         )}
 
-        {/* Pitching sim results */}
+        {/* Results */}
         {sim ? (
           sim.blocked ? (
-            <div className="rounded-md border border-dashed border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-700">
-              <p className="font-semibold mb-1">Missing Inputs</p>
-              <ul className="list-disc pl-4 space-y-0.5">
-                {sim.missingInputs.map((m, i) => <li key={i}>{m}</li>)}
-              </ul>
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-700">
+              Missing: {sim.missingInputs.join(", ")}
             </div>
           ) : (
-            <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                {([["ERA", sim.pEra, "era", false], ["FIP", sim.pFip, "fip", false], ["WHIP", sim.pWhip, "whip", false]] as const).map(([label, val, key, hib]) => (
-                  <div key={label} className={`rounded-md border px-2 py-2 ${tierStyle(tierByNcaaAverage(val, key === "era" ? pitchingEq.era_plus_ncaa_avg : key === "fip" ? pitchingEq.fip_plus_ncaa_avg : pitchingEq.whip_plus_ncaa_avg, false))}`}>
-                    <div className="text-[11px] font-semibold">{label}</div>
-                    <div className="font-mono text-lg font-bold tabular-nums">{val?.toFixed(2) ?? "-"}</div>
+            <>
+              <div className="grid grid-cols-3 gap-2">
+                <div className={`rounded-lg border-2 p-3 text-center ${heroColor(sim.pRvPlus, 110, 95)}`}>
+                  <div className="text-muted-foreground text-[10px] uppercase tracking-wide">pRV+</div>
+                  <div className="text-2xl font-bold tabular-nums">{whole(sim.pRvPlus)}</div>
+                </div>
+                <div className={`rounded-lg border-2 p-3 text-center ${heroColor(sim.pWar, 1.5, 0.5)}`}>
+                  <div className="text-muted-foreground text-[10px] uppercase tracking-wide">pWAR</div>
+                  <div className="text-2xl font-bold tabular-nums">{sim.pWar?.toFixed(2) ?? "-"}</div>
+                </div>
+                <div className={`rounded-lg border-2 p-3 text-center ${heroColor(sim.marketValue, 75000, 25000)}`}>
+                  <div className="text-muted-foreground text-[10px] uppercase tracking-wide">Market Value</div>
+                  <div className="text-xl font-bold tabular-nums">{money(sim.marketValue)}</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {([["ERA", sim.pEra, pitchingEq.era_plus_ncaa_avg, false], ["FIP", sim.pFip, pitchingEq.fip_plus_ncaa_avg, false], ["WHIP", sim.pWhip, pitchingEq.whip_plus_ncaa_avg, false]] as const).map(([label, val, avg, hib]) => (
+                  <div key={label} className={`rounded border p-2 text-center ${tierStyle(tierByNcaaAverage(val, avg, hib))}`}>
+                    <div className="text-muted-foreground text-[10px] uppercase tracking-wide">{label}</div>
+                    <div className="text-sm font-bold tabular-nums">{val?.toFixed(2) ?? "-"}</div>
                   </div>
                 ))}
               </div>
-              <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="grid grid-cols-3 gap-1.5">
                 {([["K/9", sim.pK9, pitchingEq.k9_plus_ncaa_avg, true], ["BB/9", sim.pBb9, pitchingEq.bb9_plus_ncaa_avg, false], ["HR/9", sim.pHr9, pitchingEq.hr9_plus_ncaa_avg, false]] as const).map(([label, val, avg, hib]) => (
-                  <div key={label} className={`rounded-md border px-2 py-2 ${tierStyle(tierByNcaaAverage(val, avg, hib))}`}>
-                    <div className="text-[11px] font-semibold">{label}</div>
-                    <div className="font-mono text-lg font-bold tabular-nums">{val?.toFixed(2) ?? "-"}</div>
+                  <div key={label} className={`rounded border p-2 text-center ${tierStyle(tierByNcaaAverage(val, avg, hib))}`}>
+                    <div className="text-muted-foreground text-[10px] uppercase tracking-wide">{label}</div>
+                    <div className="text-sm font-bold tabular-nums">{val?.toFixed(2) ?? "-"}</div>
                   </div>
                 ))}
               </div>
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                <div className={`rounded-md border px-2 py-2 ${tierStyle(sim.pRvPlus != null && sim.pRvPlus >= 110 ? "good" : sim.pRvPlus != null && sim.pRvPlus >= 95 ? "avg" : "bad")}`}>
-                  <div className="text-[11px] font-semibold">pRV+</div>
-                  <div className="font-mono text-xl font-bold tabular-nums">{whole(sim.pRvPlus)}</div>
-                </div>
-                <div className={`rounded-md border px-2 py-2 ${tierStyle(sim.pWar != null && sim.pWar >= 1.5 ? "good" : sim.pWar != null && sim.pWar >= 0.5 ? "avg" : "bad")}`}>
-                  <div className="text-[11px] font-semibold">pWAR</div>
-                  <div className="font-mono text-xl font-bold tabular-nums">{sim.pWar?.toFixed(2) ?? "-"}</div>
-                </div>
-                <div className={`rounded-md border px-2 py-2 ${tierStyle(sim.marketValue != null && sim.marketValue >= 75000 ? "good" : sim.marketValue != null && sim.marketValue >= 25000 ? "avg" : "bad")}`}>
-                  <div className="text-[11px] font-semibold">Market Value</div>
-                  <div className="font-mono text-lg font-bold tabular-nums">{money(sim.marketValue)}</div>
-                </div>
-              </div>
-            </div>
+            </>
           )
         ) : (
-          <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-            {pitcher ? "Select a destination team to run simulation." : "Select a pitcher and destination team."}
+          <div className="rounded-md border border-dashed p-4 text-xs text-muted-foreground text-center">
+            {pitcher ? "Select a destination team." : "Select a pitcher and destination."}
           </div>
         )}
       </CardContent>
@@ -1190,45 +1177,35 @@ export default function PlayerComparison() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 max-w-[1400px] mx-auto">
+      <div className="space-y-4 max-w-[1400px] mx-auto">
         <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-4 flex items-center justify-between">
           <div>
             <h2 className="text-2xl font-bold tracking-tight">Compare Dashboard</h2>
             <p className="text-muted-foreground text-sm">Side-by-side player comparison using the transfer simulator engine.</p>
           </div>
           <div className="flex gap-1 rounded-lg border bg-muted p-1">
-            <button
-              className={`px-4 py-1.5 text-sm rounded-md font-medium transition-colors ${simType === "hitting" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setSimType("hitting")}
-            >
-              Hitting
-            </button>
-            <button
-              className={`px-4 py-1.5 text-sm rounded-md font-medium transition-colors ${simType === "pitching" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setSimType("pitching")}
-            >
-              Pitching
-            </button>
+            <button className={`px-4 py-1.5 text-sm rounded-md font-medium transition-colors ${simType === "hitting" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`} onClick={() => setSimType("hitting")}>Hitting</button>
+            <button className={`px-4 py-1.5 text-sm rounded-md font-medium transition-colors ${simType === "pitching" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`} onClick={() => setSimType("pitching")}>Pitching</button>
           </div>
         </div>
 
         {simType === "hitting" ? (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {renderHitterPanel(
               "Player A", aPlayerSearch, setAPlayerSearch, aPlayerOpen, setAPlayerOpen, aTeamSearch, setATeamSearch, aTeamOpen, setATeamOpen,
               (p) => { setAPlayerId(p.id); setAPlayerSearch(`${p.first_name} ${p.last_name}`); setAPlayerOpen(false); },
               (t) => { setADestTeam(t.name); setATeamSearch(t.name); setATeamOpen(false); },
-              aPlayer, aHitterSim, aPrediction,
+              aPlayer, aHitterSim, aPrediction, bHitterSim,
             )}
             {renderHitterPanel(
               "Player B", bPlayerSearch, setBPlayerSearch, bPlayerOpen, setBPlayerOpen, bTeamSearch, setBTeamSearch, bTeamOpen, setBTeamOpen,
               (p) => { setBPlayerId(p.id); setBPlayerSearch(`${p.first_name} ${p.last_name}`); setBPlayerOpen(false); },
               (t) => { setBDestTeam(t.name); setBTeamSearch(t.name); setBTeamOpen(false); },
-              bPlayer, bHitterSim, bPrediction,
+              bPlayer, bHitterSim, bPrediction, aHitterSim,
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {renderPitcherPanel(
               "Pitcher A", aPitcherSearch, setAPitcherSearch, aPitcherOpen, setAPitcherOpen, aTeamSearch, setATeamSearch, aTeamOpen, setATeamOpen,
               aRoleOverride, setARoleOverride,

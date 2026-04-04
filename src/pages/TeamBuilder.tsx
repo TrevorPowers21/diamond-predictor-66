@@ -1456,41 +1456,54 @@ export default function TeamBuilder() {
   });
 
   const { data: returners = [], dataUpdatedAt: returnersUpdatedAt } = useQuery({
-    queryKey: ["team-builder-returners-v3", selectedTeamId],
-    enabled: !!selectedTeamId,
+    queryKey: ["team-builder-returners-v3", selectedTeamId, selectedTeam],
+    enabled: !!selectedTeam,
     staleTime: 0,
     retry: 1,
     queryFn: async () => {
-      // Single query: get all players on this team by team_id UUID — no string matching needed
-      const { data, error } = await supabase
-        .from("players")
-        .select("id, first_name, last_name, position, team, from_team, conference, transfer_portal, player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at)")
-        .eq("team_id", selectedTeamId!)
-        .eq("transfer_portal", false);
-      if (error) throw error;
-
-      const results: any[] = [];
-      for (const player of (data || [])) {
-        const preds = (player.player_predictions || []).filter(
-          (pr: any) => pr.variant === "regular" && (pr.status === "active" || pr.status === "departed"),
-        );
-        let best = preds.length > 0 ? preds[0] : null;
-        for (const row of preds) {
-          if (!best) { best = row; continue; }
-          const rowScore = scorePredictionLikeDashboard(row, false);
-          const bestScore = scorePredictionLikeDashboard(best, false);
-          if (rowScore > bestScore) best = row;
-          else if (rowScore === bestScore) {
-            if (new Date(row.updated_at || 0).getTime() > new Date(best.updated_at || 0).getTime()) best = row;
-          }
-        }
-        results.push({
-          ...(best || {}),
-          player_id: player.id,
-          players: { id: player.id, first_name: player.first_name, last_name: player.last_name, position: player.position, team: player.team, from_team: player.from_team, conference: player.conference, transfer_portal: player.transfer_portal },
-        });
+      // Try team_id UUID first, fall back to team name match
+      const selectCols = "id, first_name, last_name, position, team, from_team, conference, transfer_portal, player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at)";
+      let query = supabase.from("players").select(selectCols).eq("transfer_portal", false);
+      if (selectedTeamId) {
+        query = query.eq("team_id", selectedTeamId);
+      } else {
+        query = query.eq("team", selectedTeam);
       }
-      return results;
+      const { data, error } = await query;
+      if (error) throw error;
+      // If team_id query returned nothing, retry with team name
+      if (selectedTeamId && (!data || data.length === 0)) {
+        const { data: fallback, error: fbErr } = await supabase.from("players").select(selectCols).eq("team", selectedTeam).eq("transfer_portal", false);
+        if (!fbErr && fallback && fallback.length > 0) {
+          return processReturners(fallback);
+        }
+      }
+      return processReturners(data || []);
+
+      function processReturners(players: any[]) {
+        const results: any[] = [];
+        for (const player of players) {
+          const preds = (player.player_predictions || []).filter(
+            (pr: any) => pr.variant === "regular" && (pr.status === "active" || pr.status === "departed"),
+          );
+          let best = preds.length > 0 ? preds[0] : null;
+          for (const row of preds) {
+            if (!best) { best = row; continue; }
+            const rowScore = scorePredictionLikeDashboard(row, false);
+            const bestScore = scorePredictionLikeDashboard(best, false);
+            if (rowScore > bestScore) best = row;
+            else if (rowScore === bestScore) {
+              if (new Date(row.updated_at || 0).getTime() > new Date(best.updated_at || 0).getTime()) best = row;
+            }
+          }
+          results.push({
+            ...(best || {}),
+            player_id: player.id,
+            players: { id: player.id, first_name: player.first_name, last_name: player.last_name, position: player.position, team: player.team, from_team: player.from_team, conference: player.conference, transfer_portal: player.transfer_portal },
+          });
+        }
+        return results;
+      }
     },
   });
   const storagePitchersForSelectedTeam = useMemo(() => {
@@ -4338,11 +4351,48 @@ export default function TeamBuilder() {
     setBuildName("My Team Build");
     setTotalBudget(0);
     setDirty(false);
-    autoSeededTeamRef.current = "";
-    skipAutoSeedOnceRef.current = false;
-    // Briefly clear team to force the auto-seed effect to re-trigger
-    setSelectedTeam("");
-    setTimeout(() => setSelectedTeam("Arizona State"), 0);
+    skipAutoSeedOnceRef.current = true;
+    // Rebuild roster from returners only (no targets)
+    const roster: BuildPlayer[] = returners.map((r: any) => {
+      const player = r.players;
+      if (!player) return null;
+      const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP|TWP)/i.test(String(player.position || ""));
+      const overrideRole = asPitcherRole(playerOverrides?.[player.id]?.pitcher_role || null);
+      const inferredRole = overrideRole || asPitcherRole(player.position || null);
+      return {
+        player_id: player.id,
+        source: "returner" as const,
+        custom_name: null,
+        position_slot: isPitcherRow ? (inferredRole || "RP") : null,
+        depth_order: 1,
+        nil_value: 0,
+        production_notes: null,
+        roster_status: "returner" as const,
+        depth_role: isPitcherRow
+          ? ((inferredRole === "SP") ? "weekend_starter" : "high_leverage_reliever")
+          : ("starter" as const),
+        class_transition: r.class_transition ?? "SJ",
+        dev_aggressiveness: r.dev_aggressiveness ?? 0,
+        class_transition_overridden: false,
+        dev_aggressiveness_overridden: false,
+        transfer_snapshot: null,
+        player: {
+          first_name: player.first_name,
+          last_name: player.last_name,
+          position: player.position,
+          team: player.team,
+          from_team: player.from_team,
+          conference: player.conference ?? null,
+        },
+        prediction: r ?? null,
+        nilVal: null,
+        nil_owar: null,
+        team_metrics: null,
+        team_power_plus: null,
+      };
+    }).filter(Boolean) as BuildPlayer[];
+    setRosterPlayers(roster);
+    autoSeededTeamRef.current = normalizeName(selectedTeam);
   };
 
   const renderPlayerRow = (p: BuildPlayer, idx: number, globalIdx: number) => {
