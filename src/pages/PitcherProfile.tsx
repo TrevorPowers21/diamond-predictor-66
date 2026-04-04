@@ -18,6 +18,7 @@ import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
+import { useConferenceStats } from "@/hooks/useConferenceStats";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
@@ -406,15 +407,25 @@ export default function PitcherProfile() {
 
   const { data: player, isLoading } = useQuery({
     queryKey: ["pitcher-profile-player", id],
-    enabled: !!id && isDbRoute,
+    enabled: !!id && (isDbRoute || /^\d+$/.test(id || "")),
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Try by UUID first
+      if (isDbRoute) {
+        const { data } = await supabase
+          .from("players")
+          .select("*")
+          .eq("id", id!)
+          .maybeSingle();
+        if (data) return data;
+      }
+      // Fallback: look up by source_player_id
+      const { data: bySource } = await supabase
         .from("players")
         .select("*")
-        .eq("id", id!)
-        .single();
-      if (error) throw error;
-      return data;
+        .eq("source_player_id", id!)
+        .maybeSingle();
+      if (bySource) return bySource;
+      return null;
     },
   });
 
@@ -462,6 +473,7 @@ export default function PitcherProfile() {
     },
   });
   const { teams: teamDirectory } = useTeamsTable();
+  const { conferenceStatsByKey } = useConferenceStats(2025);
   const lookupPlayerName = useMemo(() => {
     if (storageRef?.playerName) return storageRef.playerName;
     const fullName = `${player?.first_name || ""} ${player?.last_name || ""}`.trim();
@@ -759,7 +771,21 @@ export default function PitcherProfile() {
       return undefined;
     }
   }, [isDbRoute, storageOverrideKey]);
-  const displayConference = player?.conference || conferenceByTeam.get(normalize(displayTeam)) || "—";
+  // Resolve conference: use conference_id from masterRow/team → conference stats lookup, or fall back to player.conference
+  const displayConference = (() => {
+    // Try masterRow conference_id → Conference Stats (returns abbreviation)
+    const confId = masterRow?.conferenceId;
+    if (confId && conferenceStatsByKey.get(confId)) {
+      return conferenceStatsByKey.get(confId)!.conference;
+    }
+    // Try team's conference_id
+    const teamRow = teamByName.get(normalize(displayTeam));
+    if (teamRow && (teamRow as any).conference_id && conferenceStatsByKey.get((teamRow as any).conference_id)) {
+      return conferenceStatsByKey.get((teamRow as any).conference_id)!.conference;
+    }
+    // Fall back to player conference or team conference
+    return player?.conference || masterRow?.conference || conferenceByTeam.get(normalize(displayTeam)) || "—";
+  })();
   const displayHandedness = player?.handedness || masterRow?.throwHand || storageRow?.[2] || "—";
   // Read pitching stats directly from masterRow (no intermediate parse needed)
   const storageEra = masterRow?.era ?? null;
