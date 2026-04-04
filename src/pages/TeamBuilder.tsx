@@ -4692,7 +4692,7 @@ export default function TeamBuilder() {
         </div>
 
         {/* Build selector & config */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="relative">
             <Label className="text-xs mb-1 block">Team</Label>
             <Input
@@ -4763,36 +4763,19 @@ export default function TeamBuilder() {
         </div>
 
         {/* Budget summary */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Card>
-            <CardContent className="pt-4 pb-4 flex items-center gap-3">
-              <BarChart3 className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <p className="text-2xl font-bold">{rosterTableTotals.totalOWar.toFixed(2)}</p>
-                <p className="text-xs text-muted-foreground">Total WAR</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-4 flex items-center gap-3">
-              <DollarSign className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <p className="text-2xl font-bold">${Math.round(totalEffectiveNil).toLocaleString()}</p>
-                <p className="text-xs text-muted-foreground">Total Budget Used</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-4 flex items-center gap-3">
-              <DollarSign className={`h-5 w-5 ${budgetRemaining < 0 ? "text-destructive" : "text-muted-foreground"}`} />
-              <div>
-                <p className={`text-2xl font-bold ${budgetRemaining < 0 ? "text-destructive" : ""}`}>
-                  ${budgetRemaining.toLocaleString()}
-                </p>
-                <p className="text-xs text-muted-foreground">Budget Remaining (vs NIL used)</p>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4 text-center">
+            <div className="text-muted-foreground text-xs uppercase tracking-wide">Total WAR</div>
+            <div className="text-2xl font-bold tracking-tight mt-1">{rosterTableTotals.totalOWar.toFixed(2)}</div>
+          </div>
+          <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4 text-center">
+            <div className="text-muted-foreground text-xs uppercase tracking-wide">Budget Used</div>
+            <div className="text-2xl font-bold tracking-tight mt-1">${Math.round(totalEffectiveNil).toLocaleString()}</div>
+          </div>
+          <div className={`rounded-lg border-2 p-4 text-center ${budgetRemaining < 0 ? "border-destructive/30 bg-destructive/5" : "border-primary/20 bg-primary/5"}`}>
+            <div className="text-muted-foreground text-xs uppercase tracking-wide">Remaining</div>
+            <div className={`text-2xl font-bold tracking-tight mt-1 ${budgetRemaining < 0 ? "text-destructive" : ""}`}>${budgetRemaining.toLocaleString()}</div>
+          </div>
         </div>
 
         <Tabs defaultValue={initialTab}>
