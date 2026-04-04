@@ -26,8 +26,7 @@ const navItems = [
   { label: "Team Builder", href: "/dashboard/team-builder", icon: Hammer },
   { label: "Player Dashboard", href: "/dashboard/returning", icon: Activity },
   // { label: "NIL Valuations", href: "/dashboard/nil", icon: DollarSign, badge: "Coming Soon" },
-  // Temporarily hidden during testing; keep page code for later rework.
-  { label: "Compare (Coming soon)", href: "/dashboard/compare", icon: GitCompare, disabled: true },
+  { label: "Compare", href: "/dashboard/compare", icon: GitCompare },
   { label: "Admin", href: "/dashboard/admin", icon: ShieldCheck },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
