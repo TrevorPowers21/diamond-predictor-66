@@ -2223,8 +2223,8 @@ export default function TeamBuilder() {
       const name = (pr.playerName || "").trim();
       const team = (pr.team || "").trim();
       if (!name) continue;
-      // stuff_plus is NOT in Pitching Master — use null
-      const stuff = cs(null, EQ.p_ncaa_avg_stuff_plus, EQ.p_sd_stuff_plus);
+      // Use stuff_plus from Pitching Master when available
+      const stuff = pr.stuffPlus != null ? cs(pr.stuffPlus, EQ.p_ncaa_avg_stuff_plus, EQ.p_sd_stuff_plus) : null;
       const whiff = cs(pr.miss_pct, EQ.p_ncaa_avg_whiff_pct, EQ.p_sd_whiff_pct);
       const bb = cs(pr.bb_pct, EQ.p_ncaa_avg_bb_pct, EQ.p_sd_bb_pct, true);
       const hh = cs(pr.hard_hit_pct, EQ.p_ncaa_avg_hh_pct, EQ.p_sd_hh_pct, true);

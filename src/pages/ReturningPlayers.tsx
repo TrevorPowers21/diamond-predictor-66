@@ -1905,21 +1905,20 @@ export default function ReturningPlayers() {
                   <Table>
                     <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
                       <TableRow>
-                        <TableHead className="min-w-[160px] sticky left-0 z-30 bg-background">
+                        <TableHead className="min-w-[140px] sticky left-0 z-30 bg-background">
                           <SortButton label="Player" sortKeyVal="name" />
                         </TableHead>
-                        <TableHead>Prior</TableHead>
-                        <TableHead className="min-w-[120px]">Class Adjustment</TableHead>
-                        <TableHead className="min-w-[140px]">Dev Aggressiveness</TableHead>
-                        <TableHead className="text-right"><SortButton label="pAVG" sortKeyVal="p_avg" /></TableHead>
-                        <TableHead className="text-right"><SortButton label="p OBP" sortKeyVal="p_obp" /></TableHead>
-                        <TableHead className="text-right"><SortButton label="pSLG" sortKeyVal="p_slg" /></TableHead>
-                        <TableHead className="text-right"><SortButton label="p OPS" sortKeyVal="p_ops" /></TableHead>
-                        <TableHead className="text-right"><SortButton label="pISO" sortKeyVal="p_iso" /></TableHead>
-                        <TableHead className="text-right"><SortButton label="wRC+" sortKeyVal="p_wrc_plus" /></TableHead>
-                        <TableHead className="text-right"><SortButton label="oWAR" sortKeyVal="p_war" /></TableHead>
-                        <TableHead className="text-right"><SortButton label="Market Value" sortKeyVal="p_nil" /></TableHead>
-                        <TableHead className="text-center min-w-[180px]">Scouting</TableHead>
+                        <TableHead className="min-w-[70px] text-xs">Class</TableHead>
+                        <TableHead className="min-w-[60px] text-xs">Dev</TableHead>
+                        <TableHead className="text-right text-xs"><SortButton label="AVG" sortKeyVal="p_avg" /></TableHead>
+                        <TableHead className="text-right text-xs"><SortButton label="OBP" sortKeyVal="p_obp" /></TableHead>
+                        <TableHead className="text-right text-xs"><SortButton label="SLG" sortKeyVal="p_slg" /></TableHead>
+                        <TableHead className="text-right text-xs"><SortButton label="OPS" sortKeyVal="p_ops" /></TableHead>
+                        <TableHead className="text-right text-xs"><SortButton label="ISO" sortKeyVal="p_iso" /></TableHead>
+                        <TableHead className="text-right text-xs"><SortButton label="wRC+" sortKeyVal="p_wrc_plus" /></TableHead>
+                        <TableHead className="text-right text-xs"><SortButton label="oWAR" sortKeyVal="p_war" /></TableHead>
+                        <TableHead className="text-right text-xs"><SortButton label="Value" sortKeyVal="p_nil" /></TableHead>
+                        <TableHead className="text-center min-w-[140px] text-xs">Scouting</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1964,10 +1963,7 @@ export default function ReturningPlayers() {
                                 </div>
                               )}
                             </TableCell>
-                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                              {statFormat(pred.from_avg)}/{statFormat(pred.from_obp)}/{statFormat(pred.from_slg)}
-                            </TableCell>
-                            <TableCell>
+                            <TableCell className="p-1">
                               {p.model_type === "returner" ? (
                                 <ClassAdjustmentSelector
                                   value={pred.class_transition || "SJ"}
@@ -1977,7 +1973,7 @@ export default function ReturningPlayers() {
                                 <span className="text-xs text-muted-foreground">—</span>
                               )}
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="p-1">
                               {p.model_type === "returner" ? (
                                 <DevAggSelector
                                   value={pred.dev_aggressiveness ?? 0.0}
@@ -1987,22 +1983,22 @@ export default function ReturningPlayers() {
                                 <span className="text-xs text-muted-foreground">—</span>
                               )}
                             </TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(pred.p_avg)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(pred.p_obp)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(pred.p_slg)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">
+                            <TableCell className="text-right text-sm tabular-nums">{statFormat(pred.p_avg)}</TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">{statFormat(pred.p_obp)}</TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">{statFormat(pred.p_slg)}</TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">
                               {statFormat(pred.p_ops ?? computeDerived(pred.p_avg, pred.p_obp, pred.p_slg).ops)}
                             </TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">
+                            <TableCell className="text-right text-sm tabular-nums">
                               {statFormat(pred.p_iso ?? computeDerived(pred.p_avg, pred.p_obp, pred.p_slg).iso)}
                             </TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">
+                            <TableCell className="text-right text-sm font-semibold tabular-nums">
                               {pctFormat(pred.p_wrc_plus)}
                             </TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">
+                            <TableCell className="text-right text-sm tabular-nums">
                               {statFormat(computeOWarFromWrcPlus(pred.p_wrc_plus), 2)}
                             </TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">
+                            <TableCell className="text-right text-sm tabular-nums">
                               {moneyFormat(
                                 computeNilFallback({
                                   storedNil: p.nil_value,
@@ -2012,20 +2008,13 @@ export default function ReturningPlayers() {
                                 }),
                               )}
                             </TableCell>
-                            <TableCell className="text-center">
-                              {pred.ev_score != null &&
-                              pred.barrel_score != null &&
-                              pred.contact_score != null &&
-                              pred.chase_score != null ? (
-                                <div className="flex gap-1 justify-center flex-wrap">
-                                  <ScoutMiniBox label="EV" value={pred.ev_score} />
-                                  <ScoutMiniBox label="Brl" value={pred.barrel_score} />
-                                  <ScoutMiniBox label="Con" value={pred.contact_score} />
-                                  <ScoutMiniBox label="Chs" value={pred.chase_score} />
-                                </div>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">—</span>
-                              )}
+                            <TableCell className="text-center p-1">
+                              <div className="flex gap-0.5 justify-center">
+                                {pred.barrel_score != null && <ScoutMiniBox label="Brl" value={pred.barrel_score} />}
+                                {pred.ev_score != null && <ScoutMiniBox label="EV" value={pred.ev_score} />}
+                                {pred.contact_score != null && <ScoutMiniBox label="Con" value={pred.contact_score} />}
+                                {pred.chase_score != null && <ScoutMiniBox label="Chs" value={pred.chase_score} />}
+                              </div>
                             </TableCell>
                           </TableRow>
                         );
