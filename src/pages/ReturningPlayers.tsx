@@ -2085,20 +2085,33 @@ export default function ReturningPlayers() {
         </Card>
           </>
         ) : (
-          <Card>
+          <>
+        <div className="relative w-full max-w-md">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search pitchers, teams..."
+            value={pitchingSearch}
+            onChange={(e) => setPitchingSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+
+        <Card>
             <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <CardTitle className="text-base">Pitching Dashboard (2025)</CardTitle>
-                <CardDescription>Prior stats with scouting grades from pitching power ratings storage.</CardDescription>
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-base">Pitching Projections</CardTitle>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  onClick={() => exportBlankMarketValues("pitching")}
+                >
+                  Blank Market Value ({pitchingBlankMarketRows.length})
+                </Button>
+                {pitchingMissingTeamCount > 0 && (
+                  <span className="text-xs text-destructive">{pitchingMissingTeamCount} missing team</span>
+                )}
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs sm:mr-2"
-                onClick={() => exportBlankMarketValues("pitching")}
-              >
-                Blank Market Value ({pitchingBlankMarketRows.length})
-              </Button>
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <div className="flex items-center gap-1 overflow-x-auto max-w-[360px]">
                   {pitchingVisiblePages.map((p, i) => {
@@ -2119,44 +2132,30 @@ export default function ReturningPlayers() {
                     );
                   })}
                 </div>
-                <div className="relative w-full sm:w-64">
-                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search pitchers, teams..."
-                    value={pitchingSearch}
-                    onChange={(e) => setPitchingSearch(e.target.value)}
-                    className="pl-9"
-                  />
-                </div>
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="px-4 pt-3 pb-2 text-xs text-muted-foreground">
-                {pitchingMissingTeamCount === 0 ? (
-                  <span>Team check: all pitchers have a team.</span>
-                ) : (
-                  <span className="text-destructive">Team check: {pitchingMissingTeamCount} pitcher(s) missing a team.</span>
-                )}
-              </div>
               {pagedPitchingRows.length === 0 ? (
                 <div className="flex items-center justify-center py-16 text-muted-foreground">No pitchers found</div>
               ) : (
                 <>
-                  <div className="overflow-x-auto overflow-y-auto max-h-[70vh]">
+                  <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden overflow-y-auto max-h-[70vh]" style={{ scrollbarWidth: "none" }}>
                     <Table>
                       <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
                         <TableRow>
-                          <TableHead className="min-w-[160px] sticky left-0 z-30 bg-background">Player</TableHead>
-                          <TableHead className="text-right">pERA</TableHead>
-                          <TableHead className="text-right">pFIP</TableHead>
-                          <TableHead className="text-right">pWHIP</TableHead>
-                          <TableHead className="text-right">pK/9</TableHead>
-                          <TableHead className="text-right">pBB/9</TableHead>
-                          <TableHead className="text-right">pHR/9</TableHead>
-                          <TableHead className="text-right">pRV+</TableHead>
-                          <TableHead className="text-right">pWAR</TableHead>
-                          <TableHead className="text-right">Market Value</TableHead>
-                          <TableHead className="text-center min-w-[180px]">Scouting</TableHead>
+                          <TableHead className="min-w-[160px] sticky left-0 z-30 bg-background">
+                            <span className="font-medium text-muted-foreground">Player</span>
+                          </TableHead>
+                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pERA</span></TableHead>
+                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pFIP</span></TableHead>
+                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pWHIP</span></TableHead>
+                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pK/9</span></TableHead>
+                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pBB/9</span></TableHead>
+                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pHR/9</span></TableHead>
+                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pRV+</span></TableHead>
+                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pWAR</span></TableHead>
+                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">Market Value</span></TableHead>
+                          <TableHead className="text-center min-w-[180px]"><span className="font-medium text-muted-foreground">Scouting</span></TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -2174,15 +2173,15 @@ export default function ReturningPlayers() {
                                 {[r.handedness, r.team].filter(Boolean).join(" · ") || "—"}
                               </div>
                             </TableCell>
-                            <TableCell className="text-right font-mono text-sm">{statFormat(r.p_era, 2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm">{statFormat(r.p_fip, 2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm">{statFormat(r.p_whip, 2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm">{statFormat(r.p_k9, 2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm">{statFormat(r.p_bb9, 2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm">{statFormat(r.p_hr9, 2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm">{r.p_rv_plus == null ? "—" : Math.round(r.p_rv_plus)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm">{r.p_war == null ? "—" : r.p_war.toFixed(2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm">{moneyFormat(r.market_value)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(r.p_era, 2)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(r.p_fip, 2)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(r.p_whip, 2)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(r.p_k9, 2)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(r.p_bb9, 2)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(r.p_hr9, 2)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm font-bold">{r.p_rv_plus == null ? "—" : Math.round(r.p_rv_plus)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm font-bold">{r.p_war == null ? "—" : r.p_war.toFixed(2)}</TableCell>
+                            <TableCell className="text-right font-mono text-sm font-bold">{moneyFormat(r.market_value)}</TableCell>
                             <TableCell className="text-center">
                               {r.stuff_score != null &&
                               r.whiff_score != null &&
@@ -2239,6 +2238,7 @@ export default function ReturningPlayers() {
               )}
             </CardContent>
           </Card>
+          </>
         )}
       </div>
     </DashboardLayout>

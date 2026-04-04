@@ -784,52 +784,33 @@ export default function PlayerProfile() {
                   </div>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                  <InfoRow label="Team" value={displayTeam2025} />
-                  <InfoRow label="Conference" value={player.conference} />
-                  <InfoRow label="Position" value={effectivePosition} />
-                  <InfoRow label="Class Year" value={
-                    isReturner && regularPred?.class_transition
-                      ? classTransitionToYear[regularPred.class_transition] || player.class_year
-                      : player.class_year
-                  } />
-                  <InfoRow label="Age" value={(player as any).age?.toString()} />
-                  <InfoRow label="Bats" value={(player as any).bats_hand === "R" ? "Right" : (player as any).bats_hand === "L" ? "Left" : (player as any).bats_hand === "S" ? "Switch" : (player as any).bats_hand} />
-                  <InfoRow label="Throws" value={(player as any).throws_hand === "R" ? "Right" : (player as any).throws_hand === "L" ? "Left" : (player as any).throws_hand} />
-                  <InfoRow label="Height" value={formatHeight(player.height_inches)} />
-                  <InfoRow label="Weight" value={player.weight ? `${player.weight} lbs` : null} />
-                  <InfoRow label="Home State" value={player.home_state} />
-                  <InfoRow label="High School" value={player.high_school} />
-                  {player.notes && (
-                    <>
-                      <Separator className="my-2" />
-                      <div>
-                        <span className="text-xs text-muted-foreground">Notes</span>
-                        <p className="text-sm mt-1">{player.notes}</p>
-                      </div>
-                    </>
-                  )}
+                  <div className="space-y-1.5 text-sm">
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Team</span><span>{displayTeam2025 || "—"}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Conference</span><span>{resolvedConference || "—"}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Position</span><span>{effectivePosition || "—"}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Class</span><span>{(isReturner && regularPred?.class_transition ? classTransitionToYear[regularPred.class_transition] : null) || player.class_year || "—"}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Bats</span><span>{(player as any).bats_hand === "R" ? "Right" : (player as any).bats_hand === "L" ? "Left" : (player as any).bats_hand === "S" ? "Switch" : (player as any).bats_hand || "—"}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Throws</span><span>{(player as any).throws_hand === "R" ? "Right" : (player as any).throws_hand === "L" ? "Left" : (player as any).throws_hand || "—"}</span></div>
                   </div>
                 )}
               </CardContent>
             </Card>
 
-            {isAdmin && seedStatRow && seedDerived && (
+            {seedStatRow && seedDerived && (
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">2025 Stats</CardTitle>
-                  <CardDescription>Imported 2025 stats and in-system derived metrics.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3 pt-0">
+                <CardContent>
                   <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div><span className="text-muted-foreground">PA</span><div className="font-bold">{(player as any)?.pa ?? "—"}</div></div>
-                    <div><span className="text-muted-foreground">AVG</span><div className="font-bold">{statFormat(seedStatRow.avg)}</div></div>
-                    <div><span className="text-muted-foreground">OBP</span><div className="font-bold">{statFormat(seedStatRow.obp)}</div></div>
-                    <div><span className="text-muted-foreground">SLG</span><div className="font-bold">{statFormat(seedStatRow.slg)}</div></div>
-                    <div><span className="text-muted-foreground">OPS</span><div className="font-bold">{statFormat(seedDerived.ops)}</div></div>
-                    <div><span className="text-muted-foreground">ISO</span><div className="font-bold">{statFormat(seedDerived.iso)}</div></div>
-                    <div><span className="text-muted-foreground">wRC+</span><div className="font-bold">{pctFormat(seedDerived.wrcPlus)}</div></div>
-                    <div><span className="text-muted-foreground">2025 oWAR</span><div className="font-bold">{historicalOWar != null ? historicalOWar.toFixed(2) : "—"}</div></div>
+                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">PA</div><div className="font-semibold">{(player as any)?.pa ?? "—"}</div></div>
+                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">AVG</div><div className="font-semibold">{statFormat(seedStatRow.avg)}</div></div>
+                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">OBP</div><div className="font-semibold">{statFormat(seedStatRow.obp)}</div></div>
+                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">SLG</div><div className="font-semibold">{statFormat(seedStatRow.slg)}</div></div>
+                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">OPS</div><div className="font-semibold">{statFormat(seedDerived.ops)}</div></div>
+                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">ISO</div><div className="font-semibold">{statFormat(seedDerived.iso)}</div></div>
+                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">wRC+</div><div className="font-semibold">{pctFormat(seedDerived.wrcPlus)}</div></div>
+                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">2025 oWAR</div><div className="font-semibold">{historicalOWar != null ? historicalOWar.toFixed(2) : "—"}</div></div>
                   </div>
                 </CardContent>
               </Card>
@@ -838,40 +819,19 @@ export default function PlayerProfile() {
 
           {/* Predictions & Scouting */}
           <div className="lg:col-span-2 space-y-4">
-            {/* Top Metrics */}
-            <div className="grid gap-3 md:grid-cols-3">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">Market Value</CardTitle>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <div className="text-3xl font-bold text-[hsl(var(--success))]">
-                    {displayNilValuation != null
-                      ? `$${Math.round(displayNilValuation).toLocaleString()}`
-                      : "—"}
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">oWAR</CardTitle>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <div className={`text-3xl font-bold ${warTierClass(displayOWar)}`}>
-                    {displayOWar != null ? displayOWar.toFixed(1) : "—"}
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">Overall Power Rating</CardTitle>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <div className={`text-3xl font-bold ${powerTierClass(seedPowerDerived?.overallPlus ?? null)}`}>
-                    {pctFormat(seedPowerDerived?.overallPlus ?? null)}
-                  </div>
-                </CardContent>
-              </Card>
+            <div className="grid gap-3 grid-cols-3">
+              <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4 text-center">
+                <div className="text-muted-foreground text-xs uppercase tracking-wide">oWAR</div>
+                <div className={`text-3xl font-bold tracking-tight mt-1 ${warTierClass(displayOWar)}`}>{displayOWar != null ? displayOWar.toFixed(1) : "—"}</div>
+              </div>
+              <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4 text-center">
+                <div className="text-muted-foreground text-xs uppercase tracking-wide">Market Value</div>
+                <div className="text-2xl font-bold tracking-tight mt-1">{displayNilValuation != null ? `$${Math.round(displayNilValuation).toLocaleString()}` : "—"}</div>
+              </div>
+              <div className="rounded-lg border p-4 text-center">
+                <div className="text-muted-foreground text-xs uppercase tracking-wide">Power Rating</div>
+                <div className={`text-3xl font-bold tracking-tight mt-1 ${powerTierClass(seedPowerDerived?.overallPlus ?? null)}`}>{pctFormat(seedPowerDerived?.overallPlus ?? null)}</div>
+              </div>
             </div>
 
             {isTransferPortal && (
@@ -895,102 +855,90 @@ export default function PlayerProfile() {
 
               <Card>
                 <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">Predicted Stats</CardTitle>
-                    {isReturner && regularPred && !editingPrediction && (
-                      <Button variant="outline" size="sm" onClick={startPredEdit}>
-                        <Pencil className="mr-1 h-3 w-3" />Edit
-                      </Button>
-                    )}
-                    {editingPrediction && regularPred && (
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm" onClick={() => setEditingPrediction(false)}>
-                          <X className="mr-1 h-3 w-3" />Cancel
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4" />Projected Stats</CardTitle>
+                    {editingPrediction && regularPred ? (
+                      <div className="flex items-center gap-1.5">
+                        <Select value={predForm.class_transition || "none"} onValueChange={(v) => setPredForm({ ...predForm, class_transition: v === "none" ? "" : v })}>
+                          <SelectTrigger className="h-7 w-[65px] text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">—</SelectItem>
+                            <SelectItem value="FS">FS</SelectItem>
+                            <SelectItem value="SJ">SJ</SelectItem>
+                            <SelectItem value="JS">JS</SelectItem>
+                            <SelectItem value="GR">GR</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select value={predForm.dev_aggressiveness} onValueChange={(v) => setPredForm({ ...predForm, dev_aggressiveness: v })}>
+                          <SelectTrigger className="h-7 w-[65px] text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="0">0.0</SelectItem>
+                            <SelectItem value="0.5">0.5</SelectItem>
+                            <SelectItem value="1">1.0</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setEditingPrediction(false)}>
+                          <X className="h-3 w-3" />
                         </Button>
-                        <Button size="sm" onClick={savePredEdit} disabled={updatePrediction.isPending}>
-                          <Save className="mr-1 h-3 w-3" />Save
+                        <Button size="sm" className="h-7 text-xs" onClick={savePredEdit} disabled={updatePrediction.isPending}>
+                          <Save className="h-3 w-3" />
                         </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        {regularPred?.class_transition && <span className="text-xs text-muted-foreground">{regularPred.class_transition}</span>}
+                        {regularPred?.dev_aggressiveness != null && <span className="text-xs text-muted-foreground">· Dev {regularPred.dev_aggressiveness}</span>}
+                        {isReturner && regularPred && (
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={startPredEdit}>
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        )}
                       </div>
                     )}
                   </div>
-                  {editingPrediction && regularPred ? (
-                    <div className="flex items-center gap-4 mt-2">
-                      <div>
-                        <Label className="text-xs">Class Transition</Label>
-                        <Select value={predForm.class_transition || "none"} onValueChange={(v) => setPredForm({ ...predForm, class_transition: v === "none" ? "" : v })}>
-                          <SelectTrigger className="h-8 text-sm w-[180px]"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">—</SelectItem>
-                            <SelectItem value="FS">Freshman → Sophomore</SelectItem>
-                            <SelectItem value="SJ">Sophomore → Junior</SelectItem>
-                            <SelectItem value="JS">Junior → Senior</SelectItem>
-                            <SelectItem value="GR">Graduate</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label className="text-xs">Dev Confidence</Label>
-                        <Select value={predForm.dev_aggressiveness} onValueChange={(v) => setPredForm({ ...predForm, dev_aggressiveness: v })}>
-                          <SelectTrigger className="h-8 text-sm w-[160px]"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="0">0.0 — Stable</SelectItem>
-                            <SelectItem value="0.5">0.5 — Expected</SelectItem>
-                            <SelectItem value="1">1.0 — Aggressive</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  ) : (
-                    <CardDescription>
-                      {regularPred?.class_transition && classTransitionLabel[regularPred.class_transition]}
-                      {regularPred?.dev_aggressiveness != null && ` · Dev Confidence: ${regularPred.dev_aggressiveness}`}
-                      {!regularPred && "Using available 2025 source stats until a prediction row is created."}
-                    </CardDescription>
-                  )}
                 </CardHeader>
                 <CardContent className="pt-0">
-                  <div>
-                    <div>
-                      <div className="divide-y divide-border">
-                        <StatRow label="AVG" from={predFromAvg} predicted={projectedAvg} />
-                        <StatRow label="OBP" from={predFromObp} predicted={projectedObp} />
-                        <StatRow label="SLG" from={predFromSlg} predicted={projectedSlg} />
-                        <StatRow label="OPS" from={fromDerived.ops} predicted={projectedDerived.ops} />
-                        <StatRow label="ISO" from={fromDerived.iso} predicted={projectedDerived.iso} />
-                        <div className="flex items-center justify-between py-2">
-                          <span className="text-sm text-muted-foreground">wRC+</span>
-                          <div className="flex items-center gap-4">
-                            <span className="text-sm font-mono text-muted-foreground w-16 text-right">{pctFormat(fromDerived.wrcPlus)}</span>
-                            <span className="text-xs text-muted-foreground">→</span>
-                            <span className={`text-sm font-mono font-bold w-16 text-right ${fromDerived.wrcPlus != null && projectedWrcPlus != null ? (projectedWrcPlus - fromDerived.wrcPlus > 0.5 ? "text-[hsl(var(--success))]" : projectedWrcPlus - fromDerived.wrcPlus < -0.5 ? "text-destructive" : "text-muted-foreground") : ""}`}>
-                              {pctFormat(projectedWrcPlus)}
-                              {fromDerived.wrcPlus != null && projectedWrcPlus != null && Math.abs(projectedWrcPlus - fromDerived.wrcPlus) > 0.5 && (
-                                projectedWrcPlus > fromDerived.wrcPlus ? <TrendingUp className="inline h-3 w-3 ml-1" /> : <TrendingDown className="inline h-3 w-3 ml-1" />
-                              )}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="rounded-lg border bg-background/70 p-4 text-center">
+                      <div className="text-muted-foreground text-xs uppercase tracking-wide">AVG</div>
+                      <div className="text-2xl font-bold mt-1">{statFormat(projectedAvg)}</div>
+                    </div>
+                    <div className="rounded-lg border bg-background/70 p-4 text-center">
+                      <div className="text-muted-foreground text-xs uppercase tracking-wide">OBP</div>
+                      <div className="text-2xl font-bold mt-1">{statFormat(projectedObp)}</div>
+                    </div>
+                    <div className="rounded-lg border bg-background/70 p-4 text-center">
+                      <div className="text-muted-foreground text-xs uppercase tracking-wide">SLG</div>
+                      <div className="text-2xl font-bold mt-1">{statFormat(projectedSlg)}</div>
+                    </div>
+                    <div className="rounded-lg border bg-background/70 p-4 text-center">
+                      <div className="text-muted-foreground text-xs uppercase tracking-wide">OPS</div>
+                      <div className="text-2xl font-bold mt-1">{statFormat(projectedDerived.ops)}</div>
+                    </div>
+                    <div className="rounded-lg border bg-background/70 p-4 text-center">
+                      <div className="text-muted-foreground text-xs uppercase tracking-wide">ISO</div>
+                      <div className="text-2xl font-bold mt-1">{statFormat(projectedDerived.iso)}</div>
+                    </div>
+                    <div className="rounded-lg border bg-background/70 p-4 text-center">
+                      <div className="text-muted-foreground text-xs uppercase tracking-wide">wRC+</div>
+                      <div className="text-2xl font-bold mt-1">{pctFormat(projectedWrcPlus)}</div>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
             {/* Scouting Grades */}
-            {isAdmin && seedPowerDerived && (
+            {seedPowerDerived && (
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">Scouting Grades</CardTitle>
-                  <CardDescription>
-                    2025 percentile scores (color-coded)
-                  </CardDescription>
                 </CardHeader>
-                <CardContent className="pt-0">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-                    <ScoutGrade label="Brl" value={seedPowerDerived.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : null} fullLabel="Barrel % Score" />
-                    <ScoutGrade label="EV" value={seedPowerDerived.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : null} fullLabel="Avg Exit Velocity Score" />
-                    <ScoutGrade label="Con" value={seedPowerDerived.contactScore != null ? Math.round(seedPowerDerived.contactScore) : null} fullLabel="Contact % Score" />
-                    <ScoutGrade label="Chs" value={seedPowerDerived.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : null} fullLabel="Chase % Score" />
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <ScoutGrade label="Brl" value={seedPowerDerived.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : null} fullLabel="Barrel%" />
+                    <ScoutGrade label="EV" value={seedPowerDerived.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : null} fullLabel="Exit Velo" />
+                    <ScoutGrade label="Con" value={seedPowerDerived.contactScore != null ? Math.round(seedPowerDerived.contactScore) : null} fullLabel="Contact%" />
+                    <ScoutGrade label="Chs" value={seedPowerDerived.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : null} fullLabel="Chase%" />
                   </div>
                   {isAdmin && seedPowerDerived && (
                     <>
