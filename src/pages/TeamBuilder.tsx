@@ -5487,10 +5487,10 @@ export default function TeamBuilder() {
                   <svg className="absolute inset-0 h-full w-full" viewBox="0 0 980 760" preserveAspectRatio="none">
                     {/* Full outfield grass */}
                     <path d="M90 210 Q490 -180 890 210 L490 610 Z" fill="#3a7a32" />
-                    {/* Infield grass (lighter) */}
-                    <path d="M350 470 L490 330 L630 470 L490 610 Z" fill="#4a8a42" />
-                    {/* Dirt arc from 1B to 3B through outfield edge */}
-                    <path d="M264 384 L272 392 Q490 100 708 392 L716 384 Q490 130 264 384 Z" fill="#b8945a" opacity="0.6" />
+                    {/* Skinned infield dirt — fills from base paths to outfield grass arc */}
+                    <path d="M350 470 Q490 140 630 470 L490 610 Z" fill="#b8945a" />
+                    {/* Infield grass on top of dirt */}
+                    <path d="M350 470 Q490 220 630 470 L490 560 Z" fill="#4a8a42" />
                     {/* Dirt base paths */}
                     <line x1="490" y1="610" x2="350" y2="470" stroke="#b8945a" strokeWidth="12" strokeLinecap="round" />
                     <line x1="490" y1="610" x2="630" y2="470" stroke="#b8945a" strokeWidth="12" strokeLinecap="round" />
