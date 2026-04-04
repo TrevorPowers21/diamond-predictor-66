@@ -4227,7 +4227,7 @@ export default function TeamBuilder() {
   ) => {
     return (
       <div className={`absolute -translate-x-1/2 ${className}`}>
-        <p className="mb-1 text-[10px] font-bold tracking-wide text-white/90 text-center drop-shadow-sm">{slot}</p>
+        <p className="mb-1 text-[10px] font-semibold tracking-wide text-slate-700 text-center">{slot}</p>
         <div className="w-[106px] space-y-1">
           {[1, 2, 3].map((depth) => {
             const currentIdx = depthAssignments[depthKey(slot, depth)];
@@ -4265,7 +4265,7 @@ export default function TeamBuilder() {
   ) => {
     return (
       <div className={`absolute -translate-x-1/2 ${className}`}>
-        <p className="mb-1 text-[10px] font-bold tracking-wide text-white/90 text-center drop-shadow-sm">Starting Rotation</p>
+        <p className="mb-1 text-[10px] font-semibold tracking-wide text-slate-700 text-center">Starting Rotation</p>
         <div className="w-[120px] space-y-1">
           {[1, 2, 3, 4, 5].map((sp) => {
             const slot = `SP${sp}`;
@@ -4302,7 +4302,7 @@ export default function TeamBuilder() {
   ) => {
     return (
       <div className={`absolute -translate-x-1/2 ${className}`}>
-        <p className="mb-1 text-[10px] font-bold tracking-wide text-white/90 text-center drop-shadow-sm">Relievers</p>
+        <p className="mb-1 text-[10px] font-semibold tracking-wide text-slate-700 text-center">Relievers</p>
         <div className="w-[120px] space-y-1">
           {[1, 2, 3, 4, 5, 6, 7, 8].map((rpNum) => {
             const slot = `RP${rpNum}`;
@@ -5483,40 +5483,25 @@ export default function TeamBuilder() {
                   <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm bg-yellow-500/20 border border-yellow-500"></span> JR</span>
                   <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm bg-red-500/20 border border-red-500"></span> SR/GR</span>
                 </div>
-                <div className="mx-auto relative h-[780px] w-full max-w-[980px] overflow-hidden rounded-xl border border-green-800/40 bg-[#2d5a27]">
+                <div className="mx-auto relative h-[780px] w-full max-w-[980px] overflow-hidden rounded-xl border border-slate-400 bg-[#e5e5e5]">
                   <svg className="absolute inset-0 h-full w-full" viewBox="0 0 980 760" preserveAspectRatio="none">
-                    {/* Full outfield grass */}
-                    <path d="M90 210 Q490 -180 890 210 L490 610 Z" fill="#3a7a32" />
-                    {/* Infield grass (lighter) */}
-                    <path d="M350 470 L490 330 L630 470 L490 610 Z" fill="#4a8a42" />
-                    {/* Dirt arc from 1B to 3B through outfield edge */}
-                    <path d="M264 384 L272 392 Q490 100 708 392 L716 384 Q490 130 264 384 Z" fill="#b8945a" opacity="0.6" />
-                    {/* Dirt base paths */}
-                    <line x1="490" y1="610" x2="350" y2="470" stroke="#b8945a" strokeWidth="12" strokeLinecap="round" />
-                    <line x1="490" y1="610" x2="630" y2="470" stroke="#b8945a" strokeWidth="12" strokeLinecap="round" />
-                    <line x1="350" y1="470" x2="490" y2="330" stroke="#b8945a" strokeWidth="12" strokeLinecap="round" />
-                    <line x1="630" y1="470" x2="490" y2="330" stroke="#b8945a" strokeWidth="12" strokeLinecap="round" />
-                    {/* Dirt circles at bases */}
-                    <circle cx="350" cy="470" r="18" fill="#b8945a" />
-                    <circle cx="630" cy="470" r="18" fill="#b8945a" />
-                    <circle cx="490" cy="330" r="18" fill="#b8945a" />
-                    {/* Home plate dirt circle */}
-                    <circle cx="490" cy="610" r="32" fill="#b8945a" />
-                    {/* Mound dirt circle */}
-                    <circle cx="490" cy="470" r="28" fill="#b8945a" />
-                    {/* Outfield fence */}
-                    <path d="M90 210 Q490 -180 890 210" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="3" />
-                    {/* Foul lines */}
-                    <line x1="490" y1="610" x2="90" y2="210" stroke="rgba(255,255,255,0.8)" strokeWidth="2" />
-                    <line x1="490" y1="610" x2="890" y2="210" stroke="rgba(255,255,255,0.8)" strokeWidth="2" />
-                    {/* Mound rubber */}
-                    <rect x="484" y="467" width="12" height="6" rx="1.5" fill="white" />
-                    {/* Home plate */}
-                    <polygon points="490,616 500,608 500,596 480,596 480,608" fill="white" />
-                    {/* Bases — on the diamond corners */}
-                    <rect x="343" y="463" width="14" height="14" rx="1" fill="white" transform="rotate(45 350 470)" />
-                    <rect x="483" y="323" width="14" height="14" rx="1" fill="white" transform="rotate(45 490 330)" />
-                    <rect x="623" y="463" width="14" height="14" rx="1" fill="white" transform="rotate(45 630 470)" />
+                    <path
+                      d="M90 210 Q490 -180 890 210 L490 610 Z
+                         M350 470 L490 330 L630 470 L490 610 Z"
+                      fill="#f2f2f2"
+                      fillRule="evenodd"
+                    />
+                    <path d="M90 210 Q490 -180 890 210" fill="none" stroke="#525252" strokeWidth="2" />
+                    <line x1="490" y1="610" x2="90" y2="210" stroke="#525252" strokeWidth="2" />
+                    <line x1="490" y1="610" x2="890" y2="210" stroke="#525252" strokeWidth="2" />
+                    <path d="M350 470 L490 330 L630 470 L490 610 Z" fill="#d1d5db" stroke="#4b5563" strokeWidth="2" />
+                    <path d="M264 384 L272 392 Q490 100 708 392 L716 384" fill="none" stroke="#4b5563" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <line x1="490" y1="610" x2="390" y2="510" stroke="#4b5563" strokeWidth="1.5" />
+                    <line x1="490" y1="610" x2="590" y2="510" stroke="#4b5563" strokeWidth="1.5" />
+                    <circle cx="490" cy="470" r="26" fill="#f2f2f2" stroke="#6b7280" strokeWidth="1.5" />
+                    <rect x="484" y="467" width="12" height="6" rx="1.5" fill="#9ca3af" />
+                    <circle cx="490" cy="620" r="38" fill="#f2f2f2" stroke="#6b7280" strokeWidth="1.5" />
+                    <polygon points="490,624 500,616 500,604 480,604 480,616" fill="#ffffff" stroke="#6b7280" strokeWidth="1.5" />
                   </svg>
 
                   {renderDepthStack("CF", eligiblePositionPlayers, "left-[50%] top-[58px]")}
