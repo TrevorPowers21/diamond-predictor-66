@@ -9,6 +9,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell, LabelList } from "recharts";
 import { useAuth } from "@/hooks/useAuth";
 import { Link, useNavigate } from "react-router-dom";
+import { cn } from "@/lib/utils";
 import { Users, TrendingUp, Trophy, MapPin } from "lucide-react";
 import {
   DEFAULT_NIL_TIER_MULTIPLIERS,
@@ -224,44 +225,37 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="space-y-6">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Overview</h2>
-          <p className="text-muted-foreground text-sm">
-            {isLoading ? "Loading…" : "Top 10 projected outcomes across the player pool."}
-          </p>
+      <div className="space-y-4 max-w-[1400px] mx-auto">
+        {/* ─── Controls bar ─── */}
+        <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Tabs value={metric} onValueChange={(v) => setMetric(v as MetricKey)}>
+            <TabsList className="flex-wrap h-auto gap-0.5 bg-background/60">
+              {METRICS.map((m) => (
+                <TabsTrigger key={m.key} value={m.key} className="text-xs px-2.5 py-1">
+                  {m.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          <div className="min-w-[170px]">
+            <Select value={pool} onValueChange={(v) => setPool(v as PoolKey)}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="All Conferences" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Conferences</SelectItem>
+                {conferenceOptions.map((conf) => (
+                  <SelectItem key={conf} value={conf}>{conf}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
-        <Card>
-          <CardHeader className="pb-3 space-y-4">
-            {/* Metric tabs + pool dropdown row */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <Tabs value={metric} onValueChange={(v) => setMetric(v as MetricKey)}>
-                <TabsList className="flex-wrap h-auto gap-1">
-                  {METRICS.map((m) => (
-                    <TabsTrigger key={m.key} value={m.key} className="text-xs px-3 py-1.5">
-                      {m.label}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
-
-              <div className="min-w-[180px]">
-                <Select value={pool} onValueChange={(v) => setPool(v as PoolKey)}>
-                  <SelectTrigger className="h-9 w-full">
-                    <SelectValue placeholder="All Conferences" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Conferences</SelectItem>
-                    {conferenceOptions.map((conf) => (
-                      <SelectItem key={conf} value={conf}>{conf}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <CardTitle className="text-sm font-semibold text-muted-foreground">
+        {/* ─── Main content: List + Chart ─── */}
+        <Card className="border-border/60">
+          <CardHeader className="pb-2 pt-4 px-4">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Top 10 — {metricLabel}{pool !== "all" ? ` · ${pool}` : ""}
             </CardTitle>
           </CardHeader>
@@ -272,41 +266,37 @@ export default function Dashboard() {
             ) : top10.length === 0 ? (
               <div className="py-16 text-center text-sm text-muted-foreground">No data available for this metric / pool.</div>
             ) : (
-              <div className="grid lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x items-stretch">
-                {/* Ranked cards list */}
-                <div className="divide-y">
+              <div className="grid lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-border/40 items-stretch">
+                {/* Ranked list */}
+                <div className="divide-y divide-border/30">
                   {top10.map((row, idx) => (
-                      <div key={`${row.player_id}-${idx}`} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
-                        <span className="flex h-6 w-6 shrink-0 items-center justify-center text-xs font-semibold text-muted-foreground tabular-nums">
-                          {idx + 1}
+                    <Link
+                      key={`${row.player_id}-${idx}`}
+                      to={profileRouteFor(row.player_id, row.position)}
+                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/40 transition-colors group"
+                    >
+                      <span className={cn(
+                        "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold tabular-nums",
+                        idx === 0 ? "bg-primary/10 text-primary" : idx <= 2 ? "bg-muted text-foreground" : "text-muted-foreground"
+                      )}>
+                        {idx + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium group-hover:text-primary transition-colors">
+                          {row.full_name}
                         </span>
-                        <div className="min-w-0 flex-1">
-                          <Link
-                            to={profileRouteFor(row.player_id, row.position)}
-                            className="block truncate text-sm font-semibold text-primary hover:underline"
-                          >
-                            {row.full_name}
-                          </Link>
-                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <span className="truncate">{row.school}</span>
-                            {row.position && (
-                              <>
-                                <span>·</span>
-                                <span>{row.position}</span>
-                              </>
-                            )}
-                            {row.model_type === "transfer" && (
-                              <>
-                                <span>·</span>
-                                <span className="text-accent-foreground font-medium">Transfer</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <div className="ml-2 font-mono text-sm font-bold tabular-nums">
-                          {formatMetric(metric, row.metric_value)}
+                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <span className="truncate">{row.school}</span>
+                          {row.position && <><span>·</span><span>{row.position}</span></>}
+                          {row.model_type === "transfer" && (
+                            <span className="text-amber-600 font-medium">Portal</span>
+                          )}
                         </div>
                       </div>
+                      <div className="ml-2 font-mono text-sm font-bold tabular-nums">
+                        {formatMetric(metric, row.metric_value)}
+                      </div>
+                    </Link>
                   ))}
                 </div>
 
@@ -314,7 +304,7 @@ export default function Dashboard() {
                 <div className="p-4 overflow-hidden flex flex-col">
                   <ChartContainer config={chartConfig} className="flex-1 min-h-0 w-full overflow-hidden">
                     <BarChart data={chartData} layout="vertical" barCategoryGap="30%" margin={{ left: 8, right: 72, top: 8, bottom: 8 }}>
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--border))" strokeOpacity={0.4} />
                       <XAxis
                         type="number"
                         domain={[0, "auto"]}
@@ -334,8 +324,9 @@ export default function Dashboard() {
                               y={y}
                               dy={4}
                               textAnchor="end"
-                              className="fill-primary underline cursor-pointer"
+                              className="fill-foreground cursor-pointer"
                               fontSize={11}
+                              fontWeight={500}
                               onClick={() => row?.player_id && navigate(profileRouteFor(row.player_id, row.position))}
                             >
                               {payload.value}
@@ -360,7 +351,7 @@ export default function Dashboard() {
                           fontSize={11}
                         />
                         {chartData.map((_, i) => (
-                          <Cell key={i} fill={i === 0 ? "hsl(var(--accent))" : "hsl(var(--primary))"} style={{ cursor: "pointer" }} />
+                          <Cell key={i} fill={i === 0 ? "hsl(var(--primary))" : "hsl(var(--primary)/0.6)"} style={{ cursor: "pointer" }} />
                         ))}
                       </Bar>
                     </BarChart>
@@ -370,83 +361,11 @@ export default function Dashboard() {
             )}
           </CardContent>
         </Card>
-        {/* Summary metric cards */}
+
+        {/* View Full Leaderboard */}
         {!isLoading && players.length > 0 && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card>
-              <CardContent className="pt-6 pb-4 px-4">
-                <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                  <Users className="h-4 w-4" />
-                  <span className="text-xs font-medium">Total Players Tracked</span>
-                </div>
-                <p className="text-2xl font-bold tabular-nums">
-                  {pool === "all"
-                    ? players.length.toLocaleString()
-                    : players.filter((p) => (p.conference || "").trim() === pool).length.toLocaleString()}
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="pt-6 pb-4 px-4">
-                <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                  <TrendingUp className="h-4 w-4" />
-                  <span className="text-xs font-medium">Pool Avg — {metricLabel}</span>
-                </div>
-                <p className="text-2xl font-bold tabular-nums">
-                  {(() => {
-                    const source = pool === "all" ? players : players.filter((p) => (p.conference || "").trim() === pool);
-                    const values = source
-                      .map((p) => {
-                        if (metric === "owar") return computeOWar(p.p_wrc_plus);
-                        if (metric === "nil_value") return p.nil_value;
-                        return p[metric] as number | null;
-                      })
-                      .filter((v): v is number => v != null);
-                    if (values.length === 0) return "-";
-                    const avg = values.reduce((a, b) => a + b, 0) / values.length;
-                    return formatMetric(metric, avg);
-                  })()}
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="pt-6 pb-4 px-4">
-                <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                  <Trophy className="h-4 w-4" />
-                  <span className="text-xs font-medium">Highest — {metricLabel}</span>
-                </div>
-                <p className="text-2xl font-bold tabular-nums">
-                  {top10.length > 0 ? formatMetric(metric, top10[0].metric_value) : "-"}
-                </p>
-                {top10.length > 0 && (
-                  <p className="text-xs text-muted-foreground mt-0.5 truncate">{top10[0].full_name}</p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="pt-6 pb-4 px-4">
-                <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                  <MapPin className="h-4 w-4" />
-                  <span className="text-xs font-medium">Conferences</span>
-                </div>
-                <p className="text-2xl font-bold tabular-nums">
-                  {conferenceOptions.length}
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {/* View Full Leaderboard link */}
-        {!isLoading && players.length > 0 && (
-          <div className="text-center">
-            <Link
-              to="/dashboard/returning"
-              className="text-sm font-medium text-primary hover:underline"
-            >
+          <div className="text-center pb-2">
+            <Link to="/dashboard/returning" className="text-xs font-medium text-primary hover:underline">
               View Full Leaderboard →
             </Link>
           </div>

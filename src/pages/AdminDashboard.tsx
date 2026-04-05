@@ -111,6 +111,132 @@ function ImportPaAbButton() {
   );
 }
 
+function ImportHistoricalHittersButton() {
+  const [loading, setLoading] = useState(false);
+  const [season, setSeason] = useState(2024);
+  const [result, setResult] = useState<{ inserted: number; skipped: number; teamsResolved: number; teamsUnresolved: string[]; errors: string[] } | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  return (
+    <>
+      <div className="flex items-center gap-3">
+        <select value={season} onChange={(e) => setSeason(Number(e.target.value))} className="rounded border px-2 py-1 text-sm">
+          <option value={2024}>2024</option>
+          <option value={2023}>2023</option>
+          <option value={2022}>2022</option>
+        </select>
+        <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={async (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          setLoading(true);
+          setResult(null);
+          try {
+            const text = await file.text();
+            const { importHistoricalHittersCsv } = await import("@/lib/importHistoricalHitters");
+            const r = await importHistoricalHittersCsv(text, season);
+            setResult(r);
+          } catch (err: any) {
+            setResult({ inserted: 0, skipped: 0, teamsResolved: 0, teamsUnresolved: [], errors: [err.message] });
+          }
+          setLoading(false);
+          if (fileRef.current) fileRef.current.value = "";
+        }} />
+        <Button onClick={() => fileRef.current?.click()} disabled={loading} variant="outline" className="gap-2">
+          {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+          {loading ? `Importing ${season} Hitters…` : `Import Historical Hitter CSV (${season})`}
+        </Button>
+      </div>
+      {result && (
+        <p className="text-sm text-muted-foreground">
+          Inserted {result.inserted} hitters for {season}. Skipped {result.skipped}. Teams resolved: {result.teamsResolved}.
+          {result.teamsUnresolved.length > 0 && ` Unresolved teams: ${result.teamsUnresolved.slice(0, 10).join(", ")}${result.teamsUnresolved.length > 10 ? `... +${result.teamsUnresolved.length - 10} more` : ""}`}
+          {result.errors.length > 0 && ` Errors: ${result.errors.slice(0, 3).join("; ")}${result.errors.length > 3 ? `... +${result.errors.length - 3} more` : ""}`}
+        </p>
+      )}
+    </>
+  );
+}
+
+function ImportPitcherEv90Button() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ updated: number; notFound: number; errors: string[] } | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  return (
+    <>
+      <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setLoading(true);
+        setResult(null);
+        try {
+          const text = await file.text();
+          const { importPitcherEv90FromCsv } = await import("@/lib/importPitcherEv90");
+          const r = await importPitcherEv90FromCsv(text);
+          setResult(r);
+        } catch (err: any) {
+          setResult({ updated: 0, notFound: 0, errors: [err.message] });
+        }
+        setLoading(false);
+        if (fileRef.current) fileRef.current.value = "";
+      }} />
+      <Button onClick={() => fileRef.current?.click()} disabled={loading} variant="outline" className="gap-2">
+        {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+        {loading ? "Updating EV90…" : "Update Pitcher EV90 from CSV"}
+      </Button>
+      {result && (
+        <p className="text-sm text-muted-foreground">
+          Updated {result.updated} pitchers. {result.notFound} not found.
+          {result.errors.length > 0 && ` Errors: ${result.errors.slice(0, 3).join("; ")}${result.errors.length > 3 ? `... +${result.errors.length - 3} more` : ""}`}
+        </p>
+      )}
+    </>
+  );
+}
+
+function ImportHistoricalPitchersButton() {
+  const [loading, setLoading] = useState(false);
+  const [season, setSeason] = useState(2024);
+  const [result, setResult] = useState<{ inserted: number; skipped: number; teamsResolved: number; teamsUnresolved: string[]; errors: string[] } | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  return (
+    <>
+      <div className="flex items-center gap-3">
+        <select value={season} onChange={(e) => setSeason(Number(e.target.value))} className="rounded border px-2 py-1 text-sm">
+          <option value={2024}>2024</option>
+          <option value={2023}>2023</option>
+          <option value={2022}>2022</option>
+        </select>
+        <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={async (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          setLoading(true);
+          setResult(null);
+          try {
+            const text = await file.text();
+            const { importHistoricalPitchersCsv } = await import("@/lib/importHistoricalPitchers");
+            const r = await importHistoricalPitchersCsv(text, season);
+            setResult(r);
+          } catch (err: any) {
+            setResult({ inserted: 0, skipped: 0, teamsResolved: 0, teamsUnresolved: [], errors: [err.message] });
+          }
+          setLoading(false);
+          if (fileRef.current) fileRef.current.value = "";
+        }} />
+        <Button onClick={() => fileRef.current?.click()} disabled={loading} variant="outline" className="gap-2">
+          {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+          {loading ? `Importing ${season} Pitchers…` : `Import Historical Pitcher CSV (${season})`}
+        </Button>
+      </div>
+      {result && (
+        <p className="text-sm text-muted-foreground">
+          Inserted {result.inserted} pitchers for {season}. Skipped {result.skipped}. Teams resolved: {result.teamsResolved}.
+          {result.teamsUnresolved.length > 0 && ` Unresolved teams: ${result.teamsUnresolved.slice(0, 10).join(", ")}${result.teamsUnresolved.length > 10 ? `... +${result.teamsUnresolved.length - 10} more` : ""}`}
+          {result.errors.length > 0 && ` Errors: ${result.errors.slice(0, 3).join("; ")}${result.errors.length > 3 ? `... +${result.errors.length - 3} more` : ""}`}
+        </p>
+      )}
+    </>
+  );
+}
+
 function SyncMasterButton() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ hittersInserted: number; pitchersInserted: number; hittersSkipped: number; pitchersSkipped: number; errors: string[] } | null>(null);
@@ -6614,6 +6740,27 @@ function QuickActionsTab() {
             </p>
           </div>
           <ImportPitchArsenalButton />
+          <div className="border-t pt-4">
+            <p className="font-medium">Import Historical Hitter Data</p>
+            <p className="text-sm text-muted-foreground">
+              Upload a source hitter CSV for a past season (2022-2024). Clears existing data for that season and imports fresh. Resolves conference from Teams Table.
+            </p>
+          </div>
+          <ImportHistoricalHittersButton />
+          <div className="border-t pt-4">
+            <p className="font-medium">Import Historical Pitcher Data</p>
+            <p className="text-sm text-muted-foreground">
+              Upload a source pitcher CSV for a past season (2022-2024). Clears existing pitching data for that season and imports fresh. Will NOT touch 2025 data.
+            </p>
+          </div>
+          <ImportHistoricalPitchersButton />
+          <div className="border-t pt-4">
+            <p className="font-medium">Fix Pitcher EV90 (90th Exit Velo Against)</p>
+            <p className="text-sm text-muted-foreground">
+              Upload a CSV with playerId and 90thExitVel columns. Overwrites the 90th_vel column in 2025 Pitching Master with correct exit velocity data (was incorrectly pitch velocity).
+            </p>
+          </div>
+          <ImportPitcherEv90Button />
         </CardContent>
       </Card>
 
