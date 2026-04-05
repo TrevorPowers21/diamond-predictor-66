@@ -56,13 +56,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       <aside
         className={cn(
           "fixed inset-y-0 left-0 z-50 flex w-[260px] flex-col transition-transform lg:static lg:translate-x-0",
-          "bg-[#0D1B3E] text-[#c8cdd5] border-r border-[#1a2744]",
+          "bg-[#070e1f] text-[#c8cdd5] border-r border-[#1a2744]",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
         {/* Brand — RSTR IQ logo */}
         <div className="flex items-center justify-center px-5 pt-4 pb-2">
-          <img src="/rstr-iq-logo.png" alt="RSTR IQ" className="h-[68px] w-auto" />
+          <img src="/rstr-iq-logo.png" alt="RSTR IQ" className="h-[60px] w-auto" />
         </div>
 
         <div className="mx-4 border-t border-[#1a2744]" />
