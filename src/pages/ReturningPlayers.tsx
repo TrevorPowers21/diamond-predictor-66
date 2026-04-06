@@ -1762,18 +1762,24 @@ export default function ReturningPlayers() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-4 max-w-[1600px] mx-auto">
         {/* Header */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight">2025 Player Dashboard</h2>
-            <p className="text-muted-foreground">Unified 2025 player dashboard (all players, including transferred and departed)</p>
+            <h2 className="text-2xl font-bold tracking-tight">Player Dashboard</h2>
+            <p className="text-muted-foreground text-sm">2025 season — all players including transfers and departed</p>
           </div>
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap items-center">
+            <Tabs value={dashboardView} onValueChange={(v) => setDashboardView(v as "hitting" | "pitching")}>
+              <TabsList className="bg-background/60">
+                <TabsTrigger value="hitting" className="text-xs px-3">Hitting</TabsTrigger>
+                <TabsTrigger value="pitching" className="text-xs px-3">Pitching</TabsTrigger>
+              </TabsList>
+            </Tabs>
             <Button
               size="sm"
               variant={showMissingOnly ? "default" : "outline"}
-              className="h-9 text-xs"
+              className="h-8 text-xs"
               onClick={() => setShowMissingOnly(!showMissingOnly)}
             >
               {showMissingOnly ? "Show All" : "Missing Teams"}
@@ -1781,32 +1787,30 @@ export default function ReturningPlayers() {
             <Button
               size="sm"
               variant="outline"
-              className="h-9 text-xs"
+              className="h-8 text-xs"
               onClick={() => applyTemplateDefaults.mutate()}
               disabled={applyTemplateDefaults.isPending}
             >
-              {applyTemplateDefaults.isPending ? "Applying Template…" : "Apply Template: SO→JR, 0.0"}
+              {applyTemplateDefaults.isPending ? "Applying…" : "Apply Template"}
             </Button>
           </div>
         </div>
 
-        <Tabs value={dashboardView} onValueChange={(v) => setDashboardView(v as "hitting" | "pitching")}>
-          <TabsList>
-            <TabsTrigger value="hitting">Hitting</TabsTrigger>
-            <TabsTrigger value="pitching">Pitching</TabsTrigger>
-          </TabsList>
-        </Tabs>
-
         {dashboardView === "hitting" ? (
           <>
         <div className="relative w-full max-w-md">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
-            placeholder="Search players, teams..."
+            placeholder="Search players, teams, positions..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
+            className="pl-9 pr-8 h-9 text-sm rounded-lg border-border/60 focus-visible:ring-primary/30"
           />
+          {search && (
+            <button onClick={() => setSearch("")} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         {/* Table */}
@@ -1926,7 +1930,7 @@ export default function ReturningPlayers() {
                         const pred = p.prediction;
                         const effectivePosition = playerOverrides[p.id]?.position ?? p.position;
                         return (
-                          <TableRow key={p.prediction_id}>
+                          <TableRow key={p.prediction_id} className="cursor-pointer hover:bg-muted/50 transition-colors">
                             <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
                               <Link
                                 to={profileRouteFor(p.id, effectivePosition)}
@@ -2076,13 +2080,18 @@ export default function ReturningPlayers() {
         ) : (
           <>
         <div className="relative w-full max-w-md">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
             placeholder="Search pitchers, teams..."
             value={pitchingSearch}
             onChange={(e) => setPitchingSearch(e.target.value)}
-            className="pl-9"
+            className="pl-9 pr-8 h-9 text-sm rounded-lg border-border/60 focus-visible:ring-primary/30"
           />
+          {pitchingSearch && (
+            <button onClick={() => setPitchingSearch("")} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         <Card>
@@ -2149,7 +2158,7 @@ export default function ReturningPlayers() {
                       </TableHeader>
                       <TableBody>
                         {pagedPitchingRows.map((r) => (
-                          <TableRow key={r.id}>
+                          <TableRow key={r.id} className="cursor-pointer hover:bg-muted/50 transition-colors">
                             <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
                               <Link
                                 to={`/dashboard/pitcher/storage__${encodeURIComponent(r.playerName)}__${encodeURIComponent(r.team || "")}`}

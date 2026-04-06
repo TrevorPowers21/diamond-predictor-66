@@ -17,6 +17,7 @@ import {
   getPositionValueMultiplier,
 } from "@/lib/nilProgramSpecific";
 import { profileRouteFor, isPitcherProfile } from "@/lib/profileRoutes";
+import SchoolBanner from "@/components/SchoolBanner";
 
 type MetricKey = "p_avg" | "p_obp" | "p_slg" | "p_ops" | "p_iso" | "p_wrc_plus" | "owar" | "nil_value";
 type PoolKey = "all" | string;
@@ -226,6 +227,9 @@ export default function Dashboard() {
       )}
 
       <div className="space-y-4 max-w-[1400px] mx-auto">
+        {/* ─── Banner ─── */}
+        <SchoolBanner />
+
         {/* ─── Controls bar ─── */}
         <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <Tabs value={metric} onValueChange={(v) => setMetric(v as MetricKey)}>
