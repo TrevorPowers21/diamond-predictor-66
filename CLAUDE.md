@@ -1,15 +1,29 @@
 # RSTR IQ — Development Source of Truth
 
-## Design Rules (Global)
+## Design Authority
+
+**The UI/UX Pro Max design system plugin and Magic/Stitch MCP tools are the primary decision makers for all design choices.** Run the design system search before making visual decisions:
+
+```bash
+python3 skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system -p "RSTR IQ"
+```
+
+Persisted design system: `design-system/rstr-iq/MASTER.md`
+
+When the plugin's recommendations conflict with rules below, **the plugin wins**. The rules below are guardrails, not overrides.
+
+## Design Guardrails (Global)
 
 - No loading spinners, sliding cursors, skeleton loaders, or animated placeholder effects anywhere
-- Dark background: `#080F1F`, sidebar/card background: `#0D1B3E`
-- Gold accent: `#D4AF37`, darker gold: `#A08820`
-- Font: Oswald for headings/labels, system sans-serif for body
-- All cards: 0.5px gold border, border-radius 8px
+- Brand colors: Gold accent `#D4AF37`, sidebar navy `#070e1f`, darker gold `#A08820`
+- Background and card colors should be determined by the design system plugin based on light/dark mode decision
+- Font: Oswald for headings/labels in branded areas (banner, sidebar). Body font defers to design system recommendation (currently Inter)
 - No unnecessary buttons, subtitles, or decorative UI that isn't actively functional
 - Status badges: IN PORTAL = green, WATCHING = gold
 - Avatar circles: gold initials on dark gold background
+- All interactive elements need `cursor-pointer` and hover transitions (150-300ms)
+- Respect `prefers-reduced-motion` on all animations
+- Test responsive at 375px, 768px, 1024px, 1440px
 
 ---
 
