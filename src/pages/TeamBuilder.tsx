@@ -33,6 +33,7 @@ import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
+import { useTargetBoard } from "@/hooks/useTargetBoard";
 
 const POSITION_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"] as const;
 const PITCHER_SLOTS = ["SP1", "SP2", "SP3", "SP4", "SP5", "RP1", "RP2", "RP3", "RP4", "CL"] as const;
@@ -918,6 +919,7 @@ export default function TeamBuilder() {
   const { toast } = useToast();
   const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
   const { pitchers: pitchingMasterRows } = usePitchingSeedData();
+  const { board: supabaseTargetBoard, removePlayer: removeFromSupabaseBoard, addPlayer: addToSupabaseBoard, isOnBoard: isOnSupabaseBoard } = useTargetBoard();
   const queryClient = useQueryClient();
   const isAdmin = hasRole("admin");
   const [searchParams] = useSearchParams();
@@ -2048,6 +2050,72 @@ export default function TeamBuilder() {
     },
   });
 
+  // Bidirectional sync between Supabase target board and Team Builder roster targets
+  const targetSyncedRef = useRef(false);
+  useEffect(() => {
+    if (targetSyncedRef.current) return;
+    const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+
+    // 1. Push localStorage + roster targets → Supabase
+    const queue = readTargetBoard();
+    const rosterTargets = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target" && p.player_id && isUuid(p.player_id));
+    for (const entry of queue) {
+      if (isUuid(entry.playerId) && !isOnSupabaseBoard(entry.playerId)) {
+        addToSupabaseBoard({ playerId: entry.playerId });
+      }
+    }
+    for (const p of rosterTargets) {
+      if (!isOnSupabaseBoard(p.player_id!)) {
+        addToSupabaseBoard({ playerId: p.player_id! });
+      }
+    }
+
+    // 2. Pull Supabase board → roster targets (players added from profiles/dashboard)
+    if (supabaseTargetBoard.length > 0) {
+      const existingPlayerIds = new Set(rosterPlayers.map((rp) => rp.player_id));
+      const newFromSupabase = supabaseTargetBoard.filter((sb) => !existingPlayerIds.has(sb.player_id));
+      if (newFromSupabase.length > 0) {
+        setRosterPlayers((prev) => {
+          const next = [...prev];
+          for (const sb of newFromSupabase) {
+            if (next.some((rp) => rp.player_id === sb.player_id)) continue;
+            const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(sb.position || ""));
+            const inferredRole = asPitcherRole(sb.position || null);
+            next.push({
+              player_id: sb.player_id,
+              source: "portal",
+              custom_name: `${sb.first_name} ${sb.last_name}`.trim() || null,
+              position_slot: isPitcherRow ? (inferredRole || "RP") : null,
+              depth_order: 1,
+              nil_value: 0,
+              production_notes: null,
+              roster_status: "target",
+              depth_role: isPitcherRow ? "high_leverage_reliever" : "utility",
+              class_transition: "SJ",
+              dev_aggressiveness: 0,
+              transfer_snapshot: null,
+              player: {
+                first_name: sb.first_name,
+                last_name: sb.last_name,
+                position: sb.position,
+                team: sb.team,
+                from_team: sb.team,
+                conference: sb.conference ?? null,
+              },
+              prediction: null,
+              nilVal: null,
+              nil_owar: null,
+            } as BuildPlayer);
+          }
+          return next;
+        });
+        setDirty(true);
+      }
+    }
+
+    targetSyncedRef.current = true;
+  }, [supabaseTargetBoard, rosterPlayers]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!selectedTeam) return;
     let cancelled = false;
@@ -2149,6 +2217,13 @@ export default function TeamBuilder() {
 
       const remaining = queue.filter((q) => normalizeKey(q.destinationTeam) !== selectedTeamKey);
       writeTargetBoard(remaining);
+      // Sync localStorage entries to Supabase target board
+      for (const entry of eligible) {
+        const isUuidEntry = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(entry.playerId);
+        if (isUuidEntry && !isOnSupabaseBoard(entry.playerId)) {
+          addToSupabaseBoard({ playerId: entry.playerId });
+        }
+      }
       if (added > 0) {
         setDirty(true);
         toast({ title: "Target Board synced", description: `Added ${added} target${added === 1 ? "" : "s"} to this build.` });
@@ -2465,7 +2540,7 @@ export default function TeamBuilder() {
 
     const fullName = `${livePlayer.first_name} ${livePlayer.last_name}`;
     // Fast path: UUID match
-    const byId = bp.player_id ? seedByPlayerId.get(bp.player_id) : undefined;
+    const byId = p.player_id ? seedByPlayerId.get(p.player_id) : undefined;
     let inferredFromTeam: string | null = byId?.team ?? null;
     if (!inferredFromTeam) {
     const candidates = seedByName.get(normalizeKey(fullName)) || [];
@@ -3481,6 +3556,10 @@ export default function TeamBuilder() {
     setDirty(true);
     setTargetPlayerSearchQuery("");
     setTargetPlayerSearchOpen(false);
+    // Also sync to Supabase target board
+    if (row.id && !isOnSupabaseBoard(row.id)) {
+      addToSupabaseBoard({ playerId: row.id });
+    }
     toast({ title: "Added to targets", description: `${row.first_name} ${row.last_name}` });
     } catch (err: any) {
       toast({

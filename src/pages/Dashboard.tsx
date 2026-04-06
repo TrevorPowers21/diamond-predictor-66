@@ -5,18 +5,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell, LabelList } from "recharts";
 import { useAuth } from "@/hooks/useAuth";
+import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { Link, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Users, TrendingUp, Trophy, MapPin } from "lucide-react";
+import { Eye, LogIn, X, CheckCircle } from "lucide-react";
 import {
   DEFAULT_NIL_TIER_MULTIPLIERS,
   getProgramTierMultiplierByConference,
   getPositionValueMultiplier,
 } from "@/lib/nilProgramSpecific";
-import { profileRouteFor, isPitcherProfile } from "@/lib/profileRoutes";
+import { profileRouteFor } from "@/lib/profileRoutes";
 import SchoolBanner from "@/components/SchoolBanner";
 
 type MetricKey = "p_avg" | "p_obp" | "p_slg" | "p_ops" | "p_iso" | "p_wrc_plus" | "owar" | "nil_value";
@@ -70,12 +69,6 @@ const formatMetric = (metric: MetricKey, value: number | null) => {
   return value.toFixed(3);
 };
 
-const tickFormat = (metric: MetricKey, value: number) => {
-  if (metric === "nil_value") return formatCompactUsd(value);
-  if (metric === "p_wrc_plus") return Math.round(value).toString();
-  if (metric === "owar") return value.toFixed(1);
-  return value.toFixed(3);
-};
 
 const computeOWar = (wrcPlus: number | null | undefined, actualPa?: number | null): number | null => {
   if (wrcPlus == null) return null;
@@ -195,19 +188,10 @@ export default function Dashboard() {
       .slice(0, 10);
   }, [players, metric, pool]);
 
-  const chartData = top10.map((p, idx) => ({
-    name: `${idx + 1}. ${p.chart_name}`,
-    value: p.metric_value ?? 0,
-    valueLabel: formatMetric(metric, p.metric_value ?? null),
-    player_id: p.player_id,
-    position: p.position,
-  }));
-
-  const chartConfig = {
-    value: { label: METRICS.find((m) => m.key === metric)?.label ?? metric, color: "hsl(var(--primary))" },
-  };
-
   const metricLabel = METRICS.find((m) => m.key === metric)?.label ?? metric;
+
+  // Real Supabase-backed target board
+  const { board: targetBoard, removePlayer: removeFromBoard } = useTargetBoard();
 
   return (
     <DashboardLayout>
@@ -256,22 +240,21 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* ─── Main content: List + Chart ─── */}
-        <Card className="border-border/60">
-          <CardHeader className="pb-2 pt-4 px-4">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Top 10 — {metricLabel}{pool !== "all" ? ` · ${pool}` : ""}
-            </CardTitle>
-          </CardHeader>
-
-          <CardContent className="p-0">
-            {isLoading ? (
-              <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>
-            ) : top10.length === 0 ? (
-              <div className="py-16 text-center text-sm text-muted-foreground">No data available for this metric / pool.</div>
-            ) : (
-              <div className="grid lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-border/40 items-stretch">
-                {/* Ranked list */}
+        {/* ─── Main content: Top 10 + Target Board ─── */}
+        <div className="grid lg:grid-cols-[1.2fr_0.8fr] gap-4 items-start">
+          {/* Top 10 Leaderboard */}
+          <Card className="border-border/60">
+            <CardHeader className="pb-2 pt-4 px-4">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Top 10 — {metricLabel}{pool !== "all" ? ` · ${pool}` : ""}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {isLoading ? (
+                <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>
+              ) : top10.length === 0 ? (
+                <div className="py-16 text-center text-sm text-muted-foreground">No data available for this metric / pool.</div>
+              ) : (
                 <div className="divide-y divide-border/30">
                   {top10.map((row, idx) => (
                     <Link
@@ -303,68 +286,76 @@ export default function Dashboard() {
                     </Link>
                   ))}
                 </div>
+              )}
+            </CardContent>
+          </Card>
 
-                {/* Bar chart */}
-                <div className="p-4 overflow-hidden flex flex-col">
-                  <ChartContainer config={chartConfig} className="flex-1 min-h-0 w-full overflow-hidden">
-                    <BarChart data={chartData} layout="vertical" barCategoryGap="30%" margin={{ left: 8, right: 72, top: 8, bottom: 8 }}>
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--border))" strokeOpacity={0.4} />
-                      <XAxis
-                        type="number"
-                        domain={[0, "auto"]}
-                        tickFormatter={(v) => tickFormat(metric, Number(v))}
-                        tick={{ fontSize: 10 }}
-                      />
-                      <YAxis
-                        type="category"
-                        dataKey="name"
-                        width={108}
-                        tick={(props: any) => {
-                          const { x, y, payload } = props;
-                          const row = chartData.find((d) => d.name === payload.value);
-                          return (
-                            <text
-                              x={x}
-                              y={y}
-                              dy={4}
-                              textAnchor="end"
-                              className="fill-foreground cursor-pointer"
-                              fontSize={11}
-                              fontWeight={500}
-                              onClick={() => row?.player_id && navigate(profileRouteFor(row.player_id, row.position))}
-                            >
-                              {payload.value}
-                            </text>
-                          );
-                        }}
-                      />
-                      <ChartTooltip content={<ChartTooltipContent />} />
-                      <Bar
-                        dataKey="value"
-                        radius={[0, 4, 4, 0]}
-                        onClick={(data: any) => {
-                          const pid = data?.payload?.player_id;
-                          if (pid) navigate(profileRouteFor(pid, data?.payload?.position));
-                        }}
+          {/* Target Board — independent card */}
+          <Card className="border-border/60">
+            <CardHeader className="pb-2 pt-4 px-4 flex flex-row items-center justify-between">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Target Board</CardTitle>
+              <span className="text-[10px] text-muted-foreground/60">{targetBoard.length} players</span>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="divide-y divide-border/30">
+                {targetBoard.length === 0 ? (
+                  <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    No players on your board yet. Add players from the Player Dashboard or player profiles.
+                  </div>
+                ) : (
+                  targetBoard.map((row) => {
+                    const initials = `${(row.first_name?.[0] || "").toUpperCase()}${(row.last_name?.[0] || "").toUpperCase()}`;
+                    const statusConfig = {
+                      "IN PORTAL": { bg: "bg-emerald-500/10", text: "text-emerald-600", icon: LogIn, label: "In Portal" },
+                      "COMMITTED": { bg: "bg-blue-500/10", text: "text-blue-600", icon: CheckCircle, label: "Committed" },
+                      "WATCHING": { bg: "bg-[#D4AF37]/10", text: "text-[#D4AF37]", icon: Eye, label: "Watching" },
+                      "NOT IN PORTAL": { bg: "bg-muted", text: "text-muted-foreground", icon: Eye, label: "Not In Portal" },
+                    }[row.portal_status] || { bg: "bg-muted", text: "text-muted-foreground", icon: Eye, label: "Not In Portal" };
+                    const StatusIcon = statusConfig.icon;
+                    return (
+                      <div
+                        key={row.player_id}
+                        className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors group"
                       >
-                        <LabelList
-                          dataKey="valueLabel"
-                          position="right"
-                          offset={8}
-                          className="fill-foreground"
-                          fontSize={11}
-                        />
-                        {chartData.map((_, i) => (
-                          <Cell key={i} fill={i === 0 ? "hsl(var(--primary))" : "hsl(var(--primary)/0.6)"} style={{ cursor: "pointer" }} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ChartContainer>
-                </div>
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#A08820]/15 text-[12px] font-bold text-[#D4AF37] ring-1 ring-[#D4AF37]/20">
+                          {initials}
+                        </div>
+                        <Link
+                          to={profileRouteFor(row.player_id, row.position)}
+                          className="min-w-0 flex-1 cursor-pointer"
+                        >
+                          <span className="block truncate text-sm font-medium group-hover:text-primary transition-colors">
+                            {row.first_name} {row.last_name}
+                          </span>
+                          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                            <span className="truncate">{row.team || "—"}</span>
+                            {row.position && <><span>·</span><span>{row.position}</span></>}
+                          </div>
+                        </Link>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <span className={cn(
+                            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                            statusConfig.bg, statusConfig.text,
+                          )}>
+                            <StatusIcon className="h-2.5 w-2.5" />
+                            {statusConfig.label}
+                          </span>
+                          <button
+                            onClick={() => removeFromBoard(row.player_id)}
+                            className="text-muted-foreground/40 hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                            title="Remove from board"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
 
         {/* View Full Leaderboard */}
         {!isLoading && players.length > 0 && (

@@ -24,35 +24,7 @@ import {
 } from "@/lib/nilProgramSpecific";
 import { readPlayerOverrides } from "@/lib/playerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
-
-const TARGET_BOARD_STORAGE_KEY = "team_builder_target_board_v1";
-type TargetBoardEntry = {
-  playerId: string;
-  playerName: string;
-  destinationTeam: string;
-  fromTeam: string | null;
-  fromConference: string | null;
-  pAvg: number | null;
-  pObp: number | null;
-  pSlg: number | null;
-  pWrcPlus: number | null;
-  owar: number | null;
-  nilValuation: number | null;
-  createdAt: string;
-};
-const readTargetBoard = (): TargetBoardEntry[] => {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(TARGET_BOARD_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch { return []; }
-};
-const writeTargetBoard = (rows: TargetBoardEntry[]) => {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(TARGET_BOARD_STORAGE_KEY, JSON.stringify(rows));
-};
+import { useTargetBoard } from "@/hooks/useTargetBoard";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -201,6 +173,7 @@ export default function PlayerProfile() {
   const queryClient = useQueryClient();
   const { hasRole } = useAuth();
   const isAdmin = hasRole("admin");
+  const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
   const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
 
   const [storageByName, storageByNameTeam, storageByPlayerId] = useMemo(() => {
@@ -345,6 +318,22 @@ export default function PlayerProfile() {
       return data as unknown as { avg_power_rating: number | null; obp_power_rating: number | null; slg_power_rating: number | null } | null;
     },
     enabled: !!id && isAdmin && predictions.length > 0,
+  });
+
+  const updatePortalStatus = useMutation({
+    mutationFn: async ({ value }: { value: string }) => {
+      const { error } = await supabase
+        .from("players")
+        .update({ portal_status: value, transfer_portal: value === "IN PORTAL" } as any)
+        .eq("id", id!);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["player-profile", id] });
+      queryClient.invalidateQueries({ queryKey: ["target-board"] });
+      toast.success("Portal status updated");
+    },
+    onError: (e: any) => toast.error(`Portal status update failed: ${e.message}`),
   });
 
   const updatePlayer = useMutation({
@@ -642,38 +631,48 @@ export default function PlayerProfile() {
                 const conf = player.conference || teamConf || null;
                 return conf ? <Badge variant="outline" className="text-muted-foreground">{conf}</Badge> : null;
               })()}
-              {player.transfer_portal && <Badge className="bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]">Transfer Portal</Badge>}
+              {(() => {
+                const ps = (player as any).portal_status || "NOT IN PORTAL";
+                const cfg: Record<string, { bg: string; text: string; label: string }> = {
+                  "NOT IN PORTAL": { bg: "bg-muted", text: "text-muted-foreground", label: "Not In Portal" },
+                  "WATCHING": { bg: "bg-[#D4AF37]/10", text: "text-[#D4AF37]", label: "Watching" },
+                  "IN PORTAL": { bg: "bg-emerald-500/10", text: "text-emerald-600", label: "In Portal" },
+                  "COMMITTED": { bg: "bg-blue-500/10", text: "text-blue-600", label: "Committed" },
+                };
+                const c = cfg[ps] || cfg["NOT IN PORTAL"];
+                if (isAdmin) {
+                  return (
+                    <Select value={ps} onValueChange={(v) => updatePortalStatus.mutate({ value: v })}>
+                      <SelectTrigger className={`h-auto w-auto gap-1 border-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${c.bg} ${c.text} focus:ring-0 focus:ring-offset-0`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent align="start" className="min-w-[140px]">
+                        <SelectItem value="NOT IN PORTAL"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-muted-foreground/40" />Not In Portal</span></SelectItem>
+                        <SelectItem value="WATCHING"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-[#D4AF37]" />Watching</span></SelectItem>
+                        <SelectItem value="IN PORTAL"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-500" />In Portal</span></SelectItem>
+                        <SelectItem value="COMMITTED"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-500" />Committed</span></SelectItem>
+                      </SelectContent>
+                    </Select>
+                  );
+                }
+                if (ps === "NOT IN PORTAL") return null;
+                return <Badge className={`${c.bg} ${c.text} border-0`}>{c.label}</Badge>;
+              })()}
             </div>
           </div>
           <Button
-            variant="outline"
+            variant={isOnBoard(player.id) ? "default" : "outline"}
             size="sm"
             onClick={() => {
-              const board = readTargetBoard();
-              if (board.some((e) => e.playerId === player.id)) {
-                toast.info("Already on target board");
-                return;
+              if (isOnBoard(player.id)) {
+                removeFromBoard(player.id);
+              } else {
+                addToBoard({ playerId: player.id });
               }
-              const pred = regularPred;
-              board.push({
-                playerId: player.id,
-                playerName: `${player.first_name} ${player.last_name}`,
-                destinationTeam: "",
-                fromTeam: player.from_team || player.team || null,
-                fromConference: player.conference || null,
-                pAvg: pred?.p_avg ?? null,
-                pObp: pred?.p_obp ?? null,
-                pSlg: pred?.p_slg ?? null,
-                pWrcPlus: pred?.p_wrc_plus ?? null,
-                owar: null,
-                nilValuation: null,
-                createdAt: new Date().toISOString(),
-              });
-              writeTargetBoard(board);
-              toast.success("Added to Target Board");
             }}
           >
-            <Target className="mr-2 h-3.5 w-3.5" />Target Board
+            <Target className="mr-2 h-3.5 w-3.5" />
+            {isOnBoard(player.id) ? "On Board" : "Target Board"}
           </Button>
           {!editing ? (
             <Button variant="outline" size="sm" onClick={startEdit}>

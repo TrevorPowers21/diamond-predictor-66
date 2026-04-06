@@ -16,6 +16,8 @@ import {
   Pencil,
   Save,
   X,
+  Target,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -33,6 +35,8 @@ import { readPlayerOverrides } from "@/lib/playerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
+import { useTargetBoard } from "@/hooks/useTargetBoard";
+import { useAuth } from "@/hooks/useAuth";
 
 type SortKey =
   | "name"
@@ -724,6 +728,9 @@ export default function ReturningPlayers() {
   };
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(100);
+  const { hasRole } = useAuth();
+  const isAdmin = hasRole("admin");
+  const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
   const [sortKey, setSortKey] = useState<SortKey>("p_wrc_plus");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [bulkEditMode, setBulkEditMode] = useState(false);
@@ -975,6 +982,7 @@ export default function ReturningPlayers() {
           position: player.position,
           class_year: player.class_year,
           transfer_portal: player.transfer_portal,
+          portal_status: (player as any).portal_status || "NOT IN PORTAL",
           model_type: row.model_type,
           status: row.status,
           pa: player.pa ?? null,
@@ -1016,7 +1024,7 @@ export default function ReturningPlayers() {
         const to = from + pageSize - 1;
         const { data: pageData, error: pageErr, count } = await supabase
           .from("player_predictions")
-          .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal, pa)", { count: "exact" })
+          .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal, portal_status, pa)", { count: "exact" })
           .in("model_type", ["returner", "transfer"])
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
@@ -1059,7 +1067,7 @@ export default function ReturningPlayers() {
         while (true) {
           const { data, error } = await supabase
             .from("player_predictions")
-            .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal, pa)")
+            .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal, portal_status, pa)")
             .in("model_type", ["returner", "transfer"])
             .eq("variant", "regular")
             .in("status", ["active", "departed"])
@@ -1404,6 +1412,22 @@ export default function ReturningPlayers() {
       toast.success("Class adjustment updated");
     },
     onError: (e) => toast.error(`Class adjustment failed: ${e.message}`),
+  });
+
+  const updatePortalStatus = useMutation({
+    mutationFn: async ({ playerId, value }: { playerId: string; value: string }) => {
+      const { error } = await supabase
+        .from("players")
+        .update({ portal_status: value, transfer_portal: value === "IN PORTAL" } as any)
+        .eq("id", playerId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
+      queryClient.invalidateQueries({ queryKey: ["target-board"] });
+      toast.success("Portal status updated");
+    },
+    onError: (e) => toast.error(`Portal status update failed: ${e.message}`),
   });
 
   const updateDevAgg = useMutation({
@@ -1939,8 +1963,6 @@ export default function ReturningPlayers() {
                         <TableHead className="min-w-[140px] sticky left-0 z-30 bg-background">
                           <SortButton label="Player" sortKeyVal="name" />
                         </TableHead>
-                        <TableHead className="min-w-[70px] text-xs">Class</TableHead>
-                        <TableHead className="min-w-[60px] text-xs">Dev</TableHead>
                         <TableHead className="text-right text-xs"><SortButton label="AVG" sortKeyVal="p_avg" /></TableHead>
                         <TableHead className="text-right text-xs"><SortButton label="OBP" sortKeyVal="p_obp" /></TableHead>
                         <TableHead className="text-right text-xs"><SortButton label="SLG" sortKeyVal="p_slg" /></TableHead>
@@ -1950,6 +1972,7 @@ export default function ReturningPlayers() {
                         <TableHead className="text-right text-xs"><SortButton label="oWAR" sortKeyVal="p_war" /></TableHead>
                         <TableHead className="text-right text-xs"><SortButton label="Value" sortKeyVal="p_nil" /></TableHead>
                         <TableHead className="text-center min-w-[140px] text-xs">Scouting</TableHead>
+                        <TableHead className="w-[36px] text-center text-xs p-0"><Target className="h-3.5 w-3.5 mx-auto text-muted-foreground" /></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1994,26 +2017,6 @@ export default function ReturningPlayers() {
                                 </div>
                               )}
                             </TableCell>
-                            <TableCell className="p-1">
-                              {p.model_type === "returner" ? (
-                                <ClassAdjustmentSelector
-                                  value={pred.class_transition || "SJ"}
-                                  onChange={(v) => updateClassTransition.mutate({ predictionId: p.prediction_id, value: v })}
-                                />
-                              ) : (
-                                <span className="text-xs text-muted-foreground">—</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="p-1">
-                              {p.model_type === "returner" ? (
-                                <DevAggSelector
-                                  value={pred.dev_aggressiveness ?? 0.0}
-                                  onChange={(v) => updateDevAgg.mutate({ predictionId: p.prediction_id, value: v })}
-                                />
-                              ) : (
-                                <span className="text-xs text-muted-foreground">—</span>
-                              )}
-                            </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">{statFormat(pred.p_avg)}</TableCell>
                             <TableCell className="text-right text-sm tabular-nums">{statFormat(pred.p_obp)}</TableCell>
                             <TableCell className="text-right text-sm tabular-nums">{statFormat(pred.p_slg)}</TableCell>
@@ -2046,6 +2049,24 @@ export default function ReturningPlayers() {
                                 {pred.contact_score != null && <ScoutMiniBox label="Con" value={pred.contact_score} />}
                                 {pred.chase_score != null && <ScoutMiniBox label="Chs" value={pred.chase_score} />}
                               </div>
+                            </TableCell>
+                            <TableCell className="text-center p-1">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (isOnBoard(p.id)) removeFromBoard(p.id);
+                                  else addToBoard({ playerId: p.id });
+                                }}
+                                className={cn(
+                                  "inline-flex h-6 w-6 items-center justify-center rounded-md transition-colors",
+                                  isOnBoard(p.id)
+                                    ? "bg-primary/10 text-primary hover:bg-destructive/10 hover:text-destructive"
+                                    : "text-muted-foreground/40 hover:bg-primary/10 hover:text-primary"
+                                )}
+                                title={isOnBoard(p.id) ? "Remove from Target Board" : "Add to Target Board"}
+                              >
+                                {isOnBoard(p.id) ? <Check className="h-3.5 w-3.5" /> : <Target className="h-3.5 w-3.5" />}
+                              </button>
                             </TableCell>
                           </TableRow>
                         );
@@ -2188,6 +2209,7 @@ export default function ReturningPlayers() {
                           <TableHead className="text-right"><span className="font-medium text-muted-foreground">pWAR</span></TableHead>
                           <TableHead className="text-right"><span className="font-medium text-muted-foreground">Market Value</span></TableHead>
                           <TableHead className="text-center min-w-[180px]"><span className="font-medium text-muted-foreground">Scouting</span></TableHead>
+                          <TableHead className="w-[36px] text-center p-0"><Target className="h-3.5 w-3.5 mx-auto text-muted-foreground" /></TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -2205,15 +2227,15 @@ export default function ReturningPlayers() {
                                 {[r.handedness, r.team].filter(Boolean).join(" · ") || "—"}
                               </div>
                             </TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(r.p_era, 2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(r.p_fip, 2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(r.p_whip, 2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(r.p_k9, 2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(r.p_bb9, 2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">{statFormat(r.p_hr9, 2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">{r.p_rv_plus == null ? "—" : Math.round(r.p_rv_plus)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">{r.p_war == null ? "—" : r.p_war.toFixed(2)}</TableCell>
-                            <TableCell className="text-right font-mono text-sm font-bold">{moneyFormat(r.market_value)}</TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">{statFormat(r.p_era, 2)}</TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">{statFormat(r.p_fip, 2)}</TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">{statFormat(r.p_whip, 2)}</TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">{statFormat(r.p_k9, 2)}</TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">{statFormat(r.p_bb9, 2)}</TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">{statFormat(r.p_hr9, 2)}</TableCell>
+                            <TableCell className="text-right text-sm font-semibold tabular-nums">{r.p_rv_plus == null ? "—" : Math.round(r.p_rv_plus)}</TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">{r.p_war == null ? "—" : r.p_war.toFixed(2)}</TableCell>
+                            <TableCell className="text-right text-sm tabular-nums">{moneyFormat(r.market_value)}</TableCell>
                             <TableCell className="text-center">
                               {r.stuff_score != null &&
                               r.whiff_score != null &&

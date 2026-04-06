@@ -26,7 +26,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Pencil, RefreshCw, Scale, Sliders, Trophy, Plus, Trash2, Building2, Check, Edit2, Save, X, Upload } from "lucide-react";
+import { Pencil, RefreshCw, Scale, Sliders, Trophy, Plus, Trash2, Building2, Check, Edit2, Save, X, Upload, LogIn } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { bulkRecalculatePredictionsLocal } from "@/lib/predictionEngine";
 // TODO: Seed JSON files are static local data — migrate to Supabase tables for live updates.
@@ -8377,6 +8377,152 @@ function HittingPitchingSection({
 
 // ─── Main Admin Dashboard ─────────────────────────────────────────────────────
 
+function BulkPortalStatusTab() {
+  const [nameList, setNameList] = useState("");
+  const [targetStatus, setTargetStatus] = useState<string>("IN PORTAL");
+  const [results, setResults] = useState<{ input: string; name: string; team: string; matched: boolean; playerId?: string }[]>([]);
+  const [processing, setProcessing] = useState(false);
+  const queryClient = useQueryClient();
+
+  const handleBulkUpdate = async () => {
+    const lines = nameList
+      .split("\n")
+      .map((n) => n.trim())
+      .filter(Boolean);
+    if (!lines.length) return;
+
+    setProcessing(true);
+    const output: typeof results = [];
+
+    for (const line of lines) {
+      // Format: "First Last, Team" or "Last, First, Team"
+      const parts = line.split(",").map((s) => s.trim());
+      let first = "";
+      let last = "";
+      let team = "";
+
+      if (parts.length >= 3) {
+        // "Last, First, Team"
+        last = parts[0];
+        first = parts[1];
+        team = parts.slice(2).join(", ");
+      } else if (parts.length === 2) {
+        // "First Last, Team"
+        const nameParts = parts[0].split(/\s+/);
+        first = nameParts[0] || "";
+        last = nameParts.slice(1).join(" ") || "";
+        team = parts[1];
+      } else {
+        output.push({ input: line, name: line, team: "", matched: false });
+        continue;
+      }
+
+      if ((!first && !last) || !team) {
+        output.push({ input: line, name: `${first} ${last}`.trim(), team, matched: false });
+        continue;
+      }
+
+      // Exact match on name + team
+      const { data } = await supabase
+        .from("players")
+        .select("id, first_name, last_name, team")
+        .ilike("first_name", first)
+        .ilike("last_name", last)
+        .ilike("team", `%${team}%`)
+        .limit(5);
+
+      if (data && data.length > 0) {
+        for (const player of data) {
+          await supabase
+            .from("players")
+            .update({ portal_status: targetStatus, transfer_portal: targetStatus === "IN PORTAL" } as any)
+            .eq("id", player.id);
+          output.push({ input: line, name: `${player.first_name} ${player.last_name}`, team: player.team || "", matched: true, playerId: player.id });
+        }
+      } else {
+        output.push({ input: line, name: `${first} ${last}`.trim(), team, matched: false });
+      }
+    }
+
+    setResults(output);
+    setProcessing(false);
+    queryClient.invalidateQueries({ queryKey: ["target-board"] });
+    queryClient.invalidateQueries({ queryKey: ["returning-players-2025-unified"] });
+  };
+
+  const matched = results.filter((r) => r.matched).length;
+  const unmatched = results.filter((r) => !r.matched).length;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Bulk Portal Status Update</CardTitle>
+        <CardDescription>
+          Paste a list of players, one per line. Each line must include name and team to avoid mismatches.
+          <br />
+          Formats: <code className="text-xs bg-muted px-1 rounded">First Last, Team</code> or <code className="text-xs bg-muted px-1 rounded">Last, First, Team</code>
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Label className="text-sm font-medium whitespace-nowrap">Set status to:</Label>
+          <select
+            className={`text-xs font-semibold uppercase tracking-wider rounded-full px-3 py-1.5 border-0 cursor-pointer appearance-none transition-colors ${
+              targetStatus === "IN PORTAL" ? "bg-emerald-500/10 text-emerald-600"
+              : targetStatus === "COMMITTED" ? "bg-blue-500/10 text-blue-600"
+              : targetStatus === "WATCHING" ? "bg-[#D4AF37]/10 text-[#D4AF37]"
+              : "bg-muted text-muted-foreground"
+            }`}
+            value={targetStatus}
+            onChange={(e) => setTargetStatus(e.target.value)}
+          >
+            <option value="NOT IN PORTAL">Not In Portal</option>
+            <option value="WATCHING">Watching</option>
+            <option value="IN PORTAL">In Portal</option>
+            <option value="COMMITTED">Committed</option>
+          </select>
+        </div>
+
+        <textarea
+          className="w-full min-h-[200px] rounded-md border border-border bg-background px-3 py-2 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          placeholder={"John Smith, Arizona State\nJane Doe, Oregon State\nDoe, Jane, Texas"}
+          value={nameList}
+          onChange={(e) => setNameList(e.target.value)}
+        />
+
+        <div className="flex items-center gap-3">
+          <Button onClick={handleBulkUpdate} disabled={processing || !nameList.trim()}>
+            {processing ? "Processing…" : `Update ${nameList.split("\n").filter((n) => n.trim()).length} Players`}
+          </Button>
+          {results.length > 0 && (
+            <span className="text-sm text-muted-foreground">
+              <span className="text-emerald-600 font-medium">{matched} matched</span>
+              {unmatched > 0 && <> · <span className="text-destructive font-medium">{unmatched} not found</span></>}
+            </span>
+          )}
+        </div>
+
+        {results.length > 0 && (
+          <div className="rounded-md border border-border divide-y divide-border max-h-[300px] overflow-auto">
+            {results.map((r, i) => (
+              <div key={i} className={`flex items-center gap-2 px-3 py-1.5 text-sm ${r.matched ? "" : "bg-destructive/5"}`}>
+                {r.matched ? (
+                  <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                ) : (
+                  <X className="h-3.5 w-3.5 text-destructive shrink-0" />
+                )}
+                <span className={r.matched ? "" : "text-destructive"}>{r.name}</span>
+                {r.team && <span className="text-[10px] text-muted-foreground">· {r.team}</span>}
+                {!r.matched && <span className="text-[10px] text-muted-foreground ml-auto">No match found</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AdminDashboard() {
   const { hasRole } = useAuth();
   const isAdmin = hasRole("admin");
@@ -8428,6 +8574,10 @@ export default function AdminDashboard() {
               <RefreshCw className="h-4 w-4" />
               Data Sync
             </TabsTrigger>
+            <TabsTrigger value="portal" className="gap-1.5">
+              <LogIn className="h-4 w-4" />
+              Portal
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="equations">
@@ -8459,6 +8609,9 @@ export default function AdminDashboard() {
           </TabsContent>
           <TabsContent value="data-storage-2025">
             <DataStorage2025Tab />
+          </TabsContent>
+          <TabsContent value="portal">
+            <BulkPortalStatusTab />
           </TabsContent>
         </Tabs>
       </div>

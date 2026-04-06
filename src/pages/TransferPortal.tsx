@@ -27,6 +27,7 @@ import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
+import { useTargetBoard } from "@/hooks/useTargetBoard";
 
 type SimPlayer = {
   prediction_id: string | null;
@@ -506,6 +507,7 @@ export default function TransferPortal() {
   const { toast } = useToast();
   const { hasRole } = useAuth();
   const { hitterStats, powerRatings } = useHitterSeedData();
+  const { addPlayer: addToSupabaseBoard, isOnBoard: isOnSupabaseBoard } = useTargetBoard();
   const isAdmin = hasRole("admin");
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>("");
   const [playerSearch, setPlayerSearch] = useState<string>("");
@@ -1666,6 +1668,10 @@ export default function TransferPortal() {
       );
       deduped.push(entry);
       localStorage.setItem(TARGET_BOARD_STORAGE_KEY, JSON.stringify(deduped));
+      // Sync to Supabase target board
+      if (entry.playerId && !isOnSupabaseBoard(entry.playerId)) {
+        addToSupabaseBoard({ playerId: entry.playerId });
+      }
       toast({
         title: "Added to Target Board",
         description: `${entry.playerName} -> ${entry.destinationTeam}`,
@@ -1716,6 +1722,10 @@ export default function TransferPortal() {
       );
       deduped.push(entry);
       localStorage.setItem(TARGET_BOARD_STORAGE_KEY, JSON.stringify(deduped));
+      // Sync to Supabase target board
+      if (entry.playerId && !isOnSupabaseBoard(entry.playerId)) {
+        addToSupabaseBoard({ playerId: entry.playerId });
+      }
       toast({
         title: "Added to Target Board",
         description: `${entry.playerName} -> ${entry.destinationTeam}`,
