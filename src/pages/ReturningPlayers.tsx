@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { useHitterSeedData } from "@/hooks/useHitterSeedData";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
@@ -706,7 +707,21 @@ export default function ReturningPlayers() {
 
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [positionFilter, setPositionFilter] = useState<string>("all");
+  const [positionFilters, setPositionFilters] = useState<Set<string>>(new Set());
+  const positionFilter = positionFilters.size === 0 ? "all" : Array.from(positionFilters)[0];
+  const setPositionFilter = (v: string) => setPositionFilters(v === "all" ? new Set() : new Set([v]));
+  const togglePosition = (pos: string) => {
+    setPositionFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(pos)) next.delete(pos);
+      else next.add(pos);
+      return next;
+    });
+  };
+  const positionMatchesFilter = (pos: string | null) => {
+    if (positionFilters.size === 0) return true;
+    return pos != null && positionFilters.has(pos);
+  };
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(100);
   const [sortKey, setSortKey] = useState<SortKey>("p_wrc_plus");
@@ -716,6 +731,7 @@ export default function ReturningPlayers() {
   const playerOverrides = useMemo(() => readPlayerOverrides(), []);
   const [showMissingOnly, setShowMissingOnly] = useState(false);
   const [dashboardView, setDashboardView] = useState<"hitting" | "pitching">("hitting");
+  const [pitchingRoleFilter, setPitchingRoleFilter] = useState<"all" | "SP" | "RP">("all");
   const [pitchingSearch, setPitchingSearch] = useState("");
   const [pitchingPage, setPitchingPage] = useState(1);
   const [pitchingPageSize, setPitchingPageSize] = useState<number>(100);
@@ -1121,7 +1137,7 @@ export default function ReturningPlayers() {
         }
 
         let allRows = dedupedRows.map((row: any) => toReturnerRow(row, row.players, nilByPlayer));
-        if (positionFilter !== "all") allRows = allRows.filter((p) => p.position === positionFilter);
+        if (positionFilters.size > 0) allRows = allRows.filter((p) => positionMatchesFilter(p.position));
         if (showMissingOnly) allRows = allRows.filter((p) => !p.team);
         if (debouncedSearch) {
           const q = debouncedSearch.toLowerCase();
@@ -1161,7 +1177,8 @@ export default function ReturningPlayers() {
         .order("last_name", { ascending: true })
         .order("first_name", { ascending: true })
         .range(from, to);
-      if (positionFilter !== "all") playersQuery = playersQuery.eq("position", positionFilter);
+      if (positionFilters.size === 1) playersQuery = playersQuery.eq("position", Array.from(positionFilters)[0]);
+      else if (positionFilters.size > 1) playersQuery = playersQuery.in("position", Array.from(positionFilters));
       if (showMissingOnly) playersQuery = playersQuery.is("team", null);
       if (debouncedSearch) {
         const q = debouncedSearch.replace(/[%]/g, "").trim();
@@ -1656,9 +1673,13 @@ export default function ReturningPlayers() {
     return [] as PitchingDashboardRow[];
   }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows]);
   const filteredPitchingRows = useMemo(() => {
+    let rows = pitchingRows;
+    if (pitchingRoleFilter !== "all") {
+      rows = rows.filter((r) => r.role === pitchingRoleFilter);
+    }
     const q = pitchingSearch.trim().toLowerCase();
-    if (!q) return pitchingRows;
-    return pitchingRows.filter((r) => {
+    if (!q) return rows;
+    return rows.filter((r) => {
       return (
         r.playerName.toLowerCase().includes(q) ||
         (r.team || "").toLowerCase().includes(q) ||
@@ -1666,14 +1687,14 @@ export default function ReturningPlayers() {
         (r.handedness || "").toLowerCase().includes(q)
       );
     });
-  }, [pitchingRows, pitchingSearch]);
+  }, [pitchingRows, pitchingSearch, pitchingRoleFilter]);
   useEffect(() => {
     if (skipNextPitchingPageResetRef.current) {
       skipNextPitchingPageResetRef.current = false;
       return;
     }
     setPitchingPage(1);
-  }, [pitchingSearch, pitchingPageSize]);
+  }, [pitchingSearch, pitchingPageSize, pitchingRoleFilter]);
   const pitchingTotal = filteredPitchingRows.length;
   const pitchingTotalPages = Math.max(1, Math.ceil(pitchingTotal / pitchingPageSize));
   const pitchingCurrentPage = Math.min(pitchingPage, pitchingTotalPages);
@@ -1769,48 +1790,75 @@ export default function ReturningPlayers() {
             <h2 className="text-2xl font-bold tracking-tight">Player Dashboard</h2>
             <p className="text-muted-foreground text-sm">2025 season — all players including transfers and departed</p>
           </div>
-          <div className="flex gap-2 flex-wrap items-center">
-            <Tabs value={dashboardView} onValueChange={(v) => setDashboardView(v as "hitting" | "pitching")}>
-              <TabsList className="bg-background/60">
-                <TabsTrigger value="hitting" className="text-xs px-3">Hitting</TabsTrigger>
-                <TabsTrigger value="pitching" className="text-xs px-3">Pitching</TabsTrigger>
-              </TabsList>
-            </Tabs>
-            <Button
-              size="sm"
-              variant={showMissingOnly ? "default" : "outline"}
-              className="h-8 text-xs"
-              onClick={() => setShowMissingOnly(!showMissingOnly)}
+          <div className="flex gap-1 rounded-lg border bg-muted p-1">
+            <button
+              className={cn(
+                "px-5 py-2 text-sm rounded-md font-medium transition-colors",
+                dashboardView === "hitting" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+              onClick={() => setDashboardView("hitting")}
             >
-              {showMissingOnly ? "Show All" : "Missing Teams"}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-xs"
-              onClick={() => applyTemplateDefaults.mutate()}
-              disabled={applyTemplateDefaults.isPending}
+              Hitting
+            </button>
+            <button
+              className={cn(
+                "px-5 py-2 text-sm rounded-md font-medium transition-colors",
+                dashboardView === "pitching" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+              onClick={() => setDashboardView("pitching")}
             >
-              {applyTemplateDefaults.isPending ? "Applying…" : "Apply Template"}
-            </Button>
+              Pitching
+            </button>
           </div>
         </div>
 
         {dashboardView === "hitting" ? (
           <>
-        <div className="relative w-full max-w-md">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input
-            placeholder="Search players, teams, positions..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 pr-8 h-9 text-sm rounded-lg border-border/60 focus-visible:ring-primary/30"
-          />
-          {search && (
-            <button onClick={() => setSearch("")} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-              <X className="h-4 w-4" />
+        <div className="space-y-2">
+          <div className="relative w-full max-w-md">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Search players, teams, positions..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 pr-8 h-9 text-sm rounded-lg border-border/60 focus-visible:ring-primary/30"
+            />
+            {search && (
+              <button onClick={() => setSearch("")} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <button
+              onClick={() => setPositionFilters(new Set())}
+              className={cn(
+                "px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer",
+                positionFilters.size === 0
+                  ? "bg-primary/15 text-primary ring-1 ring-primary/30"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+              )}
+            >
+              All
             </button>
-          )}
+            {positions.map((pos) => (
+              <button
+                key={pos}
+                onClick={() => togglePosition(pos)}
+                className={cn(
+                  "px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer",
+                  positionFilters.has(pos)
+                    ? "bg-primary/15 text-primary ring-1 ring-primary/30"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                )}
+              >
+                {pos}
+              </button>
+            ))}
+            {positionFilters.size > 1 && (
+              <span className="text-[10px] text-muted-foreground ml-1">{positionFilters.size} selected</span>
+            )}
+          </div>
         </div>
 
         {/* Table */}
@@ -1818,27 +1866,6 @@ export default function ReturningPlayers() {
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <CardTitle className="text-base">Player Projections</CardTitle>
-              <Select value={positionFilter} onValueChange={setPositionFilter}>
-                <SelectTrigger className="w-36 h-8">
-                  <SelectValue placeholder="Position" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Positions</SelectItem>
-                  {positions.map((pos) => (
-                    <SelectItem key={pos} value={pos}>
-                      {pos}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs"
-                onClick={() => exportBlankMarketValues("hitting")}
-              >
-                Blank Market Value ({hittingBlankMarketRows.length})
-              </Button>
               {bulkEditMode ? (
                 <div className="flex gap-1">
                   <Button
@@ -2079,36 +2106,43 @@ export default function ReturningPlayers() {
           </>
         ) : (
           <>
-        <div className="relative w-full max-w-md">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input
-            placeholder="Search pitchers, teams..."
-            value={pitchingSearch}
-            onChange={(e) => setPitchingSearch(e.target.value)}
-            className="pl-9 pr-8 h-9 text-sm rounded-lg border-border/60 focus-visible:ring-primary/30"
-          />
-          {pitchingSearch && (
-            <button onClick={() => setPitchingSearch("")} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-              <X className="h-4 w-4" />
-            </button>
-          )}
+        <div className="space-y-2">
+          <div className="relative w-full max-w-md">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Search pitchers, teams..."
+              value={pitchingSearch}
+              onChange={(e) => setPitchingSearch(e.target.value)}
+              className="pl-9 pr-8 h-9 text-sm rounded-lg border-border/60 focus-visible:ring-primary/30"
+            />
+            {pitchingSearch && (
+              <button onClick={() => setPitchingSearch("")} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {(["all", "SP", "RP"] as const).map((role) => (
+              <button
+                key={role}
+                onClick={() => setPitchingRoleFilter(role)}
+                className={cn(
+                  "px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer",
+                  pitchingRoleFilter === role
+                    ? "bg-primary/15 text-primary ring-1 ring-primary/30"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                )}
+              >
+                {role === "all" ? "All Pitchers" : role === "SP" ? "Starters" : "Relievers"}
+              </button>
+            ))}
+          </div>
         </div>
 
         <Card>
             <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <CardTitle className="text-base">Pitching Projections</CardTitle>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs"
-                  onClick={() => exportBlankMarketValues("pitching")}
-                >
-                  Blank Market Value ({pitchingBlankMarketRows.length})
-                </Button>
-                {pitchingMissingTeamCount > 0 && (
-                  <span className="text-xs text-destructive">{pitchingMissingTeamCount} missing team</span>
-                )}
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <div className="flex items-center gap-1 overflow-x-auto max-w-[360px]">
