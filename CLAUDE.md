@@ -114,6 +114,22 @@ Track when players enter the transfer portal and commit to new schools:
 
 ---
 
+## Team Builder — Championship WAR Benchmarks
+
+Calculate total team WAR and player scores from previous national champions (CWS winners) to establish target benchmarks:
+
+- Research and compile total oWAR + pWAR for recent CWS champions (2019-2024)
+- Calculate average total WAR needed to win a national championship
+- Break down by positional groups: starting lineup oWAR, rotation pWAR, bullpen pWAR
+- Display as a **target WAR goal** on the Team Builder page — a horizontal bar or gauge showing:
+  - Current roster projected total WAR vs championship benchmark
+  - Color-coded: red (below contender), gold (competitive), green (championship caliber)
+- Show the gap: "You need X more WAR to reach championship level"
+- Allow coaches to see which positional group is the weakest relative to champion benchmarks
+- Data source: manually compiled from historical data, stored in Supabase reference table
+
+---
+
 ## Technical Notes
 
 - Primary data source: Supabase (Hitter Master, Pitching Master, Conference Stats, Teams Table, Park Factors)
