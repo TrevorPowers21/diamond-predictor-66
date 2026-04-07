@@ -19,7 +19,27 @@ export async function importHistoricalPitchersCsv(csvText: string, season: numbe
   const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length < 2) { result.errors.push("CSV has no data rows"); return result; }
 
-  const header = lines[0].split(",").map((h) => h.trim());
+  const header = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
+
+  const parseCsvRow = (line: string): string[] => {
+    const out: string[] = [];
+    let cur = "";
+    let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = !inQ;
+      } else if (ch === ',' && !inQ) {
+        out.push(cur.trim());
+        cur = "";
+      } else {
+        cur += ch;
+      }
+    }
+    out.push(cur.trim());
+    return out;
+  };
   const col = (name: string) => header.indexOf(name);
   // Try multiple possible column names
   const colAny = (...names: string[]) => {
@@ -89,13 +109,28 @@ export async function importHistoricalPitchersCsv(csvText: string, season: numbe
     return Number.isFinite(n) ? n : null;
   };
 
+  // Baseball IP notation: "70.1" = 70 IP + 1 out (70.333), "70.2" = 70 IP + 2 outs (70.667)
+  const parseIp = (val: string | undefined): number | null => {
+    if (!val) return null;
+    const cleaned = val.trim();
+    if (cleaned === "" || cleaned === "-") return null;
+    const m = cleaned.match(/^(\d+)(?:\.([012]))?$/);
+    if (!m) {
+      const n = Number(cleaned);
+      return Number.isFinite(n) ? n : null;
+    }
+    const whole = Number(m[1]);
+    const frac = m[2] ? Number(m[2]) : 0;
+    return Math.round((whole + frac / 3) * 1000) / 1000;
+  };
+
   const getCol = (idx: number, cols: string[]): string | undefined => idx >= 0 ? cols[idx] : undefined;
 
   const rows: any[] = [];
   const unresolvedTeams = new Set<string>();
 
   for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+    const cols = parseCsvRow(lines[i]);
 
     const sourcePlayerId = cols[iPlayerId];
     const fullName = cols[iFullName];
@@ -122,7 +157,7 @@ export async function importHistoricalPitchersCsv(csvText: string, season: numbe
       Season: season,
       ThrowHand: getCol(iThrowHand, cols) || null,
       Role: getCol(iRole, cols) || null,
-      IP: parseNum(getCol(iIP, cols)),
+      IP: parseIp(getCol(iIP, cols)),
       G: parseNum(getCol(iG, cols)),
       GS: parseNum(getCol(iGS, cols)),
       ERA: parseNum(getCol(iERA, cols)),
@@ -148,7 +183,7 @@ export async function importHistoricalPitchersCsv(csvText: string, season: numbe
     });
   }
 
-  console.log(`[importHistoricalPitchers] Parsed ${rows.length} rows for season ${season}`);
+  console.log(`[importHistoricalPitchers v2-fractional-IP] Parsed ${rows.length} rows for season ${season}, sample IP:`, rows.slice(0, 3).map(r => r.IP));
   result.teamsUnresolved = [...unresolvedTeams].sort();
 
   // Safety: never clear 2025 data via historical import

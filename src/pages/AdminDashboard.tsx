@@ -118,12 +118,17 @@ function ImportHistoricalHittersButton() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   return (
     <>
-      <div className="flex items-center gap-3">
-        <select value={season} onChange={(e) => setSeason(Number(e.target.value))} className="rounded border px-2 py-1 text-sm">
-          <option value={2024}>2024</option>
-          <option value={2023}>2023</option>
-          <option value={2022}>2022</option>
-        </select>
+      <div className="flex items-center gap-2">
+        <Select value={String(season)} onValueChange={(v) => setSeason(Number(v))}>
+          <SelectTrigger className="h-9 w-[90px] text-sm font-semibold">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="2024">2024</SelectItem>
+            <SelectItem value="2023">2023</SelectItem>
+            <SelectItem value="2022">2022</SelectItem>
+          </SelectContent>
+        </Select>
         <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={async (e) => {
           const file = e.target.files?.[0];
           if (!file) return;
@@ -141,8 +146,8 @@ function ImportHistoricalHittersButton() {
           if (fileRef.current) fileRef.current.value = "";
         }} />
         <Button onClick={() => fileRef.current?.click()} disabled={loading} variant="outline" className="gap-2">
-          {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-          {loading ? `Importing ${season} Hitters…` : `Import Historical Hitter CSV (${season})`}
+          {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+          {loading ? `Importing ${season} Hitters…` : `Import Hitter CSV`}
         </Button>
       </div>
       {result && (
@@ -199,12 +204,17 @@ function ImportHistoricalPitchersButton() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   return (
     <>
-      <div className="flex items-center gap-3">
-        <select value={season} onChange={(e) => setSeason(Number(e.target.value))} className="rounded border px-2 py-1 text-sm">
-          <option value={2024}>2024</option>
-          <option value={2023}>2023</option>
-          <option value={2022}>2022</option>
-        </select>
+      <div className="flex items-center gap-2">
+        <Select value={String(season)} onValueChange={(v) => setSeason(Number(v))}>
+          <SelectTrigger className="h-9 w-[90px] text-sm font-semibold">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="2024">2024</SelectItem>
+            <SelectItem value="2023">2023</SelectItem>
+            <SelectItem value="2022">2022</SelectItem>
+          </SelectContent>
+        </Select>
         <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={async (e) => {
           const file = e.target.files?.[0];
           if (!file) return;
@@ -222,8 +232,8 @@ function ImportHistoricalPitchersButton() {
           if (fileRef.current) fileRef.current.value = "";
         }} />
         <Button onClick={() => fileRef.current?.click()} disabled={loading} variant="outline" className="gap-2">
-          {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-          {loading ? `Importing ${season} Pitchers…` : `Import Historical Pitcher CSV (${season})`}
+          {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+          {loading ? `Importing ${season} Pitchers…` : `Import Pitcher CSV`}
         </Button>
       </div>
       {result && (

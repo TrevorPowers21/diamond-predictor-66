@@ -20,7 +20,28 @@ export async function importHistoricalHittersCsv(csvText: string, season: number
   if (lines.length < 2) { result.errors.push("CSV has no data rows"); return result; }
 
   // Parse header
-  const header = lines[0].split(",").map((h) => h.trim());
+  const header = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
+
+  // Quote-aware CSV row parser (handles commas inside quoted fields like "Texas A&M, College Station")
+  const parseCsvRow = (line: string): string[] => {
+    const out: string[] = [];
+    let cur = "";
+    let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = !inQ;
+      } else if (ch === ',' && !inQ) {
+        out.push(cur.trim());
+        cur = "";
+      } else {
+        cur += ch;
+      }
+    }
+    out.push(cur.trim());
+    return out;
+  };
   const col = (name: string) => {
     const idx = header.indexOf(name);
     return idx;
@@ -88,7 +109,7 @@ export async function importHistoricalHittersCsv(csvText: string, season: number
 
   for (let i = 1; i < lines.length; i++) {
     // Handle CSV fields that might contain commas in quotes
-    const cols = lines[i].split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+    const cols = parseCsvRow(lines[i]);
 
     const sourcePlayerId = cols[iPlayerId];
     const fullName = cols[iFullName];
