@@ -196,15 +196,21 @@ export type PitchingPowerRatings = PitchingScores & {
   overallPrPlus: number | null;
 };
 
-/** Compute pitching power ratings from raw sub-metrics */
+/** Compute pitching power ratings from raw sub-metrics. Stuff+ is optional —
+ *  when missing, its weight redistributes proportionally to the other components
+ *  rather than defaulting to a 50 (average) score, which previously suppressed
+ *  ratings for players from sources that don't track Stuff+ (e.g., historical years). */
 export function computePitchingPowerRatings(raw: PitchingSubMetrics, stuffPlus?: number | null): PitchingPowerRatings {
   const scores = computePitchingScores(raw);
   const s = (v: number | null) => v ?? 50; // fallback to 50 (average) when null
   const stuffScore = stuffPlus != null ? scoreFromNormal(stuffPlus, 100, 3.968) : null;
 
-  const nws = (items: Array<{ v: number; w: number }>) => {
-    const total = items.reduce((a, i) => a + i.w, 0);
-    return total > 0 ? items.reduce((a, i) => a + (i.v * i.w), 0) / total : null;
+  // Weighted average that ignores items with null values entirely (instead of
+  // substituting 50). The remaining weights renormalize automatically.
+  const nws = (items: Array<{ v: number | null; w: number }>) => {
+    const valid = items.filter((i) => i.v != null);
+    const total = valid.reduce((a, i) => a + i.w, 0);
+    return total > 0 ? valid.reduce((a, i) => a + ((i.v as number) * i.w), 0) / total : null;
   };
 
   const eraRaw = nws([
@@ -214,7 +220,7 @@ export function computePitchingPowerRatings(raw: PitchingSubMetrics, stuffPlus?:
     { v: s(scores.izWhiffScore), w: ERA_WEIGHTS.izWhiff },
     { v: s(scores.chaseScore), w: ERA_WEIGHTS.chase },
     { v: s(scores.barrelScore), w: ERA_WEIGHTS.barrel },
-    { v: s(stuffScore), w: ERA_WEIGHTS.stuff },
+    { v: stuffScore, w: ERA_WEIGHTS.stuff },
   ]);
   const eraPrPlus = eraRaw != null ? (eraRaw / 50) * 100 : null;
 
@@ -230,7 +236,7 @@ export function computePitchingPowerRatings(raw: PitchingSubMetrics, stuffPlus?:
 
   const k9Raw = nws([
     { v: s(scores.whiffScore), w: K9_WEIGHTS.whiff },
-    { v: s(stuffScore), w: K9_WEIGHTS.stuff },
+    { v: stuffScore, w: K9_WEIGHTS.stuff },
     { v: s(scores.izWhiffScore), w: K9_WEIGHTS.izWhiff },
     { v: s(scores.chaseScore), w: K9_WEIGHTS.chase },
   ]);

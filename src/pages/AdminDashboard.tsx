@@ -283,28 +283,42 @@ function SyncMasterButton() {
 
 function ComputeScoresButton() {
   const [loading, setLoading] = useState(false);
+  const [season, setSeason] = useState(2025);
   const [result, setResult] = useState<{ hitters: { updated: number; errors: number }; pitchers: { updated: number; errors: number } } | null>(null);
   return (
     <>
-      <Button
-        onClick={async () => {
-          setLoading(true);
-          setResult(null);
-          try {
-            const r = await computeAndStoreAllScores(2025);
-            setResult(r);
-          } catch {
-            setResult({ hitters: { updated: 0, errors: -1 }, pitchers: { updated: 0, errors: -1 } });
-          }
-          setLoading(false);
-        }}
-        disabled={loading}
-        variant="outline"
-        className="gap-2"
-      >
-        {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-        {loading ? "Computing Scores…" : "Compute All Scores"}
-      </Button>
+      <div className="flex items-center gap-2">
+        <Select value={String(season)} onValueChange={(v) => setSeason(Number(v))}>
+          <SelectTrigger className="h-9 w-[90px] text-sm font-semibold">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="2025">2025</SelectItem>
+            <SelectItem value="2024">2024</SelectItem>
+            <SelectItem value="2023">2023</SelectItem>
+            <SelectItem value="2022">2022</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          onClick={async () => {
+            setLoading(true);
+            setResult(null);
+            try {
+              const r = await computeAndStoreAllScores(season);
+              setResult(r);
+            } catch {
+              setResult({ hitters: { updated: 0, errors: -1 }, pitchers: { updated: 0, errors: -1 } });
+            }
+            setLoading(false);
+          }}
+          disabled={loading}
+          variant="outline"
+          className="gap-2"
+        >
+          {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+          {loading ? `Computing ${season} Scores…` : `Compute ${season} Scores`}
+        </Button>
+      </div>
       {result && (
         <p className="text-sm text-muted-foreground">
           Hitters: {result.hitters.updated} scored. Pitchers: {result.pitchers.updated} scored.
