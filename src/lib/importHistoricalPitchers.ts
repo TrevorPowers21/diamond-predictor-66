@@ -186,12 +186,6 @@ export async function importHistoricalPitchersCsv(csvText: string, season: numbe
   console.log(`[importHistoricalPitchers v2-fractional-IP] Parsed ${rows.length} rows for season ${season}, sample IP:`, rows.slice(0, 3).map(r => r.IP));
   result.teamsUnresolved = [...unresolvedTeams].sort();
 
-  // Safety: never clear 2025 data via historical import
-  if (season === 2025) {
-    result.errors.push("Cannot import over 2025 data with the historical importer. Use the main import instead.");
-    return result;
-  }
-
   // Clear existing data for this season only
   console.log(`[importHistoricalPitchers] Clearing existing ${season} pitching data...`);
   const { error: clearErr } = await supabase.from("Pitching Master").delete().eq("Season", season);

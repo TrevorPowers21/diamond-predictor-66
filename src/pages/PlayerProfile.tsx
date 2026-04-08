@@ -669,6 +669,52 @@ export default function PlayerProfile() {
   const projectedDerived = computeDerived(projectedAvg, projectedObp, projectedSlg);
   const projectedWrcPlus = regularPred?.p_wrc_plus ?? null;
 
+  const activeMasterRow = isHistoricalView ? historicalRow : currentHitterRow;
+  const activeAb = (activeMasterRow as any)?.ab;
+  const hasZeroAb = activeMasterRow != null && (activeAb == null || Number(activeAb) === 0);
+  if (hasZeroAb) {
+    return (
+      <DashboardLayout>
+        <div className="space-y-4 max-w-[1400px] mx-auto">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" onClick={() => returnTo ? navigate(returnTo) : navigate(-1)}>
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <div className="flex-1">
+              <h2 className="text-2xl font-bold tracking-tight">
+                {player.first_name} {player.last_name}
+              </h2>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                {effectivePosition && <Badge variant="secondary">{effectivePosition}</Badge>}
+                {(activeMasterRow as any)?.Team && <Badge variant="outline">{(activeMasterRow as any).Team}</Badge>}
+              </div>
+            </div>
+          </div>
+          {availableSeasons.length > 1 && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs uppercase tracking-wide text-muted-foreground">Season:</span>
+              {availableSeasons.map((s) => (
+                <Button
+                  key={s}
+                  size="sm"
+                  variant={s === effectiveSeason ? "default" : "outline"}
+                  onClick={() => setSelectedSeason(s)}
+                >
+                  {s}
+                </Button>
+              ))}
+            </div>
+          )}
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground">
+              No hitting stats for the {effectiveSeason} season.
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout>
       <div className="space-y-4 max-w-[1400px] mx-auto">

@@ -14,6 +14,152 @@ import {
 
 const round2 = (v: number | null) => (v == null ? null : Math.round(v * 100) / 100);
 
+// Hitter columns we read for blending — must match HITTER_BLEND_COLS in combinedStats.ts
+const HITTER_PRIOR_SELECT = "source_player_id, Season, pa, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb";
+const PITCHER_PRIOR_SELECT = `source_player_id, Season, IP, ERA, FIP, WHIP, K9, BB9, HR9, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, h_pull_pct, la_10_30_pct, stuff_plus, "90th_vel"`;
+
+const HITTER_BLEND_COLS = [
+  "AVG", "OBP", "SLG", "ISO",
+  "contact", "line_drive", "avg_exit_velo", "pop_up", "bb",
+  "chase", "barrel", "ev90", "pull", "la_10_30", "gb",
+] as const;
+const PITCHER_BLEND_COLS = [
+  "ERA", "FIP", "WHIP", "K9", "BB9", "HR9",
+  "miss_pct", "bb_pct", "hard_hit_pct", "in_zone_whiff_pct", "chase_pct",
+  "barrel_pct", "line_pct", "exit_vel", "ground_pct", "in_zone_pct",
+  "h_pull_pct", "la_10_30_pct", "stuff_plus", "90th_vel",
+] as const;
+
+/**
+ * Synchronous blend using a pre-fetched prior-seasons map.
+ * Replaces the per-row Supabase query in getBlendedHitterStats.
+ */
+function blendHitterSync(
+  sourcePlayerId: string | null,
+  currentRow: any,
+  priorMap: Map<string, any[]>,
+) {
+  const currentPa = Number(currentRow?.pa) || 0;
+  const passthroughValues = HITTER_BLEND_COLS.reduce((acc, col) => {
+    acc[col] = currentRow?.[col] ?? null;
+    return acc;
+  }, {} as Record<string, number | null>);
+  if (!sourcePlayerId || currentPa >= HITTER_PA_THRESHOLD) {
+    return { combined: false, totalPa: currentPa, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
+  }
+  const priors = priorMap.get(sourcePlayerId) || [];
+  if (priors.length === 0) {
+    return { combined: false, totalPa: currentPa, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
+  }
+  const collected: any[] = [currentRow];
+  let totalPa = currentPa;
+  for (const ps of priors) {
+    const pa = Number(ps.pa) || 0;
+    if (pa <= 0) continue;
+    collected.push(ps);
+    totalPa += pa;
+    if (totalPa >= HITTER_PA_THRESHOLD) break;
+  }
+  if (collected.length === 1) {
+    return { combined: false, totalPa: currentPa, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
+  }
+  const out: Record<string, number | null> = {};
+  for (const col of HITTER_BLEND_COLS) {
+    let sw = 0, ww = 0;
+    for (const r of collected) {
+      const v = r[col]; const w = Number(r.pa) || 0;
+      if (v != null && Number.isFinite(Number(v)) && w > 0) { sw += Number(v) * w; ww += w; }
+    }
+    out[col] = ww > 0 ? sw / ww : null;
+  }
+  return {
+    combined: true,
+    totalPa,
+    seasonsUsed: collected.map((c) => Number(c.Season)).sort((a, b) => b - a),
+    values: out,
+  };
+}
+
+function blendPitcherSync(
+  sourcePlayerId: string | null,
+  currentRow: any,
+  priorMap: Map<string, any[]>,
+) {
+  const currentIp = Number(currentRow?.IP) || 0;
+  const passthroughValues = PITCHER_BLEND_COLS.reduce((acc, col) => {
+    acc[col] = currentRow?.[col] ?? null;
+    return acc;
+  }, {} as Record<string, number | null>);
+  if (!sourcePlayerId || currentIp >= PITCHER_IP_THRESHOLD) {
+    return { combined: false, totalIp: currentIp, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
+  }
+  const priors = priorMap.get(sourcePlayerId) || [];
+  if (priors.length === 0) {
+    return { combined: false, totalIp: currentIp, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
+  }
+  const collected: any[] = [currentRow];
+  let totalIp = currentIp;
+  for (const ps of priors) {
+    const ip = Number(ps.IP) || 0;
+    if (ip <= 0) continue;
+    collected.push(ps);
+    totalIp += ip;
+    if (totalIp >= PITCHER_IP_THRESHOLD) break;
+  }
+  if (collected.length === 1) {
+    return { combined: false, totalIp: currentIp, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
+  }
+  const out: Record<string, number | null> = {};
+  for (const col of PITCHER_BLEND_COLS) {
+    let sw = 0, ww = 0;
+    for (const r of collected) {
+      const v = r[col]; const w = Number(r.IP) || 0;
+      if (v != null && Number.isFinite(Number(v)) && w > 0) { sw += Number(v) * w; ww += w; }
+    }
+    out[col] = ww > 0 ? sw / ww : null;
+  }
+  return {
+    combined: true,
+    totalIp,
+    seasonsUsed: collected.map((c) => Number(c.Season)).sort((a, b) => b - a),
+    values: out,
+  };
+}
+
+/** Fetch all rows from a master table with Season < cutoff, paginated. */
+async function fetchAllPrior(table: "Hitter Master" | "Pitching Master", select: string, cutoffSeason: number) {
+  const all: any[] = [];
+  let from = 0;
+  const pageSize = 1000;
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(select)
+      .lt("Season", cutoffSeason)
+      .order("Season", { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+/** Run async tasks with bounded concurrency. */
+async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
+  let i = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const idx = i++;
+      if (idx >= items.length) return;
+      await worker(items[idx]);
+    }
+  });
+  await Promise.all(runners);
+}
+
 /**
  * Fetch the per-season NCAA averages from `ncaa_averages` and convert to
  * the HitterBaselines / PitchingBaselines shape expected by powerRatings.
@@ -75,81 +221,101 @@ async function fetchSeasonBaselines(season: number): Promise<{ hitter: HitterBas
 export async function computeAndStoreHitterScores(season = 2025): Promise<{ updated: number; errors: number }> {
   let updated = 0;
   let errors = 0;
-  let from = 0;
-  const pageSize = 500;
 
-  // Fetch season-specific baselines once before processing
   const { hitter: hitterBaselines } = await fetchSeasonBaselines(season);
   console.log(`[computeAndStoreHitterScores] Using baselines for ${season}:`, hitterBaselines);
 
+  // Pre-fetch ALL prior-season hitter rows in one paginated pass, then index by source_player_id.
+  // Eliminates the per-row Supabase query that getBlendedHitterStats was doing.
+  console.log(`[computeAndStoreHitterScores] Pre-fetching prior seasons (< ${season})...`);
+  const priorRows = await fetchAllPrior("Hitter Master", HITTER_PRIOR_SELECT, season);
+  const priorMap = new Map<string, any[]>();
+  for (const r of priorRows) {
+    const sid = (r as any).source_player_id;
+    if (!sid) continue;
+    if (!priorMap.has(sid)) priorMap.set(sid, []);
+    priorMap.get(sid)!.push(r);
+  }
+  // Sort each player's history newest-first (fetch is already sorted, but ensure it)
+  for (const arr of priorMap.values()) arr.sort((a, b) => Number(b.Season) - Number(a.Season));
+  console.log(`[computeAndStoreHitterScores] Indexed ${priorRows.length} prior rows for ${priorMap.size} players`);
+
+  // Fetch all current-season rows in pages
+  console.log(`[computeAndStoreHitterScores] Fetching ${season} rows...`);
+  const currentRows: any[] = [];
+  let from = 0;
+  const readPageSize = 1000;
   while (true) {
     const { data: rows, error } = await supabase
       .from("Hitter Master")
-      .select("id, source_player_id, pa, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb")
+      .select("id, source_player_id, Season, pa, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb")
       .eq("Season", season)
       .order("id", { ascending: true })
-      .range(from, from + pageSize - 1);
-
+      .range(from, from + readPageSize - 1);
     if (error) throw error;
     if (!rows || rows.length === 0) break;
-
-    for (const row of rows) {
-      // Low-PA players get blended stats from prior seasons by source_player_id
-      const blended = await getBlendedHitterStats(
-        (row as any).source_player_id ?? null,
-        season,
-        row,
-      );
-      const v = blended.values;
-      const ratings = computeHitterPowerRatings({
-        contact: v.contact,
-        lineDrive: v.line_drive,
-        avgExitVelo: v.avg_exit_velo,
-        popUp: v.pop_up,
-        bb: v.bb,
-        chase: v.chase,
-        barrel: v.barrel,
-        ev90: v.ev90,
-        pull: v.pull,
-        la10_30: v.la_10_30,
-        gb: v.gb,
-      }, hitterBaselines);
-
-      const { error: updateErr } = await supabase
-        .from("Hitter Master")
-        .update({
-          contact_score: round2(ratings.contactScore),
-          line_drive_score: round2(ratings.lineDriveScore),
-          avg_ev_score: round2(ratings.avgEVScore),
-          pop_up_score: round2(ratings.popUpScore),
-          bb_score: round2(ratings.bbScore),
-          chase_score: round2(ratings.chaseScore),
-          barrel_score: round2(ratings.barrelScore),
-          ev90_score: round2(ratings.ev90Score),
-          pull_score: round2(ratings.pullScore),
-          la_score: round2(ratings.laScore),
-          gb_score: round2(ratings.gbScore),
-          ba_plus: round2(ratings.baPlus),
-          obp_plus: round2(ratings.obpPlus),
-          iso_plus: round2(ratings.isoPlus),
-          overall_plus: round2(ratings.overallPlus),
-          combined_used: blended.combined,
-          combined_pa: blended.combined ? blended.totalPa : null,
-          combined_seasons: blended.combined ? blended.seasonsUsed.join(",") : null,
-        } as any)
-        .eq("id", row.id);
-
-      if (updateErr) {
-        console.error(`Failed to update hitter ${row.id}:`, updateErr);
-        errors++;
-      } else {
-        updated++;
-      }
-    }
-
-    if (rows.length < pageSize) break;
-    from += pageSize;
+    currentRows.push(...rows);
+    if (rows.length < readPageSize) break;
+    from += readPageSize;
   }
+  console.log(`[computeAndStoreHitterScores] Computing scores for ${currentRows.length} rows...`);
+
+  // Compute updates in-memory (synchronous, no DB calls)
+  const updates = currentRows.map((row) => {
+    const blended = blendHitterSync((row as any).source_player_id ?? null, row, priorMap);
+    const v = blended.values;
+    const ratings = computeHitterPowerRatings({
+      contact: v.contact,
+      lineDrive: v.line_drive,
+      avgExitVelo: v.avg_exit_velo,
+      popUp: v.pop_up,
+      bb: v.bb,
+      chase: v.chase,
+      barrel: v.barrel,
+      ev90: v.ev90,
+      pull: v.pull,
+      la10_30: v.la_10_30,
+      gb: v.gb,
+    }, hitterBaselines);
+    return {
+      id: row.id,
+      patch: {
+        contact_score: round2(ratings.contactScore),
+        line_drive_score: round2(ratings.lineDriveScore),
+        avg_ev_score: round2(ratings.avgEVScore),
+        pop_up_score: round2(ratings.popUpScore),
+        bb_score: round2(ratings.bbScore),
+        chase_score: round2(ratings.chaseScore),
+        barrel_score: round2(ratings.barrelScore),
+        ev90_score: round2(ratings.ev90Score),
+        pull_score: round2(ratings.pullScore),
+        la_score: round2(ratings.laScore),
+        gb_score: round2(ratings.gbScore),
+        ba_plus: round2(ratings.baPlus),
+        obp_plus: round2(ratings.obpPlus),
+        iso_plus: round2(ratings.isoPlus),
+        overall_plus: round2(ratings.overallPlus),
+        combined_used: blended.combined,
+        combined_pa: blended.combined ? blended.totalPa : null,
+        combined_seasons: blended.combined ? blended.seasonsUsed.join(",") : null,
+      } as any,
+    };
+  });
+
+  // Write updates with bounded concurrency (50 in flight at a time).
+  console.log(`[computeAndStoreHitterScores] Writing ${updates.length} updates...`);
+  await runWithConcurrency(updates, 50, async (u) => {
+    const { error: updateErr } = await supabase
+      .from("Hitter Master")
+      .update(u.patch)
+      .eq("id", u.id);
+    if (updateErr) {
+      console.error(`Failed to update hitter ${u.id}:`, updateErr);
+      errors++;
+    } else {
+      updated++;
+    }
+  });
 
   return { updated, errors };
 }
@@ -161,88 +327,102 @@ export async function computeAndStoreHitterScores(season = 2025): Promise<{ upda
 export async function computeAndStorePitchingScores(season = 2025): Promise<{ updated: number; errors: number }> {
   let updated = 0;
   let errors = 0;
-  let from = 0;
-  const pageSize = 500;
 
-  // Fetch season-specific baselines once before processing
   const { pitcher: pitcherBaselines } = await fetchSeasonBaselines(season);
   console.log(`[computeAndStorePitchingScores] Using baselines for ${season}:`, pitcherBaselines);
 
+  console.log(`[computeAndStorePitchingScores] Pre-fetching prior seasons (< ${season})...`);
+  const priorRows = await fetchAllPrior("Pitching Master", PITCHER_PRIOR_SELECT, season);
+  const priorMap = new Map<string, any[]>();
+  for (const r of priorRows) {
+    const sid = (r as any).source_player_id;
+    if (!sid) continue;
+    if (!priorMap.has(sid)) priorMap.set(sid, []);
+    priorMap.get(sid)!.push(r);
+  }
+  for (const arr of priorMap.values()) arr.sort((a, b) => Number(b.Season) - Number(a.Season));
+  console.log(`[computeAndStorePitchingScores] Indexed ${priorRows.length} prior rows for ${priorMap.size} players`);
+
+  console.log(`[computeAndStorePitchingScores] Fetching ${season} rows...`);
+  const currentRows: any[] = [];
+  let from = 0;
+  const readPageSize = 1000;
   while (true) {
     const { data: rows, error } = await supabase
       .from("Pitching Master")
-      .select("id, source_player_id, IP, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, \"90th_vel\", h_pull_pct, la_10_30_pct, stuff_plus")
+      .select("id, source_player_id, Season, IP, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, \"90th_vel\", h_pull_pct, la_10_30_pct, stuff_plus")
       .eq("Season", season)
       .order("id", { ascending: true })
-      .range(from, from + pageSize - 1);
-
+      .range(from, from + readPageSize - 1);
     if (error) throw error;
     if (!rows || rows.length === 0) break;
-
-    for (const row of rows) {
-      // Low-IP pitchers get blended stats from prior seasons
-      const blended = await getBlendedPitcherStats(
-        (row as any).source_player_id ?? null,
-        season,
-        row,
-      );
-      const v = blended.values;
-      const ratings = computePitchingPowerRatings({
-        miss_pct: v.miss_pct,
-        bb_pct: v.bb_pct,
-        hard_hit_pct: v.hard_hit_pct,
-        in_zone_whiff_pct: v.in_zone_whiff_pct,
-        chase_pct: v.chase_pct,
-        barrel_pct: v.barrel_pct,
-        line_pct: v.line_pct,
-        exit_vel: v.exit_vel,
-        ground_pct: v.ground_pct,
-        in_zone_pct: v.in_zone_pct,
-        vel_90th: (v as any)["90th_vel"],
-        h_pull_pct: v.h_pull_pct,
-        la_10_30_pct: v.la_10_30_pct,
-      }, v.stuff_plus ?? null, pitcherBaselines);
-
-      const { error: updateErr } = await supabase
-        .from("Pitching Master")
-        .update({
-          whiff_score: round2(ratings.whiffScore),
-          bb_score: round2(ratings.bbScore),
-          hh_score: round2(ratings.hhScore),
-          iz_whiff_score: round2(ratings.izWhiffScore),
-          chase_score: round2(ratings.chaseScore),
-          barrel_score: round2(ratings.barrelScore),
-          ld_score: round2(ratings.ldScore),
-          ev_score: round2(ratings.evScore),
-          gb_score: round2(ratings.gbScore),
-          iz_score: round2(ratings.izScore),
-          ev90_score: round2(ratings.ev90Score),
-          pull_score: round2(ratings.pullScore),
-          la_score: round2(ratings.laScore),
-          era_pr_plus: round2(ratings.eraPrPlus),
-          fip_pr_plus: round2(ratings.fipPrPlus),
-          whip_pr_plus: round2(ratings.whipPrPlus),
-          k9_pr_plus: round2(ratings.k9PrPlus),
-          bb9_pr_plus: round2(ratings.bb9PrPlus),
-          hr9_pr_plus: round2(ratings.hr9PrPlus),
-          overall_pr_plus: round2(ratings.overallPrPlus),
-          combined_used: blended.combined,
-          combined_ip: blended.combined ? blended.totalIp : null,
-          combined_seasons: blended.combined ? blended.seasonsUsed.join(",") : null,
-        })
-        .eq("id", row.id);
-
-      if (updateErr) {
-        console.error(`Failed to update pitcher ${row.id}:`, updateErr);
-        errors++;
-      } else {
-        updated++;
-      }
-    }
-
-    if (rows.length < pageSize) break;
-    from += pageSize;
+    currentRows.push(...rows);
+    if (rows.length < readPageSize) break;
+    from += readPageSize;
   }
+  console.log(`[computeAndStorePitchingScores] Computing scores for ${currentRows.length} rows...`);
+
+  const updates = currentRows.map((row) => {
+    const blended = blendPitcherSync((row as any).source_player_id ?? null, row, priorMap);
+    const v = blended.values;
+    const ratings = computePitchingPowerRatings({
+      miss_pct: v.miss_pct,
+      bb_pct: v.bb_pct,
+      hard_hit_pct: v.hard_hit_pct,
+      in_zone_whiff_pct: v.in_zone_whiff_pct,
+      chase_pct: v.chase_pct,
+      barrel_pct: v.barrel_pct,
+      line_pct: v.line_pct,
+      exit_vel: v.exit_vel,
+      ground_pct: v.ground_pct,
+      in_zone_pct: v.in_zone_pct,
+      vel_90th: (v as any)["90th_vel"],
+      h_pull_pct: v.h_pull_pct,
+      la_10_30_pct: v.la_10_30_pct,
+    }, v.stuff_plus ?? null, pitcherBaselines);
+    return {
+      id: row.id,
+      patch: {
+        whiff_score: round2(ratings.whiffScore),
+        bb_score: round2(ratings.bbScore),
+        hh_score: round2(ratings.hhScore),
+        iz_whiff_score: round2(ratings.izWhiffScore),
+        chase_score: round2(ratings.chaseScore),
+        barrel_score: round2(ratings.barrelScore),
+        ld_score: round2(ratings.ldScore),
+        ev_score: round2(ratings.evScore),
+        gb_score: round2(ratings.gbScore),
+        iz_score: round2(ratings.izScore),
+        ev90_score: round2(ratings.ev90Score),
+        pull_score: round2(ratings.pullScore),
+        la_score: round2(ratings.laScore),
+        era_pr_plus: round2(ratings.eraPrPlus),
+        fip_pr_plus: round2(ratings.fipPrPlus),
+        whip_pr_plus: round2(ratings.whipPrPlus),
+        k9_pr_plus: round2(ratings.k9PrPlus),
+        bb9_pr_plus: round2(ratings.bb9PrPlus),
+        hr9_pr_plus: round2(ratings.hr9PrPlus),
+        overall_pr_plus: round2(ratings.overallPrPlus),
+        combined_used: blended.combined,
+        combined_ip: blended.combined ? blended.totalIp : null,
+        combined_seasons: blended.combined ? blended.seasonsUsed.join(",") : null,
+      },
+    };
+  });
+
+  console.log(`[computeAndStorePitchingScores] Writing ${updates.length} updates...`);
+  await runWithConcurrency(updates, 50, async (u) => {
+    const { error: updateErr } = await supabase
+      .from("Pitching Master")
+      .update(u.patch)
+      .eq("id", u.id);
+    if (updateErr) {
+      console.error(`Failed to update pitcher ${u.id}:`, updateErr);
+      errors++;
+    } else {
+      updated++;
+    }
+  });
 
   return { updated, errors };
 }

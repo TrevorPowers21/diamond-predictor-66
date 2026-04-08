@@ -124,6 +124,8 @@ function ImportHistoricalHittersButton() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="2026">2026</SelectItem>
+            <SelectItem value="2025">2025</SelectItem>
             <SelectItem value="2024">2024</SelectItem>
             <SelectItem value="2023">2023</SelectItem>
             <SelectItem value="2022">2022</SelectItem>
@@ -210,6 +212,8 @@ function ImportHistoricalPitchersButton() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="2026">2026</SelectItem>
+            <SelectItem value="2025">2025</SelectItem>
             <SelectItem value="2024">2024</SelectItem>
             <SelectItem value="2023">2023</SelectItem>
             <SelectItem value="2022">2022</SelectItem>
@@ -5528,30 +5532,28 @@ function QuickActionsTab() {
 
       const norm = (v: string) => (v || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 
-      // Fetch ALL existing pitching power ratings (paginated)
-      const allRows: Array<{ id: string; player_name: string; team: string }> = [];
+      // Fetch ALL existing 2025 Pitching Master rows (paginated)
+      const allRows: Array<{ id: string; playerFullName: string; Team: string }> = [];
       let from = 0;
       while (true) {
         const { data, error } = await supabase
-          .from("pitching_power_ratings_storage")
-          .select("id, player_name, team")
-          .eq("season", 2025)
+          .from("Pitching Master")
+          .select("id, playerFullName, Team")
+          .eq("Season", 2025)
           .range(from, from + 999);
         if (error) throw error;
-        allRows.push(...(data || []));
+        allRows.push(...((data || []) as any));
         if (!data || data.length < 1000) break;
         from += 1000;
       }
 
       // Build normalized lookup: "normalized_name|normalized_team" → id
       const lookup = new Map<string, string>();
-      // Also build name-only fallback for cases where team differs slightly
       const nameOnly = new Map<string, string>();
       for (const row of allRows) {
-        const key = `${norm(row.player_name)}|${norm(row.team)}`;
+        const key = `${norm(row.playerFullName)}|${norm(row.Team)}`;
         lookup.set(key, row.id);
-        // Name-only (last resort) — only set if not ambiguous
-        const nk = norm(row.player_name);
+        const nk = norm(row.playerFullName);
         if (nameOnly.has(nk)) {
           nameOnly.set(nk, "__ambiguous__");
         } else {
@@ -5589,16 +5591,19 @@ function QuickActionsTab() {
         updates.push({ id: matchId, stuff_plus: stuffVal });
       }
 
-      // Execute updates — also null out derived scores/PR+ so they get recalculated from fresh stuff_plus
+      // Execute updates — also null out derived PR+ so Compute Scores recalculates from fresh stuff_plus
       for (const upd of updates) {
         const { error: updErr } = await supabase
-          .from("pitching_power_ratings_storage")
+          .from("Pitching Master")
           .update({
             stuff_plus: upd.stuff_plus,
-            stuff_score: null,
             era_pr_plus: null,
             fip_pr_plus: null,
+            whip_pr_plus: null,
             k9_pr_plus: null,
+            bb9_pr_plus: null,
+            hr9_pr_plus: null,
+            overall_pr_plus: null,
           })
           .eq("id", upd.id);
         if (updErr) { console.error(`Error updating id ${upd.id}:`, updErr); skipped++; continue; }
@@ -6604,168 +6609,6 @@ function QuickActionsTab() {
       <Card>
         <CardContent className="pt-6 space-y-4">
           <div>
-            <p className="font-medium">Sync Player Profile Teams to Teams Table</p>
-            <p className="text-sm text-muted-foreground">
-              Match player team/conference to valid Teams-table names using 2025 storage + aliases. Ambiguous or unmatched entries are left blank for manual review.
-            </p>
-          </div>
-          <Button onClick={sync2025TeamsForNonTransfers} disabled={syncTeamsLoading} variant="outline" className="gap-2">
-            {syncTeamsLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            {syncTeamsLoading ? "Syncing Teams…" : "Sync Team Names"}
-          </Button>
-          {syncTeamsResult && (
-            <p className="text-sm text-muted-foreground">
-              Updated: {syncTeamsResult.updated}, cleared to blank: {syncTeamsResult.clearedUnmatched}, skipped ambiguous: {syncTeamsResult.skippedAmbiguous}, unmatched: {syncTeamsResult.unmatched}
-            </p>
-          )}
-          {syncTeamsResult && syncTeamsResult.unresolvedSample.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              Unresolved sample: {syncTeamsResult.unresolvedSample.join(", ")}
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="pt-6 space-y-4">
-          <div>
-            <p className="font-medium">Sync 2025 Hitter Seed Data to Supabase</p>
-            <p className="text-sm text-muted-foreground">
-              Uploads the local 2025 hitter stats and power ratings JSON seed files to Supabase so all networks can access them. Safe to re-run — uses upsert.
-            </p>
-          </div>
-          <Button onClick={syncSeedDataToSupabase} disabled={syncSeedLoading} variant="outline" className="gap-2">
-            {syncSeedLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            {syncSeedLoading ? "Syncing Seed Data…" : "Sync 2025 Hitter Seed Data"}
-          </Button>
-          {syncSeedResult && (
-            <p className="text-sm text-muted-foreground">
-              Synced {syncSeedResult.stats} hitter stat rows and {syncSeedResult.power} power rating rows. Linked {syncSeedResult.linked} rows to player IDs.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="pt-6 space-y-4">
-          <div>
-            <p className="font-medium">Import Master 2025 Hitter CSV</p>
-            <p className="text-sm text-muted-foreground">
-              Clears all existing 2025 hitter stats and power ratings, then imports fresh from a single master CSV. Links player IDs via source_player_id and name matching.
-            </p>
-          </div>
-          <input
-            ref={masterCsvRef}
-            type="file"
-            accept=".csv"
-            className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
-            disabled={masterCsvLoading}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) importMasterHitterCsv(file);
-            }}
-          />
-          {masterCsvLoading && (
-            <p className="text-sm text-muted-foreground flex items-center gap-2">
-              <RefreshCw className="h-4 w-4 animate-spin" /> Clearing old data and importing master CSV…
-            </p>
-          )}
-          {masterCsvResult && (
-            <p className="text-sm text-muted-foreground">
-              Cleared old data. Imported {masterCsvResult.stats} stat rows and {masterCsvResult.power} power rating rows. Linked {masterCsvResult.linked} to player IDs.
-            </p>
-          )}
-          {masterCsvResult && masterCsvResult.linked < masterCsvResult.stats && (
-            <div className="pt-2 border-t space-y-2">
-              <p className="text-sm font-medium">{masterCsvResult.stats - masterCsvResult.linked} players unlinked — create player records for them?</p>
-              <Button onClick={createMissingPlayers} disabled={createMissingLoading} variant="outline" className="gap-2">
-                {createMissingLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                {createMissingLoading ? "Creating Players…" : "Create Missing Players & Link"}
-              </Button>
-              {createMissingResult && (
-                <p className="text-sm text-muted-foreground">
-                  Created {createMissingResult.created} new player records, linked {createMissingResult.linked} storage rows. {createMissingResult.alreadyLinked} were already linked.
-                </p>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="pt-6 space-y-4">
-          <div>
-            <p className="font-medium">Re-link Storage & Remove Duplicates</p>
-            <p className="text-sm text-muted-foreground">
-              Fixes mismatched player_id links on hitter storage rows. Points all rows to the player record that has predictions, then deletes orphan duplicates. Safe to re-run.
-            </p>
-          </div>
-          <Button onClick={relinkAndDedup} disabled={relinkLoading} variant="outline" className="gap-2">
-            {relinkLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            {relinkLoading ? "Re-linking…" : "Re-link & Dedup Players"}
-          </Button>
-          {relinkResult && (
-            <p className="text-sm text-muted-foreground">
-              Re-linked {relinkResult.relinked} storage rows, deleted {relinkResult.deleted} duplicate player records.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="pt-6 space-y-4">
-          <div>
-            <p className="font-medium">Sync 2025 Pitching Data to Supabase</p>
-            <p className="text-sm text-muted-foreground">
-              Uploads pitching stats and power ratings from localStorage to Supabase so all networks can access them. Safe to re-run — uses upsert.
-            </p>
-          </div>
-          <Button onClick={syncPitchingDataToSupabase} disabled={syncPitchingLoading} variant="outline" className="gap-2">
-            {syncPitchingLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            {syncPitchingLoading ? "Syncing Pitching Data…" : "Sync 2025 Pitching Data"}
-          </Button>
-          {syncPitchingResult && (
-            <p className="text-sm text-muted-foreground">
-              Synced {syncPitchingResult.stats} pitching stat rows and {syncPitchingResult.power} power rating rows.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="pt-6 space-y-4">
-          <div>
-            <p className="font-medium">Import Master 2025 Pitching CSV</p>
-            <p className="text-sm text-muted-foreground">
-              Clears all existing 2025 pitching stats and power ratings, then imports fresh from a single master CSV. Links player IDs via name matching.
-            </p>
-          </div>
-          <input
-            ref={masterPitchingCsvRef}
-            type="file"
-            accept=".csv"
-            className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
-            disabled={masterPitchingLoading}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) importMasterPitchingCsv(file);
-            }}
-          />
-          {masterPitchingLoading && (
-            <p className="text-sm text-muted-foreground flex items-center gap-2">
-              <RefreshCw className="h-4 w-4 animate-spin" /> Clearing old data and importing master pitching CSV…
-            </p>
-          )}
-          {masterPitchingResult && (
-            <p className="text-sm text-muted-foreground">
-              Imported {masterPitchingResult.stats} stat rows and {masterPitchingResult.power} power rating rows. Linked {masterPitchingResult.linked} to player IDs.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="pt-6 space-y-4">
-          <div>
             <p className="font-medium">Sync Master Tables → Players</p>
             <p className="text-sm text-muted-foreground">
               Creates a players row for every hitter and pitcher in Hitter Master / Pitching Master that doesn't already exist. Links by source_player_id. Safe to re-run.
@@ -6824,13 +6667,6 @@ function QuickActionsTab() {
             </p>
           </div>
           <ImportHistoricalPitchersButton />
-          <div className="border-t pt-4">
-            <p className="font-medium">Fix Pitcher EV90 (90th Exit Velo Against)</p>
-            <p className="text-sm text-muted-foreground">
-              Upload a CSV with playerId and 90thExitVel columns. Overwrites the 90th_vel column in 2025 Pitching Master with correct exit velocity data (was incorrectly pitch velocity).
-            </p>
-          </div>
-          <ImportPitcherEv90Button />
         </CardContent>
       </Card>
 
@@ -6839,7 +6675,7 @@ function QuickActionsTab() {
           <div>
             <p className="font-medium">Update Stuff+ from CSV</p>
             <p className="text-sm text-muted-foreground">
-              Upload a CSV with columns: Player Name, Team, Stuff+. Updates only the stuff_plus field in pitching_power_ratings_storage for matching players. Does NOT clear other data.
+              Upload a CSV with columns: Player Name, Team, Stuff+. Updates only the stuff_plus field on 2025 Pitching Master rows for matching players, and nulls out PR+ scores so the next Compute Scores run picks up the new values.
             </p>
           </div>
           <input

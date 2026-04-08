@@ -161,12 +161,6 @@ export async function importHistoricalHittersCsv(csvText: string, season: number
   console.log(`[importHistorical] Parsed ${rows.length} rows for season ${season}`);
   result.teamsUnresolved = [...unresolvedTeams].sort();
 
-  // Safety: never clear 2025 data via historical import
-  if (season === 2025) {
-    result.errors.push("Cannot import over 2025 data with the historical importer. Use the main import instead.");
-    return result;
-  }
-
   // Delete existing data for this season only to avoid duplicates
   console.log(`[importHistorical] Clearing existing ${season} data...`);
   const { error: clearErr } = await supabase

@@ -4,7 +4,14 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
+import { lazy, Suspense } from "react";
 import Index from "./pages/Index";
+
+// Savant — internal-only, gated, lazy-loaded so RSTR IQ users never download it.
+// Do not link to /savant/* from any RSTR IQ nav.
+const SavantRoute = lazy(() => import("@/savant/components/SavantRoute"));
+const SavantIndex = lazy(() => import("@/savant/pages/SavantIndex"));
+const SavantHitterPage = lazy(() => import("@/savant/pages/HitterPage"));
 import TransferPortal from "./pages/TransferPortal";
 import ReturningPlayers from "./pages/ReturningPlayers";
 import Auth from "./pages/Auth";
@@ -44,6 +51,27 @@ const App = () => (
             <Route path="/dashboard/team-builder" element={<ProtectedRoute><TeamBuilder /></ProtectedRoute>} />
             <Route path="/dashboard/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
             <Route path="/dashboard/*" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            {/* Savant — internal only. Gated by SavantRoute (auth + email allowlist). */}
+            <Route
+              path="/savant"
+              element={
+                <ProtectedRoute>
+                  <Suspense fallback={null}>
+                    <SavantRoute><SavantIndex /></SavantRoute>
+                  </Suspense>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/savant/hitter/:id"
+              element={
+                <ProtectedRoute>
+                  <Suspense fallback={null}>
+                    <SavantRoute><SavantHitterPage /></SavantRoute>
+                  </Suspense>
+                </ProtectedRoute>
+              }
+            />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

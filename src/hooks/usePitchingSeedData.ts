@@ -52,6 +52,8 @@ export function usePitchingSeedData(season = 2025) {
           .from("Pitching Master")
           .select("*")
           .eq("Season", season)
+          .gte("IP", 5)
+          .not("Role", "in", "(C,1B,2B,3B,SS,OF,LF,CF,RF,DH,IF,UT)")
           .range(from, from + pageSize - 1);
         if (error) throw error;
         all.push(...(data || []));

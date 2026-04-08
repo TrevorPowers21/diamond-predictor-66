@@ -1205,6 +1205,30 @@ export default function PitcherProfile() {
     );
   }
 
+  const activePitcherRow = isHistoricalView ? historicalRow : currentPitcherRow;
+  const activeIp = (activePitcherRow as any)?.IP;
+  if (activePitcherRow != null && (activeIp == null || Number(activeIp) === 0)) {
+    return (
+      <DashboardLayout>
+        <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <h2 className="text-2xl font-bold tracking-tight">
+              {player?.first_name} {player?.last_name}
+            </h2>
+          </div>
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground">
+              No pitching stats for the {effectiveSeason} season.
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout>
       <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
