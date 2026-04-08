@@ -446,6 +446,38 @@ export default function PitcherProfile() {
     },
   });
 
+  // Fetch all Pitching Master rows across seasons (linked by source_player_id)
+  const { data: pitcherMasterSeasons = [] } = useQuery({
+    queryKey: ["pitcher-profile-master-seasons", id, (player as any)?.source_player_id],
+    queryFn: async () => {
+      const sourceId = (player as any)?.source_player_id;
+      if (!sourceId) return [];
+      const { data, error } = await supabase
+        .from("Pitching Master")
+        .select("*")
+        .eq("source_player_id", sourceId)
+        .order("Season", { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!player && !!(player as any)?.source_player_id,
+  });
+
+  const availableSeasons = useMemo(() => {
+    const set = new Set<number>();
+    for (const r of pitcherMasterSeasons) if ((r as any).Season != null) set.add(Number((r as any).Season));
+    for (const s of seasonStats) if ((s as any).season != null) set.add(Number((s as any).season));
+    return [...set].sort((a, b) => b - a);
+  }, [pitcherMasterSeasons, seasonStats]);
+
+  const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  const defaultSeason = availableSeasons.includes(2025) ? 2025 : (availableSeasons[0] ?? 2025);
+  const effectiveSeason = selectedSeason ?? defaultSeason;
+  const isHistoricalView = effectiveSeason !== 2025;
+  const historicalRow = useMemo(() => {
+    return (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason) || null;
+  }, [pitcherMasterSeasons, effectiveSeason]);
+
   const { data: predictions = [] } = useQuery({
     queryKey: ["pitcher-profile-predictions", id],
     enabled: !!id && isDbRoute,
@@ -1213,7 +1245,24 @@ export default function PitcherProfile() {
               })()}
             </div>
           </div>
-          {player && (
+          {availableSeasons.length > 1 && (
+            <Select value={String(effectiveSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
+              <SelectTrigger className="h-9 w-[80px] text-sm font-semibold">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {availableSeasons.map((y) => (
+                  <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {isHistoricalView && (
+            <Badge className="bg-muted text-muted-foreground border-0 uppercase tracking-wider text-[10px] font-semibold">
+              Historical
+            </Badge>
+          )}
+          {!isHistoricalView && player && (
             <Button
               variant={isOnBoard(player.id) ? "default" : "outline"}
               size="sm"
@@ -1231,6 +1280,13 @@ export default function PitcherProfile() {
           )}
         </div>
 
+        {isHistoricalView ? (
+          <HistoricalPitcherView
+            row={historicalRow}
+            season={effectiveSeason}
+            isAdmin={isAdmin}
+          />
+        ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-1 space-y-4">
             <Card>
@@ -1483,7 +1539,194 @@ export default function PitcherProfile() {
             ) : null}
           </div>
         </div>
+        )}
       </div>
     </DashboardLayout>
+  );
+}
+
+// ─── Historical Pitcher View ─────────────────────────────────────────
+function HistoricalPitcherView({
+  row, season, isAdmin,
+}: {
+  row: any | null;
+  season: number;
+  isAdmin: boolean;
+}) {
+  if (!row) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center text-muted-foreground">
+          No {season} season data available for this pitcher.
+        </CardContent>
+      </Card>
+    );
+  }
+  const fmt = (v: number | null | undefined, d = 2) => v == null ? "—" : Number(v).toFixed(d);
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-3">
+      {/* Left: pitcher info */}
+      <div className="lg:col-span-1 space-y-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">{season} Season</CardTitle>
+            <CardDescription className="text-xs">Actual stats and scouting grades</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-0">
+            <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">Team</span><span className="text-sm font-semibold">{row.Team || "—"}</span></div>
+            <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">Conference</span><span className="text-sm font-semibold">{row.Conference || "—"}</span></div>
+            <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">Throws</span><span className="text-sm font-semibold">{row.ThrowHand || "—"}</span></div>
+            <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">IP</span><span className="text-sm font-semibold tabular-nums">{row.IP == null ? "—" : Number(row.IP).toFixed(1)}</span></div>
+            <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">G</span><span className="text-sm font-semibold tabular-nums">{row.G ?? "—"}</span></div>
+            <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">GS</span><span className="text-sm font-semibold tabular-nums">{row.GS ?? "—"}</span></div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Middle + right: stats and scouting */}
+      <div className="lg:col-span-2 space-y-4">
+        {/* Headline pitching stats */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">{season} Pitching Stats</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">ERA</div>
+                <div className="text-2xl font-bold mt-1 tabular-nums">{fmt(row.ERA)}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">FIP</div>
+                <div className="text-2xl font-bold mt-1 tabular-nums">{fmt(row.FIP)}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">WHIP</div>
+                <div className="text-2xl font-bold mt-1 tabular-nums">{fmt(row.WHIP)}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">K/9</div>
+                <div className="text-2xl font-bold mt-1 tabular-nums">{fmt(row.K9)}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">BB/9</div>
+                <div className="text-2xl font-bold mt-1 tabular-nums">{fmt(row.BB9)}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">HR/9</div>
+                <div className="text-2xl font-bold mt-1 tabular-nums">{fmt(row.HR9)}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Scouting grades — public 4 + admin extras (mirrors hitter profile) */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">{season} Scouting Grades</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <PitcherScoutGrade label="Whf" value={row.whiff_score} fullLabel="Whiff%" />
+              <PitcherScoutGrade label="BB%" value={row.bb_score} fullLabel="BB%" />
+              <PitcherScoutGrade label="Brl" value={row.barrel_score} fullLabel="Barrel%" />
+              <PitcherScoutGrade label="HH" value={row.hh_score} fullLabel="Hard Hit%" />
+            </div>
+            {isAdmin && (
+              <>
+                <Separator className="my-4" />
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-sm font-semibold text-primary">Internal Power Ratings</span>
+                  <Badge variant="outline" className="text-xs">Admin Only</Badge>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                  <div className="rounded-lg border border-border bg-muted/50 p-3">
+                    <div className="text-xs font-medium text-muted-foreground">Overall PR+</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.overall_pr_plus != null ? Math.round(row.overall_pr_plus) : "—"}</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/50 p-3">
+                    <div className="text-xs font-medium text-muted-foreground">ERA PR+</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.era_pr_plus != null ? Math.round(row.era_pr_plus) : "—"}</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/50 p-3">
+                    <div className="text-xs font-medium text-muted-foreground">FIP PR+</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.fip_pr_plus != null ? Math.round(row.fip_pr_plus) : "—"}</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/50 p-3">
+                    <div className="text-xs font-medium text-muted-foreground">WHIP PR+</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.whip_pr_plus != null ? Math.round(row.whip_pr_plus) : "—"}</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/50 p-3">
+                    <div className="text-xs font-medium text-muted-foreground">K/9 PR+</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.k9_pr_plus != null ? Math.round(row.k9_pr_plus) : "—"}</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/50 p-3">
+                    <div className="text-xs font-medium text-muted-foreground">BB/9 PR+</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.bb9_pr_plus != null ? Math.round(row.bb9_pr_plus) : "—"}</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/50 p-3">
+                    <div className="text-xs font-medium text-muted-foreground">HR/9 PR+</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.hr9_pr_plus != null ? Math.round(row.hr9_pr_plus) : "—"}</div>
+                  </div>
+                </div>
+                <Separator className="my-4" />
+                <div className="text-xs font-medium text-muted-foreground mb-3">{season} Input Metrics</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                  <PitchInputMetric label="Whiff %" value={row.miss_pct} suffix="%" />
+                  <PitchInputMetric label="Chase %" value={row.chase_pct} suffix="%" />
+                  <PitchInputMetric label="In-Zone Whiff %" value={row.in_zone_whiff_pct} suffix="%" />
+                  <PitchInputMetric label="BB %" value={row.bb_pct} suffix="%" />
+                  <PitchInputMetric label="Barrel %" value={row.barrel_pct} suffix="%" />
+                  <PitchInputMetric label="Hard Hit %" value={row.hard_hit_pct} suffix="%" />
+                  <PitchInputMetric label="Avg Exit Velo" value={row.exit_vel} suffix=" mph" />
+                  <PitchInputMetric label="EV90 Against" value={row["90th_vel"]} suffix=" mph" />
+                  <PitchInputMetric label="GB %" value={row.ground_pct} suffix="%" />
+                  <PitchInputMetric label="In-Zone %" value={row.in_zone_pct} suffix="%" />
+                  <PitchInputMetric label="Pull % Against" value={row.h_pull_pct} suffix="%" />
+                  <PitchInputMetric label="LA 10-30 %" value={row.la_10_30_pct} suffix="%" />
+                  <PitchInputMetric label="Line Drive %" value={row.line_pct} suffix="%" />
+                  <PitchInputMetric label="Stuff+" value={row.stuff_plus} />
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function PitcherScoutGrade({ label, value, fullLabel }: { label: string; value: number | null; fullLabel: string }) {
+  if (value == null) {
+    return (
+      <div className="rounded-lg border border-border bg-muted/30 p-3 text-center" title={fullLabel}>
+        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+        <div className="text-2xl font-bold mt-1 text-muted-foreground">—</div>
+      </div>
+    );
+  }
+  const tier =
+    value >= 80
+      ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]"
+      : value >= 50
+        ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]"
+        : "bg-destructive/15 text-destructive border-destructive/30";
+  return (
+    <div className={`rounded-lg border p-3 text-center ${tier}`} title={fullLabel}>
+      <div className="text-xs font-semibold uppercase tracking-wider opacity-80">{label}</div>
+      <div className="text-2xl font-bold mt-1 tabular-nums">{Math.round(value)}</div>
+    </div>
+  );
+}
+
+function PitchInputMetric({ label, value, suffix }: { label: string; value: number | null | undefined; suffix?: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/50 p-3">
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <div className="text-xl font-bold font-mono mt-1">
+        {value == null ? "—" : `${Number(value).toFixed(1)}${suffix || ""}`}
+      </div>
+    </div>
   );
 }

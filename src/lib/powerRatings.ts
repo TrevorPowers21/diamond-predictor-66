@@ -22,6 +22,9 @@ export const scoreFromNormal = (x: number | null, mean: number, sd: number, inve
 };
 
 // ─── Hitter sub-metric defaults (NCAA D1 2025) ────────────────────────
+// These are the FALLBACK values if no per-season baseline is provided.
+// The scoring engine should pass season-specific baselines from the
+// `ncaa_averages` table for accurate per-year scoring.
 const HITTER_DEFAULTS = {
   contact:    { mean: 77.1, sd: 6.6 },
   lineDrive:  { mean: 20.9, sd: 4.31 },
@@ -35,6 +38,20 @@ const HITTER_DEFAULTS = {
   la10_30:    { mean: 29,   sd: 6.81 },
   gb:         { mean: 43.2, sd: 8.0,  invert: true },
 } as const;
+
+export type HitterBaselines = Partial<{
+  contact:    { mean: number; sd: number };
+  lineDrive:  { mean: number; sd: number };
+  avgExitVelo:{ mean: number; sd: number };
+  popUp:      { mean: number; sd: number };
+  bb:         { mean: number; sd: number };
+  chase:      { mean: number; sd: number };
+  barrel:     { mean: number; sd: number };
+  ev90:       { mean: number; sd: number };
+  pull:       { mean: number; sd: number };
+  la10_30:    { mean: number; sd: number };
+  gb:         { mean: number; sd: number };
+}>;
 
 export type HitterSubMetrics = {
   contact: number | null;
@@ -71,20 +88,35 @@ export type HitterPowerRatings = HitterScores & {
   overallPlus: number | null;
 };
 
-/** Compute all hitter power ratings from raw sub-metrics */
-export function computeHitterPowerRatings(raw: HitterSubMetrics): HitterPowerRatings {
-  const d = HITTER_DEFAULTS;
-  const contactScore = scoreFromNormal(raw.contact, d.contact.mean, d.contact.sd);
-  const lineDriveScore = scoreFromNormal(raw.lineDrive, d.lineDrive.mean, d.lineDrive.sd);
-  const avgEVScore = scoreFromNormal(raw.avgExitVelo, d.avgExitVelo.mean, d.avgExitVelo.sd);
-  const popUpScore = scoreFromNormal(raw.popUp, d.popUp.mean, d.popUp.sd, true);
-  const bbScore = scoreFromNormal(raw.bb, d.bb.mean, d.bb.sd);
-  const chaseScore = scoreFromNormal(raw.chase, d.chase.mean, d.chase.sd, true);
-  const barrelScore = scoreFromNormal(raw.barrel, d.barrel.mean, d.barrel.sd);
-  const ev90Score = scoreFromNormal(raw.ev90, d.ev90.mean, d.ev90.sd);
-  const pullScore = scoreFromNormal(raw.pull, d.pull.mean, d.pull.sd);
-  const laScore = scoreFromNormal(raw.la10_30, d.la10_30.mean, d.la10_30.sd);
-  const gbScore = scoreFromNormal(raw.gb, d.gb.mean, d.gb.sd, true);
+/** Compute all hitter power ratings from raw sub-metrics.
+ *  Pass `baselines` to use season-specific NCAA averages — anything not
+ *  provided falls back to HITTER_DEFAULTS (2025 hardcoded constants). */
+export function computeHitterPowerRatings(raw: HitterSubMetrics, baselines?: HitterBaselines): HitterPowerRatings {
+  // Merge baselines with defaults: per-key fallback, so partial overrides are safe
+  const merge = <K extends keyof typeof HITTER_DEFAULTS>(k: K) => baselines?.[k] ?? HITTER_DEFAULTS[k];
+  const contact = merge("contact");
+  const lineDrive = merge("lineDrive");
+  const avgExitVelo = merge("avgExitVelo");
+  const popUp = merge("popUp");
+  const bb = merge("bb");
+  const chase = merge("chase");
+  const barrel = merge("barrel");
+  const ev90 = merge("ev90");
+  const pull = merge("pull");
+  const la10_30 = merge("la10_30");
+  const gb = merge("gb");
+
+  const contactScore = scoreFromNormal(raw.contact, contact.mean, contact.sd);
+  const lineDriveScore = scoreFromNormal(raw.lineDrive, lineDrive.mean, lineDrive.sd);
+  const avgEVScore = scoreFromNormal(raw.avgExitVelo, avgExitVelo.mean, avgExitVelo.sd);
+  const popUpScore = scoreFromNormal(raw.popUp, popUp.mean, popUp.sd, true);
+  const bbScore = scoreFromNormal(raw.bb, bb.mean, bb.sd);
+  const chaseScore = scoreFromNormal(raw.chase, chase.mean, chase.sd, true);
+  const barrelScore = scoreFromNormal(raw.barrel, barrel.mean, barrel.sd);
+  const ev90Score = scoreFromNormal(raw.ev90, ev90.mean, ev90.sd);
+  const pullScore = scoreFromNormal(raw.pull, pull.mean, pull.sd);
+  const laScore = scoreFromNormal(raw.la10_30, la10_30.mean, la10_30.sd);
+  const gbScore = scoreFromNormal(raw.gb, gb.mean, gb.sd, true);
 
   const baPower = contactScore == null || lineDriveScore == null || avgEVScore == null || popUpScore == null
     ? null : (0.4 * contactScore) + (0.25 * lineDriveScore) + (0.2 * avgEVScore) + (0.15 * popUpScore);
@@ -108,6 +140,7 @@ export function computeHitterPowerRatings(raw: HitterSubMetrics): HitterPowerRat
 }
 
 // ─── Pitching sub-metric defaults (NCAA D1 2025) ──────────────────────
+// Fallback baselines used if no per-season override is provided.
 const PITCHING_DEFAULTS = {
   miss_pct:          { mean: 22.9,  sd: 5.476 },
   bb_pct:            { mean: 11.3,  sd: 2.920, invert: true },
@@ -123,6 +156,23 @@ const PITCHING_DEFAULTS = {
   h_pull_pct:        { mean: 36.5,  sd: 5.357, invert: true },
   la_10_30_pct:      { mean: 29,    sd: 5.774, invert: true },
 } as const;
+
+export type PitchingBaselines = Partial<{
+  miss_pct:          { mean: number; sd: number };
+  bb_pct:            { mean: number; sd: number };
+  hard_hit_pct:      { mean: number; sd: number };
+  in_zone_whiff_pct: { mean: number; sd: number };
+  chase_pct:         { mean: number; sd: number };
+  barrel_pct:        { mean: number; sd: number };
+  line_pct:          { mean: number; sd: number };
+  exit_vel:          { mean: number; sd: number };
+  ground_pct:        { mean: number; sd: number };
+  in_zone_pct:       { mean: number; sd: number };
+  vel_90th:          { mean: number; sd: number };
+  h_pull_pct:        { mean: number; sd: number };
+  la_10_30_pct:      { mean: number; sd: number };
+  stuff_plus:        { mean: number; sd: number };
+}>;
 
 export type PitchingSubMetrics = {
   miss_pct: number | null;
@@ -156,23 +206,39 @@ export type PitchingScores = {
   laScore: number | null;
 };
 
-/** Compute pitching percentile scores from raw sub-metrics */
-export function computePitchingScores(raw: PitchingSubMetrics): PitchingScores {
-  const d = PITCHING_DEFAULTS;
+/** Compute pitching percentile scores from raw sub-metrics.
+ *  Pass `baselines` to use season-specific NCAA averages — anything not
+ *  provided falls back to PITCHING_DEFAULTS. */
+export function computePitchingScores(raw: PitchingSubMetrics, baselines?: PitchingBaselines): PitchingScores {
+  const merge = <K extends keyof typeof PITCHING_DEFAULTS>(k: K) => baselines?.[k] ?? PITCHING_DEFAULTS[k];
+  const miss = merge("miss_pct");
+  const bb = merge("bb_pct");
+  const hh = merge("hard_hit_pct");
+  const izWhiff = merge("in_zone_whiff_pct");
+  const chase = merge("chase_pct");
+  const barrel = merge("barrel_pct");
+  const line = merge("line_pct");
+  const exitVel = merge("exit_vel");
+  const ground = merge("ground_pct");
+  const inZone = merge("in_zone_pct");
+  const vel90 = merge("vel_90th");
+  const hPull = merge("h_pull_pct");
+  const la1030 = merge("la_10_30_pct");
+
   return {
-    whiffScore:   scoreFromNormal(raw.miss_pct, d.miss_pct.mean, d.miss_pct.sd),
-    bbScore:      scoreFromNormal(raw.bb_pct, d.bb_pct.mean, d.bb_pct.sd, true),
-    hhScore:      scoreFromNormal(raw.hard_hit_pct, d.hard_hit_pct.mean, d.hard_hit_pct.sd, true),
-    izWhiffScore: scoreFromNormal(raw.in_zone_whiff_pct, d.in_zone_whiff_pct.mean, d.in_zone_whiff_pct.sd),
-    chaseScore:   scoreFromNormal(raw.chase_pct, d.chase_pct.mean, d.chase_pct.sd),
-    barrelScore:  scoreFromNormal(raw.barrel_pct, d.barrel_pct.mean, d.barrel_pct.sd, true),
-    ldScore:      scoreFromNormal(raw.line_pct, d.line_pct.mean, d.line_pct.sd, true),
-    evScore:      scoreFromNormal(raw.exit_vel, d.exit_vel.mean, d.exit_vel.sd, true),
-    gbScore:      scoreFromNormal(raw.ground_pct, d.ground_pct.mean, d.ground_pct.sd),
-    izScore:      scoreFromNormal(raw.in_zone_pct, d.in_zone_pct.mean, d.in_zone_pct.sd),
-    ev90Score:    scoreFromNormal(raw.vel_90th, d.vel_90th.mean, d.vel_90th.sd),
-    pullScore:    scoreFromNormal(raw.h_pull_pct, d.h_pull_pct.mean, d.h_pull_pct.sd, true),
-    laScore:      scoreFromNormal(raw.la_10_30_pct, d.la_10_30_pct.mean, d.la_10_30_pct.sd, true),
+    whiffScore:   scoreFromNormal(raw.miss_pct, miss.mean, miss.sd),
+    bbScore:      scoreFromNormal(raw.bb_pct, bb.mean, bb.sd, true),
+    hhScore:      scoreFromNormal(raw.hard_hit_pct, hh.mean, hh.sd, true),
+    izWhiffScore: scoreFromNormal(raw.in_zone_whiff_pct, izWhiff.mean, izWhiff.sd),
+    chaseScore:   scoreFromNormal(raw.chase_pct, chase.mean, chase.sd),
+    barrelScore:  scoreFromNormal(raw.barrel_pct, barrel.mean, barrel.sd, true),
+    ldScore:      scoreFromNormal(raw.line_pct, line.mean, line.sd, true),
+    evScore:      scoreFromNormal(raw.exit_vel, exitVel.mean, exitVel.sd, true),
+    gbScore:      scoreFromNormal(raw.ground_pct, ground.mean, ground.sd),
+    izScore:      scoreFromNormal(raw.in_zone_pct, inZone.mean, inZone.sd),
+    ev90Score:    scoreFromNormal(raw.vel_90th, vel90.mean, vel90.sd),
+    pullScore:    scoreFromNormal(raw.h_pull_pct, hPull.mean, hPull.sd, true),
+    laScore:      scoreFromNormal(raw.la_10_30_pct, la1030.mean, la1030.sd, true),
   };
 }
 
@@ -199,11 +265,19 @@ export type PitchingPowerRatings = PitchingScores & {
 /** Compute pitching power ratings from raw sub-metrics. Stuff+ is optional —
  *  when missing, its weight redistributes proportionally to the other components
  *  rather than defaulting to a 50 (average) score, which previously suppressed
- *  ratings for players from sources that don't track Stuff+ (e.g., historical years). */
-export function computePitchingPowerRatings(raw: PitchingSubMetrics, stuffPlus?: number | null): PitchingPowerRatings {
-  const scores = computePitchingScores(raw);
+ *  ratings for players from sources that don't track Stuff+ (e.g., historical years).
+ *  Pass `baselines` to use season-specific NCAA averages from `ncaa_averages`. */
+export function computePitchingPowerRatings(
+  raw: PitchingSubMetrics,
+  stuffPlus?: number | null,
+  baselines?: PitchingBaselines,
+): PitchingPowerRatings {
+  const scores = computePitchingScores(raw, baselines);
   const s = (v: number | null) => v ?? 50; // fallback to 50 (average) when null
-  const stuffScore = stuffPlus != null ? scoreFromNormal(stuffPlus, 100, 3.968) : null;
+  // Stuff+ baseline: use override if provided, else default to mean=100, sd=3.968
+  const stuffMean = baselines?.stuff_plus?.mean ?? 100;
+  const stuffSd = baselines?.stuff_plus?.sd ?? 3.968;
+  const stuffScore = stuffPlus != null ? scoreFromNormal(stuffPlus, stuffMean, stuffSd) : null;
 
   // Weighted average that ignores items with null values entirely (instead of
   // substituting 50). The remaining weights renormalize automatically.

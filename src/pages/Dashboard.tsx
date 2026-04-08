@@ -305,12 +305,14 @@ export default function Dashboard() {
                 ) : (
                   targetBoard.map((row) => {
                     const initials = `${(row.first_name?.[0] || "").toUpperCase()}${(row.last_name?.[0] || "").toUpperCase()}`;
+                    // Players on the board with NOT IN PORTAL status display as WATCHING
+                    // (since they're on the board, they're being watched by the coach)
+                    const displayStatus = row.portal_status === "NOT IN PORTAL" ? "WATCHING" : row.portal_status;
                     const statusConfig = {
                       "IN PORTAL": { bg: "bg-emerald-500/10", text: "text-emerald-600", icon: LogIn, label: "In Portal" },
                       "COMMITTED": { bg: "bg-blue-500/10", text: "text-blue-600", icon: CheckCircle, label: "Committed" },
                       "WATCHING": { bg: "bg-[#D4AF37]/10", text: "text-[#D4AF37]", icon: Eye, label: "Watching" },
-                      "NOT IN PORTAL": { bg: "bg-muted", text: "text-muted-foreground", icon: Eye, label: "Not In Portal" },
-                    }[row.portal_status] || { bg: "bg-muted", text: "text-muted-foreground", icon: Eye, label: "Not In Portal" };
+                    }[displayStatus] || { bg: "bg-[#D4AF37]/10", text: "text-[#D4AF37]", icon: Eye, label: "Watching" };
                     const StatusIcon = statusConfig.icon;
                     return (
                       <div

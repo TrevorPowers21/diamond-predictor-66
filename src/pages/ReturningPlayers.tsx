@@ -37,6 +37,7 @@ import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { useAuth } from "@/hooks/useAuth";
+import { HistoricalPlayerTable, HistoricalPitcherTable } from "@/components/HistoricalPlayerTable";
 
 type SortKey =
   | "name"
@@ -737,6 +738,7 @@ export default function ReturningPlayers() {
   const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string | null; position?: string | null }>>({});
   const playerOverrides = useMemo(() => readPlayerOverrides(), []);
   const [showMissingOnly, setShowMissingOnly] = useState(false);
+  const [selectedSeason, setSelectedSeason] = useState<number>(2025);
   const [dashboardView, setDashboardView] = useState<"hitting" | "pitching">("hitting");
   const [pitchingRoleFilter, setPitchingRoleFilter] = useState<"all" | "SP" | "RP">("all");
   const [pitchingSearch, setPitchingSearch] = useState("");
@@ -766,6 +768,7 @@ export default function ReturningPlayers() {
         sortDir?: SortDir;
         showMissingOnly?: boolean;
         dashboardView?: "hitting" | "pitching";
+        selectedSeason?: number;
         pitchingSearch?: string;
         pitchingPage?: number;
         pitchingPageSize?: number;
@@ -779,6 +782,7 @@ export default function ReturningPlayers() {
       if (parsed.sortDir) setSortDir(parsed.sortDir);
       if (typeof parsed.showMissingOnly === "boolean") setShowMissingOnly(parsed.showMissingOnly);
       if (parsed.dashboardView === "hitting" || parsed.dashboardView === "pitching") setDashboardView(parsed.dashboardView);
+      if (Number.isFinite(parsed.selectedSeason)) setSelectedSeason(Number(parsed.selectedSeason));
       if (typeof parsed.pitchingSearch === "string") setPitchingSearch(parsed.pitchingSearch);
       if (Number.isFinite(parsed.pitchingPage) && Number(parsed.pitchingPage) >= 1) setPitchingPage(Number(parsed.pitchingPage));
       if (Number.isFinite(parsed.pitchingPageSize) && Number(parsed.pitchingPageSize) > 0) setPitchingPageSize(Number(parsed.pitchingPageSize));
@@ -806,6 +810,7 @@ export default function ReturningPlayers() {
           sortDir,
           showMissingOnly,
           dashboardView,
+          selectedSeason,
           pitchingSearch,
           pitchingPage,
           pitchingPageSize,
@@ -817,6 +822,7 @@ export default function ReturningPlayers() {
     }
   }, [
     dashboardView,
+    selectedSeason,
     page,
     pageSize,
     pitchingPage,
@@ -1812,31 +1818,52 @@ export default function ReturningPlayers() {
         <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-2xl font-bold tracking-tight">Player Dashboard</h2>
-            <p className="text-muted-foreground text-sm">2025 season — all players including transfers and departed</p>
+            <p className="text-muted-foreground text-sm">
+              {selectedSeason === 2025
+                ? "2025 season — all players including transfers and departed"
+                : `${selectedSeason} historical — actual stats and scouting grades`}
+            </p>
           </div>
-          <div className="flex gap-1 rounded-lg border bg-muted p-1">
-            <button
-              className={cn(
-                "px-5 py-2 text-sm rounded-md font-medium transition-colors",
-                dashboardView === "hitting" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
-              )}
-              onClick={() => setDashboardView("hitting")}
-            >
-              Hitting
-            </button>
-            <button
-              className={cn(
-                "px-5 py-2 text-sm rounded-md font-medium transition-colors",
-                dashboardView === "pitching" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
-              )}
-              onClick={() => setDashboardView("pitching")}
-            >
-              Pitching
-            </button>
+          <div className="flex items-center gap-2">
+            <Select value={String(selectedSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
+              <SelectTrigger className="h-[42px] w-[80px] text-sm font-medium rounded-lg border bg-muted">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="2025">2025</SelectItem>
+                <SelectItem value="2024">2024</SelectItem>
+                <SelectItem value="2023">2023</SelectItem>
+                <SelectItem value="2022">2022</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="flex gap-1 rounded-lg border bg-muted p-1">
+              <button
+                className={cn(
+                  "px-5 py-2 text-sm rounded-md font-medium transition-colors",
+                  dashboardView === "hitting" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                )}
+                onClick={() => setDashboardView("hitting")}
+              >
+                Hitting
+              </button>
+              <button
+                className={cn(
+                  "px-5 py-2 text-sm rounded-md font-medium transition-colors",
+                  dashboardView === "pitching" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                )}
+                onClick={() => setDashboardView("pitching")}
+              >
+                Pitching
+              </button>
+            </div>
           </div>
         </div>
 
-        {dashboardView === "hitting" ? (
+        {selectedSeason !== 2025 ? (
+          dashboardView === "hitting"
+            ? <HistoricalPlayerTable season={selectedSeason} onPlayerClick={saveViewSnapshot} />
+            : <HistoricalPitcherTable season={selectedSeason} onPlayerClick={saveViewSnapshot} />
+        ) : dashboardView === "hitting" ? (
           <>
         <div className="space-y-2">
           <div className="relative w-full max-w-md">

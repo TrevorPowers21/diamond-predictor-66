@@ -284,6 +284,54 @@ export default function PlayerProfile() {
     enabled: !!id,
   });
 
+  // Fetch all Hitter Master rows across seasons (linked by source_player_id)
+  const { data: hitterMasterSeasons = [] } = useQuery({
+    queryKey: ["player-hitter-master-seasons", id, (player as any)?.source_player_id],
+    queryFn: async () => {
+      const sourceId = (player as any)?.source_player_id;
+      if (!sourceId) return [];
+      const { data, error } = await supabase
+        .from("Hitter Master")
+        .select("*")
+        .eq("source_player_id", sourceId)
+        .order("Season", { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!player && !!(player as any)?.source_player_id,
+  });
+
+  const availableSeasons = useMemo(() => {
+    const set = new Set<number>();
+    for (const r of hitterMasterSeasons) if (r.Season != null) set.add(Number(r.Season));
+    for (const s of seasonStats) if ((s as any).season != null) set.add(Number((s as any).season));
+    return [...set].sort((a, b) => b - a);
+  }, [hitterMasterSeasons, seasonStats]);
+
+  const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  // Default to 2025 if it's available, else the most recent season
+  const defaultSeason = availableSeasons.includes(2025) ? 2025 : (availableSeasons[0] ?? 2025);
+  const effectiveSeason = selectedSeason ?? defaultSeason;
+  const isHistoricalView = effectiveSeason !== 2025;
+  const historicalRow = useMemo(() => {
+    return hitterMasterSeasons.find((r: any) => Number(r.Season) === effectiveSeason) || null;
+  }, [hitterMasterSeasons, effectiveSeason]);
+
+  // Fetch NCAA wRC mean for the historical season (for wRC+ calculation)
+  const { data: ncaaWrcForSeason } = useQuery({
+    queryKey: ["ncaa-wrc-mean-profile", effectiveSeason],
+    enabled: isHistoricalView,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("ncaa_averages" as any)
+        .select("wrc")
+        .eq("season", effectiveSeason)
+        .maybeSingle();
+      if (error) return null;
+      return (data as any)?.wrc ?? null;
+    },
+  });
+
   const { teams: teamsForConference } = useTeamsTable();
 
   const { data: nilValuation } = useQuery({
@@ -660,20 +708,39 @@ export default function PlayerProfile() {
               })()}
             </div>
           </div>
-          <Button
-            variant={isOnBoard(player.id) ? "default" : "outline"}
-            size="sm"
-            onClick={() => {
-              if (isOnBoard(player.id)) {
-                removeFromBoard(player.id);
-              } else {
-                addToBoard({ playerId: player.id });
-              }
-            }}
-          >
-            <Target className="mr-2 h-3.5 w-3.5" />
-            {isOnBoard(player.id) ? "On Board" : "Target Board"}
-          </Button>
+          {availableSeasons.length > 1 && (
+            <Select value={String(effectiveSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
+              <SelectTrigger className="h-9 w-[80px] text-sm font-semibold">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {availableSeasons.map((y) => (
+                  <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {isHistoricalView && (
+            <Badge className="bg-muted text-muted-foreground border-0 uppercase tracking-wider text-[10px] font-semibold">
+              Historical
+            </Badge>
+          )}
+          {!isHistoricalView && (
+            <Button
+              variant={isOnBoard(player.id) ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                if (isOnBoard(player.id)) {
+                  removeFromBoard(player.id);
+                } else {
+                  addToBoard({ playerId: player.id });
+                }
+              }}
+            >
+              <Target className="mr-2 h-3.5 w-3.5" />
+              {isOnBoard(player.id) ? "On Board" : "Target Board"}
+            </Button>
+          )}
           {!editing ? (
             <Button variant="outline" size="sm" onClick={startEdit}>
               <Pencil className="mr-2 h-3.5 w-3.5" />Edit
@@ -690,6 +757,15 @@ export default function PlayerProfile() {
           )}
         </div>
 
+        {isHistoricalView ? (
+          <HistoricalHitterView
+            player={player}
+            row={historicalRow}
+            season={effectiveSeason}
+            ncaaWrc={ncaaWrcForSeason ?? null}
+            isAdmin={isAdmin}
+          />
+        ) : (
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="lg:col-span-1 space-y-4">
             {/* Player Info Card */}
@@ -1069,8 +1145,166 @@ export default function PlayerProfile() {
             )}
           </div>
         </div>
+        )}
       </div>
     </DashboardLayout>
+  );
+}
+
+// ─── Historical Hitter View ─────────────────────────────────────────
+function HistoricalHitterView({
+  player, row, season, ncaaWrc, isAdmin,
+}: {
+  player: any;
+  row: any | null;
+  season: number;
+  ncaaWrc: number | null;
+  isAdmin: boolean;
+}) {
+  if (!row) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center text-muted-foreground">
+          No {season} season data available for this player.
+        </CardContent>
+      </Card>
+    );
+  }
+  const fmt = (v: number | null | undefined, d = 3) => v == null ? "—" : Number(v).toFixed(d);
+  const ops = row.OBP != null && row.SLG != null ? row.OBP + row.SLG : null;
+  const wrcPlus = (() => {
+    if (row.AVG == null || row.OBP == null || row.SLG == null || row.ISO == null || ncaaWrc == null || ncaaWrc <= 0) return null;
+    const wrc = (0.45 * row.OBP) + (0.30 * row.SLG) + (0.15 * row.AVG) + (0.10 * row.ISO);
+    return Math.round((wrc / ncaaWrc) * 100);
+  })();
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-3">
+      {/* Left: player info */}
+      <div className="lg:col-span-1 space-y-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">{season} Season</CardTitle>
+            <CardDescription className="text-xs">Actual stats and scouting grades</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-0">
+            <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">Team</span><span className="text-sm font-semibold">{row.Team || "—"}</span></div>
+            <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">Conference</span><span className="text-sm font-semibold">{row.Conference || "—"}</span></div>
+            <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">Position</span><span className="text-sm font-semibold">{row.Pos || player.position || "—"}</span></div>
+            <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">Bats</span><span className="text-sm font-semibold">{row.BatHand || player.bats_hand || "—"}</span></div>
+            <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">PA</span><span className="text-sm font-semibold tabular-nums">{row.pa ?? "—"}</span></div>
+            <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">AB</span><span className="text-sm font-semibold tabular-nums">{row.ab ?? "—"}</span></div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Middle + right: stats and scouting */}
+      <div className="lg:col-span-2 space-y-4">
+        {/* Slash line + wRC+ hero row */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">{season} Hitting Stats</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">AVG</div>
+                <div className="text-2xl font-bold mt-1 tabular-nums">{fmt(row.AVG)}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">OBP</div>
+                <div className="text-2xl font-bold mt-1 tabular-nums">{fmt(row.OBP)}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">SLG</div>
+                <div className="text-2xl font-bold mt-1 tabular-nums">{fmt(row.SLG)}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">OPS</div>
+                <div className="text-2xl font-bold mt-1 tabular-nums">{fmt(ops)}</div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">ISO</div>
+                <div className="text-2xl font-bold mt-1 tabular-nums">{fmt(row.ISO)}</div>
+              </div>
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-primary">wRC+</div>
+                <div className="text-2xl font-bold mt-1 tabular-nums text-primary">{wrcPlus ?? "—"}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Scouting grades — public 4 + admin extras (mirrors 2025) */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">{season} Scouting Grades</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <ScoutGrade label="Brl" value={row.barrel_score != null ? Math.round(row.barrel_score) : null} fullLabel="Barrel%" />
+              <ScoutGrade label="EV"  value={row.avg_ev_score != null ? Math.round(row.avg_ev_score) : null} fullLabel="Exit Velo" />
+              <ScoutGrade label="Con" value={row.contact_score != null ? Math.round(row.contact_score) : null} fullLabel="Contact%" />
+              <ScoutGrade label="Chs" value={row.chase_score != null ? Math.round(row.chase_score) : null} fullLabel="Chase%" />
+            </div>
+            {isAdmin && (
+              <>
+                <Separator className="my-4" />
+                <div className="flex items-center gap-2 mb-3">
+                  <ShieldCheck className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-semibold text-primary">Internal Power Ratings</span>
+                  <Badge variant="outline" className="text-xs">Admin Only</Badge>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                  <div className="rounded-lg border border-border bg-muted/50 p-3">
+                    <div className="text-xs font-medium text-muted-foreground">Overall Power Rating</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.overall_plus != null ? Math.round(row.overall_plus) : "—"}</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/50 p-3">
+                    <div className="text-xs font-medium text-muted-foreground">Batting Average Power Rating</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.ba_plus != null ? Math.round(row.ba_plus) : "—"}</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/50 p-3">
+                    <div className="text-xs font-medium text-muted-foreground">OBP Power Rating</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.obp_plus != null ? Math.round(row.obp_plus) : "—"}</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted/50 p-3">
+                    <div className="text-xs font-medium text-muted-foreground">ISO Power Rating</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.iso_plus != null ? Math.round(row.iso_plus) : "—"}</div>
+                  </div>
+                </div>
+                <Separator className="my-4" />
+                <div className="text-xs font-medium text-muted-foreground mb-3">{season} Input Metrics</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                  <InputMetric label="Contact %" value={row.contact} suffix="%" />
+                  <InputMetric label="Line Drive %" value={row.line_drive} suffix="%" />
+                  <InputMetric label="Pop-Up %" value={row.pop_up} suffix="%" />
+                  <InputMetric label="BB %" value={row.bb} suffix="%" />
+                  <InputMetric label="Chase %" value={row.chase} suffix="%" />
+                  <InputMetric label="Barrel %" value={row.barrel} suffix="%" />
+                  <InputMetric label="Pull %" value={row.pull} suffix="%" />
+                  <InputMetric label="LA 10-30 %" value={row.la_10_30} suffix="%" />
+                  <InputMetric label="GB %" value={row.gb} suffix="%" />
+                  <InputMetric label="Avg Exit Velo" value={row.avg_exit_velo} suffix=" mph" />
+                  <InputMetric label="EV90" value={row.ev90} suffix=" mph" />
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function InputMetric({ label, value, suffix }: { label: string; value: number | null | undefined; suffix?: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/50 p-3">
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <div className="text-xl font-bold font-mono mt-1">
+        {value == null ? "—" : `${Number(value).toFixed(1)}${suffix || ""}`}
+      </div>
+    </div>
   );
 }
 
