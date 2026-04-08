@@ -446,11 +446,14 @@ export default function PitcherProfile() {
     },
   });
 
-  // Fetch all Pitching Master rows across seasons (linked by source_player_id)
+  // Fetch all Pitching Master rows across seasons (linked by source_player_id).
+  // Falls back to the URL `id` for cases where the player record is missing
+  // but the URL itself is a numeric source_player_id (historical-only pitchers
+  // who have no row in the `players` table).
   const { data: pitcherMasterSeasons = [] } = useQuery({
     queryKey: ["pitcher-profile-master-seasons", id, (player as any)?.source_player_id],
     queryFn: async () => {
-      const sourceId = (player as any)?.source_player_id;
+      const sourceId = (player as any)?.source_player_id || (id && /^\d+$/.test(id) ? id : null);
       if (!sourceId) return [];
       const { data, error } = await supabase
         .from("Pitching Master")
@@ -460,7 +463,7 @@ export default function PitcherProfile() {
       if (error) throw error;
       return data || [];
     },
-    enabled: !!player && !!(player as any)?.source_player_id,
+    enabled: !!id,
   });
 
   const availableSeasons = useMemo(() => {
@@ -477,6 +480,13 @@ export default function PitcherProfile() {
   const historicalRow = useMemo(() => {
     return (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason) || null;
   }, [pitcherMasterSeasons, effectiveSeason]);
+
+  const currentPitcherRow = useMemo(() => {
+    return (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === 2025) || null;
+  }, [pitcherMasterSeasons]);
+  const combinedUsed = !isHistoricalView && !!(currentPitcherRow as any)?.combined_used;
+  const combinedIp = (currentPitcherRow as any)?.combined_ip as number | null | undefined;
+  const combinedSeasonsLabel = (currentPitcherRow as any)?.combined_seasons as string | null | undefined;
 
   const { data: predictions = [] } = useQuery({
     queryKey: ["pitcher-profile-predictions", id],
@@ -783,11 +793,14 @@ export default function PitcherProfile() {
     return map;
   }, [teamDirectory]);
   const { parkMap: teamParkComponents } = useParkFactors();
+  // Look up the most recent Pitching Master row by source_player_id as fallback
+  const anyPitcherMasterRow = (pitcherMasterSeasons as any[])[0] || null;
   const fullName =
     `${player?.first_name || ""} ${player?.last_name || ""}`.trim() ||
+    anyPitcherMasterRow?.playerFullName ||
     storageRef?.playerName ||
     "Pitcher";
-  const displayTeam = normalizePitcherTeamName(player?.team || masterRow?.team || storageRef?.teamName || "") || "—";
+  const displayTeam = normalizePitcherTeamName(player?.team || masterRow?.team || anyPitcherMasterRow?.Team || storageRef?.teamName || "") || "—";
   const playerOverride = useMemo(
     () => (isDbRoute && id ? readPlayerOverrides()[id] : undefined),
     [id, isDbRoute],
@@ -818,10 +831,10 @@ export default function PitcherProfile() {
     if (teamRow && (teamRow as any).conference_id && conferenceStatsByKey.get((teamRow as any).conference_id)) {
       return conferenceStatsByKey.get((teamRow as any).conference_id)!.conference;
     }
-    // Fall back to player conference or team conference
-    return player?.conference || masterRow?.conference || conferenceByTeam.get(normalize(displayTeam)) || "—";
+    // Fall back to player conference, team conference, or any master row
+    return player?.conference || masterRow?.conference || (anyPitcherMasterRow as any)?.Conference || conferenceByTeam.get(normalize(displayTeam)) || "—";
   })();
-  const displayHandedness = player?.handedness || masterRow?.throwHand || storageRow?.[2] || "—";
+  const displayHandedness = player?.handedness || masterRow?.throwHand || (anyPitcherMasterRow as any)?.ThrowHand || storageRow?.[2] || "—";
   // Read pitching stats directly from masterRow (no intermediate parse needed)
   const storageEra = masterRow?.era ?? null;
   const storageFip = masterRow?.fip ?? null;
@@ -1243,6 +1256,15 @@ export default function PitcherProfile() {
                 if (ps === "NOT IN PORTAL") return null;
                 return <Badge className={`${c.bg} ${c.text} border-0`}>{c.label}</Badge>;
               })()}
+              {combinedUsed && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] font-semibold uppercase tracking-wider"
+                  title={`Projection blends ${combinedSeasonsLabel} (${combinedIp} IP total)`}
+                >
+                  Combined: {combinedSeasonsLabel} ({combinedIp} IP)
+                </Badge>
+              )}
             </div>
           </div>
           {availableSeasons.length > 1 && (
@@ -1628,10 +1650,10 @@ function HistoricalPitcherView({
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <PitcherScoutGrade label="Whf" value={row.whiff_score} fullLabel="Whiff%" />
-              <PitcherScoutGrade label="BB%" value={row.bb_score} fullLabel="BB%" />
-              <PitcherScoutGrade label="Brl" value={row.barrel_score} fullLabel="Barrel%" />
-              <PitcherScoutGrade label="HH" value={row.hh_score} fullLabel="Hard Hit%" />
+              <HistoricalPitcherGrade value={row.whiff_score} fullLabel="Whiff%" />
+              <HistoricalPitcherGrade value={row.bb_score} fullLabel="BB%" />
+              <HistoricalPitcherGrade value={row.barrel_score} fullLabel="Barrel%" />
+              <HistoricalPitcherGrade value={row.hh_score} fullLabel="Hard Hit%" />
             </div>
             {isAdmin && (
               <>
@@ -1697,25 +1719,34 @@ function HistoricalPitcherView({
   );
 }
 
-function PitcherScoutGrade({ label, value, fullLabel }: { label: string; value: number | null; fullLabel: string }) {
+function HistoricalPitcherGrade({ value, fullLabel }: { value: number | null; fullLabel: string }) {
   if (value == null) {
     return (
-      <div className="rounded-lg border border-border bg-muted/30 p-3 text-center" title={fullLabel}>
-        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="rounded-lg border border-border bg-muted/30 p-3" title={fullLabel}>
+        <div className="text-xs font-medium opacity-80">{fullLabel}</div>
         <div className="text-2xl font-bold mt-1 text-muted-foreground">—</div>
+        <div className="text-xs font-semibold mt-0.5 text-muted-foreground">No Data</div>
       </div>
     );
   }
   const tier =
-    value >= 80
-      ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]"
-      : value >= 50
-        ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]"
-        : "bg-destructive/15 text-destructive border-destructive/30";
+    value >= 90 ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]" :
+    value >= 75 ? "bg-[hsl(142,71%,45%,0.12)] text-[hsl(142,71%,35%)] border-[hsl(142,71%,45%,0.25)]" :
+    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,35%)] border-[hsl(200,80%,50%,0.25)]" :
+    value >= 45 ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]" :
+    value >= 35 ? "bg-[hsl(25,90%,50%,0.12)] text-[hsl(25,90%,38%)] border-[hsl(25,90%,50%,0.25)]" :
+    "bg-destructive/15 text-destructive border-destructive/30";
+  const grade =
+    value >= 90 ? "Elite" :
+    value >= 75 ? "Plus-Plus" :
+    value >= 60 ? "Plus" :
+    value >= 45 ? "Average" :
+    value >= 35 ? "Below Avg" : "Poor";
   return (
-    <div className={`rounded-lg border p-3 text-center ${tier}`} title={fullLabel}>
-      <div className="text-xs font-semibold uppercase tracking-wider opacity-80">{label}</div>
-      <div className="text-2xl font-bold mt-1 tabular-nums">{Math.round(value)}</div>
+    <div className={`rounded-lg border p-3 ${tier}`}>
+      <div className="text-xs font-medium opacity-80">{fullLabel}</div>
+      <div className="text-2xl font-bold mt-1">{Math.round(value)}</div>
+      <div className="text-xs font-semibold mt-0.5">{grade}</div>
     </div>
   );
 }

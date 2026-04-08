@@ -436,11 +436,15 @@ function recalcReturner(
   config: ReturnerConfig,
   powerContext?: ReturnerPowerContext,
   overrides?: UpdateFields,
+  combinedUsed?: boolean,
 ) {
   const ct = normalizeClassTransition(overrides?.class_transition || pred.class_transition || "SJ");
   const rawDevAgg = overrides?.dev_aggressiveness ?? pred.dev_aggressiveness ?? config.defaultDevAgg;
   const devAgg = Number.isFinite(Number(rawDevAgg)) ? Number(rawDevAgg) : config.defaultDevAgg;
   const bases = config.classBases[ct] || config.classBases.GR || { avg: 0.01, obp: 0.01, iso: 0.01 };
+  // Low-sample players: bump power weight from 0.7 → 0.9 to lean harder on
+  // their (more stable) scouting ratings rather than their noisy actuals.
+  const effectivePowerWeight = combinedUsed ? 0.9 : config.powerWeight;
   const fromAvg = normalizeRateInput(Number(pred.from_avg));
   const fromObp = normalizeRateInput(Number(pred.from_obp));
   const fromSlg = normalizeRateInput(Number(pred.from_slg));
@@ -465,7 +469,7 @@ function recalcReturner(
     : (() => {
       const safeBaStdPower = config.baStdPower === 0 ? 1 : config.baStdPower;
       const scaledBa = config.ncaaAvg + (((baPlus - config.ncaaPR) / safeBaStdPower) * config.baStdNcaa);
-      const baBlended = (fromAvg * (1 - config.powerWeight)) + (scaledBa * config.powerWeight);
+      const baBlended = (fromAvg * (1 - effectivePowerWeight)) + (scaledBa * effectivePowerWeight);
       const baProjected = baBlended * (1 + bases.avg + (devAgg * config.devCoeffs.avg));
       const baDelta = baProjected - fromAvg;
       return round3(normalizeProjectedRate(fromAvg + (baDelta * avgProjectedTierDamp(baProjected))));
@@ -476,7 +480,7 @@ function recalcReturner(
     : (() => {
       const safeObpStdPower = config.obpStdPower === 0 ? 1 : config.obpStdPower;
       const scaledObp = config.ncaaObp + (((obpPlus - config.ncaaPR) / safeObpStdPower) * config.obpStdNcaa);
-      const obpBlended = (fromObp * (1 - config.powerWeight)) + (scaledObp * config.powerWeight);
+      const obpBlended = (fromObp * (1 - effectivePowerWeight)) + (scaledObp * effectivePowerWeight);
       const obpProjected = obpBlended * (1 + bases.obp + (devAgg * config.devCoeffs.obp));
       const obpDelta = obpProjected - fromObp;
       return round3(normalizeProjectedRate(fromObp + (obpDelta * obpProjectedTierDamp(obpProjected))));
@@ -487,7 +491,7 @@ function recalcReturner(
     : (() => {
       const lastIso = fromSlg - fromAvg;
       const scaledIso = config.ncaaIso + (((isoPlus - config.ncaaPR) / config.isoStdPower) * config.isoStdNcaa);
-      const blendedIso = (lastIso * (1 - config.powerWeight)) + (scaledIso * config.powerWeight);
+      const blendedIso = (lastIso * (1 - effectivePowerWeight)) + (scaledIso * effectivePowerWeight);
       return round3(normalizeProjectedRate(blendedIso * (1 + bases.iso + (devAgg * config.devCoeffs.iso))));
     })();
 
@@ -633,6 +637,7 @@ export async function recalculatePredictionById(predictionId: string, updates: U
 
   const merged = { ...(pred as PredictionRow), ...updates };
   let powerContext: ReturnerPowerContext | undefined;
+  let combinedUsed = false;
   if (merged.model_type === "returner") {
     const { data: internal } = await supabase
       .from("player_prediction_internals")
@@ -645,9 +650,29 @@ export async function recalculatePredictionById(predictionId: string, updates: U
       obpPlus: readSpecificPlus(internal?.obp_power_rating) ?? manual?.obpPlus ?? null,
       isoPlus: readSpecificPlus(internal?.slg_power_rating) ?? manual?.isoPlus ?? null,
     };
+    // Look up the player's current-season Hitter Master row to check if
+    // combined stats were applied (low-PA player). If yes, the projection
+    // engine will bump power weight 0.7 → 0.9 to lean harder on scouting.
+    if (merged.player_id) {
+      const { data: playerRow } = await supabase
+        .from("players")
+        .select("source_player_id")
+        .eq("id", merged.player_id)
+        .maybeSingle();
+      const sourceId = (playerRow as any)?.source_player_id;
+      if (sourceId) {
+        const { data: hm } = await supabase
+          .from("Hitter Master")
+          .select("combined_used")
+          .eq("source_player_id", sourceId)
+          .eq("Season", 2025)
+          .maybeSingle();
+        combinedUsed = !!(hm as any)?.combined_used;
+      }
+    }
   }
   const result = merged.model_type === "returner"
-    ? recalcReturner(merged, config.returner, powerContext, updates)
+    ? recalcReturner(merged, config.returner, powerContext, updates, combinedUsed)
     : recalcTransfer(merged, config.transfer);
 
   const { error: unlockErr } = await supabase
@@ -656,9 +681,15 @@ export async function recalculatePredictionById(predictionId: string, updates: U
     .eq("id", predictionId);
   if (unlockErr) throw unlockErr;
 
+  // If the coach explicitly updated class_transition, mark it as manually
+  // overridden so the auto-infer batch job won't reset it later.
+  const extraFields: Record<string, any> = {};
+  if (updates.class_transition !== undefined) {
+    extraFields.class_transition_overridden = true;
+  }
   const { error: updateErr } = await supabase
     .from("player_predictions")
-    .update({ ...updates, ...result, locked: true })
+    .update({ ...updates, ...result, ...extraFields, locked: true })
     .eq("id", predictionId);
   if (updateErr) throw updateErr;
 

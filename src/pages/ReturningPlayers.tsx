@@ -2251,7 +2251,10 @@ export default function ReturningPlayers() {
                                 {r.playerName}
                               </Link>
                               <div className="text-xs text-muted-foreground">
-                                {[r.handedness, r.team].filter(Boolean).join(" · ") || "—"}
+                                {(() => {
+                                  const hand = r.handedness === "R" ? "RHP" : r.handedness === "L" ? "LHP" : null;
+                                  return [hand, r.team].filter(Boolean).join(" · ") || "—";
+                                })()}
                               </div>
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">{statFormat(r.p_era, 2)}</TableCell>

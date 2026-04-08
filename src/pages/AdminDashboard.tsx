@@ -329,6 +329,42 @@ function ComputeScoresButton() {
   );
 }
 
+function InferClassTransitionsButton() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ updated: number; skipped: number; errors: number } | null>(null);
+  return (
+    <>
+      <Button
+        onClick={async () => {
+          setLoading(true);
+          setResult(null);
+          try {
+            const { inferAllClassTransitions } = await import("@/lib/inferClassTransitions");
+            const r = await inferAllClassTransitions(2025);
+            setResult(r);
+          } catch (e: any) {
+            setResult({ updated: 0, skipped: 0, errors: -1 });
+            console.error(e);
+          }
+          setLoading(false);
+        }}
+        disabled={loading}
+        variant="outline"
+        className="gap-2"
+      >
+        {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+        {loading ? "Inferring class transitions…" : "Auto-Infer Class Transitions"}
+      </Button>
+      {result && (
+        <p className="text-sm text-muted-foreground">
+          Updated: {result.updated}. Skipped (overridden / no change): {result.skipped}.
+          {result.errors > 0 && ` Errors: ${result.errors}`}
+        </p>
+      )}
+    </>
+  );
+}
+
 function CreatePredictionsButton() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ predictionsCreated: number; internalsCreated: number; errors: string[] } | null>(null);
@@ -6743,6 +6779,16 @@ function QuickActionsTab() {
             </p>
           </div>
           <ComputeScoresButton />
+          <div className="border-t pt-4">
+            <p className="font-medium">Auto-Infer Class Transitions</p>
+            <p className="text-sm text-muted-foreground">
+              Sets each player's class transition (FS/SJ/JS/GR) based on how many years
+              they've been in the system. First-seen 2025 → FS, first-seen 2024 → SJ,
+              first-seen 2023 → JS, first-seen 2022 → GR. Skips players whose class has
+              been manually overridden by a coach.
+            </p>
+          </div>
+          <InferClassTransitionsButton />
           <div className="border-t pt-4">
             <p className="font-medium">Create Predictions from Master</p>
             <p className="text-sm text-muted-foreground">

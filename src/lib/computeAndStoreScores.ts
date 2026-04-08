@@ -5,6 +5,12 @@ import {
   type HitterBaselines,
   type PitchingBaselines,
 } from "@/lib/powerRatings";
+import {
+  getBlendedHitterStats,
+  getBlendedPitcherStats,
+  HITTER_PA_THRESHOLD,
+  PITCHER_IP_THRESHOLD,
+} from "@/lib/combinedStats";
 
 const round2 = (v: number | null) => (v == null ? null : Math.round(v * 100) / 100);
 
@@ -79,7 +85,7 @@ export async function computeAndStoreHitterScores(season = 2025): Promise<{ upda
   while (true) {
     const { data: rows, error } = await supabase
       .from("Hitter Master")
-      .select("id, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb")
+      .select("id, source_player_id, pa, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb")
       .eq("Season", season)
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
@@ -88,18 +94,25 @@ export async function computeAndStoreHitterScores(season = 2025): Promise<{ upda
     if (!rows || rows.length === 0) break;
 
     for (const row of rows) {
+      // Low-PA players get blended stats from prior seasons by source_player_id
+      const blended = await getBlendedHitterStats(
+        (row as any).source_player_id ?? null,
+        season,
+        row,
+      );
+      const v = blended.values;
       const ratings = computeHitterPowerRatings({
-        contact: row.contact,
-        lineDrive: row.line_drive,
-        avgExitVelo: row.avg_exit_velo,
-        popUp: row.pop_up,
-        bb: row.bb,
-        chase: row.chase,
-        barrel: row.barrel,
-        ev90: row.ev90,
-        pull: row.pull,
-        la10_30: row.la_10_30,
-        gb: row.gb,
+        contact: v.contact,
+        lineDrive: v.line_drive,
+        avgExitVelo: v.avg_exit_velo,
+        popUp: v.pop_up,
+        bb: v.bb,
+        chase: v.chase,
+        barrel: v.barrel,
+        ev90: v.ev90,
+        pull: v.pull,
+        la10_30: v.la_10_30,
+        gb: v.gb,
       }, hitterBaselines);
 
       const { error: updateErr } = await supabase
@@ -120,7 +133,10 @@ export async function computeAndStoreHitterScores(season = 2025): Promise<{ upda
           obp_plus: round2(ratings.obpPlus),
           iso_plus: round2(ratings.isoPlus),
           overall_plus: round2(ratings.overallPlus),
-        })
+          combined_used: blended.combined,
+          combined_pa: blended.combined ? blended.totalPa : null,
+          combined_seasons: blended.combined ? blended.seasonsUsed.join(",") : null,
+        } as any)
         .eq("id", row.id);
 
       if (updateErr) {
@@ -155,7 +171,7 @@ export async function computeAndStorePitchingScores(season = 2025): Promise<{ up
   while (true) {
     const { data: rows, error } = await supabase
       .from("Pitching Master")
-      .select("id, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, \"90th_vel\", h_pull_pct, la_10_30_pct, stuff_plus")
+      .select("id, source_player_id, IP, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, \"90th_vel\", h_pull_pct, la_10_30_pct, stuff_plus")
       .eq("Season", season)
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
@@ -164,21 +180,28 @@ export async function computeAndStorePitchingScores(season = 2025): Promise<{ up
     if (!rows || rows.length === 0) break;
 
     for (const row of rows) {
+      // Low-IP pitchers get blended stats from prior seasons
+      const blended = await getBlendedPitcherStats(
+        (row as any).source_player_id ?? null,
+        season,
+        row,
+      );
+      const v = blended.values;
       const ratings = computePitchingPowerRatings({
-        miss_pct: row.miss_pct,
-        bb_pct: row.bb_pct,
-        hard_hit_pct: row.hard_hit_pct,
-        in_zone_whiff_pct: row.in_zone_whiff_pct,
-        chase_pct: row.chase_pct,
-        barrel_pct: row.barrel_pct,
-        line_pct: row.line_pct,
-        exit_vel: row.exit_vel,
-        ground_pct: row.ground_pct,
-        in_zone_pct: row.in_zone_pct,
-        vel_90th: (row as any)["90th_vel"],
-        h_pull_pct: row.h_pull_pct,
-        la_10_30_pct: row.la_10_30_pct,
-      }, (row as any).stuff_plus ?? null, pitcherBaselines);
+        miss_pct: v.miss_pct,
+        bb_pct: v.bb_pct,
+        hard_hit_pct: v.hard_hit_pct,
+        in_zone_whiff_pct: v.in_zone_whiff_pct,
+        chase_pct: v.chase_pct,
+        barrel_pct: v.barrel_pct,
+        line_pct: v.line_pct,
+        exit_vel: v.exit_vel,
+        ground_pct: v.ground_pct,
+        in_zone_pct: v.in_zone_pct,
+        vel_90th: (v as any)["90th_vel"],
+        h_pull_pct: v.h_pull_pct,
+        la_10_30_pct: v.la_10_30_pct,
+      }, v.stuff_plus ?? null, pitcherBaselines);
 
       const { error: updateErr } = await supabase
         .from("Pitching Master")
@@ -203,6 +226,9 @@ export async function computeAndStorePitchingScores(season = 2025): Promise<{ up
           bb9_pr_plus: round2(ratings.bb9PrPlus),
           hr9_pr_plus: round2(ratings.hr9PrPlus),
           overall_pr_plus: round2(ratings.overallPrPlus),
+          combined_used: blended.combined,
+          combined_ip: blended.combined ? blended.totalIp : null,
+          combined_seasons: blended.combined ? blended.seasonsUsed.join(",") : null,
         })
         .eq("id", row.id);
 

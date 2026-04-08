@@ -284,11 +284,13 @@ export default function PlayerProfile() {
     enabled: !!id,
   });
 
-  // Fetch all Hitter Master rows across seasons (linked by source_player_id)
+  // Fetch all Hitter Master rows across seasons (linked by source_player_id).
+  // Falls back to the URL `id` if it's a numeric source_player_id (historical-only
+  // players with no row in the `players` table).
   const { data: hitterMasterSeasons = [] } = useQuery({
     queryKey: ["player-hitter-master-seasons", id, (player as any)?.source_player_id],
     queryFn: async () => {
-      const sourceId = (player as any)?.source_player_id;
+      const sourceId = (player as any)?.source_player_id || (id && /^\d+$/.test(id) ? id : null);
       if (!sourceId) return [];
       const { data, error } = await supabase
         .from("Hitter Master")
@@ -298,7 +300,7 @@ export default function PlayerProfile() {
       if (error) throw error;
       return data || [];
     },
-    enabled: !!player && !!(player as any)?.source_player_id,
+    enabled: !!id,
   });
 
   const availableSeasons = useMemo(() => {
@@ -316,6 +318,15 @@ export default function PlayerProfile() {
   const historicalRow = useMemo(() => {
     return hitterMasterSeasons.find((r: any) => Number(r.Season) === effectiveSeason) || null;
   }, [hitterMasterSeasons, effectiveSeason]);
+
+  // Pick the 2025 Hitter Master row to check if combined stats were used
+  // (badge only shows on the current season view, not historical)
+  const currentHitterRow = useMemo(() => {
+    return hitterMasterSeasons.find((r: any) => Number(r.Season) === 2025) || null;
+  }, [hitterMasterSeasons]);
+  const combinedUsed = !isHistoricalView && !!(currentHitterRow as any)?.combined_used;
+  const combinedPa = (currentHitterRow as any)?.combined_pa as number | null | undefined;
+  const combinedSeasonsLabel = (currentHitterRow as any)?.combined_seasons as string | null | undefined;
 
   // Fetch NCAA wRC mean for the historical season (for wRC+ calculation)
   const { data: ncaaWrcForSeason } = useQuery({
@@ -706,6 +717,15 @@ export default function PlayerProfile() {
                 if (ps === "NOT IN PORTAL") return null;
                 return <Badge className={`${c.bg} ${c.text} border-0`}>{c.label}</Badge>;
               })()}
+              {combinedUsed && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] font-semibold uppercase tracking-wider"
+                  title={`Projection blends ${combinedSeasonsLabel} (${combinedPa} PA total)`}
+                >
+                  Combined: {combinedSeasonsLabel} ({combinedPa} PA)
+                </Badge>
+              )}
             </div>
           </div>
           {availableSeasons.length > 1 && (

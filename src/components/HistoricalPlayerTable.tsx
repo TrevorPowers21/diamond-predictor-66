@@ -599,7 +599,10 @@ export function HistoricalPitcherTable({ season, onPlayerClick }: { season: numb
                             {r.playerFullName}
                           </Link>
                           <div className="text-xs text-muted-foreground">
-                            {[r.ThrowHand, r.Team].filter(Boolean).join(" · ") || "—"}
+                            {(() => {
+                              const hand = r.ThrowHand === "R" ? "RHP" : r.ThrowHand === "L" ? "LHP" : null;
+                              return [hand, r.Team].filter(Boolean).join(" · ") || "—";
+                            })()}
                           </div>
                         </TableCell>
                         <TableCell className="text-right text-sm tabular-nums">{r.ERA == null ? "—" : Number(r.ERA).toFixed(2)}</TableCell>
