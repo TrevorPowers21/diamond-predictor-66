@@ -229,23 +229,18 @@ export default function HitterPage() {
                 <div className="flex items-center gap-2">
                   <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: GOLD }} />
                   <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.22em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>
-                    {/* Custom season picker */}
+                    {/* Inline season picker — looks like part of the heading */}
                     <div ref={seasonRef} className="relative">
                       <button
                         type="button"
                         onClick={() => setSeasonOpen((v) => !v)}
-                        className="group flex cursor-pointer items-center gap-1.5 border px-2 py-1 transition-all duration-200 hover:border-[#D4AF37] hover:bg-[#D4AF37]/[0.08]"
-                        style={{
-                          borderColor: NAVY_BORDER,
-                          backgroundColor: NAVY_BG,
-                        }}
+                        className="group inline-flex cursor-pointer items-center gap-1 bg-transparent text-xs font-bold uppercase tracking-[0.22em] text-[#D4AF37] transition-colors duration-150 hover:text-[#E8C24E] focus:outline-none"
+                        style={{ fontFamily: "'Oswald', sans-serif" }}
                       >
-                        <span className="font-[Oswald] text-base font-bold leading-none text-white">
-                          {selectedSeason}
-                        </span>
+                        <span>{selectedSeason}</span>
                         <svg
-                          width="9"
-                          height="9"
+                          width="8"
+                          height="8"
                           viewBox="0 0 12 12"
                           fill="none"
                           className={`transition-transform duration-200 ${seasonOpen ? "rotate-180" : ""}`}
