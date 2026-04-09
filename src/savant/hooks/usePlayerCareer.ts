@@ -51,7 +51,7 @@ export function usePlayerCareer(sourcePlayerId: string | null | undefined) {
         .from("Hitter Master")
         .select(SELECT_COLS)
         .eq("source_player_id", sourcePlayerId!)
-        .order("Season", { ascending: false });
+        .order("Season", { ascending: true });
       if (error) throw error;
       return (data || []) as unknown as PlayerCareerRow[];
     },
