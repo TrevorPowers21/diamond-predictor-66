@@ -101,8 +101,19 @@ export async function inferAllClassTransitions(season = 2025): Promise<InferResu
   // 3) Build the update plan in memory (no DB calls).
   const updates: Array<{ id: string; cls: InferredClass }> = [];
   for (const row of allRows as any[]) {
-    if (row.class_transition_overridden) { result.skipped++; continue; }
     const sourceId = row.players?.source_player_id;
+    // TEMP DEBUG: trace Bowen
+    if (sourceId === "1297350912") {
+      console.warn("[inferClass] BOWEN TRACE", {
+        predId: row.id,
+        currentClass: row.class_transition,
+        overridden: row.class_transition_overridden,
+        sourceId,
+        earliestInMap: earliestBySourceId.get(sourceId),
+        mapSize: earliestBySourceId.size,
+      });
+    }
+    if (row.class_transition_overridden) { result.skipped++; continue; }
     if (!sourceId) { result.skipped++; continue; }
     const earliest = earliestBySourceId.get(sourceId);
     if (earliest == null) { result.skipped++; continue; }
