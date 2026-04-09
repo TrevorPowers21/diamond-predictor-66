@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import PercentileBar from "@/savant/components/PercentileBar";
 import CareerStatsTable from "@/savant/components/CareerStatsTable";
 import CareerScoutingTable from "@/savant/components/CareerScoutingTable";
+import CareerPowerRatingsTable from "@/savant/components/CareerPowerRatingsTable";
 import PredictionCard from "@/savant/components/PredictionCard";
 import { usePlayerPrediction } from "@/savant/hooks/usePlayerPrediction";
 import {
@@ -191,6 +192,9 @@ export default function HitterPage() {
 
             {/* Year-over-year scouting metrics */}
             <CareerScoutingTable rows={careerRows} />
+
+            {/* Year-over-year internal power ratings */}
+            <CareerPowerRatingsTable rows={careerRows} />
           </div>
 
           {/* ─── RIGHT COLUMN ─── */}
