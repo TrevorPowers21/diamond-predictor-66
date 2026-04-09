@@ -303,6 +303,23 @@ export default function PlayerProfile() {
     enabled: !!id,
   });
 
+  // Detect two-way: does this player have any meaningful pitching innings?
+  const { data: hasPitchingData = false } = useQuery({
+    queryKey: ["player-has-pitching", id, (player as any)?.source_player_id],
+    queryFn: async () => {
+      const sourceId = (player as any)?.source_player_id || (id && /^\d+$/.test(id) ? id : null);
+      if (!sourceId) return false;
+      const { data } = await supabase
+        .from("Pitching Master")
+        .select("IP")
+        .eq("source_player_id", sourceId)
+        .gte("IP", 1)
+        .limit(1);
+      return (data?.length || 0) > 0;
+    },
+    enabled: !!id,
+  });
+
   const availableSeasons = useMemo(() => {
     const set = new Set<number>();
     for (const r of hitterMasterSeasons) if (r.Season != null) set.add(Number(r.Season));
@@ -727,6 +744,16 @@ export default function PlayerProfile() {
             <h2 className="text-2xl font-bold tracking-tight">
               {player.first_name} {player.last_name}
             </h2>
+            {hasPitchingData && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-1"
+                onClick={() => navigate(`/dashboard/pitcher/${id}`)}
+              >
+                View Pitching Profile →
+              </Button>
+            )}
               <div className="flex items-center gap-2 mt-1 flex-wrap">
               {effectivePosition && <Badge variant="secondary">{effectivePosition}</Badge>}
               {displayTeam2025 && <Badge variant="outline">{displayTeam2025}</Badge>}

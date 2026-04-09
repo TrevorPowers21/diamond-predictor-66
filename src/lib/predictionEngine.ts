@@ -473,22 +473,6 @@ function recalcReturner(
       const baProjected = baBlended * (1 + bases.avg + (devAgg * config.devCoeffs.avg));
       const baDelta = baProjected - fromAvg;
       const result = round3(normalizeProjectedRate(fromAvg + (baDelta * avgProjectedTierDamp(baProjected))));
-      // Debug: log the math for any case that produces null
-      if (result == null || !Number.isFinite(result)) {
-        console.warn("[recalcReturner] pAvg null", {
-          predId: pred.id,
-          baPlus, fromAvg,
-          ncaaAvg: config.ncaaAvg,
-          ncaaPR: config.ncaaPR,
-          safeBaStdPower,
-          baStdNcaa: config.baStdNcaa,
-          effectivePowerWeight,
-          basesAvg: bases.avg,
-          devAgg,
-          devCoeffsAvg: config.devCoeffs?.avg,
-          scaledBa, baBlended, baProjected, baDelta,
-        });
-      }
       return result;
     })();
 
@@ -799,20 +783,14 @@ export async function bulkRecalculatePredictionsLocal() {
           } else {
             const internal = internalByPredictionId.get(pred.id);
             const manual = MANUAL_INTERNAL_OVERRIDES[pred.id];
-            // Fallback: derive power from Hitter Master if ANY of the three power ratings is missing
-            let fallbackPower: ReturnerPowerContext | null = null;
-            const needsFallback =
-              (!readSpecificPlus(internal?.avg_power_rating) && !manual?.baPlus) ||
-              (!readSpecificPlus(internal?.obp_power_rating) && !manual?.obpPlus) ||
-              (!readSpecificPlus(internal?.slg_power_rating) && !manual?.isoPlus);
-            if (needsFallback && pred.player_id) {
-              const raw = powerByPlayerId.get(pred.player_id);
-              if (raw) fallbackPower = derivePower(raw);
-            }
+            // No fallback: if internals are missing, we leave projections null
+            // rather than computing from hardcoded baselines which drift from
+            // the canonical Hitter Master scores. The 80-some players with
+            // missing internals need their internals backfilled properly.
             const powerContext: ReturnerPowerContext = {
-              baPlus: readSpecificPlus(internal?.avg_power_rating) ?? manual?.baPlus ?? fallbackPower?.baPlus ?? null,
-              obpPlus: readSpecificPlus(internal?.obp_power_rating) ?? manual?.obpPlus ?? fallbackPower?.obpPlus ?? null,
-              isoPlus: readSpecificPlus(internal?.slg_power_rating) ?? manual?.isoPlus ?? fallbackPower?.isoPlus ?? null,
+              baPlus: readSpecificPlus(internal?.avg_power_rating) ?? manual?.baPlus ?? null,
+              obpPlus: readSpecificPlus(internal?.obp_power_rating) ?? manual?.obpPlus ?? null,
+              isoPlus: readSpecificPlus(internal?.slg_power_rating) ?? manual?.isoPlus ?? null,
             };
             result = recalcReturner(pred, config.returner, powerContext);
           }

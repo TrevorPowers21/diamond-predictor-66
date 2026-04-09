@@ -54,7 +54,6 @@ export function useHitterSeedData() {
           .select("source_player_id, playerFullName, Team, TeamID, Conference, conference_id, Season, Pos, BatHand, ThrowHand, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb, ab")
           .eq("Season", 2025)
           .gte("ab", 75)
-          .not("Pos", "in", "(P,RHP,LHP,SP,RP)")
           .range(from, from + pageSize - 1);
         if (error) throw error;
         all.push(...(data || []));

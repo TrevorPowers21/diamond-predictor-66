@@ -91,21 +91,35 @@ export default function Dashboard() {
 
   const { data: players = [], isLoading } = useQuery({
     queryKey: ["overview-top10-base"],
+    staleTime: 0,
     queryFn: async () => {
-      const [predRes, nilRes] = await Promise.all([
-        supabase
+      // Paginate predictions — Supabase caps single requests at 1000 rows
+      // and there are ~10k+ rows in player_predictions, so without paging
+      // we'd silently miss most players.
+      const allPreds: any[] = [];
+      let from = 0;
+      const PAGE = 1000;
+      while (true) {
+        const { data, error } = await supabase
           .from("player_predictions")
           .select(
-            "id, player_id, model_type, variant, status, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, players!inner(first_name, last_name, team, from_team, conference, position)",
+            "id, player_id, model_type, variant, status, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, players!inner(first_name, last_name, team, from_team, conference, position, pa, ip)",
           )
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
-          .in("model_type", ["returner", "transfer"]),
-        supabase.from("nil_valuations").select("player_id, estimated_value, season"),
-      ]);
+          .in("model_type", ["returner", "transfer"])
+          .or("pa.gte.75,ip.gte.20", { foreignTable: "players" })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const rows = data || [];
+        allPreds.push(...rows);
+        if (rows.length < PAGE) break;
+        from += PAGE;
+      }
 
-      if (predRes.error) throw predRes.error;
+      const nilRes = await supabase.from("nil_valuations").select("player_id, estimated_value, season");
       if (nilRes.error) throw nilRes.error;
+      const predRes = { data: allPreds, error: null as any };
 
       const nilByPlayer = new Map<string, { season: number; value: number | null }>();
       for (const row of nilRes.data || []) {

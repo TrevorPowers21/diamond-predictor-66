@@ -466,6 +466,23 @@ export default function PitcherProfile() {
     enabled: !!id,
   });
 
+  // Detect two-way: does this pitcher also have meaningful at-bats?
+  const { data: hasHittingData = false } = useQuery({
+    queryKey: ["pitcher-has-hitting", id, (player as any)?.source_player_id],
+    queryFn: async () => {
+      const sourceId = (player as any)?.source_player_id || (id && /^\d+$/.test(id) ? id : null);
+      if (!sourceId) return false;
+      const { data } = await supabase
+        .from("Hitter Master")
+        .select("ab")
+        .eq("source_player_id", sourceId)
+        .gte("ab", 1)
+        .limit(1);
+      return (data?.length || 0) > 0;
+    },
+    enabled: !!id,
+  });
+
   const availableSeasons = useMemo(() => {
     const set = new Set<number>();
     for (const r of pitcherMasterSeasons) if ((r as any).Season != null) set.add(Number((r as any).Season));
@@ -562,16 +579,58 @@ export default function PitcherProfile() {
       return byPlayerName();
     },
   });
-  // ── Pitching Master (replaces pitching_stats_storage + pitching_power_ratings_storage) ──
+  // ── Pitching Master ──
+  // Pull from the unfiltered profile-scoped query (pitcherMasterSeasons) so
+  // low-IP pitchers (e.g. two-way players) still load. The shared
+  // usePitchingSeedData hook applies an IP >= 20 dashboard filter that would
+  // hide them from individual profile pages.
   const { pitchers: pitchingMasterRows } = usePitchingSeedData();
   const masterRow = useMemo(() => {
+    // Prefer the unfiltered pitcher seasons row for the current selected season
+    const fromSeasons = (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason)
+      ?? (pitcherMasterSeasons as any[])[0];
+    if (fromSeasons) {
+      // Map raw DB shape into the seed-data shape downstream code expects
+      return {
+        source_player_id: fromSeasons.source_player_id ?? null,
+        playerName: fromSeasons.playerFullName ?? "",
+        team: fromSeasons.Team ?? null,
+        teamId: fromSeasons.TeamID ?? null,
+        conference: fromSeasons.Conference ?? null,
+        conferenceId: fromSeasons.conference_id ?? null,
+        throwHand: fromSeasons.ThrowHand ?? null,
+        role: fromSeasons.Role ?? null,
+        ip: fromSeasons.IP ?? null,
+        g: fromSeasons.G ?? null,
+        gs: fromSeasons.GS ?? null,
+        era: fromSeasons.ERA ?? null,
+        fip: fromSeasons.FIP ?? null,
+        whip: fromSeasons.WHIP ?? null,
+        k9: fromSeasons.K9 ?? null,
+        bb9: fromSeasons.BB9 ?? null,
+        hr9: fromSeasons.HR9 ?? null,
+        miss_pct: fromSeasons.miss_pct ?? null,
+        bb_pct: fromSeasons.bb_pct ?? null,
+        hard_hit_pct: fromSeasons.hard_hit_pct ?? null,
+        in_zone_whiff_pct: fromSeasons.in_zone_whiff_pct ?? null,
+        chase_pct: fromSeasons.chase_pct ?? null,
+        barrel_pct: fromSeasons.barrel_pct ?? null,
+        line_pct: fromSeasons.line_pct ?? null,
+        exit_vel: fromSeasons.exit_vel ?? null,
+        ground_pct: fromSeasons.ground_pct ?? null,
+        in_zone_pct: fromSeasons.in_zone_pct ?? null,
+        vel_90th: fromSeasons["90th_vel"] ?? null,
+        h_pull_pct: fromSeasons.h_pull_pct ?? null,
+        la_10_30_pct: fromSeasons.la_10_30_pct ?? null,
+        stuffPlus: fromSeasons.stuff_plus ?? null,
+      } as any;
+    }
+    // Fallback: legacy hook lookup (kept so name-only routes still resolve)
     if (!lookupPlayerName && !id) return null;
-    // Try source_player_id match first (UUID route)
     if (isDbRoute && id) {
       const byId = pitchingMasterRows.find((r) => r.source_player_id === id);
       if (byId) return byId;
     }
-    // Fallback: name match (+ optional team match)
     const normName = normalize(lookupPlayerName);
     if (!normName) return null;
     const byName = pitchingMasterRows.filter((r) => normalize(r.playerName) === normName);
@@ -580,7 +639,7 @@ export default function PitcherProfile() {
     const normTeam = normalize(lookupTeamName);
     const exactTeam = byName.find((r) => normalize(r.team) === normTeam);
     return exactTeam || byName[0];
-  }, [pitchingMasterRows, id, isDbRoute, lookupPlayerName, lookupTeamName]);
+  }, [pitcherMasterSeasons, effectiveSeason, pitchingMasterRows, id, isDbRoute, lookupPlayerName, lookupTeamName]);
 
   const storageRow = useMemo(() => {
     if (!masterRow) return null;
@@ -1249,6 +1308,16 @@ export default function PitcherProfile() {
           </Button>
           <div className="flex-1">
             <h2 className="text-2xl font-bold tracking-tight">{fullName}</h2>
+            {hasHittingData && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-1 mb-1"
+                onClick={() => navigate(`/dashboard/player/${id}`)}
+              >
+                View Hitting Profile →
+              </Button>
+            )}
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <Badge variant="outline">{displayTeam}</Badge>
               <Badge variant="outline" className="text-muted-foreground">{displayConference}</Badge>

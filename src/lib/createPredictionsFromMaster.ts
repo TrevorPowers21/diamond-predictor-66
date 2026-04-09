@@ -69,19 +69,16 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
   }
   console.log(`[createPredictions] ${hitterBySourceId.size} hitters loaded from master`);
 
-  // ─── Determine which players are pitchers ────────────────────────────
-  const isPitcher = (pos: string | null) => {
-    if (!pos) return false;
-    return /^(SP|RP|CL|P|LHP|RHP|TWP)$/i.test(pos.trim());
-  };
-
   // ─── Create predictions ──────────────────────────────────────────────
+  // Note: we no longer skip players whose position is P/SP/RP — two-way players
+  // (e.g. Noah Franco) need hitter predictions if they have meaningful AB. The
+  // Hitter Master lookup naturally returns nothing for true pitchers, so they
+  // get filtered out by the `if (!hitter) continue` below.
   const predsToInsert: any[] = [];
   const powerByPlayerId = new Map<string, { baPlus: number | null; obpPlus: number | null; isoPlus: number | null; overallPlus: number | null }>();
 
   for (const player of allPlayers) {
     if (existingPredPlayerIds.has(player.id)) continue;
-    if (isPitcher(player.position)) continue; // Pitching projections are computed on the fly
 
     // Find hitter data
     const hitter = (player.source_player_id ? hitterBySourceId.get(player.source_player_id) : null)

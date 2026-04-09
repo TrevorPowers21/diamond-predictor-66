@@ -109,7 +109,6 @@ export function HistoricalPlayerTable({ season, onPlayerClick }: { season: numbe
                    chase_score, barrel_score, ev90_score, pull_score, la_score, gb_score`)
           .eq("Season", season)
           .gte("ab", 75)
-          .not("Pos", "in", "(P,RHP,LHP,SP,RP)")
           .order("pa", { ascending: false })
           .range(from, from + pageSize - 1);
         if (error) throw error;

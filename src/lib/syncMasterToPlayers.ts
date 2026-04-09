@@ -226,6 +226,27 @@ export async function syncMasterToPlayers(season = 2025): Promise<SyncResult> {
     }
   }
 
+  // ─── Two-way player detection ────────────────────────────────────────
+  // Tag as TWP when the player has meaningful PA on the hitter side (>=10 AB)
+  // AND meaningful IP on the pitcher side (>=5 IP) in the preferred season.
+  const twoWayHitters = new Set<string>();
+  const twoWayPitchers = new Set<string>();
+  for (const h of hitterRows) {
+    if (Number(h.Season) !== season) continue;
+    if (!h.source_player_id) continue;
+    if ((Number(h.ab) || 0) >= 10) twoWayHitters.add(h.source_player_id);
+  }
+  for (const p of pitcherRows) {
+    if (Number(p.Season) !== season) continue;
+    if (!p.source_player_id) continue;
+    if ((Number(p.IP) || 0) >= 5) twoWayPitchers.add(p.source_player_id);
+  }
+  for (const [sid, rec] of byId.entries()) {
+    if (twoWayHitters.has(sid) && twoWayPitchers.has(sid)) {
+      rec.position = "TWP";
+    }
+  }
+
   // ─── Build final insert payload ──────────────────────────────────────
   const allRecs = [...byId.values(), ...anon];
   const inserts = allRecs.map((r) => ({

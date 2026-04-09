@@ -165,7 +165,7 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
                     className="text-2xl font-semibold tracking-wide uppercase mt-0.5"
                     style={{
                       fontFamily: "'Oswald', sans-serif",
-                      color: '#A1A1A4',
+                      color: '#FFFFFF',
                     }}
                   >
                     Horned Frogs
