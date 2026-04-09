@@ -1,7 +1,7 @@
 import type { PlayerPredictionRow } from "@/savant/hooks/usePlayerPrediction";
 
 const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#162241";
+const NAVY_BORDER = "#1f2d52";
 const GOLD = "#D4AF37";
 
 const fmt3 = (v: number | null) => (v == null ? "—" : v.toFixed(3));
@@ -37,11 +37,14 @@ export default function PredictionCard({ prediction, targetSeason = 2026 }: Pred
       style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
     >
       <div className="flex items-baseline justify-between border-b px-6 py-3" style={{ borderColor: NAVY_BORDER }}>
-        <div className="text-[11px] font-bold uppercase tracking-[0.25em]" style={{ color: GOLD }}>
-          {targetSeason} Projection
+        <div className="flex items-center gap-2">
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: GOLD }} />
+          <h2 className="text-xs font-bold uppercase tracking-[0.22em]" style={{ color: GOLD, fontFamily: "'Oswald', sans-serif" }}>
+            {targetSeason} Projection
+          </h2>
         </div>
         {prediction.class_transition && (
-          <div className="text-[10px] uppercase tracking-wider text-white/45">
+          <div className="text-[11px] uppercase tracking-wider text-white/55">
             Class · {prediction.class_transition}
           </div>
         )}

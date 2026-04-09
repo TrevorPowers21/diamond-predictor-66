@@ -34,7 +34,7 @@ const wrcPlusOf = (r: {
 const GOLD = "#D4AF37";
 const NAVY_BG = "#040810";
 const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#162241";
+const NAVY_BORDER = "#1f2d52";
 
 interface BarConfig {
   label: string;
@@ -164,7 +164,7 @@ export default function HitterPage() {
               className="border-l-[3px] px-7 py-6 shadow-[0_1px_0_0_rgba(212,175,55,0.08)_inset]"
               style={{ borderColor: GOLD, backgroundColor: NAVY_CARD }}
             >
-              <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#D4AF37]">
+              <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#D4AF37]">
                 Internal · Savant · Hitter Profile · {player.Season ?? "—"}
               </div>
               <h1
@@ -207,10 +207,13 @@ export default function HitterPage() {
               style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
             >
               <div className="mb-3 flex items-baseline justify-between">
-                <div className="text-xs font-bold uppercase tracking-[0.25em] text-[#D4AF37]">
-                  {player.Season ?? ""} Percentile Rankings
+                <div className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: GOLD }} />
+                  <h2 className="text-xs font-bold uppercase tracking-[0.22em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>
+                    {player.Season ?? ""} Percentile Rankings
+                  </h2>
                 </div>
-                <div className="text-[10px] uppercase tracking-wider text-white/45">
+                <div className="text-[11px] uppercase tracking-wider text-white/55">
                   vs. NCAA · min {SAVANT_MIN_AB} AB
                 </div>
               </div>

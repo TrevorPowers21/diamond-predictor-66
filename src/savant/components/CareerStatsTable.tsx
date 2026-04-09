@@ -7,7 +7,7 @@ const opsOf = (r: { OBP: number | null; SLG: number | null }) =>
   r.OBP != null && r.SLG != null ? r.OBP + r.SLG : null;
 
 const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#162241";
+const NAVY_BORDER = "#1f2d52";
 const GOLD = "#D4AF37";
 
 interface CareerStatsTableProps {
@@ -49,15 +49,16 @@ export default function CareerStatsTable({ rows }: CareerStatsTableProps) {
       className="mt-6 border"
       style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
     >
-      <div className="border-b px-6 py-3" style={{ borderColor: NAVY_BORDER }}>
-        <div className="text-[11px] font-bold uppercase tracking-[0.25em]" style={{ color: GOLD }}>
+      <div className="flex items-center gap-2 border-b px-6 py-3" style={{ borderColor: NAVY_BORDER }}>
+        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: GOLD }} />
+        <h2 className="text-xs font-bold uppercase tracking-[0.22em]" style={{ color: GOLD, fontFamily: "'Oswald', sans-serif" }}>
           Career Stats
-        </div>
+        </h2>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-white/55">
+            <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-white/65">
               <th className="px-4 py-2">Season</th>
               <th className="px-3 py-2">Team</th>
               <th className="px-3 py-2 text-right">PA</th>

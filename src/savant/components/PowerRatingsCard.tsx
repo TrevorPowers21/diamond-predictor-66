@@ -1,7 +1,7 @@
 import type { SavantHitterRow } from "@/savant/hooks/useSavantHitters";
 
 const NAVY_CARD = "#0a1428";
-const NAVY_BORDER = "#162241";
+const NAVY_BORDER = "#1f2d52";
 const GOLD = "#D4AF37";
 
 const fmtInt = (v: number | null | undefined) => (v == null ? "—" : `${Math.round(v)}`);
@@ -36,10 +36,13 @@ export default function PowerRatingsCard({ player }: PowerRatingsCardProps) {
       style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
     >
       <div className="flex items-baseline justify-between border-b px-6 py-3" style={{ borderColor: NAVY_BORDER }}>
-        <div className="text-[11px] font-bold uppercase tracking-[0.25em]" style={{ color: GOLD }}>
-          {player.Season ?? ""} Power Ratings
+        <div className="flex items-center gap-2">
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: GOLD }} />
+          <h2 className="text-xs font-bold uppercase tracking-[0.22em]" style={{ color: GOLD, fontFamily: "'Oswald', sans-serif" }}>
+            {player.Season ?? ""} Power Ratings
+          </h2>
         </div>
-        <div className="text-[10px] uppercase tracking-wider text-white/45">100 · NCAA Avg</div>
+        <div className="text-[11px] uppercase tracking-wider text-white/55">100 · NCAA Avg</div>
       </div>
       <div className="grid grid-cols-2 gap-px sm:grid-cols-4" style={{ backgroundColor: NAVY_BORDER }}>
         {tiles.map((t) => {
