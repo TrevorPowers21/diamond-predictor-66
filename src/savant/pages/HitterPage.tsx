@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import PercentileBar from "@/savant/components/PercentileBar";
 import CareerStatsTable from "@/savant/components/CareerStatsTable";
+import CareerScoutingTable from "@/savant/components/CareerScoutingTable";
 import {
   SAVANT_MIN_AB,
   useSavantHitters,
@@ -208,6 +209,9 @@ export default function HitterPage() {
 
         {/* Career stats table — year-over-year slash + counting stats */}
         <CareerStatsTable rows={careerRows} />
+
+        {/* Year-over-year scouting metrics — Statcast-style data table */}
+        <CareerScoutingTable rows={careerRows} />
 
         {/* Percentile panel — full width, single column. New sections (historical
             production table, year-over-year data table) stack below as we build them. */}
