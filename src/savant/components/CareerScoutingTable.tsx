@@ -57,17 +57,17 @@ export default function CareerScoutingTable({ rows }: CareerScoutingTableProps) 
                 className="border-t text-white/85 transition-colors hover:bg-white/[0.025]"
                 style={{ borderColor: NAVY_BORDER }}
               >
-                <td className="px-4 py-2 font-mono tabular-nums text-white">{r.Season ?? "—"}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtPct(r.contact)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtPct(r.line_drive)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt1(r.avg_exit_velo)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt1(r.ev90)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtPct(r.barrel)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtPct(r.la_10_30)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtPct(r.bb)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtPct(r.chase)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtPct(r.gb)}</td>
-                <td className="px-3 py-2 pr-4 text-right font-mono tabular-nums">{fmtPct(r.pull)}</td>
+                <td className="px-4 py-2 tabular-nums text-white">{r.Season ?? "—"}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtPct(r.contact)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtPct(r.line_drive)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmt1(r.avg_exit_velo)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmt1(r.ev90)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtPct(r.barrel)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtPct(r.la_10_30)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtPct(r.bb)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtPct(r.chase)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtPct(r.gb)}</td>
+                <td className="px-3 py-2 pr-4 text-right tabular-nums">{fmtPct(r.pull)}</td>
               </tr>
             ))}
           </tbody>

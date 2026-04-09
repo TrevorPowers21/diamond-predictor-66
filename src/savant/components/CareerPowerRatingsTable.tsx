@@ -46,12 +46,12 @@ export default function CareerPowerRatingsTable({ rows }: CareerPowerRatingsTabl
                 className="border-t text-white/85 transition-colors hover:bg-white/[0.025]"
                 style={{ borderColor: NAVY_BORDER }}
               >
-                <td className="px-4 py-2 font-mono tabular-nums text-white">{r.Season ?? "—"}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtInt(r.ba_plus)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtInt(r.obp_plus)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtInt(r.iso_plus)}</td>
+                <td className="px-4 py-2 tabular-nums text-white">{r.Season ?? "—"}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtInt(r.ba_plus)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtInt(r.obp_plus)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtInt(r.iso_plus)}</td>
                 <td
-                  className="px-3 py-2 pr-4 text-right font-mono tabular-nums font-bold"
+                  className="px-3 py-2 pr-4 text-right tabular-nums font-bold"
                   style={{ color: GOLD }}
                 >
                   {fmtInt(r.overall_plus)}

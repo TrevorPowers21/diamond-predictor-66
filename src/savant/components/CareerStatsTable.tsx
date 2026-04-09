@@ -82,16 +82,16 @@ export default function CareerStatsTable({ rows }: CareerStatsTableProps) {
                 className="border-t text-white/85 transition-colors hover:bg-white/[0.025]"
                 style={{ borderColor: NAVY_BORDER }}
               >
-                <td className="px-4 py-2 font-mono tabular-nums text-white">{r.Season ?? "—"}</td>
+                <td className="px-4 py-2 tabular-nums text-white">{r.Season ?? "—"}</td>
                 <td className="px-3 py-2">{r.Team ?? "—"}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtInt(r.pa)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtInt(r.ab)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(r.AVG)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(r.OBP)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(r.SLG)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(opsOf(r))}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(r.ISO)}</td>
-                <td className="px-3 py-2 pr-4 text-right font-mono tabular-nums font-bold" style={{ color: GOLD }}>{fmtInt(wrcOf(r))}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtInt(r.pa)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtInt(r.ab)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmt3(r.AVG)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmt3(r.OBP)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmt3(r.SLG)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmt3(opsOf(r))}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmt3(r.ISO)}</td>
+                <td className="px-3 py-2 pr-4 text-right tabular-nums font-bold" style={{ color: GOLD }}>{fmtInt(wrcOf(r))}</td>
               </tr>
             ))}
             {rows.length > 1 && (
@@ -103,14 +103,14 @@ export default function CareerStatsTable({ rows }: CareerStatsTableProps) {
                   {rows.length} Seasons
                 </td>
                 <td className="px-3 py-2 text-white/55">—</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtInt(totalPa)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtInt(totalAb)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(careerAvg)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(careerObp)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(careerSlg)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(careerOps)}</td>
-                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(careerIso)}</td>
-                <td className="px-3 py-2 pr-4 text-right font-mono tabular-nums font-bold" style={{ color: GOLD }}>{fmtInt(computeWrcPlus(careerAvg, careerObp, careerSlg, careerIso))}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtInt(totalPa)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtInt(totalAb)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmt3(careerAvg)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmt3(careerObp)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmt3(careerSlg)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmt3(careerOps)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmt3(careerIso)}</td>
+                <td className="px-3 py-2 pr-4 text-right tabular-nums font-bold" style={{ color: GOLD }}>{fmtInt(computeWrcPlus(careerAvg, careerObp, careerSlg, careerIso))}</td>
               </tr>
             )}
           </tbody>
