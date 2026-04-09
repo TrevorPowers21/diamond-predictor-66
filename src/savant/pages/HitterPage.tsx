@@ -193,13 +193,14 @@ export default function HitterPage() {
 
             {/* Year-over-year scouting metrics */}
             <CareerScoutingTable rows={careerRows} />
+
+            {/* 2025 Power Ratings tile strip */}
+            <PowerRatingsCard player={player} />
           </div>
 
           {/* ─── RIGHT COLUMN ─── */}
           <div className="space-y-6">
             <PredictionCard prediction={prediction} targetSeason={2026} />
-
-            <CareerPowerRatingsTable rows={careerRows} />
 
             <section
               className="border px-6 py-5"
