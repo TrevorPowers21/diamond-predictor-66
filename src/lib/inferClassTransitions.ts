@@ -101,19 +101,8 @@ export async function inferAllClassTransitions(season = 2025): Promise<InferResu
   // 3) Build the update plan in memory (no DB calls).
   const updates: Array<{ id: string; cls: InferredClass }> = [];
   for (const row of allRows as any[]) {
-    const sourceId = row.players?.source_player_id;
-    // TEMP DEBUG: trace Bowen
-    if (sourceId === "1297350912") {
-      console.warn("[inferClass] BOWEN TRACE", {
-        predId: row.id,
-        currentClass: row.class_transition,
-        overridden: row.class_transition_overridden,
-        sourceId,
-        earliestInMap: earliestBySourceId.get(sourceId),
-        mapSize: earliestBySourceId.size,
-      });
-    }
     if (row.class_transition_overridden) { result.skipped++; continue; }
+    const sourceId = row.players?.source_player_id;
     if (!sourceId) { result.skipped++; continue; }
     const earliest = earliestBySourceId.get(sourceId);
     if (earliest == null) { result.skipped++; continue; }
@@ -124,17 +113,31 @@ export async function inferAllClassTransitions(season = 2025): Promise<InferResu
   }
   console.log(`[inferClass] ${updates.length} updates needed`);
 
-  // 4) Write updates in parallel (50 in flight).
-  await runWithConcurrency(updates, 50, async (u) => {
-    const { error: updErr } = await supabase
-      .from("player_predictions")
-      .update({ class_transition: u.cls })
-      .eq("id", u.id);
-    if (updErr) {
-      console.error(`[inferClass] update failed for ${u.id}`, updErr);
-      result.errors++;
-    } else {
+  // 4) Write updates with unlock-then-update (the protect_locked_predictions
+  // trigger silently drops writes to locked rows, so we must unlock first).
+  await runWithConcurrency(updates, 25, async (u) => {
+    let success = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { error: unlockErr } = await supabase
+        .from("player_predictions")
+        .update({ locked: false })
+        .eq("id", u.id);
+      if (unlockErr) {
+        await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+        continue;
+      }
+      const { error: updErr } = await supabase
+        .from("player_predictions")
+        .update({ class_transition: u.cls, locked: true })
+        .eq("id", u.id);
+      if (!updErr) { success = true; break; }
+      await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+    }
+    if (success) {
       result.updated++;
+    } else {
+      console.error(`[inferClass] update failed for ${u.id}`);
+      result.errors++;
     }
   });
 
