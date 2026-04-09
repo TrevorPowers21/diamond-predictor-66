@@ -1826,7 +1826,9 @@ export default function TeamBuilder() {
     const roster: BuildPlayer[] = returners.map((r: any) => {
       const player = r.players;
       if (!player) return null;
-      const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP|TWP)/i.test(String(player.position || ""));
+      // TWP (two-way) defaults to hitter side on the team builder — coaches
+      // can click into the profile to see the pitching view.
+      const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)$/i.test(String(player.position || ""));
       const overrideRole = asPitcherRole(playerOverrides?.[player.id]?.pitcher_role || null);
       const inferredRole = overrideRole || asPitcherRole(player.position || null);
       return {
@@ -4437,7 +4439,9 @@ export default function TeamBuilder() {
     const roster: BuildPlayer[] = returners.map((r: any) => {
       const player = r.players;
       if (!player) return null;
-      const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP|TWP)/i.test(String(player.position || ""));
+      // TWP (two-way) defaults to hitter side on the team builder — coaches
+      // can click into the profile to see the pitching view.
+      const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)$/i.test(String(player.position || ""));
       const overrideRole = asPitcherRole(playerOverrides?.[player.id]?.pitcher_role || null);
       const inferredRole = overrideRole || asPitcherRole(player.position || null);
       return {
