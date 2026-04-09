@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { pruneJunkTwins } from "@/lib/importHistoricalHitters";
 
 type ImportResult = {
   inserted: number;
@@ -216,5 +217,10 @@ export async function importHistoricalPitchersCsv(csvText: string, season: numbe
   }
 
   console.log(`[importHistoricalPitchers] Done! Inserted: ${result.inserted}, Skipped: ${result.skipped}`);
+
+  // Junk-twin cleanup: remove the meaningless 0-IP pitcher rows for true hitters
+  // and the meaningless 0-AB hitter rows for true pitchers, in this season.
+  await pruneJunkTwins(season);
+
   return result;
 }

@@ -1030,10 +1030,11 @@ export default function ReturningPlayers() {
         const to = from + pageSize - 1;
         const { data: pageData, error: pageErr, count } = await supabase
           .from("player_predictions")
-          .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal, portal_status, pa)", { count: "exact" })
+          .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal, portal_status, pa, ip)", { count: "exact" })
           .in("model_type", ["returner", "transfer"])
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
+          .gte("players.pa", 75)
           .order(orderColumn, { ascending: sortDir === "asc", nullsFirst: false })
           .range(from, to);
         if (pageErr) throw pageErr;
@@ -1073,10 +1074,11 @@ export default function ReturningPlayers() {
         while (true) {
           const { data, error } = await supabase
             .from("player_predictions")
-            .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal, portal_status, pa)")
+            .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal, portal_status, pa, ip)")
             .in("model_type", ["returner", "transfer"])
             .eq("variant", "regular")
             .in("status", ["active", "departed"])
+            .gte("players.pa", 75)
             .range(predFrom, predFrom + PRED_PAGE_SIZE - 1);
           if (error) throw error;
           allData = allData.concat(data || []);
@@ -1187,7 +1189,8 @@ export default function ReturningPlayers() {
       const to = from + pageSize - 1;
       let playersQuery = supabase
         .from("players")
-        .select("id, first_name, last_name, team, conference, position, class_year, transfer_portal, pa", { count: "exact" })
+        .select("id, first_name, last_name, team, conference, position, class_year, transfer_portal, pa, ip", { count: "exact" } as any)
+        .gte("pa", 75)
         .order("last_name", { ascending: true })
         .order("first_name", { ascending: true })
         .range(from, to);

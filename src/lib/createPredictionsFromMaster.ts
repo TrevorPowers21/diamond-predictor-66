@@ -161,3 +161,71 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
   console.log(`[createPredictions] Done!`, result);
   return result;
 }
+
+/**
+ * Create stub predictions for EVERY player (hitter or pitcher, current or
+ * departed) so class_transition has a row to live on. Skips players who
+ * already have a 2025 returner/regular prediction. Idempotent.
+ */
+export async function createStubPredictionsForAllPlayers(season = 2025): Promise<{ created: number; errors: string[] }> {
+  const errors: string[] = [];
+  let created = 0;
+
+  console.log("[createStubPredictions] Loading players...");
+  const allPlayers: Array<{ id: string }> = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("players")
+      .select("id")
+      .range(from, from + 999);
+    if (error) { errors.push(`Load players: ${error.message}`); return { created, errors }; }
+    allPlayers.push(...((data || []) as any));
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  console.log(`[createStubPredictions] ${allPlayers.length} players loaded`);
+
+  console.log("[createStubPredictions] Loading existing predictions to skip...");
+  const existing = new Set<string>();
+  from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("player_predictions")
+      .select("player_id")
+      .eq("season", season)
+      .eq("model_type", "returner")
+      .eq("variant", "regular")
+      .range(from, from + 999);
+    if (error) break;
+    for (const r of data || []) existing.add(r.player_id);
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  console.log(`[createStubPredictions] ${existing.size} existing predictions, will skip those`);
+
+  const stubs = allPlayers
+    .filter((p) => !existing.has(p.id))
+    .map((p) => ({
+      player_id: p.id,
+      model_type: "returner",
+      variant: "regular",
+      season,
+      status: "active",
+      locked: false,
+    }));
+
+  console.log(`[createStubPredictions] Inserting ${stubs.length} stub predictions...`);
+  for (let i = 0; i < stubs.length; i += CHUNK) {
+    const chunk = stubs.slice(i, i + CHUNK);
+    const { error } = await supabase.from("player_predictions").insert(chunk);
+    if (error) {
+      errors.push(`Stub chunk ${i}: ${error.message}`);
+    } else {
+      created += chunk.length;
+    }
+  }
+
+  console.log(`[createStubPredictions] Done. Created ${created}, errors ${errors.length}`);
+  return { created, errors };
+}

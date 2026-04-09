@@ -369,6 +369,41 @@ function InferClassTransitionsButton() {
   );
 }
 
+function CreateStubPredictionsButton() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ created: number; errors: string[] } | null>(null);
+  return (
+    <>
+      <Button
+        onClick={async () => {
+          setLoading(true);
+          setResult(null);
+          try {
+            const { createStubPredictionsForAllPlayers } = await import("@/lib/createPredictionsFromMaster");
+            const r = await createStubPredictionsForAllPlayers(2025);
+            setResult(r);
+          } catch (e: any) {
+            setResult({ created: 0, errors: [e.message] });
+          }
+          setLoading(false);
+        }}
+        disabled={loading}
+        variant="outline"
+        className="gap-2"
+      >
+        {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+        {loading ? "Creating Stubs…" : "Create Stub Predictions for All Players"}
+      </Button>
+      {result && (
+        <p className="text-sm text-muted-foreground">
+          Created {result.created} stub predictions.
+          {result.errors.length > 0 && ` Errors: ${result.errors.length}`}
+        </p>
+      )}
+    </>
+  );
+}
+
 function CreatePredictionsButton() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ predictionsCreated: number; internalsCreated: number; errors: string[] } | null>(null);
@@ -6639,6 +6674,13 @@ function QuickActionsTab() {
             </p>
           </div>
           <CreatePredictionsButton />
+          <div className="border-t pt-4">
+            <p className="font-medium">Create Stub Predictions for All Players</p>
+            <p className="text-sm text-muted-foreground">
+              Creates a blank returner prediction row for every player (hitter or pitcher, current or departed) who doesn't already have one. Required so Auto-Infer Class Transitions has somewhere to write each player's class. Idempotent and fast.
+            </p>
+          </div>
+          <CreateStubPredictionsButton />
           <div className="border-t pt-4">
             <p className="font-medium">Import PA/AB from CSV</p>
             <p className="text-sm text-muted-foreground">

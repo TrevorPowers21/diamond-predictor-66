@@ -195,5 +195,103 @@ export async function importHistoricalHittersCsv(csvText: string, season: number
   }
 
   console.log(`[importHistorical] Done! Inserted: ${result.inserted}, Skipped: ${result.skipped}`);
+
+  // Junk-twin cleanup: delete the meaningless 0-AB hitter rows for true pitchers,
+  // and the meaningless 0-IP pitcher rows for true hitters, in this season.
+  await pruneJunkTwins(season);
+
   return result;
+}
+
+/**
+ * Remove the junk twin rows created by importing the same source CSV into both
+ * Hitter Master and Pitching Master:
+ *  - 0-AB hitter rows whose source_player_id has IP > 0 in Pitching Master
+ *  - 0-IP pitcher rows whose source_player_id has AB > 0 in Hitter Master
+ *
+ * Players with no meaningful record on either side (true 0/0 redshirts) are
+ * preserved in both tables so class transition inference still works.
+ */
+export async function pruneJunkTwins(season: number): Promise<void> {
+  // 1) Pull all source_player_ids in Pitching Master with IP > 0 for this season
+  const pitcherIds = new Set<string>();
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("Pitching Master")
+      .select("source_player_id")
+      .eq("Season", season)
+      .gt("IP", 0)
+      .range(from, from + 999);
+    if (error) {
+      console.error("[pruneJunkTwins] failed listing real pitchers", error);
+      break;
+    }
+    for (const r of data || []) {
+      const sid = (r as any).source_player_id;
+      if (sid) pitcherIds.add(sid);
+    }
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+
+  // 2) Pull all source_player_ids in Hitter Master with ab > 0 for this season
+  const hitterIds = new Set<string>();
+  from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("Hitter Master")
+      .select("source_player_id")
+      .eq("Season", season)
+      .gt("ab", 0)
+      .range(from, from + 999);
+    if (error) {
+      console.error("[pruneJunkTwins] failed listing real hitters", error);
+      break;
+    }
+    for (const r of data || []) {
+      const sid = (r as any).source_player_id;
+      if (sid) hitterIds.add(sid);
+    }
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+
+  // 3) Delete junk hitter rows (0/null AB) for source_player_ids that are real pitchers
+  let deletedHitters = 0;
+  const pitcherIdList = [...pitcherIds];
+  for (let i = 0; i < pitcherIdList.length; i += 200) {
+    const chunk = pitcherIdList.slice(i, i + 200);
+    const { error, count } = await supabase
+      .from("Hitter Master")
+      .delete({ count: "exact" })
+      .eq("Season", season)
+      .or("ab.is.null,ab.eq.0")
+      .in("source_player_id", chunk);
+    if (error) {
+      console.error("[pruneJunkTwins] hitter delete chunk failed", error);
+    } else {
+      deletedHitters += count || 0;
+    }
+  }
+
+  // 4) Delete junk pitcher rows (0/null IP) for source_player_ids that are real hitters
+  let deletedPitchers = 0;
+  const hitterIdList = [...hitterIds];
+  for (let i = 0; i < hitterIdList.length; i += 200) {
+    const chunk = hitterIdList.slice(i, i + 200);
+    const { error, count } = await supabase
+      .from("Pitching Master")
+      .delete({ count: "exact" })
+      .eq("Season", season)
+      .or("IP.is.null,IP.eq.0")
+      .in("source_player_id", chunk);
+    if (error) {
+      console.error("[pruneJunkTwins] pitcher delete chunk failed", error);
+    } else {
+      deletedPitchers += count || 0;
+    }
+  }
+
+  console.log(`[pruneJunkTwins] season=${season} deletedHitters=${deletedHitters} deletedPitchers=${deletedPitchers}`);
 }

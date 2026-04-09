@@ -472,7 +472,24 @@ function recalcReturner(
       const baBlended = (fromAvg * (1 - effectivePowerWeight)) + (scaledBa * effectivePowerWeight);
       const baProjected = baBlended * (1 + bases.avg + (devAgg * config.devCoeffs.avg));
       const baDelta = baProjected - fromAvg;
-      return round3(normalizeProjectedRate(fromAvg + (baDelta * avgProjectedTierDamp(baProjected))));
+      const result = round3(normalizeProjectedRate(fromAvg + (baDelta * avgProjectedTierDamp(baProjected))));
+      // Debug: log the math for any case that produces null
+      if (result == null || !Number.isFinite(result)) {
+        console.warn("[recalcReturner] pAvg null", {
+          predId: pred.id,
+          baPlus, fromAvg,
+          ncaaAvg: config.ncaaAvg,
+          ncaaPR: config.ncaaPR,
+          safeBaStdPower,
+          baStdNcaa: config.baStdNcaa,
+          effectivePowerWeight,
+          basesAvg: bases.avg,
+          devAgg,
+          devCoeffsAvg: config.devCoeffs?.avg,
+          scaledBa, baBlended, baProjected, baDelta,
+        });
+      }
+      return result;
     })();
 
   const pObp = obpPlus == null
@@ -609,11 +626,14 @@ async function fetchAllPredictionsForReturnerMode(): Promise<PredictionRow[]> {
   for (let page = 0; ; page++) {
     const from = page * pageSize;
     const to = from + pageSize - 1;
+    // Skip stub predictions (no input stats) — they have nothing to recalculate.
+    // Stubs are characterized by having from_avg = null.
     const { data, error } = await supabase
       .from("player_predictions")
       .select("*")
       .in("model_type", ["returner", "transfer"])
       .in("status", ["active", "departed"])
+      .not("from_avg", "is", null)
       .range(from, to);
 
     if (error) throw error;
@@ -700,13 +720,29 @@ export async function bulkRecalculatePredictionsLocal() {
   const config = await loadEngineConfig();
   const preds = await fetchAllPredictionsForReturnerMode();
 
-  // Pre-fetch power ratings by source_player_id from Hitter Master for fallback when internals are missing
+  // Pre-fetch power ratings keyed by players.id (the FK predictions use), so the
+  // fallback lookup actually finds anything. We resolve the join via Hitter Master
+  // -> source_player_id -> players.id.
   const powerByPlayerId = new Map<string, { contact: number | null; lineDrive: number | null; avgExitVelo: number | null; popUp: number | null; bb: number | null; chase: number | null; barrel: number | null; ev90: number | null; pull: number | null; la10_30: number | null; gb: number | null }>();
+  // 1) source_player_id -> players.id
+  const sourceToPlayerId = new Map<string, string>();
+  let plFrom = 0;
+  while (true) {
+    const { data } = await supabase.from("players").select("id, source_player_id").not("source_player_id", "is", null).range(plFrom, plFrom + 999);
+    for (const r of data || []) {
+      if ((r as any).source_player_id) sourceToPlayerId.set((r as any).source_player_id, (r as any).id);
+    }
+    if (!data || data.length < 1000) break;
+    plFrom += 1000;
+  }
+  // 2) Hitter Master scouting -> bucket under players.id
   let pfrom = 0;
   while (true) {
     const { data } = await supabase.from("Hitter Master").select("source_player_id, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb").eq("Season", 2025).not("source_player_id", "is", null).range(pfrom, pfrom + 999);
     for (const r of data || []) {
-      if (r.source_player_id) powerByPlayerId.set(r.source_player_id, { contact: r.contact, lineDrive: r.line_drive, avgExitVelo: r.avg_exit_velo, popUp: r.pop_up, bb: r.bb, chase: r.chase, barrel: r.barrel, ev90: r.ev90, pull: r.pull, la10_30: r.la_10_30, gb: r.gb });
+      const playerId = r.source_player_id ? sourceToPlayerId.get(r.source_player_id) : null;
+      if (!playerId) continue;
+      powerByPlayerId.set(playerId, { contact: r.contact, lineDrive: r.line_drive, avgExitVelo: r.avg_exit_velo, popUp: r.pop_up, bb: r.bb, chase: r.chase, barrel: r.barrel, ev90: r.ev90, pull: r.pull, la10_30: r.la_10_30, gb: r.gb });
     }
     if (!data || data.length < 1000) break;
     pfrom += 1000;
@@ -740,7 +776,7 @@ export async function bulkRecalculatePredictionsLocal() {
   let errors = 0;
   let updatedReturner = 0;
   let updatedTransfer = 0;
-  const BATCH = 40;
+  const BATCH = 5;
 
   for (let i = 0; i < preds.length; i += BATCH) {
     const batch = preds.slice(i, i + BATCH);
@@ -763,9 +799,13 @@ export async function bulkRecalculatePredictionsLocal() {
           } else {
             const internal = internalByPredictionId.get(pred.id);
             const manual = MANUAL_INTERNAL_OVERRIDES[pred.id];
-            // Fallback: derive power from Hitter Master if internals are all null
+            // Fallback: derive power from Hitter Master if ANY of the three power ratings is missing
             let fallbackPower: ReturnerPowerContext | null = null;
-            if (!readSpecificPlus(internal?.avg_power_rating) && !manual?.baPlus && pred.player_id) {
+            const needsFallback =
+              (!readSpecificPlus(internal?.avg_power_rating) && !manual?.baPlus) ||
+              (!readSpecificPlus(internal?.obp_power_rating) && !manual?.obpPlus) ||
+              (!readSpecificPlus(internal?.slg_power_rating) && !manual?.isoPlus);
+            if (needsFallback && pred.player_id) {
               const raw = powerByPlayerId.get(pred.player_id);
               if (raw) fallbackPower = derivePower(raw);
             }
@@ -776,11 +816,29 @@ export async function bulkRecalculatePredictionsLocal() {
             };
             result = recalcReturner(pred, config.returner, powerContext);
           }
-          await supabase.from("player_predictions").update({ locked: false }).eq("id", pred.id);
-          const { error } = await supabase
-            .from("player_predictions")
-            .update({ ...result, locked: true })
-            .eq("id", pred.id);
+          // The protect_locked_predictions trigger blocks updates when locked=true,
+          // so we MUST unlock before writing the recalculated fields, then re-lock.
+          let lastErr: any = null;
+          let success = false;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              const { error: unlockErr } = await supabase
+                .from("player_predictions")
+                .update({ locked: false })
+                .eq("id", pred.id);
+              if (unlockErr) { lastErr = unlockErr; throw unlockErr; }
+              const { error: e } = await supabase
+                .from("player_predictions")
+                .update({ ...result, locked: true })
+                .eq("id", pred.id);
+              if (!e) { success = true; break; }
+              lastErr = e;
+            } catch (e) {
+              lastErr = e;
+            }
+            await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+          }
+          const error = success ? null : lastErr;
 
           if (error) {
             errors += 1;

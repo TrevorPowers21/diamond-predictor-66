@@ -108,6 +108,8 @@ export function HistoricalPlayerTable({ season, onPlayerClick }: { season: numbe
                    contact_score, line_drive_score, avg_ev_score, bb_score,
                    chase_score, barrel_score, ev90_score, pull_score, la_score, gb_score`)
           .eq("Season", season)
+          .gte("ab", 75)
+          .not("Pos", "in", "(P,RHP,LHP,SP,RP)")
           .order("pa", { ascending: false })
           .range(from, from + pageSize - 1);
         if (error) throw error;
@@ -440,8 +442,10 @@ export function HistoricalPitcherTable({ season, onPlayerClick }: { season: numb
           .from("Pitching Master")
           .select(`source_player_id, playerFullName, Team, Conference, ThrowHand,
                    IP, G, GS, ERA, FIP, WHIP, K9, BB9, HR9, stuff_plus,
-                   whiff_score, bb_score, barrel_score, hh_score`)
+                   whiff_score, bb_score, barrel_score, hh_score, Role`)
           .eq("Season", season)
+          .gte("IP", 20)
+          .not("Role", "in", "(C,1B,2B,3B,SS,OF,LF,CF,RF,DH,IF,UT)")
           .order("IP", { ascending: false })
           .range(from, from + pageSize - 1);
         if (error) {

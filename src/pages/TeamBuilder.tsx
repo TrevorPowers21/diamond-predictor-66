@@ -975,7 +975,7 @@ export default function TeamBuilder() {
   }, [newConfStats, pitchingEq]);
 
   const [buildName, setBuildName] = useState("My Team Build");
-  const [selectedTeam, setSelectedTeam] = useState<string>("Arizona State");
+  const [selectedTeam, setSelectedTeam] = useState<string>("TCU");
   const [totalBudget, setTotalBudget] = useState<number>(0);
   const [rosterPlayers, setRosterPlayers] = useState<BuildPlayer[]>([]);
   const [dirty, setDirty] = useState(false);

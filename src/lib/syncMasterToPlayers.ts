@@ -9,8 +9,13 @@ type SyncResult = {
 };
 
 /**
- * Clear the players table, then rebuild it from Hitter Master + Pitching Master.
- * Clean slate — no dedup, no partial updates.
+ * Clear the players table, then rebuild it from ALL seasons in Hitter Master +
+ * Pitching Master. One row per source_player_id, with metadata preferred from
+ * the most recent season the player appears in.
+ *
+ * The `season` parameter is the "preferred" season for metadata (defaults 2025).
+ * Players who don't appear in that season fall back to the most recent season
+ * they DO appear in.
  */
 export async function syncMasterToPlayers(season = 2025): Promise<SyncResult> {
   const result: SyncResult = { hittersInserted: 0, pitchersInserted: 0, errors: [] };
@@ -23,18 +28,15 @@ export async function syncMasterToPlayers(season = 2025): Promise<SyncResult> {
     return result;
   }
 
-  // Track source_player_ids to handle players who are both hitters and pitchers
-  const insertedSourceIds = new Set<string>();
-
-  // ─── Insert Hitters ──────────────────────────────────────────────────
-  console.log("[syncMaster] Loading Hitter Master...");
+  // ─── Load ALL hitter rows across every season ───────────────────────
+  console.log("[syncMaster] Loading Hitter Master (all seasons)...");
   const hitterRows: any[] = [];
   let from = 0;
   while (true) {
     const { data, error } = await supabase
       .from("Hitter Master")
-      .select("source_player_id, playerFullName, Team, TeamID, Conference, Pos, BatHand, ThrowHand")
-      .eq("Season", season)
+      .select("source_player_id, playerFullName, Team, TeamID, Conference, Pos, BatHand, ThrowHand, Season, pa, ab")
+      .order("Season", { ascending: false })
       .range(from, from + 999);
     if (error) { result.errors.push(`Hitter Master load: ${error.message}`); break; }
     hitterRows.push(...(data || []));
@@ -42,46 +44,15 @@ export async function syncMasterToPlayers(season = 2025): Promise<SyncResult> {
     from += 1000;
   }
 
-  console.log(`[syncMaster] Inserting ${hitterRows.length} hitters...`);
-  const hitterInserts = hitterRows.map((h) => {
-    const parts = (h.playerFullName || "").trim().split(/\s+/);
-    const firstName = parts[0] || "";
-    const lastName = parts.slice(1).join(" ") || "";
-    if (h.source_player_id) insertedSourceIds.add(h.source_player_id);
-    return {
-      first_name: firstName,
-      last_name: lastName,
-      team: h.Team,
-      conference: h.Conference,
-      position: h.Pos,
-      bats_hand: h.BatHand,
-      throws_hand: h.ThrowHand,
-      source_player_id: h.source_player_id,
-      source_team_id: h.TeamID,
-      transfer_portal: false,
-      from_team: h.Team,
-    };
-  }).filter((r) => r.first_name && r.last_name);
-
-  for (let i = 0; i < hitterInserts.length; i += CHUNK_SIZE) {
-    const chunk = hitterInserts.slice(i, i + CHUNK_SIZE);
-    const { error } = await supabase.from("players").insert(chunk);
-    if (error) {
-      result.errors.push(`Hitter chunk ${i}: ${error.message}`);
-    } else {
-      result.hittersInserted += chunk.length;
-    }
-  }
-
-  // ─── Insert Pitchers (skip if already inserted as hitter) ────────────
-  console.log("[syncMaster] Loading Pitching Master...");
+  // ─── Load ALL pitcher rows across every season ──────────────────────
+  console.log("[syncMaster] Loading Pitching Master (all seasons)...");
   const pitcherRows: any[] = [];
   from = 0;
   while (true) {
     const { data, error } = await supabase
       .from("Pitching Master")
-      .select("source_player_id, playerFullName, Team, TeamID, Conference, ThrowHand, Role")
-      .eq("Season", season)
+      .select("source_player_id, playerFullName, Team, TeamID, Conference, ThrowHand, Role, Season, IP, G, GS")
+      .order("Season", { ascending: false })
       .range(from, from + 999);
     if (error) { result.errors.push(`Pitching Master load: ${error.message}`); break; }
     pitcherRows.push(...(data || []));
@@ -89,40 +60,212 @@ export async function syncMasterToPlayers(season = 2025): Promise<SyncResult> {
     from += 1000;
   }
 
-  const pitcherInserts = pitcherRows
-    .filter((p) => !p.source_player_id || !insertedSourceIds.has(p.source_player_id))
-    .map((p) => {
-      const parts = (p.playerFullName || "").trim().split(/\s+/);
-      const firstName = parts[0] || "";
-      const lastName = parts.slice(1).join(" ") || "";
-      const role = (p.Role || "").trim().toUpperCase();
-      const position = role === "SP" || role === "RP" ? role : "P";
-      return {
-        first_name: firstName,
-        last_name: lastName,
-        team: p.Team,
-        conference: p.Conference,
-        position,
-        throws_hand: p.ThrowHand,
-        source_player_id: p.source_player_id,
-        source_team_id: p.TeamID,
-        transfer_portal: false,
-        from_team: p.Team,
-      };
-    })
-    .filter((r) => r.first_name && r.last_name);
+  // ─── Collapse to one record per source_player_id ─────────────────────
+  // Preference order: preferred season first, then most recent. Hitter rows
+  // beat pitcher rows when both exist for the same season (so position info
+  // comes from the hitter side for two-way players).
+  type Collapsed = {
+    source_player_id: string | null;
+    first_name: string;
+    last_name: string;
+    team: string | null;
+    conference: string | null;
+    position: string | null;
+    bats_hand: string | null;
+    throws_hand: string | null;
+    source_team_id: string | null;
+    bestSeason: number;
+    isPitcher: boolean;
+    pa: number | null;
+    ab: number | null;
+    ip: number | null;
+    g: number | null;
+    gs: number | null;
+  };
+  const byId = new Map<string, Collapsed>();
+  // Anonymous (no source_player_id) rows are keyed by name+team+isPitcher to
+  // dedupe but won't merge across hitter/pitcher tables.
+  const anon: Collapsed[] = [];
 
-  console.log(`[syncMaster] Inserting ${pitcherInserts.length} pitchers...`);
-  for (let i = 0; i < pitcherInserts.length; i += CHUNK_SIZE) {
-    const chunk = pitcherInserts.slice(i, i + CHUNK_SIZE);
-    const { error } = await supabase.from("players").insert(chunk);
-    if (error) {
-      result.errors.push(`Pitcher chunk ${i}: ${error.message}`);
+  const splitName = (full: string | null) => {
+    const parts = (full || "").trim().split(/\s+/);
+    return { first: parts[0] || "", last: parts.slice(1).join(" ") || "" };
+  };
+  const seasonScore = (s: number | null) => {
+    if (s == null) return -1;
+    if (s === season) return 1_000_000; // preferred season wins
+    return Number(s);
+  };
+
+  for (const h of hitterRows) {
+    const { first, last } = splitName(h.playerFullName);
+    if (!first || !last) continue;
+    const rec: Collapsed = {
+      source_player_id: h.source_player_id ?? null,
+      first_name: first,
+      last_name: last,
+      team: h.Team ?? null,
+      conference: h.Conference ?? null,
+      position: h.Pos ?? null,
+      bats_hand: h.BatHand ?? null,
+      throws_hand: h.ThrowHand ?? null,
+      source_team_id: h.TeamID ?? null,
+      bestSeason: Number(h.Season) || 0,
+      isPitcher: false,
+      pa: h.pa ?? null,
+      ab: h.ab ?? null,
+      ip: null,
+      g: null,
+      gs: null,
+    };
+    if (rec.source_player_id) {
+      const existing = byId.get(rec.source_player_id);
+      if (!existing) {
+        byId.set(rec.source_player_id, rec);
+      } else if (seasonScore(rec.bestSeason) > seasonScore(existing.bestSeason)) {
+        // Newer hitter row wins, but inherit pitching counts if existing had them
+        rec.ip = existing.ip ?? rec.ip;
+        rec.g = existing.g ?? rec.g;
+        rec.gs = existing.gs ?? rec.gs;
+        byId.set(rec.source_player_id, rec);
+      } else {
+        // Existing record wins season-wise but pull pa/ab if missing
+        existing.pa = existing.pa ?? rec.pa;
+        existing.ab = existing.ab ?? rec.ab;
+      }
     } else {
-      result.pitchersInserted += chunk.length;
+      anon.push(rec);
     }
   }
 
-  console.log(`[syncMaster] Done! Hitters: ${result.hittersInserted}, Pitchers: ${result.pitchersInserted}`, result);
+  for (const p of pitcherRows) {
+    const { first, last } = splitName(p.playerFullName);
+    if (!first || !last) continue;
+    const role = (p.Role || "").trim().toUpperCase();
+    const position = role === "SP" || role === "RP" ? role : "P";
+    const rec: Collapsed = {
+      source_player_id: p.source_player_id ?? null,
+      first_name: first,
+      last_name: last,
+      team: p.Team ?? null,
+      conference: p.Conference ?? null,
+      position,
+      bats_hand: null,
+      throws_hand: p.ThrowHand ?? null,
+      source_team_id: p.TeamID ?? null,
+      bestSeason: Number(p.Season) || 0,
+      isPitcher: true,
+      pa: null,
+      ab: null,
+      ip: p.IP ?? null,
+      g: p.G ?? null,
+      gs: p.GS ?? null,
+    };
+    if (rec.source_player_id) {
+      const existing = byId.get(rec.source_player_id);
+      if (!existing) {
+        byId.set(rec.source_player_id, rec);
+      } else if (seasonScore(rec.bestSeason) > seasonScore(existing.bestSeason)) {
+        if (!existing.isPitcher) {
+          existing.team = rec.team;
+          existing.conference = rec.conference;
+          existing.throws_hand = rec.throws_hand ?? existing.throws_hand;
+          existing.source_team_id = rec.source_team_id;
+          existing.bestSeason = rec.bestSeason;
+          existing.ip = rec.ip ?? existing.ip;
+          existing.g = rec.g ?? existing.g;
+          existing.gs = rec.gs ?? existing.gs;
+        } else {
+          // overwrite but preserve any prior pa/ab from hitter side
+          rec.pa = existing.pa ?? rec.pa;
+          rec.ab = existing.ab ?? rec.ab;
+          byId.set(rec.source_player_id, rec);
+        }
+      } else {
+        // Existing record from preferred season — still pull in pitching counts
+        existing.ip = existing.ip ?? rec.ip;
+        existing.g = existing.g ?? rec.g;
+        existing.gs = existing.gs ?? rec.gs;
+      }
+    } else {
+      anon.push(rec);
+    }
+  }
+
+  // ─── Force team/conference to come from the preferred (2025) season only ──
+  // Without this, departed players show up on a current roster because their
+  // last team carries forward. We want a player on the team they actually
+  // played for in 2025, or null if they weren't in 2025 at all.
+  const teamBySourceId2025 = new Map<string, { team: string | null; conference: string | null; teamId: string | null }>();
+  for (const h of hitterRows) {
+    if (Number(h.Season) !== season) continue;
+    if (!h.source_player_id) continue;
+    teamBySourceId2025.set(h.source_player_id, { team: h.Team ?? null, conference: h.Conference ?? null, teamId: h.TeamID ?? null });
+  }
+  for (const p of pitcherRows) {
+    if (Number(p.Season) !== season) continue;
+    if (!p.source_player_id) continue;
+    // Hitter row takes precedence (already set), only fill if missing
+    if (!teamBySourceId2025.has(p.source_player_id)) {
+      teamBySourceId2025.set(p.source_player_id, { team: p.Team ?? null, conference: p.Conference ?? null, teamId: p.TeamID ?? null });
+    }
+  }
+
+  for (const [sid, rec] of byId.entries()) {
+    const t = teamBySourceId2025.get(sid);
+    if (t) {
+      rec.team = t.team;
+      rec.conference = t.conference;
+      rec.source_team_id = t.teamId;
+    } else {
+      // Player has no 2025 row — they're a departed player. Clear roster fields
+      // so they don't pollute current rosters; profile lookups still work via id.
+      rec.team = null;
+      rec.conference = null;
+      rec.source_team_id = null;
+    }
+  }
+
+  // ─── Build final insert payload ──────────────────────────────────────
+  const allRecs = [...byId.values(), ...anon];
+  const inserts = allRecs.map((r) => ({
+    first_name: r.first_name,
+    last_name: r.last_name,
+    team: r.team,
+    conference: r.conference,
+    position: r.position,
+    bats_hand: r.bats_hand,
+    throws_hand: r.throws_hand,
+    source_player_id: r.source_player_id,
+    source_team_id: r.source_team_id,
+    transfer_portal: false,
+    from_team: r.team,
+    pa: r.pa,
+    ab: r.ab,
+    ip: r.ip,
+    g: r.g,
+    gs: r.gs,
+  }));
+
+  console.log(`[syncMaster] Inserting ${inserts.length} unique players (across all seasons)...`);
+  for (let i = 0; i < inserts.length; i += CHUNK_SIZE) {
+    const chunk = inserts.slice(i, i + CHUNK_SIZE);
+    const { error } = await supabase.from("players").insert(chunk);
+    if (error) {
+      result.errors.push(`Insert chunk ${i}: ${error.message}`);
+    } else {
+      // Split the count between the two buckets for the existing UI label
+      for (const c of chunk) {
+        // crude classification: if position is SP/RP/P we call it a pitcher
+        if (c.position === "SP" || c.position === "RP" || c.position === "P") {
+          result.pitchersInserted++;
+        } else {
+          result.hittersInserted++;
+        }
+      }
+    }
+  }
+
+  console.log(`[syncMaster] Done! Total: ${inserts.length} players (${result.hittersInserted} hitters, ${result.pitchersInserted} pitchers)`, result);
   return result;
 }

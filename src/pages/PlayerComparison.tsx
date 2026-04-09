@@ -668,9 +668,9 @@ export default function PlayerComparison() {
   const [aPlayerSearch, setAPlayerSearch] = useState("");
   const [aPlayerOpen, setAPlayerOpen] = useState(false);
   const [aPlayerId, setAPlayerId] = useState("");
-  const [aTeamSearch, setATeamSearch] = useState("Arizona State");
+  const [aTeamSearch, setATeamSearch] = useState("TCU");
   const [aTeamOpen, setATeamOpen] = useState(false);
-  const [aDestTeam, setADestTeam] = useState("Arizona State");
+  const [aDestTeam, setADestTeam] = useState("TCU");
   const [aPitcherId, setAPitcherId] = useState("");
   const [aPitcherSearch, setAPitcherSearch] = useState("");
   const [aPitcherOpen, setAPitcherOpen] = useState(false);
@@ -680,9 +680,9 @@ export default function PlayerComparison() {
   const [bPlayerSearch, setBPlayerSearch] = useState("");
   const [bPlayerOpen, setBPlayerOpen] = useState(false);
   const [bPlayerId, setBPlayerId] = useState("");
-  const [bTeamSearch, setBTeamSearch] = useState("Arizona State");
+  const [bTeamSearch, setBTeamSearch] = useState("TCU");
   const [bTeamOpen, setBTeamOpen] = useState(false);
-  const [bDestTeam, setBDestTeam] = useState("Arizona State");
+  const [bDestTeam, setBDestTeam] = useState("TCU");
   const [bPitcherId, setBPitcherId] = useState("");
   const [bPitcherSearch, setBPitcherSearch] = useState("");
   const [bPitcherOpen, setBPitcherOpen] = useState(false);
@@ -727,7 +727,7 @@ export default function PlayerComparison() {
       let from = 0;
       const PAGE = 1000;
       while (true) {
-        const { data, error } = await supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, player_predictions(id, from_avg, from_obp, from_slg, model_type, variant, status, updated_at)").range(from, from + PAGE - 1);
+        const { data, error } = await supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, player_predictions(id, from_avg, from_obp, from_slg, model_type, variant, status, updated_at)").or("pa.gte.75,ip.gte.20").range(from, from + PAGE - 1);
         if (error) throw error;
         all = all.concat(data || []);
         if (!data || data.length < PAGE) break;
