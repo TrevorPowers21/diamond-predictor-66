@@ -48,7 +48,7 @@ const SELECT_COLS =
  */
 export const SAVANT_MIN_AB = 50;
 
-export function useSavantHitters(season = 2025) {
+export function useSavantHitters(season: number = 2025) {
   return useQuery({
     queryKey: ["savant_hitters", season, "v3-la"],
     queryFn: async () => {

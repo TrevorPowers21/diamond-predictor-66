@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import PercentileBar from "@/savant/components/PercentileBar";
 import CareerStatsTable from "@/savant/components/CareerStatsTable";
@@ -105,9 +105,17 @@ function BarGroup({ bars }: { bars: BarConfig[] }) {
 
 export default function HitterPage() {
   const { id } = useParams<{ id: string }>();
-  const { data: hitters = [], isLoading } = useSavantHitters();
+  const [selectedSeason, setSelectedSeason] = useState<number>(2025);
+  const { data: hitters = [], isLoading } = useSavantHitters(selectedSeason);
   const { data: careerRows = [] } = usePlayerCareer(id);
   const { data: prediction = null } = usePlayerPrediction(id);
+
+  // Years this player actually has data for — drives the season dropdown
+  const availableSeasons = useMemo(() => {
+    const set = new Set<number>();
+    for (const r of careerRows) if (r.Season != null) set.add(Number(r.Season));
+    return [...set].sort((a, b) => b - a);
+  }, [careerRows]);
 
   const player = useMemo(
     () => hitters.find((h) => h.source_player_id === id),
@@ -205,8 +213,23 @@ export default function HitterPage() {
               <div className="mb-3 flex items-baseline justify-between">
                 <div className="flex items-center gap-2">
                   <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: GOLD }} />
-                  <h2 className="text-xs font-bold uppercase tracking-[0.22em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>
-                    {player.Season ?? ""} Percentile Rankings
+                  <h2 className="flex items-center gap-1 text-xs font-bold uppercase tracking-[0.22em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>
+                    <span className="relative inline-block">
+                      <select
+                        value={selectedSeason}
+                        onChange={(e) => setSelectedSeason(Number(e.target.value))}
+                        className="cursor-pointer appearance-none bg-transparent pr-3 text-xs font-bold uppercase tracking-[0.22em] text-[#D4AF37] focus:outline-none"
+                        style={{ fontFamily: "'Oswald', sans-serif" }}
+                      >
+                        {(availableSeasons.length > 0 ? availableSeasons : [2025]).map((s) => (
+                          <option key={s} value={s} style={{ backgroundColor: NAVY_CARD }}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-[8px]">▼</span>
+                    </span>
+                    Percentile Rankings
                   </h2>
                 </div>
                 <div className="text-[11px] uppercase tracking-wider text-white/55">
