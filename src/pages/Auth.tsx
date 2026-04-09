@@ -39,11 +39,15 @@ export default function Auth() {
           </div>
         )}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center gap-2 text-primary">
-            <Activity className="h-8 w-8" />
-            <span className="text-2xl font-bold tracking-tight">Diamond Analytics</span>
+          <div className="inline-flex items-center gap-3">
+            <svg width="44" height="44" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="30" y="30" width="140" height="140" fill="none" stroke="#D4AF37" strokeWidth="2.5" transform="rotate(45 100 100)" />
+              <rect x="50" y="50" width="100" height="100" fill="none" stroke="#D4AF37" strokeWidth="1.8" transform="rotate(45 100 100)" />
+              <text x="100" y="105" textAnchor="middle" dominantBaseline="middle" fill="#D4AF37" fontSize="80" fontWeight="600" fontFamily="'Cormorant Garamond', serif">R</text>
+            </svg>
+            <span className="text-3xl font-bold tracking-wider" style={{ fontFamily: "'Oswald', sans-serif", color: "#D4AF37" }}>RSTR IQ</span>
           </div>
-          <p className="text-muted-foreground text-sm">College Baseball Intelligence Platform</p>
+          <p className="text-muted-foreground text-sm tracking-[0.3em] uppercase">Everyday GM</p>
         </div>
 
         <Card className="border-border/50">
