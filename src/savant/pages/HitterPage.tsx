@@ -3,6 +3,8 @@ import { Link, useParams } from "react-router-dom";
 import PercentileBar from "@/savant/components/PercentileBar";
 import CareerStatsTable from "@/savant/components/CareerStatsTable";
 import CareerScoutingTable from "@/savant/components/CareerScoutingTable";
+import PredictionCard from "@/savant/components/PredictionCard";
+import { usePlayerPrediction } from "@/savant/hooks/usePlayerPrediction";
 import {
   SAVANT_MIN_AB,
   useSavantHitters,
@@ -103,6 +105,7 @@ export default function HitterPage() {
   const { id } = useParams<{ id: string }>();
   const { data: hitters = [], isLoading } = useSavantHitters();
   const { data: careerRows = [] } = usePlayerCareer(id);
+  const { data: prediction = null } = usePlayerPrediction(id);
 
   const player = useMemo(
     () => hitters.find((h) => h.source_player_id === id),
@@ -142,7 +145,7 @@ export default function HitterPage() {
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: NAVY_BG }}>
-      <div className="mx-auto max-w-5xl px-6 py-8">
+      <div className="mx-auto max-w-7xl px-6 py-8">
         <Link
           to="/savant"
           className="cursor-pointer text-[10px] font-bold uppercase tracking-[0.25em] text-[#D4AF37] transition-colors hover:text-[#E8C24E]"
@@ -150,93 +153,102 @@ export default function HitterPage() {
           ← Savant
         </Link>
 
-        {/* Header card */}
-        <header
-          className="mt-4 border-l-[3px] px-7 py-6 shadow-[0_1px_0_0_rgba(212,175,55,0.08)_inset]"
-          style={{ borderColor: GOLD, backgroundColor: NAVY_CARD }}
-        >
-          <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#D4AF37]">
-            Internal · Savant · Hitter Profile · {player.Season ?? "—"}
-          </div>
-          <h1
-            className="mt-2 font-[Oswald] text-4xl font-bold leading-none tracking-tight text-white"
-            style={{ textShadow: "0 0 16px rgba(212,175,55,0.08)" }}
-          >
-            {player.playerFullName}
-          </h1>
-          <div className="mt-3 text-sm text-white/75">
-            <span className="font-semibold text-white">{player.Team ?? "—"}</span>
-            <MetaDot />
-            <span>{player.Conference ?? "—"}</span>
-            <MetaDot />
-            <span>{player.Pos ?? "—"}</span>
-            <MetaDot />
-            <span>{player.BatHand ?? "?"}/{player.ThrowHand ?? "?"}</span>
-            <MetaDot />
-            <span className="font-mono tabular-nums">{player.pa ?? 0} PA</span>
-            <MetaDot />
-            <span className="font-mono tabular-nums">{player.ab ?? 0} AB</span>
-          </div>
-        </header>
+        {/* Two-column layout: identity + tables on the left, percentile viz on the right */}
+        <div className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-[1.15fr_1fr]">
+          {/* ─── LEFT COLUMN ─── */}
+          <div className="space-y-6">
+            {/* Header card */}
+            <header
+              className="border-l-[3px] px-7 py-6 shadow-[0_1px_0_0_rgba(212,175,55,0.08)_inset]"
+              style={{ borderColor: GOLD, backgroundColor: NAVY_CARD }}
+            >
+              <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#D4AF37]">
+                Internal · Savant · Hitter Profile · {player.Season ?? "—"}
+              </div>
+              <h1
+                className="mt-2 font-[Oswald] text-4xl font-bold leading-none tracking-tight text-white"
+                style={{ textShadow: "0 0 16px rgba(212,175,55,0.08)" }}
+              >
+                {player.playerFullName}
+              </h1>
+              <div className="mt-3 text-sm text-white/75">
+                <span className="font-semibold text-white">{player.Team ?? "—"}</span>
+                <MetaDot />
+                <span>{player.Conference ?? "—"}</span>
+                <MetaDot />
+                <span>{player.Pos ?? "—"}</span>
+                <MetaDot />
+                <span>{player.BatHand ?? "?"}/{player.ThrowHand ?? "?"}</span>
+                <MetaDot />
+                <span className="font-mono tabular-nums">{player.pa ?? 0} PA</span>
+                <MetaDot />
+                <span className="font-mono tabular-nums">{player.ab ?? 0} AB</span>
+              </div>
+            </header>
 
-        {/* Slash line — full width row across the top */}
-        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          {[
-            ["AVG", player.AVG, fmt3],
-            ["OBP", player.OBP, fmt3],
-            ["SLG", player.SLG, fmt3],
-            ["OPS", opsOf(player), fmt3],
-            ["ISO", player.ISO, fmt3],
-            ["WRC+", wrcPlusOf(player), fmtInt],
-          ].map(([label, val, f]) => (
-            <div
-              key={label as string}
-              className="group cursor-default border px-4 py-4 transition-colors duration-200 hover:border-[#D4AF37]/40"
+            {/* Slash line — 6 tiles, fits inside left column */}
+            <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
+              {[
+                ["AVG", player.AVG, fmt3],
+                ["OBP", player.OBP, fmt3],
+                ["SLG", player.SLG, fmt3],
+                ["OPS", opsOf(player), fmt3],
+                ["ISO", player.ISO, fmt3],
+                ["WRC+", wrcPlusOf(player), fmtInt],
+              ].map(([label, val, f]) => (
+                <div
+                  key={label as string}
+                  className="group cursor-default border px-3 py-3 transition-colors duration-200 hover:border-[#D4AF37]/40"
+                  style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
+                >
+                  <div className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#D4AF37]/80">
+                    {label as string}
+                  </div>
+                  <div
+                    className="mt-1 font-[Oswald] text-2xl font-bold tabular-nums text-white"
+                    style={{ textShadow: "0 0 12px rgba(212,175,55,0.15)" }}
+                  >
+                    {val != null ? (f as (n: number) => string)(val as number) : "—"}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Career stats table */}
+            <CareerStatsTable rows={careerRows} />
+
+            {/* Year-over-year scouting metrics */}
+            <CareerScoutingTable rows={careerRows} />
+          </div>
+
+          {/* ─── RIGHT COLUMN ─── */}
+          <div className="space-y-6">
+            <PredictionCard prediction={prediction} targetSeason={2026} />
+
+            <section
+              className="border px-6 py-5"
               style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
             >
-              <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#D4AF37]/80">
-                {label as string}
+              <div className="mb-3 flex items-baseline justify-between">
+                <div className="text-xs font-bold uppercase tracking-[0.25em] text-[#D4AF37]">
+                  {player.Season ?? ""} Percentile Rankings
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-white/45">
+                  vs. NCAA · min {SAVANT_MIN_AB} AB
+                </div>
               </div>
-              <div
-                className="mt-1.5 font-[Oswald] text-3xl font-bold tabular-nums text-white"
-                style={{ textShadow: "0 0 12px rgba(212,175,55,0.15)" }}
-              >
-                {val != null ? (f as (n: number) => string)(val as number) : "—"}
-              </div>
-            </div>
-          ))}
-        </div>
 
-        {/* Career stats table — year-over-year slash + counting stats */}
-        <CareerStatsTable rows={careerRows} />
+              <SectionHeader>Production</SectionHeader>
+              <BarGroup bars={groups.production} />
 
-        {/* Year-over-year scouting metrics — Statcast-style data table */}
-        <CareerScoutingTable rows={careerRows} />
+              <SectionHeader>Quality of Contact</SectionHeader>
+              <BarGroup bars={groups.contact} />
 
-        {/* Percentile panel — full width, single column. New sections (historical
-            production table, year-over-year data table) stack below as we build them. */}
-        <section
-          className="mt-6 border px-6 py-5"
-          style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
-        >
-          <div className="mb-3 flex items-baseline justify-between">
-            <div className="text-xs font-bold uppercase tracking-[0.25em] text-[#D4AF37]">
-              {player.Season ?? ""} Percentile Rankings
-            </div>
-            <div className="text-[10px] uppercase tracking-wider text-white/45">
-              vs. NCAA · min {SAVANT_MIN_AB} AB
-            </div>
+              <SectionHeader>Plate Discipline</SectionHeader>
+              <BarGroup bars={groups.discipline} />
+            </section>
           </div>
-
-          <SectionHeader>Production</SectionHeader>
-          <BarGroup bars={groups.production} />
-
-          <SectionHeader>Quality of Contact</SectionHeader>
-          <BarGroup bars={groups.contact} />
-
-          <SectionHeader>Plate Discipline</SectionHeader>
-          <BarGroup bars={groups.discipline} />
-        </section>
+        </div>
       </div>
     </div>
   );
