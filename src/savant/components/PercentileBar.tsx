@@ -22,8 +22,8 @@ export default function PercentileBar({ label, value, percentile, format }: Perc
   const pct = hasData ? Math.max(2, percentile!) : 0; // floor to keep marker visible at 0
 
   return (
-    <div className="grid grid-cols-[110px_1fr_60px] items-center gap-3 py-2">
-      <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-white/70">
+    <div className="grid grid-cols-[130px_1fr_60px] items-center gap-3 py-2">
+      <div className="whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.12em] text-white/70">
         {label}
       </div>
 
@@ -50,7 +50,7 @@ export default function PercentileBar({ label, value, percentile, format }: Perc
         )}
       </div>
 
-      <div className="text-right text-sm font-mono font-semibold tabular-nums text-white">
+      <div className="text-right text-sm font-semibold tabular-nums text-white">
         {display}
       </div>
     </div>
