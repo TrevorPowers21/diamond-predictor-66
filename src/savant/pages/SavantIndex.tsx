@@ -41,7 +41,7 @@ export default function SavantIndex() {
     name: p.playerFullName,
     team: p.Team,
     value,
-    href: p.source_player_id ? `/savant/hitter/${p.source_player_id}` : null,
+    href: p.source_player_id ? `/savant/pitcher/${p.source_player_id}` : null,
   });
 
   const barrelEntries = useMemo(

@@ -1,0 +1,299 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import PercentileBar from "@/savant/components/PercentileBar";
+import PitcherCareerStatsTable from "@/savant/components/PitcherCareerStatsTable";
+import PitcherStuffPlusTable from "@/savant/components/PitcherStuffPlusTable";
+import {
+  SAVANT_MIN_IP,
+  useSavantPitchers,
+  type SavantPitcherRow,
+} from "@/savant/hooks/useSavantPitchers";
+import { usePitcherCareer } from "@/savant/hooks/usePitcherCareer";
+import { usePitcherStuffPlus } from "@/savant/hooks/usePitcherStuffPlus";
+import { percentileRank } from "@/savant/lib/percentile";
+
+const fmt2 = (v: number) => v.toFixed(2);
+const fmt1 = (v: number) => v.toFixed(1);
+const fmtPct = (v: number) => `${v.toFixed(1)}%`;
+const fmtInt = (v: number) => `${Math.round(v)}`;
+
+const NAVY_BG = "#040810";
+const NAVY_CARD = "#0a1428";
+const NAVY_BORDER = "#1f2d52";
+const GOLD = "#D4AF37";
+
+interface BarConfig {
+  label: string;
+  value: number | null;
+  pop: Array<number | null>;
+  format: (v: number) => string;
+  /** Lower-is-better metrics get inverted percentile */
+  invert?: boolean;
+}
+
+function buildBars(player: SavantPitcherRow, pop: SavantPitcherRow[]) {
+  const qualified = pop.filter((p) => (p.IP ?? 0) >= SAVANT_MIN_IP);
+  const col = <K extends keyof SavantPitcherRow>(k: K) =>
+    qualified.map((r) => r[k] as number | null);
+
+  const production: BarConfig[] = [
+    { label: "ERA", value: player.ERA, pop: col("ERA"), format: fmt2, invert: true },
+    { label: "FIP", value: player.FIP, pop: col("FIP"), format: fmt2, invert: true },
+    { label: "WHIP", value: player.WHIP, pop: col("WHIP"), format: fmt2, invert: true },
+    { label: "K/9", value: player.K9, pop: col("K9"), format: fmt2 },
+    { label: "BB/9", value: player.BB9, pop: col("BB9"), format: fmt2, invert: true },
+    { label: "HR/9", value: player.HR9, pop: col("HR9"), format: fmt2, invert: true },
+    { label: "STUFF+", value: player.stuff_plus, pop: col("stuff_plus"), format: fmtInt },
+  ];
+  const stuff: BarConfig[] = [
+    { label: "WHIFF %", value: player.miss_pct, pop: col("miss_pct"), format: fmtPct },
+    { label: "IZ WHIFF %", value: player.in_zone_whiff_pct, pop: col("in_zone_whiff_pct"), format: fmtPct },
+    { label: "CHASE %", value: player.chase_pct, pop: col("chase_pct"), format: fmtPct },
+    { label: "BB %", value: player.bb_pct, pop: col("bb_pct"), format: fmtPct, invert: true },
+  ];
+  const contact: BarConfig[] = [
+    { label: "HARD HIT %", value: player.hard_hit_pct, pop: col("hard_hit_pct"), format: fmtPct, invert: true },
+    { label: "BARREL %", value: player.barrel_pct, pop: col("barrel_pct"), format: fmtPct, invert: true },
+    { label: "EXIT VELO", value: player.exit_vel, pop: col("exit_vel"), format: fmt1, invert: true },
+    { label: "GROUND %", value: player.ground_pct, pop: col("ground_pct"), format: fmtPct },
+  ];
+  return { production, stuff, contact };
+}
+
+function MetaDot() {
+  return <span className="mx-2 inline-block h-1 w-1 rounded-full bg-[#D4AF37]/70 align-middle" />;
+}
+
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-2 mt-4 flex items-center gap-2 first:mt-0">
+      <span className="h-px flex-1 bg-[#D4AF37]/20" />
+      <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#D4AF37]">
+        {children}
+      </span>
+      <span className="h-px flex-1 bg-[#D4AF37]/20" />
+    </div>
+  );
+}
+
+function BarGroup({ bars }: { bars: BarConfig[] }) {
+  return (
+    <div className="divide-y divide-white/5">
+      {bars.map((b) => (
+        <PercentileBar
+          key={b.label}
+          label={b.label}
+          value={b.value}
+          percentile={percentileRank(b.value, b.pop, { invert: b.invert })}
+          format={b.format}
+        />
+      ))}
+    </div>
+  );
+}
+
+export default function PitcherPage() {
+  const { id } = useParams<{ id: string }>();
+  const [selectedSeason, setSelectedSeason] = useState<number>(2025);
+  const [seasonOpen, setSeasonOpen] = useState(false);
+  const seasonRef = useRef<HTMLDivElement>(null);
+
+  // Close percentile-rankings dropdown on outside click
+  useEffect(() => {
+    if (!seasonOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (seasonRef.current && !seasonRef.current.contains(e.target as Node)) {
+        setSeasonOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [seasonOpen]);
+
+  const { data: pitchers = [], isLoading } = useSavantPitchers(selectedSeason);
+  const { data: careerRows = [] } = usePitcherCareer(id);
+
+  // Stuff+ table has its own season state since the dropdown only includes
+  // seasons that have Stuff+ data (forward only, no historical backfill).
+  const [stuffSeason, setStuffSeason] = useState<number>(2025);
+  const { data: stuffRows = [] } = usePitcherStuffPlus(id, stuffSeason);
+
+  const availableSeasons = useMemo(() => {
+    const set = new Set<number>();
+    for (const r of careerRows) if (r.Season != null) set.add(Number(r.Season));
+    return [...set].sort((a, b) => b - a);
+  }, [careerRows]);
+
+  const player = useMemo(
+    () => pitchers.find((p) => p.source_player_id === id),
+    [pitchers, id],
+  );
+
+  const groups = useMemo(
+    () => (player ? buildBars(player, pitchers) : null),
+    [player, pitchers],
+  );
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen p-10 text-sm text-white/50" style={{ backgroundColor: NAVY_BG }}>
+        Loading…
+      </div>
+    );
+  }
+
+  if (!player || !groups) {
+    return (
+      <div className="min-h-screen p-10" style={{ backgroundColor: NAVY_BG }}>
+        <div className="mx-auto max-w-3xl">
+          <Link
+            to="/savant"
+            className="cursor-pointer text-xs font-bold uppercase tracking-[0.2em] text-[#D4AF37] transition-colors hover:text-[#E8C24E]"
+          >
+            ← Savant
+          </Link>
+          <div className="mt-6 text-sm text-white/60">
+            Pitcher not found in {selectedSeason} Pitching Master.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen text-white" style={{ backgroundColor: NAVY_BG }}>
+      <div className="mx-auto max-w-7xl px-6 py-8">
+        <Link
+          to="/savant"
+          className="cursor-pointer text-[10px] font-bold uppercase tracking-[0.25em] text-[#D4AF37] transition-colors hover:text-[#E8C24E]"
+        >
+          ← Savant
+        </Link>
+
+        <div className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-[1.15fr_1fr]">
+          {/* ─── LEFT COLUMN ─── */}
+          <div className="space-y-6">
+            {/* Header card */}
+            <header
+              className="border-l-[3px] px-7 py-6 shadow-[0_1px_0_0_rgba(212,175,55,0.08)_inset]"
+              style={{ borderColor: GOLD, backgroundColor: NAVY_CARD }}
+            >
+              <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#D4AF37]">
+                Internal · Savant · Pitcher Profile · {player.Season ?? "—"}
+              </div>
+              <h1
+                className="mt-2 font-[Oswald] text-4xl font-bold leading-none tracking-tight text-white"
+                style={{ textShadow: "0 0 16px rgba(212,175,55,0.08)" }}
+              >
+                {player.playerFullName}
+              </h1>
+              <div className="mt-3 text-sm text-white/75">
+                <span className="font-semibold text-white">{player.Team ?? "—"}</span>
+                <MetaDot />
+                <span>{player.Conference ?? "—"}</span>
+                <MetaDot />
+                <span>{player.Role ?? "—"}</span>
+                <MetaDot />
+                <span>{player.ThrowHand === "L" ? "LHP" : player.ThrowHand === "R" ? "RHP" : player.ThrowHand ?? "?"}</span>
+              </div>
+            </header>
+
+            <PitcherCareerStatsTable rows={careerRows} />
+
+            <PitcherStuffPlusTable
+              rows={stuffRows}
+              selectedSeason={stuffSeason}
+              availableSeasons={[2025]}
+              onSeasonChange={setStuffSeason}
+            />
+          </div>
+
+          {/* ─── RIGHT COLUMN ─── */}
+          <div className="space-y-6">
+            <section
+              className="border px-6 py-5"
+              style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
+            >
+              <div className="mb-3 flex items-baseline justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: GOLD }} />
+                  <h2
+                    className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.22em] text-[#D4AF37]"
+                    style={{ fontFamily: "'Oswald', sans-serif" }}
+                  >
+                    <div ref={seasonRef} className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setSeasonOpen((v) => !v)}
+                        className="inline-flex cursor-pointer items-center gap-1 bg-transparent text-xs font-bold uppercase tracking-[0.22em] text-[#D4AF37] transition-colors duration-150 hover:text-[#E8C24E] focus:outline-none"
+                        style={{ fontFamily: "'Oswald', sans-serif" }}
+                      >
+                        <span>{selectedSeason}</span>
+                        <svg
+                          width="8"
+                          height="8"
+                          viewBox="0 0 12 12"
+                          fill="none"
+                          className={`transition-transform duration-200 ${seasonOpen ? "rotate-180" : ""}`}
+                          style={{ color: GOLD }}
+                        >
+                          <path
+                            d="M2 4l4 4 4-4"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </button>
+                      {seasonOpen && (
+                        <div
+                          className="absolute left-0 top-full z-20 mt-1 min-w-full overflow-hidden border shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]"
+                          style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
+                        >
+                          {(availableSeasons.length > 0 ? availableSeasons : [2025]).map((s) => {
+                            const isActive = s === selectedSeason;
+                            return (
+                              <button
+                                key={s}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedSeason(s);
+                                  setSeasonOpen(false);
+                                }}
+                                className="block w-full cursor-pointer px-4 py-2 text-left font-[Oswald] text-sm font-bold leading-none transition-colors duration-150 hover:bg-[#D4AF37]/[0.1]"
+                                style={{
+                                  color: isActive ? GOLD : "#FFFFFF",
+                                  backgroundColor: isActive ? "rgba(212,175,55,0.06)" : "transparent",
+                                }}
+                              >
+                                {s}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    Percentile Rankings
+                  </h2>
+                </div>
+                <div className="text-[11px] uppercase tracking-wider text-white/55">
+                  vs. NCAA · min {SAVANT_MIN_IP} IP
+                </div>
+              </div>
+
+              <SectionHeader>Production</SectionHeader>
+              <BarGroup bars={groups.production} />
+
+              <SectionHeader>Stuff & Discipline</SectionHeader>
+              <BarGroup bars={groups.stuff} />
+
+              <SectionHeader>Quality of Contact</SectionHeader>
+              <BarGroup bars={groups.contact} />
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

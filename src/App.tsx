@@ -12,6 +12,7 @@ import Index from "./pages/Index";
 const SavantRoute = lazy(() => import("@/savant/components/SavantRoute"));
 const SavantIndex = lazy(() => import("@/savant/pages/SavantIndex"));
 const SavantHitterPage = lazy(() => import("@/savant/pages/HitterPage"));
+const SavantPitcherPage = lazy(() => import("@/savant/pages/PitcherPage"));
 import TransferPortal from "./pages/TransferPortal";
 import ReturningPlayers from "./pages/ReturningPlayers";
 import Auth from "./pages/Auth";
@@ -68,6 +69,16 @@ const App = () => (
                 <ProtectedRoute>
                   <Suspense fallback={null}>
                     <SavantRoute><SavantHitterPage /></SavantRoute>
+                  </Suspense>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/savant/pitcher/:id"
+              element={
+                <ProtectedRoute>
+                  <Suspense fallback={null}>
+                    <SavantRoute><SavantPitcherPage /></SavantRoute>
                   </Suspense>
                 </ProtectedRoute>
               }
