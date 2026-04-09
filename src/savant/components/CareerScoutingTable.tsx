@@ -36,7 +36,7 @@ export default function CareerScoutingTable({ rows }: CareerScoutingTableProps) 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-white/65">
+            <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-white">
               <th className="px-4 py-2">Season</th>
               <th className="px-3 py-2 text-right">Contact</th>
               <th className="px-3 py-2 text-right">LD%</th>

@@ -23,7 +23,7 @@ export default function PercentileBar({ label, value, percentile, format }: Perc
 
   return (
     <div className="grid grid-cols-[130px_1fr_60px] items-center gap-3 py-2">
-      <div className="whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.12em] text-white/70">
+      <div className="whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.12em] text-white">
         {label}
       </div>
 
