@@ -1,10 +1,14 @@
 import type { PlayerCareerRow } from "@/savant/hooks/usePlayerCareer";
+import { computeWrcPlus } from "@/savant/lib/wrcPlus";
 
 const fmt3 = (v: number | null) => (v == null ? "—" : v.toFixed(3));
 const fmtInt = (v: number | null) => (v == null ? "—" : `${Math.round(v)}`);
 
 const opsOf = (r: { OBP: number | null; SLG: number | null }) =>
   r.OBP != null && r.SLG != null ? r.OBP + r.SLG : null;
+
+const wrcOf = (r: { AVG: number | null; OBP: number | null; SLG: number | null; ISO: number | null }) =>
+  computeWrcPlus(r.AVG, r.OBP, r.SLG, r.ISO);
 
 const NAVY_CARD = "#0a1428";
 const NAVY_BORDER = "#1f2d52";
@@ -67,7 +71,8 @@ export default function CareerStatsTable({ rows }: CareerStatsTableProps) {
               <th className="px-3 py-2 text-right">OBP</th>
               <th className="px-3 py-2 text-right">SLG</th>
               <th className="px-3 py-2 text-right">OPS</th>
-              <th className="px-3 py-2 pr-4 text-right">ISO</th>
+              <th className="px-3 py-2 text-right">ISO</th>
+              <th className="px-3 py-2 pr-4 text-right">WRC+</th>
             </tr>
           </thead>
           <tbody>
@@ -85,7 +90,8 @@ export default function CareerStatsTable({ rows }: CareerStatsTableProps) {
                 <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(r.OBP)}</td>
                 <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(r.SLG)}</td>
                 <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(opsOf(r))}</td>
-                <td className="px-3 py-2 pr-4 text-right font-mono tabular-nums">{fmt3(r.ISO)}</td>
+                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(r.ISO)}</td>
+                <td className="px-3 py-2 pr-4 text-right font-mono tabular-nums font-bold" style={{ color: GOLD }}>{fmtInt(wrcOf(r))}</td>
               </tr>
             ))}
             {rows.length > 1 && (
@@ -103,7 +109,8 @@ export default function CareerStatsTable({ rows }: CareerStatsTableProps) {
                 <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(careerObp)}</td>
                 <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(careerSlg)}</td>
                 <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(careerOps)}</td>
-                <td className="px-3 py-2 pr-4 text-right font-mono tabular-nums">{fmt3(careerIso)}</td>
+                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmt3(careerIso)}</td>
+                <td className="px-3 py-2 pr-4 text-right font-mono tabular-nums font-bold" style={{ color: GOLD }}>{fmtInt(computeWrcPlus(careerAvg, careerObp, careerSlg, careerIso))}</td>
               </tr>
             )}
           </tbody>

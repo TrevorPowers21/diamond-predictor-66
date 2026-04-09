@@ -181,10 +181,6 @@ export default function HitterPage() {
                 <span>{player.Pos ?? "—"}</span>
                 <MetaDot />
                 <span>{player.BatHand ?? "?"}/{player.ThrowHand ?? "?"}</span>
-                <MetaDot />
-                <span className="font-mono tabular-nums">{player.pa ?? 0} PA</span>
-                <MetaDot />
-                <span className="font-mono tabular-nums">{player.ab ?? 0} AB</span>
               </div>
             </header>
 
