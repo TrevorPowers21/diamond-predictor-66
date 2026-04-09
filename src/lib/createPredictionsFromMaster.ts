@@ -1,5 +1,4 @@
 import { supabase } from "@/integrations/supabase/client";
-import { computeHitterPowerRatings } from "@/lib/powerRatings";
 
 const CHUNK = 200;
 
@@ -32,30 +31,37 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
   }
   console.log(`[createPredictions] ${allPlayers.length} players loaded`);
 
-  // ─── Load existing prediction player_ids to skip ─────────────────────
-  const existingPredPlayerIds = new Set<string>();
+  // ─── Load existing 2025 returner predictions, indexed by player_id ───
+  // We need the prediction id (to update), not just whether one exists.
+  const existingPredByPlayerId = new Map<string, { id: string; from_avg: number | null }>();
   from = 0;
   while (true) {
     const { data, error } = await supabase
       .from("player_predictions")
-      .select("player_id")
+      .select("id, player_id, from_avg")
       .eq("season", season)
+      .eq("model_type", "returner")
+      .eq("variant", "regular")
       .range(from, from + 999);
     if (error) break;
-    for (const r of data || []) existingPredPlayerIds.add(r.player_id);
+    for (const r of data || []) {
+      if ((r as any).player_id) existingPredByPlayerId.set((r as any).player_id, { id: (r as any).id, from_avg: (r as any).from_avg ?? null });
+    }
     if (!data || data.length < 1000) break;
     from += 1000;
   }
-  console.log(`[createPredictions] ${existingPredPlayerIds.size} existing predictions to skip`);
+  console.log(`[createPredictions] ${existingPredByPlayerId.size} existing 2025 returner predictions`);
 
-  // ─── Load Hitter Master by source_player_id ──────────────────────────
+  // ─── Load Hitter Master with canonical scores by source_player_id ────
+  // Read ba_plus/obp_plus/iso_plus directly (already computed by Compute Scores)
+  // instead of recomputing here — keeps internals in sync with master.
   const hitterBySourceId = new Map<string, any>();
   const hitterByNameTeam = new Map<string, any>();
   from = 0;
   while (true) {
     const { data, error } = await supabase
       .from("Hitter Master")
-      .select("source_player_id, playerFullName, Team, AVG, OBP, SLG, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb")
+      .select("source_player_id, playerFullName, Team, AVG, OBP, SLG, ba_plus, obp_plus, iso_plus, overall_plus")
       .eq("Season", season)
       .range(from, from + 999);
     if (error) break;
@@ -69,52 +75,73 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
   }
   console.log(`[createPredictions] ${hitterBySourceId.size} hitters loaded from master`);
 
-  // ─── Create predictions ──────────────────────────────────────────────
-  // Note: we no longer skip players whose position is P/SP/RP — two-way players
-  // (e.g. Noah Franco) need hitter predictions if they have meaningful AB. The
-  // Hitter Master lookup naturally returns nothing for true pitchers, so they
-  // get filtered out by the `if (!hitter) continue` below.
+  // ─── Build update + insert plans ─────────────────────────────────────
+  // - INSERT: a brand new prediction row for any hitter who doesn't have one
+  // - UPDATE: backfill from_avg/from_obp/from_slg for existing stub predictions
+  //   that have no inputs yet
+  // Doesn't touch predictions that already have from_avg populated.
   const predsToInsert: any[] = [];
-  const powerByPlayerId = new Map<string, { baPlus: number | null; obpPlus: number | null; isoPlus: number | null; overallPlus: number | null }>();
+  const predsToUpdate: Array<{ id: string; patch: any }> = [];
+  const internalsByPredId = new Map<string, { avg_power_rating: number | null; obp_power_rating: number | null; slg_power_rating: number | null }>();
 
   for (const player of allPlayers) {
-    if (existingPredPlayerIds.has(player.id)) continue;
-
-    // Find hitter data
     const hitter = (player.source_player_id ? hitterBySourceId.get(player.source_player_id) : null)
       ?? hitterByNameTeam.get(`${player.first_name} ${player.last_name}`.toLowerCase().trim() + "|" + (player.team || "").toLowerCase().trim());
 
     if (!hitter) continue;
 
-    // Compute power ratings
-    const power = computeHitterPowerRatings({
-      contact: hitter.contact, lineDrive: hitter.line_drive,
-      avgExitVelo: hitter.avg_exit_velo, popUp: hitter.pop_up,
-      bb: hitter.bb, chase: hitter.chase,
-      barrel: hitter.barrel, ev90: hitter.ev90,
-      pull: hitter.pull, la10_30: hitter.la_10_30, gb: hitter.gb,
-    });
+    const existing = existingPredByPlayerId.get(player.id);
+    const baPlus = (hitter as any).ba_plus ?? null;
+    const obpPlus = (hitter as any).obp_plus ?? null;
+    const isoPlus = (hitter as any).iso_plus ?? null;
+    const overallPlus = (hitter as any).overall_plus ?? null;
 
-    powerByPlayerId.set(player.id, power);
-
-    predsToInsert.push({
-      player_id: player.id,
-      model_type: "returner",
-      variant: "regular",
-      season,
-      status: "active",
-      locked: true,
-      class_transition: "SJ",
-      dev_aggressiveness: 0.0,
-      from_avg: hitter.AVG,
-      from_obp: hitter.OBP,
-      from_slg: hitter.SLG,
-      power_rating_plus: power.overallPlus != null ? Math.round(power.overallPlus) : 100,
-    });
+    if (existing) {
+      // Backfill stub if from_avg is missing
+      if (existing.from_avg == null) {
+        predsToUpdate.push({
+          id: existing.id,
+          patch: {
+            from_avg: hitter.AVG,
+            from_obp: hitter.OBP,
+            from_slg: hitter.SLG,
+            power_rating_plus: overallPlus != null ? Math.round(overallPlus) : null,
+            locked: false,
+          },
+        });
+        internalsByPredId.set(existing.id, {
+          avg_power_rating: baPlus,
+          obp_power_rating: obpPlus,
+          slg_power_rating: isoPlus,
+        });
+      } else {
+        // Already has inputs but maybe not internals — refresh internals only
+        internalsByPredId.set(existing.id, {
+          avg_power_rating: baPlus,
+          obp_power_rating: obpPlus,
+          slg_power_rating: isoPlus,
+        });
+      }
+    } else {
+      // No prediction at all — insert one
+      predsToInsert.push({
+        player_id: player.id,
+        model_type: "returner",
+        variant: "regular",
+        season,
+        status: "active",
+        locked: false,
+        class_transition: "SJ",
+        dev_aggressiveness: 0.0,
+        from_avg: hitter.AVG,
+        from_obp: hitter.OBP,
+        from_slg: hitter.SLG,
+        power_rating_plus: overallPlus != null ? Math.round(overallPlus) : null,
+      });
+    }
   }
 
-  console.log(`[createPredictions] Creating ${predsToInsert.length} predictions...`);
-
+  // ─── INSERT new predictions ──────────────────────────────────────────
   const insertedPreds: Array<{ id: string; player_id: string }> = [];
   for (let i = 0; i < predsToInsert.length; i += CHUNK) {
     const chunk = predsToInsert.slice(i, i + CHUNK);
@@ -123,28 +150,56 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
       .insert(chunk)
       .select("id, player_id");
     if (error) {
-      result.errors.push(`Prediction chunk ${i}: ${error.message}`);
+      result.errors.push(`Prediction insert chunk ${i}: ${error.message}`);
     } else {
       insertedPreds.push(...(data || []));
       result.predictionsCreated += (data || []).length;
     }
   }
+  // Map newly-inserted predictions back to player → internals
+  const playerIdToHitter = new Map<string, any>();
+  for (const player of allPlayers) {
+    const hitter = player.source_player_id ? hitterBySourceId.get(player.source_player_id) : null;
+    if (hitter) playerIdToHitter.set(player.id, hitter);
+  }
+  for (const pred of insertedPreds) {
+    const hitter = playerIdToHitter.get(pred.player_id);
+    if (hitter) {
+      internalsByPredId.set(pred.id, {
+        avg_power_rating: (hitter as any).ba_plus ?? null,
+        obp_power_rating: (hitter as any).obp_plus ?? null,
+        slg_power_rating: (hitter as any).iso_plus ?? null,
+      });
+    }
+  }
 
-  // ─── Create internals (power ratings per prediction) ─────────────────
-  console.log(`[createPredictions] Creating ${insertedPreds.length} internals...`);
+  // ─── UPDATE existing stubs (with retry to bypass lock trigger) ───────
+  console.log(`[createPredictions] Updating ${predsToUpdate.length} existing stubs...`);
+  for (const u of predsToUpdate) {
+    let success = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { error } = await supabase
+        .from("player_predictions")
+        .update(u.patch)
+        .eq("id", u.id);
+      if (!error) { success = true; break; }
+      await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+    }
+    if (success) {
+      result.predictionsCreated += 1;
+    } else {
+      result.errors.push(`Update stub ${u.id} failed`);
+    }
+  }
 
-  const internalsToInsert = insertedPreds.map((pred) => {
-    const power = powerByPlayerId.get(pred.player_id);
-    return {
-      prediction_id: pred.id,
-      avg_power_rating: power?.baPlus ?? null,
-      obp_power_rating: power?.obpPlus ?? null,
-      slg_power_rating: power?.isoPlus ?? null,
-    };
-  });
-
-  for (let i = 0; i < internalsToInsert.length; i += CHUNK) {
-    const chunk = internalsToInsert.slice(i, i + CHUNK);
+  // ─── UPSERT internals for everything we touched ──────────────────────
+  console.log(`[createPredictions] Upserting ${internalsByPredId.size} internals rows...`);
+  const internalsRows = Array.from(internalsByPredId.entries()).map(([prediction_id, vals]) => ({
+    prediction_id,
+    ...vals,
+  }));
+  for (let i = 0; i < internalsRows.length; i += CHUNK) {
+    const chunk = internalsRows.slice(i, i + CHUNK);
     const { error } = await supabase
       .from("player_prediction_internals")
       .upsert(chunk, { onConflict: "prediction_id" });
