@@ -186,34 +186,6 @@ export default function HitterPage() {
               </div>
             </header>
 
-            {/* Slash line — 6 tiles, fits inside left column */}
-            <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
-              {[
-                ["AVG", player.AVG, fmt3],
-                ["OBP", player.OBP, fmt3],
-                ["SLG", player.SLG, fmt3],
-                ["OPS", opsOf(player), fmt3],
-                ["ISO", player.ISO, fmt3],
-                ["WRC+", wrcPlusOf(player), fmtInt],
-              ].map(([label, val, f]) => (
-                <div
-                  key={label as string}
-                  className="group cursor-default border px-3 py-3 transition-colors duration-200 hover:border-[#D4AF37]/40"
-                  style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
-                >
-                  <div className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#D4AF37]/80">
-                    {label as string}
-                  </div>
-                  <div
-                    className="mt-1 font-[Oswald] text-2xl font-bold tabular-nums text-white"
-                    style={{ textShadow: "0 0 12px rgba(212,175,55,0.15)" }}
-                  >
-                    {val != null ? (f as (n: number) => string)(val as number) : "—"}
-                  </div>
-                </div>
-              ))}
-            </div>
-
             {/* Career stats table */}
             <CareerStatsTable rows={careerRows} />
 
