@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import PercentileBar from "@/savant/components/PercentileBar";
 import CareerStatsTable from "@/savant/components/CareerStatsTable";
@@ -106,6 +106,21 @@ function BarGroup({ bars }: { bars: BarConfig[] }) {
 export default function HitterPage() {
   const { id } = useParams<{ id: string }>();
   const [selectedSeason, setSelectedSeason] = useState<number>(2025);
+  const [seasonOpen, setSeasonOpen] = useState(false);
+  const seasonRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!seasonOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (seasonRef.current && !seasonRef.current.contains(e.target as Node)) {
+        setSeasonOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [seasonOpen]);
+
   const { data: hitters = [], isLoading } = useSavantHitters(selectedSeason);
   const { data: careerRows = [] } = usePlayerCareer(id);
   const { data: prediction = null } = usePlayerPrediction(id);
@@ -213,22 +228,60 @@ export default function HitterPage() {
               <div className="mb-3 flex items-baseline justify-between">
                 <div className="flex items-center gap-2">
                   <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: GOLD }} />
-                  <h2 className="flex items-center gap-1 text-xs font-bold uppercase tracking-[0.22em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>
-                    <span className="relative inline-block">
-                      <select
-                        value={selectedSeason}
-                        onChange={(e) => setSelectedSeason(Number(e.target.value))}
-                        className="cursor-pointer appearance-none bg-transparent pr-3 text-xs font-bold uppercase tracking-[0.22em] text-[#D4AF37] focus:outline-none"
-                        style={{ fontFamily: "'Oswald', sans-serif" }}
+                  <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.22em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>
+                    {/* Custom season picker */}
+                    <div ref={seasonRef} className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setSeasonOpen((v) => !v)}
+                        className="group flex cursor-pointer items-center gap-1.5 border px-2 py-1 transition-all duration-200 hover:border-[#D4AF37] hover:bg-[#D4AF37]/[0.08]"
+                        style={{
+                          borderColor: NAVY_BORDER,
+                          backgroundColor: NAVY_BG,
+                        }}
                       >
-                        {(availableSeasons.length > 0 ? availableSeasons : [2025]).map((s) => (
-                          <option key={s} value={s} style={{ backgroundColor: NAVY_CARD }}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-[8px]">▼</span>
-                    </span>
+                        <span className="font-[Oswald] text-base font-bold leading-none text-white">
+                          {selectedSeason}
+                        </span>
+                        <svg
+                          width="9"
+                          height="9"
+                          viewBox="0 0 12 12"
+                          fill="none"
+                          className={`transition-transform duration-200 ${seasonOpen ? "rotate-180" : ""}`}
+                          style={{ color: GOLD }}
+                        >
+                          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                      {seasonOpen && (
+                        <div
+                          className="absolute left-0 top-full z-20 mt-1 min-w-full overflow-hidden border shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]"
+                          style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
+                        >
+                          {(availableSeasons.length > 0 ? availableSeasons : [2025]).map((s) => {
+                            const isActive = s === selectedSeason;
+                            return (
+                              <button
+                                key={s}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedSeason(s);
+                                  setSeasonOpen(false);
+                                }}
+                                className="block w-full cursor-pointer px-4 py-2 text-left font-[Oswald] text-sm font-bold leading-none transition-colors duration-150 hover:bg-[#D4AF37]/[0.1]"
+                                style={{
+                                  color: isActive ? GOLD : "#FFFFFF",
+                                  backgroundColor: isActive ? "rgba(212,175,55,0.06)" : "transparent",
+                                }}
+                              >
+                                {s}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                     Percentile Rankings
                   </h2>
                 </div>
