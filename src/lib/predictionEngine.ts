@@ -760,7 +760,7 @@ export async function bulkRecalculatePredictionsLocal() {
   let errors = 0;
   let updatedReturner = 0;
   let updatedTransfer = 0;
-  const BATCH = 5;
+  const BATCH = 25;
 
   for (let i = 0; i < preds.length; i += BATCH) {
     const batch = preds.slice(i, i + BATCH);
