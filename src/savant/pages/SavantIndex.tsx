@@ -93,29 +93,58 @@ export default function SavantIndex() {
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: NAVY_BG }}>
-      <div className="mx-auto max-w-7xl px-6 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="text-[10px] font-bold uppercase tracking-[0.25em]" style={{ color: GOLD }}>
-            Internal · College Baseball Data Hub
+      {/* Hero header — full-bleed gradient banner */}
+      <div
+        className="border-b"
+        style={{
+          borderColor: NAVY_BORDER,
+          background: "linear-gradient(180deg, #0D1B3E 0%, #070e1f 100%)",
+        }}
+      >
+        <div className="mx-auto max-w-7xl px-6 py-12">
+          <div className="flex items-end justify-between gap-6 flex-wrap">
+            <div>
+              <div
+                className="text-[10px] font-bold uppercase tracking-[0.3em]"
+                style={{ color: GOLD }}
+              >
+                Internal · College Baseball Data Hub
+              </div>
+              <h1
+                className="mt-3 font-[Oswald] text-6xl font-bold leading-none tracking-tight"
+                style={{ color: "#FFFFFF", textShadow: "0 0 24px rgba(212,175,55,0.15)" }}
+              >
+                Savant
+              </h1>
+              <p className="mt-3 max-w-xl text-sm text-white/55">
+                Leaderboards, scouting metrics, and player profiles. Click any name to open their page.
+              </p>
+            </div>
           </div>
-          <h1
-            className="mt-2 font-[Oswald] text-5xl font-bold leading-none tracking-tight"
-            style={{ color: "#FFFFFF", textShadow: "0 0 16px rgba(212,175,55,0.08)" }}
-          >
-            Savant
-          </h1>
-          <p className="mt-3 text-sm text-white/60">
-            Leaderboards, scouting metrics, and player profiles. Click any name to open their page.
-          </p>
         </div>
+      </div>
 
+      <div className="mx-auto max-w-7xl px-6 py-8">
         {/* Search bar */}
-        <div className="mb-8">
+        <div className="mb-10">
           <div
-            className="border px-4 py-3"
+            className="group flex items-center gap-3 border px-4 py-3.5 transition-colors duration-200 focus-within:border-[#D4AF37]/60"
             style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
           >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#D4AF37"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="opacity-70"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
             <input
               type="text"
               placeholder="Search any player or team…"
