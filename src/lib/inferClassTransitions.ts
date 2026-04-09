@@ -27,9 +27,13 @@ async function fetchAllSeasons(table: "Hitter Master" | "Pitching Master") {
   const out: Array<{ source_player_id: string; Season: number }> = [];
   let from = 0;
   while (true) {
+    // Must order for reliable pagination — without it Supabase can return
+    // duplicated or skipped rows across pages.
     const { data, error } = await supabase
       .from(table)
       .select("source_player_id, Season")
+      .order("source_player_id", { ascending: true })
+      .order("Season", { ascending: true })
       .range(from, from + 999);
     if (error) throw error;
     if (!data || data.length === 0) break;
