@@ -54,7 +54,7 @@ export default function CareerScoutingTable({ rows }: CareerScoutingTableProps) 
             {rows.map((r, i) => (
               <tr
                 key={`${r.Season}-${r.Team}-${i}`}
-                className="border-t text-white/85 transition-colors hover:bg-white/[0.025]"
+                className="border-t text-white transition-colors hover:bg-white/[0.025]"
                 style={{ borderColor: NAVY_BORDER }}
               >
                 <td className="px-4 py-2 tabular-nums text-white">{r.Season ?? "—"}</td>
