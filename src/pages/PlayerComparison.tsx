@@ -668,9 +668,9 @@ export default function PlayerComparison() {
   const [aPlayerSearch, setAPlayerSearch] = useState("");
   const [aPlayerOpen, setAPlayerOpen] = useState(false);
   const [aPlayerId, setAPlayerId] = useState("");
-  const [aTeamSearch, setATeamSearch] = useState("TCU");
+  const [aTeamSearch, setATeamSearch] = useState("Arizona State");
   const [aTeamOpen, setATeamOpen] = useState(false);
-  const [aDestTeam, setADestTeam] = useState("TCU");
+  const [aDestTeam, setADestTeam] = useState("Arizona State");
   const [aPitcherId, setAPitcherId] = useState("");
   const [aPitcherSearch, setAPitcherSearch] = useState("");
   const [aPitcherOpen, setAPitcherOpen] = useState(false);
@@ -680,9 +680,9 @@ export default function PlayerComparison() {
   const [bPlayerSearch, setBPlayerSearch] = useState("");
   const [bPlayerOpen, setBPlayerOpen] = useState(false);
   const [bPlayerId, setBPlayerId] = useState("");
-  const [bTeamSearch, setBTeamSearch] = useState("TCU");
+  const [bTeamSearch, setBTeamSearch] = useState("Arizona State");
   const [bTeamOpen, setBTeamOpen] = useState(false);
-  const [bDestTeam, setBDestTeam] = useState("TCU");
+  const [bDestTeam, setBDestTeam] = useState("Arizona State");
   const [bPitcherId, setBPitcherId] = useState("");
   const [bPitcherSearch, setBPitcherSearch] = useState("");
   const [bPitcherOpen, setBPitcherOpen] = useState(false);

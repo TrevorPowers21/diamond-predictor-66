@@ -511,8 +511,8 @@ export default function TransferPortal() {
   const isAdmin = hasRole("admin");
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>("");
   const [playerSearch, setPlayerSearch] = useState<string>("");
-  const [selectedDestinationTeam, setSelectedDestinationTeam] = useState<string>("TCU");
-  const [teamSearch, setTeamSearch] = useState<string>("TCU");
+  const [selectedDestinationTeam, setSelectedDestinationTeam] = useState<string>("Arizona State");
+  const [teamSearch, setTeamSearch] = useState<string>("Arizona State");
   const [simType, setSimType] = useState<"hitting" | "pitching">("hitting");
   const [selectedPitcherId, setSelectedPitcherId] = useState<string>("");
   const [pitcherSearch, setPitcherSearch] = useState<string>("");
