@@ -33,10 +33,14 @@ export interface SavantHitterRow {
   la_10_30: number | null;
   gb: number | null;
   pull: number | null;
+  ba_plus: number | null;
+  obp_plus: number | null;
+  iso_plus: number | null;
+  overall_plus: number | null;
 }
 
 const SELECT_COLS =
-  "source_player_id, playerFullName, Team, TeamID, Conference, Pos, BatHand, ThrowHand, Season, pa, ab, AVG, OBP, SLG, ISO, avg_exit_velo, ev90, barrel, bb, chase, contact, line_drive, la_10_30, gb, pull";
+  "source_player_id, playerFullName, Team, TeamID, Conference, Pos, BatHand, ThrowHand, Season, pa, ab, AVG, OBP, SLG, ISO, avg_exit_velo, ev90, barrel, bb, chase, contact, line_drive, la_10_30, gb, pull, ba_plus, obp_plus, iso_plus, overall_plus";
 
 /**
  * Minimum AB to be included in the Savant percentile population.

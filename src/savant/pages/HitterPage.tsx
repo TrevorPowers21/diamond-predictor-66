@@ -4,6 +4,7 @@ import PercentileBar from "@/savant/components/PercentileBar";
 import CareerStatsTable from "@/savant/components/CareerStatsTable";
 import CareerScoutingTable from "@/savant/components/CareerScoutingTable";
 import CareerPowerRatingsTable from "@/savant/components/CareerPowerRatingsTable";
+import PowerRatingsCard from "@/savant/components/PowerRatingsCard";
 import PredictionCard from "@/savant/components/PredictionCard";
 import { usePlayerPrediction } from "@/savant/hooks/usePlayerPrediction";
 import {
@@ -200,6 +201,8 @@ export default function HitterPage() {
           {/* ─── RIGHT COLUMN ─── */}
           <div className="space-y-6">
             <PredictionCard prediction={prediction} targetSeason={2026} />
+
+            <PowerRatingsCard player={player} />
 
             <section
               className="border px-6 py-5"
