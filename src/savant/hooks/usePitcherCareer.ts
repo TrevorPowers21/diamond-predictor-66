@@ -30,9 +30,16 @@ export interface PitcherCareerRow {
   ground_pct: number | null;
   vel_90th: number | null;
   stuff_plus: number | null;
+  // Per-stat power ratings — feed the pRV+ composite
+  era_pr_plus: number | null;
+  fip_pr_plus: number | null;
+  whip_pr_plus: number | null;
+  k9_pr_plus: number | null;
+  bb9_pr_plus: number | null;
+  hr9_pr_plus: number | null;
 }
 
-const SELECT_COLS = `Season, Team, Conference, Role, IP, G, GS, ERA, FIP, WHIP, K9, BB9, HR9, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, exit_vel, ground_pct, "90th_vel", stuff_plus`;
+const SELECT_COLS = `Season, Team, Conference, Role, IP, G, GS, ERA, FIP, WHIP, K9, BB9, HR9, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, exit_vel, ground_pct, "90th_vel", stuff_plus, era_pr_plus, fip_pr_plus, whip_pr_plus, k9_pr_plus, bb9_pr_plus, hr9_pr_plus`;
 
 export function usePitcherCareer(sourcePlayerId: string | null | undefined) {
   return useQuery({

@@ -1,4 +1,5 @@
 import type { PitcherCareerRow } from "@/savant/hooks/usePitcherCareer";
+import { computePrvPlus } from "@/savant/lib/prvPlus";
 
 const NAVY_CARD = "#0a1428";
 const NAVY_BORDER = "#1f2d52";
@@ -7,6 +8,9 @@ const GOLD = "#D4AF37";
 const fmt2 = (v: number | null) => (v == null ? "—" : v.toFixed(2));
 const fmt1 = (v: number | null) => (v == null ? "—" : v.toFixed(1));
 const fmtInt = (v: number | null) => (v == null ? "—" : `${Math.round(v)}`);
+
+const prvOf = (r: PitcherCareerRow) =>
+  computePrvPlus(r.era_pr_plus, r.fip_pr_plus, r.whip_pr_plus, r.k9_pr_plus, r.bb9_pr_plus, r.hr9_pr_plus);
 
 interface PitcherCareerStatsTableProps {
   rows: PitcherCareerRow[];
@@ -22,11 +26,11 @@ export default function PitcherCareerStatsTable({ rows }: PitcherCareerStatsTabl
   const totalIp = rows.reduce((s, r) => s + (r.IP ?? 0), 0);
   const totalG = rows.reduce((s, r) => s + (r.G ?? 0), 0);
   const totalGs = rows.reduce((s, r) => s + (r.GS ?? 0), 0);
-  const wAvg = (key: "ERA" | "FIP" | "WHIP" | "K9" | "BB9" | "HR9") => {
+  const wAvg = <K extends keyof PitcherCareerRow>(key: K) => {
     let sum = 0;
     let weight = 0;
     for (const r of rows) {
-      const v = r[key];
+      const v = r[key] as number | null;
       const w = r.IP ?? 0;
       if (v != null && w > 0) {
         sum += v * w;
@@ -35,6 +39,14 @@ export default function PitcherCareerStatsTable({ rows }: PitcherCareerStatsTabl
     }
     return weight > 0 ? sum / weight : null;
   };
+  const careerPrv = computePrvPlus(
+    wAvg("era_pr_plus"),
+    wAvg("fip_pr_plus"),
+    wAvg("whip_pr_plus"),
+    wAvg("k9_pr_plus"),
+    wAvg("bb9_pr_plus"),
+    wAvg("hr9_pr_plus"),
+  );
 
   return (
     <section
@@ -61,7 +73,8 @@ export default function PitcherCareerStatsTable({ rows }: PitcherCareerStatsTabl
               <th className="px-3 py-2 text-right">WHIP</th>
               <th className="px-3 py-2 text-right">K/9</th>
               <th className="px-3 py-2 text-right">BB/9</th>
-              <th className="px-3 py-2 pr-4 text-right">HR/9</th>
+              <th className="px-3 py-2 text-right">HR/9</th>
+              <th className="px-3 py-2 pr-4 text-right">pRV+</th>
             </tr>
           </thead>
           <tbody>
@@ -81,7 +94,8 @@ export default function PitcherCareerStatsTable({ rows }: PitcherCareerStatsTabl
                 <td className="px-3 py-2 text-right tabular-nums">{fmt2(r.WHIP)}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{fmt2(r.K9)}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{fmt2(r.BB9)}</td>
-                <td className="px-3 py-2 pr-4 text-right tabular-nums">{fmt2(r.HR9)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmt2(r.HR9)}</td>
+                <td className="px-3 py-2 pr-4 text-right tabular-nums font-bold" style={{ color: GOLD }}>{fmtInt(prvOf(r))}</td>
               </tr>
             ))}
             {rows.length > 1 && (
@@ -101,7 +115,8 @@ export default function PitcherCareerStatsTable({ rows }: PitcherCareerStatsTabl
                 <td className="px-3 py-2 text-right tabular-nums">{fmt2(wAvg("WHIP"))}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{fmt2(wAvg("K9"))}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{fmt2(wAvg("BB9"))}</td>
-                <td className="px-3 py-2 pr-4 text-right tabular-nums">{fmt2(wAvg("HR9"))}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmt2(wAvg("HR9"))}</td>
+                <td className="px-3 py-2 pr-4 text-right tabular-nums font-bold" style={{ color: GOLD }}>{fmtInt(careerPrv)}</td>
               </tr>
             )}
           </tbody>

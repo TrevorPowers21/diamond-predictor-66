@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import PercentileBar from "@/savant/components/PercentileBar";
 import PitcherCareerStatsTable from "@/savant/components/PitcherCareerStatsTable";
 import PitcherStuffPlusTable from "@/savant/components/PitcherStuffPlusTable";
+import PitcherCareerScoutingTable from "@/savant/components/PitcherCareerScoutingTable";
 import {
   SAVANT_MIN_IP,
   useSavantPitchers,
@@ -11,6 +12,7 @@ import {
 import { usePitcherCareer } from "@/savant/hooks/usePitcherCareer";
 import { usePitcherStuffPlus } from "@/savant/hooks/usePitcherStuffPlus";
 import { percentileRank } from "@/savant/lib/percentile";
+import { computePrvPlus } from "@/savant/lib/prvPlus";
 
 const fmt2 = (v: number) => v.toFixed(2);
 const fmt1 = (v: number) => v.toFixed(1);
@@ -36,6 +38,15 @@ function buildBars(player: SavantPitcherRow, pop: SavantPitcherRow[]) {
   const col = <K extends keyof SavantPitcherRow>(k: K) =>
     qualified.map((r) => r[k] as number | null);
 
+  // Compute pRV+ for the player AND the population so percentile ranks correctly
+  const playerPrv = computePrvPlus(
+    player.era_pr_plus, player.fip_pr_plus, player.whip_pr_plus,
+    player.k9_pr_plus, player.bb9_pr_plus, player.hr9_pr_plus,
+  );
+  const popPrv = qualified.map((r) =>
+    computePrvPlus(r.era_pr_plus, r.fip_pr_plus, r.whip_pr_plus, r.k9_pr_plus, r.bb9_pr_plus, r.hr9_pr_plus),
+  );
+
   const production: BarConfig[] = [
     { label: "ERA", value: player.ERA, pop: col("ERA"), format: fmt2, invert: true },
     { label: "FIP", value: player.FIP, pop: col("FIP"), format: fmt2, invert: true },
@@ -43,6 +54,7 @@ function buildBars(player: SavantPitcherRow, pop: SavantPitcherRow[]) {
     { label: "K/9", value: player.K9, pop: col("K9"), format: fmt2 },
     { label: "BB/9", value: player.BB9, pop: col("BB9"), format: fmt2, invert: true },
     { label: "HR/9", value: player.HR9, pop: col("HR9"), format: fmt2, invert: true },
+    { label: "pRV+", value: playerPrv, pop: popPrv, format: fmtInt },
     { label: "STUFF+", value: player.stuff_plus, pop: col("stuff_plus"), format: fmtInt },
   ];
   const stuff: BarConfig[] = [
@@ -206,6 +218,8 @@ export default function PitcherPage() {
               availableSeasons={[2025]}
               onSeasonChange={setStuffSeason}
             />
+
+            <PitcherCareerScoutingTable rows={careerRows} />
           </div>
 
           {/* ─── RIGHT COLUMN ─── */}
