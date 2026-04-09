@@ -43,7 +43,7 @@ export default function CareerScoutingTable({ rows }: CareerScoutingTableProps) 
               <th className="px-3 py-2 text-right">EV</th>
               <th className="px-3 py-2 text-right">EV90</th>
               <th className="px-3 py-2 text-right">Barrel</th>
-              <th className="px-3 py-2 text-right">LA Sweet</th>
+              <th className="px-3 py-2 text-right">LA Sweet Spot</th>
               <th className="px-3 py-2 text-right">BB%</th>
               <th className="px-3 py-2 text-right">Chase</th>
               <th className="px-3 py-2 text-right">GB%</th>

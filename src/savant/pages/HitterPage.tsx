@@ -61,7 +61,7 @@ function buildBars(player: SavantHitterRow, pop: SavantHitterRow[]) {
     { label: "EXIT VELO", value: player.avg_exit_velo, pop: col("avg_exit_velo"), format: fmt1 },
     { label: "EV90", value: player.ev90, pop: col("ev90"), format: fmt1 },
     { label: "BARREL%", value: player.barrel, pop: col("barrel"), format: fmtPct },
-    { label: "LA SWEET %", value: player.la_10_30, pop: col("la_10_30"), format: fmtPct },
+    { label: "LA SWEET SPOT %", value: player.la_10_30, pop: col("la_10_30"), format: fmtPct },
   ];
   const discipline: BarConfig[] = [
     { label: "BB%", value: player.bb, pop: col("bb"), format: fmtPct },
