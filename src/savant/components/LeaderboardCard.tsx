@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
 
-const NAVY_CARD = "#0D1B3E";
-const NAVY_DEEP = "#091327";
-const NAVY_BORDER = "#1a2950";
+const NAVY_CARD = "#0a1428";
+const NAVY_DEEP = "#040810";
+const NAVY_BORDER = "#162241";
 const GOLD = "#D4AF37";
 const GOLD_DIM = "#A08820";
 
@@ -110,7 +110,7 @@ export default function LeaderboardCard({
               <div
                 className="flex h-7 w-7 shrink-0 items-center justify-center font-mono text-xs font-bold tabular-nums"
                 style={{
-                  color: isTop ? "#0D1B3E" : "rgba(255,255,255,0.55)",
+                  color: isTop ? "#0a1428" : "rgba(255,255,255,0.55)",
                   backgroundColor: isTop ? GOLD : "transparent",
                   border: isTop ? "none" : `1px solid ${NAVY_BORDER}`,
                 }}

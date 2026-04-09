@@ -1,7 +1,7 @@
 import type { PlayerCareerRow } from "@/savant/hooks/usePlayerCareer";
 
-const NAVY_CARD = "#0D1B3E";
-const NAVY_BORDER = "#1a2950";
+const NAVY_CARD = "#0a1428";
+const NAVY_BORDER = "#162241";
 const GOLD = "#D4AF37";
 
 const fmtPct = (v: number | null) => (v == null ? "—" : `${v.toFixed(1)}%`);

@@ -30,9 +30,9 @@ const wrcPlusOf = (r: {
 }): number | null => computeWrcPlus(r.AVG, r.OBP, r.SLG, r.ISO);
 
 const GOLD = "#D4AF37";
-const NAVY_BG = "#070e1f";
-const NAVY_CARD = "#0D1B3E";
-const NAVY_BORDER = "#1a2950";
+const NAVY_BG = "#040810";
+const NAVY_CARD = "#0a1428";
+const NAVY_BORDER = "#162241";
 
 interface BarConfig {
   label: string;

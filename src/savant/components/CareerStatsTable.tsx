@@ -6,8 +6,8 @@ const fmtInt = (v: number | null) => (v == null ? "—" : `${Math.round(v)}`);
 const opsOf = (r: { OBP: number | null; SLG: number | null }) =>
   r.OBP != null && r.SLG != null ? r.OBP + r.SLG : null;
 
-const NAVY_CARD = "#0D1B3E";
-const NAVY_BORDER = "#1a2950";
+const NAVY_CARD = "#0a1428";
+const NAVY_BORDER = "#162241";
 const GOLD = "#D4AF37";
 
 interface CareerStatsTableProps {
