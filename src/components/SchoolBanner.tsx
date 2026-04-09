@@ -8,8 +8,8 @@ interface SchoolBannerProps {
 }
 
 const SchoolBanner: React.FC<SchoolBannerProps> = ({
-  schoolLogoUrl = "/asu-logo.png",
-  schoolName = "Arizona State",
+  schoolLogoUrl = "/tculogo.png",
+  schoolName = "TCU",
   className = '',
 }) => {
   const [showSchool, setShowSchool] = React.useState(false);
@@ -156,19 +156,19 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
                     className="text-4xl font-bold tracking-wider leading-none uppercase"
                     style={{
                       fontFamily: "'Oswald', sans-serif",
-                      color: '#8C1D40',
+                      color: '#4D1979',
                     }}
                   >
-                    Arizona State
+                    TCU
                   </h2>
                   <p
                     className="text-2xl font-semibold tracking-wide uppercase mt-0.5"
                     style={{
                       fontFamily: "'Oswald', sans-serif",
-                      color: '#FFC627',
+                      color: '#A1A1A4',
                     }}
                   >
-                    Sun Devils
+                    Horned Frogs
                   </p>
                 </div>
               </div>
