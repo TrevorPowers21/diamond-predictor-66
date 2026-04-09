@@ -3744,23 +3744,19 @@ export default function TeamBuilder() {
     URL.revokeObjectURL(url);
   };
 
-  // Split into position players and pitchers.
-  // TWP (two-way player) appears in BOTH lists so coaches see them on the
-  // hitter table AND the pitcher table.
+  // Split into position players and pitchers. TWP (two-way) appears in
+  // their primary side only — coaches can click into the player profile
+  // and use the View Hitting/Pitching toggle to see the other half.
   const isPitcher = (p: BuildPlayer) => {
     const pos = p.position_slot || p.player?.position || "";
     return /^(SP|RP|CL|P|LHP|RHP)/i.test(pos);
   };
-  const isTwoWay = (p: BuildPlayer) => {
-    const pos = p.position_slot || p.player?.position || "";
-    return /^TWP$/i.test(pos);
-  };
 
-  const positionPlayers = rosterPlayers.filter((p) => !isPitcher(p) || isTwoWay(p));
-  const pitchers = rosterPlayers.filter((p) => isPitcher(p) || isTwoWay(p));
+  const positionPlayers = rosterPlayers.filter((p) => !isPitcher(p));
+  const pitchers = rosterPlayers.filter((p) => isPitcher(p));
   const targetPlayers = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target");
-  const targetPositionPlayers = targetPlayers.filter((p) => !isPitcher(p) || isTwoWay(p));
-  const targetPitchers = targetPlayers.filter((p) => isPitcher(p) || isTwoWay(p));
+  const targetPositionPlayers = targetPlayers.filter((p) => !isPitcher(p));
+  const targetPitchers = targetPlayers.filter((p) => isPitcher(p));
 
   const pitchingTierMultipliers = useMemo(
     () => ({
