@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
+import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 
 type PredictionRow = {
   id: string;
@@ -354,15 +355,15 @@ async function loadEngineConfig(): Promise<EngineConfig> {
     obpStdNcaa: 0.046781,
     baPowerWeight: 0.7,
     obpPowerWeight: 0.7,
-    baConferenceWeight: 1,
-    obpConferenceWeight: 1,
-    isoConferenceWeight: 0.25,
-    baPitchingWeight: 1,
-    obpPitchingWeight: 1,
-    isoPitchingWeight: 1,
-    baParkWeight: 1,
-    obpParkWeight: 1,
-    isoParkWeight: 0.05,
+    baConferenceWeight: TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight,
+    obpConferenceWeight: TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight,
+    isoConferenceWeight: TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight,
+    baPitchingWeight: TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight,
+    obpPitchingWeight: TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight,
+    isoPitchingWeight: TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight,
+    baParkWeight: TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight,
+    obpParkWeight: TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight,
+    isoParkWeight: TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight,
     isoStdNcaa: 0.07849797197,
     isoStdPower: 45.423,
     wrcWeights: { ...DEFAULT_WRC_WEIGHTS },

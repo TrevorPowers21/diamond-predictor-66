@@ -8,6 +8,7 @@ import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
 (window as any).computeAllScores = computeAndStoreAllScores;
 (window as any).syncMasterToPlayers = syncMasterToPlayers;
 (window as any).createPredictions = createPredictionsFromMaster;
+import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 import DashboardLayout from "@/components/DashboardLayout";
 import ConferenceStatsTable from "@/components/ConferenceStatsTable";
 import PitchingConferenceStatsTable from "@/components/PitchingConferenceStatsTable";
@@ -492,22 +493,22 @@ function EquationConstantsTab() {
     t_ba_std_pr: "31.297",
     t_ba_std_ncaa: "0.043455",
     t_ba_power_weight: "0.70",
-    t_ba_conference_weight: "1.000",
-    t_ba_pitching_weight: "1.000",
-    t_ba_park_weight: "1.000",
+    t_ba_conference_weight: String(TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight),
+    t_ba_pitching_weight: String(TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight),
+    t_ba_park_weight: String(TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight),
     t_obp_ncaa_avg: "0.385",
     t_obp_std_pr: "28.889",
     t_obp_std_ncaa: "0.046781",
     t_obp_power_weight: "0.70",
-    t_obp_conference_weight: "1.000",
-    t_obp_pitching_weight: "1.000",
-    t_obp_park_weight: "1.000",
+    t_obp_conference_weight: String(TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight),
+    t_obp_pitching_weight: String(TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight),
+    t_obp_park_weight: String(TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight),
     t_iso_ncaa_avg: "0.162",
     t_iso_std_ncaa: "0.07849797197",
     t_iso_std_power: "45.423",
-    t_iso_conference_weight: "0.250",
-    t_iso_pitching_weight: "1.000",
-    t_iso_park_weight: "0.050",
+    t_iso_conference_weight: String(TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight),
+    t_iso_pitching_weight: String(TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight),
+    t_iso_park_weight: String(TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight),
     t_w_obp: "0.45",
     t_w_slg: "0.30",
     t_w_avg: "0.15",

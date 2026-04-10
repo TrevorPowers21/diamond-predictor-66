@@ -28,6 +28,7 @@ import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
+import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 
 type SimPlayer = {
   prediction_id: string | null;
@@ -488,18 +489,23 @@ type TargetBoardEntry = {
 };
 
 function readLocalNum(key: string, fallback: number, remoteValues?: Record<string, number>): number {
+  // 1) Supabase model_config is the authority — always wins if present
   const remote = remoteValues?.[key];
   if (Number.isFinite(remote)) return Number(remote);
-  if (typeof window === "undefined") return fallback;
-  try {
-    const raw = window.localStorage.getItem("admin_dashboard_equation_values_v1");
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw) as Record<string, string>;
-    const num = Number(parsed[key]);
-    return Number.isFinite(num) ? num : fallback;
-  } catch {
-    return fallback;
+  // 2) Fall back to the canonical default from transferWeightDefaults (if it's a weight key)
+  const canonical = (TRANSFER_WEIGHT_DEFAULTS as Record<string, number>)[key];
+  if (canonical !== undefined) return canonical;
+  // 3) localStorage is last resort — never let it override DB or canonical defaults
+  if (typeof window !== "undefined") {
+    try {
+      const raw = window.localStorage.getItem("admin_dashboard_equation_values_v1");
+      if (raw) {
+        const num = Number(JSON.parse(raw)[key]);
+        if (Number.isFinite(num)) return num;
+      }
+    } catch { /* ignore */ }
   }
+  return fallback;
 }
 
 export default function TransferPortal() {
@@ -1119,17 +1125,17 @@ export default function TransferPortal() {
     const baPowerWeight = toRate(readLocalNum("t_ba_power_weight", 0.70, remoteEquationValues));
     const obpPowerWeight = toRate(readLocalNum("t_obp_power_weight", 0.70, remoteEquationValues));
 
-    const baConferenceWeight = toWeight(readLocalNum("t_ba_conference_weight", 1.0, remoteEquationValues));
-    const obpConferenceWeight = toWeight(readLocalNum("t_obp_conference_weight", 1.0, remoteEquationValues));
-    const isoConferenceWeight = toWeight(readLocalNum("t_iso_conference_weight", 0.25, remoteEquationValues));
+    const baConferenceWeight = toWeight(readLocalNum("t_ba_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight, remoteEquationValues));
+    const obpConferenceWeight = toWeight(readLocalNum("t_obp_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight, remoteEquationValues));
+    const isoConferenceWeight = toWeight(readLocalNum("t_iso_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight, remoteEquationValues));
 
-    const baPitchingWeight = toWeight(readLocalNum("t_ba_pitching_weight", 1.0, remoteEquationValues));
-    const obpPitchingWeight = toWeight(readLocalNum("t_obp_pitching_weight", 1.0, remoteEquationValues));
-    const isoPitchingWeight = toWeight(readLocalNum("t_iso_pitching_weight", 1.0, remoteEquationValues));
+    const baPitchingWeight = toWeight(readLocalNum("t_ba_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight, remoteEquationValues));
+    const obpPitchingWeight = toWeight(readLocalNum("t_obp_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight, remoteEquationValues));
+    const isoPitchingWeight = toWeight(readLocalNum("t_iso_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight, remoteEquationValues));
 
-    const baParkWeight = toWeight(readLocalNum("t_ba_park_weight", 1.0, remoteEquationValues));
-    const obpParkWeight = toWeight(readLocalNum("t_obp_park_weight", 1.0, remoteEquationValues));
-    const isoParkWeight = toWeight(readLocalNum("t_iso_park_weight", 0.05, remoteEquationValues));
+    const baParkWeight = toWeight(readLocalNum("t_ba_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight, remoteEquationValues));
+    const obpParkWeight = toWeight(readLocalNum("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight, remoteEquationValues));
+    const isoParkWeight = toWeight(readLocalNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight, remoteEquationValues));
 
     const isoStdPower = readLocalNum("t_iso_std_power", 45.423, remoteEquationValues);
     const isoStdNcaa = toRate(readLocalNum("t_iso_std_ncaa", 0.07849797197, remoteEquationValues));
