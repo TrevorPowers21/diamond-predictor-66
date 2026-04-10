@@ -108,7 +108,8 @@ export default function Dashboard() {
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
           .in("model_type", ["returner", "transfer"])
-          .or("pa.gte.75,ip.gte.20", { foreignTable: "players" })
+          .gte("players.pa", 75)
+          .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
           .range(from, from + PAGE - 1);
         if (error) throw error;
         const rows = data || [];
