@@ -599,6 +599,15 @@ function EquationConstantsTab() {
         for (const row of remoteRows) {
           if (row.config_key) next[row.config_key] = String(row.config_value);
         }
+        // Fix stale transfer weight defaults: if model_config still has the
+        // old wrong value of 1.0 for a weight key, replace with the canonical
+        // default. Once the user intentionally sets a different value, it sticks.
+        for (const [key, canonical] of Object.entries(TRANSFER_WEIGHT_DEFAULTS)) {
+          const dbVal = Number(next[key]);
+          if (dbVal === 1 && canonical !== 1) {
+            next[key] = String(canonical);
+          }
+        }
         return next;
       });
     }
