@@ -202,7 +202,9 @@ export default function StuffPlusImporter() {
         });
       }
 
-      setParsedRows(rows);
+      // Filter out rows with 0 pitches thrown
+      const filtered = rows.filter((r) => r.pitches != null && r.pitches >= 1);
+      setParsedRows(filtered);
     } catch (err: any) {
       setParseError(err.message || "Failed to parse CSV.");
     }
