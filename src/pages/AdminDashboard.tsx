@@ -536,6 +536,13 @@ function EquationConstantsTab() {
       for (const [k, v] of Object.entries(merged)) {
         if (v == null) merged[k] = defaultEditableValues[k] ?? "";
       }
+      // Fix stale localStorage: if a transfer weight is stuck at the old
+      // wrong default of 1.0, replace it with the canonical value.
+      for (const [key, canonical] of Object.entries(TRANSFER_WEIGHT_DEFAULTS)) {
+        if (Number(merged[key]) === 1 && canonical !== 1) {
+          merged[key] = String(canonical);
+        }
+      }
       return merged;
     } catch {
       return defaultEditableValues;
