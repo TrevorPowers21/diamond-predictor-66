@@ -333,6 +333,9 @@ export default function StuffPlusImporter() {
                     <TableHead>Vel</TableHead>
                     <TableHead>IVB</TableHead>
                     <TableHead>HB</TableHead>
+                    <TableHead>RelH</TableHead>
+                    <TableHead>RelS</TableHead>
+                    <TableHead>Ext</TableHead>
                     <TableHead>Spin</TableHead>
                     <TableHead>VAA</TableHead>
                     <TableHead>Whiff%</TableHead>
@@ -348,6 +351,9 @@ export default function StuffPlusImporter() {
                       <TableCell>{r.velocity ?? "—"}</TableCell>
                       <TableCell>{r.ivb ?? "—"}</TableCell>
                       <TableCell>{r.hb ?? "—"}</TableCell>
+                      <TableCell>{r.rel_height ?? "—"}</TableCell>
+                      <TableCell>{r.rel_side ?? "—"}</TableCell>
+                      <TableCell>{r.extension ?? "—"}</TableCell>
                       <TableCell>{r.spin ?? "—"}</TableCell>
                       <TableCell>{r.vaa ?? "—"}</TableCell>
                       <TableCell>{r.whiff_pct != null ? `${r.whiff_pct}%` : "—"}</TableCell>
