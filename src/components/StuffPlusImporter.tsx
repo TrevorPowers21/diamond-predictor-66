@@ -224,7 +224,7 @@ export default function StuffPlusImporter() {
       const batch = parsedRows.slice(i, i + BATCH_SIZE);
       const { error } = await (supabase as any)
         .from("pitcher_stuff_plus_inputs")
-        .upsert(batch, { onConflict: "source_player_id,season,pitch_type,hand" });
+        .insert(batch);
 
       if (error) {
         errorCount += batch.length;
