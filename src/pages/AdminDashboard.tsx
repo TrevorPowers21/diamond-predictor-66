@@ -37,6 +37,7 @@ import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
+import StuffPlusImporter from "@/components/StuffPlusImporter";
 
 // ─── Sync & Compute Buttons ──────────────────────────────────────────────────
 
@@ -8543,6 +8544,10 @@ export default function AdminDashboard() {
               <LogIn className="h-4 w-4" />
               Portal
             </TabsTrigger>
+            <TabsTrigger value="stuff-import" className="gap-1.5">
+              <Upload className="h-4 w-4" />
+              Stuff+ Import
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="equations">
@@ -8577,6 +8582,9 @@ export default function AdminDashboard() {
           </TabsContent>
           <TabsContent value="portal">
             <BulkPortalStatusTab />
+          </TabsContent>
+          <TabsContent value="stuff-import">
+            <StuffPlusImporter />
           </TabsContent>
         </Tabs>
       </div>
