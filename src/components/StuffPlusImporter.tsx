@@ -203,7 +203,17 @@ export default function StuffPlusImporter() {
       }
 
       // Filter out rows with 0 pitches thrown
-      const filtered = rows.filter((r) => r.pitches != null && r.pitches >= 1);
+      const withPitches = rows.filter((r) => r.pitches != null && r.pitches >= 1);
+
+      // Deduplicate: keep only the first row per source_player_id
+      const seen = new Set<string>();
+      const filtered: ParsedRow[] = [];
+      for (const r of withPitches) {
+        if (!seen.has(r.source_player_id)) {
+          seen.add(r.source_player_id);
+          filtered.push(r);
+        }
+      }
       setParsedRows(filtered);
     } catch (err: any) {
       setParseError(err.message || "Failed to parse CSV.");

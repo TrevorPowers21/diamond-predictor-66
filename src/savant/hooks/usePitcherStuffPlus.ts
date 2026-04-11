@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
  */
 export interface PitcherStuffPlusRow {
   pitch_type: string;
+  rstr_pitch_class: string | null;
   hand: string | null;
   pitches: number | null;
   velocity: number | null;
@@ -33,7 +34,7 @@ export function usePitcherStuffPlus(
       const { data, error } = await (supabase as any)
         .from("pitcher_stuff_plus_inputs")
         .select(
-          "pitch_type, hand, pitches, velocity, ivb, hb, rel_height, rel_side, extension, spin, whiff_pct, stuff_plus",
+          "pitch_type, rstr_pitch_class, hand, pitches, velocity, ivb, hb, rel_height, rel_side, extension, spin, whiff_pct, stuff_plus",
         )
         .eq("source_player_id", sourcePlayerId!)
         .eq("season", season)

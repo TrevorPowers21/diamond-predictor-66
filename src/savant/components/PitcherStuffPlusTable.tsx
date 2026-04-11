@@ -145,7 +145,7 @@ export default function PitcherStuffPlusTable({
                   style={{ borderColor: NAVY_BORDER }}
                 >
                   <td className="px-4 py-2 font-semibold text-white">
-                    {r.pitch_type}
+                    {r.rstr_pitch_class ?? r.pitch_type}
                     {r.hand && <span className="ml-1 text-[10px] text-white/55">vs {r.hand}</span>}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmtInt(r.pitches)}</td>
