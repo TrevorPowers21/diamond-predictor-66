@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useSavantHitters, SAVANT_MIN_AB } from "@/savant/hooks/useSavantHitters";
 import { useSavantPitchers, SAVANT_MIN_IP } from "@/savant/hooks/useSavantPitchers";
 import LeaderboardCard, { type LeaderboardEntry } from "@/savant/components/LeaderboardCard";
+import ReclassificationRunner from "@/savant/components/ReclassificationRunner";
 
 const NAVY_BG = "#040810";
 const NAVY_CARD = "#0a1428";
@@ -248,6 +249,16 @@ export default function SavantIndex() {
         {isLoading && (
           <div className="mt-8 text-center text-xs text-white/40">Loading data…</div>
         )}
+
+        {/* Section: Pipeline Tools */}
+        <div className="mb-3 mt-10 flex items-center gap-3">
+          <span className="h-px flex-1 bg-[#D4AF37]/20" />
+          <span className="text-[11px] font-bold uppercase tracking-[0.3em]" style={{ color: GOLD }}>
+            Pipeline Tools
+          </span>
+          <span className="h-px flex-1 bg-[#D4AF37]/20" />
+        </div>
+        <ReclassificationRunner />
 
         <div className="mt-12 border-t pt-4 text-center text-[10px] uppercase tracking-wider text-white/30" style={{ borderColor: NAVY_BORDER }}>
           RSTR IQ Savant · Internal Data Hub
