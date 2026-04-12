@@ -4,6 +4,8 @@ import { useSavantHitters, SAVANT_MIN_AB } from "@/savant/hooks/useSavantHitters
 import { useSavantPitchers, SAVANT_MIN_IP } from "@/savant/hooks/useSavantPitchers";
 import LeaderboardCard, { type LeaderboardEntry } from "@/savant/components/LeaderboardCard";
 import ReclassificationRunner from "@/savant/components/ReclassificationRunner";
+import VeloDiffRunner from "@/savant/components/VeloDiffRunner";
+import StuffPlusRunner from "@/savant/components/StuffPlusRunner";
 
 const NAVY_BG = "#040810";
 const NAVY_CARD = "#0a1428";
@@ -259,6 +261,8 @@ export default function SavantIndex() {
           <span className="h-px flex-1 bg-[#D4AF37]/20" />
         </div>
         <ReclassificationRunner />
+        <VeloDiffRunner />
+        <StuffPlusRunner />
 
         <div className="mt-12 border-t pt-4 text-center text-[10px] uppercase tracking-wider text-white/30" style={{ borderColor: NAVY_BORDER }}>
           RSTR IQ Savant · Internal Data Hub
