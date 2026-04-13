@@ -18,7 +18,7 @@ export default function TeamsListPage() {
     const q = query.trim().toLowerCase();
     return teams.filter((t) => {
       if (confFilter && t.conference !== confFilter) return false;
-      if (q && !t.full_name.toLowerCase().includes(q) && !(t.abbreviation ?? "").toLowerCase().includes(q)) return false;
+      if (q && !t.fullName.toLowerCase().includes(q) && !(t.abbreviation ?? "").toLowerCase().includes(q)) return false;
       return true;
     });
   }, [teams, query, confFilter]);
@@ -68,7 +68,7 @@ export default function TeamsListPage() {
             style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
           >
             <div className="font-semibold text-white transition-colors group-hover:text-[#D4AF37]">
-              {t.full_name}
+              {t.fullName}
             </div>
             <div className="mt-1 text-[10px] uppercase tracking-wider text-white/40">
               {t.conference ?? "—"}{t.abbreviation ? ` · ${t.abbreviation}` : ""}

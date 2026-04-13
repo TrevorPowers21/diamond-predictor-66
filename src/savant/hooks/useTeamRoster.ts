@@ -6,10 +6,10 @@ import { useMemo } from "react";
 export function useTeamRoster(teamId: string | undefined, season: number = 2025) {
   const { teams } = useTeamsTable();
 
-  // Resolve team UUID → source_id for master table lookups
+  // Resolve team UUID → source_team_id for master table lookups
   const team = useMemo(() => teams.find((t) => t.id === teamId), [teams, teamId]);
-  const sourceId = team?.source_id ?? null;
-  const teamName = team?.full_name ?? null;
+  const sourceId = team?.source_team_id ?? null;
+  const teamName = team?.fullName ?? null;
 
   const { data: hitters = [], isLoading: hLoading } = useQuery({
     queryKey: ["team-roster-hitters", teamId, sourceId, teamName, season],

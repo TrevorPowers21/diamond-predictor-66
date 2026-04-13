@@ -32,7 +32,7 @@ export default function TeamProfilePage() {
   // Park factors lookup
   const pf = useMemo(() => {
     if (!team) return null;
-    return parkMap.byTeamId[team.id] ?? parkMap.byName[team.full_name?.toLowerCase().trim() ?? ""] ?? null;
+    return parkMap.byTeamId[team.id] ?? parkMap.byName[team.fullName?.toLowerCase().trim() ?? ""] ?? null;
   }, [team, parkMap]);
 
   const hittingTradSort = useSortable(hitters, "pa", "desc");
@@ -51,7 +51,7 @@ export default function TeamProfilePage() {
           {team.conference ?? "—"}
         </div>
         <h2 className="mt-1 font-[Oswald] text-3xl font-bold tracking-tight text-white">
-          {team.full_name}
+          {team.fullName}
         </h2>
       </div>
 
