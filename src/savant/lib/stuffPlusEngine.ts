@@ -170,18 +170,21 @@ function calcCutter(row: PitchRow, pop: PopConstants, hand: string): { score: nu
 }
 
 function calcGyroSlider(row: PitchRow, pop: PopConstants): { score: number; zs: ZScores } {
+  // Velocity: MAX floor — below avg contributes zero
   const zv = zMax(row.velocity, pop.velocity, pop.velocity_sd) ?? 0;
-  const zi = zDistFromZero(row.ivb, pop.ivb_sd) ?? 0;   // negated below
-  const zh = zDistFromZero(row.hb, pop.hb_sd) ?? 0;     // negated below
+  // IVB: proximity to zero rewarded — (sd - |0 - ivb|) / sd
+  const zi = (pop.ivb_sd && row.ivb != null) ? (pop.ivb_sd - Math.abs(0 - row.ivb)) / pop.ivb_sd : 0;
+  // HB: proximity to zero rewarded — (sd - |0 - hb|) / sd
+  const zh = (pop.hb_sd && row.hb != null) ? (pop.hb_sd - Math.abs(0 - row.hb)) / pop.hb_sd : 0;
   const zrh = zAbs(row.rel_height, pop.rel_height, pop.rel_height_sd) ?? 0;
   const zrs = zAbs(row.rel_side, pop.rel_side, pop.rel_side_sd) ?? 0;
   const ze = z(row.extension, pop.extension, pop.extension_sd) ?? 0;
-  const zsp = z(row.spin, pop.spin, pop.spin_sd) ?? 0;
 
-  const weighted = 0.15 * zv + (-0.15) * zi + (-0.25) * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.25 * zsp;
+  // Weights: 40 + 15 + 25 + 5 + 5 + 10 = 100%
+  const weighted = 0.40 * zv + 0.15 * zi + 0.25 * zh + 0.05 * zrh + 0.05 * zrs + 0.10 * ze;
   return {
     score: 100 + weighted * 10,
-    zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: zsp },
+    zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: 0 },
   };
 }
 
