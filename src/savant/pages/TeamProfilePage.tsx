@@ -14,16 +14,28 @@ const fmt1 = (v: number | null) => (v == null ? "—" : v.toFixed(1));
 const fmtPct = (v: number | null) => (v == null ? "—" : `${v.toFixed(1)}%`);
 const fmtInt = (v: number | null) => (v == null ? "—" : `${Math.round(v)}`);
 
-function parkColor(v: number | null, neutral = 1.0): string {
+/** Hitting park factors: >1.0 = green (good for hitters), <1.0 = red */
+function parkColorHitting(v: number | null): string {
   if (v == null) return "";
-  const diff = v - neutral;
+  const diff = v - 1.0;
   if (Math.abs(diff) < 0.01) return "#ffffff";
-  if (diff > 0.08) return "#ef4444";   // extreme hitter friendly
-  if (diff > 0.03) return "#f97316";   // moderate hitter friendly
-  if (diff > 0) return "#eab308";      // slight hitter friendly
-  if (diff < -0.08) return "#22c55e";  // extreme pitcher friendly
-  if (diff < -0.03) return "#3b82f6";  // moderate pitcher friendly
-  return "#67e8f9";                    // slight pitcher friendly
+  if (diff > 0.05) return "#22c55e";
+  if (diff > 0.02) return "#3b82f6";
+  if (diff < -0.05) return "#ef4444";
+  if (diff < -0.02) return "#eab308";
+  return "#ffffff";
+}
+
+/** Pitching park factors: >1.0 = red (bad for pitchers), <1.0 = green */
+function parkColorPitching(v: number | null): string {
+  if (v == null) return "";
+  const diff = v - 1.0;
+  if (Math.abs(diff) < 0.01) return "#ffffff";
+  if (diff > 0.05) return "#ef4444";
+  if (diff > 0.02) return "#eab308";
+  if (diff < -0.05) return "#22c55e";
+  if (diff < -0.02) return "#3b82f6";
+  return "#ffffff";
 }
 
 export default function TeamProfilePage() {
@@ -207,16 +219,16 @@ export default function TeamProfilePage() {
           <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white/50">Park Factors</div>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
             {([
-              ["AVG", pf.avg],
-              ["OBP", pf.obp],
-              ["ISO", pf.iso],
-              ["ERA (R/G)", pf.era],
-              ["WHIP", pf.whip],
-              ["HR/9", pf.hr9],
-            ] as [string, number | null | undefined][]).map(([label, val]) => (
+              ["AVG", pf.avg, "hit"],
+              ["OBP", pf.obp, "hit"],
+              ["ISO", pf.iso, "hit"],
+              ["ERA (R/G)", pf.era, "pitch"],
+              ["WHIP", pf.whip, "pitch"],
+              ["HR/9", pf.hr9, "pitch"],
+            ] as [string, number | null | undefined, string][]).map(([label, val, type]) => (
               <div key={label} className="border px-3 py-2" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
                 <div className="text-[9px] font-bold uppercase tracking-wider text-white/40">{label}</div>
-                <div className="mt-0.5 font-[Oswald] text-lg font-bold tabular-nums" style={{ color: parkColor(val ?? null) }}>
+                <div className="mt-0.5 font-[Oswald] text-lg font-bold tabular-nums" style={{ color: type === "hit" ? parkColorHitting(val ?? null) : parkColorPitching(val ?? null) }}>
                   {val != null ? val.toFixed(3) : "—"}
                 </div>
               </div>
