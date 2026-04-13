@@ -1898,7 +1898,7 @@ export default function TeamBuilder() {
 
       setSelectedBuildId(draft.selectedBuildId ?? null);
       setBuildName(draft.buildName ?? "My Team Build");
-      setSelectedTeam(draft.selectedTeam ?? "");
+      setSelectedTeam(draft.selectedTeam ?? "TCU");
       setTotalBudget(Number(draft.totalBudget) || 0);
       setRosterPlayers(Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers : []);
       setProgramTierMultiplier(Number(draft.programTierMultiplier) || 1.2);
@@ -2051,7 +2051,7 @@ export default function TeamBuilder() {
       setSelectedBuildId(null);
       setRosterPlayers([]);
       setBuildName("My Team Build");
-      setSelectedTeam("");
+      setSelectedTeam("TCU");
       setTotalBudget(0);
       queryClient.invalidateQueries({ queryKey: ["team-builds"] });
       toast({ title: "Build deleted" });
