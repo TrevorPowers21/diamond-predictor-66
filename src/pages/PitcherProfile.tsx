@@ -558,11 +558,41 @@ export default function PitcherProfile() {
     queryKey: ["pitcher-profile-pitch-arsenal", id, lookupPlayerName, (player as any)?.source_player_id],
     enabled: !!lookupPlayerName || !!(player as any)?.source_player_id || !!id,
     queryFn: async () => {
-      // Try source_player_id from player record, or fall back to URL id (for numeric source IDs)
-      const sourceId = (player as any)?.source_player_id || (id && /^\d+$/.test(id) ? id : null);
+      // Get source_player_id — try player record, Pitching Master, or URL
+      const playerSourceId = (player as any)?.source_player_id;
+      const urlSourceId = id && /^\d+$/.test(id) ? id : null;
 
-      // Primary: pull from pitcher_stuff_plus_inputs (has calculated Stuff+ scores)
-      if (sourceId) {
+      // If we have a UUID (not numeric), look up the numeric source_player_id
+      // from Pitching Master — this is the ID that pitcher_stuff_plus_inputs uses
+      let numericSourceId: string | null = playerSourceId;
+      if (!numericSourceId && id) {
+        const { data: masterLookup } = await (supabase as any)
+          .from("Pitching Master")
+          .select("source_player_id")
+          .eq("Season", 2025)
+          .or(`source_player_id.eq.${id}`)
+          .limit(1)
+          .maybeSingle();
+        numericSourceId = masterLookup?.source_player_id ?? null;
+      }
+      // Also check: the players table source_player_id might differ from
+      // Pitching Master source_player_id. Try to resolve from Pitching Master
+      // using the players table source_player_id.
+      if (numericSourceId && !/^\d+$/.test(numericSourceId)) {
+        // It's a UUID, not a numeric source ID — look up the numeric one
+        const { data: masterLookup } = await (supabase as any)
+          .from("Pitching Master")
+          .select("source_player_id")
+          .eq("Season", 2025)
+          .ilike("playerFullName", lookupPlayerName || "___impossible___")
+          .limit(1)
+          .maybeSingle();
+        if (masterLookup?.source_player_id) numericSourceId = masterLookup.source_player_id;
+      }
+
+      const candidates = [...new Set([numericSourceId, playerSourceId, urlSourceId].filter(Boolean))];
+
+      for (const sourceId of candidates) {
         const { data: stuffRows } = await (supabase as any)
           .from("pitcher_stuff_plus_inputs")
           .select("season, source_player_id, hand, pitch_type, pitches, whiff_pct, stuff_plus")
