@@ -10,10 +10,14 @@ import Index from "./pages/Index";
 // Savant — internal-only, gated, lazy-loaded so RSTR IQ users never download it.
 // Do not link to /savant/* from any RSTR IQ nav.
 const SavantRoute = lazy(() => import("@/savant/components/SavantRoute"));
-const SavantIndex = lazy(() => import("@/savant/pages/SavantIndex"));
+const SavantLayout = lazy(() => import("@/savant/components/SavantLayout"));
+const SavantHome = lazy(() => import("@/savant/pages/SavantHome"));
+const SavantLeaderboards = lazy(() => import("@/savant/pages/LeaderboardsPage"));
+const SavantConferenceStats = lazy(() => import("@/savant/pages/ConferenceStatsPage"));
+const SavantTeamsList = lazy(() => import("@/savant/pages/TeamsListPage"));
+const SavantTeamProfile = lazy(() => import("@/savant/pages/TeamProfilePage"));
 const SavantHitterPage = lazy(() => import("@/savant/pages/HitterPage"));
 const SavantPitcherPage = lazy(() => import("@/savant/pages/PitcherPage"));
-const SavantConferenceStats = lazy(() => import("@/savant/pages/ConferenceStatsPage"));
 import TransferPortal from "./pages/TransferPortal";
 import ReturningPlayers from "./pages/ReturningPlayers";
 import Auth from "./pages/Auth";
@@ -59,41 +63,19 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <Suspense fallback={null}>
-                    <SavantRoute><SavantIndex /></SavantRoute>
+                    <SavantRoute><SavantLayout /></SavantRoute>
                   </Suspense>
                 </ProtectedRoute>
               }
-            />
-            <Route
-              path="/savant/hitter/:id"
-              element={
-                <ProtectedRoute>
-                  <Suspense fallback={null}>
-                    <SavantRoute><SavantHitterPage /></SavantRoute>
-                  </Suspense>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/savant/pitcher/:id"
-              element={
-                <ProtectedRoute>
-                  <Suspense fallback={null}>
-                    <SavantRoute><SavantPitcherPage /></SavantRoute>
-                  </Suspense>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/savant/conferences"
-              element={
-                <ProtectedRoute>
-                  <Suspense fallback={null}>
-                    <SavantRoute><SavantConferenceStats /></SavantRoute>
-                  </Suspense>
-                </ProtectedRoute>
-              }
-            />
+            >
+              <Route index element={<Suspense fallback={null}><SavantHome /></Suspense>} />
+              <Route path="leaderboards" element={<Suspense fallback={null}><SavantLeaderboards /></Suspense>} />
+              <Route path="conferences" element={<Suspense fallback={null}><SavantConferenceStats /></Suspense>} />
+              <Route path="teams" element={<Suspense fallback={null}><SavantTeamsList /></Suspense>} />
+              <Route path="team/:id" element={<Suspense fallback={null}><SavantTeamProfile /></Suspense>} />
+              <Route path="hitter/:id" element={<Suspense fallback={null}><SavantHitterPage /></Suspense>} />
+              <Route path="pitcher/:id" element={<Suspense fallback={null}><SavantPitcherPage /></Suspense>} />
+            </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

@@ -143,43 +143,21 @@ export default function HitterPage() {
   );
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen p-10 text-sm text-white/50" style={{ backgroundColor: NAVY_BG }}>
-        Loading…
-      </div>
-    );
+    return <div className="py-10 text-sm text-white/50">Loading…</div>;
   }
 
   if (!player || !groups) {
     return (
-      <div className="min-h-screen p-10" style={{ backgroundColor: NAVY_BG }}>
-        <div className="mx-auto max-w-3xl">
-          <Link
-            to="/savant"
-            className="cursor-pointer text-xs font-bold uppercase tracking-[0.2em] text-[#D4AF37] transition-colors hover:text-[#E8C24E]"
-          >
-            ← Savant
-          </Link>
-          <div className="mt-6 text-sm text-white/60">
-            Hitter not found in 2025 Hitter Master.
-          </div>
-        </div>
+      <div className="py-10 text-sm text-white/60">
+        Hitter not found in {selectedSeason} Hitter Master.
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen text-white" style={{ backgroundColor: NAVY_BG }}>
-      <div className="mx-auto max-w-7xl px-6 py-8">
-        <Link
-          to="/savant"
-          className="cursor-pointer text-[10px] font-bold uppercase tracking-[0.25em] text-[#D4AF37] transition-colors hover:text-[#E8C24E]"
-        >
-          ← Savant
-        </Link>
-
-        {/* Two-column layout: identity + tables on the left, percentile viz on the right */}
-        <div className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-[1.15fr_1fr]">
+    <>
+      {/* Two-column layout: identity + tables on the left, percentile viz on the right */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.15fr_1fr]">
           {/* ─── LEFT COLUMN ─── */}
           <div className="space-y-6">
             {/* Header card */}
@@ -296,7 +274,6 @@ export default function HitterPage() {
             </section>
           </div>
         </div>
-      </div>
-    </div>
+    </>
   );
 }
