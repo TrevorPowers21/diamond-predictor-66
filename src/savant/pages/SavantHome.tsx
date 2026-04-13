@@ -54,6 +54,7 @@ export default function SavantHome() {
   const stuffEntries = useMemo(() => qualifiedPitchers.map((p) => toPitcherEntry(p, p.stuff_plus)), [qualifiedPitchers]);
   const whiffEntries = useMemo(() => qualifiedPitchers.map((p) => toPitcherEntry(p, p.miss_pct)), [qualifiedPitchers]);
   const izWhiffEntries = useMemo(() => qualifiedPitchers.map((p) => toPitcherEntry(p, p.in_zone_whiff_pct)), [qualifiedPitchers]);
+  const pitcherBbEntries = useMemo(() => qualifiedPitchers.map((p) => toPitcherEntry(p, p.bb_pct)), [qualifiedPitchers]);
 
   const isLoading = hLoading || pLoading;
 
@@ -67,12 +68,11 @@ export default function SavantHome() {
         </span>
         <span className="h-px flex-1 bg-[#D4AF37]/20" />
       </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         <LeaderboardCard title="Barrel %" subtitle={`Min ${BATTING_TITLE_PA} PA`} entries={barrelEntries} format={fmtPct} />
         <LeaderboardCard title="Avg Exit Velo" subtitle={`Min ${BATTING_TITLE_PA} PA`} unit="MPH" entries={exitVeloEntries} format={fmt1} />
         <LeaderboardCard title="90th % EV" subtitle={`Min ${BATTING_TITLE_PA} PA`} unit="MPH" entries={ev90Entries} format={fmt1} />
         <LeaderboardCard title="Chase %" subtitle={`Min ${BATTING_TITLE_PA} PA · Lower is Better`} entries={chaseEntries} format={fmtPct} invert />
-        <LeaderboardCard title="BB %" subtitle={`Min ${BATTING_TITLE_PA} PA`} entries={bbPctEntries} format={fmtPct} />
       </div>
 
       {/* Pitching Leaderboards */}
@@ -83,10 +83,11 @@ export default function SavantHome() {
         </span>
         <span className="h-px flex-1 bg-[#D4AF37]/20" />
       </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         <LeaderboardCard title="Stuff+" subtitle={`Min ${MIN_IP} IP`} entries={stuffEntries} format={fmtInt} emptyMessage="Stuff+ data being filled in" />
         <LeaderboardCard title="Whiff %" subtitle={`Min ${MIN_IP} IP`} entries={whiffEntries} format={fmtPct} />
         <LeaderboardCard title="IZ Whiff %" subtitle={`Min ${MIN_IP} IP`} entries={izWhiffEntries} format={fmtPct} />
+        <LeaderboardCard title="BB %" subtitle={`Min ${MIN_IP} IP · Lower is Better`} entries={pitcherBbEntries} format={fmtPct} invert />
       </div>
 
       {isLoading && <div className="mt-8 text-center text-xs text-white/40">Loading data…</div>}

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSavantHitters, SAVANT_MIN_AB } from "@/savant/hooks/useSavantHitters";
+import { computeWrcPlus } from "@/savant/lib/wrcPlus";
 import { useSavantPitchers, SAVANT_MIN_IP } from "@/savant/hooks/useSavantPitchers";
 import { useSortable, SortHeader, tierColor } from "@/savant/components/SortableTable";
 import { NAVY_CARD, NAVY_BORDER, GOLD } from "@/savant/lib/theme";
@@ -16,7 +17,9 @@ export default function LeaderboardsPage() {
   const { data: pitchers = [] } = useSavantPitchers();
 
   const qualifiedHitters = useMemo(
-    () => hitters.filter((h) => (h.ab ?? 0) >= SAVANT_MIN_AB),
+    () => hitters
+      .filter((h) => (h.ab ?? 0) >= SAVANT_MIN_AB)
+      .map((h) => ({ ...h, wrc_plus: computeWrcPlus(h.AVG, h.OBP, h.SLG, h.ISO) })),
     [hitters],
   );
   const qualifiedPitchers = useMemo(
@@ -52,11 +55,7 @@ export default function LeaderboardsPage() {
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-white/50">
                 <SortHeader label="Player" field="playerFullName" sortKey={hittingSort.sortKey} sortDir={hittingSort.sortDir} onSort={hittingSort.toggleSort} align="left" />
-                <SortHeader label="PA" field="pa" sortKey={hittingSort.sortKey} sortDir={hittingSort.sortDir} onSort={hittingSort.toggleSort} />
-                <SortHeader label="AVG" field="AVG" sortKey={hittingSort.sortKey} sortDir={hittingSort.sortDir} onSort={hittingSort.toggleSort} />
-                <SortHeader label="OBP" field="OBP" sortKey={hittingSort.sortKey} sortDir={hittingSort.sortDir} onSort={hittingSort.toggleSort} />
-                <SortHeader label="SLG" field="SLG" sortKey={hittingSort.sortKey} sortDir={hittingSort.sortDir} onSort={hittingSort.toggleSort} />
-                <SortHeader label="ISO" field="ISO" sortKey={hittingSort.sortKey} sortDir={hittingSort.sortDir} onSort={hittingSort.toggleSort} />
+                <SortHeader label="wRC+" field="wrc_plus" sortKey={hittingSort.sortKey} sortDir={hittingSort.sortDir} onSort={hittingSort.toggleSort} />
                 <SortHeader label="EV" field="avg_exit_velo" sortKey={hittingSort.sortKey} sortDir={hittingSort.sortDir} onSort={hittingSort.toggleSort} />
                 <SortHeader label="EV90" field="ev90" sortKey={hittingSort.sortKey} sortDir={hittingSort.sortDir} onSort={hittingSort.toggleSort} />
                 <SortHeader label="Barrel%" field="barrel" sortKey={hittingSort.sortKey} sortDir={hittingSort.sortDir} onSort={hittingSort.toggleSort} />
@@ -77,11 +76,7 @@ export default function LeaderboardsPage() {
                     </Link>
                     <div className="text-[10px] text-white/40">{[h.Pos, h.Team].filter(Boolean).join(" · ")}</div>
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-white/60">{fmtInt(h.pa)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmt3(h.AVG)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmt3(h.OBP)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmt3(h.SLG)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmt3(h.ISO)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-bold" style={{ color: tierColor(h.wrc_plus, 100, 15) }}>{fmtInt(h.wrc_plus)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt1(h.avg_exit_velo)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt1(h.ev90)}</td>
                   <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(h.barrel, 8, 4) }}>{fmtPct(h.barrel)}</td>
