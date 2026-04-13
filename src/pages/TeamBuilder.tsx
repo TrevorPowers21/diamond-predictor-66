@@ -1471,7 +1471,7 @@ export default function TeamBuilder() {
     retry: 1,
     queryFn: async () => {
       // Try team_id UUID first, fall back to team name match
-      const selectCols = "id, first_name, last_name, position, team, from_team, conference, transfer_portal, player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at)";
+      const selectCols = "id, first_name, last_name, position, team, from_team, conference, transfer_portal, source_player_id, player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at)";
       let query = supabase.from("players").select(selectCols).eq("transfer_portal", false);
       if (selectedTeamId) {
         query = query.eq("team_id", selectedTeamId);
