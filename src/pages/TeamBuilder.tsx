@@ -3815,13 +3815,18 @@ export default function TeamBuilder() {
     const teamName = p.player?.team || selectedTeam || "";
     const key = `${normalizeName(fullName)}|${normalizeName(teamName)}`;
     const sourceId = (p as any)?.player?.source_player_id || null;
-    const stats = pitchingStatsByNameTeam.byKey.get(key)
-      || (sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId) : null)
-      || (() => { const bucket = pitchingStatsByNameTeam.byName.get(normalizeName(fullName)) || []; return bucket.length === 1 ? bucket[0] : null; })();
-    const pr = pitchingPrByNameTeam.byKey.get(key)
-      || (sourceId ? pitchingPrByNameTeam.bySourceId.get(sourceId) : null)
-      || (() => { const bucket = pitchingPrByNameTeam.byName.get(normalizeName(fullName)) || []; return bucket.length === 1 ? bucket[0] : null; })();
-    if (!stats) return null;
+    const byKey = pitchingStatsByNameTeam.byKey.get(key);
+    const bySid = sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId) : null;
+    const byName = (() => { const bucket = pitchingStatsByNameTeam.byName.get(normalizeName(fullName)) || []; return bucket.length === 1 ? bucket[0] : null; })();
+    const stats = byKey || bySid || byName;
+    const prByKey = pitchingPrByNameTeam.byKey.get(key);
+    const prBySid = sourceId ? pitchingPrByNameTeam.bySourceId.get(sourceId) : null;
+    const prByName = (() => { const bucket = pitchingPrByNameTeam.byName.get(normalizeName(fullName)) || []; return bucket.length === 1 ? bucket[0] : null; })();
+    const pr = prByKey || prBySid || prByName;
+    if (!stats) {
+      console.warn(`[TB Pitcher] No stats for "${fullName}" | team="${teamName}" | key="${key}" | sourceId=${sourceId} | byKey=${!!byKey} bySid=${!!bySid} byName=${!!byName}`);
+      return null;
+    }
     // If PR is missing, use empty PR — projectPitchingRate will carry forward last season stats
     const emptyPr = { eraPrPlus: null, fipPrPlus: null, whipPrPlus: null, k9PrPlus: null, bb9PrPlus: null, hr9PrPlus: null };
     if (!pr) { const _pr = emptyPr; Object.assign(emptyPr, _pr); }
