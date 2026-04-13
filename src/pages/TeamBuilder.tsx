@@ -686,8 +686,8 @@ const normalizePitcherRole = (raw: string | null | undefined): "SP" | "RP" => {
 };
 const asPitcherRole = (raw: string | null | undefined): "SP" | "RP" | null => {
   const v = String(raw || "").toUpperCase();
-  if (v.startsWith("SP")) return "SP";
-  if (v.startsWith("RP")) return "RP";
+  if (v.startsWith("SP") || v === "STARTER") return "SP";
+  if (v.startsWith("RP") || v === "RELIEVER" || v === "CL" || v === "CLOSER") return "RP";
   return null;
 };
 
@@ -1837,7 +1837,11 @@ export default function TeamBuilder() {
       // can click into the profile to see the pitching view.
       const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)$/i.test(String(player.position || ""));
       const overrideRole = asPitcherRole(playerOverrides?.[player.id]?.pitcher_role || null);
-      const inferredRole = overrideRole || asPitcherRole(player.position || null);
+      // Check Pitching Master Role for accurate SP/RP from last season
+      const _pName = `${player.first_name || ""} ${player.last_name || ""}`.trim();
+      const _pmKey = `${normalizeName(_pName)}|${normalizeName(player.team || "")}`;
+      const pmRole = asPitcherRole(pitchingStatsByNameTeam.byKey.get(_pmKey)?.role ?? null);
+      const inferredRole = overrideRole || pmRole || asPitcherRole(player.position || null);
       return {
         player_id: player.id,
         source: "returner" as const,
@@ -4450,7 +4454,11 @@ export default function TeamBuilder() {
       // can click into the profile to see the pitching view.
       const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)$/i.test(String(player.position || ""));
       const overrideRole = asPitcherRole(playerOverrides?.[player.id]?.pitcher_role || null);
-      const inferredRole = overrideRole || asPitcherRole(player.position || null);
+      // Check Pitching Master Role for accurate SP/RP from last season
+      const _pName = `${player.first_name || ""} ${player.last_name || ""}`.trim();
+      const _pmKey = `${normalizeName(_pName)}|${normalizeName(player.team || "")}`;
+      const pmRole = asPitcherRole(pitchingStatsByNameTeam.byKey.get(_pmKey)?.role ?? null);
+      const inferredRole = overrideRole || pmRole || asPitcherRole(player.position || null);
       return {
         player_id: player.id,
         source: "returner" as const,
