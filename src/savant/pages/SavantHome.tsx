@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useSavantHitters } from "@/savant/hooks/useSavantHitters";
-import { useSavantPitchers, SAVANT_MIN_IP } from "@/savant/hooks/useSavantPitchers";
+import { useSavantPitchers } from "@/savant/hooks/useSavantPitchers";
 import LeaderboardCard, { type LeaderboardEntry } from "@/savant/components/LeaderboardCard";
 import ReclassificationRunner from "@/savant/components/ReclassificationRunner";
 import VeloDiffRunner from "@/savant/components/VeloDiffRunner";
@@ -18,15 +18,15 @@ export default function SavantHome() {
   const { data: pitchers = [], isLoading: pLoading } = useSavantPitchers();
   const [showPipeline, setShowPipeline] = useState(false);
 
-  // NCAA batting title: 2.0 PA per team game (~56 games = 112 PA)
-  const BATTING_TITLE_PA = 112;
+  const BATTING_TITLE_PA = 150;
+  const MIN_IP = 30;
 
   const qualifiedHitters = useMemo(
     () => hitters.filter((h) => (h.pa ?? 0) >= BATTING_TITLE_PA),
     [hitters],
   );
   const qualifiedPitchers = useMemo(
-    () => pitchers.filter((p) => (p.IP ?? 0) >= SAVANT_MIN_IP),
+    () => pitchers.filter((p) => (p.IP ?? 0) >= MIN_IP),
     [pitchers],
   );
 
@@ -81,8 +81,8 @@ export default function SavantHome() {
         <span className="h-px flex-1 bg-[#D4AF37]/20" />
       </div>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <LeaderboardCard title="Stuff+" subtitle={`Min ${SAVANT_MIN_IP} IP`} entries={stuffEntries} format={fmtInt} emptyMessage="Stuff+ data being filled in" />
-        <LeaderboardCard title="Whiff %" subtitle={`Min ${SAVANT_MIN_IP} IP`} entries={whiffEntries} format={fmtPct} />
+        <LeaderboardCard title="Stuff+" subtitle={`Min ${MIN_IP} IP`} entries={stuffEntries} format={fmtInt} emptyMessage="Stuff+ data being filled in" />
+        <LeaderboardCard title="Whiff %" subtitle={`Min ${MIN_IP} IP`} entries={whiffEntries} format={fmtPct} />
       </div>
 
       {isLoading && <div className="mt-8 text-center text-xs text-white/40">Loading data…</div>}
