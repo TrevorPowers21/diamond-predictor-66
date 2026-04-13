@@ -1272,7 +1272,8 @@ export default function PitcherProfile() {
           overallStuffPlus: row.overall_stuff_plus == null ? null : Number(row.overall_stuff_plus),
         };
       })
-      .filter((r) => r.pitchType.length > 0 && (r.pitchCount == null || r.pitchCount >= 5));
+      .filter((r) => r.pitchType.length > 0 && (r.pitchCount == null || r.pitchCount >= 5))
+      .filter((r) => r.usagePct == null || r.usagePct >= 5);
 
     const byPitch = new Map<string, typeof normalized[number]>();
     for (const row of normalized) byPitch.set(row.pitchType, row);
