@@ -556,9 +556,10 @@ export default function PitcherProfile() {
   }, [player?.team, storageRef?.teamName]);
   const { data: pitchArsenalRows = [] } = useQuery({
     queryKey: ["pitcher-profile-pitch-arsenal", id, lookupPlayerName, (player as any)?.source_player_id],
-    enabled: !!lookupPlayerName || !!(player as any)?.source_player_id,
+    enabled: !!lookupPlayerName || !!(player as any)?.source_player_id || !!id,
     queryFn: async () => {
-      const sourceId = (player as any)?.source_player_id;
+      // Try source_player_id from player record, or fall back to URL id (for numeric source IDs)
+      const sourceId = (player as any)?.source_player_id || (id && /^\d+$/.test(id) ? id : null);
 
       // Primary: pull from pitcher_stuff_plus_inputs (has calculated Stuff+ scores)
       if (sourceId) {
@@ -1625,7 +1626,7 @@ export default function PitcherProfile() {
                           const pt = row.pitchType;
                           const isFB = pt === "4S FB" || pt === "SINKER" || pt === "4-SEAM" || pt === "FOUR-SEAM" || pt === "SI" || pt === "FF";
                           const isCutter = pt === "CUTTER" || pt === "FC" || pt === "CT";
-                          const isBreaking = pt === "SLIDER" || pt === "CURVEBALL" || pt === "SWEEPER" || pt === "SL" || pt === "CB" || pt === "CU" || pt === "SW";
+                          const isBreaking = pt === "SLIDER" || pt === "CURVEBALL" || pt === "SWEEPER" || pt === "GYRO SLIDER" || pt === "SL" || pt === "CB" || pt === "CU" || pt === "SW";
                           const isOffspeed = pt === "CHANGE-UP" || pt === "SPLITTER" || pt === "CH" || pt === "FS" || pt === "CHANGEUP";
                           const [wGreen, wBlue, wYellow] = isFB ? [22, 15, 10] : isCutter ? [30, 20, 14] : isBreaking ? [38, 28, 20] : isOffspeed ? [40, 30, 20] : [35, 25, 18];
                           const whiffColor = wp == null ? "" : wp >= wGreen ? "text-green-600" : wp >= wBlue ? "text-blue-600" : wp >= wYellow ? "text-yellow-600" : "text-red-600";
