@@ -805,16 +805,16 @@ const projectPitchingRate = ({
   impacts: number[];
   lowerIsBetter: boolean;
 }) => {
+  if (lastStat == null || !Number.isFinite(lastStat)) return null;
+  // If power rating is missing, carry forward last season stat as projection
   if (
-    lastStat == null ||
     prPlus == null ||
-    !Number.isFinite(lastStat) ||
     !Number.isFinite(prPlus) ||
     !Number.isFinite(ncaaAvg) ||
     !Number.isFinite(ncaaSd) ||
     !Number.isFinite(prSd) ||
     prSd === 0
-  ) return null;
+  ) return lastStat;
   const zShift = ((prPlus - 100) / prSd) * ncaaSd;
   const powerAdjusted = lowerIsBetter ? (ncaaAvg - zShift) : (ncaaAvg + zShift);
   const blended = (lastStat * (1 - 0.7)) + (powerAdjusted * 0.7);
