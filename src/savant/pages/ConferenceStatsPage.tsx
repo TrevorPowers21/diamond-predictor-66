@@ -117,11 +117,6 @@ function HittingTable({ rows, sortKey, sortDir, onSort }: { rows: FlatRow[]; sor
             <th className="cursor-pointer select-none px-4 py-2 text-left" onClick={() => onSort("conference")}>
               <span className={sortKey === "conference" ? "text-[#D4AF37]" : ""}>Conference</span>
             </th>
-            <SortHeader label="AVG" field="avg" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="OBP" field="obp" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="SLG" field="slg" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="OPS" field="ops" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="ISO" field="iso" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="AVG+" field="avg_plus" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="OBP+" field="obp_plus" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="SLG+" field="slg_plus" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
@@ -139,11 +134,6 @@ function HittingTable({ rows, sortKey, sortDir, onSort }: { rows: FlatRow[]; sor
           {rows.map((r) => (
             <tr key={r.conference} className="border-t border-white/5 transition-colors hover:bg-white/[0.02]">
               <td className="px-4 py-2 font-semibold">{r.conference}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{fmt3(r.avg)}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{fmt3(r.obp)}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{fmt3(r.slg)}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{fmt3(r.ops)}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{fmt3(r.iso)}</td>
               <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(r.avg_plus, 100, 8) }}>{fmtInt(r.avg_plus)}</td>
               <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(r.obp_plus, 100, 8) }}>{fmtInt(r.obp_plus)}</td>
               <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(r.slg_plus, 100, 8) }}>{fmtInt(r.slg_plus)}</td>

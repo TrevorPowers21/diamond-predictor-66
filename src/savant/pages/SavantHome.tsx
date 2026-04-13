@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useSavantHitters, SAVANT_MIN_AB } from "@/savant/hooks/useSavantHitters";
+import { useSavantHitters } from "@/savant/hooks/useSavantHitters";
 import { useSavantPitchers, SAVANT_MIN_IP } from "@/savant/hooks/useSavantPitchers";
 import LeaderboardCard, { type LeaderboardEntry } from "@/savant/components/LeaderboardCard";
 import ReclassificationRunner from "@/savant/components/ReclassificationRunner";
@@ -18,8 +18,11 @@ export default function SavantHome() {
   const { data: pitchers = [], isLoading: pLoading } = useSavantPitchers();
   const [showPipeline, setShowPipeline] = useState(false);
 
+  // NCAA batting title: 2.0 PA per team game (~56 games = 112 PA)
+  const BATTING_TITLE_PA = 112;
+
   const qualifiedHitters = useMemo(
-    () => hitters.filter((h) => (h.ab ?? 0) >= SAVANT_MIN_AB),
+    () => hitters.filter((h) => (h.pa ?? 0) >= BATTING_TITLE_PA),
     [hitters],
   );
   const qualifiedPitchers = useMemo(
@@ -63,9 +66,9 @@ export default function SavantHome() {
         <span className="h-px flex-1 bg-[#D4AF37]/20" />
       </div>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <LeaderboardCard title="Barrel %" subtitle={`Min ${SAVANT_MIN_AB} AB`} entries={barrelEntries} format={fmtPct} />
-        <LeaderboardCard title="Avg Exit Velo" subtitle={`Min ${SAVANT_MIN_AB} AB`} unit="MPH" entries={exitVeloEntries} format={fmt1} />
-        <LeaderboardCard title="90th % EV" subtitle={`Min ${SAVANT_MIN_AB} AB`} unit="MPH" entries={ev90Entries} format={fmt1} />
+        <LeaderboardCard title="Barrel %" subtitle={`Min ${BATTING_TITLE_PA} PA`} entries={barrelEntries} format={fmtPct} />
+        <LeaderboardCard title="Avg Exit Velo" subtitle={`Min ${BATTING_TITLE_PA} PA`} unit="MPH" entries={exitVeloEntries} format={fmt1} />
+        <LeaderboardCard title="90th % EV" subtitle={`Min ${BATTING_TITLE_PA} PA`} unit="MPH" entries={ev90Entries} format={fmt1} />
         <LeaderboardCard title="Chase %" subtitle={`Min ${SAVANT_MIN_AB} AB · Lower is Better`} entries={chaseEntries} format={fmtPct} invert />
       </div>
 
