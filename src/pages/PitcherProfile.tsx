@@ -558,65 +558,54 @@ export default function PitcherProfile() {
     queryKey: ["pitcher-profile-pitch-arsenal", id, lookupPlayerName, (player as any)?.source_player_id],
     enabled: !!lookupPlayerName || !!(player as any)?.source_player_id || !!id,
     queryFn: async () => {
-      // Get source_player_id — try player record, Pitching Master, or URL
+      // Resolve the source_player_id that pitcher_stuff_plus_inputs uses.
+      // Strategy: get it from the Pitching Master row (same source Savant uses).
       const playerSourceId = (player as any)?.source_player_id;
-      const urlSourceId = id && /^\d+$/.test(id) ? id : null;
+      const urlId = id && /^\d+$/.test(id) ? id : null;
 
-      // If we have a UUID (not numeric), look up the numeric source_player_id
-      // from Pitching Master — this is the ID that pitcher_stuff_plus_inputs uses
-      let numericSourceId: string | null = playerSourceId;
-      if (!numericSourceId && id) {
-        const { data: masterLookup } = await (supabase as any)
+      // If we have a source_player_id from the player record, try it first.
+      // If that's a UUID (not numeric), look up the numeric one from Pitching Master.
+      let sourceId = playerSourceId || urlId;
+
+      // Always try to get the canonical source_player_id from Pitching Master
+      // since that's what pitcher_stuff_plus_inputs is keyed on
+      if (lookupPlayerName) {
+        const { data: masterRow } = await (supabase as any)
           .from("Pitching Master")
           .select("source_player_id")
           .eq("Season", 2025)
-          .or(`source_player_id.eq.${id}`)
+          .ilike("playerFullName", lookupPlayerName)
           .limit(1)
           .maybeSingle();
-        numericSourceId = masterLookup?.source_player_id ?? null;
-      }
-      // Also check: the players table source_player_id might differ from
-      // Pitching Master source_player_id. Try to resolve from Pitching Master
-      // using the players table source_player_id.
-      if (numericSourceId && !/^\d+$/.test(numericSourceId)) {
-        // It's a UUID, not a numeric source ID — look up the numeric one
-        const { data: masterLookup } = await (supabase as any)
-          .from("Pitching Master")
-          .select("source_player_id")
-          .eq("Season", 2025)
-          .ilike("playerFullName", lookupPlayerName || "___impossible___")
-          .limit(1)
-          .maybeSingle();
-        if (masterLookup?.source_player_id) numericSourceId = masterLookup.source_player_id;
+        if (masterRow?.source_player_id) sourceId = masterRow.source_player_id;
       }
 
-      const candidates = [...new Set([numericSourceId, playerSourceId, urlSourceId].filter(Boolean))];
+      if (!sourceId) return [] as PitchArsenalRow[];
 
-      for (const sourceId of candidates) {
-        const { data: stuffRows } = await (supabase as any)
-          .from("pitcher_stuff_plus_inputs")
-          .select("season, source_player_id, hand, pitch_type, pitches, whiff_pct, stuff_plus")
-          .eq("source_player_id", sourceId)
-          .eq("season", 2025)
-          .gte("pitches", 5)
-          .order("pitches", { ascending: false });
+      // Primary: pull from pitcher_stuff_plus_inputs
+      const { data: stuffRows, error } = await (supabase as any)
+        .from("pitcher_stuff_plus_inputs")
+        .select("season, source_player_id, hand, pitch_type, pitches, whiff_pct, stuff_plus")
+        .eq("source_player_id", sourceId)
+        .eq("season", 2025)
+        .gte("pitches", 5)
+        .order("pitches", { ascending: false });
 
-        if (stuffRows && stuffRows.length > 0) {
-          const totalPitchesAll = stuffRows.reduce((s: number, r: any) => s + (r.pitches ?? 0), 0);
-          return stuffRows.map((r: any) => ({
-            season: r.season,
-            source_player_id: r.source_player_id,
-            player_name: null,
-            hand: r.hand,
-            pitch_type: r.pitch_type,
-            stuff_plus: r.stuff_plus,
-            usage_pct: null,
-            whiff_pct: r.whiff_pct,
-            total_pitches: r.pitches,
-            total_pitches_all: totalPitchesAll,
-            overall_stuff_plus: null,
-          })) as PitchArsenalRow[];
-        }
+      if (!error && stuffRows && stuffRows.length > 0) {
+        const totalPitchesAll = stuffRows.reduce((s: number, r: any) => s + (r.pitches ?? 0), 0);
+        return stuffRows.map((r: any) => ({
+          season: r.season,
+          source_player_id: r.source_player_id,
+          player_name: null,
+          hand: r.hand,
+          pitch_type: r.pitch_type,
+          stuff_plus: r.stuff_plus,
+          usage_pct: null,
+          whiff_pct: r.whiff_pct,
+          total_pitches: r.pitches,
+          total_pitches_all: totalPitchesAll,
+          overall_stuff_plus: null,
+        })) as PitchArsenalRow[];
       }
 
       // Fallback: legacy Pitch Arsenal table
