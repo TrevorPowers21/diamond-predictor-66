@@ -156,31 +156,40 @@ type PitchArsenalRow = {
 };
 
 const PITCH_TYPE_LABELS: Record<string, string> = {
-  "4S": "4-Seam Fastball",
-  "4S FB": "4-Seam Fastball",
-  "FOUR-SEAM": "4-Seam Fastball",
-  "FF": "4-Seam Fastball",
+  "4S": "4-Seam FB",
+  "4S FB": "4-Seam FB",
+  "FOUR-SEAM": "4-Seam FB",
+  "FF": "4-Seam FB",
   SI: "Sinker",
   SINKER: "Sinker",
+  Sinker: "Sinker",
   SL: "Slider",
   SLIDER: "Slider",
+  Slider: "Slider",
   SWP: "Sweeper",
   SWEEPER: "Sweeper",
+  Sweeper: "Sweeper",
+  "GYRO SLIDER": "Gyro Slider",
+  "Gyro Slider": "Gyro Slider",
   CB: "Curveball",
   CURVEBALL: "Curveball",
+  Curveball: "Curveball",
   CU: "Curveball",
   CT: "Cutter",
   CUTTER: "Cutter",
+  Cutter: "Cutter",
   FC: "Cutter",
   CH: "Changeup",
   "CHANGE-UP": "Changeup",
+  "Change-up": "Changeup",
   CHANGEUP: "Changeup",
   SP: "Splitter",
   SPLITTER: "Splitter",
+  Splitter: "Splitter",
   FS: "Splitter",
 };
 
-const PITCH_DISPLAY_ORDER = ["4S", "4S FB", "SI", "SINKER", "CT", "CUTTER", "SL", "SLIDER", "SWP", "SWEEPER", "CB", "CURVEBALL", "CH", "CHANGE-UP", "SP", "SPLITTER"] as const;
+const PITCH_DISPLAY_ORDER = ["4S", "4S FB", "SI", "SINKER", "Sinker", "CT", "CUTTER", "Cutter", "GYRO SLIDER", "Gyro Slider", "SL", "SLIDER", "Slider", "SWP", "SWEEPER", "Sweeper", "CB", "CURVEBALL", "Curveball", "CH", "CHANGE-UP", "Change-up", "SP", "SPLITTER", "Splitter"] as const;
 
 const PITCHING_POWER_RATING_WEIGHT = 0.7;
 const PITCHING_DEV_FACTOR = 0.06;
@@ -549,10 +558,38 @@ export default function PitcherProfile() {
     queryKey: ["pitcher-profile-pitch-arsenal", id, lookupPlayerName, (player as any)?.source_player_id],
     enabled: !!lookupPlayerName || !!(player as any)?.source_player_id,
     queryFn: async () => {
-      // Try source_player_id first, then player_name
+      const sourceId = (player as any)?.source_player_id;
+
+      // Primary: pull from pitcher_stuff_plus_inputs (has calculated Stuff+ scores)
+      if (sourceId) {
+        const { data: stuffRows } = await (supabase as any)
+          .from("pitcher_stuff_plus_inputs")
+          .select("season, source_player_id, hand, pitch_type, pitches, whiff_pct, stuff_plus")
+          .eq("source_player_id", sourceId)
+          .eq("season", 2025)
+          .gte("pitches", 5)
+          .order("pitches", { ascending: false });
+
+        if (stuffRows && stuffRows.length > 0) {
+          const totalPitchesAll = stuffRows.reduce((s: number, r: any) => s + (r.pitches ?? 0), 0);
+          return stuffRows.map((r: any) => ({
+            season: r.season,
+            source_player_id: r.source_player_id,
+            player_name: null,
+            hand: r.hand,
+            pitch_type: r.pitch_type,
+            stuff_plus: r.stuff_plus,
+            usage_pct: null,
+            whiff_pct: r.whiff_pct,
+            total_pitches: r.pitches,
+            total_pitches_all: totalPitchesAll,
+            overall_stuff_plus: null,
+          })) as PitchArsenalRow[];
+        }
+      }
+
+      // Fallback: legacy Pitch Arsenal table
       const bySourceId = async () => {
-        // Get the source_player_id from the player record
-        const sourceId = (player as any)?.source_player_id;
         if (!sourceId) return [];
         const { data, error } = await supabase
           .from("Pitch Arsenal")
