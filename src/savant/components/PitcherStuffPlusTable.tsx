@@ -140,7 +140,7 @@ export default function PitcherStuffPlusTable({
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
+              {rows.filter((r) => (r.pitches ?? 0) >= 5).map((r, i) => (
                 <tr
                   key={`${r.pitch_type}-${r.hand}-${i}`}
                   className="border-t text-white transition-colors hover:bg-white/[0.025]"
