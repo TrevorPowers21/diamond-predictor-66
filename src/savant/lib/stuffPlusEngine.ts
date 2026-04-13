@@ -484,6 +484,27 @@ export async function runStuffPlusPipeline(
     });
   }
 
+  // ── Write overall Stuff+ to Pitching Master (for RSTR IQ) ──────────────
+  // Group by rounded overall score for batch updates
+  const overallGroups = new Map<number, string[]>();
+  for (const o of overallResults) {
+    if (!overallGroups.has(o.overall)) overallGroups.set(o.overall, []);
+    overallGroups.get(o.overall)!.push(o.source_player_id);
+  }
+
+  for (const [score, pids] of overallGroups) {
+    for (let i = 0; i < pids.length; i += 500) {
+      const batch = pids.slice(i, i + 500);
+      const { error } = await (supabase as any)
+        .from("Pitching Master")
+        .update({ stuff_plus: score })
+        .in("source_player_id", batch)
+        .eq("Season", season);
+
+      if (error) errors.push(`Pitching Master update: ${error.message}`);
+    }
+  }
+
   // ── Build report ───────────────────────────────────────────────────────
   const byPitchType: StuffPlusReport["byPitchType"] = [];
   const calibrationWarnings: string[] = [];

@@ -134,7 +134,9 @@ export default function PitcherStuffPlusTable({
                 <th className="px-3 py-2 text-right">Rel S</th>
                 <th className="px-3 py-2 text-right">Ext</th>
                 <th className="px-3 py-2 text-right">Spin</th>
-                <th className="px-3 py-2 pr-4 text-right">Whiff</th>
+                <th className="px-3 py-2 text-right">VAA</th>
+                <th className="px-3 py-2 text-right">Whiff</th>
+                <th className="px-3 py-2 pr-4 text-right">Stuff+</th>
               </tr>
             </thead>
             <tbody>
@@ -156,7 +158,13 @@ export default function PitcherStuffPlusTable({
                   <td className="px-3 py-2 text-right tabular-nums">{fmt2(r.rel_side)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt2(r.extension)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmtInt(r.spin)}</td>
-                  <td className="px-3 py-2 pr-4 text-right tabular-nums">{fmtPct(r.whiff_pct)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-white/50">
+                    {(r.rstr_pitch_class ?? r.pitch_type) === "4S FB" ? fmt1(r.vaa) : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmtPct(r.whiff_pct)}</td>
+                  <td className="px-3 py-2 pr-4 text-right tabular-nums font-semibold" style={{ color: r.stuff_plus != null ? "#D4AF37" : undefined }}>
+                    {r.stuff_plus != null ? fmtInt(r.stuff_plus) : "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -18,6 +18,7 @@ export interface PitcherStuffPlusRow {
   rel_side: number | null;
   extension: number | null;
   spin: number | null;
+  vaa: number | null;
   whiff_pct: number | null;
   stuff_plus: number | null;
 }
@@ -34,7 +35,7 @@ export function usePitcherStuffPlus(
       const { data, error } = await (supabase as any)
         .from("pitcher_stuff_plus_inputs")
         .select(
-          "pitch_type, rstr_pitch_class, hand, pitches, velocity, ivb, hb, rel_height, rel_side, extension, spin, whiff_pct, stuff_plus",
+          "pitch_type, rstr_pitch_class, hand, pitches, velocity, ivb, hb, rel_height, rel_side, extension, spin, vaa, whiff_pct, stuff_plus",
         )
         .eq("source_player_id", sourcePlayerId!)
         .eq("season", season)
