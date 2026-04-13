@@ -187,6 +187,17 @@ export default function SavantIndex() {
           )}
         </div>
 
+        {/* Quick links */}
+        <div className="mb-8 flex gap-3">
+          <Link
+            to="/savant/conferences"
+            className="cursor-pointer border px-5 py-2.5 text-xs font-bold uppercase tracking-[0.15em] transition-colors duration-150 hover:bg-[#D4AF37]/10"
+            style={{ borderColor: NAVY_BORDER, color: GOLD }}
+          >
+            Conference Stats →
+          </Link>
+        </div>
+
         {/* Section: Hitting Leaderboards */}
         <div className="mb-3 mt-10 flex items-center gap-3">
           <span className="h-px flex-1 bg-[#D4AF37]/20" />
