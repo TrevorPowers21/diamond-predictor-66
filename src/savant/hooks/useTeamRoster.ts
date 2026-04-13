@@ -6,16 +6,17 @@ import { useMemo } from "react";
 export function useTeamRoster(teamId: string | undefined, season: number = 2025) {
   const { teams } = useTeamsTable();
 
-  // Resolve team UUID → source_team_id for master table lookups
+  // Resolve team UUID → lookup fields for master table queries
   const team = useMemo(() => teams.find((t) => t.id === teamId), [teams, teamId]);
   const sourceId = team?.source_team_id ?? null;
   const teamName = team?.fullName ?? null;
+  const abbreviation = team?.abbreviation ?? null;
 
   const { data: hitters = [], isLoading: hLoading } = useQuery({
-    queryKey: ["team-roster-hitters", teamId, sourceId, teamName, season],
-    enabled: !!(sourceId || teamName),
+    queryKey: ["team-roster-hitters", teamId, sourceId, teamName, abbreviation, season],
+    enabled: !!(sourceId || teamName || abbreviation),
     queryFn: async () => {
-      // Try by TeamID (source_id) first, fall back to team name
+      // Try by TeamID (source_id) first
       if (sourceId) {
         const { data } = await (supabase as any)
           .from("Hitter Master")
@@ -25,6 +26,7 @@ export function useTeamRoster(teamId: string | undefined, season: number = 2025)
           .order("pa", { ascending: false });
         if (data && data.length > 0) return data;
       }
+      // Try by team full name
       if (teamName) {
         const { data } = await (supabase as any)
           .from("Hitter Master")
@@ -32,7 +34,17 @@ export function useTeamRoster(teamId: string | undefined, season: number = 2025)
           .eq("Team", teamName)
           .eq("Season", season)
           .order("pa", { ascending: false });
-        return data || [];
+        if (data && data.length > 0) return data;
+      }
+      // Try by abbreviation (some master tables use abbreviation as Team)
+      if (abbreviation) {
+        const { data } = await (supabase as any)
+          .from("Hitter Master")
+          .select("*")
+          .eq("Team", abbreviation)
+          .eq("Season", season)
+          .order("pa", { ascending: false });
+        if (data && data.length > 0) return data;
       }
       return [];
     },
@@ -40,8 +52,8 @@ export function useTeamRoster(teamId: string | undefined, season: number = 2025)
   });
 
   const { data: pitchers = [], isLoading: pLoading } = useQuery({
-    queryKey: ["team-roster-pitchers", teamId, sourceId, teamName, season],
-    enabled: !!(sourceId || teamName),
+    queryKey: ["team-roster-pitchers", teamId, sourceId, teamName, abbreviation, season],
+    enabled: !!(sourceId || teamName || abbreviation),
     queryFn: async () => {
       if (sourceId) {
         const { data } = await (supabase as any)
@@ -59,7 +71,16 @@ export function useTeamRoster(teamId: string | undefined, season: number = 2025)
           .eq("Team", teamName)
           .eq("Season", season)
           .order("IP", { ascending: false });
-        return data || [];
+        if (data && data.length > 0) return data;
+      }
+      if (abbreviation) {
+        const { data } = await (supabase as any)
+          .from("Pitching Master")
+          .select("*")
+          .eq("Team", abbreviation)
+          .eq("Season", season)
+          .order("IP", { ascending: false });
+        if (data && data.length > 0) return data;
       }
       return [];
     },

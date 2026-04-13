@@ -4,6 +4,8 @@ import { useTeamRoster } from "@/savant/hooks/useTeamRoster";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { useSortable, SortHeader, tierColor } from "@/savant/components/SortableTable";
 import { NAVY_CARD, NAVY_BORDER, GOLD } from "@/savant/lib/theme";
+import { computeOWarFromStats, computePWar } from "@/savant/lib/war";
+import { computePrvPlus } from "@/savant/lib/prvPlus";
 
 const fmt3 = (v: number | null) => (v == null ? "—" : v.toFixed(3));
 const fmt2 = (v: number | null) => (v == null ? "—" : v.toFixed(2));
@@ -35,10 +37,25 @@ export default function TeamProfilePage() {
     return parkMap.byTeamId[team.id] ?? parkMap.byName[team.fullName?.toLowerCase().trim() ?? ""] ?? null;
   }, [team, parkMap]);
 
-  const hittingTradSort = useSortable(hitters, "pa", "desc");
-  const hittingAdvSort = useSortable(hitters, "avg_exit_velo", "desc");
-  const pitchingTradSort = useSortable(pitchers, "IP", "desc");
-  const pitchingAdvSort = useSortable(pitchers, "stuff_plus", "desc");
+  // Enrich hitters with computed oWAR
+  const enrichedHitters = useMemo(() => hitters.map((h: any) => ({
+    ...h,
+    owar: computeOWarFromStats(h.AVG, h.OBP, h.SLG, h.ISO, h.pa),
+  })), [hitters]);
+
+  // Enrich pitchers with computed pWAR
+  const enrichedPitchers = useMemo(() => pitchers.map((p: any) => {
+    const prvPlus = computePrvPlus(
+      p.era_pr_plus, p.fip_pr_plus, p.whip_pr_plus,
+      p.k9_pr_plus, p.bb9_pr_plus, p.hr9_pr_plus,
+    );
+    return { ...p, pwar: computePWar(prvPlus, p.IP), prv_plus: prvPlus };
+  }), [pitchers]);
+
+  const hittingTradSort = useSortable(enrichedHitters, "pa", "desc");
+  const hittingAdvSort = useSortable(enrichedHitters, "avg_exit_velo", "desc");
+  const pitchingTradSort = useSortable(enrichedPitchers, "IP", "desc");
+  const pitchingAdvSort = useSortable(enrichedPitchers, "stuff_plus", "desc");
 
   if (isLoading) return <div className="py-10 text-center text-sm text-white/40">Loading…</div>;
   if (!team) return <div className="py-10 text-center text-sm text-white/40">Team not found.</div>;
@@ -138,6 +155,7 @@ export default function TeamProfilePage() {
             { field: "SLG", label: "SLG", fmt: fmt3 },
             { field: "OPS", label: "OPS", fmt: fmt3 },
             { field: "ISO", label: "ISO", fmt: fmt3 },
+            { field: "owar", label: "oWAR", fmt: fmt1 },
           ]}
         />
       )}
@@ -186,6 +204,8 @@ export default function TeamProfilePage() {
             { field: "K9", label: "K/9", fmt: fmt1 },
             { field: "BB9", label: "BB/9", fmt: fmt1 },
             { field: "HR9", label: "HR/9", fmt: fmt2 },
+            { field: "prv_plus", label: "pRV+", fmt: fmtInt },
+            { field: "pwar", label: "pWAR", fmt: fmt1 },
           ]}
         />
       )}
