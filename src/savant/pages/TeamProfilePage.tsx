@@ -17,11 +17,13 @@ const fmtInt = (v: number | null) => (v == null ? "—" : `${Math.round(v)}`);
 function parkColor(v: number | null, neutral = 1.0): string {
   if (v == null) return "";
   const diff = v - neutral;
-  if (Math.abs(diff) < 0.02) return "#ffffff";
-  if (diff > 0.05) return "#ef4444"; // hitter friendly
-  if (diff > 0) return "#eab308";
-  if (diff < -0.05) return "#22c55e"; // pitcher friendly
-  return "#3b82f6";
+  if (Math.abs(diff) < 0.01) return "#ffffff";
+  if (diff > 0.08) return "#ef4444";   // extreme hitter friendly
+  if (diff > 0.03) return "#f97316";   // moderate hitter friendly
+  if (diff > 0) return "#eab308";      // slight hitter friendly
+  if (diff < -0.08) return "#22c55e";  // extreme pitcher friendly
+  if (diff < -0.03) return "#3b82f6";  // moderate pitcher friendly
+  return "#67e8f9";                    // slight pitcher friendly
 }
 
 export default function TeamProfilePage() {
@@ -434,7 +436,20 @@ function RosterTable({ rows, sortKey, sortDir, onSort, columns, weightField = "p
           </tr>
         </thead>
         <tbody>
-          {/* Team average row */}
+          {rows.map((r, i) => (
+            <tr key={r.source_player_id ?? i} className="border-t border-white/5 transition-colors hover:bg-white/[0.02]">
+              {columns.map((col) =>
+                col.render ? (
+                  col.render(r)
+                ) : (
+                  <td key={col.field} className="px-3 py-2 text-right tabular-nums">
+                    {col.fmt ? col.fmt(r[col.field]) : (r[col.field] ?? "—")}
+                  </td>
+                ),
+              )}
+            </tr>
+          ))}
+          {/* Team average row — bottom */}
           {teamAvg && (
             <tr className="border-t-2" style={{ borderColor: GOLD, backgroundColor: "rgba(212,175,55,0.04)" }}>
               {columns.map((col) =>
@@ -450,19 +465,6 @@ function RosterTable({ rows, sortKey, sortDir, onSort, columns, weightField = "p
               )}
             </tr>
           )}
-          {rows.map((r, i) => (
-            <tr key={r.source_player_id ?? i} className="border-t border-white/5 transition-colors hover:bg-white/[0.02]">
-              {columns.map((col) =>
-                col.render ? (
-                  col.render(r)
-                ) : (
-                  <td key={col.field} className="px-3 py-2 text-right tabular-nums">
-                    {col.fmt ? col.fmt(r[col.field]) : (r[col.field] ?? "—")}
-                  </td>
-                ),
-              )}
-            </tr>
-          ))}
         </tbody>
       </table>
       {rows.length === 0 && (
