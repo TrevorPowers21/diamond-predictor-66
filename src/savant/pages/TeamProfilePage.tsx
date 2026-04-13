@@ -64,6 +64,19 @@ export default function TeamProfilePage() {
   const pitchingTradSort = useSortable(enrichedPitchers, "IP", "desc");
   const pitchingAdvSort = useSortable(enrichedPitchers, "stuff_plus", "desc");
 
+  // Team totals
+  const totalOWar = useMemo(() => {
+    const valid = enrichedHitters.filter((h: any) => h.owar != null);
+    return valid.length > 0 ? valid.reduce((s: number, h: any) => s + h.owar, 0) : null;
+  }, [enrichedHitters]);
+
+  const totalPWar = useMemo(() => {
+    const valid = enrichedPitchers.filter((p: any) => p.pwar != null);
+    return valid.length > 0 ? valid.reduce((s: number, p: any) => s + p.pwar, 0) : null;
+  }, [enrichedPitchers]);
+
+  const totalWar = (totalOWar ?? 0) + (totalPWar ?? 0);
+
   if (isLoading) return <div className="py-10 text-center text-sm text-white/40">Loading…</div>;
   if (!team) return <div className="py-10 text-center text-sm text-white/40">Team not found.</div>;
 
@@ -77,6 +90,43 @@ export default function TeamProfilePage() {
         <h2 className="mt-1 font-[Oswald] text-3xl font-bold tracking-tight text-white">
           {team.fullName}
         </h2>
+      </div>
+
+      {/* Team WAR Summary */}
+      <div className="mb-6">
+        <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white/50">Team Information</div>
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+          <div className="border px-4 py-3" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+            <div className="text-[9px] font-bold uppercase tracking-wider text-white/40">Total oWAR</div>
+            <div className="mt-1 font-[Oswald] text-2xl font-bold tabular-nums" style={{ color: GOLD }}>
+              {totalOWar != null ? totalOWar.toFixed(1) : "—"}
+            </div>
+          </div>
+          <div className="border px-4 py-3" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+            <div className="text-[9px] font-bold uppercase tracking-wider text-white/40">Total pWAR</div>
+            <div className="mt-1 font-[Oswald] text-2xl font-bold tabular-nums" style={{ color: GOLD }}>
+              {totalPWar != null ? totalPWar.toFixed(1) : "—"}
+            </div>
+          </div>
+          <div className="border px-4 py-3" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+            <div className="text-[9px] font-bold uppercase tracking-wider text-white/40">Total WAR</div>
+            <div className="mt-1 font-[Oswald] text-2xl font-bold tabular-nums" style={{ color: GOLD }}>
+              {totalWar.toFixed(1)}
+            </div>
+          </div>
+          <div className="border px-4 py-3" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+            <div className="text-[9px] font-bold uppercase tracking-wider text-white/40">Hitters</div>
+            <div className="mt-1 font-[Oswald] text-2xl font-bold tabular-nums text-white">
+              {enrichedHitters.length}
+            </div>
+          </div>
+          <div className="border px-4 py-3" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+            <div className="text-[9px] font-bold uppercase tracking-wider text-white/40">Pitchers</div>
+            <div className="mt-1 font-[Oswald] text-2xl font-bold tabular-nums text-white">
+              {enrichedPitchers.length}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Park Factors */}
