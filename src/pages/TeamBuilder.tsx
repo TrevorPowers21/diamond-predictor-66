@@ -2272,13 +2272,29 @@ export default function TeamBuilder() {
     const byKey = new Map<string, PStatRec>();
     const byName = new Map<string, PStatRec[]>();
     const bySourceId = new Map<string, PStatRec>();
+    // Build abbreviation → full name map from teams
+    const abbrToFull = new Map<string, string>();
+    const fullToAbbr = new Map<string, string>();
+    for (const t of teams) {
+      if (t.abbreviation && t.fullName) {
+        abbrToFull.set(normalizeName(t.abbreviation), normalizeName(t.fullName));
+        fullToAbbr.set(normalizeName(t.fullName), normalizeName(t.abbreviation));
+      }
+    }
     const addRec = (name: string, team: string, rec: PStatRec, sourceId?: string | null) => {
-      const key = `${normalizeName(name)}|${normalizeName(team)}`;
+      const nName = normalizeName(name);
+      const nTeam = normalizeName(team);
+      const key = `${nName}|${nTeam}`;
       if (!byKey.has(key)) byKey.set(key, rec);
-      const nKey = normalizeName(name);
-      const bucket = byName.get(nKey) || [];
+      // Also index by alternate team name (abbreviation ↔ full name)
+      const altTeam = abbrToFull.get(nTeam) || fullToAbbr.get(nTeam);
+      if (altTeam) {
+        const altKey = `${nName}|${altTeam}`;
+        if (!byKey.has(altKey)) byKey.set(altKey, rec);
+      }
+      const bucket = byName.get(nName) || [];
       bucket.push(rec);
-      byName.set(nKey, bucket);
+      byName.set(nName, bucket);
       if (sourceId) bySourceId.set(sourceId, rec);
     };
     for (const r of pitchingMasterRows) {
@@ -2301,20 +2317,35 @@ export default function TeamBuilder() {
       addRec(name, team, rec, r.source_player_id);
     }
     return { byKey, byName, bySourceId };
-  }, [pitchingMasterRows]);
+  }, [pitchingMasterRows, teams]);
 
   const pitchingPrByNameTeam = useMemo(() => {
     type PRec = { eraPrPlus: number | null; fipPrPlus: number | null; whipPrPlus: number | null; k9PrPlus: number | null; bb9PrPlus: number | null; hr9PrPlus: number | null };
     const byKey = new Map<string, PRec>();
     const byName = new Map<string, PRec[]>();
     const bySourceId = new Map<string, PRec>();
+    // Build abbreviation → full name map from teams
+    const abbrToFull = new Map<string, string>();
+    const fullToAbbr = new Map<string, string>();
+    for (const t of teams) {
+      if (t.abbreviation && t.fullName) {
+        abbrToFull.set(normalizeName(t.abbreviation), normalizeName(t.fullName));
+        fullToAbbr.set(normalizeName(t.fullName), normalizeName(t.abbreviation));
+      }
+    }
     const addRec = (name: string, team: string, rec: PRec, sourceId?: string | null) => {
-      const key = `${normalizeName(name)}|${normalizeName(team)}`;
+      const nName = normalizeName(name);
+      const nTeam = normalizeName(team);
+      const key = `${nName}|${nTeam}`;
       if (!byKey.has(key)) byKey.set(key, rec);
-      const nKey = normalizeName(name);
-      const bucket = byName.get(nKey) || [];
+      const altTeam = abbrToFull.get(nTeam) || fullToAbbr.get(nTeam);
+      if (altTeam) {
+        const altKey = `${nName}|${altTeam}`;
+        if (!byKey.has(altKey)) byKey.set(altKey, rec);
+      }
+      const bucket = byName.get(nName) || [];
       bucket.push(rec);
-      byName.set(nKey, bucket);
+      byName.set(nName, bucket);
       if (sourceId) bySourceId.set(sourceId, rec);
     };
 
@@ -2373,7 +2404,7 @@ export default function TeamBuilder() {
       }, pr.source_player_id);
     }
     return { byKey, byName, bySourceId };
-  }, [pitchingMasterRows]);
+  }, [pitchingMasterRows, teams]);
 
   const confByKey = useMemo(() => {
     const map = new Map<string, ConferenceRow>();
