@@ -77,6 +77,41 @@ export default function TeamProfilePage() {
 
   const totalWar = (totalOWar ?? 0) + (totalPWar ?? 0);
 
+  // PA-weighted hitting aggregates
+  const teamHitting = useMemo(() => {
+    const rows = enrichedHitters.filter((h: any) => (h.pa ?? 0) > 0);
+    if (rows.length === 0) return null;
+    const totalPa = rows.reduce((s: number, h: any) => s + (h.pa ?? 0), 0);
+    const wAvg = (field: string) => {
+      let sv = 0, sw = 0;
+      for (const h of rows) { const v = Number(h[field]); const w = h.pa ?? 0; if (Number.isFinite(v) && w > 0) { sv += v * w; sw += w; } }
+      return sw > 0 ? sv / sw : null;
+    };
+    return {
+      avg: wAvg("AVG"), obp: wAvg("OBP"), slg: wAvg("SLG"),
+      ops: wAvg("OPS"), wrc_plus: wAvg("wrc_plus"),
+      ev: wAvg("avg_exit_velo"), barrel: wAvg("barrel"),
+      totalPa,
+    };
+  }, [enrichedHitters]);
+
+  // IP-weighted pitching aggregates
+  const teamPitching = useMemo(() => {
+    const rows = enrichedPitchers.filter((p: any) => (p.IP ?? 0) > 0);
+    if (rows.length === 0) return null;
+    const totalIp = rows.reduce((s: number, p: any) => s + (p.IP ?? 0), 0);
+    const wAvg = (field: string) => {
+      let sv = 0, sw = 0;
+      for (const p of rows) { const v = Number(p[field]); const w = p.IP ?? 0; if (Number.isFinite(v) && w > 0) { sv += v * w; sw += w; } }
+      return sw > 0 ? sv / sw : null;
+    };
+    return {
+      era: wAvg("ERA"), fip: wAvg("FIP"), whip: wAvg("WHIP"),
+      k9: wAvg("K9"), bb9: wAvg("BB9"), stuff_plus: wAvg("stuff_plus"),
+      totalIp,
+    };
+  }, [enrichedPitchers]);
+
   if (isLoading) return <div className="py-10 text-center text-sm text-white/40">Loading…</div>;
   if (!team) return <div className="py-10 text-center text-sm text-white/40">Team not found.</div>;
 
@@ -92,10 +127,12 @@ export default function TeamProfilePage() {
         </h2>
       </div>
 
-      {/* Team WAR Summary */}
+      {/* Team Information */}
       <div className="mb-6">
         <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white/50">Team Information</div>
-        <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+
+        {/* WAR row */}
+        <div className="grid grid-cols-3 gap-3 mb-3">
           <div className="border px-4 py-3" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
             <div className="text-[9px] font-bold uppercase tracking-wider text-white/40">Total oWAR</div>
             <div className="mt-1 font-[Oswald] text-2xl font-bold tabular-nums" style={{ color: GOLD }}>
@@ -114,19 +151,52 @@ export default function TeamProfilePage() {
               {totalWar.toFixed(1)}
             </div>
           </div>
-          <div className="border px-4 py-3" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
-            <div className="text-[9px] font-bold uppercase tracking-wider text-white/40">Hitters</div>
-            <div className="mt-1 font-[Oswald] text-2xl font-bold tabular-nums text-white">
-              {enrichedHitters.length}
-            </div>
-          </div>
-          <div className="border px-4 py-3" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
-            <div className="text-[9px] font-bold uppercase tracking-wider text-white/40">Pitchers</div>
-            <div className="mt-1 font-[Oswald] text-2xl font-bold tabular-nums text-white">
-              {enrichedPitchers.length}
-            </div>
-          </div>
         </div>
+
+        {/* Hitting aggregates */}
+        {teamHitting && (
+          <div className="mb-3">
+            <div className="mb-1 text-[9px] font-bold uppercase tracking-wider text-white/30">Hitting</div>
+            <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
+              {([
+                ["AVG", teamHitting.avg, fmt3],
+                ["OBP", teamHitting.obp, fmt3],
+                ["SLG", teamHitting.slg, fmt3],
+                ["OPS", teamHitting.ops, fmt3],
+                ["wRC+", teamHitting.wrc_plus, fmtInt],
+                ["Avg EV", teamHitting.ev, fmt1],
+                ["Barrel%", teamHitting.barrel, fmtPct],
+              ] as [string, number | null, (v: number | null) => string][]).map(([label, val, formatter]) => (
+                <div key={label} className="border px-3 py-2" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+                  <div className="text-[9px] font-bold uppercase tracking-wider text-white/40">{label}</div>
+                  <div className="mt-0.5 font-[Oswald] text-lg font-bold tabular-nums text-white">{formatter(val)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Pitching aggregates */}
+        {teamPitching && (
+          <div className="mb-3">
+            <div className="mb-1 text-[9px] font-bold uppercase tracking-wider text-white/30">Pitching</div>
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+              {([
+                ["ERA", teamPitching.era, fmt2],
+                ["FIP", teamPitching.fip, fmt2],
+                ["WHIP", teamPitching.whip, fmt2],
+                ["K/9", teamPitching.k9, fmt1],
+                ["BB/9", teamPitching.bb9, fmt1],
+                ["Stuff+", teamPitching.stuff_plus, fmtInt],
+              ] as [string, number | null, (v: number | null) => string][]).map(([label, val, formatter]) => (
+                <div key={label} className="border px-3 py-2" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+                  <div className="text-[9px] font-bold uppercase tracking-wider text-white/40">{label}</div>
+                  <div className="mt-0.5 font-[Oswald] text-lg font-bold tabular-nums text-white">{formatter(val)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Park Factors */}
