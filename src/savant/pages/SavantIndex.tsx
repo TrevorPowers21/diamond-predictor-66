@@ -6,6 +6,7 @@ import LeaderboardCard, { type LeaderboardEntry } from "@/savant/components/Lead
 import ReclassificationRunner from "@/savant/components/ReclassificationRunner";
 import VeloDiffRunner from "@/savant/components/VeloDiffRunner";
 import StuffPlusRunner from "@/savant/components/StuffPlusRunner";
+import ConferenceStuffPlusRunner from "@/savant/components/ConferenceStuffPlusRunner";
 
 const NAVY_BG = "#040810";
 const NAVY_CARD = "#0a1428";
@@ -263,6 +264,7 @@ export default function SavantIndex() {
         <ReclassificationRunner />
         <VeloDiffRunner />
         <StuffPlusRunner />
+        <ConferenceStuffPlusRunner />
 
         <div className="mt-12 border-t pt-4 text-center text-[10px] uppercase tracking-wider text-white/30" style={{ borderColor: NAVY_BORDER }}>
           RSTR IQ Savant · Internal Data Hub
