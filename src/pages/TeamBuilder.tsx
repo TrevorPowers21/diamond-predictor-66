@@ -1840,7 +1840,11 @@ export default function TeamBuilder() {
       // Check Pitching Master Role for accurate SP/RP from last season
       const _pName = `${player.first_name || ""} ${player.last_name || ""}`.trim();
       const _pmKey = `${normalizeName(_pName)}|${normalizeName(player.team || "")}`;
-      const pmRole = asPitcherRole(pitchingStatsByNameTeam.byKey.get(_pmKey)?.role ?? null);
+      const _pmSid = player.source_player_id || null;
+      const pmRec = pitchingStatsByNameTeam.byKey.get(_pmKey)
+        || (_pmSid ? pitchingStatsByNameTeam.bySourceId.get(_pmSid) : null)
+        || (() => { const b = pitchingStatsByNameTeam.byName.get(normalizeName(_pName)) || []; return b.length >= 1 ? b[0] : null; })();
+      const pmRole = asPitcherRole(pmRec?.role ?? null);
       const inferredRole = overrideRole || pmRole || asPitcherRole(player.position || null);
       return {
         player_id: player.id,
@@ -4516,7 +4520,11 @@ export default function TeamBuilder() {
       // Check Pitching Master Role for accurate SP/RP from last season
       const _pName = `${player.first_name || ""} ${player.last_name || ""}`.trim();
       const _pmKey = `${normalizeName(_pName)}|${normalizeName(player.team || "")}`;
-      const pmRole = asPitcherRole(pitchingStatsByNameTeam.byKey.get(_pmKey)?.role ?? null);
+      const _pmSid = player.source_player_id || null;
+      const pmRec = pitchingStatsByNameTeam.byKey.get(_pmKey)
+        || (_pmSid ? pitchingStatsByNameTeam.bySourceId.get(_pmSid) : null)
+        || (() => { const b = pitchingStatsByNameTeam.byName.get(normalizeName(_pName)) || []; return b.length >= 1 ? b[0] : null; })();
+      const pmRole = asPitcherRole(pmRec?.role ?? null);
       const inferredRole = overrideRole || pmRole || asPitcherRole(player.position || null);
       return {
         player_id: player.id,
