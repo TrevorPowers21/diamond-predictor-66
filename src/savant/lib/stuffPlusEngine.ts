@@ -153,7 +153,7 @@ function calcSinker(row: PitchRow, pop: PopConstants, hand: string): { score: nu
 }
 
 function calcCutter(row: PitchRow, pop: PopConstants, hand: string): { score: number; zs: ZScores } {
-  const zv = zMax(row.velocity, pop.velocity, pop.velocity_sd) ?? 0;
+  const zv = z(row.velocity, pop.velocity, pop.velocity_sd) ?? 0;
   const zi = zAbs(row.ivb, pop.ivb, pop.ivb_sd) ?? 0;
   const zh = z(row.hb, pop.hb, pop.hb_sd) ?? 0;
   const zrh = zAbs(row.rel_height, pop.rel_height, pop.rel_height_sd) ?? 0;
