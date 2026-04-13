@@ -4600,12 +4600,19 @@ export default function TeamBuilder() {
       </TableCell>
       <TableCell>{(() => {
         const dbPos = p.player?.position || "";
-        // If position is generic "OF", check exit positions for specific LF/CF/RF
         if (dbPos === "OF" || !dbPos) {
           const fullName = `${p.player?.first_name || ""} ${p.player?.last_name || ""}`.trim();
           const team = p.player?.team || "";
           const posMap = exitPositions as Record<string, string>;
-          return posMap[`${fullName}|${team}`] || posMap[fullName] || dbPos || "—";
+          // Try exact match, then check all keys containing player name
+          const exact = posMap[`${fullName}|${team}`] || posMap[fullName];
+          if (exact) return exact;
+          // Fuzzy: find any key starting with the player name
+          const namePrefix = `${fullName}|`;
+          for (const key of Object.keys(posMap)) {
+            if (key.startsWith(namePrefix)) return posMap[key];
+          }
+          return dbPos || "—";
         }
         return dbPos;
       })()}</TableCell>
