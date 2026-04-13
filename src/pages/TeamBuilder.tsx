@@ -686,7 +686,7 @@ const normalizePitcherRole = (raw: string | null | undefined): "SP" | "RP" => {
 };
 const asPitcherRole = (raw: string | null | undefined): "SP" | "RP" | null => {
   const v = String(raw || "").toUpperCase();
-  if (v.startsWith("SP") || v === "STARTER") return "SP";
+  if (v.startsWith("SP") || v === "STARTER" || v === "SM") return "SP";
   if (v.startsWith("RP") || v === "RELIEVER" || v === "CL" || v === "CLOSER") return "RP";
   return null;
 };
