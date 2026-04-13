@@ -14,19 +14,28 @@ const fmt1 = (v: number | null) => (v == null ? "—" : v.toFixed(1));
 const fmtPct = (v: number | null) => (v == null ? "—" : `${v.toFixed(1)}%`);
 const fmtInt = (v: number | null) => (v == null ? "—" : `${Math.round(v)}`);
 
-/** Hitting park factors (AVG, OBP, ISO): >1.0 = green (boosts hitters), <1.0 = red (suppresses hitters) */
+/** Normalize park factor to 100-based scale */
+function parkNormalize(v: number | null): number | null {
+  if (v == null) return null;
+  // If stored as decimal (0.95, 1.05), convert to 100-based
+  return Math.abs(v) <= 3 ? v * 100 : v;
+}
+
+/** Hitting park factors (AVG, OBP, ISO): >100 = green (boosts hitters), <100 = red (suppresses hitters) */
 function parkColorHitting(v: number | null): string {
-  if (v == null) return "";
-  const diff = v - 1.0;
-  if (Math.abs(diff) < 0.005) return "#ffffff";
+  const n = parkNormalize(v);
+  if (n == null) return "";
+  const diff = n - 100;
+  if (Math.abs(diff) < 0.5) return "#ffffff";
   return diff > 0 ? "#22c55e" : "#ef4444";
 }
 
-/** Pitching park factors (ERA, WHIP, HR/9): >1.0 = red (inflates runs), <1.0 = green (suppresses runs) */
+/** Pitching park factors (ERA, WHIP, HR/9): >100 = red (inflates runs), <100 = green (suppresses runs) */
 function parkColorPitching(v: number | null): string {
-  if (v == null) return "";
-  const diff = v - 1.0;
-  if (Math.abs(diff) < 0.005) return "#ffffff";
+  const n = parkNormalize(v);
+  if (n == null) return "";
+  const diff = n - 100;
+  if (Math.abs(diff) < 0.5) return "#ffffff";
   return diff > 0 ? "#ef4444" : "#22c55e";
 }
 
@@ -221,7 +230,7 @@ export default function TeamProfilePage() {
               <div key={label} className="border px-3 py-2" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
                 <div className="text-[9px] font-bold uppercase tracking-wider text-white/40">{label}</div>
                 <div className="mt-0.5 font-[Oswald] text-lg font-bold tabular-nums" style={{ color: type === "hit" ? parkColorHitting(val ?? null) : parkColorPitching(val ?? null) }}>
-                  {val != null ? val.toFixed(3) : "—"}
+                  {val != null ? (parkNormalize(val) ?? val).toFixed(1) : "—"}
                 </div>
               </div>
             ))}
