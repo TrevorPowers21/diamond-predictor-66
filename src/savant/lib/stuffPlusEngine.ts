@@ -121,7 +121,7 @@ function zDistFromZero(player: number | null, sd: number | null): number | null 
 // ─── Pitch Equations ────────────────────────────────────────────────────────
 
 function calc4SFB(row: PitchRow, pop: PopConstants): { score: number; zs: ZScores } {
-  const zv = zMax(row.velocity, pop.velocity, pop.velocity_sd) ?? 0;
+  const zv = z(row.velocity, pop.velocity, pop.velocity_sd) ?? 0;
   const zi = z(row.ivb, pop.ivb, pop.ivb_sd) ?? 0;
   const zh = zAbs(row.hb, pop.hb, pop.hb_sd) ?? 0;
   const zrh = zAbs(row.rel_height, pop.rel_height, pop.rel_height_sd) ?? 0;
