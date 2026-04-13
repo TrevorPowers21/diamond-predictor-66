@@ -2,7 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-interface PopConstants {
+export interface PopConstants {
   pitch_type: string;
   hand: string;
   velocity: number | null;
@@ -25,7 +25,7 @@ interface PopConstants {
   velo_diff_sd: number | null;
 }
 
-interface PitchRow {
+export interface PitchRow {
   id: string;
   source_player_id: string;
   pitch_type: string;
@@ -279,7 +279,7 @@ function calcSplitter(row: PitchRow, pop: PopConstants, hand: string): { score: 
 
 // ─── Equation Router ────────────────────────────────────────────────────────
 
-function calculateStuffPlus(
+export function calculateStuffPlus(
   pitchType: string,
   row: PitchRow,
   pop: PopConstants,
