@@ -112,7 +112,7 @@ export default function LeaderboardsPage() {
                 <SortHeader label="Exit Velo" field="exit_vel" sortKey={pitchingSort.sortKey} sortDir={pitchingSort.sortDir} onSort={pitchingSort.toggleSort} />
                 <SortHeader label="GB%" field="ground_pct" sortKey={pitchingSort.sortKey} sortDir={pitchingSort.sortDir} onSort={pitchingSort.toggleSort} />
                 <SortHeader label="Stuff+" field="stuff_plus" sortKey={pitchingSort.sortKey} sortDir={pitchingSort.sortDir} onSort={pitchingSort.toggleSort} />
-                <SortHeader label="90th Velo" field="vel_90th" sortKey={pitchingSort.sortKey} sortDir={pitchingSort.sortDir} onSort={pitchingSort.toggleSort} />
+                <SortHeader label="EV90" field="vel_90th" sortKey={pitchingSort.sortKey} sortDir={pitchingSort.sortDir} onSort={pitchingSort.toggleSort} />
               </tr>
             </thead>
             <tbody>
