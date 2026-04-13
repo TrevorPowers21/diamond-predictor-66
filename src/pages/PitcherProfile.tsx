@@ -463,14 +463,25 @@ export default function PitcherProfile() {
     queryKey: ["pitcher-profile-master-seasons", id, (player as any)?.source_player_id],
     queryFn: async () => {
       const sourceId = (player as any)?.source_player_id || (id && /^\d+$/.test(id) ? id : null);
-      if (!sourceId) return [];
-      const { data, error } = await supabase
-        .from("Pitching Master")
-        .select("*")
-        .eq("source_player_id", sourceId)
-        .order("Season", { ascending: false });
-      if (error) throw error;
-      return data || [];
+      // Try by source_player_id first
+      if (sourceId) {
+        const { data, error } = await supabase
+          .from("Pitching Master")
+          .select("*")
+          .eq("source_player_id", sourceId)
+          .order("Season", { ascending: false });
+        if (!error && data && data.length > 0) return data;
+      }
+      // Fallback: look up by player name
+      if (lookupPlayerName) {
+        const { data } = await (supabase as any)
+          .from("Pitching Master")
+          .select("*")
+          .ilike("playerFullName", lookupPlayerName)
+          .order("Season", { ascending: false });
+        if (data && data.length > 0) return data;
+      }
+      return [];
     },
     enabled: !!id,
   });
