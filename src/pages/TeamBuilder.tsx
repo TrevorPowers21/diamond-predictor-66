@@ -2270,19 +2270,21 @@ export default function TeamBuilder() {
     type PStatRec = { team: string | null; role: "SP" | "RP" | "SM" | null; era: number | null; fip: number | null; whip: number | null; k9: number | null; bb9: number | null; hr9: number | null; g: number | null; gs: number | null; ip: number | null };
     const byKey = new Map<string, PStatRec>();
     const byName = new Map<string, PStatRec[]>();
-    const addRec = (name: string, team: string, rec: PStatRec) => {
+    const bySourceId = new Map<string, PStatRec>();
+    const addRec = (name: string, team: string, rec: PStatRec, sourceId?: string | null) => {
       const key = `${normalizeName(name)}|${normalizeName(team)}`;
       if (!byKey.has(key)) byKey.set(key, rec);
       const nKey = normalizeName(name);
       const bucket = byName.get(nKey) || [];
       bucket.push(rec);
       byName.set(nKey, bucket);
+      if (sourceId) bySourceId.set(sourceId, rec);
     };
     for (const r of pitchingMasterRows) {
       const name = (r.playerName || "").trim();
       const team = (r.team || "").trim();
       if (!name) continue;
-      addRec(name, team, {
+      const rec = {
         team: team || null,
         role: toPitchingRole(r.role),
         era: r.era != null ? Number(r.era) : null,
@@ -2294,22 +2296,25 @@ export default function TeamBuilder() {
         g: r.g != null ? Number(r.g) : null,
         gs: r.gs != null ? Number(r.gs) : null,
         ip: r.ip != null ? Number(r.ip) : null,
-      });
+      };
+      addRec(name, team, rec, r.source_player_id);
     }
-    return { byKey, byName };
+    return { byKey, byName, bySourceId };
   }, [pitchingMasterRows]);
 
   const pitchingPrByNameTeam = useMemo(() => {
     type PRec = { eraPrPlus: number | null; fipPrPlus: number | null; whipPrPlus: number | null; k9PrPlus: number | null; bb9PrPlus: number | null; hr9PrPlus: number | null };
     const byKey = new Map<string, PRec>();
     const byName = new Map<string, PRec[]>();
-    const addRec = (name: string, team: string, rec: PRec) => {
+    const bySourceId = new Map<string, PRec>();
+    const addRec = (name: string, team: string, rec: PRec, sourceId?: string | null) => {
       const key = `${normalizeName(name)}|${normalizeName(team)}`;
       if (!byKey.has(key)) byKey.set(key, rec);
       const nKey = normalizeName(name);
       const bucket = byName.get(nKey) || [];
       bucket.push(rec);
       byName.set(nKey, bucket);
+      if (sourceId) bySourceId.set(sourceId, rec);
     };
 
     // Score calculation helpers (same as TransferPortal)
@@ -2364,9 +2369,9 @@ export default function TeamBuilder() {
         k9PrPlus: k9Pr,
         hr9PrPlus: hr9Pr,
         bb9PrPlus: bb9Pr,
-      });
+      }, pr.source_player_id);
     }
-    return { byKey, byName };
+    return { byKey, byName, bySourceId };
   }, [pitchingMasterRows]);
 
   const confByKey = useMemo(() => {
@@ -3808,14 +3813,13 @@ export default function TeamBuilder() {
       : (p.custom_name || "").trim();
     const teamName = p.player?.team || selectedTeam || "";
     const key = `${normalizeName(fullName)}|${normalizeName(teamName)}`;
-    const stats = pitchingStatsByNameTeam.byKey.get(key) || (() => {
-      const bucket = pitchingStatsByNameTeam.byName.get(normalizeName(fullName)) || [];
-      return bucket.length === 1 ? bucket[0] : null;
-    })();
-    const pr = pitchingPrByNameTeam.byKey.get(key) || (() => {
-      const bucket = pitchingPrByNameTeam.byName.get(normalizeName(fullName)) || [];
-      return bucket.length === 1 ? bucket[0] : null;
-    })();
+    const sourceId = (p as any)?.player?.source_player_id || null;
+    const stats = pitchingStatsByNameTeam.byKey.get(key)
+      || (sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId) : null)
+      || (() => { const bucket = pitchingStatsByNameTeam.byName.get(normalizeName(fullName)) || []; return bucket.length === 1 ? bucket[0] : null; })();
+    const pr = pitchingPrByNameTeam.byKey.get(key)
+      || (sourceId ? pitchingPrByNameTeam.bySourceId.get(sourceId) : null)
+      || (() => { const bucket = pitchingPrByNameTeam.byName.get(normalizeName(fullName)) || []; return bucket.length === 1 ? bucket[0] : null; })();
     if (!stats || !pr) return null;
 
     const currentPitcherRole = normalizePitcherRole(
