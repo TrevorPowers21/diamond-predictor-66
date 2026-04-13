@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { DEMO_SCHOOL } from '@/lib/demoSchool';
 
 interface SchoolBannerProps {
   schoolLogoUrl?: string;
@@ -8,8 +9,8 @@ interface SchoolBannerProps {
 }
 
 const SchoolBanner: React.FC<SchoolBannerProps> = ({
-  schoolLogoUrl = "/tculogo.png",
-  schoolName = "TCU",
+  schoolLogoUrl = DEMO_SCHOOL.logo,
+  schoolName = DEMO_SCHOOL.name,
   className = '',
 }) => {
   const [showSchool, setShowSchool] = React.useState(false);
@@ -156,19 +157,19 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
                     className="text-4xl font-bold tracking-wider leading-none uppercase"
                     style={{
                       fontFamily: "'Oswald', sans-serif",
-                      color: '#4D1979',
+                      color: DEMO_SCHOOL.primaryColor,
                     }}
                   >
-                    TCU
+                    {DEMO_SCHOOL.name}
                   </h2>
                   <p
                     className="text-2xl font-semibold tracking-wide uppercase mt-0.5"
                     style={{
                       fontFamily: "'Oswald', sans-serif",
-                      color: '#A3A9AC',
+                      color: DEMO_SCHOOL.secondaryColor,
                     }}
                   >
-                    Horned Frogs
+                    {DEMO_SCHOOL.mascot}
                   </p>
                 </div>
               </div>

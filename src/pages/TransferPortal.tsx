@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { DEMO_SCHOOL } from "@/lib/demoSchool";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -517,8 +518,8 @@ export default function TransferPortal() {
   const isAdmin = hasRole("admin");
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>("");
   const [playerSearch, setPlayerSearch] = useState<string>("");
-  const [selectedDestinationTeam, setSelectedDestinationTeam] = useState<string>("TCU");
-  const [teamSearch, setTeamSearch] = useState<string>("TCU");
+  const [selectedDestinationTeam, setSelectedDestinationTeam] = useState<string>(DEMO_SCHOOL.name);
+  const [teamSearch, setTeamSearch] = useState<string>(DEMO_SCHOOL.name);
   const [simType, setSimType] = useState<"hitting" | "pitching">("hitting");
   const [selectedPitcherId, setSelectedPitcherId] = useState<string>("");
   const [pitcherSearch, setPitcherSearch] = useState<string>("");

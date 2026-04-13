@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
+import { DEMO_SCHOOL } from "@/lib/demoSchool";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -981,7 +982,7 @@ export default function TeamBuilder() {
   }, [newConfStats, pitchingEq]);
 
   const [buildName, setBuildName] = useState("My Team Build");
-  const [selectedTeam, setSelectedTeam] = useState<string>("TCU");
+  const [selectedTeam, setSelectedTeam] = useState<string>(DEMO_SCHOOL.name);
   const [totalBudget, setTotalBudget] = useState<number>(0);
   const [rosterPlayers, setRosterPlayers] = useState<BuildPlayer[]>([]);
   const [dirty, setDirty] = useState(false);
@@ -1898,7 +1899,7 @@ export default function TeamBuilder() {
 
       setSelectedBuildId(draft.selectedBuildId ?? null);
       setBuildName(draft.buildName ?? "My Team Build");
-      setSelectedTeam(draft.selectedTeam ?? "TCU");
+      setSelectedTeam(draft.selectedTeam ?? DEMO_SCHOOL.name);
       setTotalBudget(Number(draft.totalBudget) || 0);
       setRosterPlayers(Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers : []);
       setProgramTierMultiplier(Number(draft.programTierMultiplier) || 1.2);
@@ -2051,7 +2052,7 @@ export default function TeamBuilder() {
       setSelectedBuildId(null);
       setRosterPlayers([]);
       setBuildName("My Team Build");
-      setSelectedTeam("TCU");
+      setSelectedTeam(DEMO_SCHOOL.name);
       setTotalBudget(0);
       queryClient.invalidateQueries({ queryKey: ["team-builds"] });
       toast({ title: "Build deleted" });
