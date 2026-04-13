@@ -1453,13 +1453,6 @@ export default function PitcherProfile() {
           )}
         </div>
 
-        {isHistoricalView ? (
-          <HistoricalPitcherView
-            row={historicalRow}
-            season={effectiveSeason}
-            isAdmin={isAdmin}
-          />
-        ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-1 space-y-4">
             <Card>
@@ -1513,20 +1506,68 @@ export default function PitcherProfile() {
               </Card>
             )}
 
+            {/* Career Stats Table */}
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">2025 Stats</CardTitle>
+                <CardTitle className="text-base">Career Stats</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">IP</div><div className="font-semibold">{fmt(storageIp ?? latestStats?.innings_pitched ?? null, 1)}</div></div>
-                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">ERA</div><div className="font-semibold">{fmt(latestStats?.era ?? storageEra, 2)}</div></div>
-                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">WHIP</div><div className="font-semibold">{fmt(latestStats?.whip ?? storageWhip, 2)}</div></div>
-                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">FIP</div><div className="font-semibold">{fmt(storageFip, 2)}</div></div>
-                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">K/9</div><div className="font-semibold">{fmt(storageK9, 2)}</div></div>
-                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">BB/9</div><div className="font-semibold">{fmt(storageBb9, 2)}</div></div>
-                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">HR/9</div><div className="font-semibold">{fmt(storageHr9, 2)}</div></div>
-                  <div className="rounded border p-2"><div className="text-muted-foreground text-xs">2025 pWAR</div><div className="font-semibold">{fmt(pitching2025.pWar2025, 2)}</div></div>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-xs text-muted-foreground">
+                        <th className="text-left py-1.5 pr-2 font-medium">Year</th>
+                        <th className="text-left py-1.5 px-1 font-medium">Team</th>
+                        <th className="text-right py-1.5 px-1 font-medium">IP</th>
+                        <th className="text-right py-1.5 px-1 font-medium">ERA</th>
+                        <th className="text-right py-1.5 px-1 font-medium">FIP</th>
+                        <th className="text-right py-1.5 px-1 font-medium">WHIP</th>
+                        <th className="text-right py-1.5 px-1 font-medium">K/9</th>
+                        <th className="text-right py-1.5 px-1 font-medium">BB/9</th>
+                        <th className="text-right py-1.5 pl-1 font-medium">HR/9</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(pitcherMasterSeasons as any[])
+                        .sort((a, b) => Number(a.Season) - Number(b.Season))
+                        .map((row: any) => (
+                        <tr key={row.Season} className="border-b last:border-0">
+                          <td className="py-1.5 pr-2 font-semibold">{row.Season}</td>
+                          <td className="py-1.5 px-1 text-muted-foreground">{row.Team ?? "—"}</td>
+                          <td className="py-1.5 px-1 text-right tabular-nums">{fmt(row.IP, 1)}</td>
+                          <td className="py-1.5 px-1 text-right tabular-nums">{fmt(row.ERA, 2)}</td>
+                          <td className="py-1.5 px-1 text-right tabular-nums">{fmt(row.FIP, 2)}</td>
+                          <td className="py-1.5 px-1 text-right tabular-nums">{fmt(row.WHIP, 2)}</td>
+                          <td className="py-1.5 px-1 text-right tabular-nums">{fmt(row.K9, 2)}</td>
+                          <td className="py-1.5 px-1 text-right tabular-nums">{fmt(row.BB9, 2)}</td>
+                          <td className="py-1.5 pl-1 text-right tabular-nums">{fmt(row.HR9, 2)}</td>
+                        </tr>
+                      ))}
+                      {(pitcherMasterSeasons as any[]).length > 1 && (() => {
+                        const rows = pitcherMasterSeasons as any[];
+                        const totalIp = rows.reduce((s, r) => s + (Number(r.IP) || 0), 0);
+                        if (totalIp === 0) return null;
+                        const wAvg = (field: string) => {
+                          let sv = 0, sw = 0;
+                          for (const r of rows) { const v = Number(r[field]); const w = Number(r.IP) || 0; if (Number.isFinite(v) && w > 0) { sv += v * w; sw += w; } }
+                          return sw > 0 ? sv / sw : null;
+                        };
+                        return (
+                          <tr className="border-t-2 font-semibold">
+                            <td className="py-1.5 pr-2">Career</td>
+                            <td className="py-1.5 px-1"></td>
+                            <td className="py-1.5 px-1 text-right tabular-nums">{fmt(totalIp, 1)}</td>
+                            <td className="py-1.5 px-1 text-right tabular-nums">{fmt(wAvg("ERA"), 2)}</td>
+                            <td className="py-1.5 px-1 text-right tabular-nums">{fmt(wAvg("FIP"), 2)}</td>
+                            <td className="py-1.5 px-1 text-right tabular-nums">{fmt(wAvg("WHIP"), 2)}</td>
+                            <td className="py-1.5 px-1 text-right tabular-nums">{fmt(wAvg("K9"), 2)}</td>
+                            <td className="py-1.5 px-1 text-right tabular-nums">{fmt(wAvg("BB9"), 2)}</td>
+                            <td className="py-1.5 pl-1 text-right tabular-nums">{fmt(wAvg("HR9"), 2)}</td>
+                          </tr>
+                        );
+                      })()}
+                    </tbody>
+                  </table>
                 </div>
               </CardContent>
             </Card>
@@ -1614,7 +1655,21 @@ export default function PitcherProfile() {
 
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">Scouting Grades</CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">Scouting Grades</CardTitle>
+                  {availableSeasons.length > 1 && (
+                    <Select value={String(effectiveSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
+                      <SelectTrigger className="h-8 w-[75px] text-xs font-semibold">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableSeasons.map((y) => (
+                          <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-4 gap-2">
@@ -1714,7 +1769,6 @@ export default function PitcherProfile() {
             ) : null}
           </div>
         </div>
-        )}
       </div>
     </DashboardLayout>
   );
