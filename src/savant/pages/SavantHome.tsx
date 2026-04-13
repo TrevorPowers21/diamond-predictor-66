@@ -69,7 +69,7 @@ export default function SavantHome() {
         <LeaderboardCard title="Barrel %" subtitle={`Min ${BATTING_TITLE_PA} PA`} entries={barrelEntries} format={fmtPct} />
         <LeaderboardCard title="Avg Exit Velo" subtitle={`Min ${BATTING_TITLE_PA} PA`} unit="MPH" entries={exitVeloEntries} format={fmt1} />
         <LeaderboardCard title="90th % EV" subtitle={`Min ${BATTING_TITLE_PA} PA`} unit="MPH" entries={ev90Entries} format={fmt1} />
-        <LeaderboardCard title="Chase %" subtitle={`Min ${SAVANT_MIN_AB} AB · Lower is Better`} entries={chaseEntries} format={fmtPct} invert />
+        <LeaderboardCard title="Chase %" subtitle={`Min ${BATTING_TITLE_PA} PA · Lower is Better`} entries={chaseEntries} format={fmtPct} invert />
       </div>
 
       {/* Pitching Leaderboards */}
