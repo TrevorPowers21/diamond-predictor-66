@@ -77,15 +77,15 @@ export default function LeaderboardsPage() {
                     <div className="text-[10px] text-white/40">{[h.Pos, h.Team].filter(Boolean).join(" · ")}</div>
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums font-bold" style={{ color: tierColor(h.wrc_plus, 100, 15) }}>{fmtInt(h.wrc_plus)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmt1(h.avg_exit_velo)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmt1(h.ev90)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(h.avg_exit_velo, 85, 4) }}>{fmt1(h.avg_exit_velo)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(h.ev90, 95, 4) }}>{fmt1(h.ev90)}</td>
                   <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(h.barrel, 8, 4) }}>{fmtPct(h.barrel)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtPct(h.bb)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtPct(h.chase)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtPct(h.contact)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtPct(h.line_drive)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtPct(h.gb)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtPct(h.pull)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(h.bb, 10, 3) }}>{fmtPct(h.bb)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(h.chase, 28, 5, true) }}>{fmtPct(h.chase)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(h.contact, 82, 5) }}>{fmtPct(h.contact)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(h.line_drive, 22, 4) }}>{fmtPct(h.line_drive)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(h.gb, 42, 6, true) }}>{fmtPct(h.gb)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(h.pull, 42, 5) }}>{fmtPct(h.pull)}</td>
                 </tr>
               ))}
             </tbody>
@@ -120,16 +120,16 @@ export default function LeaderboardsPage() {
                     <div className="text-[10px] text-white/40">{[p.Role, p.Team].filter(Boolean).join(" · ")}</div>
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-white/60">{fmt1(p.IP)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtPct(p.miss_pct)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtPct(p.in_zone_whiff_pct)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtPct(p.chase_pct)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtPct(p.bb_pct)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtPct(p.hard_hit_pct)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtPct(p.barrel_pct)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmt1(p.exit_vel)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtPct(p.ground_pct)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(p.miss_pct, 22, 5) }}>{fmtPct(p.miss_pct)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(p.in_zone_whiff_pct, 18, 4) }}>{fmtPct(p.in_zone_whiff_pct)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(p.chase_pct, 30, 5) }}>{fmtPct(p.chase_pct)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(p.bb_pct, 10, 3, true) }}>{fmtPct(p.bb_pct)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(p.hard_hit_pct, 35, 6, true) }}>{fmtPct(p.hard_hit_pct)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(p.barrel_pct, 6, 3, true) }}>{fmtPct(p.barrel_pct)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(p.exit_vel, 86, 3, true) }}>{fmt1(p.exit_vel)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(p.ground_pct, 42, 6) }}>{fmtPct(p.ground_pct)}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-bold" style={{ color: tierColor(p.stuff_plus, 100, 10) }}>{fmtInt(p.stuff_plus)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmt1(p.vel_90th)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" style={{ color: tierColor(p.vel_90th, 91, 3) }}>{fmt1(p.vel_90th)}</td>
                 </tr>
               ))}
             </tbody>
