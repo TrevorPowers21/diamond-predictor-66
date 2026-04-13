@@ -14,28 +14,20 @@ const fmt1 = (v: number | null) => (v == null ? "—" : v.toFixed(1));
 const fmtPct = (v: number | null) => (v == null ? "—" : `${v.toFixed(1)}%`);
 const fmtInt = (v: number | null) => (v == null ? "—" : `${Math.round(v)}`);
 
-/** Hitting park factors: >1.0 = green (good for hitters), <1.0 = red */
+/** Hitting park factors (AVG, OBP, ISO): >1.0 = green (boosts hitters), <1.0 = red (suppresses hitters) */
 function parkColorHitting(v: number | null): string {
   if (v == null) return "";
   const diff = v - 1.0;
-  if (Math.abs(diff) < 0.01) return "#ffffff";
-  if (diff > 0.05) return "#22c55e";
-  if (diff > 0.02) return "#3b82f6";
-  if (diff < -0.05) return "#ef4444";
-  if (diff < -0.02) return "#eab308";
-  return "#ffffff";
+  if (Math.abs(diff) < 0.005) return "#ffffff";
+  return diff > 0 ? "#22c55e" : "#ef4444";
 }
 
-/** Pitching park factors: >1.0 = red (bad for pitchers), <1.0 = green */
+/** Pitching park factors (ERA, WHIP, HR/9): >1.0 = red (inflates runs), <1.0 = green (suppresses runs) */
 function parkColorPitching(v: number | null): string {
   if (v == null) return "";
   const diff = v - 1.0;
-  if (Math.abs(diff) < 0.01) return "#ffffff";
-  if (diff > 0.05) return "#ef4444";
-  if (diff > 0.02) return "#eab308";
-  if (diff < -0.05) return "#22c55e";
-  if (diff < -0.02) return "#3b82f6";
-  return "#ffffff";
+  if (Math.abs(diff) < 0.005) return "#ffffff";
+  return diff > 0 ? "#ef4444" : "#22c55e";
 }
 
 export default function TeamProfilePage() {
