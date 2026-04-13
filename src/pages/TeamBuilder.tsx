@@ -3846,18 +3846,32 @@ export default function TeamBuilder() {
     const teamName = p.player?.team || selectedTeam || "";
     const key = `${normalizeName(fullName)}|${normalizeName(teamName)}`;
     const sourceId = (p as any)?.player?.source_player_id || null;
-    const byKey = pitchingStatsByNameTeam.byKey.get(key);
-    const bySid = sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId) : null;
-    const byName = (() => { const bucket = pitchingStatsByNameTeam.byName.get(normalizeName(fullName)) || []; return bucket.length === 1 ? bucket[0] : null; })();
-    const stats = byKey || bySid || byName;
-    const prByKey = pitchingPrByNameTeam.byKey.get(key);
-    const prBySid = sourceId ? pitchingPrByNameTeam.bySourceId.get(sourceId) : null;
-    const prByName = (() => { const bucket = pitchingPrByNameTeam.byName.get(normalizeName(fullName)) || []; return bucket.length === 1 ? bucket[0] : null; })();
-    const pr = prByKey || prBySid || prByName;
-    if (!stats) {
-      console.warn(`[TB Pitcher] No stats for "${fullName}" | team="${teamName}" | key="${key}" | sourceId=${sourceId} | byKey=${!!byKey} bySid=${!!bySid} byName=${!!byName}`);
-      return null;
-    }
+    // Try all lookup strategies
+    const nName = normalizeName(fullName);
+    const stats = pitchingStatsByNameTeam.byKey.get(key)
+      || (sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId) : null)
+      || (() => {
+        // Try name-only: pick the one matching selected team if multiple
+        const bucket = pitchingStatsByNameTeam.byName.get(nName) || [];
+        if (bucket.length === 1) return bucket[0];
+        if (bucket.length > 1) {
+          // Pick the one whose team matches selectedTeam or its full name
+          const selNorm = normalizeName(selectedTeam);
+          const match = bucket.find((b) => normalizeName(b.team || "") === selNorm);
+          if (match) return match;
+          // Just return the first one — better than nothing
+          return bucket[0];
+        }
+        return null;
+      })();
+    const pr = pitchingPrByNameTeam.byKey.get(key)
+      || (sourceId ? pitchingPrByNameTeam.bySourceId.get(sourceId) : null)
+      || (() => {
+        const bucket = pitchingPrByNameTeam.byName.get(nName) || [];
+        if (bucket.length >= 1) return bucket[0];
+        return null;
+      })();
+    if (!stats) return null;
     // If PR is missing, use empty PR — projectPitchingRate will carry forward last season stats
     const emptyPr = { eraPrPlus: null, fipPrPlus: null, whipPrPlus: null, k9PrPlus: null, bb9PrPlus: null, hr9PrPlus: null };
     if (!pr) { const _pr = emptyPr; Object.assign(emptyPr, _pr); }
