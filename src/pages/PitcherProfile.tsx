@@ -1483,7 +1483,8 @@ export default function PitcherProfile() {
                 <CardContent className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     {(() => {
-                      const sp = pitchArsenal.overallStuffPlus;
+                      // Use Pitching Master stuff_plus (pipeline-calculated overall) as authoritative
+                      const sp = (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus;
                       const stuffColor = sp == null ? "border-border" : sp >= 103 ? "border-green-500 bg-green-500/10" : sp >= 98 ? "border-blue-500 bg-blue-500/10" : sp >= 93 ? "border-yellow-500 bg-yellow-500/10" : "border-red-500 bg-red-500/10";
                       const stuffText = sp == null ? "text-muted-foreground" : sp >= 103 ? "text-green-600" : sp >= 98 ? "text-blue-600" : sp >= 93 ? "text-yellow-600" : "text-red-600";
                       return (
@@ -1495,7 +1496,8 @@ export default function PitcherProfile() {
                       );
                     })()}
                     {(() => {
-                      const wp = pitchArsenal.overallWhiffPct;
+                      // Use Pitching Master miss_pct (matches 2025 Input Metrics display)
+                      const wp = (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct;
                       const whiffColor = wp == null ? "border-border" : wp >= 27 ? "border-green-500 bg-green-500/10" : wp >= 21 ? "border-blue-500 bg-blue-500/10" : wp >= 16 ? "border-yellow-500 bg-yellow-500/10" : "border-red-500 bg-red-500/10";
                       const whiffText = wp == null ? "text-muted-foreground" : wp >= 27 ? "text-green-600" : wp >= 21 ? "text-blue-600" : wp >= 16 ? "text-yellow-600" : "text-red-600";
                       return (
