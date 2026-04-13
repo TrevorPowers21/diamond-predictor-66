@@ -6,6 +6,7 @@ import { useSortable, SortHeader, tierColor } from "@/savant/components/Sortable
 import { NAVY_CARD, NAVY_BORDER, GOLD } from "@/savant/lib/theme";
 import { computeOWarFromStats, computePWar } from "@/savant/lib/war";
 import { computePrvPlus } from "@/savant/lib/prvPlus";
+import { computeWrcPlus } from "@/savant/lib/wrcPlus";
 
 const fmt3 = (v: number | null) => (v == null ? "—" : v.toFixed(3));
 const fmt2 = (v: number | null) => (v == null ? "—" : v.toFixed(2));
@@ -37,11 +38,17 @@ export default function TeamProfilePage() {
     return parkMap.byTeamId[team.id] ?? parkMap.byName[team.fullName?.toLowerCase().trim() ?? ""] ?? null;
   }, [team, parkMap]);
 
-  // Enrich hitters with computed oWAR
-  const enrichedHitters = useMemo(() => hitters.map((h: any) => ({
-    ...h,
-    owar: computeOWarFromStats(h.AVG, h.OBP, h.SLG, h.ISO, h.pa),
-  })), [hitters]);
+  // Enrich hitters with computed OPS, wRC+, oWAR
+  const enrichedHitters = useMemo(() => hitters.map((h: any) => {
+    const ops = (h.OBP != null && h.SLG != null) ? h.OBP + h.SLG : null;
+    const wrcPlus = computeWrcPlus(h.AVG, h.OBP, h.SLG, h.ISO);
+    return {
+      ...h,
+      OPS: ops,
+      wrc_plus: wrcPlus,
+      owar: computeOWarFromStats(h.AVG, h.OBP, h.SLG, h.ISO, h.pa),
+    };
+  }), [hitters]);
 
   // Enrich pitchers with computed pWAR
   const enrichedPitchers = useMemo(() => pitchers.map((p: any) => {
@@ -155,6 +162,7 @@ export default function TeamProfilePage() {
             { field: "SLG", label: "SLG", fmt: fmt3 },
             { field: "OPS", label: "OPS", fmt: fmt3 },
             { field: "ISO", label: "ISO", fmt: fmt3 },
+            { field: "wrc_plus", label: "wRC+", fmt: fmtInt },
             { field: "owar", label: "oWAR", fmt: fmt1 },
           ]}
         />
@@ -190,6 +198,7 @@ export default function TeamProfilePage() {
           sortKey={pitchingTradSort.sortKey}
           sortDir={pitchingTradSort.sortDir}
           onSort={pitchingTradSort.toggleSort}
+          weightField="IP"
           columns={[
             { field: "playerFullName", label: "Player", align: "left" as const, render: (r: any) => (
               <td key="name" className="px-3 py-2">
@@ -215,6 +224,7 @@ export default function TeamProfilePage() {
           sortKey={pitchingAdvSort.sortKey}
           sortDir={pitchingAdvSort.sortDir}
           onSort={pitchingAdvSort.toggleSort}
+          weightField="IP"
           columns={[
             { field: "playerFullName", label: "Player", align: "left" as const, render: (r: any) => (
               <td key="name" className="px-3 py-2">
@@ -248,13 +258,43 @@ interface ColDef {
   render?: (row: any) => React.ReactNode;
 }
 
-function RosterTable({ rows, sortKey, sortDir, onSort, columns }: {
+function RosterTable({ rows, sortKey, sortDir, onSort, columns, weightField = "pa" }: {
   rows: any[];
   sortKey: string;
   sortDir: string;
   onSort: (f: string) => void;
   columns: ColDef[];
+  weightField?: string;
 }) {
+  // Compute usage-weighted team averages
+  const teamAvg = useMemo(() => {
+    if (rows.length === 0) return null;
+    const totalWeight = rows.reduce((s, r) => s + (Number(r[weightField]) || 0), 0);
+    if (totalWeight === 0) return null;
+
+    const avg: Record<string, number | null> = {};
+    for (const col of columns) {
+      if (col.render || col.field === "playerFullName") {
+        avg[col.field] = null;
+        continue;
+      }
+      // Sum weighted values
+      let sumWV = 0;
+      let sumW = 0;
+      for (const r of rows) {
+        const v = Number(r[col.field]);
+        const w = Number(r[weightField]) || 0;
+        if (!Number.isFinite(v) || w === 0) continue;
+        sumWV += v * w;
+        sumW += w;
+      }
+      avg[col.field] = sumW > 0 ? sumWV / sumW : null;
+    }
+    // Special: weight field itself is a sum not average
+    avg[weightField] = totalWeight;
+    return avg;
+  }, [rows, columns, weightField]);
+
   return (
     <div className="overflow-x-auto border" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
       <table className="w-full text-sm text-white">
@@ -274,6 +314,22 @@ function RosterTable({ rows, sortKey, sortDir, onSort, columns }: {
           </tr>
         </thead>
         <tbody>
+          {/* Team average row */}
+          {teamAvg && (
+            <tr className="border-t-2" style={{ borderColor: GOLD, backgroundColor: "rgba(212,175,55,0.04)" }}>
+              {columns.map((col) =>
+                col.render ? (
+                  <td key={col.field} className="px-3 py-2 font-bold" style={{ color: GOLD }}>
+                    Team Avg
+                  </td>
+                ) : (
+                  <td key={col.field} className="px-3 py-2 text-right tabular-nums font-bold" style={{ color: GOLD }}>
+                    {teamAvg[col.field] != null && col.fmt ? col.fmt(teamAvg[col.field]) : "—"}
+                  </td>
+                ),
+              )}
+            </tr>
+          )}
           {rows.map((r, i) => (
             <tr key={r.source_player_id ?? i} className="border-t border-white/5 transition-colors hover:bg-white/[0.02]">
               {columns.map((col) =>
