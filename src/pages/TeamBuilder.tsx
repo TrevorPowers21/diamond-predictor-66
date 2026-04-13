@@ -4598,7 +4598,17 @@ export default function TeamBuilder() {
           </Select>
         )}
       </TableCell>
-      <TableCell>{p.player?.position || "—"}</TableCell>
+      <TableCell>{(() => {
+        const dbPos = p.player?.position || "";
+        // If position is generic "OF", check exit positions for specific LF/CF/RF
+        if (dbPos === "OF" || !dbPos) {
+          const fullName = `${p.player?.first_name || ""} ${p.player?.last_name || ""}`.trim();
+          const team = p.player?.team || "";
+          const posMap = exitPositions as Record<string, string>;
+          return posMap[`${fullName}|${team}`] || posMap[fullName] || dbPos || "—";
+        }
+        return dbPos;
+      })()}</TableCell>
       <TableCell>
         {isPitcherRow ? (
           <Select
