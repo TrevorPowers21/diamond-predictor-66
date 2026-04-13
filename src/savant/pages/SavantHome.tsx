@@ -50,8 +50,10 @@ export default function SavantHome() {
   const exitVeloEntries = useMemo(() => qualifiedHitters.map((h) => toHitterEntry(h, h.avg_exit_velo)), [qualifiedHitters]);
   const ev90Entries = useMemo(() => qualifiedHitters.map((h) => toHitterEntry(h, h.ev90)), [qualifiedHitters]);
   const chaseEntries = useMemo(() => qualifiedHitters.map((h) => toHitterEntry(h, h.chase)), [qualifiedHitters]);
+  const bbPctEntries = useMemo(() => qualifiedHitters.map((h) => toHitterEntry(h, h.bb)), [qualifiedHitters]);
   const stuffEntries = useMemo(() => qualifiedPitchers.map((p) => toPitcherEntry(p, p.stuff_plus)), [qualifiedPitchers]);
   const whiffEntries = useMemo(() => qualifiedPitchers.map((p) => toPitcherEntry(p, p.miss_pct)), [qualifiedPitchers]);
+  const izWhiffEntries = useMemo(() => qualifiedPitchers.map((p) => toPitcherEntry(p, p.in_zone_whiff_pct)), [qualifiedPitchers]);
 
   const isLoading = hLoading || pLoading;
 
@@ -65,11 +67,12 @@ export default function SavantHome() {
         </span>
         <span className="h-px flex-1 bg-[#D4AF37]/20" />
       </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         <LeaderboardCard title="Barrel %" subtitle={`Min ${BATTING_TITLE_PA} PA`} entries={barrelEntries} format={fmtPct} />
         <LeaderboardCard title="Avg Exit Velo" subtitle={`Min ${BATTING_TITLE_PA} PA`} unit="MPH" entries={exitVeloEntries} format={fmt1} />
         <LeaderboardCard title="90th % EV" subtitle={`Min ${BATTING_TITLE_PA} PA`} unit="MPH" entries={ev90Entries} format={fmt1} />
         <LeaderboardCard title="Chase %" subtitle={`Min ${BATTING_TITLE_PA} PA · Lower is Better`} entries={chaseEntries} format={fmtPct} invert />
+        <LeaderboardCard title="BB %" subtitle={`Min ${BATTING_TITLE_PA} PA`} entries={bbPctEntries} format={fmtPct} />
       </div>
 
       {/* Pitching Leaderboards */}
@@ -80,9 +83,10 @@ export default function SavantHome() {
         </span>
         <span className="h-px flex-1 bg-[#D4AF37]/20" />
       </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         <LeaderboardCard title="Stuff+" subtitle={`Min ${MIN_IP} IP`} entries={stuffEntries} format={fmtInt} emptyMessage="Stuff+ data being filled in" />
         <LeaderboardCard title="Whiff %" subtitle={`Min ${MIN_IP} IP`} entries={whiffEntries} format={fmtPct} />
+        <LeaderboardCard title="IZ Whiff %" subtitle={`Min ${MIN_IP} IP`} entries={izWhiffEntries} format={fmtPct} />
       </div>
 
       {isLoading && <div className="mt-8 text-center text-xs text-white/40">Loading data…</div>}
