@@ -1198,6 +1198,7 @@ export default function PitcherProfile() {
     const classBb9Adj = toPitchingClassAdj(classTransition, eq.class_bb9_fs, eq.class_bb9_sj, eq.class_bb9_js, eq.class_bb9_gr);
     const classHr9Adj = toPitchingClassAdj(classTransition, eq.class_hr9_fs, eq.class_hr9_sj, eq.class_hr9_js, eq.class_hr9_gr);
 
+    console.log("[PitcherProfile Proj]", { storageEra, storageFip, storageWhip, storageK9, storageBb9, storageHr9, eraPrPlus, fipPrPlus, whipPrPlus, k9PrPlus, bb9PrPlus, hr9PrPlus, masterRow2025: !!masterRow2025, powerRatingsRow2025: !!powerRatingsRow2025 });
     const pEra = projectPitchingRate({
       lastStat: storageEra,
       prPlus: eraPrPlus,
