@@ -1370,6 +1370,9 @@ export default function PitcherProfile() {
 
     return { pRvPlus2025, pWar2025 };
   }, [
+    masterRow2025,
+    powerRatingsRow2025,
+    internalPowerRatings,
     latestStats?.era,
     latestStats?.whip,
     storageBb9,
@@ -1377,7 +1380,14 @@ export default function PitcherProfile() {
     storageFip,
     storageHr9,
     storageK9,
+    storageIp,
     storageWhip,
+    displayConference,
+    derivedRole,
+    projectedRole,
+    projectedClassTransition,
+    projectedDevAggressiveness,
+    displayTeam,
   ]);
   const pitchArsenal = useMemo(() => {
     const sourceRows = pitchArsenalRows || [];
