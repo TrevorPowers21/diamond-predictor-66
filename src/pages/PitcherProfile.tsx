@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Target, TrendingUp } from "lucide-react";
@@ -460,30 +460,17 @@ export default function PitcherProfile() {
   // but the URL itself is a numeric source_player_id (historical-only pitchers
   // who have no row in the `players` table).
   const { data: pitcherMasterSeasons = [] } = useQuery({
-    queryKey: ["pitcher-profile-master-seasons", id, (player as any)?.source_player_id, player?.first_name, player?.last_name],
-    enabled: !!id,
+    queryKey: ["pitcher-profile-master-seasons", id, (player as any)?.source_player_id],
     queryFn: async () => {
       const sourceId = (player as any)?.source_player_id || (id && /^\d+$/.test(id) ? id : null);
-      const playerName = player ? `${player.first_name || ""} ${player.last_name || ""}`.trim() : null;
-      // Try by source_player_id first
-      if (sourceId) {
-        const { data, error } = await supabase
-          .from("Pitching Master")
-          .select("*")
-          .eq("source_player_id", sourceId)
-          .order("Season", { ascending: false });
-        if (!error && data && data.length > 0) return data;
-      }
-      // Fallback: look up by player name
-      if (playerName) {
-        const { data } = await (supabase as any)
-          .from("Pitching Master")
-          .select("*")
-          .ilike("playerFullName", playerName)
-          .order("Season", { ascending: false });
-        if (data && data.length > 0) return data;
-      }
-      return [];
+      if (!sourceId) return [];
+      const { data, error } = await supabase
+        .from("Pitching Master")
+        .select("*")
+        .eq("source_player_id", sourceId)
+        .order("Season", { ascending: false });
+      if (error) throw error;
+      return data || [];
     },
     enabled: !!id,
   });
@@ -655,64 +642,8 @@ export default function PitcherProfile() {
   // usePitchingSeedData hook applies an IP >= 20 dashboard filter that would
   // hide them from individual profile pages.
   const { pitchers: pitchingMasterRows } = usePitchingSeedData();
-  // masterRow2025: pinned to 2025 for projections. If IP < 25, blends in prior seasons.
-  const MIN_IP_THRESHOLD = 25;
-  const masterRow2025 = useMemo(() => {
-    const seasons = (pitcherMasterSeasons as any[]);
-    if (seasons.length === 0) return null;
-
-    const toRow = (r: any) => ({
-      source_player_id: r.source_player_id ?? null,
-      playerName: r.playerFullName ?? r.playerName ?? "",
-      team: r.Team ?? null, teamId: r.TeamID ?? null,
-      conference: r.Conference ?? null, conferenceId: r.conference_id ?? null,
-      throwHand: r.ThrowHand ?? null, role: r.Role ?? null,
-      ip: r.IP ?? null, g: r.G ?? null, gs: r.GS ?? null,
-      era: r.ERA ?? null, fip: r.FIP ?? null, whip: r.WHIP ?? null,
-      k9: r.K9 ?? null, bb9: r.BB9 ?? null, hr9: r.HR9 ?? null,
-      miss_pct: r.miss_pct ?? null, bb_pct: r.bb_pct ?? null,
-      hard_hit_pct: r.hard_hit_pct ?? null, in_zone_whiff_pct: r.in_zone_whiff_pct ?? null,
-      chase_pct: r.chase_pct ?? null, barrel_pct: r.barrel_pct ?? null,
-      line_pct: r.line_pct ?? null, exit_vel: r.exit_vel ?? null,
-      ground_pct: r.ground_pct ?? null, in_zone_pct: r.in_zone_pct ?? null,
-      vel_90th: r["90th_vel"] ?? null, h_pull_pct: r.h_pull_pct ?? null,
-      la_10_30_pct: r.la_10_30_pct ?? null, stuffPlus: r.stuff_plus ?? null,
-    } as any);
-
-    const row2025 = seasons.find((r) => Number(r.Season) === 2025);
-    if (!row2025) {
-      const sorted = [...seasons].sort((a, b) => Number(b.Season) - Number(a.Season));
-      return toRow(sorted[0]);
-    }
-
-    const ip2025 = Number(row2025.IP) || 0;
-    if (ip2025 >= MIN_IP_THRESHOLD) return toRow(row2025);
-
-    // Below threshold — blend backwards
-    const row2024 = seasons.find((r) => Number(r.Season) === 2024);
-    const row2023 = seasons.find((r) => Number(r.Season) === 2023);
-    const rowsToBlend = [row2025];
-    let totalIp = ip2025;
-    if (totalIp < MIN_IP_THRESHOLD && row2024) { rowsToBlend.push(row2024); totalIp += Number(row2024.IP) || 0; }
-    if (totalIp < MIN_IP_THRESHOLD && row2023) { rowsToBlend.push(row2023); totalIp += Number(row2023.IP) || 0; }
-    if (rowsToBlend.length === 1) return toRow(row2025);
-
-    const wAvg = (field: string) => {
-      let sv = 0, sw = 0;
-      for (const r of rowsToBlend) { const v = Number(r[field]); const w = Number(r.IP) || 0; if (Number.isFinite(v) && w > 0) { sv += v * w; sw += w; } }
-      return sw > 0 ? sv / sw : null;
-    };
-
-    const blended = { ...row2025 };
-    for (const f of ["ERA","FIP","WHIP","K9","BB9","HR9","miss_pct","bb_pct","hard_hit_pct","in_zone_whiff_pct","chase_pct","barrel_pct","line_pct","exit_vel","ground_pct","in_zone_pct","90th_vel","h_pull_pct","la_10_30_pct"]) {
-      blended[f] = wAvg(f);
-    }
-    blended.IP = totalIp;
-    return toRow(blended);
-  }, [pitcherMasterSeasons]);
-
-  // masterRow: follows effectiveSeason for scouting grades
   const masterRow = useMemo(() => {
+    // Prefer the unfiltered pitcher seasons row for the current selected season
     const fromSeasons = (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason)
       ?? (pitcherMasterSeasons as any[])[0];
     if (fromSeasons) {
@@ -780,21 +711,6 @@ export default function PitcherProfile() {
       String(m.k9 ?? ""), String(m.bb9 ?? ""), String(m.hr9 ?? ""),
     ] as string[];
   }, [masterRow]);
-  // powerRatingsRow2025: always 2025, used for projections
-  const powerRatingsRow2025 = useMemo(() => {
-    if (!masterRow2025) return null;
-    const m = masterRow2025;
-    return [
-      m.playerName || "", m.team || "",
-      String(m.stuffPlus ?? ""), String(m.miss_pct ?? ""), String(m.bb_pct ?? ""), String(m.hard_hit_pct ?? ""),
-      String(m.in_zone_whiff_pct ?? ""), String(m.chase_pct ?? ""), String(m.barrel_pct ?? ""), String(m.line_pct ?? ""),
-      String(m.exit_vel ?? ""), String(m.ground_pct ?? ""), String(m.in_zone_pct ?? ""), String(m.vel_90th ?? ""),
-      String(m.h_pull_pct ?? ""), String(m.la_10_30_pct ?? ""),
-      "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-    ] as string[];
-  }, [masterRow2025]);
-
-  // powerRatingsRow: follows effectiveSeason for scouting grades
   const powerRatingsRow = useMemo(() => {
     if (!masterRow) return null;
     const m = masterRow;
@@ -1035,19 +951,18 @@ export default function PitcherProfile() {
     return player?.conference || masterRow?.conference || (anyPitcherMasterRow as any)?.Conference || conferenceByTeam.get(normalize(displayTeam)) || "—";
   })();
   const displayHandedness = player?.handedness || masterRow?.throwHand || (anyPitcherMasterRow as any)?.ThrowHand || storageRow?.[2] || "—";
-  // Read pitching stats from 2025 masterRow for projections (stable across year switches)
-  const m2025 = masterRow2025 ?? masterRow;
-  const storageEra = m2025?.era ?? null;
-  const storageFip = m2025?.fip ?? null;
-  const storageWhip = m2025?.whip ?? null;
-  const storageK9 = m2025?.k9 ?? null;
-  const storageBb9 = m2025?.bb9 ?? null;
-  const storageHr9 = m2025?.hr9 ?? null;
-  const storageIp = parseBaseballInnings(m2025?.ip != null ? String(m2025.ip) : null);
-  const storageGames = m2025?.g ?? null;
-  const storageGamesStarted = m2025?.gs ?? null;
+  // Read pitching stats directly from masterRow (no intermediate parse needed)
+  const storageEra = masterRow?.era ?? null;
+  const storageFip = masterRow?.fip ?? null;
+  const storageWhip = masterRow?.whip ?? null;
+  const storageK9 = masterRow?.k9 ?? null;
+  const storageBb9 = masterRow?.bb9 ?? null;
+  const storageHr9 = masterRow?.hr9 ?? null;
+  const storageIp = parseBaseballInnings(masterRow?.ip != null ? String(masterRow.ip) : null);
+  const storageGames = masterRow?.g ?? null;
+  const storageGamesStarted = masterRow?.gs ?? null;
   const derivedRole = (() => {
-    const roleRaw = toPitchingRole(m2025?.role);
+    const roleRaw = toPitchingRole(masterRow?.role);
     if (roleRaw) return roleRaw;
     if (storageGames != null && storageGames > 0 && storageGamesStarted != null) {
       return (storageGamesStarted / storageGames) < 0.5 ? "RP" : "SP";
@@ -1100,6 +1015,7 @@ export default function PitcherProfile() {
       // ignore local storage failures
     }
   };
+  const cachedProjectionRef = useRef<any>(null);
   const projectedPitching = useMemo(() => {
     const eq = readPitchingWeights();
     const classTransitionRaw = String(projectedClassTransition || "SJ").toUpperCase();
@@ -1109,54 +1025,12 @@ export default function PitcherProfile() {
         : "SJ";
     const devAggressiveness = projectedDevAggressiveness;
 
-    // Always use 2025 power ratings for projections (not year-switchable scouting)
-    const pr2025 = (() => {
-      if (!powerRatingsRow2025) return internalPowerRatings;
-      const m = {
-        stuff: parseNum(powerRatingsRow2025[2]), whiff: parseNum(powerRatingsRow2025[3]),
-        bb: parseNum(powerRatingsRow2025[4]), hh: parseNum(powerRatingsRow2025[5]),
-        izWhiff: parseNum(powerRatingsRow2025[6]), chase: parseNum(powerRatingsRow2025[7]),
-        barrel: parseNum(powerRatingsRow2025[8]), ld: parseNum(powerRatingsRow2025[9]),
-        avgEv: parseNum(powerRatingsRow2025[10]), gb: parseNum(powerRatingsRow2025[11]),
-        iz: parseNum(powerRatingsRow2025[12]), ev90: parseNum(powerRatingsRow2025[13]),
-        pull: parseNum(powerRatingsRow2025[14]), la1030: parseNum(powerRatingsRow2025[15]),
-      };
-      const sc = (v: number | null, avg: number, sd: number, lib = false) => scoreFromMetric(v, avg, sd, lib);
-      const s = {
-        stuff: sc(m.stuff, eq.p_ncaa_avg_stuff_plus, eq.p_sd_stuff_plus),
-        whiff: sc(m.whiff, eq.p_ncaa_avg_whiff_pct, eq.p_sd_whiff_pct),
-        bb: sc(m.bb, eq.p_ncaa_avg_bb_pct, eq.p_sd_bb_pct, true),
-        hh: sc(m.hh, eq.p_ncaa_avg_hh_pct, eq.p_sd_hh_pct, true),
-        izWhiff: sc(m.izWhiff, eq.p_ncaa_avg_in_zone_whiff_pct, eq.p_sd_in_zone_whiff_pct),
-        chase: sc(m.chase, eq.p_ncaa_avg_chase_pct, eq.p_sd_chase_pct),
-        barrel: sc(m.barrel, eq.p_ncaa_avg_barrel_pct, eq.p_sd_barrel_pct, true),
-        ld: sc(m.ld, eq.p_ncaa_avg_ld_pct, eq.p_sd_ld_pct, true),
-        avgEv: sc(m.avgEv, eq.p_ncaa_avg_avg_ev, eq.p_sd_avg_ev, true),
-        gb: sc(m.gb, eq.p_ncaa_avg_gb_pct, eq.p_sd_gb_pct),
-        iz: sc(m.iz, eq.p_ncaa_avg_in_zone_pct, eq.p_sd_in_zone_pct),
-        ev90: sc(m.ev90, eq.p_ncaa_avg_ev90, eq.p_sd_ev90, true),
-        pull: sc(m.pull, eq.p_ncaa_avg_pull_pct, eq.p_sd_pull_pct, true),
-        la1030: sc(m.la1030, eq.p_ncaa_avg_la_10_30_pct, eq.p_sd_la_10_30_pct, true),
-      };
-      const eraR = [s.stuff, s.whiff, s.bb, s.hh, s.izWhiff, s.chase, s.barrel].every(v => v != null)
-        ? (safe(s.stuff)! * eq.p_era_stuff_plus_weight + safe(s.whiff)! * eq.p_era_whiff_pct_weight + safe(s.bb)! * eq.p_era_bb_pct_weight + safe(s.hh)! * eq.p_era_hh_pct_weight + safe(s.izWhiff)! * eq.p_era_in_zone_whiff_pct_weight + safe(s.chase)! * eq.p_era_chase_pct_weight + safe(s.barrel)! * eq.p_era_barrel_pct_weight) / eq.p_era_ncaa_avg_power_rating * 100 : null;
-      const whipR = [s.bb, s.ld, s.avgEv, s.whiff, s.gb, s.chase].every(v => v != null)
-        ? normalizedWeightedSum([{value:safe(s.bb)!,weight:eq.p_whip_bb_pct_weight},{value:safe(s.ld)!,weight:eq.p_whip_ld_pct_weight},{value:safe(s.avgEv)!,weight:eq.p_whip_avg_ev_weight},{value:safe(s.whiff)!,weight:eq.p_whip_whiff_pct_weight},{value:safe(s.gb)!,weight:eq.p_whip_gb_pct_weight},{value:safe(s.chase)!,weight:eq.p_whip_chase_pct_weight}]) / eq.p_ncaa_avg_whip_power_rating * 100 : null;
-      const k9R = [s.whiff, s.stuff, s.izWhiff, s.chase].every(v => v != null)
-        ? (safe(s.whiff)! * eq.p_k9_whiff_pct_weight + safe(s.stuff)! * eq.p_k9_stuff_plus_weight + safe(s.izWhiff)! * eq.p_k9_in_zone_whiff_pct_weight + safe(s.chase)! * eq.p_k9_chase_pct_weight) / eq.p_ncaa_avg_k9_power_rating * 100 : null;
-      const bb9R = [s.bb, s.iz, s.chase].every(v => v != null)
-        ? (safe(s.bb)! * eq.p_bb9_bb_pct_weight + safe(s.iz)! * eq.p_bb9_in_zone_pct_weight + safe(s.chase)! * eq.p_bb9_chase_pct_weight) / eq.p_ncaa_avg_bb9_power_rating * 100 : null;
-      const hr9R = [s.barrel, s.ev90, s.gb, s.pull, s.la1030].every(v => v != null)
-        ? (safe(s.barrel)! * eq.p_hr9_barrel_pct_weight + safe(s.ev90)! * eq.p_hr9_ev90_weight + safe(s.gb)! * eq.p_hr9_gb_pct_weight + safe(s.pull)! * eq.p_hr9_pull_pct_weight + safe(s.la1030)! * eq.p_hr9_la_10_30_pct_weight) / eq.p_ncaa_avg_hr9_power_rating * 100 : null;
-      const fipR = hr9R != null && bb9R != null && k9R != null ? hr9R * eq.p_fip_hr9_power_rating_plus_weight + bb9R * eq.p_fip_bb9_power_rating_plus_weight + k9R * eq.p_fip_k9_power_rating_plus_weight : null;
-      return { eraPlus: eraR, fipPlus: fipR, whipPlus: whipR, k9Plus: k9R, bb9Plus: bb9R, hr9Plus: hr9R };
-    })();
-    const eraPrPlus = pr2025?.eraPlus ?? null;
-    const fipPrPlus = pr2025?.fipPlus ?? null;
-    const whipPrPlus = pr2025?.whipPlus ?? null;
-    const k9PrPlus = pr2025?.k9Plus ?? null;
-    const hr9PrPlus = pr2025?.hr9Plus ?? null;
-    const bb9PrPlus = pr2025?.bb9Plus ?? null;
+    const eraPrPlus = internalPowerRatings?.eraPlus ?? parseNum(powerRatingsRow?.[30]);
+    const fipPrPlus = internalPowerRatings?.fipPlus ?? parseNum(powerRatingsRow?.[31]);
+    const whipPrPlus = internalPowerRatings?.whipPlus ?? parseNum(powerRatingsRow?.[32]);
+    const k9PrPlus = internalPowerRatings?.k9Plus ?? parseNum(powerRatingsRow?.[33]);
+    const hr9PrPlus = internalPowerRatings?.hr9Plus ?? parseNum(powerRatingsRow?.[34]);
+    const bb9PrPlus = internalPowerRatings?.bb9Plus ?? parseNum(powerRatingsRow?.[35]);
 
     const classEraAdj = toPitchingClassAdj(classTransition, eq.class_era_fs, eq.class_era_sj, eq.class_era_js, eq.class_era_gr);
     const classFipAdj = toPitchingClassAdj(classTransition, eq.class_fip_fs, eq.class_fip_sj, eq.class_fip_js, eq.class_fip_gr);
@@ -1165,7 +1039,6 @@ export default function PitcherProfile() {
     const classBb9Adj = toPitchingClassAdj(classTransition, eq.class_bb9_fs, eq.class_bb9_sj, eq.class_bb9_js, eq.class_bb9_gr);
     const classHr9Adj = toPitchingClassAdj(classTransition, eq.class_hr9_fs, eq.class_hr9_sj, eq.class_hr9_js, eq.class_hr9_gr);
 
-    console.log("[PitcherProfile Proj]", { storageEra, storageFip, storageWhip, storageK9, storageBb9, storageHr9, eraPrPlus, fipPrPlus, whipPrPlus, k9PrPlus, bb9PrPlus, hr9PrPlus, masterRow2025: !!masterRow2025, powerRatingsRow2025: !!powerRatingsRow2025 });
     const pEra = projectPitchingRate({
       lastStat: storageEra,
       prPlus: eraPrPlus,
@@ -1301,7 +1174,7 @@ export default function PitcherProfile() {
     const marketEligible = canShowPitchingMarketValue(teamForMarket, conferenceForMarket);
     const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
 
-    return {
+    const result = {
       pEra: roleAdjustedEra,
       pFip: roleAdjustedFip,
       pWhip: roleAdjustedWhip,
@@ -1313,6 +1186,10 @@ export default function PitcherProfile() {
       marketValue,
       projectedIp,
     };
+    // Cache first valid projection so switching scouting year doesn't wipe it
+    const hasData = result.pEra != null || result.pFip != null || result.pWar != null;
+    if (hasData) cachedProjectionRef.current = result;
+    return hasData ? result : (cachedProjectionRef.current ?? result);
   }, [
     projectedClassTransition,
     projectedDevAggressiveness,
@@ -1372,9 +1249,6 @@ export default function PitcherProfile() {
 
     return { pRvPlus2025, pWar2025 };
   }, [
-    masterRow2025,
-    powerRatingsRow2025,
-    internalPowerRatings,
     latestStats?.era,
     latestStats?.whip,
     storageBb9,
@@ -1382,14 +1256,7 @@ export default function PitcherProfile() {
     storageFip,
     storageHr9,
     storageK9,
-    storageIp,
     storageWhip,
-    displayConference,
-    derivedRole,
-    projectedRole,
-    projectedClassTransition,
-    projectedDevAggressiveness,
-    displayTeam,
   ]);
   const pitchArsenal = useMemo(() => {
     const sourceRows = pitchArsenalRows || [];
@@ -1460,10 +1327,9 @@ export default function PitcherProfile() {
     );
   }
 
-  // Always use current row for determining if player has data — don't bail on historical year
-  const activePitcherRow = currentPitcherRow;
+  const activePitcherRow = isHistoricalView ? historicalRow : currentPitcherRow;
   const activeIp = (activePitcherRow as any)?.IP;
-  if (activePitcherRow != null && (activeIp == null || Number(activeIp) === 0) && !isHistoricalView) {
+  if (activePitcherRow != null && (activeIp == null || Number(activeIp) === 0)) {
     return (
       <DashboardLayout>
         <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
@@ -1615,8 +1481,8 @@ export default function PitcherProfile() {
                 <CardContent className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     {(() => {
-                      // Use 2025 Pitching Master stuff_plus (pipeline-calculated overall) — stable across year switches
-                      const sp = (masterRow2025 as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus;
+                      // Use Pitching Master stuff_plus (pipeline-calculated overall) as authoritative
+                      const sp = (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus;
                       const stuffColor = sp == null ? "border-border" : sp >= 103 ? "border-green-500 bg-green-500/10" : sp >= 98 ? "border-blue-500 bg-blue-500/10" : sp >= 93 ? "border-yellow-500 bg-yellow-500/10" : "border-red-500 bg-red-500/10";
                       const stuffText = sp == null ? "text-muted-foreground" : sp >= 103 ? "text-green-600" : sp >= 98 ? "text-blue-600" : sp >= 93 ? "text-yellow-600" : "text-red-600";
                       return (
@@ -1628,8 +1494,8 @@ export default function PitcherProfile() {
                       );
                     })()}
                     {(() => {
-                      // Use 2025 Pitching Master miss_pct — stable across year switches
-                      const wp = (masterRow2025 as any)?.miss_pct ?? pitchArsenal.overallWhiffPct;
+                      // Use Pitching Master miss_pct (matches 2025 Input Metrics display)
+                      const wp = (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct;
                       const whiffColor = wp == null ? "border-border" : wp >= 27 ? "border-green-500 bg-green-500/10" : wp >= 21 ? "border-blue-500 bg-blue-500/10" : wp >= 16 ? "border-yellow-500 bg-yellow-500/10" : "border-red-500 bg-red-500/10";
                       const whiffText = wp == null ? "text-muted-foreground" : wp >= 27 ? "text-green-600" : wp >= 21 ? "text-blue-600" : wp >= 16 ? "text-yellow-600" : "text-red-600";
                       return (
