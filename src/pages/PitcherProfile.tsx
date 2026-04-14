@@ -653,27 +653,95 @@ export default function PitcherProfile() {
   // usePitchingSeedData hook applies an IP >= 20 dashboard filter that would
   // hide them from individual profile pages.
   const { pitchers: pitchingMasterRows } = usePitchingSeedData();
-  // masterRow2025: always 2025, used for projections/Stuff+/display that shouldn't change
+  // masterRow2025: always starts with 2025, combines backwards if below IP threshold
+  // If 2025 IP < 25, blend in 2024. If still < 25, blend in 2023.
+  const MIN_IP_THRESHOLD = 25;
   const masterRow2025 = useMemo(() => {
-    const row2025 = (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === 2025);
-    if (!row2025) return null;
-    return {
-      source_player_id: row2025.source_player_id ?? null,
-      playerName: row2025.playerFullName ?? "",
-      team: row2025.Team ?? null, teamId: row2025.TeamID ?? null,
-      conference: row2025.Conference ?? null, conferenceId: row2025.conference_id ?? null,
-      throwHand: row2025.ThrowHand ?? null, role: row2025.Role ?? null,
-      ip: row2025.IP ?? null, g: row2025.G ?? null, gs: row2025.GS ?? null,
-      era: row2025.ERA ?? null, fip: row2025.FIP ?? null, whip: row2025.WHIP ?? null,
-      k9: row2025.K9 ?? null, bb9: row2025.BB9 ?? null, hr9: row2025.HR9 ?? null,
-      miss_pct: row2025.miss_pct ?? null, bb_pct: row2025.bb_pct ?? null,
-      hard_hit_pct: row2025.hard_hit_pct ?? null, in_zone_whiff_pct: row2025.in_zone_whiff_pct ?? null,
-      chase_pct: row2025.chase_pct ?? null, barrel_pct: row2025.barrel_pct ?? null,
-      line_pct: row2025.line_pct ?? null, exit_vel: row2025.exit_vel ?? null,
-      ground_pct: row2025.ground_pct ?? null, in_zone_pct: row2025.in_zone_pct ?? null,
-      vel_90th: row2025["90th_vel"] ?? null, h_pull_pct: row2025.h_pull_pct ?? null,
-      la_10_30_pct: row2025.la_10_30_pct ?? null, stuffPlus: row2025.stuff_plus ?? null,
-    } as any;
+    const seasons = (pitcherMasterSeasons as any[]);
+    const row2025 = seasons.find((r) => Number(r.Season) === 2025);
+    if (!row2025) {
+      // No 2025 data at all — use most recent season
+      const sorted = [...seasons].sort((a, b) => Number(b.Season) - Number(a.Season));
+      if (sorted.length === 0) return null;
+      const fallback = sorted[0];
+      return buildMasterRow(fallback);
+    }
+
+    const ip2025 = Number(row2025.IP) || 0;
+    if (ip2025 >= MIN_IP_THRESHOLD) return buildMasterRow(row2025);
+
+    // Below threshold — accumulate backwards
+    const row2024 = seasons.find((r) => Number(r.Season) === 2024);
+    const row2023 = seasons.find((r) => Number(r.Season) === 2023);
+    const rowsToBlend = [row2025];
+    let totalIp = ip2025;
+    if (totalIp < MIN_IP_THRESHOLD && row2024) {
+      rowsToBlend.push(row2024);
+      totalIp += Number(row2024.IP) || 0;
+    }
+    if (totalIp < MIN_IP_THRESHOLD && row2023) {
+      rowsToBlend.push(row2023);
+      totalIp += Number(row2023.IP) || 0;
+    }
+
+    // IP-weighted blend of all accumulated seasons
+    if (rowsToBlend.length === 1) return buildMasterRow(row2025);
+
+    const wAvg = (field: string) => {
+      let sv = 0, sw = 0;
+      for (const r of rowsToBlend) {
+        const v = Number(r[field]);
+        const w = Number(r.IP) || 0;
+        if (Number.isFinite(v) && w > 0) { sv += v * w; sw += w; }
+      }
+      return sw > 0 ? sv / sw : null;
+    };
+
+    // Use 2025 identity fields, blended stats
+    const blended = { ...row2025 };
+    blended.IP = totalIp;
+    blended.ERA = wAvg("ERA");
+    blended.FIP = wAvg("FIP");
+    blended.WHIP = wAvg("WHIP");
+    blended.K9 = wAvg("K9");
+    blended.BB9 = wAvg("BB9");
+    blended.HR9 = wAvg("HR9");
+    blended.miss_pct = wAvg("miss_pct");
+    blended.bb_pct = wAvg("bb_pct");
+    blended.hard_hit_pct = wAvg("hard_hit_pct");
+    blended.in_zone_whiff_pct = wAvg("in_zone_whiff_pct");
+    blended.chase_pct = wAvg("chase_pct");
+    blended.barrel_pct = wAvg("barrel_pct");
+    blended.line_pct = wAvg("line_pct");
+    blended.exit_vel = wAvg("exit_vel");
+    blended.ground_pct = wAvg("ground_pct");
+    blended.in_zone_pct = wAvg("in_zone_pct");
+    blended["90th_vel"] = wAvg("90th_vel");
+    blended.h_pull_pct = wAvg("h_pull_pct");
+    blended.la_10_30_pct = wAvg("la_10_30_pct");
+    // Keep 2025 stuff_plus (pipeline-calculated, not blendable)
+    return buildMasterRow(blended);
+
+    function buildMasterRow(r: any) {
+      if (!r) return null;
+      return {
+      source_player_id: r.source_player_id ?? null,
+      playerName: r.playerFullName ?? "",
+      team: r.Team ?? null, teamId: r.TeamID ?? null,
+      conference: r.Conference ?? null, conferenceId: r.conference_id ?? null,
+      throwHand: r.ThrowHand ?? null, role: r.Role ?? null,
+      ip: r.IP ?? null, g: r.G ?? null, gs: r.GS ?? null,
+      era: r.ERA ?? null, fip: r.FIP ?? null, whip: r.WHIP ?? null,
+      k9: r.K9 ?? null, bb9: r.BB9 ?? null, hr9: r.HR9 ?? null,
+      miss_pct: r.miss_pct ?? null, bb_pct: r.bb_pct ?? null,
+      hard_hit_pct: r.hard_hit_pct ?? null, in_zone_whiff_pct: r.in_zone_whiff_pct ?? null,
+      chase_pct: r.chase_pct ?? null, barrel_pct: r.barrel_pct ?? null,
+      line_pct: r.line_pct ?? null, exit_vel: r.exit_vel ?? null,
+      ground_pct: r.ground_pct ?? null, in_zone_pct: r.in_zone_pct ?? null,
+      vel_90th: r["90th_vel"] ?? null, h_pull_pct: r.h_pull_pct ?? null,
+      la_10_30_pct: r.la_10_30_pct ?? null, stuffPlus: r.stuff_plus ?? null,
+      } as any;
+    }
   }, [pitcherMasterSeasons]);
 
   // masterRow: follows effectiveSeason for scouting grades
