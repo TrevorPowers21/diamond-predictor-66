@@ -653,8 +653,31 @@ export default function PitcherProfile() {
   // usePitchingSeedData hook applies an IP >= 20 dashboard filter that would
   // hide them from individual profile pages.
   const { pitchers: pitchingMasterRows } = usePitchingSeedData();
+  // masterRow2025: always 2025, used for projections/Stuff+/display that shouldn't change
+  const masterRow2025 = useMemo(() => {
+    const row2025 = (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === 2025);
+    if (!row2025) return null;
+    return {
+      source_player_id: row2025.source_player_id ?? null,
+      playerName: row2025.playerFullName ?? "",
+      team: row2025.Team ?? null, teamId: row2025.TeamID ?? null,
+      conference: row2025.Conference ?? null, conferenceId: row2025.conference_id ?? null,
+      throwHand: row2025.ThrowHand ?? null, role: row2025.Role ?? null,
+      ip: row2025.IP ?? null, g: row2025.G ?? null, gs: row2025.GS ?? null,
+      era: row2025.ERA ?? null, fip: row2025.FIP ?? null, whip: row2025.WHIP ?? null,
+      k9: row2025.K9 ?? null, bb9: row2025.BB9 ?? null, hr9: row2025.HR9 ?? null,
+      miss_pct: row2025.miss_pct ?? null, bb_pct: row2025.bb_pct ?? null,
+      hard_hit_pct: row2025.hard_hit_pct ?? null, in_zone_whiff_pct: row2025.in_zone_whiff_pct ?? null,
+      chase_pct: row2025.chase_pct ?? null, barrel_pct: row2025.barrel_pct ?? null,
+      line_pct: row2025.line_pct ?? null, exit_vel: row2025.exit_vel ?? null,
+      ground_pct: row2025.ground_pct ?? null, in_zone_pct: row2025.in_zone_pct ?? null,
+      vel_90th: row2025["90th_vel"] ?? null, h_pull_pct: row2025.h_pull_pct ?? null,
+      la_10_30_pct: row2025.la_10_30_pct ?? null, stuffPlus: row2025.stuff_plus ?? null,
+    } as any;
+  }, [pitcherMasterSeasons]);
+
+  // masterRow: follows effectiveSeason for scouting grades
   const masterRow = useMemo(() => {
-    // Prefer the unfiltered pitcher seasons row for the current selected season
     const fromSeasons = (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason)
       ?? (pitcherMasterSeasons as any[])[0];
     if (fromSeasons) {
@@ -722,6 +745,21 @@ export default function PitcherProfile() {
       String(m.k9 ?? ""), String(m.bb9 ?? ""), String(m.hr9 ?? ""),
     ] as string[];
   }, [masterRow]);
+  // powerRatingsRow2025: always 2025, used for projections
+  const powerRatingsRow2025 = useMemo(() => {
+    if (!masterRow2025) return null;
+    const m = masterRow2025;
+    return [
+      m.playerName || "", m.team || "",
+      String(m.stuffPlus ?? ""), String(m.miss_pct ?? ""), String(m.bb_pct ?? ""), String(m.hard_hit_pct ?? ""),
+      String(m.in_zone_whiff_pct ?? ""), String(m.chase_pct ?? ""), String(m.barrel_pct ?? ""), String(m.line_pct ?? ""),
+      String(m.exit_vel ?? ""), String(m.ground_pct ?? ""), String(m.in_zone_pct ?? ""), String(m.vel_90th ?? ""),
+      String(m.h_pull_pct ?? ""), String(m.la_10_30_pct ?? ""),
+      "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+    ] as string[];
+  }, [masterRow2025]);
+
+  // powerRatingsRow: follows effectiveSeason for scouting grades
   const powerRatingsRow = useMemo(() => {
     if (!masterRow) return null;
     const m = masterRow;
@@ -962,18 +1000,19 @@ export default function PitcherProfile() {
     return player?.conference || masterRow?.conference || (anyPitcherMasterRow as any)?.Conference || conferenceByTeam.get(normalize(displayTeam)) || "—";
   })();
   const displayHandedness = player?.handedness || masterRow?.throwHand || (anyPitcherMasterRow as any)?.ThrowHand || storageRow?.[2] || "—";
-  // Read pitching stats directly from masterRow (no intermediate parse needed)
-  const storageEra = masterRow?.era ?? null;
-  const storageFip = masterRow?.fip ?? null;
-  const storageWhip = masterRow?.whip ?? null;
-  const storageK9 = masterRow?.k9 ?? null;
-  const storageBb9 = masterRow?.bb9 ?? null;
-  const storageHr9 = masterRow?.hr9 ?? null;
-  const storageIp = parseBaseballInnings(masterRow?.ip != null ? String(masterRow.ip) : null);
-  const storageGames = masterRow?.g ?? null;
-  const storageGamesStarted = masterRow?.gs ?? null;
+  // Read pitching stats from 2025 masterRow for projections (stable across year switches)
+  const m2025 = masterRow2025 ?? masterRow;
+  const storageEra = m2025?.era ?? null;
+  const storageFip = m2025?.fip ?? null;
+  const storageWhip = m2025?.whip ?? null;
+  const storageK9 = m2025?.k9 ?? null;
+  const storageBb9 = m2025?.bb9 ?? null;
+  const storageHr9 = m2025?.hr9 ?? null;
+  const storageIp = parseBaseballInnings(m2025?.ip != null ? String(m2025.ip) : null);
+  const storageGames = m2025?.g ?? null;
+  const storageGamesStarted = m2025?.gs ?? null;
   const derivedRole = (() => {
-    const roleRaw = toPitchingRole(masterRow?.role);
+    const roleRaw = toPitchingRole(m2025?.role);
     if (roleRaw) return roleRaw;
     if (storageGames != null && storageGames > 0 && storageGamesStarted != null) {
       return (storageGamesStarted / storageGames) < 0.5 ? "RP" : "SP";
@@ -1035,12 +1074,54 @@ export default function PitcherProfile() {
         : "SJ";
     const devAggressiveness = projectedDevAggressiveness;
 
-    const eraPrPlus = internalPowerRatings?.eraPlus ?? parseNum(powerRatingsRow?.[30]);
-    const fipPrPlus = internalPowerRatings?.fipPlus ?? parseNum(powerRatingsRow?.[31]);
-    const whipPrPlus = internalPowerRatings?.whipPlus ?? parseNum(powerRatingsRow?.[32]);
-    const k9PrPlus = internalPowerRatings?.k9Plus ?? parseNum(powerRatingsRow?.[33]);
-    const hr9PrPlus = internalPowerRatings?.hr9Plus ?? parseNum(powerRatingsRow?.[34]);
-    const bb9PrPlus = internalPowerRatings?.bb9Plus ?? parseNum(powerRatingsRow?.[35]);
+    // Always use 2025 power ratings for projections (not year-switchable scouting)
+    const pr2025 = (() => {
+      if (!powerRatingsRow2025) return internalPowerRatings;
+      const m = {
+        stuff: parseNum(powerRatingsRow2025[2]), whiff: parseNum(powerRatingsRow2025[3]),
+        bb: parseNum(powerRatingsRow2025[4]), hh: parseNum(powerRatingsRow2025[5]),
+        izWhiff: parseNum(powerRatingsRow2025[6]), chase: parseNum(powerRatingsRow2025[7]),
+        barrel: parseNum(powerRatingsRow2025[8]), ld: parseNum(powerRatingsRow2025[9]),
+        avgEv: parseNum(powerRatingsRow2025[10]), gb: parseNum(powerRatingsRow2025[11]),
+        iz: parseNum(powerRatingsRow2025[12]), ev90: parseNum(powerRatingsRow2025[13]),
+        pull: parseNum(powerRatingsRow2025[14]), la1030: parseNum(powerRatingsRow2025[15]),
+      };
+      const sc = (v: number | null, avg: number, sd: number, lib = false) => scoreFromMetric(v, avg, sd, lib);
+      const s = {
+        stuff: sc(m.stuff, eq.p_ncaa_avg_stuff_plus, eq.p_sd_stuff_plus),
+        whiff: sc(m.whiff, eq.p_ncaa_avg_whiff_pct, eq.p_sd_whiff_pct),
+        bb: sc(m.bb, eq.p_ncaa_avg_bb_pct, eq.p_sd_bb_pct, true),
+        hh: sc(m.hh, eq.p_ncaa_avg_hh_pct, eq.p_sd_hh_pct, true),
+        izWhiff: sc(m.izWhiff, eq.p_ncaa_avg_in_zone_whiff_pct, eq.p_sd_in_zone_whiff_pct),
+        chase: sc(m.chase, eq.p_ncaa_avg_chase_pct, eq.p_sd_chase_pct),
+        barrel: sc(m.barrel, eq.p_ncaa_avg_barrel_pct, eq.p_sd_barrel_pct, true),
+        ld: sc(m.ld, eq.p_ncaa_avg_ld_pct, eq.p_sd_ld_pct, true),
+        avgEv: sc(m.avgEv, eq.p_ncaa_avg_avg_ev, eq.p_sd_avg_ev, true),
+        gb: sc(m.gb, eq.p_ncaa_avg_gb_pct, eq.p_sd_gb_pct),
+        iz: sc(m.iz, eq.p_ncaa_avg_in_zone_pct, eq.p_sd_in_zone_pct),
+        ev90: sc(m.ev90, eq.p_ncaa_avg_ev90, eq.p_sd_ev90, true),
+        pull: sc(m.pull, eq.p_ncaa_avg_pull_pct, eq.p_sd_pull_pct, true),
+        la1030: sc(m.la1030, eq.p_ncaa_avg_la_10_30_pct, eq.p_sd_la_10_30_pct, true),
+      };
+      const eraR = [s.stuff, s.whiff, s.bb, s.hh, s.izWhiff, s.chase, s.barrel].every(v => v != null)
+        ? (safe(s.stuff)! * eq.p_era_stuff_plus_weight + safe(s.whiff)! * eq.p_era_whiff_pct_weight + safe(s.bb)! * eq.p_era_bb_pct_weight + safe(s.hh)! * eq.p_era_hh_pct_weight + safe(s.izWhiff)! * eq.p_era_in_zone_whiff_pct_weight + safe(s.chase)! * eq.p_era_chase_pct_weight + safe(s.barrel)! * eq.p_era_barrel_pct_weight) / eq.p_era_ncaa_avg_power_rating * 100 : null;
+      const whipR = [s.bb, s.ld, s.avgEv, s.whiff, s.gb, s.chase].every(v => v != null)
+        ? normalizedWeightedSum([{value:safe(s.bb)!,weight:eq.p_whip_bb_pct_weight},{value:safe(s.ld)!,weight:eq.p_whip_ld_pct_weight},{value:safe(s.avgEv)!,weight:eq.p_whip_avg_ev_weight},{value:safe(s.whiff)!,weight:eq.p_whip_whiff_pct_weight},{value:safe(s.gb)!,weight:eq.p_whip_gb_pct_weight},{value:safe(s.chase)!,weight:eq.p_whip_chase_pct_weight}]) / eq.p_ncaa_avg_whip_power_rating * 100 : null;
+      const k9R = [s.whiff, s.stuff, s.izWhiff, s.chase].every(v => v != null)
+        ? (safe(s.whiff)! * eq.p_k9_whiff_pct_weight + safe(s.stuff)! * eq.p_k9_stuff_plus_weight + safe(s.izWhiff)! * eq.p_k9_in_zone_whiff_pct_weight + safe(s.chase)! * eq.p_k9_chase_pct_weight) / eq.p_ncaa_avg_k9_power_rating * 100 : null;
+      const bb9R = [s.bb, s.iz, s.chase].every(v => v != null)
+        ? (safe(s.bb)! * eq.p_bb9_bb_pct_weight + safe(s.iz)! * eq.p_bb9_in_zone_pct_weight + safe(s.chase)! * eq.p_bb9_chase_pct_weight) / eq.p_ncaa_avg_bb9_power_rating * 100 : null;
+      const hr9R = [s.barrel, s.ev90, s.gb, s.pull, s.la1030].every(v => v != null)
+        ? (safe(s.barrel)! * eq.p_hr9_barrel_pct_weight + safe(s.ev90)! * eq.p_hr9_ev90_weight + safe(s.gb)! * eq.p_hr9_gb_pct_weight + safe(s.pull)! * eq.p_hr9_pull_pct_weight + safe(s.la1030)! * eq.p_hr9_la_10_30_pct_weight) / eq.p_ncaa_avg_hr9_power_rating * 100 : null;
+      const fipR = hr9R != null && bb9R != null && k9R != null ? hr9R * eq.p_fip_hr9_power_rating_plus_weight + bb9R * eq.p_fip_bb9_power_rating_plus_weight + k9R * eq.p_fip_k9_power_rating_plus_weight : null;
+      return { eraPlus: eraR, fipPlus: fipR, whipPlus: whipR, k9Plus: k9R, bb9Plus: bb9R, hr9Plus: hr9R };
+    })();
+    const eraPrPlus = pr2025?.eraPlus ?? null;
+    const fipPrPlus = pr2025?.fipPlus ?? null;
+    const whipPrPlus = pr2025?.whipPlus ?? null;
+    const k9PrPlus = pr2025?.k9Plus ?? null;
+    const hr9PrPlus = pr2025?.hr9Plus ?? null;
+    const bb9PrPlus = pr2025?.bb9Plus ?? null;
 
     const classEraAdj = toPitchingClassAdj(classTransition, eq.class_era_fs, eq.class_era_sj, eq.class_era_js, eq.class_era_gr);
     const classFipAdj = toPitchingClassAdj(classTransition, eq.class_fip_fs, eq.class_fip_sj, eq.class_fip_js, eq.class_fip_gr);
@@ -1488,8 +1569,8 @@ export default function PitcherProfile() {
                 <CardContent className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     {(() => {
-                      // Use Pitching Master stuff_plus (pipeline-calculated overall) as authoritative
-                      const sp = (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus;
+                      // Use 2025 Pitching Master stuff_plus (pipeline-calculated overall) — stable across year switches
+                      const sp = (masterRow2025 as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus;
                       const stuffColor = sp == null ? "border-border" : sp >= 103 ? "border-green-500 bg-green-500/10" : sp >= 98 ? "border-blue-500 bg-blue-500/10" : sp >= 93 ? "border-yellow-500 bg-yellow-500/10" : "border-red-500 bg-red-500/10";
                       const stuffText = sp == null ? "text-muted-foreground" : sp >= 103 ? "text-green-600" : sp >= 98 ? "text-blue-600" : sp >= 93 ? "text-yellow-600" : "text-red-600";
                       return (
@@ -1501,8 +1582,8 @@ export default function PitcherProfile() {
                       );
                     })()}
                     {(() => {
-                      // Use Pitching Master miss_pct (matches 2025 Input Metrics display)
-                      const wp = (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct;
+                      // Use 2025 Pitching Master miss_pct — stable across year switches
+                      const wp = (masterRow2025 as any)?.miss_pct ?? pitchArsenal.overallWhiffPct;
                       const whiffColor = wp == null ? "border-border" : wp >= 27 ? "border-green-500 bg-green-500/10" : wp >= 21 ? "border-blue-500 bg-blue-500/10" : wp >= 16 ? "border-yellow-500 bg-yellow-500/10" : "border-red-500 bg-red-500/10";
                       const whiffText = wp == null ? "text-muted-foreground" : wp >= 27 ? "text-green-600" : wp >= 21 ? "text-blue-600" : wp >= 16 ? "text-yellow-600" : "text-red-600";
                       return (
