@@ -850,15 +850,6 @@ export default function PlayerProfile() {
           )}
         </div>
 
-        {isHistoricalView ? (
-          <HistoricalHitterView
-            player={player}
-            row={historicalRow}
-            season={effectiveSeason}
-            ncaaWrc={ncaaWrcForSeason ?? null}
-            isAdmin={isAdmin}
-          />
-        ) : (
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="lg:col-span-1 space-y-4">
             {/* Player Info Card */}
@@ -964,21 +955,75 @@ export default function PlayerProfile() {
               </CardContent>
             </Card>
 
-            {seedStatRow && seedDerived && (
+            {/* Career Stats Table */}
+            {(hitterMasterSeasons as any[]).length > 0 && (
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-base">2025 Stats</CardTitle>
+                  <CardTitle className="text-base">Career Stats</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">PA</div><div className="font-semibold">{(player as any)?.pa ?? "—"}</div></div>
-                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">AVG</div><div className="font-semibold">{statFormat(seedStatRow.avg)}</div></div>
-                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">OBP</div><div className="font-semibold">{statFormat(seedStatRow.obp)}</div></div>
-                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">SLG</div><div className="font-semibold">{statFormat(seedStatRow.slg)}</div></div>
-                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">OPS</div><div className="font-semibold">{statFormat(seedDerived.ops)}</div></div>
-                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">ISO</div><div className="font-semibold">{statFormat(seedDerived.iso)}</div></div>
-                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">wRC+</div><div className="font-semibold">{pctFormat(seedDerived.wrcPlus)}</div></div>
-                    <div className="rounded border p-2"><div className="text-muted-foreground text-xs">2025 oWAR</div><div className="font-semibold">{historicalOWar != null ? historicalOWar.toFixed(2) : "—"}</div></div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b text-xs text-muted-foreground">
+                          <th className="text-left py-1.5 pr-2 font-medium">Year</th>
+                          <th className="text-left py-1.5 px-1 font-medium">Team</th>
+                          <th className="text-right py-1.5 px-1 font-medium">PA</th>
+                          <th className="text-right py-1.5 px-1 font-medium">AVG</th>
+                          <th className="text-right py-1.5 px-1 font-medium">OBP</th>
+                          <th className="text-right py-1.5 px-1 font-medium">SLG</th>
+                          <th className="text-right py-1.5 px-1 font-medium">OPS</th>
+                          <th className="text-right py-1.5 pl-1 font-medium">ISO</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(hitterMasterSeasons as any[])
+                          .sort((a, b) => Number(a.Season) - Number(b.Season))
+                          .map((row: any) => {
+                            const ops = row.OBP != null && row.SLG != null ? (Number(row.OBP) + Number(row.SLG)) : null;
+                            const iso = row.SLG != null && row.AVG != null ? (Number(row.SLG) - Number(row.AVG)) : null;
+                            return (
+                              <tr key={row.Season} className="border-b last:border-0">
+                                <td className="py-1.5 pr-2 font-semibold">{row.Season}</td>
+                                <td className="py-1.5 px-1 text-muted-foreground">{row.Team ?? "—"}</td>
+                                <td className="py-1.5 px-1 text-right tabular-nums">{row.pa ?? "—"}</td>
+                                <td className="py-1.5 px-1 text-right tabular-nums">{row.AVG != null ? Number(row.AVG).toFixed(3) : "—"}</td>
+                                <td className="py-1.5 px-1 text-right tabular-nums">{row.OBP != null ? Number(row.OBP).toFixed(3) : "—"}</td>
+                                <td className="py-1.5 px-1 text-right tabular-nums">{row.SLG != null ? Number(row.SLG).toFixed(3) : "—"}</td>
+                                <td className="py-1.5 px-1 text-right tabular-nums">{ops != null ? ops.toFixed(3) : "—"}</td>
+                                <td className="py-1.5 pl-1 text-right tabular-nums">{iso != null ? iso.toFixed(3) : "—"}</td>
+                              </tr>
+                            );
+                          })}
+                        {(hitterMasterSeasons as any[]).length > 1 && (() => {
+                          const rows = hitterMasterSeasons as any[];
+                          const totalPa = rows.reduce((s, r) => s + (Number(r.pa) || 0), 0);
+                          if (totalPa === 0) return null;
+                          const wAvg = (field: string) => {
+                            let sv = 0, sw = 0;
+                            for (const r of rows) { const v = Number(r[field]); const w = Number(r.pa) || 0; if (Number.isFinite(v) && w > 0) { sv += v * w; sw += w; } }
+                            return sw > 0 ? sv / sw : null;
+                          };
+                          const cAvg = wAvg("AVG");
+                          const cObp = wAvg("OBP");
+                          const cSlg = wAvg("SLG");
+                          const cOps = cObp != null && cSlg != null ? cObp + cSlg : null;
+                          const cIso = cSlg != null && cAvg != null ? cSlg - cAvg : null;
+                          return (
+                            <tr className="border-t-2 font-semibold">
+                              <td className="py-1.5 pr-2">Career</td>
+                              <td className="py-1.5 px-1"></td>
+                              <td className="py-1.5 px-1 text-right tabular-nums">{totalPa}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums">{cAvg != null ? cAvg.toFixed(3) : "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums">{cObp != null ? cObp.toFixed(3) : "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums">{cSlg != null ? cSlg.toFixed(3) : "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums">{cOps != null ? cOps.toFixed(3) : "—"}</td>
+                              <td className="py-1.5 pl-1 text-right tabular-nums">{cIso != null ? cIso.toFixed(3) : "—"}</td>
+                            </tr>
+                          );
+                        })()}
+                      </tbody>
+                    </table>
                   </div>
                 </CardContent>
               </Card>
@@ -1099,7 +1144,21 @@ export default function PlayerProfile() {
             {seedPowerDerived && (
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Scouting Grades</CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">Scouting Grades</CardTitle>
+                    {availableSeasons.length > 1 && (
+                      <Select value={String(effectiveSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
+                        <SelectTrigger className="h-8 w-[75px] text-xs font-semibold">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableSeasons.map((y) => (
+                            <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -1238,7 +1297,6 @@ export default function PlayerProfile() {
             )}
           </div>
         </div>
-        )}
       </div>
     </DashboardLayout>
   );
