@@ -460,7 +460,8 @@ export default function PitcherProfile() {
   // but the URL itself is a numeric source_player_id (historical-only pitchers
   // who have no row in the `players` table).
   const { data: pitcherMasterSeasons = [] } = useQuery({
-    queryKey: ["pitcher-profile-master-seasons", id, (player as any)?.source_player_id],
+    queryKey: ["pitcher-profile-master-seasons", id, (player as any)?.source_player_id, lookupPlayerName],
+    enabled: !!id && (!isDbRoute || !!player),
     queryFn: async () => {
       const sourceId = (player as any)?.source_player_id || (id && /^\d+$/.test(id) ? id : null);
       // Try by source_player_id first
