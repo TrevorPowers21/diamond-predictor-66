@@ -460,10 +460,11 @@ export default function PitcherProfile() {
   // but the URL itself is a numeric source_player_id (historical-only pitchers
   // who have no row in the `players` table).
   const { data: pitcherMasterSeasons = [] } = useQuery({
-    queryKey: ["pitcher-profile-master-seasons", id, (player as any)?.source_player_id, lookupPlayerName],
+    queryKey: ["pitcher-profile-master-seasons", id, (player as any)?.source_player_id, player?.first_name, player?.last_name],
     enabled: !!id && (!isDbRoute || !!player),
     queryFn: async () => {
       const sourceId = (player as any)?.source_player_id || (id && /^\d+$/.test(id) ? id : null);
+      const playerName = player ? `${player.first_name || ""} ${player.last_name || ""}`.trim() : null;
       // Try by source_player_id first
       if (sourceId) {
         const { data, error } = await supabase
@@ -474,11 +475,11 @@ export default function PitcherProfile() {
         if (!error && data && data.length > 0) return data;
       }
       // Fallback: look up by player name
-      if (lookupPlayerName) {
+      if (playerName) {
         const { data } = await (supabase as any)
           .from("Pitching Master")
           .select("*")
-          .ilike("playerFullName", lookupPlayerName)
+          .ilike("playerFullName", playerName)
           .order("Season", { ascending: false });
         if (data && data.length > 0) return data;
       }
