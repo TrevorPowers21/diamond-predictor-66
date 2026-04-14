@@ -1333,9 +1333,10 @@ export default function PitcherProfile() {
     );
   }
 
-  const activePitcherRow = isHistoricalView ? historicalRow : currentPitcherRow;
+  // Always use current row for determining if player has data — don't bail on historical year
+  const activePitcherRow = currentPitcherRow;
   const activeIp = (activePitcherRow as any)?.IP;
-  if (activePitcherRow != null && (activeIp == null || Number(activeIp) === 0)) {
+  if (activePitcherRow != null && (activeIp == null || Number(activeIp) === 0) && !isHistoricalView) {
     return (
       <DashboardLayout>
         <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">

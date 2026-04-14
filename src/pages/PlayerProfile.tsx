@@ -686,9 +686,10 @@ export default function PlayerProfile() {
   const projectedDerived = computeDerived(projectedAvg, projectedObp, projectedSlg);
   const projectedWrcPlus = regularPred?.p_wrc_plus ?? null;
 
-  const activeMasterRow = isHistoricalView ? historicalRow : currentHitterRow;
+  // Always use 2025 row for determining if player has data — don't bail on historical year with no AB
+  const activeMasterRow = currentHitterRow;
   const activeAb = (activeMasterRow as any)?.ab;
-  const hasZeroAb = activeMasterRow != null && (activeAb == null || Number(activeAb) === 0);
+  const hasZeroAb = activeMasterRow != null && (activeAb == null || Number(activeAb) === 0) && !isHistoricalView;
   if (hasZeroAb) {
     return (
       <DashboardLayout>
