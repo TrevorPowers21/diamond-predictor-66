@@ -1604,7 +1604,7 @@ export default function PitcherProfile() {
             <Card>
               <CardHeader className="pb-2">
                 <div className="flex items-center gap-3 flex-wrap">
-                  <CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4" />Projected Stats</CardTitle>
+                  <CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4" />2026 Projected Stats</CardTitle>
                   <div className="flex items-center gap-1.5">
                     <Select value={projectedRole} onValueChange={(v) => updateProjectedInputs({ pitcher_role: v as "SP" | "RP" | "SM" })}>
                       <SelectTrigger className="h-7 w-[65px] text-xs"><SelectValue /></SelectTrigger>

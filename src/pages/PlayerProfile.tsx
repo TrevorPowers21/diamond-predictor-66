@@ -1069,7 +1069,7 @@ export default function PlayerProfile() {
               <Card>
                 <CardHeader className="pb-2">
                   <div className="flex items-center gap-3 flex-wrap">
-                    <CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4" />Projected Stats</CardTitle>
+                    <CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4" />2026 Projected Stats</CardTitle>
                     {editingPrediction && regularPred ? (
                       <div className="flex items-center gap-1.5">
                         <Select value={predForm.class_transition || "none"} onValueChange={(v) => setPredForm({ ...predForm, class_transition: v === "none" ? "" : v })}>
