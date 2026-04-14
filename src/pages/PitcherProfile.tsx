@@ -461,7 +461,7 @@ export default function PitcherProfile() {
   // who have no row in the `players` table).
   const { data: pitcherMasterSeasons = [] } = useQuery({
     queryKey: ["pitcher-profile-master-seasons", id, (player as any)?.source_player_id, player?.first_name, player?.last_name],
-    enabled: !!id && (!isDbRoute || !!player),
+    enabled: !!id,
     queryFn: async () => {
       const sourceId = (player as any)?.source_player_id || (id && /^\d+$/.test(id) ? id : null);
       const playerName = player ? `${player.first_name || ""} ${player.last_name || ""}`.trim() : null;
