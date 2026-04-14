@@ -459,18 +459,28 @@ export default function PitcherProfile() {
   // Falls back to the URL `id` for cases where the player record is missing
   // but the URL itself is a numeric source_player_id (historical-only pitchers
   // who have no row in the `players` table).
+  const _playerName = player ? `${player.first_name || ""} ${player.last_name || ""}`.trim() : null;
   const { data: pitcherMasterSeasons = [] } = useQuery({
-    queryKey: ["pitcher-profile-master-seasons", id, (player as any)?.source_player_id],
+    queryKey: ["pitcher-profile-master-seasons", id, (player as any)?.source_player_id, _playerName],
     queryFn: async () => {
       const sourceId = (player as any)?.source_player_id || (id && /^\d+$/.test(id) ? id : null);
-      if (!sourceId) return [];
-      const { data, error } = await supabase
-        .from("Pitching Master")
-        .select("*")
-        .eq("source_player_id", sourceId)
-        .order("Season", { ascending: false });
-      if (error) throw error;
-      return data || [];
+      if (sourceId) {
+        const { data, error } = await supabase
+          .from("Pitching Master")
+          .select("*")
+          .eq("source_player_id", sourceId)
+          .order("Season", { ascending: false });
+        if (!error && data && data.length > 0) return data;
+      }
+      if (_playerName) {
+        const { data } = await (supabase as any)
+          .from("Pitching Master")
+          .select("*")
+          .ilike("playerFullName", _playerName)
+          .order("Season", { ascending: false });
+        if (data && data.length > 0) return data;
+      }
+      return [];
     },
     enabled: !!id,
   });
