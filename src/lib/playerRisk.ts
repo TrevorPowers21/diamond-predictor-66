@@ -281,8 +281,8 @@ function assessPitcherTypeRisk(metrics: {
 /**
  * Competition risk — driven by actual conference talent data.
  *
- * For hitters: uses Conf Stuff+ (pitching quality faced)
- * For pitchers: uses Conf Hitter Talent+ (hitting quality faced)
+ * For hitters: uses Stuff+ (pitching quality faced)
+ * For pitchers: uses Hitter Talent+ (hitting quality faced)
  *
  * Higher opposing talent = lower risk (stats earned against real competition).
  * Lower opposing talent = higher risk (stats may be inflated).
@@ -294,7 +294,7 @@ function assessCompetitionRisk(conference: string | null | undefined, confOpposi
 
   if (confOpposingMetric != null && Number.isFinite(confOpposingMetric)) {
     // Data-driven competition risk calibrated to actual NCAA conference data.
-    // Hitters use Conf Stuff+ (range ~93–106), pitchers use Hitter Talent+ (range ~70–117).
+    // Hitters use Stuff+ (range ~93–106), pitchers use Hitter Talent+ (range ~70–117).
     // SEC is the benchmark at the top (~106 Stuff+, ~117 HT+).
     //
     // For Stuff+ (hitter-facing): range 93–106, 100 = NCAA avg
@@ -312,7 +312,7 @@ function assessCompetitionRisk(conference: string | null | undefined, confOpposi
     else { risk = 88; detailParts.push("very weak competition — stats unreliable"); }
 
     const label = confOpposingLabel || "Conf Quality";
-    // Format: "SoCon; Conf Stuff+ 99; average competition"
+    // Format: "SoCon; Stuff+ 99; average competition"
     const gradeText = detailParts.pop()!; // the competition grade label
     detailParts.length = 0;
     if (conference) detailParts.push(conference);
@@ -473,7 +473,7 @@ function buildSummary(grade: RiskGrade, trajectory: Trajectory, factors: RiskFac
 
 export interface HitterRiskInput {
   conference?: string | null;
-  /** Conf Stuff+ — the pitching quality hitters face in this conference */
+  /** Stuff+ — the pitching quality hitters face in this conference */
   confStuffPlus?: number | null;
   careerSeasons?: any[];
   pa?: number | null;
@@ -492,7 +492,7 @@ export interface HitterRiskInput {
 
 export interface PitcherRiskInput {
   conference?: string | null;
-  /** Conf Hitter Talent+ — computed: PR+ + 1.25*(Stuff+-100) + 0.75*(100-wRC+) */
+  /** Hitter Talent+ — computed: PR+ + 1.25*(Stuff+-100) + 0.75*(100-wRC+) */
   confHitterTalentPlus?: number | null;
   careerSeasons?: any[];
   ip?: number | null;
@@ -518,8 +518,8 @@ export function assessHitterRisk(input: HitterRiskInput): RiskAssessment {
     ev90: input.ev90, pull: input.pull, gb: input.gb, bb: input.bb,
   }));
 
-  // 2. Competition (weight: 25%) — hitters face pitching, so use Conf Stuff+
-  factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus, "Conf Stuff+"));
+  // 2. Competition (weight: 25%) — hitters face pitching, so use Stuff+
+  factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus, "Stuff+"));
 
   // 3. Trajectory (weight: 20%)
   const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "hitter");
@@ -550,8 +550,8 @@ export function assessPitcherRisk(input: PitcherRiskInput): RiskAssessment {
     gb: input.gb, izWhiff: input.izWhiff,
   }));
 
-  // 2. Competition (weight: 20%) — pitchers face hitting, so use Conf Hitter Talent+
-  factors.push(assessCompetitionRisk(input.conference, input.confHitterTalentPlus, "Conf Hitter Talent+"));
+  // 2. Competition (weight: 20%) — pitchers face hitting, so use Hitter Talent+
+  factors.push(assessCompetitionRisk(input.conference, input.confHitterTalentPlus, "Hitter Talent+"));
 
   // 3. Trajectory (weight: 20%)
   const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "pitcher");
