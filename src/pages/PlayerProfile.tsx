@@ -1207,7 +1207,6 @@ export default function PlayerProfile() {
               const risk = assessHitterRisk({
                 conference: resolvedConference || player.conference,
                 confStuffPlus: (() => { const c = conferenceStatsByKey.get((resolvedConference || player.conference || "").toLowerCase().trim()); return c?.stuff_plus; })(),
-                confHitterTalentPlus: (() => { const c = conferenceStatsByKey.get((resolvedConference || player.conference || "").toLowerCase().trim()); return c?.overall_power_rating; })(),
                 careerSeasons: hitterMasterSeasons as any[],
                 pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
                 chase: seedPowerRow?.chase, contact: seedPowerRow?.contact,

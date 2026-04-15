@@ -253,7 +253,13 @@ function assessPitcherTypeRisk(metrics: {
 
 // ── Factor 2: Competition Factor ────────────────────────────────────
 
-function assessCompetitionRisk(conference: string | null | undefined, confStuffPlus?: number | null, confHitterTalentPlus?: number | null): RiskFactor {
+/**
+ * Competition risk.
+ * confOpposingMetric = the metric representing the quality of what the player FACES:
+ *   - For hitters: Conf Stuff+ (pitching quality they'll face)
+ *   - For pitchers: Conf Hitter Talent+ (hitting quality they'll face)
+ */
+function assessCompetitionRisk(conference: string | null | undefined, confOpposingMetric?: number | null, confOpposingLabel?: string): RiskFactor {
   const tier = getConfTier(conference);
   let risk: number;
   let detailParts: string[] = [];
@@ -272,17 +278,12 @@ function assessCompetitionRisk(conference: string | null | undefined, confStuffP
     detailParts.push("Lower conference — significant inflation risk");
   }
 
-  // Adjust with actual conference metrics
-  if (confStuffPlus != null) {
-    if (confStuffPlus > 102) { risk = Math.max(risk - 10, 0); detailParts.push(`Conf Stuff+ ${Math.round(confStuffPlus)}`); }
-    else if (confStuffPlus < 96) { risk = Math.min(risk + 10, 100); detailParts.push(`Conf Stuff+ ${Math.round(confStuffPlus)}`); }
-    else { detailParts.push(`Conf Stuff+ ${Math.round(confStuffPlus)}`); }
-  }
-
-  if (confHitterTalentPlus != null) {
-    if (confHitterTalentPlus > 105) { risk = Math.max(risk - 5, 0); detailParts.push(`Conf Hitter Talent+ ${Math.round(confHitterTalentPlus)}`); }
-    else if (confHitterTalentPlus < 95) { risk = Math.min(risk + 5, 100); detailParts.push(`Conf Hitter Talent+ ${Math.round(confHitterTalentPlus)}`); }
-    else { detailParts.push(`Conf Hitter Talent+ ${Math.round(confHitterTalentPlus)}`); }
+  // Adjust with actual conference metric (Stuff+ for hitters, Hitter Talent+ for pitchers)
+  if (confOpposingMetric != null) {
+    const label = confOpposingLabel || "Conf Quality";
+    if (confOpposingMetric > 105) { risk = Math.max(risk - 10, 0); detailParts.push(`${label} ${Math.round(confOpposingMetric)}`); }
+    else if (confOpposingMetric < 95) { risk = Math.min(risk + 10, 100); detailParts.push(`${label} ${Math.round(confOpposingMetric)}`); }
+    else { detailParts.push(`${label} ${Math.round(confOpposingMetric)}`); }
   }
 
   return { label: "Competition", score: clamp(risk), grade: toGrade(clamp(risk)), detail: detailParts.join("; ") };
@@ -430,8 +431,8 @@ function buildSummary(grade: RiskGrade, trajectory: Trajectory, factors: RiskFac
 
 export interface HitterRiskInput {
   conference?: string | null;
+  /** Conf Stuff+ — the pitching quality hitters face in this conference */
   confStuffPlus?: number | null;
-  confHitterTalentPlus?: number | null;
   careerSeasons?: any[];
   pa?: number | null;
   // Scouting metrics
@@ -449,7 +450,7 @@ export interface HitterRiskInput {
 
 export interface PitcherRiskInput {
   conference?: string | null;
-  confStuffPlus?: number | null;
+  /** Conf Hitter Talent+ — the hitting quality pitchers face in this conference */
   confHitterTalentPlus?: number | null;
   careerSeasons?: any[];
   ip?: number | null;
@@ -475,8 +476,8 @@ export function assessHitterRisk(input: HitterRiskInput): RiskAssessment {
     ev90: input.ev90, pull: input.pull, gb: input.gb, bb: input.bb,
   }));
 
-  // 2. Competition (weight: 25%)
-  factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus, input.confHitterTalentPlus));
+  // 2. Competition (weight: 25%) — hitters face pitching, so use Conf Stuff+
+  factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus, "Conf Stuff+"));
 
   // 3. Trajectory (weight: 20%)
   const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "hitter");
@@ -507,8 +508,8 @@ export function assessPitcherRisk(input: PitcherRiskInput): RiskAssessment {
     gb: input.gb, izWhiff: input.izWhiff,
   }));
 
-  // 2. Competition (weight: 20%)
-  factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus, input.confHitterTalentPlus));
+  // 2. Competition (weight: 20%) — pitchers face hitting, so use Conf Hitter Talent+
+  factors.push(assessCompetitionRisk(input.conference, input.confHitterTalentPlus, "Conf Hitter Talent+"));
 
   // 3. Trajectory (weight: 20%)
   const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "pitcher");
