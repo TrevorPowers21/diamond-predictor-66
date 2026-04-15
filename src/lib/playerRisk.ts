@@ -109,21 +109,22 @@ function assessHitterTypeRisk(metrics: {
   const ld = metrics.lineDrive;
   const ev = metrics.avgEv;
 
+  // Chase/contact thresholds calibrated to ~85th percentile for "elite"
   const badChase = chase != null && chase > 30;
-  const goodChase = chase != null && chase < 24;
+  const goodChase = chase != null && chase < 22;    // ~85th pctl
   const badContact = contact != null && contact < 70;
-  const goodContact = contact != null && contact > 78;
+  const goodContact = contact != null && contact > 80; // ~75th pctl — "plus"
+  const eliteChase = chase != null && chase < 19;   // ~85th pctl
+  const eliteContact = contact != null && contact > 85; // ~85th pctl
 
   // Both below average — this is the profile that does NOT carry as competition rises
   if (badChase && badContact) {
     risk += 30;
     reasons.push("high chase + low contact — profile most exposed at higher competition");
   } else if (badChase && !goodContact) {
-    // Bad chase, mediocre contact — still risky
     risk += 18;
     reasons.push("high chase with mediocre contact");
   } else if (badContact && !goodChase) {
-    // Bad contact, mediocre chase — risky
     risk += 18;
     reasons.push("low contact with mediocre chase");
   } else {
@@ -131,27 +132,30 @@ function assessHitterTypeRisk(metrics: {
     if (chase != null) {
       if (chase > 32) { risk += 12; reasons.push("high chase rate"); }
       else if (chase > 28) { risk += 5; }
-      else if (chase < 22) { risk -= 12; reasons.push("elite plate discipline"); }
-      else if (chase < 24) { risk -= 6; }
+      else if (eliteChase) { risk -= 12; reasons.push("elite plate discipline"); }
+      else if (goodChase) { risk -= 6; reasons.push("plus discipline"); }
     }
 
     if (contact != null) {
-      if (contact > 82) { risk -= 18; reasons.push("elite contact — carries at any level"); }
-      else if (contact > 78) { risk -= 10; reasons.push("plus contact"); }
+      if (eliteContact) { risk -= 18; reasons.push("elite contact — carries at any level"); }
+      else if (goodContact) { risk -= 10; reasons.push("plus contact"); }
       else if (contact < 65) { risk += 12; reasons.push("swing-and-miss concerns"); }
       else if (contact < 70) { risk += 6; }
     }
   }
 
-  // Good chase + good contact = extremely safe floor
-  if (goodChase && goodContact) {
-    risk -= 12;
-    reasons.push("elite approach — low chase + high contact floor");
+  // Elite chase + elite contact = extremely safe floor
+  if (eliteChase && eliteContact) {
+    risk -= 14;
+    reasons.push("elite approach — top-tier chase + contact floor");
+  } else if (goodChase && goodContact) {
+    risk -= 8;
+    reasons.push("plus approach — low chase + good contact floor");
   }
 
   if (whiff != null) {
     if (whiff > 30) { risk += 8; reasons.push("high whiff rate"); }
-    else if (whiff < 18) { risk -= 6; }
+    else if (whiff < 15) { risk -= 6; reasons.push("plus bat-to-ball"); }
   }
 
   // ── Exit Velocity / EV90 — secondary risk factor ──
@@ -161,11 +165,13 @@ function assessHitterTypeRisk(metrics: {
   if (ev != null) {
     if (ev < 83) { risk += 8; reasons.push("below-avg exit velo — weak contact risk"); }
     else if (ev < 85) { risk += 4; }
-    else if (ev > 90) { risk -= 6; reasons.push("plus exit velocity"); }
+    else if (ev > 92) { risk -= 6; reasons.push("elite exit velocity"); }
+    else if (ev > 89) { risk -= 3; reasons.push("plus exit velocity"); }
   }
   if (ev90 != null) {
     if (ev90 < 95) { risk += 5; reasons.push("low EV90 — ceiling concern"); }
-    else if (ev90 > 102) { risk -= 4; reasons.push("elite top-end power"); }
+    else if (ev90 > 104) { risk -= 4; reasons.push("elite top-end power"); }
+    else if (ev90 > 100) { risk -= 2; reasons.push("plus top-end power"); }
   }
 
   // High contact + high LD = safer floor profile
@@ -223,35 +229,40 @@ function assessPitcherTypeRisk(metrics: {
   const hh = metrics.hardHit;
   const gb = metrics.gb;
 
-  // Stuff+ driven assessment
+  // Stuff+ driven assessment — elite = ~85th pctl (~115+)
   if (stuff != null) {
-    if (stuff >= 110) { risk -= 15; reasons.push("elite Stuff+"); }
-    else if (stuff >= 100) { risk -= 5; }
+    if (stuff >= 115) { risk -= 15; reasons.push("elite Stuff+"); }
+    else if (stuff >= 105) { risk -= 8; reasons.push("plus Stuff+"); }
+    else if (stuff >= 100) { risk -= 3; }
     else if (stuff < 90) { risk += 15; reasons.push("below-avg Stuff+"); }
     else if (stuff < 95) { risk += 8; }
   }
 
-  // Whiff rate
+  // Whiff rate — elite = ~85th pctl (~30%+)
   if (whiff != null) {
-    if (whiff >= 28) { risk -= 10; reasons.push("elite swing-and-miss"); }
+    if (whiff >= 30) { risk -= 10; reasons.push("elite swing-and-miss"); }
+    else if (whiff >= 25) { risk -= 5; reasons.push("plus whiff rate"); }
     else if (whiff < 18) { risk += 12; reasons.push("low whiff rate"); }
   }
 
-  // Walk rate — control risk
+  // Walk rate — control risk — elite control = ~85th pctl (<4%)
   if (bb != null) {
     if (bb > 12) { risk += 15; reasons.push("high walk rate"); }
     else if (bb > 9) { risk += 7; }
-    else if (bb < 5) { risk -= 10; reasons.push("excellent control"); }
+    else if (bb < 4) { risk -= 10; reasons.push("elite control"); }
+    else if (bb < 6) { risk -= 5; reasons.push("plus control"); }
   }
 
   // Hard hit / barrel against — contact quality allowed
   if (hh != null) {
     if (hh > 40) { risk += 12; reasons.push("high hard-hit allowed"); }
-    else if (hh < 28) { risk -= 8; reasons.push("limits hard contact"); }
+    else if (hh < 25) { risk -= 8; reasons.push("elite contact suppression"); }
+    else if (hh < 30) { risk -= 4; reasons.push("limits hard contact"); }
   }
   if (barrel != null) {
     if (barrel > 8) { risk += 10; reasons.push("barrel-prone"); }
-    else if (barrel < 4) { risk -= 8; }
+    else if (barrel < 3) { risk -= 8; reasons.push("elite barrel suppression"); }
+    else if (barrel < 5) { risk -= 4; }
   }
 
   // Ground ball rate — high GB = safer
