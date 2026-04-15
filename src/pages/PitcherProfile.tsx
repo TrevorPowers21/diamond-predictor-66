@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Target, TrendingUp } from "lucide-react";
+import { ArrowLeft, Download, Target, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { supabase } from "@/integrations/supabase/client";
@@ -20,6 +20,7 @@ import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
+import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
@@ -1500,20 +1501,58 @@ export default function PitcherProfile() {
             </Badge>
           )}
           {!isHistoricalView && player && (
-            <Button
-              variant={isOnBoard(player.id) ? "default" : "outline"}
-              size="sm"
-              onClick={() => {
-                if (isOnBoard(player.id)) {
-                  removeFromBoard(player.id);
-                } else {
-                  addToBoard({ playerId: player.id });
-                }
-              }}
-            >
-              <Target className="mr-2 h-3.5 w-3.5" />
-              {isOnBoard(player.id) ? "On Board" : "Target Board"}
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const rp: ReportPlayer = {
+                    id: player.id,
+                    player_type: "pitcher",
+                    name: `${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName,
+                    school: displayTeam,
+                    position: effectiveRoleDisplay || "P",
+                    class_year: displayClass || undefined,
+                    bats_throws: player.throws_hand ? `${player.throws_hand}/${player.throws_hand}` : undefined,
+                    p_era: projectedPitching.pEra, p_fip: projectedPitching.pFip,
+                    p_whip: projectedPitching.pWhip, p_k9: projectedPitching.pK9,
+                    p_bb9: projectedPitching.pBb9, p_hr9: projectedPitching.pHr9,
+                    p_war: projectedPitching.pWar,
+                    market_value: projectedPitching.marketValue,
+                    overall_pr_plus: internalPowerRatings?.overallPlus,
+                    stuff_plus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
+                    whiff_pct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                    stuff_score: internalPowerRatings?.scores?.stuff,
+                    whiff_score: internalPowerRatings?.scores?.whiff,
+                    bb_score: internalPowerRatings?.scores?.bb,
+                    barrel_score: internalPowerRatings?.scores?.barrel,
+                    career_seasons: pitcherMasterSeasons as any[],
+                    pitches: pitchArsenal.rows.map((r) => ({
+                      pitch_name: r.pitchType, usage: r.usagePct,
+                      whiff: r.whiffPct, stuff_plus: r.stuffPlus,
+                    })),
+                  };
+                  try { downloadSinglePlayerReport(rp); } catch (err: any) { toast.error(`Export failed: ${err.message}`); }
+                }}
+              >
+                <Download className="mr-2 h-3.5 w-3.5" />
+                Export PDF
+              </Button>
+              <Button
+                variant={isOnBoard(player.id) ? "default" : "outline"}
+                size="sm"
+                onClick={() => {
+                  if (isOnBoard(player.id)) {
+                    removeFromBoard(player.id);
+                  } else {
+                    addToBoard({ playerId: player.id });
+                  }
+                }}
+              >
+                <Target className="mr-2 h-3.5 w-3.5" />
+                {isOnBoard(player.id) ? "On Board" : "Target Board"}
+              </Button>
+            </>
           )}
         </div>
 

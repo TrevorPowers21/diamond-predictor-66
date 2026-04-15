@@ -38,6 +38,13 @@ import { useParkFactors } from "@/hooks/useParkFactors";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { useAuth } from "@/hooks/useAuth";
 import { HistoricalPlayerTable, HistoricalPitcherTable } from "@/components/HistoricalPlayerTable";
+import {
+  ScoutingReportProvider,
+  PlayerSelectCheckbox,
+  DownloadReportBar,
+  type ReportPlayer,
+} from "@/components/ScoutingReport";
+import { useHighFollow } from "@/hooks/useHighFollow";
 
 type SortKey =
   | "name"
@@ -732,6 +739,7 @@ export default function ReturningPlayers() {
   const { hasRole } = useAuth();
   const isAdmin = hasRole("admin");
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
+  const { addPlayers: addToHighFollow } = useHighFollow();
   const [sortKey, setSortKey] = useState<SortKey>("p_wrc_plus");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [bulkEditMode, setBulkEditMode] = useState(false);
@@ -1816,7 +1824,8 @@ export default function ReturningPlayers() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-4 max-w-[1600px] mx-auto">
+      <ScoutingReportProvider>
+      <div className="space-y-4 max-w-[1600px] mx-auto pb-20">
         {/* Header */}
         <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -1990,6 +1999,7 @@ export default function ReturningPlayers() {
                   <Table>
                     <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
                       <TableRow>
+                        <TableHead className="w-[32px] p-1"></TableHead>
                         <TableHead className="min-w-[140px] sticky left-0 z-30 bg-background">
                           <SortButton label="Player" sortKeyVal="name" />
                         </TableHead>
@@ -2011,6 +2021,23 @@ export default function ReturningPlayers() {
                         const effectivePosition = playerOverrides[p.id]?.position ?? p.position;
                         return (
                           <TableRow key={p.prediction_id} className="cursor-pointer hover:bg-muted/50 transition-colors">
+                            <TableCell className="p-1 text-center">
+                              <PlayerSelectCheckbox player={{
+                                id: p.id,
+                                player_type: "hitter",
+                                name: `${p.first_name} ${p.last_name}`,
+                                school: p.team,
+                                position: effectivePosition,
+                                class_year: p.class_year,
+                                p_avg: pred.p_avg, p_obp: pred.p_obp, p_slg: pred.p_slg,
+                                p_ops: pred.p_ops, p_iso: pred.p_iso, p_wrc_plus: pred.p_wrc_plus,
+                                owar: computeOWarFromWrcPlus(pred.p_wrc_plus),
+                                nil_value: p.nil_value,
+                                power_rating_plus: pred.power_rating_plus,
+                                barrel_score: pred.barrel_score, ev_score: pred.ev_score,
+                                contact_score: pred.contact_score, chase_score: pred.chase_score,
+                              } satisfies ReportPlayer} />
+                            </TableCell>
                             <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
                               <Link
                                 to={profileRouteFor(p.id, effectivePosition)}
@@ -2226,6 +2253,7 @@ export default function ReturningPlayers() {
                     <Table>
                       <TableHeader className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_hsl(var(--border))]">
                         <TableRow>
+                          <TableHead className="w-[32px] p-1"></TableHead>
                           <TableHead className="min-w-[160px] sticky left-0 z-30 bg-background">
                             <span className="font-medium text-muted-foreground">Player</span>
                           </TableHead>
@@ -2245,6 +2273,21 @@ export default function ReturningPlayers() {
                       <TableBody>
                         {pagedPitchingRows.map((r) => (
                           <TableRow key={r.id} className="cursor-pointer hover:bg-muted/50 transition-colors">
+                            <TableCell className="p-1 text-center">
+                              <PlayerSelectCheckbox player={{
+                                id: r.id,
+                                player_type: "pitcher",
+                                name: r.playerName,
+                                school: r.team,
+                                position: r.handedness === "R" ? "RHP" : r.handedness === "L" ? "LHP" : "P",
+                                p_era: r.p_era, p_fip: r.p_fip, p_whip: r.p_whip,
+                                p_k9: r.p_k9, p_bb9: r.p_bb9, p_hr9: r.p_hr9,
+                                p_war: r.p_war, market_value: r.market_value,
+                                overall_pr_plus: r.era_pr_plus,
+                                stuff_score: r.stuff_score, whiff_score: r.whiff_score,
+                                bb_score: r.bb_score, barrel_score: r.barrel_score,
+                              } satisfies ReportPlayer} />
+                            </TableCell>
                             <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
                               <Link
                                 to={`/dashboard/pitcher/storage__${encodeURIComponent(r.playerName)}__${encodeURIComponent(r.team || "")}`}
@@ -2328,6 +2371,10 @@ export default function ReturningPlayers() {
           </>
         )}
       </div>
+      <DownloadReportBar onAddToHighFollow={(players) => {
+        addToHighFollow(players.map((p) => ({ playerId: p.id, playerType: p.player_type })));
+      }} />
+      </ScoutingReportProvider>
     </DashboardLayout>
   );
 }

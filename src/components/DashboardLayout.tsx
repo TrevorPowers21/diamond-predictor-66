@@ -14,6 +14,7 @@ import {
   Hammer,
   ShieldCheck,
   ChevronRight,
+  Star,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -22,6 +23,7 @@ const navItems = [
   { label: "Transfer Portal", href: "/dashboard/portal", icon: Users, description: "Simulate transfers" },
   { label: "Team Builder", href: "/dashboard/team-builder", icon: Hammer, description: "Build your roster" },
   { label: "Player Dashboard", href: "/dashboard/returning", icon: Activity, description: "All player stats" },
+  { label: "High Follow", href: "/dashboard/high-follow", icon: Star, description: "Your watchlist" },
   { label: "Compare", href: "/dashboard/compare", icon: GitCompare, description: "Side-by-side analysis" },
 ];
 

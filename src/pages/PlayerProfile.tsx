@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, Pencil, Save, X, TrendingUp, TrendingDown, ShieldCheck, Target } from "lucide-react";
+import { ArrowLeft, Download, Pencil, Save, X, TrendingUp, TrendingDown, ShieldCheck, Target } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useHitterSeedData } from "@/hooks/useHitterSeedData";
@@ -25,6 +25,7 @@ import {
 import { readPlayerOverrides } from "@/lib/playerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
+import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -820,20 +821,52 @@ export default function PlayerProfile() {
             </Badge>
           )}
           {!isHistoricalView && (
-            <Button
-              variant={isOnBoard(player.id) ? "default" : "outline"}
-              size="sm"
-              onClick={() => {
-                if (isOnBoard(player.id)) {
-                  removeFromBoard(player.id);
-                } else {
-                  addToBoard({ playerId: player.id });
-                }
-              }}
-            >
-              <Target className="mr-2 h-3.5 w-3.5" />
-              {isOnBoard(player.id) ? "On Board" : "Target Board"}
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const rp: ReportPlayer = {
+                    id: player.id,
+                    player_type: "hitter",
+                    name: `${player.first_name || ""} ${player.last_name || ""}`.trim(),
+                    school: displayTeam2025 || player.team,
+                    position: effectivePosition,
+                    class_year: player.class_year,
+                    bats_throws: [(player as any).bats_hand, (player as any).throws_hand].filter(Boolean).join("/") || undefined,
+                    p_avg: projectedAvg, p_obp: projectedObp, p_slg: projectedSlg,
+                    p_ops: projectedDerived.ops, p_iso: projectedDerived.iso,
+                    p_wrc_plus: projectedWrcPlus,
+                    owar: displayOWar,
+                    nil_value: displayNilValuation,
+                    power_rating_plus: seedPowerDerived?.overallPlus,
+                    barrel_score: seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined,
+                    ev_score: seedPowerDerived?.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : undefined,
+                    contact_score: seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined,
+                    chase_score: seedPowerDerived?.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : undefined,
+                    career_seasons: hitterMasterSeasons as any[],
+                  };
+                  try { downloadSinglePlayerReport(rp); } catch (err: any) { toast.error(`Export failed: ${err.message}`); }
+                }}
+              >
+                <Download className="mr-2 h-3.5 w-3.5" />
+                Export PDF
+              </Button>
+              <Button
+                variant={isOnBoard(player.id) ? "default" : "outline"}
+                size="sm"
+                onClick={() => {
+                  if (isOnBoard(player.id)) {
+                    removeFromBoard(player.id);
+                  } else {
+                    addToBoard({ playerId: player.id });
+                  }
+                }}
+              >
+                <Target className="mr-2 h-3.5 w-3.5" />
+                {isOnBoard(player.id) ? "On Board" : "Target Board"}
+              </Button>
+            </>
           )}
           {!editing ? (
             <Button variant="outline" size="sm" onClick={startEdit}>

@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# PDF API
+pdf-api/venv/
+pdf-api/.env
+pdf-api/__pycache__/
