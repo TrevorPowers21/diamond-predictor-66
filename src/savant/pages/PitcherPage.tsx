@@ -13,6 +13,7 @@ import { usePitcherCareer } from "@/savant/hooks/usePitcherCareer";
 import { usePitcherStuffPlus } from "@/savant/hooks/usePitcherStuffPlus";
 import { percentileRank } from "@/savant/lib/percentile";
 import { computePrvPlus } from "@/savant/lib/prvPlus";
+import { assessPitcherRisk, type RiskGrade } from "@/lib/playerRisk";
 
 const fmt2 = (v: number) => v.toFixed(2);
 const fmt1 = (v: number) => v.toFixed(1);
@@ -202,6 +203,53 @@ export default function PitcherPage() {
 
           {/* ─── RIGHT COLUMN ─── */}
           <div className="space-y-6">
+
+            {/* Risk Assessment */}
+            {(() => {
+              const risk = assessPitcherRisk({
+                conference: player.Conference,
+                careerSeasons: careerRows,
+                ip: player.IP, classYear: undefined,
+                stuffPlus: player.stuff_plus,
+                whiffPct: player.miss_pct, bbPct: player.bb_pct,
+                chase: player.chase_pct, barrel: player.barrel_pct,
+                hardHit: player.hard_hit_pct, gb: player.ground_pct,
+                izWhiff: player.in_zone_whiff_pct,
+              });
+              const gc: Record<RiskGrade, string> = {
+                Low: "text-[hsl(142,71%,35%)] border-[hsl(142,71%,45%,0.3)] bg-[hsl(142,71%,45%,0.08)]",
+                Moderate: "text-[hsl(200,80%,35%)] border-[hsl(200,80%,50%,0.3)] bg-[hsl(200,80%,50%,0.08)]",
+                Elevated: "text-[hsl(45,80%,45%)] border-[hsl(45,80%,45%,0.3)] bg-[hsl(45,80%,45%,0.08)]",
+                High: "text-[hsl(0,72%,41%)] border-[hsl(0,72%,51%,0.3)] bg-[hsl(0,72%,51%,0.08)]",
+              };
+              return (
+                <section className="border px-5 py-4" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-xs font-bold uppercase tracking-[0.22em] text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "'Oswald', sans-serif" }}>
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#D4AF37]" />Risk Assessment
+                    </h2>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${gc[risk.grade]}`}>{risk.grade}</span>
+                  </div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">Trajectory:</span>
+                    <span className={`text-[11px] font-bold ${risk.trajectory === "Progressing" ? "text-[hsl(142,71%,35%)]" : risk.trajectory === "Regressing" ? "text-[hsl(0,72%,41%)]" : risk.trajectory === "Plateau" ? "text-[hsl(45,80%,45%)]" : "text-[#8a94a6]"}`}>{risk.trajectory}</span>
+                  </div>
+                  <p className="text-[11px] text-[#8a94a6] leading-relaxed mb-3">{risk.summary}</p>
+                  <div className="space-y-1.5">
+                    {risk.factors.map((f) => (
+                      <div key={f.label} className="flex items-center gap-2">
+                        <div className="w-[70px] text-[9px] uppercase tracking-wider font-semibold text-[#8a94a6] shrink-0">{f.label}</div>
+                        <div className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden">
+                          <div className={`h-full rounded-full ${f.score <= 25 ? "bg-[hsl(142,71%,45%)]" : f.score <= 50 ? "bg-[hsl(200,80%,50%)]" : f.score <= 75 ? "bg-[hsl(45,80%,50%)]" : "bg-[hsl(0,72%,51%)]"}`} style={{ width: `${f.score}%` }} />
+                        </div>
+                        <div className="w-6 text-right text-[9px] tabular-nums text-[#8a94a6]">{f.score}</div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            })()}
+
             <section
               className="border px-6 py-5"
               style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}

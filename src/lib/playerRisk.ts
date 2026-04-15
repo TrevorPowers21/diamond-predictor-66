@@ -223,32 +223,39 @@ function assessPitcherTypeRisk(metrics: {
 
 // ── Factor 2: Competition Factor ────────────────────────────────────
 
-function assessCompetitionRisk(conference: string | null | undefined, confStuffPlus?: number | null): RiskFactor {
+function assessCompetitionRisk(conference: string | null | undefined, confStuffPlus?: number | null, confWrcPlus?: number | null): RiskFactor {
   const tier = getConfTier(conference);
   let risk: number;
-  let detail: string;
+  let detailParts: string[] = [];
 
   if (tier === 1) {
     risk = 10;
-    detail = "Power conference — elite competition";
+    detailParts.push("Power conference — elite competition");
   } else if (tier === 2) {
     risk = 30;
-    detail = "Strong conference — quality competition";
+    detailParts.push("Strong conference — quality competition");
   } else if (tier === 3) {
     risk = 55;
-    detail = "Mid-tier conference — stats may be inflated";
+    detailParts.push("Mid-tier conference — stats may be inflated");
   } else {
     risk = 75;
-    detail = "Lower conference — significant inflation risk";
+    detailParts.push("Lower conference — significant inflation risk");
   }
 
-  // If we have actual conference Stuff+, adjust
+  // Adjust with actual conference metrics
   if (confStuffPlus != null) {
-    if (confStuffPlus > 102) risk = Math.max(risk - 10, 0);
-    else if (confStuffPlus < 96) risk = Math.min(risk + 10, 100);
+    if (confStuffPlus > 102) { risk = Math.max(risk - 10, 0); detailParts.push(`Conf Stuff+ ${Math.round(confStuffPlus)}`); }
+    else if (confStuffPlus < 96) { risk = Math.min(risk + 10, 100); detailParts.push(`Conf Stuff+ ${Math.round(confStuffPlus)}`); }
+    else { detailParts.push(`Conf Stuff+ ${Math.round(confStuffPlus)}`); }
   }
 
-  return { label: "Competition", score: clamp(risk), grade: toGrade(clamp(risk)), detail };
+  if (confWrcPlus != null) {
+    if (confWrcPlus > 105) { risk = Math.max(risk - 5, 0); detailParts.push(`Conf wRC+ ${Math.round(confWrcPlus)}`); }
+    else if (confWrcPlus < 95) { risk = Math.min(risk + 5, 100); detailParts.push(`Conf wRC+ ${Math.round(confWrcPlus)}`); }
+    else { detailParts.push(`Conf wRC+ ${Math.round(confWrcPlus)}`); }
+  }
+
+  return { label: "Competition", score: clamp(risk), grade: toGrade(clamp(risk)), detail: detailParts.join("; ") };
 }
 
 // ── Factor 3: Performance Trajectory ────────────────────────────────
@@ -394,6 +401,7 @@ function buildSummary(grade: RiskGrade, trajectory: Trajectory, factors: RiskFac
 export interface HitterRiskInput {
   conference?: string | null;
   confStuffPlus?: number | null;
+  confWrcPlus?: number | null;
   careerSeasons?: any[];
   pa?: number | null;
   // Scouting metrics
@@ -412,6 +420,7 @@ export interface HitterRiskInput {
 export interface PitcherRiskInput {
   conference?: string | null;
   confStuffPlus?: number | null;
+  confWrcPlus?: number | null;
   careerSeasons?: any[];
   ip?: number | null;
   classYear?: string | null;
@@ -437,7 +446,7 @@ export function assessHitterRisk(input: HitterRiskInput): RiskAssessment {
   }));
 
   // 2. Competition (weight: 25%)
-  factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus));
+  factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus, input.confWrcPlus));
 
   // 3. Trajectory (weight: 20%)
   const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "hitter");
@@ -469,7 +478,7 @@ export function assessPitcherRisk(input: PitcherRiskInput): RiskAssessment {
   }));
 
   // 2. Competition (weight: 20%)
-  factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus));
+  factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus, input.confWrcPlus));
 
   // 3. Trajectory (weight: 20%)
   const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "pitcher");

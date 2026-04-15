@@ -1863,6 +1863,62 @@ export default function PitcherProfile() {
               </Card>
             )}
 
+            {/* Risk Assessment */}
+            {(() => {
+              const risk = assessPitcherRisk({
+                conference: displayConference !== "—" ? displayConference : undefined,
+                careerSeasons: pitcherMasterSeasons as any[],
+                ip: (masterRow as any)?.IP ?? null, classYear: displayClass || undefined,
+                stuffPlus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
+                whiffPct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                bbPct: internalPowerRatings?.metrics?.bb, chase: internalPowerRatings?.metrics?.chase,
+                barrel: internalPowerRatings?.metrics?.barrel, hardHit: internalPowerRatings?.metrics?.hh,
+                gb: internalPowerRatings?.metrics?.gb, izWhiff: internalPowerRatings?.metrics?.izWhiff,
+              });
+              const gradeColor: Record<RiskGrade, string> = {
+                Low: "text-[hsl(142,71%,35%)] border-[hsl(142,71%,45%,0.3)] bg-[hsl(142,71%,45%,0.08)]",
+                Moderate: "text-[hsl(200,80%,35%)] border-[hsl(200,80%,50%,0.3)] bg-[hsl(200,80%,50%,0.08)]",
+                Elevated: "text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.08)]",
+                High: "text-[hsl(0,72%,41%)] border-[hsl(0,72%,51%,0.3)] bg-[hsl(0,72%,51%,0.08)]",
+              };
+              return (
+                <Card className="border-[#162241] bg-[#0a1428]">
+                  <CardHeader className="pb-2 pt-3 px-4">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Risk Assessment</CardTitle>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${gradeColor[risk.grade]}`}>{risk.grade} Risk</span>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Trajectory:</span>
+                      <span className={`text-xs font-bold ${risk.trajectory === "Progressing" ? "text-[hsl(142,71%,35%)]" : risk.trajectory === "Regressing" ? "text-[hsl(0,72%,41%)]" : risk.trajectory === "Plateau" ? "text-[hsl(var(--warning))]" : "text-[#8a94a6]"}`}>{risk.trajectory}</span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">{risk.summary}</p>
+                    <div className="space-y-1.5">
+                      {risk.factors.map((f) => (
+                        <div key={f.label} className="flex items-center gap-2">
+                          <div className="w-20 text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6] shrink-0">{f.label}</div>
+                          <div className="flex-1 h-2 rounded-full bg-[#162241] overflow-hidden">
+                            <div className={`h-full rounded-full transition-all ${f.score <= 25 ? "bg-[hsl(142,71%,45%)]" : f.score <= 50 ? "bg-[hsl(200,80%,50%)]" : f.score <= 75 ? "bg-[hsl(var(--warning))]" : "bg-[hsl(0,72%,51%)]"}`} style={{ width: `${f.score}%` }} />
+                          </div>
+                          <div className="w-8 text-right text-[10px] tabular-nums text-[#8a94a6] font-semibold">{f.score}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-1 pt-1 border-t border-[#162241]">
+                      {risk.factors.map((f) => (
+                        <div key={f.label} className="flex gap-2 text-[11px]">
+                          <span className="text-[#8a94a6] shrink-0">{f.label}:</span>
+                          <span className="text-slate-400">{f.detail}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
+
             {isAdmin ? (
               <Card className="border-[#162241] bg-[#0a1428]">
                 <CardHeader className="pt-3 px-4 pb-2">
@@ -1917,79 +1973,6 @@ export default function PitcherProfile() {
                 </CardContent>
               </Card>
             ) : null}
-
-            {/* Risk Assessment */}
-            {(() => {
-              const risk = assessPitcherRisk({
-                conference: displayConference !== "—" ? displayConference : undefined,
-                careerSeasons: pitcherMasterSeasons as any[],
-                ip: (masterRow as any)?.IP ?? null,
-                classYear: displayClass || undefined,
-                stuffPlus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
-                whiffPct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
-                bbPct: internalPowerRatings?.metrics?.bb,
-                chase: internalPowerRatings?.metrics?.chase,
-                barrel: internalPowerRatings?.metrics?.barrel,
-                hardHit: internalPowerRatings?.metrics?.hh,
-                gb: internalPowerRatings?.metrics?.gb,
-                izWhiff: internalPowerRatings?.metrics?.izWhiff,
-              });
-              const gradeColor: Record<RiskGrade, string> = {
-                Low: "text-[hsl(142,71%,35%)] border-[hsl(142,71%,45%,0.3)] bg-[hsl(142,71%,45%,0.08)]",
-                Moderate: "text-[hsl(200,80%,35%)] border-[hsl(200,80%,50%,0.3)] bg-[hsl(200,80%,50%,0.08)]",
-                Elevated: "text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.08)]",
-                High: "text-[hsl(0,72%,41%)] border-[hsl(0,72%,51%,0.3)] bg-[hsl(0,72%,51%,0.08)]",
-              };
-              return (
-                <Card className="border-[#162241] bg-[#0a1428]">
-                  <CardHeader className="pb-2 pt-3 px-4">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Risk Assessment</CardTitle>
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${gradeColor[risk.grade]}`}>
-                        {risk.grade} Risk
-                      </span>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="px-4 pb-4 space-y-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Trajectory:</span>
-                      <span className={`text-xs font-bold ${
-                        risk.trajectory === "Progressing" ? "text-[hsl(142,71%,35%)]" :
-                        risk.trajectory === "Regressing" ? "text-[hsl(0,72%,41%)]" :
-                        risk.trajectory === "Plateau" ? "text-[hsl(var(--warning))]" : "text-[#8a94a6]"
-                      }`}>{risk.trajectory}</span>
-                    </div>
-                    <p className="text-xs text-slate-300 leading-relaxed">{risk.summary}</p>
-                    <div className="space-y-1.5">
-                      {risk.factors.map((f) => (
-                        <div key={f.label} className="flex items-center gap-2">
-                          <div className="w-20 text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6] shrink-0">{f.label}</div>
-                          <div className="flex-1 h-2 rounded-full bg-[#162241] overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${
-                                f.score <= 25 ? "bg-[hsl(142,71%,45%)]" :
-                                f.score <= 50 ? "bg-[hsl(200,80%,50%)]" :
-                                f.score <= 75 ? "bg-[hsl(var(--warning))]" : "bg-[hsl(0,72%,51%)]"
-                              }`}
-                              style={{ width: `${f.score}%` }}
-                            />
-                          </div>
-                          <div className="w-8 text-right text-[10px] tabular-nums text-[#8a94a6] font-semibold">{f.score}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="space-y-1 pt-1 border-t border-[#162241]">
-                      {risk.factors.map((f) => (
-                        <div key={f.label} className="flex gap-2 text-[11px]">
-                          <span className="text-[#8a94a6] shrink-0">{f.label}:</span>
-                          <span className="text-slate-400">{f.detail}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })()}
           </div>
         </div>
       </div>
