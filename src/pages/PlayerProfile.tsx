@@ -854,11 +854,11 @@ export default function PlayerProfile() {
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="lg:col-span-1 space-y-4">
             {/* Player Info Card */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Player Info</CardTitle>
+            <Card className="border-[#162241] bg-[#0a1428]">
+              <CardHeader className="pb-1 pt-3 px-4">
+                <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Player Info</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2 pt-0">
+              <CardContent className="space-y-2 pt-0 px-4 pb-4">
                 {editing ? (
                   <div className="space-y-2">
                   <div className="grid grid-cols-2 gap-2">
@@ -944,13 +944,20 @@ export default function PlayerProfile() {
                   </div>
                   </div>
                 ) : (
-                  <div className="space-y-1.5 text-sm">
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Team</span><span>{displayTeam2025 || "—"}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Conference</span><span>{resolvedConference || "—"}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Position</span><span>{effectivePosition || "—"}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Class</span><span>{(isReturner && regularPred?.class_transition ? classTransitionToYear[regularPred.class_transition] : null) || player.class_year || "—"}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Bats</span><span>{(player as any).bats_hand === "R" ? "Right" : (player as any).bats_hand === "L" ? "Left" : (player as any).bats_hand === "S" ? "Switch" : (player as any).bats_hand || "—"}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Throws</span><span>{(player as any).throws_hand === "R" ? "Right" : (player as any).throws_hand === "L" ? "Left" : (player as any).throws_hand || "—"}</span></div>
+                  <div className="space-y-2.5 text-sm">
+                  {[
+                    ["Team", displayTeam2025 || "—"],
+                    ["Conference", resolvedConference || "—"],
+                    ["Position", effectivePosition || "—"],
+                    ["Class", (isReturner && regularPred?.class_transition ? classTransitionToYear[regularPred.class_transition] : null) || player.class_year || "—"],
+                    ["Bats", (player as any).bats_hand === "R" ? "Right" : (player as any).bats_hand === "L" ? "Left" : (player as any).bats_hand === "S" ? "Switch" : (player as any).bats_hand || "—"],
+                    ["Throws", (player as any).throws_hand === "R" ? "Right" : (player as any).throws_hand === "L" ? "Left" : (player as any).throws_hand || "—"],
+                  ].map(([label, val]) => (
+                    <div key={label} className="flex items-center justify-between border-b border-[#162241]/40 pb-1.5 last:border-0 last:pb-0">
+                      <span className="text-xs uppercase tracking-wider text-[#8a94a6]">{label}</span>
+                      <span className="font-semibold text-slate-100">{val}</span>
+                    </div>
+                  ))}
                   </div>
                 )}
               </CardContent>
@@ -958,74 +965,72 @@ export default function PlayerProfile() {
 
             {/* Career Stats Table */}
             {(hitterMasterSeasons as any[]).length > 0 && (
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Career Stats</CardTitle>
+              <Card className="border-[#162241] bg-[#0a1428]">
+                <CardHeader className="pb-1 pt-3 px-4">
+                  <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Career Stats</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b text-xs text-muted-foreground">
-                          <th className="text-left py-1.5 pr-2 font-medium">Year</th>
-                          <th className="text-left py-1.5 px-1 font-medium">Team</th>
-                          <th className="text-right py-1.5 px-1 font-medium">PA</th>
-                          <th className="text-right py-1.5 px-1 font-medium">AVG</th>
-                          <th className="text-right py-1.5 px-1 font-medium">OBP</th>
-                          <th className="text-right py-1.5 px-1 font-medium">SLG</th>
-                          <th className="text-right py-1.5 px-1 font-medium">OPS</th>
-                          <th className="text-right py-1.5 pl-1 font-medium">ISO</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(hitterMasterSeasons as any[])
-                          .sort((a, b) => Number(a.Season) - Number(b.Season))
-                          .map((row: any) => {
-                            const ops = row.OBP != null && row.SLG != null ? (Number(row.OBP) + Number(row.SLG)) : null;
-                            const iso = row.SLG != null && row.AVG != null ? (Number(row.SLG) - Number(row.AVG)) : null;
-                            return (
-                              <tr key={row.Season} className="border-b last:border-0">
-                                <td className="py-1.5 pr-2 font-semibold">{row.Season}</td>
-                                <td className="py-1.5 px-1 text-muted-foreground">{row.Team ?? "—"}</td>
-                                <td className="py-1.5 px-1 text-right tabular-nums">{row.pa ?? "—"}</td>
-                                <td className="py-1.5 px-1 text-right tabular-nums">{row.AVG != null ? Number(row.AVG).toFixed(3) : "—"}</td>
-                                <td className="py-1.5 px-1 text-right tabular-nums">{row.OBP != null ? Number(row.OBP).toFixed(3) : "—"}</td>
-                                <td className="py-1.5 px-1 text-right tabular-nums">{row.SLG != null ? Number(row.SLG).toFixed(3) : "—"}</td>
-                                <td className="py-1.5 px-1 text-right tabular-nums">{ops != null ? ops.toFixed(3) : "—"}</td>
-                                <td className="py-1.5 pl-1 text-right tabular-nums">{iso != null ? iso.toFixed(3) : "—"}</td>
-                              </tr>
-                            );
-                          })}
-                        {(hitterMasterSeasons as any[]).length > 1 && (() => {
-                          const rows = hitterMasterSeasons as any[];
-                          const totalPa = rows.reduce((s, r) => s + (Number(r.pa) || 0), 0);
-                          if (totalPa === 0) return null;
-                          const wAvg = (field: string) => {
-                            let sv = 0, sw = 0;
-                            for (const r of rows) { const v = Number(r[field]); const w = Number(r.pa) || 0; if (Number.isFinite(v) && w > 0) { sv += v * w; sw += w; } }
-                            return sw > 0 ? sv / sw : null;
-                          };
-                          const cAvg = wAvg("AVG");
-                          const cObp = wAvg("OBP");
-                          const cSlg = wAvg("SLG");
-                          const cOps = cObp != null && cSlg != null ? cObp + cSlg : null;
-                          const cIso = cSlg != null && cAvg != null ? cSlg - cAvg : null;
+                <CardContent className="px-3 pb-3">
+                  <table className="w-full text-xs" style={{ fontFamily: "Inter, sans-serif" }}>
+                    <thead>
+                      <tr className="border-b border-[#162241]">
+                        <th className="text-left py-1.5 pr-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Year</th>
+                        <th className="text-left py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Team</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">PA</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">AVG</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">OBP</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">SLG</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">OPS</th>
+                        <th className="text-right py-1.5 pl-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">ISO</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(hitterMasterSeasons as any[])
+                        .sort((a, b) => Number(a.Season) - Number(b.Season))
+                        .map((row: any, i: number) => {
+                          const ops = row.OBP != null && row.SLG != null ? (Number(row.OBP) + Number(row.SLG)) : null;
+                          const iso = row.SLG != null && row.AVG != null ? (Number(row.SLG) - Number(row.AVG)) : null;
                           return (
-                            <tr className="border-t-2 font-semibold">
-                              <td className="py-1.5 pr-2">Career</td>
-                              <td className="py-1.5 px-1"></td>
-                              <td className="py-1.5 px-1 text-right tabular-nums">{totalPa}</td>
-                              <td className="py-1.5 px-1 text-right tabular-nums">{cAvg != null ? cAvg.toFixed(3) : "—"}</td>
-                              <td className="py-1.5 px-1 text-right tabular-nums">{cObp != null ? cObp.toFixed(3) : "—"}</td>
-                              <td className="py-1.5 px-1 text-right tabular-nums">{cSlg != null ? cSlg.toFixed(3) : "—"}</td>
-                              <td className="py-1.5 px-1 text-right tabular-nums">{cOps != null ? cOps.toFixed(3) : "—"}</td>
-                              <td className="py-1.5 pl-1 text-right tabular-nums">{cIso != null ? cIso.toFixed(3) : "—"}</td>
+                            <tr key={row.Season} className={`border-b border-[#162241]/60 last:border-0 transition-colors duration-150 hover:bg-[#162241]/40 ${i % 2 === 1 ? "bg-[#0d1a30]" : ""}`}>
+                              <td className="py-1.5 pr-1 font-semibold text-white">{row.Season}</td>
+                              <td className="py-1.5 px-1 text-[#8a94a6] truncate max-w-[60px]">{row.Team ?? "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.pa ?? "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.AVG != null ? Number(row.AVG).toFixed(3) : "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.OBP != null ? Number(row.OBP).toFixed(3) : "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.SLG != null ? Number(row.SLG).toFixed(3) : "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{ops != null ? ops.toFixed(3) : "—"}</td>
+                              <td className="py-1.5 pl-1 text-right tabular-nums text-slate-200">{iso != null ? iso.toFixed(3) : "—"}</td>
                             </tr>
                           );
-                        })()}
-                      </tbody>
-                    </table>
-                  </div>
+                        })}
+                      {(hitterMasterSeasons as any[]).length > 1 && (() => {
+                        const rows = hitterMasterSeasons as any[];
+                        const totalPa = rows.reduce((s, r) => s + (Number(r.pa) || 0), 0);
+                        if (totalPa === 0) return null;
+                        const wAvg = (field: string) => {
+                          let sv = 0, sw = 0;
+                          for (const r of rows) { const v = Number(r[field]); const w = Number(r.pa) || 0; if (Number.isFinite(v) && w > 0) { sv += v * w; sw += w; } }
+                          return sw > 0 ? sv / sw : null;
+                        };
+                        const cAvg = wAvg("AVG");
+                        const cObp = wAvg("OBP");
+                        const cSlg = wAvg("SLG");
+                        const cOps = cObp != null && cSlg != null ? cObp + cSlg : null;
+                        const cIso = cSlg != null && cAvg != null ? cSlg - cAvg : null;
+                        return (
+                          <tr className={`border-t border-[#D4AF37]/30 ${rows.length % 2 === 1 ? "bg-[#0d1a30]" : ""}`}>
+                            <td className="py-1.5 pr-1 font-bold text-[#D4AF37]">Career</td>
+                            <td className="py-1.5 px-1"></td>
+                            <td className="py-1.5 px-1 text-right tabular-nums font-semibold text-white">{totalPa}</td>
+                            <td className="py-1.5 px-1 text-right tabular-nums font-semibold text-white">{cAvg != null ? cAvg.toFixed(3) : "—"}</td>
+                            <td className="py-1.5 px-1 text-right tabular-nums font-semibold text-white">{cObp != null ? cObp.toFixed(3) : "—"}</td>
+                            <td className="py-1.5 px-1 text-right tabular-nums font-semibold text-white">{cSlg != null ? cSlg.toFixed(3) : "—"}</td>
+                            <td className="py-1.5 px-1 text-right tabular-nums font-semibold text-white">{cOps != null ? cOps.toFixed(3) : "—"}</td>
+                            <td className="py-1.5 pl-1 text-right tabular-nums font-semibold text-white">{cIso != null ? cIso.toFixed(3) : "—"}</td>
+                          </tr>
+                        );
+                      })()}
+                    </tbody>
+                  </table>
                 </CardContent>
               </Card>
             )}
@@ -1034,16 +1039,16 @@ export default function PlayerProfile() {
           {/* Predictions & Scouting */}
           <div className="lg:col-span-2 space-y-4">
             <div className="grid gap-3 grid-cols-3">
-              <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4 text-center">
-                <div className="text-muted-foreground text-xs uppercase tracking-wide">oWAR</div>
+              <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">oWAR</div>
                 <div className={`text-3xl font-bold tracking-tight mt-1 ${warTierClass(displayOWar)}`}>{displayOWar != null ? displayOWar.toFixed(1) : "—"}</div>
               </div>
-              <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4 text-center">
-                <div className="text-muted-foreground text-xs uppercase tracking-wide">Market Value</div>
-                <div className="text-2xl font-bold tracking-tight mt-1">{displayNilValuation != null ? `$${Math.round(displayNilValuation).toLocaleString()}` : "—"}</div>
+              <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Market Value</div>
+                <div className="text-2xl font-bold tracking-tight mt-1 text-[#D4AF37]">{displayNilValuation != null ? `$${Math.round(displayNilValuation).toLocaleString()}` : "—"}</div>
               </div>
-              <div className="rounded-lg border p-4 text-center">
-                <div className="text-muted-foreground text-xs uppercase tracking-wide">Power Rating</div>
+              <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Power Rating</div>
                 <div className={`text-3xl font-bold tracking-tight mt-1 ${powerTierClass(seedPowerDerived?.overallPlus ?? null)}`}>{pctFormat(seedPowerDerived?.overallPlus ?? null)}</div>
               </div>
             </div>
@@ -1067,14 +1072,14 @@ export default function PlayerProfile() {
               </div>
             )}
 
-              <Card>
-                <CardHeader className="pb-2">
+              <Card className="border-[#162241] bg-[#0a1428]">
+                <CardHeader className="pb-2 pt-3 px-4">
                   <div className="flex items-center gap-3 flex-wrap">
-                    <CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4" />2026 Projected Stats</CardTitle>
+                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2026 Projected Stats</CardTitle>
                     {editingPrediction && regularPred ? (
                       <div className="flex items-center gap-1.5">
                         <Select value={predForm.class_transition || "none"} onValueChange={(v) => setPredForm({ ...predForm, class_transition: v === "none" ? "" : v })}>
-                          <SelectTrigger className="h-7 w-[65px] text-xs"><SelectValue /></SelectTrigger>
+                          <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">—</SelectItem>
                             <SelectItem value="FS">FS</SelectItem>
@@ -1084,7 +1089,7 @@ export default function PlayerProfile() {
                           </SelectContent>
                         </Select>
                         <Select value={predForm.dev_aggressiveness} onValueChange={(v) => setPredForm({ ...predForm, dev_aggressiveness: v })}>
-                          <SelectTrigger className="h-7 w-[65px] text-xs"><SelectValue /></SelectTrigger>
+                          <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="0">0.0</SelectItem>
                             <SelectItem value="0.5">0.5</SelectItem>
@@ -1100,8 +1105,8 @@ export default function PlayerProfile() {
                       </div>
                     ) : (
                       <div className="flex items-center gap-1.5">
-                        {regularPred?.class_transition && <span className="text-xs text-muted-foreground">{regularPred.class_transition}</span>}
-                        {regularPred?.dev_aggressiveness != null && <span className="text-xs text-muted-foreground">· Dev {regularPred.dev_aggressiveness}</span>}
+                        {regularPred?.class_transition && <span className="text-xs text-[#8a94a6]">{regularPred.class_transition}</span>}
+                        {regularPred?.dev_aggressiveness != null && <span className="text-xs text-[#8a94a6]">· Dev {regularPred.dev_aggressiveness}</span>}
                         {isReturner && regularPred && (
                           <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={startPredEdit}>
                             <Pencil className="h-3 w-3" />
@@ -1111,45 +1116,34 @@ export default function PlayerProfile() {
                     )}
                   </div>
                 </CardHeader>
-                <CardContent className="pt-0">
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="rounded-lg border bg-background/70 p-4 text-center">
-                      <div className="text-muted-foreground text-xs uppercase tracking-wide">AVG</div>
-                      <div className="text-2xl font-bold mt-1">{statFormat(projectedAvg)}</div>
-                    </div>
-                    <div className="rounded-lg border bg-background/70 p-4 text-center">
-                      <div className="text-muted-foreground text-xs uppercase tracking-wide">OBP</div>
-                      <div className="text-2xl font-bold mt-1">{statFormat(projectedObp)}</div>
-                    </div>
-                    <div className="rounded-lg border bg-background/70 p-4 text-center">
-                      <div className="text-muted-foreground text-xs uppercase tracking-wide">SLG</div>
-                      <div className="text-2xl font-bold mt-1">{statFormat(projectedSlg)}</div>
-                    </div>
-                    <div className="rounded-lg border bg-background/70 p-4 text-center">
-                      <div className="text-muted-foreground text-xs uppercase tracking-wide">OPS</div>
-                      <div className="text-2xl font-bold mt-1">{statFormat(projectedDerived.ops)}</div>
-                    </div>
-                    <div className="rounded-lg border bg-background/70 p-4 text-center">
-                      <div className="text-muted-foreground text-xs uppercase tracking-wide">ISO</div>
-                      <div className="text-2xl font-bold mt-1">{statFormat(projectedDerived.iso)}</div>
-                    </div>
-                    <div className="rounded-lg border bg-background/70 p-4 text-center">
-                      <div className="text-muted-foreground text-xs uppercase tracking-wide">wRC+</div>
-                      <div className="text-2xl font-bold mt-1">{pctFormat(projectedWrcPlus)}</div>
-                    </div>
+                <CardContent className="px-4 pb-4">
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      ["AVG", statFormat(projectedAvg)],
+                      ["OBP", statFormat(projectedObp)],
+                      ["SLG", statFormat(projectedSlg)],
+                      ["OPS", statFormat(projectedDerived.ops)],
+                      ["ISO", statFormat(projectedDerived.iso)],
+                      ["wRC+", pctFormat(projectedWrcPlus)],
+                    ].map(([label, val]) => (
+                      <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3 text-center">
+                        <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
+                        <div className="text-xl font-bold mt-0.5 text-white tabular-nums">{val}</div>
+                      </div>
+                    ))}
                   </div>
                 </CardContent>
               </Card>
 
             {/* Scouting Grades */}
             {seedPowerDerived && (
-              <Card>
-                <CardHeader className="pb-2">
+              <Card className="border-[#162241] bg-[#0a1428]">
+                <CardHeader className="pb-2 pt-3 px-4">
                   <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">Scouting Grades</CardTitle>
+                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Scouting Grades</CardTitle>
                     {availableSeasons.length > 1 && (
                       <Select value={String(effectiveSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
-                        <SelectTrigger className="h-8 w-[75px] text-xs font-semibold">
+                        <SelectTrigger className="h-8 w-[75px] text-xs font-semibold border-[#162241] bg-[#0d1a30] text-slate-200">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -1161,7 +1155,7 @@ export default function PlayerProfile() {
                     )}
                   </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="px-4 pb-4">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <ScoutGrade label="Brl" value={seedPowerDerived.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : null} fullLabel="Barrel%" />
                     <ScoutGrade label="EV" value={seedPowerDerived.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : null} fullLabel="Exit Velo" />
@@ -1170,81 +1164,50 @@ export default function PlayerProfile() {
                   </div>
                   {isAdmin && seedPowerDerived && (
                     <>
-                      <Separator className="my-4" />
-                      <div className="flex items-center gap-2 mb-3">
-                        <ShieldCheck className="h-4 w-4 text-primary" />
-                        <span className="text-sm font-semibold text-primary">Internal Power Ratings</span>
-                        <Badge variant="outline" className="text-xs">Admin Only</Badge>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-                        <div className="rounded-lg border border-border bg-muted/50 p-3">
-                          <div className="text-xs font-medium text-muted-foreground">Overall Power Rating</div>
-                          <div className="text-2xl font-bold font-mono mt-1">{pctFormat(seedPowerDerived.overallPlus)}</div>
+                      <div className="border-t border-[#162241] mt-4 pt-4">
+                        <div className="flex items-center gap-2 mb-3">
+                          <ShieldCheck className="h-4 w-4 text-[#D4AF37]" />
+                          <span className="text-xs font-semibold uppercase tracking-wider text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Internal Power Ratings</span>
+                          <Badge variant="outline" className="text-[10px] uppercase tracking-wide border-[#D4AF37]/30 text-[#D4AF37]/70">Admin</Badge>
                         </div>
-                        <div className="rounded-lg border border-border bg-muted/50 p-3">
-                          <div className="text-xs font-medium text-muted-foreground">Batting Average Power Rating</div>
-                          <div className="text-2xl font-bold font-mono mt-1">{pctFormat(seedPowerDerived.baPlus)}</div>
-                        </div>
-                        <div className="rounded-lg border border-border bg-muted/50 p-3">
-                          <div className="text-xs font-medium text-muted-foreground">OBP Power Rating</div>
-                          <div className="text-2xl font-bold font-mono mt-1">{pctFormat(seedPowerDerived.obpPlus)}</div>
-                        </div>
-                        <div className="rounded-lg border border-border bg-muted/50 p-3">
-                          <div className="text-xs font-medium text-muted-foreground">ISO Power Rating</div>
-                          <div className="text-2xl font-bold font-mono mt-1">{pctFormat(seedPowerDerived.isoPlus)}</div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                          {[
+                            ["Overall PR+", pctFormat(seedPowerDerived.overallPlus)],
+                            ["AVG PR+", pctFormat(seedPowerDerived.baPlus)],
+                            ["OBP PR+", pctFormat(seedPowerDerived.obpPlus)],
+                            ["ISO PR+", pctFormat(seedPowerDerived.isoPlus)],
+                          ].map(([label, val]) => (
+                            <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3">
+                              <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
+                              <div className="text-2xl font-bold mt-1 text-white tabular-nums">{val}</div>
+                            </div>
+                          ))}
                         </div>
                       </div>
                       {seedPowerRow && (
-                        <>
-                          <Separator className="my-4" />
-                          <div className="text-xs font-medium text-muted-foreground mb-3">2025 Input Metrics</div>
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-                            <div className="rounded-lg border border-border bg-muted/50 p-3">
-                              <div className="text-xs font-medium text-muted-foreground">Contact %</div>
-                              <div className="text-xl font-bold font-mono mt-1">{seedPowerRow.contact?.toFixed(1)}%</div>
-                            </div>
-                            <div className="rounded-lg border border-border bg-muted/50 p-3">
-                              <div className="text-xs font-medium text-muted-foreground">Line Drive %</div>
-                              <div className="text-xl font-bold font-mono mt-1">{seedPowerRow.lineDrive?.toFixed(1)}%</div>
-                            </div>
-                            <div className="rounded-lg border border-border bg-muted/50 p-3">
-                              <div className="text-xs font-medium text-muted-foreground">Pop-Up %</div>
-                              <div className="text-xl font-bold font-mono mt-1">{seedPowerRow.popUp?.toFixed(1)}%</div>
-                            </div>
-                            <div className="rounded-lg border border-border bg-muted/50 p-3">
-                              <div className="text-xs font-medium text-muted-foreground">BB %</div>
-                              <div className="text-xl font-bold font-mono mt-1">{seedPowerRow.bb?.toFixed(1)}%</div>
-                            </div>
-                            <div className="rounded-lg border border-border bg-muted/50 p-3">
-                              <div className="text-xs font-medium text-muted-foreground">Chase %</div>
-                              <div className="text-xl font-bold font-mono mt-1">{seedPowerRow.chase?.toFixed(1)}%</div>
-                            </div>
-                            <div className="rounded-lg border border-border bg-muted/50 p-3">
-                              <div className="text-xs font-medium text-muted-foreground">Barrel %</div>
-                              <div className="text-xl font-bold font-mono mt-1">{seedPowerRow.barrel?.toFixed(1)}%</div>
-                            </div>
-                            <div className="rounded-lg border border-border bg-muted/50 p-3">
-                              <div className="text-xs font-medium text-muted-foreground">Pull %</div>
-                              <div className="text-xl font-bold font-mono mt-1">{seedPowerRow.pull?.toFixed(1)}%</div>
-                            </div>
-                            <div className="rounded-lg border border-border bg-muted/50 p-3">
-                              <div className="text-xs font-medium text-muted-foreground">LA 10-30 %</div>
-                              <div className="text-xl font-bold font-mono mt-1">{seedPowerRow.la10_30?.toFixed(1)}%</div>
-                            </div>
-                            <div className="rounded-lg border border-border bg-muted/50 p-3">
-                              <div className="text-xs font-medium text-muted-foreground">GB %</div>
-                              <div className="text-xl font-bold font-mono mt-1">{seedPowerRow.gb?.toFixed(1)}%</div>
-                            </div>
-                            <div className="rounded-lg border border-border bg-muted/50 p-3">
-                              <div className="text-xs font-medium text-muted-foreground">Avg Exit Velo</div>
-                              <div className="text-xl font-bold font-mono mt-1">{seedPowerRow.avgExitVelo?.toFixed(1)} mph</div>
-                            </div>
-                            <div className="rounded-lg border border-border bg-muted/50 p-3">
-                              <div className="text-xs font-medium text-muted-foreground">EV90</div>
-                              <div className="text-xl font-bold font-mono mt-1">{seedPowerRow.ev90?.toFixed(1)} mph</div>
-                            </div>
+                        <div className="border-t border-[#162241] mt-4 pt-4">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-[#8a94a6] mb-3">2025 Input Metrics</p>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                            {[
+                              ["Contact %", `${seedPowerRow.contact?.toFixed(1)}%`],
+                              ["Line Drive %", `${seedPowerRow.lineDrive?.toFixed(1)}%`],
+                              ["Pop-Up %", `${seedPowerRow.popUp?.toFixed(1)}%`],
+                              ["BB %", `${seedPowerRow.bb?.toFixed(1)}%`],
+                              ["Chase %", `${seedPowerRow.chase?.toFixed(1)}%`],
+                              ["Barrel %", `${seedPowerRow.barrel?.toFixed(1)}%`],
+                              ["Pull %", `${seedPowerRow.pull?.toFixed(1)}%`],
+                              ["LA 10-30 %", `${seedPowerRow.la10_30?.toFixed(1)}%`],
+                              ["GB %", `${seedPowerRow.gb?.toFixed(1)}%`],
+                              ["Avg Exit Velo", `${seedPowerRow.avgExitVelo?.toFixed(1)} mph`],
+                              ["EV90", `${seedPowerRow.ev90?.toFixed(1)} mph`],
+                            ].map(([label, val]) => (
+                              <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3">
+                                <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
+                                <div className="font-semibold text-xl mt-1 text-slate-100 tabular-nums">{val}</div>
+                              </div>
+                            ))}
                           </div>
-                        </>
+                        </div>
                       )}
                     </>
                   )}
@@ -1254,45 +1217,43 @@ export default function PlayerProfile() {
 
             {/* Season Stats */}
             {seasonStats.length > 0 && (
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Season Stats</CardTitle>
+              <Card className="border-[#162241] bg-[#0a1428]">
+                <CardHeader className="pb-1 pt-3 px-4">
+                  <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Season Stats</CardTitle>
                 </CardHeader>
-                <CardContent className="p-0">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-border">
-                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">Season</th>
-                          <th className="text-right px-2 py-2 font-medium text-muted-foreground">G</th>
-                          <th className="text-right px-2 py-2 font-medium text-muted-foreground">AB</th>
-                          <th className="text-right px-2 py-2 font-medium text-muted-foreground">H</th>
-                          <th className="text-right px-2 py-2 font-medium text-muted-foreground">HR</th>
-                          <th className="text-right px-2 py-2 font-medium text-muted-foreground">RBI</th>
-                          <th className="text-right px-2 py-2 font-medium text-muted-foreground">AVG</th>
-                          <th className="text-right px-2 py-2 font-medium text-muted-foreground">OBP</th>
-                          <th className="text-right px-2 py-2 font-medium text-muted-foreground">SLG</th>
-                          <th className="text-right px-2 py-2 font-medium text-muted-foreground">OPS</th>
+                <CardContent className="px-3 pb-3">
+                  <table className="w-full text-xs" style={{ fontFamily: "Inter, sans-serif" }}>
+                    <thead>
+                      <tr className="border-b border-[#162241]">
+                        <th className="text-left py-1.5 pr-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Season</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">G</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">AB</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">H</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">HR</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">RBI</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">AVG</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">OBP</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">SLG</th>
+                        <th className="text-right py-1.5 pl-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">OPS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {seasonStats.map((s, i) => (
+                        <tr key={s.id} className={`border-b border-[#162241]/60 last:border-0 transition-colors duration-150 hover:bg-[#162241]/40 ${i % 2 === 1 ? "bg-[#0d1a30]" : ""}`}>
+                          <td className="py-1.5 pr-1 font-semibold text-white">{s.season}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{s.games ?? "—"}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{s.at_bats ?? "—"}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{s.hits ?? "—"}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{s.home_runs ?? "—"}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{s.rbi ?? "—"}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{statFormat(s.batting_avg)}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{statFormat(s.on_base_pct)}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{statFormat(s.slugging_pct)}</td>
+                          <td className="text-right py-1.5 pl-1 tabular-nums font-bold text-white">{statFormat(s.ops)}</td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {seasonStats.map((s) => (
-                          <tr key={s.id} className="border-b border-border last:border-0">
-                            <td className="px-4 py-2 font-medium">{s.season}</td>
-                            <td className="text-right px-2 py-2 font-mono">{s.games ?? "—"}</td>
-                            <td className="text-right px-2 py-2 font-mono">{s.at_bats ?? "—"}</td>
-                            <td className="text-right px-2 py-2 font-mono">{s.hits ?? "—"}</td>
-                            <td className="text-right px-2 py-2 font-mono">{s.home_runs ?? "—"}</td>
-                            <td className="text-right px-2 py-2 font-mono">{s.rbi ?? "—"}</td>
-                            <td className="text-right px-2 py-2 font-mono">{statFormat(s.batting_avg)}</td>
-                            <td className="text-right px-2 py-2 font-mono">{statFormat(s.on_base_pct)}</td>
-                            <td className="text-right px-2 py-2 font-mono">{statFormat(s.slugging_pct)}</td>
-                            <td className="text-right px-2 py-2 font-mono font-bold">{statFormat(s.ops)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      ))}
+                    </tbody>
+                  </table>
                 </CardContent>
               </Card>
             )}
