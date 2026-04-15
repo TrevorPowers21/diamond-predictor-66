@@ -109,69 +109,90 @@ function assessHitterTypeRisk(metrics: {
   const ld = metrics.lineDrive;
   const ev = metrics.avgEv;
 
-  // Chase/contact thresholds calibrated to ~85th percentile for "elite"
+  // ── CONTACT% is the #1 risk driver. CHASE% is #2. EV is a distant #3. ──
+  //
+  // Contact below ~65% is a major red flag regardless of anything else.
+  // You can have elite chase and still be high risk if you can't put the bat on the ball.
+  // Chase discipline helps but cannot fully compensate for truly poor contact.
+  //
+  const goodChase = chase != null && chase < 22;
+  const eliteChase = chase != null && chase < 19;
   const badChase = chase != null && chase > 30;
-  const goodChase = chase != null && chase < 22;    // ~85th pctl
+  const goodContact = contact != null && contact > 80;
+  const eliteContact = contact != null && contact > 85;
   const badContact = contact != null && contact < 70;
-  const goodContact = contact != null && contact > 80; // ~75th pctl — "plus"
-  const eliteChase = chase != null && chase < 19;   // ~85th pctl
-  const eliteContact = contact != null && contact > 85; // ~85th pctl
+  const veryBadContact = contact != null && contact < 65;
 
-  // Both below average — this is the profile that does NOT carry as competition rises
-  if (badChase && badContact) {
-    risk += 30;
-    reasons.push("high chase + low contact — profile most exposed at higher competition");
-  } else if (badChase && !goodContact) {
-    risk += 18;
-    reasons.push("high chase with mediocre contact");
-  } else if (badContact && !goodChase) {
-    risk += 18;
-    reasons.push("low contact with mediocre chase");
-  } else {
-    // At least one compensating skill present
-    if (chase != null) {
-      if (chase > 32) { risk += 12; reasons.push("high chase rate"); }
-      else if (chase > 28) { risk += 5; }
-      else if (eliteChase) { risk -= 12; reasons.push("elite plate discipline"); }
-      else if (goodChase) { risk -= 6; reasons.push("plus discipline"); }
-    }
-
-    if (contact != null) {
-      if (eliteContact) { risk -= 18; reasons.push("elite contact — carries at any level"); }
-      else if (goodContact) { risk -= 10; reasons.push("plus contact"); }
-      else if (contact < 65) { risk += 12; reasons.push("swing-and-miss concerns"); }
-      else if (contact < 70) { risk += 6; }
+  // ── Step 1: Contact% — always evaluated first, largest impact ──
+  if (contact != null) {
+    if (contact < 60) {
+      risk += 28; reasons.push("severe contact deficiency — major risk at any level");
+    } else if (contact < 65) {
+      risk += 22; reasons.push("very low contact rate — significant swing-and-miss risk");
+    } else if (contact < 68) {
+      risk += 14; reasons.push("below-avg contact — vulnerable to better pitching");
+    } else if (contact < 70) {
+      risk += 8;
+    } else if (eliteContact) {
+      risk -= 18; reasons.push("elite contact — carries at any level");
+    } else if (goodContact) {
+      risk -= 10; reasons.push("plus contact");
     }
   }
 
-  // Elite chase + elite contact = extremely safe floor
+  // ── Step 2: Chase% — #2 factor, mitigates or compounds contact ──
+  if (chase != null) {
+    if (chase > 34) {
+      risk += 14; reasons.push("very high chase rate");
+    } else if (chase > 30) {
+      risk += 10; reasons.push("high chase rate");
+    } else if (chase > 28) {
+      risk += 4;
+    } else if (eliteChase) {
+      risk -= 10; reasons.push("elite plate discipline");
+    } else if (goodChase) {
+      risk -= 5; reasons.push("plus discipline");
+    }
+  }
+
+  // ── Chase/Contact interaction bonuses ──
+  // Both bad = compounding penalty (on top of individual penalties above)
+  if (badChase && badContact) {
+    risk += 12;
+    reasons.push("chase + contact combination most exposed at higher competition");
+  }
+  // Both elite = compounding bonus
   if (eliteChase && eliteContact) {
-    risk -= 14;
+    risk -= 10;
     reasons.push("elite approach — top-tier chase + contact floor");
   } else if (goodChase && goodContact) {
-    risk -= 8;
+    risk -= 6;
     reasons.push("plus approach — low chase + good contact floor");
+  }
+  // Good chase partially compensates very bad contact — but NOT fully
+  if (veryBadContact && goodChase) {
+    risk -= 5; // small offset, NOT a full rescue
+    reasons.push("chase discipline helps but does not fully offset contact concerns");
   }
 
   if (whiff != null) {
-    if (whiff > 30) { risk += 8; reasons.push("high whiff rate"); }
-    else if (whiff < 15) { risk -= 6; reasons.push("plus bat-to-ball"); }
+    if (whiff > 30) { risk += 6; reasons.push("high whiff rate"); }
+    else if (whiff < 15) { risk -= 4; reasons.push("plus bat-to-ball"); }
   }
 
-  // ── Exit Velocity / EV90 — secondary risk factor ──
-  // Weak contact gets exposed at higher levels. Not as critical as chase/contact
-  // but hitters can't get away with soft contact against better pitching.
+  // ── Step 3: Exit Velocity / EV90 — distant #3 factor ──
+  // Weak contact gets exposed but this is less predictive than chase/contact.
   const ev90 = metrics.ev90;
   if (ev != null) {
-    if (ev < 83) { risk += 8; reasons.push("below-avg exit velo — weak contact risk"); }
-    else if (ev < 85) { risk += 4; }
-    else if (ev > 92) { risk -= 6; reasons.push("elite exit velocity"); }
-    else if (ev > 89) { risk -= 3; reasons.push("plus exit velocity"); }
+    if (ev < 83) { risk += 5; reasons.push("below-avg exit velo — weak contact quality"); }
+    else if (ev < 85) { risk += 3; }
+    else if (ev > 92) { risk -= 4; reasons.push("elite exit velocity"); }
+    else if (ev > 89) { risk -= 2; reasons.push("plus exit velocity"); }
   }
   if (ev90 != null) {
-    if (ev90 < 95) { risk += 5; reasons.push("low EV90 — ceiling concern"); }
-    else if (ev90 > 104) { risk -= 4; reasons.push("elite top-end power"); }
-    else if (ev90 > 100) { risk -= 2; reasons.push("plus top-end power"); }
+    if (ev90 < 95) { risk += 4; reasons.push("low EV90 — ceiling concern"); }
+    else if (ev90 > 104) { risk -= 3; reasons.push("elite top-end power"); }
+    else if (ev90 > 100) { risk -= 1; reasons.push("plus top-end power"); }
   }
 
   // High contact + high LD = safer floor profile
