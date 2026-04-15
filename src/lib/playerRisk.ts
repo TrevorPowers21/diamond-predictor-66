@@ -98,7 +98,10 @@ function assessHitterTypeRisk(metrics: {
   let risk = 50; // start neutral
   let reasons: string[] = [];
 
-  // High chase + high whiff = volatile approach, higher risk
+  // ── Chase & Contact are the PRIMARY risk drivers ──
+  // A hitter can survive with bad chase IF contact is good (can recover from bad swings).
+  // A hitter can survive with low contact IF chase is good (selective, makes pitchers work).
+  // BOTH below average = highest risk — the profile that gets exposed at higher levels.
   const chase = metrics.chase;
   const contact = metrics.contact;
   const whiff = metrics.whiff;
@@ -106,52 +109,79 @@ function assessHitterTypeRisk(metrics: {
   const ld = metrics.lineDrive;
   const ev = metrics.avgEv;
 
-  if (chase != null) {
-    if (chase > 32) { risk += 15; reasons.push("high chase rate"); }
-    else if (chase > 28) { risk += 7; }
-    else if (chase < 22) { risk -= 10; reasons.push("disciplined approach"); }
+  const badChase = chase != null && chase > 30;
+  const goodChase = chase != null && chase < 24;
+  const badContact = contact != null && contact < 70;
+  const goodContact = contact != null && contact > 78;
+
+  // Both below average — this is the profile that does NOT carry as competition rises
+  if (badChase && badContact) {
+    risk += 30;
+    reasons.push("high chase + low contact — profile most exposed at higher competition");
+  } else if (badChase && !goodContact) {
+    // Bad chase, mediocre contact — still risky
+    risk += 18;
+    reasons.push("high chase with mediocre contact");
+  } else if (badContact && !goodChase) {
+    // Bad contact, mediocre chase — risky
+    risk += 18;
+    reasons.push("low contact with mediocre chase");
+  } else {
+    // At least one compensating skill present
+    if (chase != null) {
+      if (chase > 32) { risk += 12; reasons.push("high chase rate"); }
+      else if (chase > 28) { risk += 5; }
+      else if (chase < 22) { risk -= 12; reasons.push("elite plate discipline"); }
+      else if (chase < 24) { risk -= 6; }
+    }
+
+    if (contact != null) {
+      if (contact > 82) { risk -= 18; reasons.push("elite contact — carries at any level"); }
+      else if (contact > 78) { risk -= 10; reasons.push("plus contact"); }
+      else if (contact < 65) { risk += 12; reasons.push("swing-and-miss concerns"); }
+      else if (contact < 70) { risk += 6; }
+    }
   }
 
-  if (contact != null) {
-    if (contact > 82) { risk -= 15; reasons.push("elite contact"); }
-    else if (contact > 75) { risk -= 8; }
-    else if (contact < 65) { risk += 15; reasons.push("swing-and-miss concerns"); }
-    else if (contact < 70) { risk += 8; }
+  // Good chase + good contact = extremely safe floor
+  if (goodChase && goodContact) {
+    risk -= 12;
+    reasons.push("elite approach — low chase + high contact floor");
   }
 
   if (whiff != null) {
-    if (whiff > 30) { risk += 12; reasons.push("high whiff rate"); }
-    else if (whiff < 18) { risk -= 8; }
+    if (whiff > 30) { risk += 8; reasons.push("high whiff rate"); }
+    else if (whiff < 18) { risk -= 6; }
   }
 
-  // High contact + high LD + moderate EV = safer floor profile
-  if (ld != null && ld > 22 && contact != null && contact > 75) {
-    risk -= 10;
+  // High contact + high LD = safer floor profile
+  if (ld != null && ld > 22 && goodContact) {
+    risk -= 8;
     reasons.push("high line drive, contact-oriented");
   }
 
   // Low EV but high contact = safe floor
-  if (ev != null && ev < 85 && contact != null && contact > 78) {
-    risk -= 5;
+  if (ev != null && ev < 85 && goodContact) {
+    risk -= 4;
     reasons.push("contact-over-power profile");
   }
 
   // High barrel + high EV = premium bat, lower risk
   if (barrel != null && barrel > 10 && ev != null && ev > 88) {
-    risk -= 12;
+    risk -= 10;
     reasons.push("premium hard-hit profile");
   }
 
   // High barrel but high chase = boom-or-bust
-  if (barrel != null && barrel > 8 && chase != null && chase > 30) {
-    risk += 10;
-    reasons.push("boom-or-bust profile");
+  if (barrel != null && barrel > 8 && badChase) {
+    risk += 12;
+    reasons.push("boom-or-bust — power undermined by chase");
   }
 
   // Walk rate as indicator of approach quality
   if (metrics.bb != null) {
-    if (metrics.bb > 12) { risk -= 8; reasons.push("strong walk rate"); }
-    else if (metrics.bb < 5) { risk += 8; reasons.push("low walk rate"); }
+    if (metrics.bb > 12) { risk -= 6; reasons.push("strong walk rate"); }
+    else if (metrics.bb < 5) { risk += 6; reasons.push("low walk rate"); }
   }
 
   risk = clamp(risk);
