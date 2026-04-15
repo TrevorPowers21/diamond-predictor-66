@@ -125,12 +125,10 @@ function assessHitterTypeRisk(metrics: {
 
   // ── Step 1: Contact% — always evaluated first, largest impact ──
   if (contact != null) {
-    if (contact < 60) {
-      risk += 28; reasons.push("severe contact deficiency — major risk at any level");
-    } else if (contact < 65) {
-      risk += 22; reasons.push("very low contact rate — significant swing-and-miss risk");
+    if (contact < 66.7) {
+      risk += 28; reasons.push("bottom 5% contact rate — major swing-and-miss risk");
     } else if (contact < 68) {
-      risk += 14; reasons.push("below-avg contact — vulnerable to better pitching");
+      risk += 18; reasons.push("very low contact — vulnerable to better pitching");
     } else if (contact < 70) {
       risk += 8;
     } else if (eliteContact) {
