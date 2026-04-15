@@ -1302,7 +1302,6 @@ export default function PlayerProfile() {
                     <ScoutGrade label="Con" value={seedPowerDerived.contactScore != null ? Math.round(seedPowerDerived.contactScore) : null} fullLabel="Contact%" />
                     <ScoutGrade label="Chs" value={seedPowerDerived.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : null} fullLabel="Chase%" />
                   </div>
-}
                 </CardContent>
               </Card>
             )}
