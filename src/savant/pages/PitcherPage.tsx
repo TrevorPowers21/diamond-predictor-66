@@ -211,7 +211,9 @@ export default function PitcherPage() {
               const confRow = player.Conference ? conferenceStatsByKey.get(player.Conference.toLowerCase().trim()) : undefined;
               const risk = assessPitcherRisk({
                 conference: player.Conference,
-                confHitterTalentPlus: confRow?.overall_power_rating,
+                confHitterTalentPlus: confRow?.overall_power_rating != null && confRow?.stuff_plus != null && confRow?.wrc_plus != null
+                  ? confRow.overall_power_rating + (1.25 * (confRow.stuff_plus - 100)) + (0.75 * (100 - confRow.wrc_plus))
+                  : null,
                 careerSeasons: careerRows,
                 ip: player.IP, classYear: undefined,
                 stuffPlus: player.stuff_plus,

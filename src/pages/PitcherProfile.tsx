@@ -1560,7 +1560,9 @@ export default function PitcherProfile() {
                   // Attach risk assessment
                   const riskResult = assessPitcherRisk({
                     conference: displayConference !== "—" ? displayConference : undefined,
-                    confHitterTalentPlus: confStatsRow?.overall_power_rating,
+                    confHitterTalentPlus: confStatsRow?.overall_power_rating != null && confStatsRow?.stuff_plus != null && confStatsRow?.wrc_plus != null
+                      ? confStatsRow.overall_power_rating + (1.25 * (confStatsRow.stuff_plus - 100)) + (0.75 * (100 - confStatsRow.wrc_plus))
+                      : null,
                     careerSeasons: pitcherMasterSeasons as any[],
                     ip: (masterRow as any)?.IP ?? null,
                     classYear: displayClass || undefined,
@@ -1873,7 +1875,9 @@ export default function PitcherProfile() {
             {(() => {
               const risk = assessPitcherRisk({
                 conference: displayConference !== "—" ? displayConference : undefined,
-                confHitterTalentPlus: confStatsRow?.overall_power_rating,
+                confHitterTalentPlus: confStatsRow?.overall_power_rating != null && confStatsRow?.stuff_plus != null && confStatsRow?.wrc_plus != null
+                      ? confStatsRow.overall_power_rating + (1.25 * (confStatsRow.stuff_plus - 100)) + (0.75 * (100 - confStatsRow.wrc_plus))
+                      : null,
                 careerSeasons: pitcherMasterSeasons as any[],
                 ip: (masterRow as any)?.IP ?? null, classYear: displayClass || undefined,
                 stuffPlus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,

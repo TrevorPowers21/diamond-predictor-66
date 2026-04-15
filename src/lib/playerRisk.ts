@@ -154,13 +154,27 @@ function assessHitterTypeRisk(metrics: {
     else if (whiff < 18) { risk -= 6; }
   }
 
+  // ── Exit Velocity / EV90 — secondary risk factor ──
+  // Weak contact gets exposed at higher levels. Not as critical as chase/contact
+  // but hitters can't get away with soft contact against better pitching.
+  const ev90 = metrics.ev90;
+  if (ev != null) {
+    if (ev < 83) { risk += 8; reasons.push("below-avg exit velo — weak contact risk"); }
+    else if (ev < 85) { risk += 4; }
+    else if (ev > 90) { risk -= 6; reasons.push("plus exit velocity"); }
+  }
+  if (ev90 != null) {
+    if (ev90 < 95) { risk += 5; reasons.push("low EV90 — ceiling concern"); }
+    else if (ev90 > 102) { risk -= 4; reasons.push("elite top-end power"); }
+  }
+
   // High contact + high LD = safer floor profile
   if (ld != null && ld > 22 && goodContact) {
     risk -= 8;
     reasons.push("high line drive, contact-oriented");
   }
 
-  // Low EV but high contact = safe floor
+  // Low EV but high contact = safe floor (contact compensates for lack of power)
   if (ev != null && ev < 85 && goodContact) {
     risk -= 4;
     reasons.push("contact-over-power profile");
@@ -450,7 +464,7 @@ export interface HitterRiskInput {
 
 export interface PitcherRiskInput {
   conference?: string | null;
-  /** Conf Hitter Talent+ — the hitting quality pitchers face in this conference */
+  /** Conf Hitter Talent+ — computed: PR+ + 1.25*(Stuff+-100) + 0.75*(100-wRC+) */
   confHitterTalentPlus?: number | null;
   careerSeasons?: any[];
   ip?: number | null;
