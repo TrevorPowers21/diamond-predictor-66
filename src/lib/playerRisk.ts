@@ -312,17 +312,21 @@ function assessCompetitionRisk(conference: string | null | undefined, confOpposi
     else { risk = 88; detailParts.push("very weak competition — stats unreliable"); }
 
     const label = confOpposingLabel || "Conf Quality";
+    // Format: "SoCon; Conf Stuff+ 99; average competition"
+    const gradeText = detailParts.pop()!; // the competition grade label
+    detailParts.length = 0;
+    if (conference) detailParts.push(conference);
     detailParts.push(`${label} ${Math.round(m)}`);
+    detailParts.push(gradeText);
   } else {
     // Fallback: tier-based when no data available
     const tier = getConfTier(conference);
+    if (conference) detailParts.push(conference);
     if (tier === 1) { risk = 15; detailParts.push("Power conference (no metric data)"); }
     else if (tier === 2) { risk = 35; detailParts.push("Strong conference (no metric data)"); }
     else if (tier === 3) { risk = 55; detailParts.push("Mid-tier conference (no metric data)"); }
     else { risk = 75; detailParts.push("Lower conference (no metric data)"); }
   }
-
-  if (conference) detailParts.push(conference);
 
   return { label: "Competition", score: clamp(risk), grade: toGrade(clamp(risk)), detail: detailParts.join("; ") };
 }
