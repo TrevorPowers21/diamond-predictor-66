@@ -25,7 +25,15 @@ export interface ReportPlayer {
   position?: string | null;
   class_year?: string | null;
   bats_throws?: string | null;
-  // Hitter fields
+  // Bio
+  sport?: string | null;
+  season?: string | null;
+  conference?: string | null;
+  height?: string | null;
+  weight?: number | string | null;
+  hometown?: string | null;
+  draft_year?: number | string | null;
+  // Hitter projected
   p_avg?: number | null;
   p_obp?: number | null;
   p_slg?: number | null;
@@ -33,13 +41,11 @@ export interface ReportPlayer {
   p_iso?: number | null;
   p_wrc_plus?: number | null;
   owar?: number | null;
-  nil_value?: number | null;
-  power_rating_plus?: number | null;
-  barrel_score?: number | null;
-  ev_score?: number | null;
-  contact_score?: number | null;
-  chase_score?: number | null;
-  // Pitcher fields
+  proj_hr?: number | null;
+  proj_rbi?: number | null;
+  proj_bb?: number | null;
+  proj_k?: number | null;
+  // Pitcher projected
   p_era?: number | null;
   p_fip?: number | null;
   p_whip?: number | null;
@@ -47,17 +53,45 @@ export interface ReportPlayer {
   p_bb9?: number | null;
   p_hr9?: number | null;
   p_war?: number | null;
+  // Shared valuation
+  nil_value?: number | null;
+  nil_tier?: string | null;
   market_value?: number | null;
+  power_rating_plus?: number | null;
   overall_pr_plus?: number | null;
+  // Hitter scouting scores (used in tables)
+  barrel_score?: number | null;
+  ev_score?: number | null;
+  contact_score?: number | null;
+  chase_score?: number | null;
+  // Pitcher scouting scores (used in tables)
   stuff_plus?: number | null;
   whiff_pct?: number | null;
   stuff_score?: number | null;
   whiff_score?: number | null;
   bb_score?: number | null;
-  // Shared
+  // Scouting grades (20-80 scale for PDF)
+  grade_hit?: number | null;
+  grade_power?: number | null;
+  grade_speed?: number | null;
+  grade_field?: number | null;
+  grade_arm?: number | null;
+  grade_ofp?: number | null;
+  grade_fb?: number | null;
+  grade_ctrl?: number | null;
+  grade_cmd?: number | null;
+  grade_del?: number | null;
+  grade_proj?: number | null;
+  // Data
   career_seasons?: any[];
   pitches?: any[];
   scouting_notes?: string | null;
+  // Risk assessment
+  risk_grade?: string | null;
+  risk_score?: number | null;
+  risk_trajectory?: string | null;
+  risk_summary?: string | null;
+  risk_factors?: { label: string; score: number; detail: string }[];
 }
 
 interface ScoutingReportContextType {

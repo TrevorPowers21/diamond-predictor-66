@@ -26,6 +26,7 @@ import { readPlayerOverrides } from "@/lib/playerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
+import { assessHitterRisk, type RiskAssessment, type RiskGrade } from "@/lib/playerRisk";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -834,18 +835,49 @@ export default function PlayerProfile() {
                     position: effectivePosition,
                     class_year: player.class_year,
                     bats_throws: [(player as any).bats_hand, (player as any).throws_hand].filter(Boolean).join("/") || undefined,
+                    // Bio
+                    conference: resolvedConference || player.conference,
+                    height: player.height_inches ? `${Math.floor(player.height_inches / 12)}'${player.height_inches % 12}"` : undefined,
+                    weight: player.weight,
+                    hometown: [player.home_state, player.high_school].filter(Boolean).join(", ") || undefined,
+                    // Projected
                     p_avg: projectedAvg, p_obp: projectedObp, p_slg: projectedSlg,
                     p_ops: projectedDerived.ops, p_iso: projectedDerived.iso,
                     p_wrc_plus: projectedWrcPlus,
                     owar: displayOWar,
+                    // Valuation
                     nil_value: displayNilValuation,
                     power_rating_plus: seedPowerDerived?.overallPlus,
+                    // Scouting scores (for tables)
                     barrel_score: seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined,
                     ev_score: seedPowerDerived?.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : undefined,
                     contact_score: seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined,
                     chase_score: seedPowerDerived?.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : undefined,
+                    // Scouting grades (20-80 for PDF)
+                    grade_hit: seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined,
+                    grade_power: seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined,
+                    grade_speed: undefined,
+                    grade_field: undefined,
+                    grade_arm: seedPowerDerived?.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : undefined,
+                    grade_ofp: seedPowerDerived?.overallPlus != null ? Math.min(80, Math.max(20, Math.round(seedPowerDerived.overallPlus / 2.5 + 20))) : undefined,
                     career_seasons: hitterMasterSeasons as any[],
+                    scouting_notes: (player as any).notes || undefined,
                   };
+                  // Attach risk assessment
+                  const riskResult = assessHitterRisk({
+                    conference: resolvedConference || player.conference,
+                    careerSeasons: hitterMasterSeasons as any[],
+                    pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
+                    chase: seedPowerRow?.chase, contact: seedPowerRow?.contact,
+                    whiff: seedPowerRow?.whiff, barrel: seedPowerRow?.barrel,
+                    lineDrive: seedPowerRow?.lineDrive, avgEv: seedPowerRow?.avgExitVelo,
+                    ev90: seedPowerRow?.ev90, gb: seedPowerRow?.gb, bb: seedPowerRow?.bb,
+                  });
+                  rp.risk_grade = riskResult.grade;
+                  rp.risk_score = riskResult.overall;
+                  rp.risk_trajectory = riskResult.trajectory;
+                  rp.risk_summary = riskResult.summary;
+                  rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
                   try { downloadSinglePlayerReport(rp); } catch (err: any) { toast.error(`Export failed: ${err.message}`); }
                 }}
               >
@@ -1247,6 +1279,84 @@ export default function PlayerProfile() {
                 </CardContent>
               </Card>
             )}
+
+            {/* Risk Assessment */}
+            {(() => {
+              const risk = assessHitterRisk({
+                conference: resolvedConference || player.conference,
+                careerSeasons: hitterMasterSeasons as any[],
+                pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
+                chase: seedPowerRow?.chase,
+                contact: seedPowerRow?.contact,
+                whiff: seedPowerRow?.whiff,
+                barrel: seedPowerRow?.barrel,
+                lineDrive: seedPowerRow?.lineDrive,
+                avgEv: seedPowerRow?.avgExitVelo,
+                ev90: seedPowerRow?.ev90,
+                pull: seedPowerRow?.pull,
+                gb: seedPowerRow?.gb,
+                bb: seedPowerRow?.bb,
+              });
+              const gradeColor: Record<RiskGrade, string> = {
+                Low: "text-[hsl(142,71%,35%)] border-[hsl(142,71%,45%,0.3)] bg-[hsl(142,71%,45%,0.08)]",
+                Moderate: "text-[hsl(200,80%,35%)] border-[hsl(200,80%,50%,0.3)] bg-[hsl(200,80%,50%,0.08)]",
+                Elevated: "text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.08)]",
+                High: "text-[hsl(0,72%,41%)] border-[hsl(0,72%,51%,0.3)] bg-[hsl(0,72%,51%,0.08)]",
+              };
+              return (
+                <Card className="border-[#162241] bg-[#0a1428]">
+                  <CardHeader className="pb-2 pt-3 px-4">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Risk Assessment</CardTitle>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${gradeColor[risk.grade]}`}>
+                        {risk.grade} Risk
+                      </span>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4 space-y-3">
+                    {/* Trajectory badge */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Trajectory:</span>
+                      <span className={`text-xs font-bold ${
+                        risk.trajectory === "Progressing" ? "text-[hsl(142,71%,35%)]" :
+                        risk.trajectory === "Regressing" ? "text-[hsl(0,72%,41%)]" :
+                        risk.trajectory === "Plateau" ? "text-[hsl(var(--warning))]" : "text-[#8a94a6]"
+                      }`}>{risk.trajectory}</span>
+                    </div>
+                    {/* Summary */}
+                    <p className="text-xs text-slate-300 leading-relaxed">{risk.summary}</p>
+                    {/* Factor breakdown */}
+                    <div className="space-y-1.5">
+                      {risk.factors.map((f) => (
+                        <div key={f.label} className="flex items-center gap-2">
+                          <div className="w-20 text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6] shrink-0">{f.label}</div>
+                          <div className="flex-1 h-2 rounded-full bg-[#162241] overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                f.score <= 25 ? "bg-[hsl(142,71%,45%)]" :
+                                f.score <= 50 ? "bg-[hsl(200,80%,50%)]" :
+                                f.score <= 75 ? "bg-[hsl(var(--warning))]" : "bg-[hsl(0,72%,51%)]"
+                              }`}
+                              style={{ width: `${f.score}%` }}
+                            />
+                          </div>
+                          <div className="w-8 text-right text-[10px] tabular-nums text-[#8a94a6] font-semibold">{f.score}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Factor details */}
+                    <div className="space-y-1 pt-1 border-t border-[#162241]">
+                      {risk.factors.map((f) => (
+                        <div key={f.label} className="flex gap-2 text-[11px]">
+                          <span className="text-[#8a94a6] shrink-0">{f.label}:</span>
+                          <span className="text-slate-400">{f.detail}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
 
             {/* Season Stats */}
             {seasonStats.length > 0 && (
