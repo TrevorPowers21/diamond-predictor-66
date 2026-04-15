@@ -16,6 +16,7 @@ import { usePlayerCareer } from "@/savant/hooks/usePlayerCareer";
 import { percentileRank } from "@/savant/lib/percentile";
 import { computeWrcPlus } from "@/savant/lib/wrcPlus";
 import { assessHitterRisk, type RiskGrade } from "@/lib/playerRisk";
+import { useConferenceStats } from "@/hooks/useConferenceStats";
 
 const fmt3 = (v: number) => v.toFixed(3);
 const fmt1 = (v: number) => v.toFixed(1);
@@ -125,6 +126,7 @@ export default function HitterPage() {
   const { data: hitters = [], isLoading } = useSavantHitters(selectedSeason);
   const { data: careerRows = [] } = usePlayerCareer(id);
   const { data: prediction = null } = usePlayerPrediction(id);
+  const { conferenceStatsByKey } = useConferenceStats(2025);
 
   // Years this player actually has data for — drives the season dropdown
   const availableSeasons = useMemo(() => {
@@ -202,8 +204,10 @@ export default function HitterPage() {
 
             {/* Risk Assessment */}
             {(() => {
+              const confRow = player.Conference ? conferenceStatsByKey.get(player.Conference.toLowerCase().trim()) : undefined;
               const risk = assessHitterRisk({
                 conference: player.Conference,
+                confStuffPlus: confRow?.stuff_plus, confHitterTalentPlus: confRow?.overall_power_rating,
                 careerSeasons: careerRows,
                 pa: player.pa ?? player.ab,
                 chase: player.chase, contact: player.contact,

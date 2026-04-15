@@ -223,7 +223,7 @@ function assessPitcherTypeRisk(metrics: {
 
 // ── Factor 2: Competition Factor ────────────────────────────────────
 
-function assessCompetitionRisk(conference: string | null | undefined, confStuffPlus?: number | null, confWrcPlus?: number | null): RiskFactor {
+function assessCompetitionRisk(conference: string | null | undefined, confStuffPlus?: number | null, confHitterTalentPlus?: number | null): RiskFactor {
   const tier = getConfTier(conference);
   let risk: number;
   let detailParts: string[] = [];
@@ -249,10 +249,10 @@ function assessCompetitionRisk(conference: string | null | undefined, confStuffP
     else { detailParts.push(`Conf Stuff+ ${Math.round(confStuffPlus)}`); }
   }
 
-  if (confWrcPlus != null) {
-    if (confWrcPlus > 105) { risk = Math.max(risk - 5, 0); detailParts.push(`Conf wRC+ ${Math.round(confWrcPlus)}`); }
-    else if (confWrcPlus < 95) { risk = Math.min(risk + 5, 100); detailParts.push(`Conf wRC+ ${Math.round(confWrcPlus)}`); }
-    else { detailParts.push(`Conf wRC+ ${Math.round(confWrcPlus)}`); }
+  if (confHitterTalentPlus != null) {
+    if (confHitterTalentPlus > 105) { risk = Math.max(risk - 5, 0); detailParts.push(`Conf Hitter Talent+ ${Math.round(confHitterTalentPlus)}`); }
+    else if (confHitterTalentPlus < 95) { risk = Math.min(risk + 5, 100); detailParts.push(`Conf Hitter Talent+ ${Math.round(confHitterTalentPlus)}`); }
+    else { detailParts.push(`Conf Hitter Talent+ ${Math.round(confHitterTalentPlus)}`); }
   }
 
   return { label: "Competition", score: clamp(risk), grade: toGrade(clamp(risk)), detail: detailParts.join("; ") };
@@ -401,7 +401,7 @@ function buildSummary(grade: RiskGrade, trajectory: Trajectory, factors: RiskFac
 export interface HitterRiskInput {
   conference?: string | null;
   confStuffPlus?: number | null;
-  confWrcPlus?: number | null;
+  confHitterTalentPlus?: number | null;
   careerSeasons?: any[];
   pa?: number | null;
   // Scouting metrics
@@ -420,7 +420,7 @@ export interface HitterRiskInput {
 export interface PitcherRiskInput {
   conference?: string | null;
   confStuffPlus?: number | null;
-  confWrcPlus?: number | null;
+  confHitterTalentPlus?: number | null;
   careerSeasons?: any[];
   ip?: number | null;
   classYear?: string | null;
@@ -446,7 +446,7 @@ export function assessHitterRisk(input: HitterRiskInput): RiskAssessment {
   }));
 
   // 2. Competition (weight: 25%)
-  factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus, input.confWrcPlus));
+  factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus, input.confHitterTalentPlus));
 
   // 3. Trajectory (weight: 20%)
   const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "hitter");
@@ -478,7 +478,7 @@ export function assessPitcherRisk(input: PitcherRiskInput): RiskAssessment {
   }));
 
   // 2. Competition (weight: 20%)
-  factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus, input.confWrcPlus));
+  factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus, input.confHitterTalentPlus));
 
   // 3. Trajectory (weight: 20%)
   const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "pitcher");

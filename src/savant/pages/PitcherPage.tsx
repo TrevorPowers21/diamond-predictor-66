@@ -14,6 +14,7 @@ import { usePitcherStuffPlus } from "@/savant/hooks/usePitcherStuffPlus";
 import { percentileRank } from "@/savant/lib/percentile";
 import { computePrvPlus } from "@/savant/lib/prvPlus";
 import { assessPitcherRisk, type RiskGrade } from "@/lib/playerRisk";
+import { useConferenceStats } from "@/hooks/useConferenceStats";
 
 const fmt2 = (v: number) => v.toFixed(2);
 const fmt1 = (v: number) => v.toFixed(1);
@@ -125,6 +126,7 @@ export default function PitcherPage() {
 
   const { data: pitchers = [], isLoading } = useSavantPitchers(selectedSeason);
   const { data: careerRows = [] } = usePitcherCareer(id);
+  const { conferenceStatsByKey } = useConferenceStats(2025);
 
   // Stuff+ table has its own season state since the dropdown only includes
   // seasons that have Stuff+ data (forward only, no historical backfill).
@@ -206,8 +208,10 @@ export default function PitcherPage() {
 
             {/* Risk Assessment */}
             {(() => {
+              const confRow = player.Conference ? conferenceStatsByKey.get(player.Conference.toLowerCase().trim()) : undefined;
               const risk = assessPitcherRisk({
                 conference: player.Conference,
+                confStuffPlus: confRow?.stuff_plus, confHitterTalentPlus: confRow?.overall_power_rating,
                 careerSeasons: careerRows,
                 ip: player.IP, classYear: undefined,
                 stuffPlus: player.stuff_plus,

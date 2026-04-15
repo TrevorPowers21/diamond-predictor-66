@@ -27,6 +27,7 @@ import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
 import { assessHitterRisk, type RiskAssessment, type RiskGrade } from "@/lib/playerRisk";
+import { useConferenceStats } from "@/hooks/useConferenceStats";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -176,6 +177,7 @@ export default function PlayerProfile() {
   const { hasRole } = useAuth();
   const isAdmin = hasRole("admin");
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
+  const { conferenceStatsByKey } = useConferenceStats(2025);
   const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
 
   const [storageByName, storageByNameTeam, storageByPlayerId] = useMemo(() => {
@@ -1204,6 +1206,8 @@ export default function PlayerProfile() {
             {(() => {
               const risk = assessHitterRisk({
                 conference: resolvedConference || player.conference,
+                confStuffPlus: (() => { const c = conferenceStatsByKey.get((resolvedConference || player.conference || "").toLowerCase().trim()); return c?.stuff_plus; })(),
+                confHitterTalentPlus: (() => { const c = conferenceStatsByKey.get((resolvedConference || player.conference || "").toLowerCase().trim()); return c?.overall_power_rating; })(),
                 careerSeasons: hitterMasterSeasons as any[],
                 pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
                 chase: seedPowerRow?.chase, contact: seedPowerRow?.contact,

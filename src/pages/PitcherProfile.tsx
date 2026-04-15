@@ -1002,6 +1002,11 @@ export default function PitcherProfile() {
     return player?.conference || masterRow?.conference || (anyPitcherMasterRow as any)?.Conference || conferenceByTeam.get(normalize(displayTeam)) || "—";
   })();
   const displayHandedness = player?.handedness || masterRow?.throwHand || (anyPitcherMasterRow as any)?.ThrowHand || storageRow?.[2] || "—";
+  const confStatsRow = (() => {
+    const confName = displayConference !== "—" ? displayConference : null;
+    if (!confName) return null;
+    return conferenceStatsByKey.get(confName.toLowerCase().trim()) || null;
+  })();
   const displayClass = (() => {
     if (player?.class_year) return player.class_year;
     const seasons = (pitcherMasterSeasons as any[]).length;
@@ -1555,6 +1560,7 @@ export default function PitcherProfile() {
                   // Attach risk assessment
                   const riskResult = assessPitcherRisk({
                     conference: displayConference !== "—" ? displayConference : undefined,
+                    confStuffPlus: confStatsRow?.stuff_plus, confHitterTalentPlus: confStatsRow?.overall_power_rating,
                     careerSeasons: pitcherMasterSeasons as any[],
                     ip: (masterRow as any)?.IP ?? null,
                     classYear: displayClass || undefined,
@@ -1867,6 +1873,7 @@ export default function PitcherProfile() {
             {(() => {
               const risk = assessPitcherRisk({
                 conference: displayConference !== "—" ? displayConference : undefined,
+                confStuffPlus: confStatsRow?.stuff_plus, confHitterTalentPlus: confStatsRow?.overall_power_rating,
                 careerSeasons: pitcherMasterSeasons as any[],
                 ip: (masterRow as any)?.IP ?? null, classYear: displayClass || undefined,
                 stuffPlus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
