@@ -229,9 +229,9 @@ function assessPitcherTypeRisk(metrics: {
   const hh = metrics.hardHit;
   const gb = metrics.gb;
 
-  // Stuff+ driven assessment — elite = ~85th pctl (~115+)
+  // Stuff+ driven assessment — elite = ~90th pctl (110+, only ~5-10 players above)
   if (stuff != null) {
-    if (stuff >= 115) { risk -= 15; reasons.push("elite Stuff+"); }
+    if (stuff >= 110) { risk -= 15; reasons.push("elite Stuff+"); }
     else if (stuff >= 105) { risk -= 8; reasons.push("plus Stuff+"); }
     else if (stuff >= 100) { risk -= 3; }
     else if (stuff < 90) { risk += 15; reasons.push("below-avg Stuff+"); }
@@ -293,17 +293,23 @@ function assessCompetitionRisk(conference: string | null | undefined, confOpposi
   let detailParts: string[] = [];
 
   if (confOpposingMetric != null && Number.isFinite(confOpposingMetric)) {
-    // Data-driven: scale risk based on opposing talent metric
-    // 100 = NCAA average. Higher = tougher competition = lower risk.
-    // Scale: 120+ → risk 5, 110 → 15, 100 → 40, 90 → 65, 80 → 85
+    // Data-driven competition risk calibrated to actual NCAA conference data.
+    // Hitters use Conf Stuff+ (range ~93–106), pitchers use Hitter Talent+ (range ~70–117).
+    // SEC is the benchmark at the top (~106 Stuff+, ~117 HT+).
+    //
+    // For Stuff+ (hitter-facing): range 93–106, 100 = NCAA avg
+    // For HT+ (pitcher-facing): range 70–117, ~103 = NCAA avg
+    //
+    // We normalize both to a common scale where higher = tougher competition.
     const m = confOpposingMetric;
-    if (m >= 115) { risk = 5; detailParts.push("elite competition level"); }
-    else if (m >= 108) { risk = 15; detailParts.push("well above-avg competition"); }
-    else if (m >= 103) { risk = 25; detailParts.push("above-avg competition"); }
-    else if (m >= 97) { risk = 40; detailParts.push("average competition"); }
-    else if (m >= 92) { risk = 55; detailParts.push("below-avg competition — stats may be inflated"); }
-    else if (m >= 85) { risk = 70; detailParts.push("weak competition — significant inflation risk"); }
-    else { risk = 85; detailParts.push("very weak competition — stats unreliable"); }
+    if (m >= 112) { risk = 5; detailParts.push("elite competition"); }
+    else if (m >= 106) { risk = 12; detailParts.push("top-tier competition"); }
+    else if (m >= 103) { risk = 20; detailParts.push("above-avg competition"); }
+    else if (m >= 100) { risk = 30; detailParts.push("solid competition"); }
+    else if (m >= 96) { risk = 45; detailParts.push("average competition"); }
+    else if (m >= 92) { risk = 60; detailParts.push("below-avg competition — stats may be inflated"); }
+    else if (m >= 85) { risk = 75; detailParts.push("weak competition — significant inflation risk"); }
+    else { risk = 88; detailParts.push("very weak competition — stats unreliable"); }
 
     const label = confOpposingLabel || "Conf Quality";
     detailParts.push(`${label} ${Math.round(m)}`);
