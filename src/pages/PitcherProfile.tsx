@@ -419,7 +419,7 @@ export default function PitcherProfile() {
 
   const { data: player, isLoading } = useQuery({
     queryKey: ["pitcher-profile-player", id],
-    enabled: !!id && (isDbRoute || /^\d+$/.test(id || "")),
+    enabled: !!id,
     queryFn: async () => {
       // Try by UUID first
       if (isDbRoute) {
@@ -430,13 +430,52 @@ export default function PitcherProfile() {
           .maybeSingle();
         if (data) return data;
       }
-      // Fallback: look up by source_player_id
-      const { data: bySource } = await supabase
-        .from("players")
-        .select("*")
-        .eq("source_player_id", id!)
-        .maybeSingle();
-      if (bySource) return bySource;
+      // Fallback: look up by source_player_id (numeric IDs)
+      if (/^\d+$/.test(id || "")) {
+        const { data: bySource } = await supabase
+          .from("players")
+          .select("*")
+          .eq("source_player_id", id!)
+          .maybeSingle();
+        if (bySource) return bySource;
+      }
+      // Fallback: storage route — look up by name in Pitching Master, then players table
+      if (storageRef?.playerName) {
+        const { data: pmRow } = await supabase
+          .from("Pitching Master")
+          .select("*")
+          .ilike("playerFullName", storageRef.playerName)
+          .limit(1)
+          .maybeSingle();
+        if (pmRow?.source_player_id) {
+          const { data: bySource } = await supabase
+            .from("players")
+            .select("*")
+            .eq("source_player_id", pmRow.source_player_id)
+            .maybeSingle();
+          if (bySource) return bySource;
+        }
+        if (pmRow) {
+          const parts = (pmRow.playerFullName || "").trim().split(/\s+/);
+          return {
+            id: pmRow.source_player_id || pmRow.id,
+            first_name: parts[0] || "",
+            last_name: parts.slice(1).join(" ") || "",
+            team: pmRow.Team,
+            from_team: pmRow.Team,
+            conference: pmRow.Conference,
+            position: pmRow.Role || "P",
+            throws_hand: pmRow.ThrowHand,
+            class_year: null,
+            transfer_portal: false,
+            source_player_id: pmRow.source_player_id,
+            source_team_id: pmRow.TeamID,
+            age: null, height_inches: null, weight: null, high_school: null, home_state: null,
+            headshot_url: null, notes: null, portal_entry_date: null, handedness: null, team_id: pmRow.TeamID,
+            created_at: "", updated_at: "",
+          } as any;
+        }
+      }
       return null;
     },
   });
