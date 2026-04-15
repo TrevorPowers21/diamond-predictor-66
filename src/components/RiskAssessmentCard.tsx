@@ -87,24 +87,18 @@ export function RiskAssessmentCardRSTR({ risk }: { risk: RiskAssessment }) {
         <p className="text-xs text-slate-300 leading-relaxed">{risk.summary}</p>
       </div>
 
-      {/* Factor bars */}
-      <div className="px-4 pb-3 space-y-2">
+      {/* Factor bars — compact, no detail notes */}
+      <div className="px-4 pb-3 space-y-1.5">
         {risk.factors.map((f) => (
-          <div key={f.label}>
-            <div className="flex items-center gap-2">
-              <div className="w-[72px] text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6] shrink-0">{f.label}</div>
-              <div className="flex-1 h-2.5 rounded-full bg-[#162241] overflow-hidden">
-                <div
-                  className={cn("h-full rounded-full transition-all duration-300", barColor(f.score))}
-                  style={{ width: `${f.score}%` }}
-                />
-              </div>
-              <div className="w-7 text-right text-[10px] tabular-nums text-slate-400 font-semibold">{f.score}</div>
-              <div className={cn("w-8 text-[9px] font-semibold", f.score <= 25 ? "text-[hsl(142,71%,35%)]" : f.score <= 50 ? "text-[hsl(200,80%,35%)]" : f.score <= 75 ? "text-[hsl(40,90%,38%)]" : "text-[hsl(0,72%,41%)]")}>
-                {scoreLabel(f.score)}
-              </div>
+          <div key={f.label} className="flex items-center gap-2">
+            <div className="w-[72px] text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6] shrink-0">{f.label}</div>
+            <div className="flex-1 h-2 rounded-full bg-[#162241] overflow-hidden">
+              <div
+                className={cn("h-full rounded-full transition-all duration-300", barColor(f.score))}
+                style={{ width: `${f.score}%` }}
+              />
             </div>
-            <div className="ml-[80px] text-[10px] text-[#6b7280] leading-tight mt-0.5">{f.detail}</div>
+            <div className="w-7 text-right text-[10px] tabular-nums text-slate-400 font-semibold">{f.score}</div>
           </div>
         ))}
       </div>
@@ -125,13 +119,6 @@ export function RiskAssessmentCardSavant({
 }) {
   const gs = GRADE_STYLES[risk.grade];
 
-  // Build synopsis: summary + key factor details rolled into one block
-  const keyDetails = risk.factors
-    .filter((f) => f.detail && f.detail !== "Standard profile")
-    .map((f) => f.detail)
-    .slice(0, 4);
-  const synopsis = [risk.summary, ...keyDetails].join(" ");
-
   return (
     <section className="border px-5 py-4" style={{ backgroundColor: navyCard, borderColor: navyBorder }}>
       {/* Header */}
@@ -150,10 +137,10 @@ export function RiskAssessmentCardSavant({
         </div>
       </div>
 
-      {/* Synopsis — summary + key details in one paragraph */}
-      <p className="text-[11px] text-[#8a94a6] leading-relaxed mb-3">{synopsis}</p>
+      {/* Summary */}
+      <p className="text-[11px] text-[#8a94a6] leading-relaxed mb-3">{risk.summary}</p>
 
-      {/* Factor bars — compact, no detail notes */}
+      {/* Factor bars */}
       <div className="space-y-1.5">
         {risk.factors.map((f) => (
           <div key={f.label} className="flex items-center gap-2">
