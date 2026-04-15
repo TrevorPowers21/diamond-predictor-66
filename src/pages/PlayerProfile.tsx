@@ -1102,6 +1102,60 @@ export default function PlayerProfile() {
                 </CardContent>
               </Card>
             )}
+
+            {/* Internal Power Ratings — admin only, fills left column space */}
+            {isAdmin && seedPowerDerived && (
+              <Card className="border-[#162241] bg-[#0a1428]">
+                <CardHeader className="pb-1 pt-3 px-4">
+                  <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}>
+                    Internal Power Ratings
+                    <Badge variant="outline" className="text-[10px] uppercase tracking-wide border-[#D4AF37]/30 text-[#D4AF37]/70">Admin</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-4 pb-4 space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      ["Overall PR+", pctFormat(seedPowerDerived.overallPlus)],
+                      ["AVG PR+", pctFormat(seedPowerDerived.baPlus)],
+                      ["OBP PR+", pctFormat(seedPowerDerived.obpPlus)],
+                      ["ISO PR+", pctFormat(seedPowerDerived.isoPlus)],
+                    ].map(([label, val]) => (
+                      <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3">
+                        <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
+                        <div className="text-2xl font-bold mt-1 text-white tabular-nums">{val}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {seedPowerRow && (
+                    <>
+                      <div className="border-t border-[#162241] pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-[#8a94a6] mb-2">2025 Input Metrics</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            ["Contact %", `${seedPowerRow.contact?.toFixed(1)}%`],
+                            ["Line Drive %", `${seedPowerRow.lineDrive?.toFixed(1)}%`],
+                            ["Pop-Up %", `${seedPowerRow.popUp?.toFixed(1)}%`],
+                            ["BB %", `${seedPowerRow.bb?.toFixed(1)}%`],
+                            ["Chase %", `${seedPowerRow.chase?.toFixed(1)}%`],
+                            ["Barrel %", `${seedPowerRow.barrel?.toFixed(1)}%`],
+                            ["Pull %", `${seedPowerRow.pull?.toFixed(1)}%`],
+                            ["LA 10-30 %", `${seedPowerRow.la10_30?.toFixed(1)}%`],
+                            ["GB %", `${seedPowerRow.gb?.toFixed(1)}%`],
+                            ["Avg Exit Velo", `${seedPowerRow.avgExitVelo?.toFixed(1)} mph`],
+                            ["EV90", `${seedPowerRow.ev90?.toFixed(1)} mph`],
+                          ].map(([label, val]) => (
+                            <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-2.5">
+                              <div className="text-[9px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
+                              <div className="font-semibold text-lg mt-0.5 text-slate-100 tabular-nums">{val}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           {/* Predictions & Scouting */}
@@ -1248,55 +1302,7 @@ export default function PlayerProfile() {
                     <ScoutGrade label="Con" value={seedPowerDerived.contactScore != null ? Math.round(seedPowerDerived.contactScore) : null} fullLabel="Contact%" />
                     <ScoutGrade label="Chs" value={seedPowerDerived.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : null} fullLabel="Chase%" />
                   </div>
-                  {isAdmin && seedPowerDerived && (
-                    <>
-                      <div className="border-t border-[#162241] mt-4 pt-4">
-                        <div className="flex items-center gap-2 mb-3">
-                          <ShieldCheck className="h-4 w-4 text-[#D4AF37]" />
-                          <span className="text-xs font-semibold uppercase tracking-wider text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Internal Power Ratings</span>
-                          <Badge variant="outline" className="text-[10px] uppercase tracking-wide border-[#D4AF37]/30 text-[#D4AF37]/70">Admin</Badge>
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                          {[
-                            ["Overall PR+", pctFormat(seedPowerDerived.overallPlus)],
-                            ["AVG PR+", pctFormat(seedPowerDerived.baPlus)],
-                            ["OBP PR+", pctFormat(seedPowerDerived.obpPlus)],
-                            ["ISO PR+", pctFormat(seedPowerDerived.isoPlus)],
-                          ].map(([label, val]) => (
-                            <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3">
-                              <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
-                              <div className="text-2xl font-bold mt-1 text-white tabular-nums">{val}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      {seedPowerRow && (
-                        <div className="border-t border-[#162241] mt-4 pt-4">
-                          <p className="text-xs font-semibold uppercase tracking-wider text-[#8a94a6] mb-3">2025 Input Metrics</p>
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                            {[
-                              ["Contact %", `${seedPowerRow.contact?.toFixed(1)}%`],
-                              ["Line Drive %", `${seedPowerRow.lineDrive?.toFixed(1)}%`],
-                              ["Pop-Up %", `${seedPowerRow.popUp?.toFixed(1)}%`],
-                              ["BB %", `${seedPowerRow.bb?.toFixed(1)}%`],
-                              ["Chase %", `${seedPowerRow.chase?.toFixed(1)}%`],
-                              ["Barrel %", `${seedPowerRow.barrel?.toFixed(1)}%`],
-                              ["Pull %", `${seedPowerRow.pull?.toFixed(1)}%`],
-                              ["LA 10-30 %", `${seedPowerRow.la10_30?.toFixed(1)}%`],
-                              ["GB %", `${seedPowerRow.gb?.toFixed(1)}%`],
-                              ["Avg Exit Velo", `${seedPowerRow.avgExitVelo?.toFixed(1)} mph`],
-                              ["EV90", `${seedPowerRow.ev90?.toFixed(1)} mph`],
-                            ].map(([label, val]) => (
-                              <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3">
-                                <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
-                                <div className="font-semibold text-xl mt-1 text-slate-100 tabular-nums">{val}</div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
+}
                 </CardContent>
               </Card>
             )}
