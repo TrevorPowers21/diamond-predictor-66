@@ -58,9 +58,9 @@ function buildBars(player: SavantPitcherRow, pop: SavantPitcherRow[]) {
     { label: "BB/9", value: player.BB9, pop: col("BB9"), format: fmt2, invert: true },
     { label: "HR/9", value: player.HR9, pop: col("HR9"), format: fmt2, invert: true },
     { label: "pRV+", value: playerPrv, pop: popPrv, format: fmtInt },
-    { label: "STUFF+", value: player.stuff_plus, pop: col("stuff_plus"), format: fmtInt },
   ];
   const stuff: BarConfig[] = [
+    { label: "STUFF+", value: player.stuff_plus, pop: col("stuff_plus"), format: fmtInt },
     { label: "WHIFF %", value: player.miss_pct, pop: col("miss_pct"), format: fmtPct },
     { label: "IZ WHIFF %", value: player.in_zone_whiff_pct, pop: col("in_zone_whiff_pct"), format: fmtPct },
     { label: "CHASE %", value: player.chase_pct, pop: col("chase_pct"), format: fmtPct },

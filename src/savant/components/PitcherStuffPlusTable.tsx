@@ -150,7 +150,6 @@ export default function PitcherStuffPlusTable({
                 >
                   <td className="px-4 py-2 font-semibold text-white">
                     {r.rstr_pitch_class ?? r.pitch_type}
-                    {r.hand && <span className="ml-1 text-[10px] text-white/55">vs {r.hand}</span>}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmtInt(r.pitches)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt1(r.velocity)}</td>
@@ -186,7 +185,7 @@ export default function PitcherStuffPlusTable({
                   <td className="px-3 py-2.5" />
                   <td className="px-3 py-2.5" />
                   <td className="px-3 py-2.5" />
-                  <td className="px-3 py-2.5 pr-4 text-right tabular-nums font-bold text-lg" style={{ color: GOLD }}>
+                  <td className="px-3 py-2.5 pr-4 text-right tabular-nums font-semibold" style={{ color: GOLD }}>
                     {fmtInt(overallStuffPlus)}
                   </td>
                 </tr>
