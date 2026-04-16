@@ -304,10 +304,11 @@ function assessPitcherTypeRisk(metrics: {
   const izWhiff = metrics.izWhiff;
 
   // ── #1: Stuff+ — dominant anchor. Stuff is stuff regardless of competition. ──
+  // NCAA Stuff+ distribution is tight — 108+ is ~99th percentile.
   if (stuff != null) {
-    if (stuff >= 115) { risk -= 22; reasons.push("elite Stuff+"); }
-    else if (stuff >= 110) { risk -= 16; reasons.push("plus Stuff+"); }
-    else if (stuff >= 105) { risk -= 10; reasons.push("above-avg Stuff+"); }
+    if (stuff >= 115) { risk -= 24; reasons.push("elite Stuff+"); }
+    else if (stuff >= 108) { risk -= 18; reasons.push("plus Stuff+"); }
+    else if (stuff >= 103) { risk -= 10; reasons.push("above-avg Stuff+"); }
     else if (stuff >= 100) { risk -= 4; }
     else if (stuff < 85) { risk += 20; reasons.push("well below-avg Stuff+"); }
     else if (stuff < 90) { risk += 14; reasons.push("below-avg Stuff+"); }
@@ -331,7 +332,7 @@ function assessPitcherTypeRisk(metrics: {
     reasons.push("average stuff + poor command — high-risk combination");
   }
   // Elite stuff + elite command = very low risk, period
-  if (stuff != null && stuff >= 110 && bb != null && bb < 5) {
+  if (stuff != null && stuff >= 108 && bb != null && bb < 5) {
     risk -= 10;
     reasons.push("elite stuff + elite command");
   }
