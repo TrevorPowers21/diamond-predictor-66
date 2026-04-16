@@ -316,39 +316,64 @@ function assessPitcherTypeRisk(metrics: {
   }
 
   // ── #2: BB% — close second, biggest variance driver. Command is command. ──
+  // NCAA BB% distribution: <5% ~90th pctl, <6% ~85th, <7% ~75th, >10% ~25th, >13% ~10th
   if (bb != null) {
     if (bb > 14) { risk += 18; reasons.push("very high walk rate — major command concern"); }
     else if (bb > 12) { risk += 14; reasons.push("high walk rate"); }
-    else if (bb > 9) { risk += 8; reasons.push("elevated walk rate"); }
-    else if (bb < 3) { risk -= 14; reasons.push("elite command"); }
-    else if (bb < 5) { risk -= 8; reasons.push("plus command"); }
-    else if (bb < 7) { risk -= 3; }
+    else if (bb > 10) { risk += 8; reasons.push("elevated walk rate"); }
+    else if (bb > 8) { risk += 4; }
+    else if (bb < 4) { risk -= 16; reasons.push("elite command"); }
+    else if (bb < 5.5) { risk -= 12; reasons.push("plus command"); }
+    else if (bb < 7) { risk -= 6; reasons.push("above-avg command"); }
   }
 
   // ── Stuff + BB% interaction — the core risk combos ──
   // Average stuff + below-avg command = nothing to lean on
-  if (stuff != null && stuff < 100 && bb != null && bb > 9) {
+  if (stuff != null && stuff < 100 && bb != null && bb > 10) {
     risk += 10;
     reasons.push("average stuff + poor command — high-risk combination");
   }
   // Elite stuff + elite command = very low risk, period
-  if (stuff != null && stuff >= 108 && bb != null && bb < 5) {
+  if (stuff != null && stuff >= 108 && bb != null && bb < 6) {
     risk -= 10;
     reasons.push("elite stuff + elite command");
   }
+  // Plus stuff + plus command = low risk
+  if (stuff != null && stuff >= 103 && stuff < 108 && bb != null && bb < 7) {
+    risk -= 5;
+    reasons.push("plus stuff + plus command");
+  }
 
   // ── #3: Hard Hit% / Barrel% — red flag when elevated, gets worse at higher levels ──
+  // CONTEXT: 4-seam FB pitchers with high whiff will naturally give up harder contact
+  // when the ball IS hit — that's the profile, not a red flag. Only penalize hard hit
+  // when the pitcher lacks swing-and-miss to justify it.
+  const hasWhiff = whiff != null && whiff >= 25; // high-whiff pitcher — hard hit is expected
   if (hh != null) {
-    if (hh > 42) { risk += 14; reasons.push("gets hit hard — red flag at higher levels"); }
-    else if (hh > 38) { risk += 8; reasons.push("elevated hard contact allowed"); }
-    else if (hh < 25) { risk -= 6; reasons.push("elite contact suppression"); }
-    else if (hh < 30) { risk -= 3; }
+    if (hasWhiff) {
+      // High-whiff pitcher: hard hit is part of the profile — minimal penalty
+      if (hh > 45) { risk += 5; reasons.push("very high hard hit — elevated even for a swing-and-miss profile"); }
+      else if (hh < 25) { risk -= 4; reasons.push("suppresses contact and misses bats"); }
+    } else {
+      // Low-whiff pitcher: hard hit is a real problem — can't miss bats AND gets hit hard
+      if (hh > 40) { risk += 14; reasons.push("gets hit hard without swing-and-miss — red flag"); }
+      else if (hh > 36) { risk += 8; reasons.push("elevated hard contact without whiff to offset"); }
+      else if (hh < 25) { risk -= 6; reasons.push("elite contact suppression"); }
+      else if (hh < 30) { risk -= 3; }
+    }
   }
   if (barrel != null) {
-    if (barrel > 10) { risk += 12; reasons.push("barrel-prone — gets worse against better hitters"); }
-    else if (barrel > 7) { risk += 6; reasons.push("elevated barrel rate allowed"); }
-    else if (barrel < 3) { risk -= 6; reasons.push("elite barrel suppression"); }
-    else if (barrel < 5) { risk -= 3; }
+    if (hasWhiff) {
+      // High-whiff: barrel is less alarming — only flag extremes
+      if (barrel > 12) { risk += 5; reasons.push("barrel rate elevated even with swing-and-miss"); }
+      else if (barrel < 4) { risk -= 4; reasons.push("plus barrel suppression + whiff"); }
+    } else {
+      // Low-whiff: barrel is a major concern
+      if (barrel > 10) { risk += 12; reasons.push("barrel-prone — gets worse against better hitters"); }
+      else if (barrel > 7) { risk += 6; reasons.push("elevated barrel rate allowed"); }
+      else if (barrel < 3) { risk -= 6; reasons.push("elite barrel suppression"); }
+      else if (barrel < 5) { risk -= 3; }
+    }
   }
 
   // ── High barrel + low whiff = bad recipe at higher levels ──
