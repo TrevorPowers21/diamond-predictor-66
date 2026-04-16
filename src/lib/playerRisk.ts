@@ -297,50 +297,111 @@ function assessPitcherTypeRisk(metrics: {
   const stuff = metrics.stuffPlus;
   const whiff = metrics.whiffPct;
   const bb = metrics.bbPct;
+  const chase = metrics.chase;
   const barrel = metrics.barrel;
   const hh = metrics.hardHit;
   const gb = metrics.gb;
+  const izWhiff = metrics.izWhiff;
 
-  // Stuff+ driven assessment — elite = ~90th pctl (110+, only ~5-10 players above)
+  // ── #1: Stuff+ — dominant anchor. Stuff is stuff regardless of competition. ──
   if (stuff != null) {
-    if (stuff >= 110) { risk -= 15; reasons.push("elite Stuff+"); }
-    else if (stuff >= 105) { risk -= 8; reasons.push("plus Stuff+"); }
-    else if (stuff >= 100) { risk -= 3; }
-    else if (stuff < 90) { risk += 15; reasons.push("below-avg Stuff+"); }
-    else if (stuff < 95) { risk += 8; }
+    if (stuff >= 115) { risk -= 22; reasons.push("elite Stuff+"); }
+    else if (stuff >= 110) { risk -= 16; reasons.push("plus Stuff+"); }
+    else if (stuff >= 105) { risk -= 10; reasons.push("above-avg Stuff+"); }
+    else if (stuff >= 100) { risk -= 4; }
+    else if (stuff < 85) { risk += 20; reasons.push("well below-avg Stuff+"); }
+    else if (stuff < 90) { risk += 14; reasons.push("below-avg Stuff+"); }
+    else if (stuff < 95) { risk += 7; }
   }
 
-  // Whiff rate — elite = ~85th pctl (~30%+)
-  if (whiff != null) {
-    if (whiff >= 30) { risk -= 10; reasons.push("elite swing-and-miss"); }
-    else if (whiff >= 25) { risk -= 5; reasons.push("plus whiff rate"); }
-    else if (whiff < 18) { risk += 12; reasons.push("low whiff rate"); }
-  }
-
-  // Walk rate — control risk — elite control = ~85th pctl (<4%)
+  // ── #2: BB% — close second, biggest variance driver. Command is command. ──
   if (bb != null) {
-    if (bb > 12) { risk += 15; reasons.push("high walk rate"); }
-    else if (bb > 9) { risk += 7; }
-    else if (bb < 4) { risk -= 10; reasons.push("elite control"); }
-    else if (bb < 6) { risk -= 5; reasons.push("plus control"); }
+    if (bb > 14) { risk += 18; reasons.push("very high walk rate — major command concern"); }
+    else if (bb > 12) { risk += 14; reasons.push("high walk rate"); }
+    else if (bb > 9) { risk += 8; reasons.push("elevated walk rate"); }
+    else if (bb < 3) { risk -= 14; reasons.push("elite command"); }
+    else if (bb < 5) { risk -= 8; reasons.push("plus command"); }
+    else if (bb < 7) { risk -= 3; }
   }
 
-  // Hard hit / barrel against — contact quality allowed
+  // ── Stuff + BB% interaction — the core risk combos ──
+  // Average stuff + below-avg command = nothing to lean on
+  if (stuff != null && stuff < 100 && bb != null && bb > 9) {
+    risk += 10;
+    reasons.push("average stuff + poor command — high-risk combination");
+  }
+  // Elite stuff + elite command = very low risk, period
+  if (stuff != null && stuff >= 110 && bb != null && bb < 5) {
+    risk -= 10;
+    reasons.push("elite stuff + elite command");
+  }
+
+  // ── #3: Hard Hit% / Barrel% — red flag when elevated, gets worse at higher levels ──
   if (hh != null) {
-    if (hh > 40) { risk += 12; reasons.push("high hard-hit allowed"); }
-    else if (hh < 25) { risk -= 8; reasons.push("elite contact suppression"); }
-    else if (hh < 30) { risk -= 4; reasons.push("limits hard contact"); }
+    if (hh > 42) { risk += 14; reasons.push("gets hit hard — red flag at higher levels"); }
+    else if (hh > 38) { risk += 8; reasons.push("elevated hard contact allowed"); }
+    else if (hh < 25) { risk -= 6; reasons.push("elite contact suppression"); }
+    else if (hh < 30) { risk -= 3; }
   }
   if (barrel != null) {
-    if (barrel > 8) { risk += 10; reasons.push("barrel-prone"); }
-    else if (barrel < 3) { risk -= 8; reasons.push("elite barrel suppression"); }
-    else if (barrel < 5) { risk -= 4; }
+    if (barrel > 10) { risk += 12; reasons.push("barrel-prone — gets worse against better hitters"); }
+    else if (barrel > 7) { risk += 6; reasons.push("elevated barrel rate allowed"); }
+    else if (barrel < 3) { risk -= 6; reasons.push("elite barrel suppression"); }
+    else if (barrel < 5) { risk -= 3; }
   }
 
-  // Ground ball rate — high GB = safer
+  // ── High barrel + low whiff = bad recipe at higher levels ──
+  if (barrel != null && barrel > 7 && whiff != null && whiff < 20) {
+    risk += 10;
+    reasons.push("gets barreled without swing-and-miss to compensate");
+  }
+
+  // ── #4: IZ Whiff% — stuff confirmation / challenge ──
+  if (izWhiff != null) {
+    // IZ whiff confirms Stuff+ — high IZ whiff with high Stuff+ = real deal
+    if (izWhiff >= 20) { risk -= 6; reasons.push("elite in-zone whiff — stuff confirmed"); }
+    else if (izWhiff >= 16) { risk -= 3; }
+    // Low IZ whiff challenges Stuff+ — model says good stuff but hitters aren't missing in zone
+    else if (izWhiff < 10) { risk += 6; reasons.push("low IZ whiff — stuff not generating misses in zone"); }
+    else if (izWhiff < 12) { risk += 3; }
+  }
+  // Stuff+ high but IZ whiff low = flag
+  if (stuff != null && stuff >= 105 && izWhiff != null && izWhiff < 12) {
+    risk += 5;
+    reasons.push("Stuff+ doesn't match in-zone swing-and-miss");
+  }
+
+  // ── #5: Chase% — flags BB% instability. High chase = BB% artificially low. ──
+  // Chase fluctuates most with competition — at higher levels chase drops, BB% rises.
+  if (chase != null) {
+    if (chase > 35) { risk += 5; reasons.push("high chase rate — BB% may rise against better hitters"); }
+    else if (chase > 30) { risk += 3; }
+    else if (chase < 18) { risk -= 3; }
+  }
+  // High chase + low BB% = unstable command picture
+  if (chase != null && chase > 30 && bb != null && bb < 6) {
+    risk += 4;
+    reasons.push("low BB% may be masked by undisciplined opposing lineups");
+  }
+
+  // ── #6: Whiff% — only meaningful relative to IZ whiff and chase context ──
+  // Discounted — whiff is polluted by chase. High whiff + high chase = inflated.
+  if (whiff != null) {
+    if (whiff >= 30 && izWhiff != null && izWhiff >= 16) { risk -= 4; reasons.push("legitimate swing-and-miss"); }
+    else if (whiff < 16) { risk += 4; reasons.push("limited swing-and-miss"); }
+  }
+  // Whiff high but IZ whiff low = chase-driven, not stuff-driven
+  if (whiff != null && whiff >= 25 && izWhiff != null && izWhiff < 12) {
+    risk += 5;
+    reasons.push("whiff rate inflated by chase — not real swing-and-miss");
+  }
+
+  // ── GB% — translatable floor note, not a risk weight. ──
+  // High GB% from a good sinker translates. Noted positively but minimal risk impact.
   if (gb != null) {
-    if (gb > 50) { risk -= 8; reasons.push("ground ball pitcher"); }
-    else if (gb < 35) { risk += 8; reasons.push("fly ball heavy"); }
+    if (gb > 55) { risk -= 3; reasons.push("elite ground ball rate — translatable floor"); }
+    else if (gb > 50) { risk -= 1; }
+    // Low GB% is not penalized — fly ball pitchers with good stuff are fine
   }
 
   risk = clamp(risk);
