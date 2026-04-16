@@ -16,6 +16,7 @@ interface PitcherStuffPlusTableProps {
   selectedSeason: number;
   availableSeasons: number[];
   onSeasonChange: (s: number) => void;
+  overallStuffPlus?: number | null;
 }
 
 /**
@@ -32,6 +33,7 @@ export default function PitcherStuffPlusTable({
   selectedSeason,
   availableSeasons,
   onSeasonChange,
+  overallStuffPlus,
 }: PitcherStuffPlusTableProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -167,6 +169,28 @@ export default function PitcherStuffPlusTable({
                   </td>
                 </tr>
               ))}
+              {/* Overall Stuff+ summary row */}
+              {overallStuffPlus != null && (
+                <tr
+                  className="border-t text-white"
+                  style={{ borderColor: GOLD, backgroundColor: "rgba(212,175,55,0.04)" }}
+                >
+                  <td className="px-4 py-2.5 font-bold text-[#D4AF37] text-xs uppercase tracking-wider">Overall</td>
+                  <td className="px-3 py-2.5" />
+                  <td className="px-3 py-2.5" />
+                  <td className="px-3 py-2.5" />
+                  <td className="px-3 py-2.5" />
+                  <td className="px-3 py-2.5" />
+                  <td className="px-3 py-2.5" />
+                  <td className="px-3 py-2.5" />
+                  <td className="px-3 py-2.5" />
+                  <td className="px-3 py-2.5" />
+                  <td className="px-3 py-2.5" />
+                  <td className="px-3 py-2.5 pr-4 text-right tabular-nums font-bold text-lg" style={{ color: GOLD }}>
+                    {fmtInt(overallStuffPlus)}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

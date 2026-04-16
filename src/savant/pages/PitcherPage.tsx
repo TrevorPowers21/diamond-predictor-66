@@ -199,6 +199,7 @@ export default function PitcherPage() {
               selectedSeason={stuffSeason}
               availableSeasons={[2025]}
               onSeasonChange={setStuffSeason}
+              overallStuffPlus={player.stuff_plus}
             />
 
             <PitcherCareerScoutingTable rows={careerRows} />
