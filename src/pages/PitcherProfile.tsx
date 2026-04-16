@@ -1742,6 +1742,61 @@ export default function PitcherProfile() {
               </CardContent>
             </Card>
 
+            {isAdmin && internalPowerRatings ? (
+              <Card className="border-[#162241] bg-[#0a1428]">
+                <CardHeader className="pt-3 px-4 pb-2">
+                  <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}>
+                    Internal Power Ratings
+                    <Badge variant="outline" className="text-[10px] uppercase tracking-wide border-[#D4AF37]/30 text-[#D4AF37]/70">Admin</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4 px-4 pb-4">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+                    {[
+                      ["Overall PR+", internalPowerRatings?.overallPlus],
+                      ["ERA PR+", internalPowerRatings?.eraPlus],
+                      ["WHIP PR+", internalPowerRatings?.whipPlus],
+                      ["K/9 PR+", internalPowerRatings?.k9Plus],
+                      ["BB/9 PR+", internalPowerRatings?.bb9Plus],
+                      ["HR/9 PR+", internalPowerRatings?.hr9Plus],
+                      ["FIP PR+", internalPowerRatings?.fipPlus],
+                    ].map(([label, val]) => (
+                      <div key={label as string} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3">
+                        <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label as string}</div>
+                        <div className="text-3xl font-bold tracking-tight mt-1 text-white tabular-nums">{fmtWhole(val as number | null | undefined)}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="border-t border-[#162241] pt-4">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-[#8a94a6] mb-3">2025 Input Metrics</p>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                      {[
+                        ["Stuff+", internalPowerRatings?.metrics.stuff],
+                        ["Whiff%", internalPowerRatings?.metrics.whiff],
+                        ["BB%", internalPowerRatings?.metrics.bb],
+                        ["HH%", internalPowerRatings?.metrics.hh],
+                        ["IZ Whiff%", internalPowerRatings?.metrics.izWhiff],
+                        ["Chase%", internalPowerRatings?.metrics.chase],
+                        ["Barrel%", internalPowerRatings?.metrics.barrel],
+                        ["LD%", internalPowerRatings?.metrics.ld],
+                        ["Avg EV", internalPowerRatings?.metrics.avgEv],
+                        ["GB%", internalPowerRatings?.metrics.gb],
+                        ["IZ%", internalPowerRatings?.metrics.iz],
+                        ["EV90", internalPowerRatings?.metrics.ev90],
+                        ["Pull%", internalPowerRatings?.metrics.pull],
+                        ["LA 10-30%", internalPowerRatings?.metrics.la1030],
+                      ].map(([label, val]) => (
+                        <div key={label as string} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3">
+                          <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label as string}</div>
+                          <div className="font-semibold text-2xl mt-1 text-slate-100 tabular-nums">{fmt(val as number | null | undefined, 1)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
+
           </div>
 
           <div className="lg:col-span-2 space-y-4">
@@ -1909,60 +1964,6 @@ export default function PitcherProfile() {
               return <RiskAssessmentCardRSTR risk={risk} />;
             })()}
 
-            {isAdmin ? (
-              <Card className="border-[#162241] bg-[#0a1428]">
-                <CardHeader className="pt-3 px-4 pb-2">
-                  <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}>
-                    Internal Power Ratings
-                    <Badge variant="outline" className="text-[10px] uppercase tracking-wide border-[#D4AF37]/30 text-[#D4AF37]/70">Admin</Badge>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4 px-4 pb-4">
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
-                    {[
-                      ["Overall PR+", internalPowerRatings?.overallPlus],
-                      ["ERA PR+", internalPowerRatings?.eraPlus],
-                      ["WHIP PR+", internalPowerRatings?.whipPlus],
-                      ["K/9 PR+", internalPowerRatings?.k9Plus],
-                      ["BB/9 PR+", internalPowerRatings?.bb9Plus],
-                      ["HR/9 PR+", internalPowerRatings?.hr9Plus],
-                      ["FIP PR+", internalPowerRatings?.fipPlus],
-                    ].map(([label, val]) => (
-                      <div key={label as string} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3">
-                        <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label as string}</div>
-                        <div className="text-3xl font-bold tracking-tight mt-1 text-white tabular-nums">{fmtWhole(val as number | null | undefined)}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="border-t border-[#162241] pt-4">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-[#8a94a6] mb-3">2025 Input Metrics</p>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-                      {[
-                        ["Stuff+", internalPowerRatings?.metrics.stuff],
-                        ["Whiff%", internalPowerRatings?.metrics.whiff],
-                        ["BB%", internalPowerRatings?.metrics.bb],
-                        ["HH%", internalPowerRatings?.metrics.hh],
-                        ["IZ Whiff%", internalPowerRatings?.metrics.izWhiff],
-                        ["Chase%", internalPowerRatings?.metrics.chase],
-                        ["Barrel%", internalPowerRatings?.metrics.barrel],
-                        ["LD%", internalPowerRatings?.metrics.ld],
-                        ["Avg EV", internalPowerRatings?.metrics.avgEv],
-                        ["GB%", internalPowerRatings?.metrics.gb],
-                        ["IZ%", internalPowerRatings?.metrics.iz],
-                        ["EV90", internalPowerRatings?.metrics.ev90],
-                        ["Pull%", internalPowerRatings?.metrics.pull],
-                        ["LA 10-30%", internalPowerRatings?.metrics.la1030],
-                      ].map(([label, val]) => (
-                        <div key={label as string} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3">
-                          <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label as string}</div>
-                          <div className="font-semibold text-2xl mt-1 text-slate-100 tabular-nums">{fmt(val as number | null | undefined, 1)}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : null}
           </div>
         </div>
       </div>
