@@ -502,13 +502,15 @@ function drawRiskAssessment(doc: jsPDF, player: ReportPlayer, y: number): number
       doc.text(f.label.toUpperCase(), barStartX - 2, fy + 4);
       // Bar background
       rect(doc, barStartX + 45, fy, barMaxW - 70, barH, [220, 220, 220]);
-      // Bar fill
-      const barFillColor: [number, number, number] = f.score <= 25 ? GREEN : f.score <= 50 ? BLUE_ACC : f.score <= 75 ? [202, 138, 4] : RED_ACC;
-      rect(doc, barStartX + 45, fy, (barMaxW - 70) * (f.score / 100), barH, barFillColor);
+      // Bar fill (skip when no data available)
+      if (f.score != null) {
+        const barFillColor: [number, number, number] = f.score <= 25 ? GREEN : f.score <= 50 ? BLUE_ACC : f.score <= 75 ? [202, 138, 4] : RED_ACC;
+        rect(doc, barStartX + 45, fy, (barMaxW - 70) * (f.score / 100), barH, barFillColor);
+      }
       // Score
       doc.setTextColor(...DARKGRAY);
       doc.setFontSize(5.5);
-      doc.text(String(f.score), barStartX + barMaxW - 18, fy + 4);
+      doc.text(f.score != null ? String(f.score) : "—", barStartX + barMaxW - 18, fy + 4);
     }
   }
 

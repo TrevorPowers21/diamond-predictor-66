@@ -93,12 +93,16 @@ export function RiskAssessmentCardRSTR({ risk }: { risk: RiskAssessment }) {
           <div key={f.label} className="flex items-center gap-2">
             <div className="w-[72px] text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6] shrink-0">{f.label}</div>
             <div className="flex-1 h-2 rounded-full bg-[#162241] overflow-hidden">
-              <div
-                className={cn("h-full rounded-full transition-all duration-300", barColor(f.score))}
-                style={{ width: `${f.score}%` }}
-              />
+              {f.score != null && (
+                <div
+                  className={cn("h-full rounded-full transition-all duration-300", barColor(f.score))}
+                  style={{ width: `${f.score}%` }}
+                />
+              )}
             </div>
-            <div className="w-7 text-right text-[10px] tabular-nums text-slate-400 font-semibold">{f.score}</div>
+            <div className="w-7 text-right text-[10px] tabular-nums text-slate-400 font-semibold">
+              {f.score != null ? f.score : "—"}
+            </div>
           </div>
         ))}
       </div>
@@ -146,12 +150,16 @@ export function RiskAssessmentCardSavant({
           <div key={f.label} className="flex items-center gap-2">
             <div className="w-[65px] text-[9px] uppercase tracking-wider font-semibold text-[#8a94a6] shrink-0">{f.label}</div>
             <div className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden">
-              <div
-                className={cn("h-full rounded-full transition-all duration-300", barColor(f.score))}
-                style={{ width: `${f.score}%` }}
-              />
+              {f.score != null && (
+                <div
+                  className={cn("h-full rounded-full transition-all duration-300", barColor(f.score))}
+                  style={{ width: `${f.score}%` }}
+                />
+              )}
             </div>
-            <div className="w-6 text-right text-[9px] tabular-nums text-[#8a94a6]">{f.score}</div>
+            <div className="w-6 text-right text-[9px] tabular-nums text-[#8a94a6]">
+              {f.score != null ? f.score : "—"}
+            </div>
           </div>
         ))}
       </div>

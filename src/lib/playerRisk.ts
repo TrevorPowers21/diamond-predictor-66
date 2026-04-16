@@ -1,14 +1,16 @@
 /**
  * RSTR IQ — Player Risk Assessment Engine
  *
- * Produces a risk profile for any hitter or pitcher based on 5 factors:
- *  1. Player Type Risk (primary) — swing profile, contact quality, approach
- *  2. Competition Factor — conference strength adjustment
- *  3. Performance Trajectory — progressing / plateau / regressing
- *  4. Sample Size Risk — PA or IP volume
- *  5. Workload Risk (pitchers) — IP for class year
+ * Answers five questions in order of importance:
+ *  1. How good is this player?              → Projection (wRC+ / pRV+)
+ *  2. How reliable is the skillset?          → Skillset (profile variance)
+ *  3. How reliable is the competition?       → Competition (testing level)
+ *  4. How is he trending?                    → Trajectory (YoY)
+ *  5. Is the sample size large enough?       → Sample Size
+ *  6. (Pitchers) How heavy is the workload?  → Workload
  *
  * Each factor produces a 0–100 risk score (higher = riskier).
+ * When a factor has no data (null score), its weight redistributes across remaining factors.
  * Overall risk = weighted composite → grade (Low / Moderate / Elevated / High).
  */
 
@@ -19,9 +21,9 @@ export type Trajectory = "Progressing" | "Plateau" | "Regressing" | "Unknown";
 
 export interface RiskFactor {
   label: string;
-  score: number;       // 0–100
-  grade: RiskGrade;
-  detail: string;      // one-line explanation
+  score: number | null;   // 0–100, or null when data is unavailable
+  grade: RiskGrade | "Unknown";
+  detail: string;         // one-line explanation
 }
 
 export interface RiskAssessment {
@@ -81,7 +83,58 @@ function getConfTier(conference: string | null | undefined): number {
   return 3;
 }
 
-// ── Factor 1: Player Type Risk (PRIMARY) ────────────────────────────
+// ── Factor 1: Projection (PRIMARY) ──────────────────────────────────
+// "How good is this player?" — anchored by projected wRC+ (hitters) or pRV+ (pitchers).
+// Higher projection = lower risk of being a non-contributor.
+
+function assessHitterProjection(pWrcPlus: number | null | undefined): RiskFactor {
+  if (pWrcPlus == null || !Number.isFinite(pWrcPlus)) {
+    return { label: "Projection", score: null, grade: "Unknown", detail: "Projection unavailable" };
+  }
+  const v = pWrcPlus;
+  let risk: number;
+  let tier: string;
+  if (v >= 150) { risk = 5;  tier = "elite projected output"; }
+  else if (v >= 130) { risk = 15; tier = "All-American caliber projection"; }
+  else if (v >= 115) { risk = 25; tier = "All-Conference+ projection"; }
+  else if (v >= 105) { risk = 35; tier = "above-average starter projection"; }
+  else if (v >= 95)  { risk = 45; tier = "average starter projection"; }
+  else if (v >= 85)  { risk = 60; tier = "below-average projection"; }
+  else if (v >= 75)  { risk = 75; tier = "bench/depth projection"; }
+  else               { risk = 88; tier = "org depth projection"; }
+  return {
+    label: "Projection",
+    score: risk,
+    grade: toGrade(risk),
+    detail: `Proj ${Math.round(v)} wRC+; ${tier}`,
+  };
+}
+
+function assessPitcherProjection(prvPlus: number | null | undefined): RiskFactor {
+  if (prvPlus == null || !Number.isFinite(prvPlus)) {
+    return { label: "Projection", score: null, grade: "Unknown", detail: "Projection unavailable" };
+  }
+  const v = prvPlus;
+  let risk: number;
+  let tier: string;
+  if (v >= 160) { risk = 5;  tier = "elite projected output"; }
+  else if (v >= 140) { risk = 15; tier = "All-American caliber projection"; }
+  else if (v >= 120) { risk = 25; tier = "All-Conference+ projection"; }
+  else if (v >= 110) { risk = 35; tier = "above-average starter projection"; }
+  else if (v >= 95)  { risk = 45; tier = "average starter projection"; }
+  else if (v >= 85)  { risk = 60; tier = "below-average projection"; }
+  else if (v >= 75)  { risk = 75; tier = "bench/depth projection"; }
+  else               { risk = 88; tier = "org depth projection"; }
+  return {
+    label: "Projection",
+    score: risk,
+    grade: toGrade(risk),
+    detail: `Proj ${Math.round(v)} pRV+; ${tier}`,
+  };
+}
+
+// ── Factor 2: Skillset Reliability ──────────────────────────────────
+// "How reliable is this player's skillset?" — profile variance driver.
 
 function assessHitterTypeRisk(metrics: {
   chase?: number | null;
@@ -225,7 +278,7 @@ function assessHitterTypeRisk(metrics: {
 
   risk = clamp(risk);
   const detail = reasons.length > 0 ? reasons.slice(0, 3).join("; ") : "Standard profile";
-  return { label: "Player Type", score: risk, grade: toGrade(risk), detail };
+  return { label: "Skillset", score: risk, grade: toGrade(risk), detail };
 }
 
 function assessPitcherTypeRisk(metrics: {
@@ -292,7 +345,7 @@ function assessPitcherTypeRisk(metrics: {
 
   risk = clamp(risk);
   const detail = reasons.length > 0 ? reasons.slice(0, 3).join("; ") : "Standard profile";
-  return { label: "Player Type", score: risk, grade: toGrade(risk), detail };
+  return { label: "Skillset", score: risk, grade: toGrade(risk), detail };
 }
 
 // ── Factor 2: Competition Factor ────────────────────────────────────
@@ -461,7 +514,8 @@ function assessWorkload(ip: number | null | undefined, classYear: string | null 
 // ── Summary Generator ───────────────────────────────────────────────
 
 function buildSummary(grade: RiskGrade, trajectory: Trajectory, factors: RiskFactor[], playerType: "hitter" | "pitcher"): string {
-  const typeRisk = factors.find((f) => f.label === "Player Type");
+  const projection = factors.find((f) => f.label === "Projection");
+  const skillset = factors.find((f) => f.label === "Skillset");
   const compRisk = factors.find((f) => f.label === "Competition");
   const parts: string[] = [];
 
@@ -471,18 +525,23 @@ function buildSummary(grade: RiskGrade, trajectory: Trajectory, factors: RiskFac
   else if (grade === "Elevated") parts.push("Elevated risk — multiple concerns present.");
   else parts.push("High-risk profile — significant concerns across multiple factors.");
 
+  // Projection headline
+  if (projection && projection.score != null && projection.detail !== "Projection unavailable") {
+    parts.push(projection.detail.charAt(0).toUpperCase() + projection.detail.slice(1) + ".");
+  }
+
   // Trajectory
   if (trajectory === "Progressing") parts.push("Performance trending upward.");
   else if (trajectory === "Regressing") parts.push("Performance has declined year-over-year.");
 
-  // Type risk detail
-  if (typeRisk && typeRisk.detail !== "Standard profile") {
-    parts.push(typeRisk.detail.charAt(0).toUpperCase() + typeRisk.detail.slice(1) + ".");
+  // Skillset detail
+  if (skillset && skillset.detail !== "Standard profile") {
+    parts.push(skillset.detail.charAt(0).toUpperCase() + skillset.detail.slice(1) + ".");
   }
 
   // Competition flag
-  if (compRisk && compRisk.score >= 55) {
-    parts.push("Conference competition level suggests stats may be inflated.");
+  if (compRisk && compRisk.score != null && compRisk.score >= 55) {
+    parts.push("Competition level suggests stats may be inflated or skillset under-tested.");
   }
 
   return parts.join(" ");
@@ -490,8 +549,27 @@ function buildSummary(grade: RiskGrade, trajectory: Trajectory, factors: RiskFac
 
 // ── Public API ──────────────────────────────────────────────────────
 
+/**
+ * Composite weighted-average helper that safely skips null-scored factors.
+ * Remaining factor weights are renormalized so the overall still sums to 100%.
+ */
+function computeComposite(factors: RiskFactor[], weights: number[]): number {
+  let weightedSum = 0;
+  let activeWeight = 0;
+  factors.forEach((f, i) => {
+    if (f.score != null && Number.isFinite(f.score)) {
+      weightedSum += f.score * weights[i];
+      activeWeight += weights[i];
+    }
+  });
+  if (activeWeight <= 0) return 50; // no data at all — neutral fallback
+  return clamp(Math.round(weightedSum / activeWeight));
+}
+
 export interface HitterRiskInput {
   conference?: string | null;
+  /** Projected wRC+ for next season (from player_predictions.p_wrc_plus) */
+  projectedWrcPlus?: number | null;
   /** Stuff+ — the pitching quality hitters face in this conference */
   confStuffPlus?: number | null;
   careerSeasons?: any[];
@@ -511,6 +589,8 @@ export interface HitterRiskInput {
 
 export interface PitcherRiskInput {
   conference?: string | null;
+  /** Current pRV+ (proxy for projection until a pitcher-prediction model exists) */
+  projectedPrvPlus?: number | null;
   /** Hitter Talent+ — computed: PR+ + 1.25*(Stuff+-100) + 0.75*(100-wRC+) */
   confHitterTalentPlus?: number | null;
   careerSeasons?: any[];
@@ -530,29 +610,28 @@ export interface PitcherRiskInput {
 export function assessHitterRisk(input: HitterRiskInput): RiskAssessment {
   const factors: RiskFactor[] = [];
 
-  // 1. Player Type (weight: 40%)
+  // 1. Projection — "How good is he?" (weight: 35%)
+  factors.push(assessHitterProjection(input.projectedWrcPlus));
+
+  // 2. Skillset — "How reliable is the skillset?" (weight: 25%)
   factors.push(assessHitterTypeRisk({
     chase: input.chase, contact: input.contact, whiff: input.whiff,
     barrel: input.barrel, lineDrive: input.lineDrive, avgEv: input.avgEv,
     ev90: input.ev90, pull: input.pull, gb: input.gb, bb: input.bb,
   }));
 
-  // 2. Competition (weight: 25%) — hitters face pitching, so use Stuff+
+  // 3. Competition — "How reliable is the competition?" (weight: 20%)
   factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus, "Stuff+"));
 
-  // 3. Trajectory (weight: 20%)
+  // 4. Trajectory — "How is he trending?" (weight: 12%)
   const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "hitter");
   factors.push(trajFactor);
 
-  // 4. Sample Size (weight: 15%)
+  // 5. Sample Size — "Is the sample large enough?" (weight: 8%)
   factors.push(assessSampleSize(input.pa, null, "hitter"));
 
-  // Weighted composite
-  const weights = [0.40, 0.25, 0.20, 0.15];
-  const overall = clamp(Math.round(
-    factors.reduce((sum, f, i) => sum + f.score * weights[i], 0)
-  ));
-
+  const weights = [0.35, 0.25, 0.20, 0.12, 0.08];
+  const overall = computeComposite(factors, weights);
   const grade = toGrade(overall);
   const summary = buildSummary(grade, trajectory, factors, "hitter");
 
@@ -562,32 +641,31 @@ export function assessHitterRisk(input: HitterRiskInput): RiskAssessment {
 export function assessPitcherRisk(input: PitcherRiskInput): RiskAssessment {
   const factors: RiskFactor[] = [];
 
-  // 1. Player Type (weight: 35%)
+  // 1. Projection — "How good is he?" (weight: 30%)
+  factors.push(assessPitcherProjection(input.projectedPrvPlus));
+
+  // 2. Skillset — "How reliable is the skillset?" (weight: 22%)
   factors.push(assessPitcherTypeRisk({
     stuffPlus: input.stuffPlus, whiffPct: input.whiffPct, bbPct: input.bbPct,
     chase: input.chase, barrel: input.barrel, hardHit: input.hardHit,
     gb: input.gb, izWhiff: input.izWhiff,
   }));
 
-  // 2. Competition (weight: 20%) — pitchers face hitting, so use Hitter Talent+
+  // 3. Competition — "How reliable is the competition?" (weight: 18%)
   factors.push(assessCompetitionRisk(input.conference, input.confHitterTalentPlus, "Hitter Talent+"));
 
-  // 3. Trajectory (weight: 20%)
+  // 4. Trajectory — "How is he trending?" (weight: 12%)
   const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "pitcher");
   factors.push(trajFactor);
 
-  // 4. Sample Size (weight: 15%)
+  // 5. Sample Size — "Is the sample large enough?" (weight: 8%)
   factors.push(assessSampleSize(null, input.ip, "pitcher"));
 
-  // 5. Workload (weight: 10%)
+  // 6. Workload (weight: 10%)
   factors.push(assessWorkload(input.ip, input.classYear));
 
-  // Weighted composite
-  const weights = [0.35, 0.20, 0.20, 0.15, 0.10];
-  const overall = clamp(Math.round(
-    factors.reduce((sum, f, i) => sum + f.score * weights[i], 0)
-  ));
-
+  const weights = [0.30, 0.22, 0.18, 0.12, 0.08, 0.10];
+  const overall = computeComposite(factors, weights);
   const grade = toGrade(overall);
   const summary = buildSummary(grade, trajectory, factors, "pitcher");
 

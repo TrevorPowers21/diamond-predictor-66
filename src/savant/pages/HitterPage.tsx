@@ -208,6 +208,7 @@ export default function HitterPage() {
               const confRow = player.Conference ? conferenceStatsByKey.get(player.Conference.toLowerCase().trim()) : undefined;
               const risk = assessHitterRisk({
                 conference: player.Conference,
+                projectedWrcPlus: prediction?.p_wrc_plus ?? null,
                 confStuffPlus: confRow?.stuff_plus,
                 careerSeasons: careerRows,
                 pa: player.pa ?? player.ab,

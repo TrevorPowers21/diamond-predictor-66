@@ -23,6 +23,7 @@ import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
 import { assessPitcherRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
+import { computePrvPlus } from "@/savant/lib/prvPlus";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
@@ -1559,8 +1560,17 @@ export default function PitcherProfile() {
                     scouting_notes: (player as any).notes || undefined,
                   };
                   // Attach risk assessment
+                  const prvForRisk = computePrvPlus(
+                    (historicalRow as any)?.era_pr_plus ?? null,
+                    (historicalRow as any)?.fip_pr_plus ?? null,
+                    (historicalRow as any)?.whip_pr_plus ?? null,
+                    (historicalRow as any)?.k9_pr_plus ?? null,
+                    (historicalRow as any)?.bb9_pr_plus ?? null,
+                    (historicalRow as any)?.hr9_pr_plus ?? null,
+                  );
                   const riskResult = assessPitcherRisk({
                     conference: displayConference !== "—" ? displayConference : undefined,
+                    projectedPrvPlus: prvForRisk,
                     confHitterTalentPlus: confStatsRow?.overall_power_rating != null && confStatsRow?.stuff_plus != null && confStatsRow?.wrc_plus != null
                       ? confStatsRow.overall_power_rating + (1.25 * (confStatsRow.stuff_plus - 100)) + (0.75 * (100 - confStatsRow.wrc_plus))
                       : null,
@@ -1874,8 +1884,17 @@ export default function PitcherProfile() {
 
             {/* Risk Assessment */}
             {(() => {
+              const prvForRisk = computePrvPlus(
+                (historicalRow as any)?.era_pr_plus ?? null,
+                (historicalRow as any)?.fip_pr_plus ?? null,
+                (historicalRow as any)?.whip_pr_plus ?? null,
+                (historicalRow as any)?.k9_pr_plus ?? null,
+                (historicalRow as any)?.bb9_pr_plus ?? null,
+                (historicalRow as any)?.hr9_pr_plus ?? null,
+              );
               const risk = assessPitcherRisk({
                 conference: displayConference !== "—" ? displayConference : undefined,
+                projectedPrvPlus: prvForRisk,
                 confHitterTalentPlus: confStatsRow?.overall_power_rating != null && confStatsRow?.stuff_plus != null && confStatsRow?.wrc_plus != null
                       ? confStatsRow.overall_power_rating + (1.25 * (confStatsRow.stuff_plus - 100)) + (0.75 * (100 - confStatsRow.wrc_plus))
                       : null,

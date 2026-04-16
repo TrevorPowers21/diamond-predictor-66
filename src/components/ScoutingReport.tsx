@@ -91,7 +91,7 @@ export interface ReportPlayer {
   risk_score?: number | null;
   risk_trajectory?: string | null;
   risk_summary?: string | null;
-  risk_factors?: { label: string; score: number; detail: string }[];
+  risk_factors?: { label: string; score: number | null; detail: string }[];
 }
 
 interface ScoutingReportContextType {

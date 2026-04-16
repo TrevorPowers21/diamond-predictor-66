@@ -210,8 +210,13 @@ export default function PitcherPage() {
             {/* Risk Assessment */}
             {(() => {
               const confRow = player.Conference ? conferenceStatsByKey.get(player.Conference.toLowerCase().trim()) : undefined;
+              const playerPrv = computePrvPlus(
+                player.era_pr_plus, player.fip_pr_plus, player.whip_pr_plus,
+                player.k9_pr_plus, player.bb9_pr_plus, player.hr9_pr_plus,
+              );
               const risk = assessPitcherRisk({
                 conference: player.Conference,
+                projectedPrvPlus: playerPrv,
                 confHitterTalentPlus: confRow?.overall_power_rating != null && confRow?.stuff_plus != null && confRow?.wrc_plus != null
                   ? confRow.overall_power_rating + (1.25 * (confRow.stuff_plus - 100)) + (0.75 * (100 - confRow.wrc_plus))
                   : null,

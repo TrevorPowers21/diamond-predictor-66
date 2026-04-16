@@ -869,6 +869,7 @@ export default function PlayerProfile() {
                   // Attach risk assessment
                   const riskResult = assessHitterRisk({
                     conference: resolvedConference || player.conference,
+                    projectedWrcPlus: projectedWrcPlus,
                     careerSeasons: hitterMasterSeasons as any[],
                     pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
                     chase: seedPowerRow?.chase, contact: seedPowerRow?.contact,
@@ -1263,6 +1264,7 @@ export default function PlayerProfile() {
               const confRow = conferenceStatsByKey.get(confKey);
               const risk = assessHitterRisk({
                 conference: resolvedConference || player.conference,
+                projectedWrcPlus: projectedWrcPlus,
                 confStuffPlus: confRow?.stuff_plus,
                 careerSeasons: hitterMasterSeasons as any[],
                 pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
