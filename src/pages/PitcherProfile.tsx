@@ -1575,7 +1575,7 @@ export default function PitcherProfile() {
                       ? confStatsRow.overall_power_rating + (1.25 * (confStatsRow.stuff_plus - 100)) + (0.75 * (100 - confStatsRow.wrc_plus))
                       : null,
                     careerSeasons: pitcherMasterSeasons as any[],
-                    ip: (masterRow as any)?.IP ?? null,
+                    ip: (masterRow as any)?.ip ?? (masterRow as any)?.IP ?? null,
                     classYear: displayClass || undefined,
                     stuffPlus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
                     whiffPct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
@@ -1899,7 +1899,7 @@ export default function PitcherProfile() {
                       ? confStatsRow.overall_power_rating + (1.25 * (confStatsRow.stuff_plus - 100)) + (0.75 * (100 - confStatsRow.wrc_plus))
                       : null,
                 careerSeasons: pitcherMasterSeasons as any[],
-                ip: (masterRow as any)?.IP ?? null, classYear: displayClass || undefined,
+                ip: (masterRow as any)?.ip ?? (masterRow as any)?.IP ?? null, classYear: displayClass || undefined,
                 stuffPlus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
                 whiffPct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
                 bbPct: internalPowerRatings?.metrics?.bb, chase: internalPowerRatings?.metrics?.chase,
