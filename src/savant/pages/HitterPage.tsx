@@ -198,28 +198,6 @@ export default function HitterPage() {
 
             {/* 2025 Power Ratings tile strip */}
             <PowerRatingsCard player={player} />
-          </div>
-
-          {/* ─── RIGHT COLUMN ─── */}
-          <div className="space-y-6">
-            <PredictionCard prediction={prediction} targetSeason={2026} />
-
-            {/* Risk Assessment */}
-            {(() => {
-              const confRow = player.Conference ? conferenceStatsByKey.get(player.Conference.toLowerCase().trim()) : undefined;
-              const risk = assessHitterRisk({
-                conference: player.Conference,
-                projectedWrcPlus: prediction?.p_wrc_plus ?? null,
-                confStuffPlus: confRow?.stuff_plus,
-                careerSeasons: careerRows,
-                pa: player.pa ?? player.ab,
-                chase: player.chase, contact: player.contact,
-                barrel: player.barrel, lineDrive: player.line_drive,
-                avgEv: player.avg_exit_velo, ev90: player.ev90,
-                pull: player.pull, gb: player.gb, bb: player.bb,
-              });
-              return <RiskAssessmentCardSavant risk={risk} navyCard={NAVY_CARD} navyBorder={NAVY_BORDER} />;
-            })()}
 
             {/* Scouting Report */}
             {(() => {
@@ -264,6 +242,28 @@ export default function HitterPage() {
                   <p className="text-[11px] text-[#8a94a6] leading-relaxed whitespace-pre-line">{report}</p>
                 </section>
               );
+            })()}
+          </div>
+
+          {/* ─── RIGHT COLUMN ─── */}
+          <div className="space-y-6">
+            <PredictionCard prediction={prediction} targetSeason={2026} />
+
+            {/* Risk Assessment */}
+            {(() => {
+              const confRow = player.Conference ? conferenceStatsByKey.get(player.Conference.toLowerCase().trim()) : undefined;
+              const risk = assessHitterRisk({
+                conference: player.Conference,
+                projectedWrcPlus: prediction?.p_wrc_plus ?? null,
+                confStuffPlus: confRow?.stuff_plus,
+                careerSeasons: careerRows,
+                pa: player.pa ?? player.ab,
+                chase: player.chase, contact: player.contact,
+                barrel: player.barrel, lineDrive: player.line_drive,
+                avgEv: player.avg_exit_velo, ev90: player.ev90,
+                pull: player.pull, gb: player.gb, bb: player.bb,
+              });
+              return <RiskAssessmentCardSavant risk={risk} navyCard={NAVY_CARD} navyBorder={NAVY_BORDER} />;
             })()}
 
             <section

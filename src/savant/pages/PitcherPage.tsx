@@ -204,34 +204,6 @@ export default function PitcherPage() {
             />
 
             <PitcherCareerScoutingTable rows={careerRows} />
-          </div>
-
-          {/* ─── RIGHT COLUMN ─── */}
-          <div className="space-y-6">
-
-            {/* Risk Assessment */}
-            {(() => {
-              const confRow = player.Conference ? conferenceStatsByKey.get(player.Conference.toLowerCase().trim()) : undefined;
-              const playerPrv = computePrvPlus(
-                player.era_pr_plus, player.fip_pr_plus, player.whip_pr_plus,
-                player.k9_pr_plus, player.bb9_pr_plus, player.hr9_pr_plus,
-              );
-              const risk = assessPitcherRisk({
-                conference: player.Conference,
-                projectedPrvPlus: playerPrv,
-                confHitterTalentPlus: confRow?.overall_power_rating != null && confRow?.stuff_plus != null && confRow?.wrc_plus != null
-                  ? confRow.overall_power_rating + (1.25 * (confRow.stuff_plus - 100)) + (0.75 * (100 - confRow.wrc_plus))
-                  : null,
-                careerSeasons: careerRows,
-                ip: player.IP, classYear: undefined,
-                stuffPlus: player.stuff_plus,
-                whiffPct: player.miss_pct, bbPct: player.bb_pct,
-                chase: player.chase_pct, barrel: player.barrel_pct,
-                hardHit: player.hard_hit_pct, gb: player.ground_pct,
-                izWhiff: player.in_zone_whiff_pct,
-              });
-              return <RiskAssessmentCardSavant risk={risk} navyCard={NAVY_CARD} navyBorder={NAVY_BORDER} />;
-            })()}
 
             {/* Scouting Report */}
             {(() => {
@@ -292,6 +264,34 @@ export default function PitcherPage() {
                   <p className="text-[11px] text-[#8a94a6] leading-relaxed whitespace-pre-line">{report}</p>
                 </section>
               );
+            })()}
+          </div>
+
+          {/* ─── RIGHT COLUMN ─── */}
+          <div className="space-y-6">
+
+            {/* Risk Assessment */}
+            {(() => {
+              const confRow = player.Conference ? conferenceStatsByKey.get(player.Conference.toLowerCase().trim()) : undefined;
+              const playerPrv = computePrvPlus(
+                player.era_pr_plus, player.fip_pr_plus, player.whip_pr_plus,
+                player.k9_pr_plus, player.bb9_pr_plus, player.hr9_pr_plus,
+              );
+              const risk = assessPitcherRisk({
+                conference: player.Conference,
+                projectedPrvPlus: playerPrv,
+                confHitterTalentPlus: confRow?.overall_power_rating != null && confRow?.stuff_plus != null && confRow?.wrc_plus != null
+                  ? confRow.overall_power_rating + (1.25 * (confRow.stuff_plus - 100)) + (0.75 * (100 - confRow.wrc_plus))
+                  : null,
+                careerSeasons: careerRows,
+                ip: player.IP, classYear: undefined,
+                stuffPlus: player.stuff_plus,
+                whiffPct: player.miss_pct, bbPct: player.bb_pct,
+                chase: player.chase_pct, barrel: player.barrel_pct,
+                hardHit: player.hard_hit_pct, gb: player.ground_pct,
+                izWhiff: player.in_zone_whiff_pct,
+              });
+              return <RiskAssessmentCardSavant risk={risk} navyCard={NAVY_CARD} navyBorder={NAVY_BORDER} />;
             })()}
 
             <section
