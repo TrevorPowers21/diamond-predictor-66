@@ -121,15 +121,12 @@ export default function RosterOverrideTab() {
 
   // Assign player to team
   const assignMutation = useMutation({
-    mutationFn: async ({ player, teamName }: { player: PlayerResult; teamName: string }) => {
-      const team = teams.find((t) =>
-        t.abbreviation === teamName || t.fullName === teamName || t.name === teamName
-      );
+    mutationFn: async ({ player, teamId }: { player: PlayerResult; teamId: string }) => {
+      const team = teams.find((t) => t.id === teamId);
+      if (!team) throw new Error("Team not found");
 
       const updates: Record<string, any> = {
-        team: team?.abbreviation || team?.fullName || teamName,
-        team_id: team?.id || null,
-        conference: team?.conference || null,
+        team_id: team.id,
         transfer_portal: false,
       };
 
@@ -170,7 +167,8 @@ export default function RosterOverrideTab() {
       }
     },
     onSuccess: () => {
-      toast.success(`Player assigned to ${targetTeam}`);
+      const assignedTeam = teams.find((t) => t.id === targetTeam);
+      toast.success(`Player assigned to ${assignedTeam?.abbreviation || assignedTeam?.fullName || "team"}`);
       setSelectedPlayer(null);
       setTargetTeam("");
       setOverrideNotes("");
@@ -288,7 +286,7 @@ export default function RosterOverrideTab() {
                   </SelectTrigger>
                   <SelectContent>
                     {sortedTeams.map((t) => (
-                      <SelectItem key={t.id} value={t.abbreviation || t.fullName || t.id}>
+                      <SelectItem key={t.id} value={t.id}>
                         {t.abbreviation || t.fullName} {t.conference ? `(${t.conference})` : ""}
                       </SelectItem>
                     ))}
@@ -309,7 +307,7 @@ export default function RosterOverrideTab() {
               <Button
                 size="sm"
                 disabled={!targetTeam || assignMutation.isPending}
-                onClick={() => assignMutation.mutate({ player: selectedPlayer, teamName: targetTeam })}
+                onClick={() => assignMutation.mutate({ player: selectedPlayer, teamId: targetTeam })}
               >
                 <Check className="h-4 w-4 mr-1" />
                 {assignMutation.isPending ? "Assigning..." : "Confirm Assignment"}
