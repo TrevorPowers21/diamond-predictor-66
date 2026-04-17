@@ -234,6 +234,8 @@ export function generateHitterReport(
     if (premiumPos) opener += " at a premium defensive position";
   } else if (powerFirst && hasUltraAggressiveChase) {
     opener += " with an ultra-aggressive approach";
+  } else if (powerFirst && hasBadContact && hasGoodChase) {
+    opener += " with high ceiling potential and a strong feel for power, paired with contact concerns that raise the variance";
   } else if (powerFirst) {
     opener += " with a strong feel for power";
     if (hasBadContact) opener += ", paired with contact concerns that raise the variance";
@@ -290,10 +292,34 @@ export function generateHitterReport(
       : " He has an above-average ability for impacting the baseball, but there are still inconsistencies with a below-average launch angle sweet spot.";
   }
 
+  // ── Divergence: EV90 >> Avg EV = "raw power, inconsistent" ──
+  if (input.ev90 != null && input.avgEv != null && p.ev90 != null && p.avgEv != null) {
+    if (p.ev90 - p.avgEv > 25) {
+      // Big gap between top-end and average = raw power with inconsistent contact
+      opener += s
+        ? ` The gap between the ${input.ev90.toFixed(1)} EV90 (${p.ev90}th) and ${input.avgEv.toFixed(1)} average exit velocity (${p.avgEv}th) shows raw power in the tank but a lot of soft contact mixed in.`
+        : " There is raw power in the tank but a lot of soft contact mixed in — the top-end exit velocity is much stronger than the average.";
+    }
+  }
+
+  // ── Contact-first with low EV: "needs to be plus runner + plus defender" ──
+  if (contactFirst && input.avgEv != null && input.avgEv < 87 && !premiumPos) {
+    opener += " With limited power tools, the bat alone won't carry — the value has to come with plus defense and baserunning.";
+  } else if (contactFirst && input.avgEv != null && input.avgEv < 87 && premiumPos) {
+    opener += " At a premium defensive position, the contact and approach carry more weight even without the power tools.";
+  }
+
+  // ── BABIP reliance: low EV + low LA sweet spot ──
+  if (input.avgEv != null && input.avgEv < 85 && hasLowLaSweet && !hasPlusBarrel) {
+    opener += s
+      ? " The on-field production leans on BABIP luck more than raw skill — hard to sustain at higher levels."
+      : " The production leans more on luck than raw contact quality — hard to sustain against better pitching.";
+  }
+
   paragraphs.push(opener.replace(/\.\./g, ".").trim());
 
   // ── Paragraph 2: Approach + discipline ──
-  if (length === "full" || fearedProfile || hasUltraAggressiveChase || hasBadContact) {
+  if (true) { // Always include approach context — it's central to every evaluation
     const approachParts: string[] = [];
 
     if (fearedProfile) {
@@ -332,24 +358,45 @@ export function generateHitterReport(
       } else {
         approachParts.push("The approach is elite — he doesn't chase and takes his walks.");
       }
+    } else if (hasEliteChase && !hasBadContact) {
+      // Elite chase but BB% not elite = "elite swing decisions" not "elite approach"
+      const bbContext = input.bb != null && p.bb != null && p.bb < 75
+        ? (s ? ` The ${input.bb.toFixed(1)}% walk rate (${p.bb}th percentile) doesn't fully match the chase rate.` : " The walk rate doesn't fully match the chase rate.")
+        : "";
+      if (s) {
+        approachParts.push(`Elite swing decisions with a ${input.chase?.toFixed(1)}% chase rate.${bbContext}`);
+      } else {
+        approachParts.push(`Elite swing decisions.${bbContext}`);
+      }
+    } else if (hasGoodChase && !hasBadContact) {
+      if (s) {
+        approachParts.push(`Makes high-level swing decisions with a ${input.chase?.toFixed(1)}% chase rate.`);
+      } else {
+        approachParts.push("Makes high-level swing decisions.");
+      }
     }
 
     if (approachParts.length > 0) paragraphs.push(approachParts.join(" "));
   }
 
-  // ── Paragraph 3: Production vs data disconnect (if applicable) ──
-  if (length === "full" && input.avg != null && input.obp != null && input.slg != null) {
+  // ── Production vs data disconnect ──
+  if (input.avg != null && input.obp != null && input.slg != null) {
     const allProcessElite = hasPlusEv && hasPlusBarrel && (hasGoodContact || hasGoodChase);
-    const productionStrong = p.avg != null && p.avg >= 85 && p.obp != null && p.obp >= 85 && p.slg != null && p.slg >= 85;
-    const allProcessSuperElite = hasEliteEv && hasEliteBarrel && hasEliteContact;
+    const productionStrong = p.avg != null && p.avg >= 80 && p.obp != null && p.obp >= 80 && p.slg != null && p.slg >= 80;
+    const productionNotElite = p.avg != null && p.avg < 92 || p.obp != null && p.obp < 92 || p.slg != null && p.slg < 92;
 
-    // Data >> Production — flag upside
-    if (allProcessSuperElite && productionStrong && !allProcessSuperElite) {
-      // Production is strong but data says even more
+    // Data >> Production — flag upside (fires for complete profiles where data says more)
+    if (allProcessElite && productionStrong && productionNotElite) {
       const line = s
-        ? `The ${input.avg.toFixed(3)}/${input.obp.toFixed(3)}/${input.slg.toFixed(3)} line is elite production. What's worth noting is that the underlying data points to even more upside than the stat line reflects.`
-        : "The on-field production is elite. What's worth noting is that the underlying data points to even more upside than the stat line reflects.";
-      paragraphs.push(line);
+        ? `The ${input.avg.toFixed(3)}/${input.obp.toFixed(3)}/${input.slg.toFixed(3)} line is strong production. What's worth noting is that the underlying data points to even more upside than the stat line reflects.`
+        : "The on-field production is strong. What's worth noting is that the underlying data points to even more upside than the stat line reflects.";
+
+      // Pop-up rate clue if elevated
+      const popNote = input.popUp != null && input.popUp > 10
+        ? (s ? ` The ${input.popUp.toFixed(1)}% pop-up rate is elevated and could be a clue.` : " The pop-up rate is elevated and could be a clue.")
+        : "";
+
+      paragraphs.push(line + popNote);
     }
 
     // EV-dependent production for feared profiles
@@ -361,7 +408,7 @@ export function generateHitterReport(
       const posNote = (pos || "").toUpperCase().includes("1B") || (pos || "").toUpperCase().includes("FIRST")
         ? " As a first base prospect, there is little to no value outside of the bat, so the bat has to carry everything."
         : premiumPos
-          ? ` At a premium defensive position, the approach concerns are more forgivable.`
+          ? " At a premium defensive position, the approach concerns are more forgivable."
           : "";
 
       paragraphs.push(line + posNote);
