@@ -170,7 +170,8 @@ function assessHitterTypeRisk(metrics: {
   //
   const goodChase = chase != null && chase < 22;
   const eliteChase = chase != null && chase < 19;
-  const badChase = chase != null && chase > 30;
+  const badChase = chase != null && chase > 28;
+  const veryBadChase = chase != null && chase > 32;
   const goodContact = contact != null && contact > 80;
   const eliteContact = contact != null && contact > 85;
   const badContact = contact != null && contact < 70;
@@ -194,10 +195,12 @@ function assessHitterTypeRisk(metrics: {
   // ── Step 2: Chase% — #2 factor, mitigates or compounds contact ──
   if (chase != null) {
     if (chase > 34) {
-      risk += 14; reasons.push("very high chase rate");
+      risk += 16; reasons.push("very high chase rate");
     } else if (chase > 30) {
-      risk += 10; reasons.push("high chase rate");
+      risk += 12; reasons.push("high chase rate");
     } else if (chase > 28) {
+      risk += 8; reasons.push("above-avg chase rate");
+    } else if (chase > 25) {
       risk += 4;
     } else if (eliteChase) {
       risk -= 10; reasons.push("elite plate discipline");
@@ -259,9 +262,15 @@ function assessHitterTypeRisk(metrics: {
   }
 
   // High barrel + high EV = premium bat, lower risk
+  // BUT NOT when both contact and chase are bad — power can't rescue a feared profile
   if (barrel != null && barrel > 10 && ev != null && ev > 88) {
-    risk -= 10;
-    reasons.push("premium hard-hit profile");
+    if (badContact && badChase) {
+      // No bonus — power doesn't rescue when both safety valves are gone
+      reasons.push("power present but can't offset contact + chase concerns");
+    } else {
+      risk -= 10;
+      reasons.push("premium hard-hit profile");
+    }
   }
 
   // High barrel but high chase = boom-or-bust
