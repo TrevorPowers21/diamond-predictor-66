@@ -221,36 +221,86 @@ export default function Dashboard() {
       if (!builds || builds.length === 0) return [];
       const buildId = (builds[0] as any).id;
 
-      // Get target players from that build
-      const { data: players } = await supabase
+      // Get ALL players from that build — roster_status is inside production_notes JSON
+      const { data: buildPlayers } = await supabase
         .from("team_build_players" as any)
-        .select("player_id, custom_name, roster_status")
-        .eq("build_id", buildId)
-        .eq("roster_status", "target");
-      if (!players || players.length === 0) return [];
+        .select("player_id, custom_name, production_notes")
+        .eq("build_id", buildId);
+      if (!buildPlayers || buildPlayers.length === 0) return [];
 
-      // Fetch player details
-      const ids = (players as any[]).map((p: any) => p.player_id).filter(Boolean);
-      if (ids.length === 0) return [];
+      // Filter to targets by parsing production_notes JSON
+      const targets = (buildPlayers as any[]).filter((p: any) => {
+        if (!p.production_notes) return false;
+        try {
+          const parsed = typeof p.production_notes === "string" ? JSON.parse(p.production_notes) : p.production_notes;
+          return parsed.rosterStatus === "target";
+        } catch { return false; }
+      });
+      if (targets.length === 0) return [];
+
+      // Fetch player details for those with UUIDs
+      const ids = targets.map((p: any) => p.player_id).filter(Boolean);
+      if (ids.length === 0) {
+        // Seed-data targets with no player_id — use custom_name
+        return targets.map((t: any) => {
+          const parsed = (() => { try { return JSON.parse(t.production_notes); } catch { return {}; } })();
+          const lp = parsed.localPlayer || {};
+          return {
+            id: t.custom_name || "unknown",
+            player_id: t.custom_name || "unknown",
+            notes: null,
+            added_at: "",
+            first_name: lp.first_name || (t.custom_name || "").split(" ")[0] || "",
+            last_name: lp.last_name || (t.custom_name || "").split(" ").slice(1).join(" ") || "",
+            team: lp.team || lp.from_team || null,
+            conference: lp.conference || null,
+            position: lp.position || null,
+            class_year: null,
+            portal_status: "NOT IN PORTAL" as const,
+          };
+        });
+      }
+
       const { data: details } = await supabase
         .from("players")
         .select("id, first_name, last_name, team, conference, position, portal_status")
         .in("id", ids);
-      if (!details) return [];
 
-      return (details as any[]).map((d: any) => ({
-        id: d.id,
-        player_id: d.id,
-        notes: null,
-        added_at: "",
-        first_name: d.first_name,
-        last_name: d.last_name,
-        team: d.team,
-        conference: d.conference,
-        position: d.position,
-        class_year: null,
-        portal_status: d.portal_status || "NOT IN PORTAL",
-      }));
+      const detailMap = new Map((details || []).map((d: any) => [d.id, d]));
+      return targets.map((t: any) => {
+        const d = detailMap.get(t.player_id);
+        if (d) {
+          return {
+            id: d.id,
+            player_id: d.id,
+            notes: null,
+            added_at: "",
+            first_name: d.first_name,
+            last_name: d.last_name,
+            team: d.team,
+            conference: d.conference,
+            position: d.position,
+            class_year: null,
+            portal_status: d.portal_status || "NOT IN PORTAL",
+          };
+        }
+        // Fallback to parsed production_notes for seed-data players
+        const parsed = (() => { try { return JSON.parse(t.production_notes); } catch { return {}; } })();
+        const lp = parsed.localPlayer || {};
+        return {
+          id: t.player_id || t.custom_name || "unknown",
+          player_id: t.player_id || t.custom_name || "unknown",
+          notes: null,
+          added_at: "",
+          first_name: lp.first_name || (t.custom_name || "").split(" ")[0] || "",
+          last_name: lp.last_name || (t.custom_name || "").split(" ").slice(1).join(" ") || "",
+          team: lp.team || lp.from_team || null,
+          conference: lp.conference || null,
+          position: lp.position || null,
+          class_year: null,
+          portal_status: "NOT IN PORTAL" as const,
+        };
+      });
     },
     staleTime: 5 * 60 * 1000,
   });
