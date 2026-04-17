@@ -1166,24 +1166,30 @@ export default function TeamBuilder() {
     return out;
   }, [teams, hitterStats, powerRatingsData, exitPositions]);
 
-  // Power ratings + PA lookup for risk assessment in target board
+  // PA lookup by player UUID for risk assessment sample size
   const { data: hitterMasterPaMap = new Map<string, number>() } = useQuery({
     queryKey: ["team-builder-pa-lookup"],
     queryFn: async () => {
       const map = new Map<string, number>();
-      const { data } = await (supabase as any)
+      // Get source_player_id → PA from Hitter Master
+      const { data: hmRows } = await (supabase as any)
         .from("Hitter Master")
-        .select("source_player_id, playerFullName, Team, pa, ab")
+        .select("source_player_id, pa, ab")
         .eq("Season", 2025)
         .gt("ab", 0);
-      for (const r of (data || [])) {
+      const sourceIdToPa = new Map<string, number>();
+      for (const r of (hmRows || [])) {
         const pa = r.pa ?? r.ab ?? null;
-        if (pa == null) continue;
-        if (r.source_player_id) map.set(r.source_player_id, pa);
-        const nameKey = `${normalizeName(r.playerFullName || "")}|${normalizeName(r.Team || "")}`;
-        if (nameKey && nameKey !== "|") map.set(nameKey, pa);
-        const nameOnly = normalizeName(r.playerFullName || "");
-        if (nameOnly) map.set(nameOnly, pa);
+        if (pa != null && r.source_player_id) sourceIdToPa.set(r.source_player_id, pa);
+      }
+      // Get players UUID → source_player_id mapping
+      const { data: playerRows } = await supabase
+        .from("players")
+        .select("id, source_player_id");
+      for (const p of (playerRows || [])) {
+        if (p.source_player_id && sourceIdToPa.has(p.source_player_id)) {
+          map.set(p.id, sourceIdToPa.get(p.source_player_id)!);
+        }
       }
       return map;
     },
@@ -4685,11 +4691,7 @@ export default function TeamBuilder() {
           const transferWrc = sim?.pWrcPlus ?? p.transfer_snapshot?.p_wrc_plus ?? null;
           const destConf = selectedTeam ? (teamByKey.get(normalizeKey(selectedTeam))?.conference ?? null) : null;
 
-          // Resolve PA from Hitter Master lookup
-          const paKey1 = p.player_id || "";
-          const paKey2 = `${normalizeName(pName)}|${normalizeName(pTeam)}`;
-          const paKey3 = normalizeName(pName);
-          const resolvedPa = hitterMasterPaMap.get(paKey1) ?? hitterMasterPaMap.get(paKey2) ?? hitterMasterPaMap.get(paKey3) ?? null;
+          const resolvedPa = p.player_id ? (hitterMasterPaMap.get(p.player_id) ?? null) : null;
 
           const risk = assessHitterRisk({
             conference: destConf,

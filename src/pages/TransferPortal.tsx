@@ -851,24 +851,28 @@ export default function TransferPortal() {
     return map;
   }, [teams]);
 
-  // PA lookup for risk assessment sample size
+  // PA lookup by player UUID for risk assessment sample size
   const { data: hitterPaMap = new Map<string, number>() } = useQuery({
     queryKey: ["transfer-portal-pa-lookup"],
     queryFn: async () => {
       const map = new Map<string, number>();
-      const { data } = await (supabase as any)
+      const { data: hmRows } = await (supabase as any)
         .from("Hitter Master")
-        .select("source_player_id, playerFullName, Team, pa, ab")
+        .select("source_player_id, pa, ab")
         .eq("Season", 2025)
         .gt("ab", 0);
-      for (const r of (data || [])) {
+      const sourceIdToPa = new Map<string, number>();
+      for (const r of (hmRows || [])) {
         const pa = r.pa ?? r.ab ?? null;
-        if (pa == null) continue;
-        if (r.source_player_id) map.set(r.source_player_id, pa);
-        const nameKey = `${normalizeKey(r.playerFullName || "")}|${normalizeKey(r.Team || "")}`;
-        if (nameKey && nameKey !== "|") map.set(nameKey, pa);
-        const nameOnly = normalizeKey(r.playerFullName || "");
-        if (nameOnly) map.set(nameOnly, pa);
+        if (pa != null && r.source_player_id) sourceIdToPa.set(r.source_player_id, pa);
+      }
+      const { data: playerRows } = await supabase
+        .from("players")
+        .select("id, source_player_id");
+      for (const p of (playerRows || [])) {
+        if (p.source_player_id && sourceIdToPa.has(p.source_player_id)) {
+          map.set(p.id, sourceIdToPa.get(p.source_player_id)!);
+        }
       }
       return map;
     },
@@ -1887,11 +1891,7 @@ export default function TransferPortal() {
               const sp = powerByNameTeam.get(spKey) ?? powerByNameTeam.get(normalizeKey(fullName)) ?? null;
               const toConfRow = toConference ? confByKey.get(toConference.toLowerCase().trim()) ?? null : null;
 
-              // Resolve PA
-              const paKey1 = selectedPlayer?.player_id || "";
-              const paKey2 = `${normalizeKey(fullName)}|${normalizeKey(fromTeam)}`;
-              const paKey3 = normalizeKey(fullName);
-              const resolvedPa = hitterPaMap.get(paKey1) ?? hitterPaMap.get(paKey2) ?? hitterPaMap.get(paKey3) ?? null;
+              const resolvedPa = selectedPlayer?.player_id ? (hitterPaMap.get(selectedPlayer.player_id) ?? null) : null;
 
               const risk = assessHitterRisk({
                 conference: toConference,
