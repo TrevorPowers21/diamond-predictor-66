@@ -7,10 +7,10 @@
  */
 
 export const DEMO_SCHOOL = {
-  name: "TCU",
-  fullName: "Texas Christian University",
-  logo: "/tculogo.png",
-  primaryColor: "#4D1979",
-  secondaryColor: "#A3A9AC",
-  mascot: "Horned Frogs",
+  name: "Virginia Tech",
+  fullName: "Virginia Polytechnic Institute and State University",
+  logo: "/vtlogo.png",
+  primaryColor: "#630031",
+  secondaryColor: "#CF4420",
+  mascot: "Hokies",
 } as const;
