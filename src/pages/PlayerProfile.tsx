@@ -27,6 +27,7 @@ import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
 import { assessHitterRisk } from "@/lib/playerRisk";
+import { generateHitterReport } from "@/lib/scoutingReportGenerator";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 
@@ -864,7 +865,24 @@ export default function PlayerProfile() {
                     grade_arm: seedPowerDerived?.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : undefined,
                     grade_ofp: seedPowerDerived?.overallPlus != null ? Math.min(80, Math.max(20, Math.round(seedPowerDerived.overallPlus / 2.5 + 20))) : undefined,
                     career_seasons: hitterMasterSeasons as any[],
-                    scouting_notes: (player as any).notes || undefined,
+                    scouting_notes: (() => {
+                      // Use manual notes if present, otherwise generate full report
+                      if ((player as any).notes) return (player as any).notes;
+                      if (!seedPowerRow) return undefined;
+                      return generateHitterReport({
+                        batHand: (player as any).bats_hand,
+                        position: effectivePosition,
+                        conference: resolvedConference || player.conference,
+                        avg: seedStatRow?.avg, obp: seedStatRow?.obp, slg: seedStatRow?.slg,
+                        iso: seedDerived?.iso,
+                        pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
+                        contact: seedPowerRow.contact, chase: seedPowerRow.chase, bb: seedPowerRow.bb,
+                        avgEv: seedPowerRow.avgExitVelo, ev90: seedPowerRow.ev90,
+                        barrel: seedPowerRow.barrel, laSweet: seedPowerRow.la10_30,
+                        lineDrive: seedPowerRow.lineDrive, gb: seedPowerRow.gb,
+                        pull: seedPowerRow.pull, popUp: seedPowerRow.popUp,
+                      }, "rstriq", "full");
+                    })(),
                   };
                   // Attach risk assessment
                   const riskResult = assessHitterRisk({
@@ -1275,6 +1293,36 @@ export default function PlayerProfile() {
                 gb: seedPowerRow?.gb, bb: seedPowerRow?.bb,
               });
               return <RiskAssessmentCardRSTR risk={risk} />;
+            })()}
+
+            {/* Scouting Report */}
+            {seedPowerRow && (() => {
+              const report = generateHitterReport({
+                batHand: (player as any).bats_hand,
+                position: seedPos || player.position,
+                conference: resolvedConference || player.conference,
+                avg: seedStatRow?.avg, obp: seedStatRow?.obp, slg: seedStatRow?.slg,
+                iso: seedDerived?.iso,
+                pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
+                contact: seedPowerRow.contact, chase: seedPowerRow.chase, bb: seedPowerRow.bb,
+                avgEv: seedPowerRow.avgExitVelo, ev90: seedPowerRow.ev90,
+                barrel: seedPowerRow.barrel, laSweet: seedPowerRow.la10_30,
+                lineDrive: seedPowerRow.lineDrive, gb: seedPowerRow.gb,
+                pull: seedPowerRow.pull, popUp: seedPowerRow.popUp,
+              }, "rstriq", "short");
+
+              return (
+                <Card className="border-[#162241] bg-[#0a1428]">
+                  <CardHeader className="pb-2 pt-3 px-4">
+                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>
+                      Scouting Report
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{report}</p>
+                  </CardContent>
+                </Card>
+              );
             })()}
 
             {/* Scouting Grades */}

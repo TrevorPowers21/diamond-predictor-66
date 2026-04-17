@@ -24,6 +24,7 @@ import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/Scou
 import { assessPitcherRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
 import { computePrvPlus } from "@/savant/lib/prvPlus";
+import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
@@ -1557,7 +1558,40 @@ export default function PitcherProfile() {
                       pitch_name: r.pitchType, usage: r.usagePct,
                       whiff: r.whiffPct, stuff_plus: r.stuffPlus,
                     })),
-                    scouting_notes: (player as any).notes || undefined,
+                    scouting_notes: (() => {
+                      if ((player as any).notes) return (player as any).notes;
+                      const pitchesForReport = pitchArsenal.rows.map((r) => ({
+                        name: r.pitchType || "",
+                        count: r.count ?? null,
+                        velocity: r.velocity ?? null,
+                        ivb: r.ivb ?? null,
+                        hb: r.hb ?? null,
+                        whiffPct: r.whiffPct ?? null,
+                        stuffPlus: r.stuffPlus ?? null,
+                        relHeight: r.relHeight ?? null,
+                        extension: r.extension ?? null,
+                        vaa: r.vaa ?? null,
+                      }));
+                      return generatePitcherReport({
+                        throwHand: (masterRow as any)?.throwHand || player?.throws_hand || displayHandedness,
+                        role: effectiveRoleDisplay || (masterRow as any)?.role,
+                        conference: displayConference !== "—" ? displayConference : undefined,
+                        era: (masterRow as any)?.era, fip: (masterRow as any)?.fip,
+                        whip: (masterRow as any)?.whip, k9: (masterRow as any)?.k9,
+                        bb9: (masterRow as any)?.bb9, hr9: (masterRow as any)?.hr9,
+                        ip: (masterRow as any)?.ip ?? (masterRow as any)?.IP,
+                        stuffPlus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
+                        whiffPct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                        izWhiffPct: internalPowerRatings?.metrics?.izWhiff,
+                        chasePct: internalPowerRatings?.metrics?.chase,
+                        bbPct: internalPowerRatings?.metrics?.bb,
+                        hardHitPct: internalPowerRatings?.metrics?.hh,
+                        barrelPct: internalPowerRatings?.metrics?.barrel,
+                        exitVel: internalPowerRatings?.metrics?.avgEv,
+                        gbPct: internalPowerRatings?.metrics?.gb,
+                        pitches: pitchesForReport,
+                      }, "rstriq", "full");
+                    })(),
                   };
                   // Attach risk assessment
                   const prvForRisk = computePrvPlus(
@@ -1962,6 +1996,55 @@ export default function PitcherProfile() {
                 gb: internalPowerRatings?.metrics?.gb, izWhiff: internalPowerRatings?.metrics?.izWhiff,
               });
               return <RiskAssessmentCardRSTR risk={risk} />;
+            })()}
+
+            {/* Scouting Report */}
+            {(() => {
+              const pitchesForReport = pitchArsenal.rows.map((r) => ({
+                name: r.pitchType || "",
+                count: r.count ?? null,
+                velocity: r.velocity ?? null,
+                ivb: r.ivb ?? null,
+                hb: r.hb ?? null,
+                whiffPct: r.whiffPct ?? null,
+                stuffPlus: r.stuffPlus ?? null,
+                relHeight: r.relHeight ?? null,
+                extension: r.extension ?? null,
+                vaa: r.vaa ?? null,
+              }));
+
+              const report = generatePitcherReport({
+                throwHand: (masterRow as any)?.throwHand || player?.throws_hand || displayHandedness,
+                role: effectiveRoleDisplay || (masterRow as any)?.role,
+                conference: displayConference !== "—" ? displayConference : undefined,
+                era: (masterRow as any)?.era, fip: (masterRow as any)?.fip,
+                whip: (masterRow as any)?.whip, k9: (masterRow as any)?.k9,
+                bb9: (masterRow as any)?.bb9, hr9: (masterRow as any)?.hr9,
+                ip: (masterRow as any)?.ip ?? (masterRow as any)?.IP,
+                stuffPlus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
+                whiffPct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                izWhiffPct: internalPowerRatings?.metrics?.izWhiff,
+                chasePct: internalPowerRatings?.metrics?.chase,
+                bbPct: internalPowerRatings?.metrics?.bb,
+                hardHitPct: internalPowerRatings?.metrics?.hh,
+                barrelPct: internalPowerRatings?.metrics?.barrel,
+                exitVel: internalPowerRatings?.metrics?.avgEv,
+                gbPct: internalPowerRatings?.metrics?.gb,
+                pitches: pitchesForReport,
+              }, "rstriq", "short");
+
+              return (
+                <Card className="border-[#162241] bg-[#0a1428]">
+                  <CardHeader className="pb-2 pt-3 px-4">
+                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>
+                      Scouting Report
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{report}</p>
+                  </CardContent>
+                </Card>
+              );
             })()}
 
           </div>
