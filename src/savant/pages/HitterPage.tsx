@@ -18,6 +18,7 @@ import { computeWrcPlus } from "@/savant/lib/wrcPlus";
 import { assessHitterRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardSavant } from "@/components/RiskAssessmentCard";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
+import { generateHitterReport } from "@/lib/scoutingReportGenerator";
 
 const fmt3 = (v: number) => v.toFixed(3);
 const fmt1 = (v: number) => v.toFixed(1);
@@ -218,6 +219,51 @@ export default function HitterPage() {
                 pull: player.pull, gb: player.gb, bb: player.bb,
               });
               return <RiskAssessmentCardSavant risk={risk} navyCard={NAVY_CARD} navyBorder={NAVY_BORDER} />;
+            })()}
+
+            {/* Scouting Report */}
+            {(() => {
+              const qualified = hitters.filter((h) => (h.ab ?? 0) >= SAVANT_MIN_AB);
+              const col = <K extends keyof SavantHitterRow>(k: K) => qualified.map((r) => r[k] as number | null);
+              const pr = (v: number | null | undefined, pop: Array<number | null>, opts?: { invert?: boolean }) =>
+                v != null ? percentileRank(v, pop, opts) ?? undefined : undefined;
+
+              const report = generateHitterReport({
+                batHand: player.BatHand,
+                position: player.Pos,
+                conference: player.Conference,
+                avg: player.AVG, obp: player.OBP, slg: player.SLG,
+                iso: player.ISO,
+                pa: player.pa ?? player.ab,
+                contact: player.contact, chase: player.chase, bb: player.bb,
+                avgEv: player.avg_exit_velo, ev90: player.ev90,
+                barrel: player.barrel, laSweet: player.la_10_30,
+                lineDrive: player.line_drive, gb: player.gb, pull: player.pull,
+                pct: {
+                  avg: pr(player.AVG, col("AVG")),
+                  obp: pr(player.OBP, col("OBP")),
+                  slg: pr(player.SLG, col("SLG")),
+                  iso: pr(player.ISO, col("ISO")),
+                  contact: pr(player.contact, col("contact")),
+                  chase: pr(player.chase, col("chase"), { invert: true }),
+                  bb: pr(player.bb, col("bb")),
+                  avgEv: pr(player.avg_exit_velo, col("avg_exit_velo")),
+                  ev90: pr(player.ev90, col("ev90")),
+                  barrel: pr(player.barrel, col("barrel")),
+                  laSweet: pr(player.la_10_30, col("la_10_30")),
+                  gb: pr(player.gb, col("gb")),
+                  pull: pr(player.pull, col("pull")),
+                },
+              }, "savant", "short");
+
+              return (
+                <section className="border px-5 py-4" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+                  <h2 className="text-xs font-bold uppercase tracking-[0.22em] text-[#D4AF37] mb-3" style={{ fontFamily: "'Oswald', sans-serif" }}>
+                    Scouting Report
+                  </h2>
+                  <p className="text-[11px] text-[#8a94a6] leading-relaxed whitespace-pre-line">{report}</p>
+                </section>
+              );
             })()}
 
             <section

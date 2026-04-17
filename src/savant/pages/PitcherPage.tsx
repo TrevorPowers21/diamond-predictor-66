@@ -16,6 +16,7 @@ import { computePrvPlus } from "@/savant/lib/prvPlus";
 import { assessPitcherRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardSavant } from "@/components/RiskAssessmentCard";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
+import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
 
 const fmt2 = (v: number) => v.toFixed(2);
 const fmt1 = (v: number) => v.toFixed(1);
@@ -230,6 +231,67 @@ export default function PitcherPage() {
                 izWhiff: player.in_zone_whiff_pct,
               });
               return <RiskAssessmentCardSavant risk={risk} navyCard={NAVY_CARD} navyBorder={NAVY_BORDER} />;
+            })()}
+
+            {/* Scouting Report */}
+            {(() => {
+              const qualified = pitchers.filter((pp) => (pp.IP ?? 0) >= SAVANT_MIN_IP);
+              const col = <K extends keyof SavantPitcherRow>(k: K) => qualified.map((r) => r[k] as number | null);
+              const pr = (v: number | null | undefined, pop: Array<number | null>, opts?: { invert?: boolean }) =>
+                v != null ? percentileRank(v, pop, opts) ?? undefined : undefined;
+
+              const pitchArsenal = stuffRows.filter((r) => (r.pitches ?? 0) >= 5).map((r) => ({
+                name: r.rstr_pitch_class ?? r.pitch_type,
+                count: r.pitches,
+                velocity: r.velocity,
+                ivb: r.ivb,
+                hb: r.hb,
+                whiffPct: r.whiff_pct,
+                stuffPlus: r.stuff_plus,
+                relHeight: r.rel_height,
+                extension: r.extension,
+                vaa: r.vaa,
+              }));
+
+              const report = generatePitcherReport({
+                throwHand: player.ThrowHand,
+                role: player.Role,
+                conference: player.Conference,
+                era: player.ERA, fip: player.FIP, whip: player.WHIP,
+                k9: player.K9, bb9: player.BB9, hr9: player.HR9, ip: player.IP,
+                stuffPlus: player.stuff_plus,
+                whiffPct: player.miss_pct, izWhiffPct: player.in_zone_whiff_pct,
+                chasePct: player.chase_pct, bbPct: player.bb_pct,
+                hardHitPct: player.hard_hit_pct, barrelPct: player.barrel_pct,
+                exitVel: player.exit_vel, gbPct: player.ground_pct,
+                pitches: pitchArsenal,
+                pct: {
+                  era: pr(player.ERA, col("ERA"), { invert: true }),
+                  fip: pr(player.FIP, col("FIP"), { invert: true }),
+                  whip: pr(player.WHIP, col("WHIP"), { invert: true }),
+                  k9: pr(player.K9, col("K9")),
+                  bb9: pr(player.BB9, col("BB9"), { invert: true }),
+                  hr9: pr(player.HR9, col("HR9"), { invert: true }),
+                  stuffPlus: pr(player.stuff_plus, col("stuff_plus")),
+                  whiffPct: pr(player.miss_pct, col("miss_pct")),
+                  izWhiffPct: pr(player.in_zone_whiff_pct, col("in_zone_whiff_pct")),
+                  chasePct: pr(player.chase_pct, col("chase_pct")),
+                  bbPct: pr(player.bb_pct, col("bb_pct"), { invert: true }),
+                  hardHitPct: pr(player.hard_hit_pct, col("hard_hit_pct"), { invert: true }),
+                  barrelPct: pr(player.barrel_pct, col("barrel_pct"), { invert: true }),
+                  exitVel: pr(player.exit_vel, col("exit_vel"), { invert: true }),
+                  gbPct: pr(player.ground_pct, col("ground_pct")),
+                },
+              }, "savant", "short");
+
+              return (
+                <section className="border px-5 py-4" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+                  <h2 className="text-xs font-bold uppercase tracking-[0.22em] text-[#D4AF37] mb-3" style={{ fontFamily: "'Oswald', sans-serif" }}>
+                    Scouting Report
+                  </h2>
+                  <p className="text-[11px] text-[#8a94a6] leading-relaxed whitespace-pre-line">{report}</p>
+                </section>
+              );
             })()}
 
             <section
