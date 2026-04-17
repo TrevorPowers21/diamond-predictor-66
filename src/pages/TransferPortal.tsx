@@ -29,6 +29,8 @@ import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
+import { assessHitterRisk } from "@/lib/playerRisk";
+import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
 import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 
 type SimPlayer = {
@@ -1853,6 +1855,28 @@ export default function TransferPortal() {
                 </div>
               ))}
             </div>
+
+            {/* ─── Portal Risk Assessment ─── */}
+            {simulation && !simulation.blocked && (() => {
+              const fullName = selectedPlayer ? `${selectedPlayer.first_name} ${selectedPlayer.last_name}` : "";
+              const spKey = `${normalizeKey(fullName)}|${normalizeKey(fromTeam)}`;
+              const sp = powerByNameTeam.get(spKey) ?? powerByNameTeam.get(normalizeKey(fullName)) ?? null;
+              const toConfRow = toConference ? confByKey.get(toConference.toLowerCase().trim()) ?? null : null;
+
+              const risk = assessHitterRisk({
+                conference: toConference,
+                projectedWrcPlus: simulation.pWrcPlus,
+                confStuffPlus: toConfRow?.stuff_plus ?? null,
+                careerSeasons: [],
+                pa: null,
+                chase: sp?.chase, contact: sp?.contact,
+                barrel: sp?.barrel, lineDrive: sp?.lineDrive,
+                avgEv: sp?.avgExitVelo, ev90: sp?.ev90,
+                pull: sp?.pull, gb: sp?.gb, bb: sp?.bb,
+              });
+
+              return <RiskAssessmentCardRSTR risk={risk} />;
+            })()}
 
             {/* ─── Context (collapsible) ─── */}
             <details className="rounded-lg border p-3">

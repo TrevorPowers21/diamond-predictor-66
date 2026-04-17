@@ -36,6 +36,7 @@ import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
+import { assessHitterRisk, type RiskGrade } from "@/lib/playerRisk";
 
 const POSITION_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"] as const;
 const PITCHER_SLOTS = ["SP1", "SP2", "SP3", "SP4", "SP5", "RP1", "RP2", "RP3", "RP4", "CL"] as const;
@@ -1164,6 +1165,20 @@ export default function TeamBuilder() {
     }
     return out;
   }, [teams, hitterStats, powerRatingsData, exitPositions]);
+
+  // Power ratings lookup for risk assessment in target board
+  const powerLookup = useMemo(() => {
+    const map = new Map<string, any>();
+    const rows = (powerRatingsData as Array<any>) || [];
+    for (const pr of rows) {
+      const key = `${normalizeName(pr?.playerName || "")}|${normalizeName(pr?.team || "")}`;
+      if (key && key !== "|") map.set(key, pr);
+      const nameOnly = normalizeName(pr?.playerName || "");
+      if (nameOnly && !map.has(nameOnly)) map.set(nameOnly, pr);
+    }
+    return map;
+  }, [powerRatingsData]);
+
   const combinedTargetSearchPlayers = useMemo(() => {
     const byKey = new Map<string, any>();
     const primaryKeyByNameTeam = new Map<string, string>();
@@ -4637,6 +4652,39 @@ export default function TeamBuilder() {
           </div>
         )}
       </TableCell>
+      <TableCell className="text-center">
+        {(() => {
+          if (!isTarget) return "—";
+          const pName = p.player ? `${p.player.first_name || ""} ${p.player.last_name || ""}`.trim() : "";
+          const pTeam = p.player?.from_team || p.player?.team || "";
+          const spKey = `${normalizeName(pName)}|${normalizeName(pTeam)}`;
+          const sp = powerLookup.get(spKey) ?? powerLookup.get(normalizeName(pName)) ?? null;
+          const transferWrc = sim?.pWrcPlus ?? p.transfer_snapshot?.p_wrc_plus ?? null;
+          const destConf = selectedTeam ? (teamByKey.get(normalizeKey(selectedTeam))?.conference ?? null) : null;
+
+          const risk = assessHitterRisk({
+            conference: destConf,
+            projectedWrcPlus: transferWrc,
+            careerSeasons: [],
+            pa: null,
+            chase: sp?.chase, contact: sp?.contact,
+            barrel: sp?.barrel, lineDrive: sp?.lineDrive,
+            avgEv: sp?.avgExitVelo, ev90: sp?.ev90,
+            pull: sp?.pull, gb: sp?.gb, bb: sp?.bb,
+          });
+          const colors: Record<string, string> = {
+            Low: "text-[hsl(142,71%,35%)] bg-[hsl(142,71%,45%,0.12)]",
+            Moderate: "text-[hsl(200,80%,35%)] bg-[hsl(200,80%,50%,0.12)]",
+            Elevated: "text-[hsl(40,90%,38%)] bg-[hsl(40,90%,50%,0.12)]",
+            High: "text-[hsl(0,72%,41%)] bg-[hsl(0,72%,51%,0.12)]",
+          };
+          return (
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${colors[risk.grade] || ""}`}>
+              {risk.grade}
+            </span>
+          );
+        })()}
+      </TableCell>
       <TableCell>
         {(p.roster_status || (p.source === "portal" ? "target" : "returner")) === "target" ? (
           <span className="text-xs font-medium text-primary">Target</span>
@@ -5337,6 +5385,7 @@ export default function TeamBuilder() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="sticky left-0 z-20 bg-muted/95 backdrop-blur-sm shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] min-w-[180px]">Player</TableHead>
+                      <TableHead className="text-center">Risk</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Pos</TableHead>
                       <TableHead>Position Change</TableHead>
@@ -5354,7 +5403,7 @@ export default function TeamBuilder() {
                   </TableHeader>
                   <TableBody>
                     {targetPositionPlayers.length === 0 ? (
-                      <TableRow><TableCell colSpan={13} className="text-center text-muted-foreground py-8">No target position players</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={14} className="text-center text-muted-foreground py-8">No target position players</TableCell></TableRow>
                     ) : (
                       targetPositionPlayers.map((p, i) => {
                         const globalIdx = rosterPlayers.indexOf(p);
