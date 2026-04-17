@@ -851,6 +851,30 @@ export default function TransferPortal() {
     return map;
   }, [teams]);
 
+  // PA lookup for risk assessment sample size
+  const { data: hitterPaMap = new Map<string, number>() } = useQuery({
+    queryKey: ["transfer-portal-pa-lookup"],
+    queryFn: async () => {
+      const map = new Map<string, number>();
+      const { data } = await (supabase as any)
+        .from("Hitter Master")
+        .select("source_player_id, playerFullName, Team, pa, ab")
+        .eq("Season", 2025)
+        .gt("ab", 0);
+      for (const r of (data || [])) {
+        const pa = r.pa ?? r.ab ?? null;
+        if (pa == null) continue;
+        if (r.source_player_id) map.set(r.source_player_id, pa);
+        const nameKey = `${normalizeKey(r.playerFullName || "")}|${normalizeKey(r.Team || "")}`;
+        if (nameKey && nameKey !== "|") map.set(nameKey, pa);
+        const nameOnly = normalizeKey(r.playerFullName || "");
+        if (nameOnly) map.set(nameOnly, pa);
+      }
+      return map;
+    },
+    staleTime: 30 * 60 * 1000,
+  });
+
   const confByKey = useMemo(() => {
     const map = new Map<string, ConferenceRow>();
     for (const c of conferenceStats) {
@@ -1863,10 +1887,17 @@ export default function TransferPortal() {
               const sp = powerByNameTeam.get(spKey) ?? powerByNameTeam.get(normalizeKey(fullName)) ?? null;
               const toConfRow = toConference ? confByKey.get(toConference.toLowerCase().trim()) ?? null : null;
 
+              // Resolve PA
+              const paKey1 = selectedPlayer?.player_id || "";
+              const paKey2 = `${normalizeKey(fullName)}|${normalizeKey(fromTeam)}`;
+              const paKey3 = normalizeKey(fullName);
+              const resolvedPa = hitterPaMap.get(paKey1) ?? hitterPaMap.get(paKey2) ?? hitterPaMap.get(paKey3) ?? null;
+
               const risk = assessHitterRisk({
                 conference: toConference,
                 projectedWrcPlus: simulation.pWrcPlus,
                 confStuffPlus: toConfRow?.stuff_plus ?? null,
+                pa: resolvedPa,
                 chase: sp?.chase, contact: sp?.contact,
                 barrel: sp?.barrel, lineDrive: sp?.lineDrive,
                 avgEv: sp?.avgExitVelo, ev90: sp?.ev90,

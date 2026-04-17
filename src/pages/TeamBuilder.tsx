@@ -1166,7 +1166,30 @@ export default function TeamBuilder() {
     return out;
   }, [teams, hitterStats, powerRatingsData, exitPositions]);
 
-  // Power ratings lookup for risk assessment in target board
+  // Power ratings + PA lookup for risk assessment in target board
+  const { data: hitterMasterPaMap = new Map<string, number>() } = useQuery({
+    queryKey: ["team-builder-pa-lookup"],
+    queryFn: async () => {
+      const map = new Map<string, number>();
+      const { data } = await (supabase as any)
+        .from("Hitter Master")
+        .select("source_player_id, playerFullName, Team, pa, ab")
+        .eq("Season", 2025)
+        .gt("ab", 0);
+      for (const r of (data || [])) {
+        const pa = r.pa ?? r.ab ?? null;
+        if (pa == null) continue;
+        if (r.source_player_id) map.set(r.source_player_id, pa);
+        const nameKey = `${normalizeName(r.playerFullName || "")}|${normalizeName(r.Team || "")}`;
+        if (nameKey && nameKey !== "|") map.set(nameKey, pa);
+        const nameOnly = normalizeName(r.playerFullName || "");
+        if (nameOnly) map.set(nameOnly, pa);
+      }
+      return map;
+    },
+    staleTime: 30 * 60 * 1000,
+  });
+
   const powerLookup = useMemo(() => {
     const map = new Map<string, any>();
     const rows = (powerRatingsData as Array<any>) || [];
@@ -4662,9 +4685,16 @@ export default function TeamBuilder() {
           const transferWrc = sim?.pWrcPlus ?? p.transfer_snapshot?.p_wrc_plus ?? null;
           const destConf = selectedTeam ? (teamByKey.get(normalizeKey(selectedTeam))?.conference ?? null) : null;
 
+          // Resolve PA from Hitter Master lookup
+          const paKey1 = p.player_id || "";
+          const paKey2 = `${normalizeName(pName)}|${normalizeName(pTeam)}`;
+          const paKey3 = normalizeName(pName);
+          const resolvedPa = hitterMasterPaMap.get(paKey1) ?? hitterMasterPaMap.get(paKey2) ?? hitterMasterPaMap.get(paKey3) ?? null;
+
           const risk = assessHitterRisk({
             conference: destConf,
             projectedWrcPlus: transferWrc,
+            pa: resolvedPa,
             chase: sp?.chase, contact: sp?.contact,
             barrel: sp?.barrel, lineDrive: sp?.lineDrive,
             avgEv: sp?.avgExitVelo, ev90: sp?.ev90,
