@@ -6242,7 +6242,8 @@ function QuickActionsTab() {
         from += playerPageSize;
       }
 
-      // Build lookup: "normalizedName|normalizedTeam" → player_id
+      // Build lookup: ID-first, then "normalizedName|normalizedTeam" → player_id
+      const playerIdBySourceId = new Map<string, string>();
       const playerIdByNameTeam = new Map<string, string>();
       const playerIdByName = new Map<string, string | null>();
       const normalizeTeamForKey = (team: string | null | undefined) => {
@@ -6250,6 +6251,8 @@ function QuickActionsTab() {
         return t.replace(/\buniversity\b/g, "").replace(/\bof\b/g, "").replace(/\s+/g, " ").trim();
       };
       for (const p of allPlayers) {
+        // ID-first: index by source_player_id for instant matching
+        if (p.source_player_id) playerIdBySourceId.set(p.source_player_id, p.id);
         const fullName = normalize(`${p.first_name} ${p.last_name}`);
         const ntKey = `${fullName}|${normalizeTeamForKey(p.team)}`;
         playerIdByNameTeam.set(ntKey, p.id);

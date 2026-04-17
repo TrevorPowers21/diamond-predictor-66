@@ -589,9 +589,10 @@ export default function PlayerProfile() {
   const statCandidates = storageByName.get(fullName) || [];
   const round3 = (v: number | null | undefined) => (v == null ? null : Math.round(v * 1000) / 1000);
   const resolvedSeedStatRow = (() => {
-    // Fast path: UUID match (instant, unambiguous)
-    const byId = id ? storageByPlayerId.get(id) : undefined;
-    if (byId) return byId;
+    // Fast path: source_player_id match (instant, unambiguous)
+    const sourceId = player?.source_player_id;
+    const bySourceId = sourceId ? storageByPlayerId.get(sourceId) : undefined;
+    if (bySourceId) return bySourceId;
     const byFromTeam = storageByNameTeam.get(nameTeamKey(fullNameRaw, player.from_team));
     if (byFromTeam) return byFromTeam;
     const byPlayerTeam = storageByNameTeam.get(nameTeamKey(fullNameRaw, player.team));
@@ -613,9 +614,10 @@ export default function PlayerProfile() {
   const seedStatRow = resolvedSeedStatRow;
   const powerCandidates = powerByName.get(fullName) || [];
   const seedPowerRow = (() => {
-    // Fast path: UUID match (instant, unambiguous)
-    const byId = id ? powerByPlayerId.get(id) : undefined;
-    if (byId) return byId;
+    // Fast path: source_player_id match (instant, unambiguous)
+    const sourceId = player?.source_player_id;
+    const bySourceId = sourceId ? powerByPlayerId.get(sourceId) : undefined;
+    if (bySourceId) return bySourceId;
     const bySeedTeam = powerByNameTeam.get(nameTeamKey(fullNameRaw, seedStatRow?.team));
     if (bySeedTeam) return bySeedTeam;
     const byFromTeam = powerByNameTeam.get(nameTeamKey(fullNameRaw, player.from_team));

@@ -931,18 +931,21 @@ export default function ReturningPlayers() {
       const statSeedRows = hitterStats as Array<{
         playerName: string;
         team: string | null;
+        player_id: string | null;
         avg: number | null;
         obp: number | null;
         slg: number | null;
       }>;
       const statsByName = new Map<string, typeof statSeedRows>();
       const statsByNameTeam = new Map<string, (typeof statSeedRows)[number]>();
+      const statsByPlayerId = new Map<string, (typeof statSeedRows)[number]>();
       for (const row of statSeedRows) {
         const nk = normalize(row.playerName);
         const arr = statsByName.get(nk) || [];
         arr.push(row);
         statsByName.set(nk, arr);
         statsByNameTeam.set(nameTeamKey(row.playerName, row.team), row);
+        if (row.player_id) statsByPlayerId.set(row.player_id, row);
       }
 
       const toReturnerRow = (
@@ -952,9 +955,10 @@ export default function ReturningPlayers() {
       ): ReturnerPlayer => {
         const fullName = `${player.first_name} ${player.last_name}`;
         const seedPowerRow = (() => {
-          // Fast path: UUID match
-          const byId = player.id ? powerSeedByPlayerId.get(player.id) : undefined;
-          if (byId) return byId;
+          // Fast path: source_player_id match (links player UUID chain to Hitter Master)
+          const sourceId = player.source_player_id;
+          const bySourceId = sourceId ? powerSeedByPlayerId.get(sourceId) : undefined;
+          if (bySourceId) return bySourceId;
           const direct = powerSeedByNameTeam.get(nameTeamKey(fullName, player.team));
           if (direct) return direct;
 
@@ -977,8 +981,10 @@ export default function ReturningPlayers() {
         const seedBarrelScore = scoreFromNormal(seedPowerRow?.barrel ?? null, 17.3, 7.89);
         const seedContactScore = scoreFromNormal(seedPowerRow?.contact ?? null, 77.1, 6.6);
         const seedChaseScore = scoreFromNormal(seedPowerRow?.chase ?? null, 23.1, 5.58, true);
+        // ID-first: try source_player_id, then name|team, then name-only
+        const bySourceIdStats = player.source_player_id ? statsByPlayerId.get(player.source_player_id) : undefined;
         const candidates = statsByName.get(normalize(fullName)) || [];
-        const byTeam = statsByNameTeam.get(nameTeamKey(fullName, player.team));
+        const byTeam = bySourceIdStats ?? statsByNameTeam.get(nameTeamKey(fullName, player.team));
         const exactByStats = candidates.find((r) =>
           (r.avg == null || row.from_avg == null || Math.round(r.avg * 1000) === Math.round(Number(row.from_avg) * 1000)) &&
           (r.obp == null || row.from_obp == null || Math.round(r.obp * 1000) === Math.round(Number(row.from_obp) * 1000)) &&

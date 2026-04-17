@@ -87,7 +87,7 @@ export default function ReclassificationRunner() {
           className="cursor-pointer border px-5 py-2 text-xs font-bold uppercase tracking-[0.15em] transition-colors duration-150 hover:bg-[#D4AF37]/10 disabled:cursor-not-allowed disabled:opacity-50"
           style={{ borderColor: GOLD, color: GOLD }}
         >
-          {running ? "Running Pipeline…" : "Run Breaking Ball Reclassification"}
+          {running ? "Running Pipeline..." : "Run Breaking Ball Reclassification"}
         </button>
       </div>
 
@@ -137,16 +137,17 @@ export default function ReclassificationRunner() {
           )}
 
           {/* ── Processing Totals ── */}
-          <SectionTitle>Processing Totals</SectionTitle>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <SectionTitle>Input / Cleaning</SectionTitle>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <StatBox label="Total Pulled" value={report.totalPulled} />
-            <StatBox label="Filter 1 Dropped" value={report.filter1Dropped.length} />
-            <StatBox label="Filter 2 Dropped" value={report.filter2Dropped.length} />
-            <StatBox label="Into Reclassification" value={report.survivingIntoReclassification} />
+            <StatBox label="Missing Movement" value={report.filter1Dropped.length} />
+            <StatBox label="Missing P" value={(report.filterPDropped ?? []).length} />
+            <StatBox label="Zero Movement" value={report.filter2Dropped.length} />
+            <StatBox label="Into Classification" value={report.survivingIntoReclassification} />
           </div>
 
           {/* ── Reclassification Results ── */}
-          <SectionTitle>Reclassification Results</SectionTitle>
+          <SectionTitle>Classification Results</SectionTitle>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {Object.entries(report.reclassificationCounts).map(([hand, classes]) => (
               <div
@@ -168,6 +169,27 @@ export default function ReclassificationRunner() {
               </div>
             ))}
           </div>
+
+          {/* Unclassified */}
+          {(report.unclassifiedRows ?? []).length > 0 && (
+            <div
+              className="border border-amber-500/30 px-4 py-3"
+              style={{ backgroundColor: NAVY_CARD }}
+            >
+              <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-400">
+                Unclassified Rows ({report.unclassifiedRows.length})
+              </div>
+              {report.unclassifiedRows.slice(0, 20).map((r, i) => (
+                <div key={i} className="flex justify-between text-sm text-white">
+                  <span>
+                    <span className="text-white/50">{r.hand === "R" ? "RHP" : "LHP"}</span>{" "}
+                    {r.name} <span className="text-white/40">({r.pitch_type})</span>
+                  </span>
+                  <span className="tabular-nums text-white/70">IVB {r.ivb.toFixed(1)} / HB {r.hb.toFixed(1)}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Tag movements */}
           {(report.tagMovements ?? []).filter((m) => m.from !== m.to).length > 0 && (
@@ -193,11 +215,12 @@ export default function ReclassificationRunner() {
           )}
 
           {/* ── Consolidation Results ── */}
-          <SectionTitle>Consolidation</SectionTitle>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <StatBox label="Players Consolidated" value={report.consolidationCount} />
-            <StatBox label="Source Rows Merged" value={report.sourceRowsMerged} />
-            <StatBox label="Rows Produced" value={report.consolidatedRowsProduced} />
+          <SectionTitle>Consolidation (4-Tier)</SectionTitle>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            <StatBox label="Auto-Absorbed" value={report.autoAbsorbedCount ?? 0} />
+            <StatBox label="Auto-Consolidated" value={report.autoConsolidatedCount ?? 0} />
+            <StatBox label="Needs Review" value={report.needsReviewCount ?? 0} />
+            <StatBox label="Kept Separate" value={report.keptSeparateCount ?? 0} />
             <StatBox label="Sub-Threshold Dropped" value={report.subThresholdDropped} />
           </div>
 
@@ -208,7 +231,7 @@ export default function ReclassificationRunner() {
               style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
             >
               <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white/50">
-                Legitimate Two-Pitch Players ({report.twoPitchPlayers.length})
+                Confirmed Two-Pitch Players ({report.twoPitchPlayers.length})
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-white">
@@ -241,6 +264,96 @@ export default function ReclassificationRunner() {
                 </table>
               </div>
             </div>
+          )}
+
+          {/* ── Discrepancy Report ── */}
+          {report.discrepancy && (
+            <>
+              <SectionTitle>Discrepancy Detection</SectionTitle>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <StatBox label="Cross-Bucket Same Pitch" value={report.discrepancy.crossBucketSamePitch.length} />
+                <StatBox label="Cross-Bucket Two Pitch" value={report.discrepancy.crossBucketTwoPitch.length} />
+                <StatBox label="Boundary Cases" value={report.discrepancy.boundaryCases.length} />
+                <StatBox label="Outlier Flags" value={report.discrepancy.outlierCases.length} />
+              </div>
+
+              {report.discrepancy.crossBucketSamePitch.length > 0 && (
+                <details className="border px-4 py-3" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+                  <summary className="cursor-pointer text-[10px] font-bold uppercase tracking-[0.18em] text-amber-400">
+                    Possible Same Pitch in Multiple Buckets ({report.discrepancy.crossBucketSamePitch.length})
+                  </summary>
+                  <div className="mt-2 max-h-48 overflow-auto text-xs text-white/60">
+                    {report.discrepancy.crossBucketSamePitch.map((r, i) => (
+                      <div key={i} className="border-t border-white/5 py-1">
+                        <span className="font-medium text-white/80">{r.name}</span>
+                        <span className="ml-2 text-white/50">{r.hand === "R" ? "RHP" : "LHP"}</span>
+                        <span className="ml-2">{r.buckets.join(", ")}</span>
+                        <span className="ml-2 tabular-nums">dist: {r.distance.toFixed(1)} in</span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+
+              {report.discrepancy.outlierCases.length > 0 && (
+                <details className="border px-4 py-3" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+                  <summary className="cursor-pointer text-[10px] font-bold uppercase tracking-[0.18em] text-red-400">
+                    Outlier Flags ({report.discrepancy.outlierCases.length})
+                  </summary>
+                  <div className="mt-2 max-h-48 overflow-auto text-xs text-white/60">
+                    {report.discrepancy.outlierCases.slice(0, 50).map((r, i) => (
+                      <div key={i} className="border-t border-white/5 py-1">
+                        <span className="font-medium text-white/80">{r._playerName}</span>
+                        <span className="ml-2 text-white/50">{r.rstr_pitch_class}</span>
+                        <span className="ml-2 text-red-400">{(r.outlier_metrics ?? []).join(", ")}</span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </>
+          )}
+
+          {/* ── Population Averages ── */}
+          {(report.populationAverages ?? []).length > 0 && (
+            <>
+              <SectionTitle>Population Averages (Calculated)</SectionTitle>
+              <div
+                className="border px-4 py-3"
+                style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
+              >
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-white">
+                    <thead>
+                      <tr className="text-left text-[10px] uppercase tracking-wider text-white/50">
+                        <th className="py-1 pr-3">Hand</th>
+                        <th className="py-1 pr-3">Pitch</th>
+                        <th className="py-1 pr-2 text-right">N</th>
+                        <th className="py-1 pr-2 text-right">P</th>
+                        <th className="py-1 pr-2 text-right">Vel</th>
+                        <th className="py-1 pr-2 text-right">IVB</th>
+                        <th className="py-1 pr-2 text-right">HB</th>
+                        <th className="py-1 text-right">Spin</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {report.populationAverages.map((avg, i) => (
+                        <tr key={i} className="border-t border-white/5">
+                          <td className="py-1 pr-3 text-white/50">{avg.hand === "R" ? "RHP" : "LHP"}</td>
+                          <td className="py-1 pr-3 font-medium">{avg.pitch_type}</td>
+                          <td className="py-1 pr-2 text-right tabular-nums text-white/70">{avg.n_pitchers}</td>
+                          <td className="py-1 pr-2 text-right tabular-nums text-white/70">{avg.pitches}</td>
+                          <td className="py-1 pr-2 text-right tabular-nums">{avg.velocity?.toFixed(1) ?? "—"}</td>
+                          <td className="py-1 pr-2 text-right tabular-nums">{avg.ivb?.toFixed(1) ?? "—"}</td>
+                          <td className="py-1 pr-2 text-right tabular-nums">{avg.hb?.toFixed(1) ?? "—"}</td>
+                          <td className="py-1 text-right tabular-nums">{avg.spin != null ? Math.round(avg.spin) : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           )}
 
           {/* ── Needs Review ── */}
@@ -308,13 +421,13 @@ export default function ReclassificationRunner() {
           </div>
 
           {/* Dropped rows detail (collapsible) */}
-          {((report.filter1Dropped ?? []).length > 0 || (report.filter2Dropped ?? []).length > 0) && (
+          {((report.filter1Dropped ?? []).length > 0 || (report.filter2Dropped ?? []).length > 0 || (report.filterPDropped ?? []).length > 0) && (
             <details className="border px-4 py-3" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
               <summary className="cursor-pointer text-[10px] font-bold uppercase tracking-[0.18em] text-white/50">
-                Dropped Rows Detail ({report.filter1Dropped.length + report.filter2Dropped.length})
+                Dropped Rows Detail ({report.filter1Dropped.length + report.filter2Dropped.length + (report.filterPDropped ?? []).length})
               </summary>
               <div className="mt-2 max-h-64 overflow-auto text-xs text-white/60">
-                {[...report.filter1Dropped, ...report.filter2Dropped].slice(0, 100).map((d, i) => (
+                {[...report.filter1Dropped, ...report.filter2Dropped, ...(report.filterPDropped ?? [])].slice(0, 100).map((d, i) => (
                   <div key={i} className="border-t border-white/5 py-1">
                     <span className="font-medium text-white/80">{d.name}</span>
                     <span className="ml-2 text-white/40">{d.pitch_type}</span>

@@ -310,7 +310,8 @@ const splitFullName = (fullName: string) => {
 
 const readStoragePitcherLocalPlayers = (
   teamName: string | null | undefined,
-  masterRows: Array<{ playerName: string; team: string | null; throwHand: string | null; role: string | null; conference: string | null }> = [],
+  masterRows: Array<{ playerName: string; team: string | null; teamId?: string | null; throwHand: string | null; role: string | null; conference: string | null }> = [],
+  selectedTeamId?: string | null,
 ): Array<{
   first_name: string;
   last_name: string;
@@ -320,7 +321,7 @@ const readStoragePitcherLocalPlayers = (
   conference: string | null;
   role: "SP" | "RP" | null;
 }> => {
-  if (!teamName) return [];
+  if (!teamName && !selectedTeamId) return [];
   const out: Array<{
     first_name: string;
     last_name: string;
@@ -334,7 +335,9 @@ const readStoragePitcherLocalPlayers = (
     const playerName = (r.playerName || "").trim();
     const rowTeam = (r.team || "").trim();
     if (!playerName || !rowTeam) continue;
-    if (!teamMatchesSelectedTeam(rowTeam, teamName)) continue;
+    // ID-first: compare teamId if available, name fallback
+    const teamMatch = (selectedTeamId && (r as any).teamId) ? (r as any).teamId === selectedTeamId : teamMatchesSelectedTeam(rowTeam, teamName);
+    if (!teamMatch) continue;
     const hand = (r.throwHand || "").trim().toUpperCase();
     const roleRaw = (r.role || "").trim().toUpperCase();
     const role: "SP" | "RP" | null = roleRaw === "SP" || roleRaw === "RP" ? roleRaw : null;
@@ -1115,12 +1118,10 @@ export default function TeamBuilder() {
       teamConfByKey.set(normalizeKey(t.name), t.conference || null);
     }
     const rows = (hitterStats as SeedRow[]) || [];
-    const powerByNameTeam = new Map<string, TeamMetricInputs>();
+    const powerByKey = new Map<string, TeamMetricInputs>();
     const powerRows = (powerRatingsData as Array<any>) || [];
     for (const pr of powerRows) {
-      const key = `${normalizeName(pr?.playerName || "")}|${normalizeName(pr?.team || "")}`;
-      if (!key || key === "|") continue;
-      powerByNameTeam.set(key, {
+      const metrics: TeamMetricInputs = {
         contact: parseNum(pr?.contact),
         lineDrive: parseNum(pr?.lineDrive),
         avgExitVelo: parseNum(pr?.avgExitVelo),
@@ -1132,7 +1133,12 @@ export default function TeamBuilder() {
         pull: parseNum(pr?.pull),
         la10_30: parseNum(pr?.la10_30),
         gb: parseNum(pr?.gb),
-      });
+      };
+      // ID-first: index by source_player_id
+      if (pr?.player_id) powerByKey.set(`sid:${pr.player_id}`, metrics);
+      // Name|team fallback
+      const key = `${normalizeName(pr?.playerName || "")}|${normalizeName(pr?.team || "")}`;
+      if (key && key !== "|") powerByKey.set(key, metrics);
     }
     const out: any[] = [];
     const posMap = exitPositions as Record<string, string>;
@@ -1144,7 +1150,8 @@ export default function TeamBuilder() {
       const split = splitFullName(playerName);
       const posKey = `${playerName}|${teamName}`;
       const position = posMap[posKey] || posMap[playerName] || null;
-      const seedMetrics = powerByNameTeam.get(`${normalizeName(playerName)}|${normalizeName(teamName)}`) || null;
+      // ID-first lookup, name|team fallback
+      const seedMetrics = (r.player_id ? powerByKey.get(`sid:${r.player_id}`) : null) ?? powerByKey.get(`${normalizeName(playerName)}|${normalizeName(teamName)}`) ?? null;
       const seedPowerPlus = seedMetrics ? computeTeamPowerPlus(seedMetrics) : null;
       out.push({
         id: `seed-hitter-${normalizeName(playerName)}-${normalizeName(teamName)}-${idx}`,
@@ -1154,6 +1161,7 @@ export default function TeamBuilder() {
         team: teamName,
         from_team: teamName,
         conference: teamConfByKey.get(normalizeKey(teamName)) || null,
+        teamId: r.teamId ?? null,
         __seedHitter: true,
         __seedStats: {
           avg: r.avg ?? null,
@@ -1200,6 +1208,9 @@ export default function TeamBuilder() {
     const map = new Map<string, any>();
     const rows = (powerRatingsData as Array<any>) || [];
     for (const pr of rows) {
+      // ID-first: index by source_player_id
+      if (pr?.player_id) map.set(`sid:${pr.player_id}`, pr);
+      // Name|team fallback
       const key = `${normalizeName(pr?.playerName || "")}|${normalizeName(pr?.team || "")}`;
       if (key && key !== "|") map.set(key, pr);
       const nameOnly = normalizeName(pr?.playerName || "");
@@ -1312,11 +1323,14 @@ export default function TeamBuilder() {
         const rawId = typeof p.player_id === "string" ? p.player_id.trim() : "";
         let hit = rawId ? allPlayersByIdForHydration.get(rawId) : null;
         if (!hit && p.source === "portal" && p.transfer_snapshot) {
+          const fromTeamId = p.transfer_snapshot.from_team_id || null;
           const fromKey = normalizeName(p.transfer_snapshot.from_team || "");
           const candidates = allPlayersForSearch
             .filter((r: any) => isPitcherLike(r))
             .filter((r: any) => {
-              if (!fromKey) return true;
+              if (!fromKey && !fromTeamId) return true;
+              // ID-first: compare team_id if available
+              if (fromTeamId && r.team_id) return r.team_id === fromTeamId;
               const cFrom = normalizeName(r.from_team || r.team || "");
               return !!cFrom && cFrom === fromKey;
             });
@@ -1562,7 +1576,7 @@ export default function TeamBuilder() {
   });
   const storagePitchersForSelectedTeam = useMemo(() => {
     if (!selectedTeam) return [] as BuildPlayer[];
-    return readStoragePitcherLocalPlayers(selectedTeam, pitchingMasterRows).map((lp) => ({
+    return readStoragePitcherLocalPlayers(selectedTeam, pitchingMasterRows, selectedTeamId).map((lp) => ({
       player_id: null,
       source: "returner",
       custom_name: null,
@@ -1595,7 +1609,11 @@ export default function TeamBuilder() {
   const seedHittersForSelectedTeam = useMemo(() => {
     if (!selectedTeam) return [] as BuildPlayer[];
     return seedHittersForSearch
-      .filter((row: any) => teamMatchesSelectedTeam(row.team || "", selectedTeam))
+      .filter((row: any) => {
+        // ID-first: compare teamId if available
+        if (selectedTeamId && row.teamId) return row.teamId === selectedTeamId;
+        return teamMatchesSelectedTeam(row.team || "", selectedTeam);
+      })
       .filter((row: any) => !/^(SP|RP|CL|P|LHP|RHP)/i.test(String(row.position || "")))
       .filter((row: any) => {
         const fullName = normalizeName(`${row.first_name || ""} ${row.last_name || ""}`);
@@ -1727,7 +1745,7 @@ export default function TeamBuilder() {
         }
       }
 
-      const fallbackPitchers = readStoragePitcherLocalPlayers(build.team || selectedTeam || "", pitchingMasterRows);
+      const fallbackPitchers = readStoragePitcherLocalPlayers(build.team || selectedTeam || "", pitchingMasterRows, selectedTeamId);
       const usedFallbackIndices = new Set<number>();
       const reserveFallbackIndexByName = (fullName: string) => {
         const key = normalizeName(fullName);
@@ -4686,8 +4704,10 @@ export default function TeamBuilder() {
           if (!isTarget) return "—";
           const pName = p.player ? `${p.player.first_name || ""} ${p.player.last_name || ""}`.trim() : "";
           const pTeam = p.player?.from_team || p.player?.team || "";
+          const pSourceId = p.player?.source_player_id || null;
           const spKey = `${normalizeName(pName)}|${normalizeName(pTeam)}`;
-          const sp = powerLookup.get(spKey) ?? powerLookup.get(normalizeName(pName)) ?? null;
+          // ID-first: try source_player_id, then name|team, then name-only
+          const sp = (pSourceId ? powerLookup.get(`sid:${pSourceId}`) : null) ?? powerLookup.get(spKey) ?? powerLookup.get(normalizeName(pName)) ?? null;
           const transferWrc = sim?.pWrcPlus ?? p.transfer_snapshot?.p_wrc_plus ?? null;
           const destConf = selectedTeam ? (teamByKey.get(normalizeKey(selectedTeam))?.conference ?? null) : null;
 
