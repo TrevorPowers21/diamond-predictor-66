@@ -502,7 +502,13 @@ function assessCompetitionRisk(conference: string | null | undefined, confOpposi
 // ── Factor 3: Performance Trajectory ────────────────────────────────
 
 function assessTrajectory(seasons: any[], playerType: "hitter" | "pitcher"): { factor: RiskFactor; trajectory: Trajectory } {
-  if (!seasons || seasons.length < 2) {
+  if (!seasons || seasons.length === 0) {
+    return {
+      factor: { label: "Trajectory", score: null, grade: "Unknown", detail: "No multi-year data" },
+      trajectory: "Unknown",
+    };
+  }
+  if (seasons.length < 2) {
     return {
       factor: { label: "Trajectory", score: 40, grade: "Moderate", detail: "Insufficient multi-year data" },
       trajectory: "Unknown",
@@ -554,6 +560,13 @@ function assessTrajectory(seasons: any[], playerType: "hitter" | "pitcher"): { f
 // ── Factor 4: Sample Size Risk ──────────────────────────────────────
 
 function assessSampleSize(pa: number | null | undefined, ip: number | null | undefined, playerType: "hitter" | "pitcher"): RiskFactor {
+  // When PA/IP is not provided at all (undefined), skip the factor entirely
+  if (playerType === "hitter" && pa == null) {
+    return { label: "Sample Size", score: null, grade: "Unknown", detail: "Sample size unavailable" };
+  }
+  if (playerType === "pitcher" && ip == null) {
+    return { label: "Sample Size", score: null, grade: "Unknown", detail: "Sample size unavailable" };
+  }
   if (playerType === "hitter") {
     const n = pa ?? 0;
     let risk: number;

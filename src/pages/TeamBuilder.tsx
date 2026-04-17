@@ -4665,8 +4665,6 @@ export default function TeamBuilder() {
           const risk = assessHitterRisk({
             conference: destConf,
             projectedWrcPlus: transferWrc,
-            careerSeasons: [],
-            pa: null,
             chase: sp?.chase, contact: sp?.contact,
             barrel: sp?.barrel, lineDrive: sp?.lineDrive,
             avgEv: sp?.avgExitVelo, ev90: sp?.ev90,

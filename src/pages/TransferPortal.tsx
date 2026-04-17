@@ -1867,8 +1867,6 @@ export default function TransferPortal() {
                 conference: toConference,
                 projectedWrcPlus: simulation.pWrcPlus,
                 confStuffPlus: toConfRow?.stuff_plus ?? null,
-                careerSeasons: [],
-                pa: null,
                 chase: sp?.chase, contact: sp?.contact,
                 barrel: sp?.barrel, lineDrive: sp?.lineDrive,
                 avgEv: sp?.avgExitVelo, ev90: sp?.ev90,
