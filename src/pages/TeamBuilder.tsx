@@ -1480,12 +1480,13 @@ export default function TeamBuilder() {
       }
       const { data, error } = await query;
       if (error) throw error;
-      // If team_id query returned nothing, retry with team name
-      if (selectedTeamId && (!data || data.length === 0)) {
-        const { data: fallback, error: fbErr } = await supabase.from("players").select(selectCols).eq("team", selectedTeam).eq("transfer_portal", false);
-        if (!fbErr && fallback && fallback.length > 0) {
-          return processReturners(fallback);
-        }
+      // Merge: also grab players matched by team name (many players have team name but no team_id yet)
+      if (selectedTeamId && selectedTeam) {
+        const { data: byName } = await supabase.from("players").select(selectCols).eq("team", selectedTeam).eq("transfer_portal", false);
+        const merged = new Map<string, any>();
+        for (const p of (data || [])) merged.set(p.id, p);
+        for (const p of (byName || [])) merged.set(p.id, p);
+        return processReturners([...merged.values()]);
       }
       return processReturners(data || []);
 
