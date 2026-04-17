@@ -206,7 +206,67 @@ export default function Dashboard() {
   const metricLabel = METRICS.find((m) => m.key === metric)?.label ?? metric;
 
   // Real Supabase-backed target board
-  const { board: targetBoard, removePlayer: removeFromBoard } = useTargetBoard();
+  const { board: targetBoardDirect, removePlayer: removeFromBoard } = useTargetBoard();
+
+  // Also pull targets from the most recent Team Builder saved build
+  const { data: buildTargets = [] } = useQuery({
+    queryKey: ["dashboard-build-targets"],
+    queryFn: async () => {
+      // Get the most recent build
+      const { data: builds } = await supabase
+        .from("team_builds" as any)
+        .select("id")
+        .order("updated_at", { ascending: false })
+        .limit(1);
+      if (!builds || builds.length === 0) return [];
+      const buildId = (builds[0] as any).id;
+
+      // Get target players from that build
+      const { data: players } = await supabase
+        .from("team_build_players" as any)
+        .select("player_id, custom_name, roster_status")
+        .eq("build_id", buildId)
+        .eq("roster_status", "target");
+      if (!players || players.length === 0) return [];
+
+      // Fetch player details
+      const ids = (players as any[]).map((p: any) => p.player_id).filter(Boolean);
+      if (ids.length === 0) return [];
+      const { data: details } = await supabase
+        .from("players")
+        .select("id, first_name, last_name, team, conference, position, portal_status")
+        .in("id", ids);
+      if (!details) return [];
+
+      return (details as any[]).map((d: any) => ({
+        id: d.id,
+        player_id: d.id,
+        notes: null,
+        added_at: "",
+        first_name: d.first_name,
+        last_name: d.last_name,
+        team: d.team,
+        conference: d.conference,
+        position: d.position,
+        class_year: null,
+        portal_status: d.portal_status || "NOT IN PORTAL",
+      }));
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Merge: Supabase target_board + build targets, deduplicate by player_id
+  const targetBoard = useMemo(() => {
+    const seen = new Set<string>();
+    const merged: typeof targetBoardDirect = [];
+    for (const row of targetBoardDirect) {
+      if (!seen.has(row.player_id)) { seen.add(row.player_id); merged.push(row); }
+    }
+    for (const row of buildTargets) {
+      if (!seen.has(row.player_id)) { seen.add(row.player_id); merged.push(row as any); }
+    }
+    return merged;
+  }, [targetBoardDirect, buildTargets]);
 
   return (
     <DashboardLayout>
