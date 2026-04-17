@@ -27,7 +27,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Pencil, RefreshCw, Scale, Sliders, Trophy, Plus, Trash2, Building2, Check, Edit2, Save, X, Upload, LogIn } from "lucide-react";
+import { Pencil, RefreshCw, Scale, Sliders, Trophy, Plus, Trash2, Building2, Check, Edit2, Save, X, Upload, LogIn, UserPlus } from "lucide-react";
+import RosterOverrideTab from "@/components/RosterOverrideTab";
 import { useAuth } from "@/hooks/useAuth";
 import { bulkRecalculatePredictionsLocal } from "@/lib/predictionEngine";
 // TODO: Seed JSON files are static local data — migrate to Supabase tables for live updates.
@@ -8548,6 +8549,10 @@ export default function AdminDashboard() {
               <Upload className="h-4 w-4" />
               Stuff+ Import
             </TabsTrigger>
+            <TabsTrigger value="roster-override" className="gap-1.5">
+              <UserPlus className="h-4 w-4" />
+              Roster
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="equations">
@@ -8585,6 +8590,9 @@ export default function AdminDashboard() {
           </TabsContent>
           <TabsContent value="stuff-import">
             <StuffPlusImporter />
+          </TabsContent>
+          <TabsContent value="roster-override">
+            <RosterOverrideTab />
           </TabsContent>
         </Tabs>
       </div>
