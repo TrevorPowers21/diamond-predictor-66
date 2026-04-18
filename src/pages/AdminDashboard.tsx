@@ -3126,6 +3126,61 @@ function QuickActionsTab() {
   const linkCsvRef = useRef<HTMLInputElement | null>(null);
   const [linkCsvLoading, setLinkCsvLoading] = useState(false);
   const [linkCsvResult, setLinkCsvResult] = useState<{ teamsLinked: number; playersLinked: number; playersCreated: number; unmatched: string[] } | null>(null);
+  const stuffPlusCsvRef = useRef<HTMLInputElement | null>(null);
+  const [stuffPlusLoading, setStuffPlusLoading] = useState(false);
+  const [stuffPlusResult, setStuffPlusResult] = useState<{ updated: number; notFound: number; skipped: number } | null>(null);
+
+  const importStuffPlusCsv = async (file: File) => {
+    setStuffPlusLoading(true);
+    setStuffPlusResult(null);
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length < 2) throw new Error("CSV has no data rows");
+      const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
+      const nameCol = headers.findIndex((h) => h.includes("player") || h.includes("name"));
+      const teamCol = headers.findIndex((h) => h.includes("team"));
+      const stuffCol = headers.findIndex((h) => h.includes("stuff"));
+      if (nameCol < 0 || stuffCol < 0) throw new Error("CSV must have Player Name and Stuff+ columns");
+
+      const normalize = (v: string | null | undefined) =>
+        (v || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+
+      let updated = 0;
+      let notFound = 0;
+      let skipped = 0;
+
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(",").map((c) => c.trim());
+        const playerName = cols[nameCol] || "";
+        const team = teamCol >= 0 ? (cols[teamCol] || "") : "";
+        const stuffRaw = cols[stuffCol] || "";
+        const stuffVal = parseFloat(stuffRaw);
+        if (!playerName || !Number.isFinite(stuffVal)) { skipped++; continue; }
+
+        // Match by name+team in Pitching Master
+        let query = (supabase as any).from("Pitching Master").update({
+          stuff_plus: stuffVal,
+          era_power_rating_plus: null,
+          fip_power_rating_plus: null,
+          k9_power_rating_plus: null,
+        }).eq("Season", 2025).ilike("playerFullName", playerName);
+        if (team) query = query.ilike("Team", `%${team}%`);
+        const { count, error } = await query.select("id", { count: "exact", head: true });
+
+        if (error) { notFound++; continue; }
+        if ((count ?? 0) > 0) updated++;
+        else notFound++;
+      }
+
+      setStuffPlusResult({ updated, notFound, skipped });
+      toast.success(`Updated ${updated} pitchers' Stuff+. ${notFound} not found. ${skipped} skipped.`);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStuffPlusLoading(false);
+    }
+  };
 
   const linkSourceIdsCsv = async (file: File) => {
     setLinkCsvLoading(true);
