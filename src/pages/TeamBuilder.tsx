@@ -4533,9 +4533,9 @@ export default function TeamBuilder() {
           </div>
         )}
       </TableCell>
+      {isTarget && (
       <TableCell className="text-center">
         {(() => {
-          if (!isTarget) return "—";
           const pName = p.player ? `${p.player.first_name || ""} ${p.player.last_name || ""}`.trim() : "";
           const pTeam = p.player?.from_team || p.player?.team || "";
           const pSourceId = p.player?.source_player_id || null;
@@ -4569,6 +4569,7 @@ export default function TeamBuilder() {
           );
         })()}
       </TableCell>
+      )}
       <TableCell>
         {(p.roster_status || (p.source === "portal" ? "target" : "returner")) === "target" ? (
           <span className="text-xs font-medium text-primary">Target</span>
