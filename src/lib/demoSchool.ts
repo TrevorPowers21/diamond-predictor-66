@@ -7,10 +7,10 @@
  */
 
 export const DEMO_SCHOOL = {
-  name: "Virginia Tech",
-  fullName: "Virginia Polytechnic Institute and State University",
-  logo: "/vtlogo.png",
-  primaryColor: "#630031",
-  secondaryColor: "#CF4420",
-  mascot: "Hokies",
+  name: "",
+  fullName: "",
+  logo: "/rstr-iq-logo.png",
+  primaryColor: "#D4AF37",
+  secondaryColor: "#0a1428",
+  mascot: "",
 } as const;

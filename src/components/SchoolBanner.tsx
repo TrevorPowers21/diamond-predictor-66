@@ -160,7 +160,7 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
                       color: DEMO_SCHOOL.primaryColor,
                     }}
                   >
-                    {DEMO_SCHOOL.name}
+                    {DEMO_SCHOOL.name || "RSTR IQ"}
                   </h2>
                   <p
                     className="text-4xl font-bold tracking-wide uppercase mt-0.5"
@@ -169,7 +169,7 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
                       color: DEMO_SCHOOL.secondaryColor,
                     }}
                   >
-                    {DEMO_SCHOOL.mascot}
+                    {DEMO_SCHOOL.mascot || "Baseball"}
                   </p>
                 </div>
               </div>
