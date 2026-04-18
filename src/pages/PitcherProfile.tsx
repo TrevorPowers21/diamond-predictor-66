@@ -24,6 +24,7 @@ import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/Scou
 import { assessPitcherRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
+import { usePitcherRoleOverrides } from "@/hooks/usePitcherRoleOverrides";
 import { computePrvPlus } from "@/savant/lib/prvPlus";
 import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
 
@@ -330,6 +331,7 @@ export default function PitcherProfile() {
   const navigate = useNavigate();
   const location = useLocation();
   const { hasRole } = useAuth();
+  const { getRole: getSupabaseRole, setRole: setSupabaseRole } = usePitcherRoleOverrides();
   const isAdmin = hasRole("admin");
   const queryClient = useQueryClient();
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
@@ -960,8 +962,9 @@ export default function PitcherProfile() {
     }
     return null;
   })();
-  const initialProjectedRole = playerOverride?.pitcher_role || storageProjectionOverride?.pitcher_role || derivedRole || "SM";
-  const effectiveRoleDisplay = playerOverride?.pitcher_role || derivedRole;
+  const supabaseRole = id ? getSupabaseRole(id) : null;
+  const initialProjectedRole = supabaseRole || playerOverride?.pitcher_role || storageProjectionOverride?.pitcher_role || derivedRole || "SM";
+  const effectiveRoleDisplay = supabaseRole || playerOverride?.pitcher_role || derivedRole;
   const initialProjectedClassTransition = (() => {
     const raw = String(playerOverride?.class_transition || storageProjectionOverride?.class_transition || activePrediction?.class_transition || "SJ").toUpperCase();
     return raw === "FS" || raw === "SJ" || raw === "JS" || raw === "GR" ? raw : "SJ";
@@ -981,6 +984,10 @@ export default function PitcherProfile() {
     if (updates.pitcher_role) setProjectedRole(updates.pitcher_role);
     if (updates.class_transition) setProjectedClassTransition(updates.class_transition);
     if (Number.isFinite(Number(updates.dev_aggressiveness))) setProjectedDevAggressiveness(Number(updates.dev_aggressiveness));
+    // Persist pitcher role to Supabase
+    if (updates.pitcher_role && id) {
+      setSupabaseRole(id, updates.pitcher_role);
+    }
     if (isDbRoute && id) {
       const next = {
         ...(playerOverride || {}),
