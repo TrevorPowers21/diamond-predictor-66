@@ -4112,10 +4112,7 @@ export default function AdminDashboard() {
             />
           </TabsContent>
           <TabsContent value="power">
-            <HittingPitchingSection
-              pitching={<PitchingConferenceStatsTable />}
-              pitchingTitle="Conference Statistics — Pitching"
-            />
+            <PitchingConferenceStatsTable />
           </TabsContent>
           <TabsContent value="power-ratings">
             <HittingPitchingSection
