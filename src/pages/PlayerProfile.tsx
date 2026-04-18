@@ -337,24 +337,20 @@ export default function PlayerProfile() {
   // Default to 2025 if it's available, else the most recent season
   const defaultSeason = availableSeasons.includes(2025) ? 2025 : (availableSeasons[0] ?? 2025);
   const effectiveSeason = selectedSeason ?? defaultSeason;
-  const isHistoricalView = effectiveSeason !== 2025;
-  const historicalRow = useMemo(() => {
-    return hitterMasterSeasons.find((r: any) => Number(r.Season) === effectiveSeason) || null;
-  }, [hitterMasterSeasons, effectiveSeason]);
 
   // Pick the 2025 Hitter Master row to check if combined stats were used
   // (badge only shows on the current season view, not historical)
   const currentHitterRow = useMemo(() => {
     return hitterMasterSeasons.find((r: any) => Number(r.Season) === 2025) || null;
   }, [hitterMasterSeasons]);
-  const combinedUsed = !isHistoricalView && !!(currentHitterRow as any)?.combined_used;
+  const combinedUsed = !!(currentHitterRow as any)?.combined_used;
   const combinedPa = (currentHitterRow as any)?.combined_pa as number | null | undefined;
   const combinedSeasonsLabel = (currentHitterRow as any)?.combined_seasons as string | null | undefined;
 
   // Fetch NCAA wRC mean for the historical season (for wRC+ calculation)
   const { data: ncaaWrcForSeason } = useQuery({
     queryKey: ["ncaa-wrc-mean-profile", effectiveSeason],
-    enabled: isHistoricalView,
+    enabled: effectiveSeason !== 2025,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("ncaa_averages" as any)
@@ -704,7 +700,7 @@ export default function PlayerProfile() {
   // Always use 2025 row for determining if player has data — don't bail on historical year with no AB
   const activeMasterRow = currentHitterRow;
   const activeAb = (activeMasterRow as any)?.ab;
-  const hasZeroAb = activeMasterRow != null && (activeAb == null || Number(activeAb) === 0) && !isHistoricalView;
+  const hasZeroAb = activeMasterRow != null && (activeAb == null || Number(activeAb) === 0);
   if (hasZeroAb) {
     return (
       <DashboardLayout>
@@ -723,24 +719,9 @@ export default function PlayerProfile() {
               </div>
             </div>
           </div>
-          {availableSeasons.length > 1 && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs uppercase tracking-wide text-muted-foreground">Season:</span>
-              {availableSeasons.map((s) => (
-                <Button
-                  key={s}
-                  size="sm"
-                  variant={s === effectiveSeason ? "default" : "outline"}
-                  onClick={() => setSelectedSeason(s)}
-                >
-                  {s}
-                </Button>
-              ))}
-            </div>
-          )}
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground">
-              No hitting stats for the {effectiveSeason} season.
+              No hitting stats available.
             </CardContent>
           </Card>
         </div>
@@ -817,24 +798,7 @@ export default function PlayerProfile() {
               )}
             </div>
           </div>
-          {availableSeasons.length > 1 && (
-            <Select value={String(effectiveSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
-              <SelectTrigger className="h-9 w-[80px] text-sm font-semibold">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {availableSeasons.map((y) => (
-                  <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          {isHistoricalView && (
-            <Badge className="bg-muted text-muted-foreground border-0 uppercase tracking-wider text-[10px] font-semibold">
-              Historical
-            </Badge>
-          )}
-          {!isHistoricalView && (
+          {
             <>
               <Button
                 variant="outline"

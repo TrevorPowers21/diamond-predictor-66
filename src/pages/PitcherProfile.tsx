@@ -496,7 +496,6 @@ export default function PitcherProfile() {
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const defaultSeason = availableSeasons.includes(2025) ? 2025 : (availableSeasons[0] ?? 2025);
   const effectiveSeason = selectedSeason ?? defaultSeason;
-  const isHistoricalView = effectiveSeason !== 2025;
   const historicalRow = useMemo(() => {
     return (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason) || null;
   }, [pitcherMasterSeasons, effectiveSeason]);
@@ -504,7 +503,7 @@ export default function PitcherProfile() {
   const currentPitcherRow = useMemo(() => {
     return (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === 2025) || null;
   }, [pitcherMasterSeasons]);
-  const combinedUsed = !isHistoricalView && !!(currentPitcherRow as any)?.combined_used;
+  const combinedUsed = !!(currentPitcherRow as any)?.combined_used;
   const combinedIp = (currentPitcherRow as any)?.combined_ip as number | null | undefined;
   const combinedSeasonsLabel = (currentPitcherRow as any)?.combined_seasons as string | null | undefined;
 
@@ -1325,9 +1324,9 @@ export default function PitcherProfile() {
     );
   }
 
-  const activePitcherRow = isHistoricalView ? historicalRow : currentPitcherRow;
-  const activeIp = (activePitcherRow as any)?.IP;
-  if (activePitcherRow != null && (activeIp == null || Number(activeIp) === 0)) {
+  const activePitcherRow = (effectiveSeason !== 2025) ? historicalRow : currentPitcherRow;
+  const currentIp = (currentPitcherRow as any)?.IP;
+  if (currentPitcherRow != null && (currentIp == null || Number(currentIp) === 0)) {
     return (
       <DashboardLayout>
         <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
@@ -1341,7 +1340,7 @@ export default function PitcherProfile() {
           </div>
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground">
-              No pitching stats for the {effectiveSeason} season.
+              No pitching stats available.
             </CardContent>
           </Card>
         </div>
@@ -1421,24 +1420,7 @@ export default function PitcherProfile() {
               )}
             </div>
           </div>
-          {availableSeasons.length > 1 && (
-            <Select value={String(effectiveSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
-              <SelectTrigger className="h-9 w-[80px] text-sm font-semibold">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {availableSeasons.map((y) => (
-                  <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          {isHistoricalView && (
-            <Badge className="bg-muted text-muted-foreground border-0 uppercase tracking-wider text-[10px] font-semibold">
-              Historical
-            </Badge>
-          )}
-          {!isHistoricalView && player && (
+          {player && (
             <>
               <Button
                 variant="outline"

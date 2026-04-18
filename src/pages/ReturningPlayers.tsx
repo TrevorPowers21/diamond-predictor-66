@@ -1760,23 +1760,10 @@ export default function ReturningPlayers() {
           <div>
             <h2 className="text-2xl font-bold tracking-tight">Player Dashboard</h2>
             <p className="text-muted-foreground text-sm">
-              {selectedSeason === 2025
-                ? "2025 season — all players including transfers and departed"
-                : `${selectedSeason} historical — actual stats and scouting grades`}
+              2025 season — all players including transfers and departed
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Select value={String(selectedSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
-              <SelectTrigger className="h-[42px] w-[80px] text-sm font-medium rounded-lg border bg-muted">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="2025">2025</SelectItem>
-                <SelectItem value="2024">2024</SelectItem>
-                <SelectItem value="2023">2023</SelectItem>
-                <SelectItem value="2022">2022</SelectItem>
-              </SelectContent>
-            </Select>
             <div className="flex gap-1 rounded-lg border bg-muted p-1">
               <button
                 className={cn(
@@ -1800,11 +1787,7 @@ export default function ReturningPlayers() {
           </div>
         </div>
 
-        {selectedSeason !== 2025 ? (
-          dashboardView === "hitting"
-            ? <HistoricalPlayerTable season={selectedSeason} onPlayerClick={saveViewSnapshot} />
-            : <HistoricalPitcherTable season={selectedSeason} onPlayerClick={saveViewSnapshot} />
-        ) : dashboardView === "hitting" ? (
+        {dashboardView === "hitting" ? (
           <>
         <div className="space-y-2">
           <div className="relative w-full max-w-md">
