@@ -542,16 +542,23 @@ export default function PlayerProfile() {
       if (unknownMatch) return { conference: unknownMatch[1] };
       // Try exact match first
       let { data } = await supabase
-        .from("teams")
+        .from("Teams Table")
         .select("conference")
-        .eq("name", fromTeam)
+        .eq("full_name", fromTeam)
         .maybeSingle();
       if (data) return data;
+      // Try abbreviation match
+      const { data: byAbbr } = await supabase
+        .from("Teams Table")
+        .select("conference")
+        .eq("abbreviation", fromTeam)
+        .maybeSingle();
+      if (byAbbr) return byAbbr;
       // Try contains match (short name within full formal name)
       const { data: fuzzy } = await supabase
-        .from("teams")
+        .from("Teams Table")
         .select("conference")
-        .ilike("name", `%${fromTeam}%`)
+        .ilike("full_name", `%${fromTeam}%`)
         .limit(1)
         .maybeSingle();
       return fuzzy;
