@@ -1475,11 +1475,15 @@ export default function TeamBuilder() {
   });
 
   const { data: returners = [], dataUpdatedAt: returnersUpdatedAt } = useQuery({
-    queryKey: ["team-builder-returners-v3", selectedTeamId, selectedTeam],
+    queryKey: ["team-builder-returners-v3", selectedTeamId, selectedTeam, hitterStats.length, pitchingMasterRows.length],
     enabled: !!selectedTeam,
     staleTime: 0,
     retry: 1,
     queryFn: async () => {
+      // Build set of source_player_ids that exist in 2025 data
+      const active2025Ids = new Set<string>();
+      for (const r of hitterStats) { if (r.player_id) active2025Ids.add(r.player_id); }
+      for (const r of pitchingMasterRows) { if (r.source_player_id) active2025Ids.add(r.source_player_id); }
       // Try team_id UUID first, fall back to team name match
       const selectCols = "id, first_name, last_name, position, team, from_team, conference, transfer_portal, source_player_id, player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at)";
       let query = supabase.from("players").select(selectCols).eq("transfer_portal", false);
@@ -1503,6 +1507,8 @@ export default function TeamBuilder() {
       function processReturners(players: any[]) {
         const results: any[] = [];
         for (const player of players) {
+          // Only include players who exist in 2025 Hitter Master or Pitching Master
+          if (player.source_player_id && !active2025Ids.has(player.source_player_id)) continue;
           const preds = (player.player_predictions || []).filter(
             (pr: any) => pr.variant === "regular" && (pr.status === "active" || pr.status === "departed"),
           );
