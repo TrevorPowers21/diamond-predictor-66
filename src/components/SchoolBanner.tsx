@@ -152,26 +152,30 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
                   alt={schoolName}
                   className="h-24 w-auto object-contain"
                 />
-                <div>
-                  <h2
-                    className="text-2xl font-bold tracking-wider leading-none uppercase"
-                    style={{
-                      fontFamily: "'Oswald', sans-serif",
-                      color: DEMO_SCHOOL.primaryColor,
-                    }}
-                  >
-                    {DEMO_SCHOOL.name || "RSTR IQ"}
-                  </h2>
-                  <p
-                    className="text-4xl font-bold tracking-wide uppercase mt-0.5"
-                    style={{
-                      fontFamily: "'Oswald', sans-serif",
-                      color: DEMO_SCHOOL.secondaryColor,
-                    }}
-                  >
-                    {DEMO_SCHOOL.mascot || "Baseball"}
-                  </p>
-                </div>
+                {DEMO_SCHOOL.name ? (
+                  <div>
+                    <h2
+                      className="text-2xl font-bold tracking-wider leading-none uppercase"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        color: DEMO_SCHOOL.primaryColor,
+                      }}
+                    >
+                      {DEMO_SCHOOL.name}
+                    </h2>
+                    <p
+                      className="text-4xl font-bold tracking-wide uppercase mt-0.5"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        color: DEMO_SCHOOL.secondaryColor,
+                      }}
+                    >
+                      {DEMO_SCHOOL.mascot}
+                    </p>
+                  </div>
+                ) : (
+                  <img src="/rstr-iq-logo.png" alt="RSTR IQ" className="h-16 object-contain" />
+                )}
               </div>
             </motion.div>
           )}
