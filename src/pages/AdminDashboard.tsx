@@ -567,10 +567,16 @@ function EquationConstantsTab() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("Conference Stats")
-        .select("conference, avg, obp, iso, wrc")
-        .order("conference");
+        .select(`"conference abbreviation", AVG, OBP, ISO, WRC_plus`)
+        .order("conference abbreviation");
       if (error) throw error;
-      return data;
+      return (data || []).map((r: any) => ({
+        conference: r["conference abbreviation"],
+        avg: r.AVG,
+        obp: r.OBP,
+        iso: r.ISO,
+        wrc: r.WRC_plus,
+      }));
     },
   });
   const ncaaStats = conferenceStats.find((row) => (row.conference || "").toLowerCase().includes("ncaa"));
