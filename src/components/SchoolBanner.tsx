@@ -154,7 +154,7 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
                 />
                 <div>
                   <h2
-                    className="text-4xl font-bold tracking-wider leading-none uppercase"
+                    className="text-2xl font-bold tracking-wider leading-none uppercase"
                     style={{
                       fontFamily: "'Oswald', sans-serif",
                       color: DEMO_SCHOOL.primaryColor,
@@ -163,7 +163,7 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
                     {DEMO_SCHOOL.name}
                   </h2>
                   <p
-                    className="text-2xl font-semibold tracking-wide uppercase mt-0.5"
+                    className="text-4xl font-bold tracking-wide uppercase mt-0.5"
                     style={{
                       fontFamily: "'Oswald', sans-serif",
                       color: DEMO_SCHOOL.secondaryColor,
