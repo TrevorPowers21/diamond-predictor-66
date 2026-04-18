@@ -264,19 +264,9 @@ function readLocalNum(key: string, fallback: number, remoteValues?: Record<strin
   // 1) Supabase model_config is the authority
   const remote = remoteValues?.[key];
   if (Number.isFinite(remote)) return Number(remote);
-  // 2) Canonical default from transferWeightDefaults (if it's a weight key)
+  // 2) Canonical default from transferWeightDefaults
   const canonical = (TRANSFER_WEIGHT_DEFAULTS as Record<string, number>)[key];
   if (canonical !== undefined) return canonical;
-  // 3) localStorage is last resort
-  if (typeof window !== "undefined") {
-    try {
-      const raw = window.localStorage.getItem("admin_dashboard_equation_values_v1");
-      if (raw) {
-        const num = Number(JSON.parse(raw)[key]);
-        if (Number.isFinite(num)) return num;
-      }
-    } catch { /* ignore */ }
-  }
   return fallback;
 }
 

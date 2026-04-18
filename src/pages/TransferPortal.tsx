@@ -433,9 +433,6 @@ const resolveTeamRowFromCandidates = (
   return best;
 };
 const statKey = (v: number | null | undefined) => (v == null ? "na" : round3(v).toFixed(3));
-const TARGET_BOARD_STORAGE_KEY = "team_builder_target_board_v1";
-
-
 const calcPitchingPlus = (
   statValue: number | null,
   ncaaAvg: number,
@@ -467,47 +464,13 @@ const calcHitterTalentPlusFromConference = (
   return Number.isFinite(value) ? Number(value.toFixed(1)) : null;
 };
 
-type TargetBoardEntry = {
-  playerId: string;
-  playerName: string;
-  destinationTeam: string;
-  fromTeam: string | null;
-  fromConference: string | null;
-  pitcherRole?: "SP" | "RP" | null;
-  pAvg: number | null;
-  pObp: number | null;
-  pSlg: number | null;
-  pWrcPlus: number | null;
-  pEra?: number | null;
-  pFip?: number | null;
-  pWhip?: number | null;
-  pK9?: number | null;
-  pBb9?: number | null;
-  pHr9?: number | null;
-  pRvPlus?: number | null;
-  pWar?: number | null;
-  owar: number | null;
-  nilValuation: number | null;
-  createdAt: string;
-};
-
 function readLocalNum(key: string, fallback: number, remoteValues?: Record<string, number>): number {
-  // 1) Supabase model_config is the authority — always wins if present
+  // 1) Supabase model_config is the authority
   const remote = remoteValues?.[key];
   if (Number.isFinite(remote)) return Number(remote);
-  // 2) Fall back to the canonical default from transferWeightDefaults (if it's a weight key)
+  // 2) Canonical default from transferWeightDefaults
   const canonical = (TRANSFER_WEIGHT_DEFAULTS as Record<string, number>)[key];
   if (canonical !== undefined) return canonical;
-  // 3) localStorage is last resort — never let it override DB or canonical defaults
-  if (typeof window !== "undefined") {
-    try {
-      const raw = window.localStorage.getItem("admin_dashboard_equation_values_v1");
-      if (raw) {
-        const num = Number(JSON.parse(raw)[key]);
-        if (Number.isFinite(num)) return num;
-      }
-    } catch { /* ignore */ }
-  }
   return fallback;
 }
 
@@ -1687,93 +1650,26 @@ export default function TransferPortal() {
 
   const addToTargetBoard = () => {
     if (!selectedPlayer || !selectedDestinationTeam) return;
-    const entry: TargetBoardEntry = {
-      playerId: selectedPlayer.player_id,
-      playerName: `${selectedPlayer.first_name} ${selectedPlayer.last_name}`,
-      destinationTeam: selectedDestinationTeam,
-      fromTeam: fromTeam || null,
-      fromConference: fromConference || null,
-      pAvg: simulation?.pAvg ?? null,
-      pObp: simulation?.pObp ?? null,
-      pSlg: simulation?.pSlg ?? null,
-      pWrcPlus: simulation?.pWrcPlus ?? null,
-      owar: simulation?.owar ?? null,
-      nilValuation: simulation?.nilValuation ?? null,
-      createdAt: new Date().toISOString(),
-    };
-    try {
-      const raw = localStorage.getItem(TARGET_BOARD_STORAGE_KEY);
-      const list = raw ? (JSON.parse(raw) as TargetBoardEntry[]) : [];
-      const deduped = list.filter(
-        (r) =>
-          !(
-            r.playerId === entry.playerId &&
-            normalizeKey(r.destinationTeam) === normalizeKey(entry.destinationTeam)
-          ),
-      );
-      deduped.push(entry);
-      localStorage.setItem(TARGET_BOARD_STORAGE_KEY, JSON.stringify(deduped));
-      // Sync to Supabase target board
-      if (entry.playerId && !isOnSupabaseBoard(entry.playerId)) {
-        addToSupabaseBoard({ playerId: entry.playerId });
-      }
-      toast({
-        title: "Added to Target Board",
-        description: `${entry.playerName} -> ${entry.destinationTeam}`,
-      });
-    } catch (e: any) {
-      toast({
-        title: "Could not add target",
-        description: e?.message || "Local storage write failed.",
-        variant: "destructive",
-      });
+    const playerId = selectedPlayer.player_id;
+    const playerName = `${selectedPlayer.first_name} ${selectedPlayer.last_name}`;
+    if (playerId && !isOnSupabaseBoard(playerId)) {
+      addToSupabaseBoard({ playerId });
     }
+    toast({
+      title: "Added to Target Board",
+      description: `${playerName} -> ${selectedDestinationTeam}`,
+    });
   };
 
   const addPitcherToTargetBoard = () => {
     if (!selectedPitcher || !selectedDestinationTeam || pitchingSimulation?.blocked) return;
-    const entry: TargetBoardEntry = {
-      playerId: selectedPitcher.id,
-      playerName: selectedPitcher.player_name,
-      destinationTeam: selectedDestinationTeam,
-      fromTeam: selectedPitcher.team || null,
-      fromConference: pitchingSimulation?.fromConference || null,
-      pitcherRole: pitchingSimulation?.projectedRole ?? (selectedPitcher.role === "SP" ? "SP" : "RP"),
-      pAvg: null,
-      pObp: null,
-      pSlg: null,
-      pWrcPlus: pitchingSimulation?.pRvPlus ?? null,
-      pEra: pitchingSimulation?.pEra ?? null,
-      pFip: pitchingSimulation?.pFip ?? null,
-      pWhip: pitchingSimulation?.pWhip ?? null,
-      pK9: pitchingSimulation?.pK9 ?? null,
-      pBb9: pitchingSimulation?.pBb9 ?? null,
-      pHr9: pitchingSimulation?.pHr9 ?? null,
-      pRvPlus: pitchingSimulation?.pRvPlus ?? null,
-      pWar: pitchingSimulation?.pWar ?? null,
-      owar: pitchingSimulation?.pWar ?? null,
-      nilValuation: pitchingSimulation?.marketValue ?? null,
-      createdAt: new Date().toISOString(),
-    };
-    try {
-      const raw = localStorage.getItem(TARGET_BOARD_STORAGE_KEY);
-      const list = raw ? (JSON.parse(raw) as TargetBoardEntry[]) : [];
-      const deduped = list.filter(
-        (r) =>
-          !(
-            r.playerId === entry.playerId &&
-            normalizeKey(r.destinationTeam) === normalizeKey(entry.destinationTeam)
-          ),
-      );
-      deduped.push(entry);
-      localStorage.setItem(TARGET_BOARD_STORAGE_KEY, JSON.stringify(deduped));
-      // Sync to Supabase target board
-      if (entry.playerId && !isOnSupabaseBoard(entry.playerId)) {
-        addToSupabaseBoard({ playerId: entry.playerId });
-      }
-      toast({
-        title: "Added to Target Board",
-        description: `${entry.playerName} -> ${entry.destinationTeam}`,
+    const playerId = selectedPitcher.id;
+    if (playerId && !isOnSupabaseBoard(playerId)) {
+      addToSupabaseBoard({ playerId });
+    }
+    toast({
+      title: "Added to Target Board",
+      description: `${selectedPitcher.player_name} -> ${selectedDestinationTeam}`,
       });
     } catch (e: any) {
       toast({

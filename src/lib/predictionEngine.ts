@@ -119,16 +119,6 @@ const MANUAL_INTERNAL_OVERRIDES: Record<string, ReturnerPowerContext> = {
 };
 
 
-function readLocalEquationValues(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem("admin_dashboard_equation_values_v1");
-    if (!raw) return {};
-    return JSON.parse(raw) as Record<string, string>;
-  } catch {
-    return {};
-  }
-}
 
 function round3(val: number): number {
   return Math.round(val * 1000) / 1000;
@@ -295,55 +285,6 @@ async function loadEngineConfig(): Promise<EngineConfig> {
     applyEq("w_iso", (v) => { returner.wrcWeights.iso = toWeight(v); });
   }
 
-  // Fall back to Admin UI local storage values (legacy, will be removed in Phase 7)
-  const local = readLocalEquationValues();
-  const n = (key: string) => Number(local[key]);
-  const applyIfFinite = (value: number, apply: (v: number) => void) => {
-    if (Number.isFinite(value)) apply(value);
-  };
-  applyIfFinite(n("r_ncaa_avg_ba"), (v) => { returner.ncaaAvg = toStatRate(v); });
-  applyIfFinite(n("r_ba_std_pr"), (v) => { returner.baStdPower = v; });
-  applyIfFinite(n("r_ba_std_ncaa"), (v) => { returner.baStdNcaa = toStatRate(v); });
-  applyIfFinite(n("r_obp_std_pr"), (v) => { returner.obpStdPower = v; });
-  applyIfFinite(n("r_obp_std_ncaa"), (v) => { returner.obpStdNcaa = toStatRate(v); });
-  applyIfFinite(n("r_ncaa_avg_obp"), (v) => { returner.ncaaObp = toStatRate(v); });
-  applyIfFinite(n("r_ncaa_avg_iso"), (v) => { returner.ncaaIso = toStatRate(v); });
-  applyIfFinite(n("r_ncaa_avg_wrc"), (v) => {
-    const normalized = toStatRate(v);
-    // Guardrail: NCAA wRC baseline is a rate (~0.364), not an index (1.000).
-    // Ignore out-of-range values that would destabilize wRC+ and oWAR.
-    if (normalized > 0 && normalized < 0.8) returner.ncaaWrc = normalized;
-  });
-  applyIfFinite(n("r_w_obp"), (v) => { returner.wrcWeights.obp = toWeight(v); });
-  applyIfFinite(n("r_w_slg"), (v) => { returner.wrcWeights.slg = toWeight(v); });
-  applyIfFinite(n("r_w_avg"), (v) => { returner.wrcWeights.avg = toWeight(v); });
-  applyIfFinite(n("r_w_iso"), (v) => { returner.wrcWeights.iso = toWeight(v); });
-  applyIfFinite(n("r_ba_class_fs"), (v) => { returner.classBases.FS.avg = toRate(v); });
-  applyIfFinite(n("r_ba_class_sj"), (v) => { returner.classBases.SJ.avg = toRate(v); });
-  applyIfFinite(n("r_ba_class_js"), (v) => { returner.classBases.JS.avg = toRate(v); });
-  applyIfFinite(n("r_ba_class_gr"), (v) => { returner.classBases.GR.avg = toRate(v); });
-  applyIfFinite(n("r_obp_class_fs"), (v) => { returner.classBases.FS.obp = toRate(v); });
-  applyIfFinite(n("r_obp_class_sj"), (v) => { returner.classBases.SJ.obp = toRate(v); });
-  applyIfFinite(n("r_obp_class_js"), (v) => { returner.classBases.JS.obp = toRate(v); });
-  applyIfFinite(n("r_obp_class_gr"), (v) => { returner.classBases.GR.obp = toRate(v); });
-  applyIfFinite(n("r_iso_class_fs"), (v) => { returner.classBases.FS.iso = toRate(v); });
-  applyIfFinite(n("r_iso_class_sj"), (v) => { returner.classBases.SJ.iso = toRate(v); });
-  applyIfFinite(n("r_iso_class_js"), (v) => { returner.classBases.JS.iso = toRate(v); });
-  applyIfFinite(n("r_iso_class_gr"), (v) => { returner.classBases.GR.iso = toRate(v); });
-  applyIfFinite(n("r_ba_damp_tier1_max"), (v) => { returner.baDampTier1Max = toStatRate(v); });
-  applyIfFinite(n("r_ba_damp_tier2_max"), (v) => { returner.baDampTier2Max = toStatRate(v); });
-  applyIfFinite(n("r_ba_damp_tier3_max"), (v) => { returner.baDampTier3Max = toStatRate(v); });
-  applyIfFinite(n("r_ba_damp_tier1_impact"), (v) => { returner.baDampTier1Impact = toWeight(v); });
-  applyIfFinite(n("r_ba_damp_tier2_impact"), (v) => { returner.baDampTier2Impact = toWeight(v); });
-  applyIfFinite(n("r_ba_damp_tier3_impact"), (v) => { returner.baDampTier3Impact = toWeight(v); });
-  applyIfFinite(n("r_ba_damp_tier4_impact"), (v) => { returner.baDampTier4Impact = toWeight(v); });
-  applyIfFinite(n("r_obp_damp_tier1_max"), (v) => { returner.obpDampTier1Max = toStatRate(v); });
-  applyIfFinite(n("r_obp_damp_tier2_max"), (v) => { returner.obpDampTier2Max = toStatRate(v); });
-  applyIfFinite(n("r_obp_damp_tier3_max"), (v) => { returner.obpDampTier3Max = toStatRate(v); });
-  applyIfFinite(n("r_obp_damp_tier1_impact"), (v) => { returner.obpDampTier1Impact = toWeight(v); });
-  applyIfFinite(n("r_obp_damp_tier2_impact"), (v) => { returner.obpDampTier2Impact = toWeight(v); });
-  applyIfFinite(n("r_obp_damp_tier3_impact"), (v) => { returner.obpDampTier3Impact = toWeight(v); });
-  applyIfFinite(n("r_obp_damp_tier4_impact"), (v) => { returner.obpDampTier4Impact = toWeight(v); });
 
   const transfer: TransferConfig = {
     baNcaaAvg: 0.28,

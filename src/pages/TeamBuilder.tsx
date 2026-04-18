@@ -44,31 +44,7 @@ const PITCHER_SLOTS = ["SP1", "SP2", "SP3", "SP4", "SP5", "RP1", "RP2", "RP3", "
 const MAX_DEPTH = 3;
 const DEV_AGGRESSIVENESS_OPTIONS = [0, 0.5, 1] as const;
 const TEAM_BUILDER_DRAFT_KEY = "team_builder_draft_v3";
-const TARGET_BOARD_STORAGE_KEY = "team_builder_target_board_v1";
 const LEGACY_PITCHING_ROLE_OVERRIDE_KEY = "pitching_role_overrides_v1";
-type TargetBoardEntry = {
-  playerId: string;
-  playerName: string;
-  destinationTeam: string;
-  fromTeam: string | null;
-  fromConference: string | null;
-  pitcherRole?: "SP" | "RP" | null;
-  pAvg: number | null;
-  pObp: number | null;
-  pSlg: number | null;
-  pWrcPlus: number | null;
-  pEra?: number | null;
-  pFip?: number | null;
-  pWhip?: number | null;
-  pK9?: number | null;
-  pBb9?: number | null;
-  pHr9?: number | null;
-  pRvPlus?: number | null;
-  pWar?: number | null;
-  owar: number | null;
-  nilValuation: number | null;
-  createdAt: string;
-};
 
 type TransferSnapshot = {
   p_avg: number | null;
@@ -617,22 +593,6 @@ const selectTransferPortalPreferredPrediction = (predictions: any[] | null | und
   })[0] ?? null;
 };
 
-const readTargetBoard = (): TargetBoardEntry[] => {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(TARGET_BOARD_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as TargetBoardEntry[]) : [];
-  } catch {
-    return [];
-  }
-};
-
-const writeTargetBoard = (rows: TargetBoardEntry[]) => {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(TARGET_BOARD_STORAGE_KEY, JSON.stringify(rows));
-};
 
 const computeOWarFromWrcPlus = (wrcPlus: number | null | undefined, actualPa?: number | null) => {
   if (wrcPlus == null) return null;
@@ -910,19 +870,9 @@ function readLocalNum(key: string, fallback: number, remoteValues?: Record<strin
   // 1) Supabase model_config is the authority
   const remote = remoteValues?.[key];
   if (Number.isFinite(remote)) return Number(remote);
-  // 2) Canonical default from transferWeightDefaults (if it's a weight key)
+  // 2) Canonical default from transferWeightDefaults
   const canonical = (TRANSFER_WEIGHT_DEFAULTS as Record<string, number>)[key];
   if (canonical !== undefined) return canonical;
-  // 3) localStorage is last resort
-  if (typeof window !== "undefined") {
-    try {
-      const raw = window.localStorage.getItem("admin_dashboard_equation_values_v1");
-      if (raw) {
-        const num = Number(JSON.parse(raw)[key]);
-        if (Number.isFinite(num)) return num;
-      }
-    } catch { /* ignore */ }
-  }
   return fallback;
 }
 
@@ -2139,14 +2089,8 @@ export default function TeamBuilder() {
     if (targetSyncedRef.current) return;
     const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 
-    // 1. Push localStorage + roster targets → Supabase
-    const queue = readTargetBoard();
+    // Push roster targets → Supabase
     const rosterTargets = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target" && p.player_id && isUuid(p.player_id));
-    for (const entry of queue) {
-      if (isUuid(entry.playerId) && !isOnSupabaseBoard(entry.playerId)) {
-        addToSupabaseBoard({ playerId: entry.playerId });
-      }
-    }
     for (const p of rosterTargets) {
       if (!isOnSupabaseBoard(p.player_id!)) {
         addToSupabaseBoard({ playerId: p.player_id! });
@@ -2199,124 +2143,6 @@ export default function TeamBuilder() {
     targetSyncedRef.current = true;
   }, [supabaseTargetBoard, rosterPlayers]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    if (!selectedTeam) return;
-    let cancelled = false;
-    const run = async () => {
-      const queue = readTargetBoard();
-      if (!queue.length) return;
-      const selectedTeamKey = normalizeKey(selectedTeam);
-      const eligible = queue.filter((q) => normalizeKey(q.destinationTeam) === selectedTeamKey);
-      if (!eligible.length) return;
-
-      const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
-      const ids = Array.from(new Set(eligible.map((q) => q.playerId).filter(isUuid)));
-      if (ids.length === 0) {
-        const remaining = queue.filter((q) => normalizeKey(q.destinationTeam) !== selectedTeamKey);
-        writeTargetBoard(remaining);
-        return;
-      }
-      const { data, error } = await supabase
-        .from("players")
-        .select(`
-          id, first_name, last_name, position, team, from_team, conference,
-          player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at),
-          nil_valuations(estimated_value, component_breakdown)
-        `)
-        .in("id", ids);
-      if (error) {
-        toast({ title: "Target Board sync failed", description: error.message, variant: "destructive" });
-        return;
-      }
-      if (cancelled) return;
-
-      const rowsById = new Map<string, any>();
-      (data || []).forEach((r: any) => rowsById.set(r.id, r));
-
-      let added = 0;
-      setRosterPlayers((prev) => {
-        const next = [...prev];
-        for (const entry of eligible) {
-          const row = rowsById.get(entry.playerId);
-          if (!row) continue;
-          const exists = next.some((p) => p.player_id === row.id && (p.roster_status || "returner") === "target");
-          if (exists) continue;
-          const overrideRole = asPitcherRole(getSupabaseRole(row.id) || playerOverrides?.[row.id]?.pitcher_role || null);
-          const entryRole = asPitcherRole(entry.pitcherRole || null);
-          const inferredRole = overrideRole || entryRole || asPitcherRole(row.position || null);
-          const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(row.position || ""));
-          const chosenPred = selectTransferPortalPreferredPrediction(
-            (row.player_predictions || []).filter((pr: any) => pr.variant === "regular"),
-          );
-          const newP: BuildPlayer = {
-            player_id: row.id,
-            source: "portal",
-            custom_name: `${row.first_name || ""} ${row.last_name || ""}`.trim() || null,
-            position_slot: isPitcherRow ? (inferredRole || "RP") : null,
-            depth_order: 1,
-            nil_value: row.nil_valuations?.[0]?.estimated_value ? Number(row.nil_valuations[0].estimated_value) : 0,
-            production_notes: null,
-            roster_status: "target",
-            depth_role: isPitcherRow
-              ? ((inferredRole === "SP") ? "weekend_starter" : "high_leverage_reliever")
-              : "utility",
-            class_transition: chosenPred?.class_transition ?? "SJ",
-            dev_aggressiveness: chosenPred?.dev_aggressiveness ?? 0,
-            transfer_snapshot: {
-              p_avg: entry.pAvg ?? null,
-              p_obp: entry.pObp ?? null,
-              p_slg: entry.pSlg ?? null,
-              p_wrc_plus: entry.pWrcPlus ?? null,
-              p_era: entry.pEra ?? null,
-              p_fip: entry.pFip ?? null,
-              p_whip: entry.pWhip ?? null,
-              p_k9: entry.pK9 ?? null,
-              p_bb9: entry.pBb9 ?? null,
-              p_hr9: entry.pHr9 ?? null,
-              p_rv_plus: entry.pRvPlus ?? null,
-              p_war: entry.pWar ?? null,
-              owar: entry.owar ?? null,
-              nil_valuation: entry.nilValuation ?? null,
-              from_team: entry.fromTeam ?? null,
-              from_conference: entry.fromConference ?? null,
-            },
-            player: {
-              first_name: row.first_name,
-              last_name: row.last_name,
-              position: row.position,
-              team: row.team,
-              from_team: row.from_team,
-              conference: row.conference ?? null,
-            },
-            prediction: chosenPred ?? null,
-            nilVal: row.nil_valuations?.[0]?.estimated_value ?? null,
-            nil_owar: row.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
-          };
-          next.push(newP);
-          added += 1;
-        }
-        return next;
-      });
-
-      const remaining = queue.filter((q) => normalizeKey(q.destinationTeam) !== selectedTeamKey);
-      writeTargetBoard(remaining);
-      // Sync localStorage entries to Supabase target board
-      for (const entry of eligible) {
-        const isUuidEntry = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(entry.playerId);
-        if (isUuidEntry && !isOnSupabaseBoard(entry.playerId)) {
-          addToSupabaseBoard({ playerId: entry.playerId });
-        }
-      }
-      if (added > 0) {
-        setDirty(true);
-        toast({ title: "Target Board synced", description: `Added ${added} target${added === 1 ? "" : "s"} to this build.` });
-      }
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedTeam, toast, playerOverrides]);
 
   const teamByKey = useMemo(() => {
     const map = new Map<string, TeamRow>();

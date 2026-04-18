@@ -525,27 +525,7 @@ function EquationConstantsTab() {
     nil_program_total_player_score: "68",
   };
 
-  const [editableValues, setEditableValues] = useState<Record<string, string>>(() => {
-    try {
-      const raw = localStorage.getItem("admin_dashboard_equation_values_v1");
-      if (!raw) return defaultEditableValues;
-      const parsed = JSON.parse(raw) as Record<string, string>;
-      const merged = { ...defaultEditableValues, ...parsed };
-      for (const [k, v] of Object.entries(merged)) {
-        if (v == null) merged[k] = defaultEditableValues[k] ?? "";
-      }
-      // Fix stale localStorage: if a transfer weight is stuck at the old
-      // wrong default of 1.0, replace it with the canonical value.
-      for (const [key, canonical] of Object.entries(TRANSFER_WEIGHT_DEFAULTS)) {
-        if (Number(merged[key]) === 1 && canonical !== 1) {
-          merged[key] = String(canonical);
-        }
-      }
-      return merged;
-    } catch {
-      return defaultEditableValues;
-    }
-  });
+  const [editableValues, setEditableValues] = useState<Record<string, string>>(defaultEditableValues);
 
   const remoteHydratedRef = useRef(false);
   const lastPersistedRef = useRef<Record<string, string> | null>(null);
@@ -586,14 +566,6 @@ function EquationConstantsTab() {
       setEditableValues((prev) => ({ ...prev, [key]: value }));
     }
   };
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("admin_dashboard_equation_values_v1", JSON.stringify(editableValues));
-    } catch {
-      // ignore localStorage write failures
-    }
-  }, [editableValues]);
 
   useEffect(() => {
     if (remoteHydratedRef.current) return;
