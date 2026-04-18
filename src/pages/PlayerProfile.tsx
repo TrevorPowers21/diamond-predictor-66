@@ -894,7 +894,7 @@ export default function PlayerProfile() {
                 {isOnBoard(player.id) ? "On Board" : "Target Board"}
               </Button>
             </>
-          )}
+          }
           {!editing ? (
             <Button variant="outline" size="sm" onClick={startEdit}>
               <Pencil className="mr-2 h-3.5 w-3.5" />Edit

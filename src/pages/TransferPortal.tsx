@@ -1670,14 +1670,7 @@ export default function TransferPortal() {
     toast({
       title: "Added to Target Board",
       description: `${selectedPitcher.player_name} -> ${selectedDestinationTeam}`,
-      });
-    } catch (e: any) {
-      toast({
-        title: "Could not add target",
-        description: e?.message || "Local storage write failed.",
-        variant: "destructive",
-      });
-    }
+    });
   };
 
   const [playerDropdownOpen, setPlayerDropdownOpen] = useState(false);
