@@ -136,15 +136,19 @@ const canonicalConferencePitching = (value: string | null | undefined) => {
   return k;
 };
 
-const selectPreferredPrediction = (predictions: PlayerLite["player_predictions"] | null | undefined) => {
+const selectPreferredPrediction = (predictions: PlayerLite["player_predictions"] | null | undefined, isTransferPlayer = false) => {
   const list = (predictions || []).filter(Boolean);
   if (!list.length) return null;
   const rank = (row: any) => {
     const hasFrom = row.from_avg != null || row.from_obp != null || row.from_slg != null;
     const statusBoost = row.status === "active" ? 2 : row.status === "departed" ? 1 : 0;
-    const modelMatchBoost = row.model_type === "transfer" ? 4 : 0;
     const variantBoost = row.variant === "regular" ? 3 : 0;
-    return modelMatchBoost + variantBoost + (row.model_type === "transfer" ? 3 : 1) + (hasFrom ? 2 : 0) + statusBoost;
+    // Match Transfer Portal logic: boost model type based on player's portal status
+    const modelMatchBoost =
+      (isTransferPlayer && row.model_type === "transfer") ||
+      (!isTransferPlayer && row.model_type === "returner")
+        ? 4 : 0;
+    return modelMatchBoost + variantBoost + (hasFrom ? 2 : 0) + statusBoost;
   };
   return [...list].sort((a, b) => {
     const diff = rank(b) - rank(a);
@@ -724,7 +728,7 @@ export default function PlayerComparison() {
       let from = 0;
       const PAGE = 1000;
       while (true) {
-        const { data, error } = await supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, player_predictions(id, from_avg, from_obp, from_slg, model_type, variant, status, updated_at)").or("pa.gte.75,ip.gte.20").range(from, from + PAGE - 1);
+        const { data, error } = await supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, transfer_portal, player_predictions(id, from_avg, from_obp, from_slg, model_type, variant, status, updated_at)").range(from, from + PAGE - 1);
         if (error) throw error;
         all = all.concat(data || []);
         if (!data || data.length < PAGE) break;
@@ -880,11 +884,11 @@ export default function PlayerComparison() {
   /* ─── internals for hitter predictions ─── */
   const aPrediction = useMemo(() => {
     const p = allPlayers.find((r) => r.id === aPlayerId);
-    return p ? selectPreferredPrediction((p.player_predictions || []).filter((pr) => pr.variant === "regular")) : null;
+    return p ? selectPreferredPrediction((p.player_predictions || []).filter((pr) => pr.variant === "regular"), !!p.transfer_portal) : null;
   }, [allPlayers, aPlayerId]);
   const bPrediction = useMemo(() => {
     const p = allPlayers.find((r) => r.id === bPlayerId);
-    return p ? selectPreferredPrediction((p.player_predictions || []).filter((pr) => pr.variant === "regular")) : null;
+    return p ? selectPreferredPrediction((p.player_predictions || []).filter((pr) => pr.variant === "regular"), !!p.transfer_portal) : null;
   }, [allPlayers, bPlayerId]);
   const internalIds = useMemo(() => [aPrediction?.id, bPrediction?.id].filter(Boolean) as string[], [aPrediction?.id, bPrediction?.id]);
   const { data: internals = [] } = useQuery({
