@@ -341,35 +341,6 @@ async function loadEngineConfig(): Promise<EngineConfig> {
     }
   }
 
-  applyIfFinite(n("t_ba_ncaa_avg"), (v) => { transfer.baNcaaAvg = toStatRate(v); });
-  applyIfFinite(n("t_obp_ncaa_avg"), (v) => { transfer.obpNcaaAvg = toStatRate(v); });
-  applyIfFinite(n("t_iso_ncaa_avg"), (v) => { transfer.isoNcaaAvg = toStatRate(v); });
-  applyIfFinite(n("t_ba_std_pr"), (v) => { transfer.baStdPower = v; });
-  applyIfFinite(n("t_ba_std_ncaa"), (v) => { transfer.baStdNcaa = toStatRate(v); });
-  applyIfFinite(n("t_obp_std_pr"), (v) => { transfer.obpStdPower = v; });
-  applyIfFinite(n("t_obp_std_ncaa"), (v) => { transfer.obpStdNcaa = toStatRate(v); });
-  applyIfFinite(n("t_ba_power_weight"), (v) => { transfer.baPowerWeight = toRate(v); });
-  applyIfFinite(n("t_obp_power_weight"), (v) => { transfer.obpPowerWeight = toRate(v); });
-  applyIfFinite(n("t_ba_conference_weight"), (v) => { transfer.baConferenceWeight = v; });
-  applyIfFinite(n("t_obp_conference_weight"), (v) => { transfer.obpConferenceWeight = v; });
-  applyIfFinite(n("t_iso_conference_weight"), (v) => { transfer.isoConferenceWeight = v; });
-  applyIfFinite(n("t_ba_pitching_weight"), (v) => { transfer.baPitchingWeight = v; });
-  applyIfFinite(n("t_obp_pitching_weight"), (v) => { transfer.obpPitchingWeight = v; });
-  applyIfFinite(n("t_iso_pitching_weight"), (v) => { transfer.isoPitchingWeight = v; });
-  applyIfFinite(n("t_ba_park_weight"), (v) => { transfer.baParkWeight = v; });
-  applyIfFinite(n("t_obp_park_weight"), (v) => { transfer.obpParkWeight = v; });
-  applyIfFinite(n("t_iso_park_weight"), (v) => { transfer.isoParkWeight = v; });
-  applyIfFinite(n("t_iso_std_ncaa"), (v) => { transfer.isoStdNcaa = toStatRate(v); });
-  applyIfFinite(n("t_iso_std_power"), (v) => { transfer.isoStdPower = v; });
-  applyIfFinite(n("t_w_obp"), (v) => { transfer.wrcWeights.obp = toWeight(v); });
-  applyIfFinite(n("t_w_slg"), (v) => { transfer.wrcWeights.slg = toWeight(v); });
-  applyIfFinite(n("t_w_avg"), (v) => { transfer.wrcWeights.avg = toWeight(v); });
-  applyIfFinite(n("t_w_iso"), (v) => { transfer.wrcWeights.iso = toWeight(v); });
-  applyIfFinite(n("t_wrc_plus_ncaa_avg"), (v) => {
-    const normalized = toStatRate(v);
-    if (normalized > 0 && normalized < 0.8) transfer.ncaaWrc = normalized;
-  });
-
   return { returner, transfer };
 }
 

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { computeAndStoreAllScores } from "@/lib/computeAndStoreScores";
-import { syncMasterToPlayers } from "@/lib/syncMasterToPlayers";
+import { syncMasterToPlayers, addMissingPlayers } from "@/lib/syncMasterToPlayers";
 import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
 (window as any).computeAllScores = computeAndStoreAllScores;
 (window as any).syncMasterToPlayers = syncMasterToPlayers;
@@ -277,6 +277,41 @@ function SyncMasterButton() {
       {result && (
         <p className="text-sm text-muted-foreground">
           Inserted {result.hittersInserted} hitters, {result.pitchersInserted} pitchers. Skipped {result.hittersSkipped + result.pitchersSkipped} existing.
+          {result.errors.length > 0 && ` Errors: ${result.errors.join("; ")}`}
+        </p>
+      )}
+      <AddMissingPlayersButton />
+    </>
+  );
+}
+
+function AddMissingPlayersButton() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ inserted: number; skipped: number; errors: string[] } | null>(null);
+  return (
+    <>
+      <Button
+        onClick={async () => {
+          setLoading(true);
+          setResult(null);
+          try {
+            const r = await addMissingPlayers(2025);
+            setResult(r);
+          } catch (e: any) {
+            setResult({ inserted: 0, skipped: 0, errors: [e.message] });
+          }
+          setLoading(false);
+        }}
+        disabled={loading}
+        variant="outline"
+        className="gap-2"
+      >
+        {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+        {loading ? "Adding missing players…" : "Add Missing Players"}
+      </Button>
+      {result && (
+        <p className="text-sm text-muted-foreground">
+          Added {result.inserted} new players. {result.skipped} already existed.
           {result.errors.length > 0 && ` Errors: ${result.errors.join("; ")}`}
         </p>
       )}

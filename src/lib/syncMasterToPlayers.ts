@@ -8,6 +8,143 @@ type SyncResult = {
   errors: string[];
 };
 
+type AddMissingResult = {
+  inserted: number;
+  skipped: number;
+  errors: string[];
+};
+
+/**
+ * Non-destructive sync: find source_player_ids in Hitter Master + Pitching Master
+ * that don't exist in the players table yet, and insert them. Does NOT delete or
+ * modify any existing player rows.
+ */
+export async function addMissingPlayers(season = 2025): Promise<AddMissingResult> {
+  const result: AddMissingResult = { inserted: 0, skipped: 0, errors: [] };
+
+  // 1. Load all existing source_player_ids from players table
+  console.log("[addMissing] Loading existing player source IDs...");
+  const existingIds = new Set<string>();
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("players")
+      .select("source_player_id")
+      .not("source_player_id", "is", null)
+      .range(from, from + 999);
+    if (error) { result.errors.push(`Load existing: ${error.message}`); return result; }
+    for (const r of data || []) if (r.source_player_id) existingIds.add(r.source_player_id);
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  console.log(`[addMissing] ${existingIds.size} existing players with source IDs`);
+
+  // 2. Load hitter master rows for the target season
+  console.log(`[addMissing] Loading Hitter Master season ${season}...`);
+  const hitterRows: any[] = [];
+  from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("Hitter Master")
+      .select("source_player_id, playerFullName, Team, TeamID, Conference, Pos, BatHand, ThrowHand, pa, ab")
+      .eq("Season", season)
+      .range(from, from + 999);
+    if (error) { result.errors.push(`Hitter load: ${error.message}`); break; }
+    hitterRows.push(...(data || []));
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+
+  // 3. Load pitcher master rows for the target season
+  console.log(`[addMissing] Loading Pitching Master season ${season}...`);
+  const pitcherRows: any[] = [];
+  from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("Pitching Master")
+      .select("source_player_id, playerFullName, Team, TeamID, Conference, ThrowHand, Role, IP, G, GS")
+      .eq("Season", season)
+      .range(from, from + 999);
+    if (error) { result.errors.push(`Pitcher load: ${error.message}`); break; }
+    pitcherRows.push(...(data || []));
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+
+  // 4. Find missing source_player_ids and build insert records
+  const splitName = (full: string | null) => {
+    const parts = (full || "").trim().split(/\s+/);
+    return { first: parts[0] || "", last: parts.slice(1).join(" ") || "" };
+  };
+
+  const toInsert = new Map<string, any>();
+
+  for (const h of hitterRows) {
+    const sid = h.source_player_id;
+    if (!sid || existingIds.has(sid) || toInsert.has(sid)) continue;
+    const { first, last } = splitName(h.playerFullName);
+    if (!first || !last) continue;
+    toInsert.set(sid, {
+      first_name: first,
+      last_name: last,
+      team: h.Team ?? null,
+      conference: h.Conference ?? null,
+      position: h.Pos ?? null,
+      bats_hand: h.BatHand ?? null,
+      throws_hand: h.ThrowHand ?? null,
+      source_player_id: sid,
+      source_team_id: h.TeamID ?? null,
+      transfer_portal: false,
+      from_team: h.Team ?? null,
+      pa: h.pa ?? null,
+      ab: h.ab ?? null,
+    });
+  }
+
+  for (const p of pitcherRows) {
+    const sid = p.source_player_id;
+    if (!sid || existingIds.has(sid) || toInsert.has(sid)) continue;
+    const { first, last } = splitName(p.playerFullName);
+    if (!first || !last) continue;
+    const role = (p.Role || "").trim().toUpperCase();
+    toInsert.set(sid, {
+      first_name: first,
+      last_name: last,
+      team: p.Team ?? null,
+      conference: p.Conference ?? null,
+      position: role === "SP" || role === "RP" ? role : "P",
+      throws_hand: p.ThrowHand ?? null,
+      source_player_id: sid,
+      source_team_id: p.TeamID ?? null,
+      transfer_portal: false,
+      from_team: p.Team ?? null,
+      ip: p.IP ?? null,
+      g: p.G ?? null,
+      gs: p.GS ?? null,
+    });
+  }
+
+  result.skipped = existingIds.size;
+  const inserts = Array.from(toInsert.values());
+  console.log(`[addMissing] Found ${inserts.length} missing players to insert`);
+
+  if (inserts.length === 0) return result;
+
+  // 5. Insert in chunks
+  for (let i = 0; i < inserts.length; i += CHUNK_SIZE) {
+    const chunk = inserts.slice(i, i + CHUNK_SIZE);
+    const { error } = await supabase.from("players").insert(chunk);
+    if (error) {
+      result.errors.push(`Insert chunk ${i}: ${error.message}`);
+    } else {
+      result.inserted += chunk.length;
+    }
+  }
+
+  console.log(`[addMissing] Done! Inserted ${result.inserted}, skipped ${result.skipped} existing`, result);
+  return result;
+}
+
 /**
  * Clear the players table, then rebuild it from ALL seasons in Hitter Master +
  * Pitching Master. One row per source_player_id, with metadata preferred from

@@ -8,14 +8,15 @@ import {
 import {
   getBlendedHitterStats,
   getBlendedPitcherStats,
-  HITTER_PA_THRESHOLD,
+  HITTER_AB_THRESHOLD,
+  HITTER_AB_NOISE_FLOOR,
   PITCHER_IP_THRESHOLD,
 } from "@/lib/combinedStats";
 
 const round2 = (v: number | null) => (v == null ? null : Math.round(v * 100) / 100);
 
 // Hitter columns we read for blending — must match HITTER_BLEND_COLS in combinedStats.ts
-const HITTER_PRIOR_SELECT = "source_player_id, Season, pa, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb";
+const HITTER_PRIOR_SELECT = "source_player_id, Season, ab, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb";
 const PITCHER_PRIOR_SELECT = `source_player_id, Season, IP, ERA, FIP, WHIP, K9, BB9, HR9, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, h_pull_pct, la_10_30_pct, stuff_plus, "90th_vel"`;
 
 const HITTER_BLEND_COLS = [
@@ -33,48 +34,54 @@ const PITCHER_BLEND_COLS = [
 /**
  * Synchronous blend using a pre-fetched prior-seasons map.
  * Replaces the per-row Supabase query in getBlendedHitterStats.
+ * Weights by AB (at-bats), not PA.
  */
 function blendHitterSync(
   sourcePlayerId: string | null,
   currentRow: any,
   priorMap: Map<string, any[]>,
 ) {
-  const currentPa = Number(currentRow?.pa) || 0;
+  const currentAb = Number(currentRow?.ab) || 0;
   const passthroughValues = HITTER_BLEND_COLS.reduce((acc, col) => {
     acc[col] = currentRow?.[col] ?? null;
     return acc;
   }, {} as Record<string, number | null>);
-  if (!sourcePlayerId || currentPa >= HITTER_PA_THRESHOLD) {
-    return { combined: false, totalPa: currentPa, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
+  if (!sourcePlayerId || currentAb >= HITTER_AB_THRESHOLD) {
+    return { combined: false, totalAb: currentAb, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
   }
   const priors = priorMap.get(sourcePlayerId) || [];
   if (priors.length === 0) {
-    return { combined: false, totalPa: currentPa, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
+    return { combined: false, totalAb: currentAb, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
   }
-  const collected: any[] = [currentRow];
-  let totalPa = currentPa;
+  // If current season is below noise floor, skip it entirely — use prior seasons only
+  const belowNoiseFloor = currentAb < HITTER_AB_NOISE_FLOOR;
+  const collected: any[] = belowNoiseFloor ? [] : [currentRow];
+  let totalAb = belowNoiseFloor ? 0 : currentAb;
   for (const ps of priors) {
-    const pa = Number(ps.pa) || 0;
-    if (pa <= 0) continue;
+    const ab = Number(ps.ab) || 0;
+    if (ab <= 0) continue;
     collected.push(ps);
-    totalPa += pa;
-    if (totalPa >= HITTER_PA_THRESHOLD) break;
+    totalAb += ab;
+    if (totalAb >= HITTER_AB_THRESHOLD) break;
   }
-  if (collected.length === 1) {
-    return { combined: false, totalPa: currentPa, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
+  if (collected.length === 0) {
+    return { combined: false, totalAb: currentAb, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
+  }
+  if (collected.length === 1 && !belowNoiseFloor) {
+    return { combined: false, totalAb: currentAb, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
   }
   const out: Record<string, number | null> = {};
   for (const col of HITTER_BLEND_COLS) {
     let sw = 0, ww = 0;
     for (const r of collected) {
-      const v = r[col]; const w = Number(r.pa) || 0;
+      const v = r[col]; const w = Number(r.ab) || 0;
       if (v != null && Number.isFinite(Number(v)) && w > 0) { sw += Number(v) * w; ww += w; }
     }
     out[col] = ww > 0 ? sw / ww : null;
   }
   return {
     combined: true,
-    totalPa,
+    totalAb,
     seasonsUsed: collected.map((c) => Number(c.Season)).sort((a, b) => b - a),
     values: out,
   };
@@ -248,7 +255,7 @@ export async function computeAndStoreHitterScores(season = 2025): Promise<{ upda
   while (true) {
     const { data: rows, error } = await supabase
       .from("Hitter Master")
-      .select("id, source_player_id, Season, pa, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb")
+      .select("id, source_player_id, Season, ab, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb")
       .eq("Season", season)
       .order("id", { ascending: true })
       .range(from, from + readPageSize - 1);
@@ -296,8 +303,12 @@ export async function computeAndStoreHitterScores(season = 2025): Promise<{ upda
         iso_plus: round2(ratings.isoPlus),
         overall_plus: round2(ratings.overallPlus),
         combined_used: blended.combined,
-        combined_pa: blended.combined ? blended.totalPa : null,
+        combined_pa: blended.combined ? blended.totalAb : null,
         combined_seasons: blended.combined ? blended.seasonsUsed.join(",") : null,
+        blended_avg: blended.combined ? round2(blended.values.AVG ?? null) : null,
+        blended_obp: blended.combined ? round2(blended.values.OBP ?? null) : null,
+        blended_slg: blended.combined ? round2(blended.values.SLG ?? null) : null,
+        blended_iso: blended.combined ? round2(blended.values.ISO ?? null) : null,
       } as any,
     };
   });

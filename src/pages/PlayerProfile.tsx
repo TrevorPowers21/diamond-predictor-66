@@ -668,6 +668,28 @@ export default function PlayerProfile() {
     la10_30: seedPowerRow.la10_30,
     gb: seedPowerRow.gb,
   }) : null;
+
+  // Season-aware scouting grades + power ratings from Hitter Master
+  // Falls back to seedPowerDerived (2025) when no Hitter Master row exists for the selected season
+  const activeSeasonRow = (hitterMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason) || null;
+
+  const activeSeasonScoutingGrades = activeSeasonRow ? {
+    barrelScore: activeSeasonRow.barrel_score ?? seedPowerDerived?.barrelScore ?? null,
+    avgEVScore: activeSeasonRow.avg_ev_score ?? seedPowerDerived?.avgEVScore ?? null,
+    contactScore: activeSeasonRow.contact_score ?? seedPowerDerived?.contactScore ?? null,
+    chaseScore: activeSeasonRow.chase_score ?? seedPowerDerived?.chaseScore ?? null,
+    bbScore: activeSeasonRow.bb_score ?? seedPowerDerived?.bbScore ?? null,
+    lineDriveScore: activeSeasonRow.line_drive_score ?? seedPowerDerived?.lineDriveScore ?? null,
+    popUpScore: activeSeasonRow.pop_up_score ?? seedPowerDerived?.popUpScore ?? null,
+    ev90Score: activeSeasonRow.ev90_score ?? seedPowerDerived?.ev90Score ?? null,
+    pullScore: activeSeasonRow.pull_score ?? seedPowerDerived?.pullScore ?? null,
+    laScore: activeSeasonRow.la_score ?? seedPowerDerived?.laScore ?? null,
+    gbScore: activeSeasonRow.gb_score ?? seedPowerDerived?.gbScore ?? null,
+    baPlus: activeSeasonRow.ba_plus ?? seedPowerDerived?.baPlus ?? null,
+    obpPlus: activeSeasonRow.obp_plus ?? seedPowerDerived?.obpPlus ?? null,
+    isoPlus: activeSeasonRow.iso_plus ?? seedPowerDerived?.isoPlus ?? null,
+    overallPlus: activeSeasonRow.overall_plus ?? seedPowerDerived?.overallPlus ?? null,
+  } : seedPowerDerived;
   const projectedOWar = computeOWarFromWrcPlus(regularPred?.p_wrc_plus ?? null);
   const historicalOWar = computeOWarFromWrcPlus(seedDerived?.wrcPlus ?? null, (player as any)?.pa ?? null);
   const displayOWar =
@@ -1107,10 +1129,10 @@ export default function PlayerProfile() {
                 <CardContent className="px-4 pb-4 space-y-3">
                   <div className="grid grid-cols-2 gap-2">
                     {[
-                      ["Overall PR+", pctFormat(seedPowerDerived.overallPlus)],
-                      ["AVG PR+", pctFormat(seedPowerDerived.baPlus)],
-                      ["OBP PR+", pctFormat(seedPowerDerived.obpPlus)],
-                      ["ISO PR+", pctFormat(seedPowerDerived.isoPlus)],
+                      ["Overall PR+", pctFormat(activeSeasonScoutingGrades?.overallPlus ?? seedPowerDerived?.overallPlus)],
+                      ["AVG PR+", pctFormat(activeSeasonScoutingGrades?.baPlus ?? seedPowerDerived?.baPlus)],
+                      ["OBP PR+", pctFormat(activeSeasonScoutingGrades?.obpPlus ?? seedPowerDerived?.obpPlus)],
+                      ["ISO PR+", pctFormat(activeSeasonScoutingGrades?.isoPlus ?? seedPowerDerived?.isoPlus)],
                     ].map(([label, val]) => (
                       <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3">
                         <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
@@ -1118,32 +1140,30 @@ export default function PlayerProfile() {
                       </div>
                     ))}
                   </div>
-                  {seedPowerRow && (
-                    <>
+                  {(activeSeasonRow || seedPowerRow) && (
                       <div className="border-t border-[#162241] pt-3">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-[#8a94a6] mb-2">2025 Input Metrics</p>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-[#8a94a6] mb-2">{effectiveSeason} Input Metrics</p>
                         <div className="grid grid-cols-2 gap-2">
                           {[
-                            ["Contact %", `${seedPowerRow.contact?.toFixed(1)}%`],
-                            ["Line Drive %", `${seedPowerRow.lineDrive?.toFixed(1)}%`],
-                            ["Pop-Up %", `${seedPowerRow.popUp?.toFixed(1)}%`],
-                            ["BB %", `${seedPowerRow.bb?.toFixed(1)}%`],
-                            ["Chase %", `${seedPowerRow.chase?.toFixed(1)}%`],
-                            ["Barrel %", `${seedPowerRow.barrel?.toFixed(1)}%`],
-                            ["Pull %", `${seedPowerRow.pull?.toFixed(1)}%`],
-                            ["LA 10-30 %", `${seedPowerRow.la10_30?.toFixed(1)}%`],
-                            ["GB %", `${seedPowerRow.gb?.toFixed(1)}%`],
-                            ["Avg Exit Velo", `${seedPowerRow.avgExitVelo?.toFixed(1)} mph`],
-                            ["EV90", `${seedPowerRow.ev90?.toFixed(1)} mph`],
-                          ].map(([label, val]) => (
-                            <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-2.5">
+                            ["Contact %", activeSeasonRow ? (activeSeasonRow as any).contact : seedPowerRow?.contact, "%"],
+                            ["Line Drive %", activeSeasonRow ? (activeSeasonRow as any).line_drive : seedPowerRow?.lineDrive, "%"],
+                            ["Pop-Up %", activeSeasonRow ? (activeSeasonRow as any).pop_up : seedPowerRow?.popUp, "%"],
+                            ["BB %", activeSeasonRow ? (activeSeasonRow as any).bb : seedPowerRow?.bb, "%"],
+                            ["Chase %", activeSeasonRow ? (activeSeasonRow as any).chase : seedPowerRow?.chase, "%"],
+                            ["Barrel %", activeSeasonRow ? (activeSeasonRow as any).barrel : seedPowerRow?.barrel, "%"],
+                            ["Pull %", activeSeasonRow ? (activeSeasonRow as any).pull : seedPowerRow?.pull, "%"],
+                            ["LA 10-30 %", activeSeasonRow ? (activeSeasonRow as any).la_10_30 : seedPowerRow?.la10_30, "%"],
+                            ["GB %", activeSeasonRow ? (activeSeasonRow as any).gb : seedPowerRow?.gb, "%"],
+                            ["Avg Exit Velo", activeSeasonRow ? (activeSeasonRow as any).avg_exit_velo : seedPowerRow?.avgExitVelo, " mph"],
+                            ["EV90", activeSeasonRow ? (activeSeasonRow as any).ev90 : seedPowerRow?.ev90, " mph"],
+                          ].map(([label, val, suffix]) => (
+                            <div key={label as string} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-2.5">
                               <div className="text-[9px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
-                              <div className="font-semibold text-lg mt-0.5 text-slate-100 tabular-nums">{val}</div>
+                              <div className="font-semibold text-lg mt-0.5 text-slate-100 tabular-nums">{val != null ? `${Number(val).toFixed(1)}${suffix}` : "—"}</div>
                             </div>
                           ))}
                         </div>
                       </div>
-                    </>
                   )}
                 </CardContent>
               </Card>
@@ -1299,7 +1319,7 @@ export default function PlayerProfile() {
             })()}
 
             {/* Scouting Grades */}
-            {seedPowerDerived && (
+            {activeSeasonScoutingGrades && (
               <Card className="border-[#162241] bg-[#0a1428]">
                 <CardHeader className="pb-2 pt-3 px-4">
                   <div className="flex items-center justify-between">
@@ -1320,10 +1340,10 @@ export default function PlayerProfile() {
                 </CardHeader>
                 <CardContent className="px-4 pb-4">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <ScoutGrade label="Brl" value={seedPowerDerived.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : null} fullLabel="Barrel%" />
-                    <ScoutGrade label="EV" value={seedPowerDerived.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : null} fullLabel="Exit Velo" />
-                    <ScoutGrade label="Con" value={seedPowerDerived.contactScore != null ? Math.round(seedPowerDerived.contactScore) : null} fullLabel="Contact%" />
-                    <ScoutGrade label="Chs" value={seedPowerDerived.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : null} fullLabel="Chase%" />
+                    <ScoutGrade label="Brl" value={activeSeasonScoutingGrades.barrelScore != null ? Math.round(activeSeasonScoutingGrades.barrelScore) : null} fullLabel="Barrel%" />
+                    <ScoutGrade label="EV" value={activeSeasonScoutingGrades.avgEVScore != null ? Math.round(activeSeasonScoutingGrades.avgEVScore) : null} fullLabel="Exit Velo" />
+                    <ScoutGrade label="Con" value={activeSeasonScoutingGrades.contactScore != null ? Math.round(activeSeasonScoutingGrades.contactScore) : null} fullLabel="Contact%" />
+                    <ScoutGrade label="Chs" value={activeSeasonScoutingGrades.chaseScore != null ? Math.round(activeSeasonScoutingGrades.chaseScore) : null} fullLabel="Chase%" />
                   </div>
                 </CardContent>
               </Card>

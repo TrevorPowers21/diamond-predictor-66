@@ -41,6 +41,7 @@ type PlayerLite = {
   team: string | null;
   from_team: string | null;
   conference: string | null;
+  transfer_portal?: boolean | null;
   player_predictions: Array<{
     id: string;
     from_avg: number | null;
@@ -50,6 +51,8 @@ type PlayerLite = {
     variant: string | null;
     status: string | null;
     updated_at: string | null;
+    class_transition: string | null;
+    dev_aggressiveness: number | null;
   }>;
 };
 
@@ -411,6 +414,12 @@ function simulateHitter(args: {
     fromParkIsoRaw == null || toParkIsoRaw == null
   ) return null;
 
+  const wObp = toRate(eqNum("r_w_obp", 0.45));
+  const wSlg = toRate(eqNum("r_w_slg", 0.30));
+  const wAvg = toRate(eqNum("r_w_avg", 0.15));
+  const wIso = toRate(eqNum("r_w_iso", 0.10));
+  const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.364));
+
   const projected = computeTransferProjection({
     lastAvg, lastObp, lastSlg, baPR, obpPR, isoPR,
     fromAvgPlus: fromConfStats.avg_plus, toAvgPlus: toConfStats.avg_plus,
@@ -423,7 +432,7 @@ function simulateHitter(args: {
     ncaaAvgBA: toRate(eqNum("t_ba_ncaa_avg", 0.280)),
     ncaaAvgOBP: toRate(eqNum("t_obp_ncaa_avg", 0.385)),
     ncaaAvgISO: toRate(eqNum("t_iso_ncaa_avg", 0.162)),
-    ncaaAvgWrc: toRate(eqNum("t_wrc_ncaa_avg", 0.364)),
+    ncaaAvgWrc,
     baStdPower: eqNum("t_ba_std_pr", 31.297),
     baStdNcaa: toRate(eqNum("t_ba_std_ncaa", 0.043455)),
     obpStdPower: eqNum("t_obp_std_pr", 28.889),
@@ -441,23 +450,45 @@ function simulateHitter(args: {
     isoParkWeight: toWeight(eqNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight)),
     isoStdPower: eqNum("t_iso_std_power", 45.423),
     isoStdNcaa: toRate(eqNum("t_iso_std_ncaa", 0.07849797197)),
-    wObp: toRate(eqNum("r_w_obp", 0.45)),
-    wSlg: toRate(eqNum("r_w_slg", 0.30)),
-    wAvg: toRate(eqNum("r_w_avg", 0.15)),
-    wIso: toRate(eqNum("r_w_iso", 0.10)),
+    wObp, wSlg, wAvg, wIso,
   });
+
+  // Class adjustment — must match TransferPortal exactly
+  const classKey = String(prediction.class_transition || "SJ").toUpperCase();
+  const classAdj =
+    classKey === "FS" ? 0.03 :
+    classKey === "SJ" ? 0.02 :
+    classKey === "JS" ? 0.015 :
+    classKey === "GR" ? 0.01 : 0.02;
+  const devAgg = Number.isFinite(Number(prediction.dev_aggressiveness))
+    ? Number(prediction.dev_aggressiveness) : 0;
+  const transferMult = 1 + classAdj + (devAgg * 0.06);
+  const pAvgAdj = projected.pAvg * transferMult;
+  const pObpAdj = projected.pObp * transferMult;
+  const pIsoAdj = projected.pIso * transferMult;
+  const pSlgAdj = pAvgAdj + pIsoAdj;
+  const pOpsAdj = pObpAdj + pSlgAdj;
+  const pWrcAdj = (wObp * pObpAdj) + (wSlg * pSlgAdj) + (wAvg * pAvgAdj) + (wIso * pIsoAdj);
+  const pWrcPlusAdj = ncaaAvgWrc === 0 ? null : Math.round((pWrcAdj / ncaaAvgWrc) * 100);
+  const offValueAdj = pWrcPlusAdj == null ? null : (pWrcPlusAdj - 100) / 100;
+  const pa = 260;
+  const runsPerPa = 0.13;
+  const replacementRuns = (pa / 600) * 25;
+  const raaAdj = offValueAdj == null ? null : offValueAdj * pa * runsPerPa;
+  const rarAdj = raaAdj == null ? null : raaAdj + replacementRuns;
+  const owarAdj = rarAdj == null ? null : rarAdj / 10;
 
   const basePerOwar = eqNum("nil_base_per_owar", 25000);
   const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
   const pvm = getPositionValueMultiplier(player.position ?? null);
-  const nilValuation = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
+  const nilValuation = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
 
   return {
     fromTeam: fromTeamName,
     fromConference,
     toConference: toTeamRow.conference || null,
-    pAvg: projected.pAvg, pObp: projected.pObp, pSlg: projected.pSlg, pOps: projected.pOps, pIso: projected.pIso,
-    pWrcPlus: projected.pWrcPlus, owar: projected.owar, nilValuation,
+    pAvg: pAvgAdj, pObp: pObpAdj, pSlg: pSlgAdj, pOps: pOpsAdj, pIso: pIsoAdj,
+    pWrcPlus: pWrcPlusAdj, owar: owarAdj, nilValuation,
   };
 }
 
@@ -728,7 +759,7 @@ export default function PlayerComparison() {
       let from = 0;
       const PAGE = 1000;
       while (true) {
-        const { data, error } = await supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, transfer_portal, player_predictions(id, from_avg, from_obp, from_slg, model_type, variant, status, updated_at)").range(from, from + PAGE - 1);
+        const { data, error } = await supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, transfer_portal, player_predictions(id, from_avg, from_obp, from_slg, model_type, variant, status, updated_at, class_transition, dev_aggressiveness)").range(from, from + PAGE - 1);
         if (error) throw error;
         all = all.concat(data || []);
         if (!data || data.length < PAGE) break;

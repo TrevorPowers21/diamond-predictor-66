@@ -108,8 +108,8 @@ export default function Dashboard() {
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
           .in("model_type", ["returner", "transfer"])
-          .gte("players.pa", 75)
           .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
+          .gte("players.pa", 75)
           .range(from, from + PAGE - 1);
         if (error) throw error;
         const rows = data || [];

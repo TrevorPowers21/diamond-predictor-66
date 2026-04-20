@@ -61,7 +61,7 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
   while (true) {
     const { data, error } = await supabase
       .from("Hitter Master")
-      .select("source_player_id, playerFullName, Team, AVG, OBP, SLG, ba_plus, obp_plus, iso_plus, overall_plus")
+      .select("source_player_id, playerFullName, Team, AVG, OBP, SLG, ba_plus, obp_plus, iso_plus, overall_plus, combined_used, blended_avg, blended_obp, blended_slg")
       .eq("Season", season)
       .range(from, from + 999);
     if (error) break;
@@ -97,33 +97,33 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
     const overallPlus = (hitter as any).overall_plus ?? null;
 
     if (existing) {
-      // Backfill stub if from_avg is missing
-      if (existing.from_avg == null) {
+      const useBlended = !!(hitter as any).combined_used;
+      const targetAvg = useBlended ? ((hitter as any).blended_avg ?? hitter.AVG) : hitter.AVG;
+      const targetObp = useBlended ? ((hitter as any).blended_obp ?? hitter.OBP) : hitter.OBP;
+      const targetSlg = useBlended ? ((hitter as any).blended_slg ?? hitter.SLG) : hitter.SLG;
+
+      // Update from_avg/from_obp/from_slg if missing OR if blended stats differ from stored
+      const needsStatUpdate = existing.from_avg == null || useBlended;
+      if (needsStatUpdate) {
         predsToUpdate.push({
           id: existing.id,
           patch: {
-            from_avg: hitter.AVG,
-            from_obp: hitter.OBP,
-            from_slg: hitter.SLG,
+            from_avg: targetAvg,
+            from_obp: targetObp,
+            from_slg: targetSlg,
             power_rating_plus: overallPlus != null ? Math.round(overallPlus) : null,
             locked: false,
           },
         });
-        internalsByPredId.set(existing.id, {
-          avg_power_rating: baPlus,
-          obp_power_rating: obpPlus,
-          slg_power_rating: isoPlus,
-        });
-      } else {
-        // Already has inputs but maybe not internals — refresh internals only
-        internalsByPredId.set(existing.id, {
-          avg_power_rating: baPlus,
-          obp_power_rating: obpPlus,
-          slg_power_rating: isoPlus,
-        });
       }
+      internalsByPredId.set(existing.id, {
+        avg_power_rating: baPlus,
+        obp_power_rating: obpPlus,
+        slg_power_rating: isoPlus,
+      });
     } else {
       // No prediction at all — insert one
+      const useBlended = !!(hitter as any).combined_used;
       predsToInsert.push({
         player_id: player.id,
         model_type: "returner",
@@ -133,9 +133,9 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
         locked: false,
         class_transition: "SJ",
         dev_aggressiveness: 0.0,
-        from_avg: hitter.AVG,
-        from_obp: hitter.OBP,
-        from_slg: hitter.SLG,
+        from_avg: useBlended ? ((hitter as any).blended_avg ?? hitter.AVG) : hitter.AVG,
+        from_obp: useBlended ? ((hitter as any).blended_obp ?? hitter.OBP) : hitter.OBP,
+        from_slg: useBlended ? ((hitter as any).blended_slg ?? hitter.SLG) : hitter.SLG,
         power_rating_plus: overallPlus != null ? Math.round(overallPlus) : null,
       });
     }

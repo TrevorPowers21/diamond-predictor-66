@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -640,8 +640,12 @@ export default function ReturningPlayers() {
     return [byName, byNameTeam, byPlayerId];
   }, [powerRatingsData]);
 
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<Array<{ id: string; first_name: string; last_name: string; team: string | null; position: string | null }>>([]);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
   const [positionFilters, setPositionFilters] = useState<Set<string>>(new Set());
   const positionFilter = positionFilters.size === 0 ? "all" : Array.from(positionFilters)[0];
   const setPositionFilter = (v: string) => setPositionFilters(v === "all" ? new Set() : new Set([v]));
@@ -684,6 +688,39 @@ export default function ReturningPlayers() {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 220);
     return () => window.clearTimeout(t);
   }, [search]);
+
+  // Live search dropdown — queries all players (no PA filter)
+  useEffect(() => {
+    if (!debouncedSearch || debouncedSearch.length < 2) {
+      setSearchResults([]);
+      setShowSearchDropdown(false);
+      return;
+    }
+    let cancelled = false;
+    const q = debouncedSearch.replace(/[%]/g, "").trim();
+    supabase
+      .from("players")
+      .select("id, first_name, last_name, team, position")
+      .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,team.ilike.%${q}%`)
+      .limit(15)
+      .then(({ data }) => {
+        if (cancelled) return;
+        setSearchResults((data || []) as any);
+        setShowSearchDropdown(true);
+      });
+    return () => { cancelled = true; };
+  }, [debouncedSearch]);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSearchDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   useEffect(() => {
     try {
@@ -843,7 +880,6 @@ export default function ReturningPlayers() {
         pageSize: sortKey === "name" || FAST_DB_SORT_KEYS.includes(sortKey) ? pageSize : null,
         positionFilter,
         showMissingOnly,
-        debouncedSearch,
         sortKey,
         sortDir,
         seedSource,
@@ -956,8 +992,7 @@ export default function ReturningPlayers() {
       if (
         FAST_DB_SORT_KEYS.includes(sortKey) &&
         positionFilter === "all" &&
-        !showMissingOnly &&
-        !debouncedSearch
+        !showMissingOnly
       ) {
         const orderColumn =
           sortKey === "p_war"
@@ -971,6 +1006,7 @@ export default function ReturningPlayers() {
           .in("model_type", ["returner", "transfer"])
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
+          .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
           .gte("players.pa", 75)
           .order(orderColumn, { ascending: sortDir === "asc", nullsFirst: false })
           .range(from, to);
@@ -1015,6 +1051,7 @@ export default function ReturningPlayers() {
             .in("model_type", ["returner", "transfer"])
             .eq("variant", "regular")
             .in("status", ["active", "departed"])
+            .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
             .gte("players.pa", 75)
             .range(predFrom, predFrom + PRED_PAGE_SIZE - 1);
           if (error) throw error;
@@ -1092,15 +1129,6 @@ export default function ReturningPlayers() {
         let allRows = dedupedRows.map((row: any) => toReturnerRow(row, row.players, nilByPlayer));
         if (positionFilters.size > 0) allRows = allRows.filter((p) => positionMatchesFilter(p.position));
         if (showMissingOnly) allRows = allRows.filter((p) => !p.team);
-        if (debouncedSearch) {
-          const q = debouncedSearch.toLowerCase();
-          allRows = allRows.filter(
-            (p) =>
-              `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
-              (p.team || "").toLowerCase().includes(q) ||
-              (p.conference || "").toLowerCase().includes(q),
-          );
-        }
 
         const metricFor = (p: ReturnerPlayer): number => {
           if (sortKey === "p_avg") return p.prediction.p_avg ?? -999;
@@ -1127,6 +1155,7 @@ export default function ReturningPlayers() {
       let playersQuery = supabase
         .from("players")
         .select("id, first_name, last_name, team, conference, position, class_year, transfer_portal, pa, ip", { count: "exact" } as any)
+        .not("position", "in", "(SP,RP,CL,P,LHP,RHP)")
         .gte("pa", 75)
         .order("last_name", { ascending: true })
         .order("first_name", { ascending: true })
@@ -1134,14 +1163,6 @@ export default function ReturningPlayers() {
       if (positionFilters.size === 1) playersQuery = playersQuery.eq("position", Array.from(positionFilters)[0]);
       else if (positionFilters.size > 1) playersQuery = playersQuery.in("position", Array.from(positionFilters));
       if (showMissingOnly) playersQuery = playersQuery.is("team", null);
-      if (debouncedSearch) {
-        const q = debouncedSearch.replace(/[%]/g, "").trim();
-        if (q) {
-          playersQuery = playersQuery.or(
-            `first_name.ilike.%${q}%,last_name.ilike.%${q}%,team.ilike.%${q}%,conference.ilike.%${q}%`,
-          );
-        }
-      }
       const { data: playerRows, error: playersErr, count } = await playersQuery;
       if (playersErr) throw playersErr;
 
@@ -1790,18 +1811,37 @@ export default function ReturningPlayers() {
         {dashboardView === "hitting" ? (
           <>
         <div className="space-y-2">
-          <div className="relative w-full max-w-md">
+          <div className="relative w-full max-w-md" ref={searchRef}>
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
             <Input
-              placeholder="Search players, teams, positions..."
+              placeholder="Search all players..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onFocus={() => { if (searchResults.length > 0) setShowSearchDropdown(true); }}
               className="pl-9 pr-8 h-9 text-sm rounded-lg border-border/60 focus-visible:ring-primary/30"
             />
             {search && (
-              <button onClick={() => setSearch("")} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+              <button onClick={() => { setSearch(""); setShowSearchDropdown(false); }} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
                 <X className="h-4 w-4" />
               </button>
+            )}
+            {showSearchDropdown && searchResults.length > 0 && (
+              <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-80 overflow-y-auto">
+                {searchResults.map((p) => (
+                  <button
+                    key={p.id}
+                    className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors cursor-pointer flex items-center justify-between gap-2 text-sm"
+                    onClick={() => {
+                      setShowSearchDropdown(false);
+                      setSearch("");
+                      navigate(profileRouteFor(p.id, p.position));
+                    }}
+                  >
+                    <span className="font-medium">{p.first_name} {p.last_name}</span>
+                    <span className="text-xs text-muted-foreground">{p.position || ""} · {p.team || ""}</span>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
           <div className="flex flex-wrap gap-1.5 items-center">
