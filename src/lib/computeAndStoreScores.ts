@@ -16,7 +16,7 @@ import {
 const round2 = (v: number | null) => (v == null ? null : Math.round(v * 100) / 100);
 
 // Hitter columns we read for blending — must match HITTER_BLEND_COLS in combinedStats.ts
-const HITTER_PRIOR_SELECT = "source_player_id, Season, ab, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb";
+const HITTER_PRIOR_SELECT = "source_player_id, Season, ab, Team, TeamID, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb";
 const PITCHER_PRIOR_SELECT = `source_player_id, Season, IP, ERA, FIP, WHIP, K9, BB9, HR9, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, h_pull_pct, la_10_30_pct, stuff_plus, "90th_vel"`;
 
 const HITTER_BLEND_COLS = [
@@ -79,11 +79,21 @@ function blendHitterSync(
     }
     out[col] = ww > 0 ? sw / ww : null;
   }
+  // Determine the dominant team — the team with the most AB in the blend
+  let dominantTeam: string | null = null;
+  let dominantTeamId: string | null = null;
+  let maxAb = 0;
+  for (const r of collected) {
+    const ab = Number(r.ab) || 0;
+    if (ab > maxAb && r.Team) { maxAb = ab; dominantTeam = r.Team; dominantTeamId = r.TeamID ?? null; }
+  }
   return {
     combined: true,
     totalAb,
     seasonsUsed: collected.map((c) => Number(c.Season)).sort((a, b) => b - a),
     values: out,
+    dominantTeam,
+    dominantTeamId,
   };
 }
 
@@ -309,6 +319,8 @@ export async function computeAndStoreHitterScores(season = 2025): Promise<{ upda
         blended_obp: blended.combined ? round2(blended.values.OBP ?? null) : null,
         blended_slg: blended.combined ? round2(blended.values.SLG ?? null) : null,
         blended_iso: blended.combined ? round2(blended.values.ISO ?? null) : null,
+        blended_from_team: blended.combined ? (blended.dominantTeam ?? null) : null,
+        blended_from_team_id: blended.combined ? (blended.dominantTeamId ?? null) : null,
       } as any,
     };
   });
