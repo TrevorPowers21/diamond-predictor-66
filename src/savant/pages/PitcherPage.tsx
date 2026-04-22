@@ -198,7 +198,7 @@ export default function PitcherPage() {
             <PitcherStuffPlusTable
               rows={stuffRows}
               selectedSeason={stuffSeason}
-              availableSeasons={[2025]}
+              availableSeasons={[2025, 2024]}
               onSeasonChange={setStuffSeason}
               overallStuffPlus={player.stuff_plus}
             />

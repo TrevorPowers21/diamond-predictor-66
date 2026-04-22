@@ -213,11 +213,8 @@ function reclassifyRHP(ivb: number, hb: number): string | null {
   // Priority 3 — Sweeper: dominant horizontal, minimal depth
   if (hb <= -11 && ivb > -4) return "Sweeper";
 
-  // Priority 4 — Slider: both components present
-  if (ivb >= -8 && ivb <= -2 && hb >= -11 && hb <= -4) return "Slider";
-
-  // Unclassified — does not match any bucket
-  return null;
+  // Priority 4 — Slider: default catch for any non-curveball breaking ball
+  return "Slider";
 }
 
 function reclassifyLHP(ivb: number, hb: number): string | null {
@@ -232,11 +229,8 @@ function reclassifyLHP(ivb: number, hb: number): string | null {
   // Priority 3 — Sweeper: dominant horizontal (positive HB for LHP)
   if (hb >= 11 && ivb > -4) return "Sweeper";
 
-  // Priority 4 — Slider: both components present (LHP direction)
-  if (ivb >= -8 && ivb <= -2 && hb >= 4 && hb <= 11) return "Slider";
-
-  // Unclassified
-  return null;
+  // Priority 4 — Slider: default catch for any non-curveball breaking ball
+  return "Slider";
 }
 
 function reclassify(row: RawBreakingBallRow): string | null {
