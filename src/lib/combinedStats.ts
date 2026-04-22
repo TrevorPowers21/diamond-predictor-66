@@ -187,7 +187,7 @@ export async function getBlendedPitcherStats(
 
   const { data: priorSeasons, error } = await supabase
     .from("Pitching Master")
-    .select(`Season, IP, ERA, FIP, WHIP, K9, BB9, HR9,
+    .select(`Season, IP, Team, TeamID, ERA, FIP, WHIP, K9, BB9, HR9,
              miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct,
              barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct,
              h_pull_pct, la_10_30_pct, stuff_plus, "90th_vel"`)
@@ -199,8 +199,11 @@ export async function getBlendedPitcherStats(
     return passthrough(false);
   }
 
-  const collected: any[] = [currentRow];
-  let totalIp = currentIp;
+  // If current season is below noise floor, skip it entirely — use prior seasons only
+  const belowNoiseFloor = currentIp < PITCHER_IP_NOISE_FLOOR;
+  const collected: any[] = belowNoiseFloor ? [] : [currentRow];
+  let totalIp = belowNoiseFloor ? 0 : currentIp;
+
   for (const ps of priorSeasons) {
     const ip = Number((ps as any).IP) || 0;
     if (ip <= 0) continue;
@@ -209,7 +212,12 @@ export async function getBlendedPitcherStats(
     if (totalIp >= PITCHER_IP_THRESHOLD) break;
   }
 
-  if (collected.length === 1) {
+  if (collected.length === 0) {
+    return passthrough(false);
+  }
+
+  // If we only have prior seasons (noise floor case), use straight blend of those
+  if (collected.length === 1 && !belowNoiseFloor) {
     return passthrough(false);
   }
 

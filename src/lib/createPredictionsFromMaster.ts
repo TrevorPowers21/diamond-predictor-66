@@ -34,19 +34,19 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
 
   // ─── Load existing 2025 predictions (returner + transfer), indexed by player_id ───
   // We need the prediction id (to update), not just whether one exists.
-  const existingPredByPlayerId = new Map<string, { id: string; from_avg: number | null }>();
+  const existingPredByPlayerId = new Map<string, { id: string; from_avg: number | null; from_era: number | null }>();
   from = 0;
   while (true) {
     const { data, error } = await supabase
       .from("player_predictions")
-      .select("id, player_id, from_avg")
+      .select("id, player_id, from_avg, from_era")
       .eq("season", season)
       .in("model_type", ["returner", "transfer"])
       .eq("variant", "regular")
       .range(from, from + 999);
     if (error) break;
     for (const r of data || []) {
-      if ((r as any).player_id) existingPredByPlayerId.set((r as any).player_id, { id: (r as any).id, from_avg: (r as any).from_avg ?? null });
+      if ((r as any).player_id) existingPredByPlayerId.set((r as any).player_id, { id: (r as any).id, from_avg: (r as any).from_avg ?? null, from_era: (r as any).from_era ?? null });
     }
     if (!data || data.length < 1000) break;
     from += 1000;
@@ -75,6 +75,27 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
     from += 1000;
   }
   console.log(`[createPredictions] ${hitterBySourceId.size} hitters loaded from master`);
+
+  // ─── Load Pitching Master with canonical scores by source_player_id ──
+  const pitcherBySourceId = new Map<string, any>();
+  const pitcherByNameTeam = new Map<string, any>();
+  from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("Pitching Master")
+      .select("source_player_id, playerFullName, Team, TeamID, ERA, FIP, WHIP, K9, BB9, HR9, era_pr_plus, fip_pr_plus, whip_pr_plus, overall_pr_plus, combined_used, blended_era, blended_fip, blended_whip, blended_k9, blended_bb9, blended_hr9, blended_from_team, blended_from_team_id")
+      .eq("Season", season)
+      .range(from, from + 999);
+    if (error) break;
+    for (const r of data || []) {
+      if (r.source_player_id) pitcherBySourceId.set(r.source_player_id, r);
+      const key = `${(r.playerFullName || "").toLowerCase().trim()}|${(r.Team || "").toLowerCase().trim()}`;
+      pitcherByNameTeam.set(key, r);
+    }
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  console.log(`[createPredictions] ${pitcherBySourceId.size} pitchers loaded from master`);
 
   // ─── Load conference stats + park factors for transfer context ────────
   // Used when a noise-floor player transferred (blended_from_team ≠ current team)
@@ -275,6 +296,110 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
     }
   }
 
+  // ─── Pitcher loop — mirrors hitter logic exactly ──────────────────────
+  // Skips players already handled as hitters (TWPs stay on hitter side).
+  for (const player of allPlayers) {
+    const hadHitter = (player.source_player_id && hitterBySourceId.has(player.source_player_id))
+      || hitterByNameTeam.has(`${player.first_name} ${player.last_name}`.toLowerCase().trim() + "|" + (player.team || "").toLowerCase().trim());
+    if (hadHitter) continue;
+
+    const pitcher = (player.source_player_id ? pitcherBySourceId.get(player.source_player_id) : null)
+      ?? pitcherByNameTeam.get(`${player.first_name} ${player.last_name}`.toLowerCase().trim() + "|" + (player.team || "").toLowerCase().trim());
+
+    if (!pitcher) continue;
+
+    const existing = existingPredByPlayerId.get(player.id);
+    const eraPrPlus = (pitcher as any).era_pr_plus ?? null;
+    const fipPrPlus = (pitcher as any).fip_pr_plus ?? null;
+    const whipPrPlus = (pitcher as any).whip_pr_plus ?? null;
+    const overallPrPlus = (pitcher as any).overall_pr_plus ?? null;
+
+    // If blended_from_team exists and differs from player's current from_team, queue update
+    const blendedFromTeam = (pitcher as any).blended_from_team as string | null;
+    const blendedFromTeamId = (pitcher as any).blended_from_team_id as string | null;
+    if (blendedFromTeam && blendedFromTeam !== player.from_team) {
+      playerFromTeamUpdates.push({ id: player.id, from_team: blendedFromTeam });
+    }
+
+    const isNoiseFloorTransfer = blendedFromTeam != null && blendedFromTeam.toLowerCase() !== (player.team || "").toLowerCase();
+    const playerTeamId = player.team_id as string | null;
+
+    if (existing) {
+      const useBlended = !!(pitcher as any).combined_used;
+      const targetEra = useBlended ? ((pitcher as any).blended_era ?? pitcher.ERA) : pitcher.ERA;
+      const targetFip = useBlended ? ((pitcher as any).blended_fip ?? pitcher.FIP) : pitcher.FIP;
+      const targetWhip = useBlended ? ((pitcher as any).blended_whip ?? pitcher.WHIP) : pitcher.WHIP;
+      const targetK9 = useBlended ? ((pitcher as any).blended_k9 ?? pitcher.K9) : pitcher.K9;
+      const targetBb9 = useBlended ? ((pitcher as any).blended_bb9 ?? pitcher.BB9) : pitcher.BB9;
+      const targetHr9 = useBlended ? ((pitcher as any).blended_hr9 ?? pitcher.HR9) : pitcher.HR9;
+
+      const needsStatUpdate = (existing as any).from_era == null || useBlended;
+      if (needsStatUpdate) {
+        const patch: any = {
+          from_era: targetEra,
+          from_fip: targetFip,
+          from_whip: targetWhip,
+          from_k9: targetK9,
+          from_bb9: targetBb9,
+          from_hr9: targetHr9,
+          power_rating_plus: overallPrPlus != null ? Math.round(overallPrPlus) : null,
+          locked: false,
+        };
+        if (isNoiseFloorTransfer) {
+          patch.model_type = "transfer";
+          patch.from_avg_plus = getConfPlus(blendedFromTeam, "avg", blendedFromTeamId);
+          patch.to_avg_plus = getConfPlus(player.team, "avg", playerTeamId);
+          patch.from_obp_plus = getConfPlus(blendedFromTeam, "obp", blendedFromTeamId);
+          patch.to_obp_plus = getConfPlus(player.team, "obp", playerTeamId);
+          patch.from_slg_plus = getConfPlus(blendedFromTeam, "iso", blendedFromTeamId);
+          patch.to_slg_plus = getConfPlus(player.team, "iso", playerTeamId);
+          patch.from_stuff_plus = getConfPlus(blendedFromTeam, "stuff_plus", blendedFromTeamId);
+          patch.to_stuff_plus = getConfPlus(player.team, "stuff_plus", playerTeamId);
+          patch.from_park_factor = getAvgPark(blendedFromTeam, blendedFromTeamId);
+          patch.to_park_factor = getAvgPark(player.team, playerTeamId);
+        }
+        predsToUpdate.push({ id: existing.id, patch });
+      }
+      internalsByPredId.set(existing.id, {
+        era_power_rating: eraPrPlus,
+        fip_power_rating: fipPrPlus,
+        whip_power_rating: whipPrPlus,
+      } as any);
+    } else {
+      const useBlended = !!(pitcher as any).combined_used;
+      const newPred: any = {
+        player_id: player.id,
+        model_type: isNoiseFloorTransfer ? "transfer" : "returner",
+        variant: "regular",
+        season,
+        status: "active",
+        locked: false,
+        class_transition: "SJ",
+        dev_aggressiveness: 0.0,
+        from_era: useBlended ? ((pitcher as any).blended_era ?? pitcher.ERA) : pitcher.ERA,
+        from_fip: useBlended ? ((pitcher as any).blended_fip ?? pitcher.FIP) : pitcher.FIP,
+        from_whip: useBlended ? ((pitcher as any).blended_whip ?? pitcher.WHIP) : pitcher.WHIP,
+        from_k9: useBlended ? ((pitcher as any).blended_k9 ?? pitcher.K9) : pitcher.K9,
+        from_bb9: useBlended ? ((pitcher as any).blended_bb9 ?? pitcher.BB9) : pitcher.BB9,
+        from_hr9: useBlended ? ((pitcher as any).blended_hr9 ?? pitcher.HR9) : pitcher.HR9,
+        power_rating_plus: overallPrPlus != null ? Math.round(overallPrPlus) : null,
+      };
+      if (isNoiseFloorTransfer) {
+        newPred.from_avg_plus = getConfPlus(blendedFromTeam, "avg", blendedFromTeamId);
+        newPred.to_avg_plus = getConfPlus(player.team, "avg", playerTeamId);
+        newPred.from_obp_plus = getConfPlus(blendedFromTeam, "obp", blendedFromTeamId);
+        newPred.to_obp_plus = getConfPlus(player.team, "obp", playerTeamId);
+        newPred.from_slg_plus = getConfPlus(blendedFromTeam, "iso", blendedFromTeamId);
+        newPred.to_slg_plus = getConfPlus(player.team, "iso", playerTeamId);
+        newPred.from_stuff_plus = getConfPlus(blendedFromTeam, "stuff_plus", blendedFromTeamId);
+        newPred.to_stuff_plus = getConfPlus(player.team, "stuff_plus", playerTeamId);
+        newPred.from_park_factor = getAvgPark(blendedFromTeam, blendedFromTeamId);
+        newPred.to_park_factor = getAvgPark(player.team, playerTeamId);
+      }
+      predsToInsert.push(newPred);
+    }
+  }
+
   // ─── INSERT new predictions ──────────────────────────────────────────
   const insertedPreds: Array<{ id: string; player_id: string }> = [];
   for (let i = 0; i < predsToInsert.length; i += CHUNK) {
@@ -292,9 +417,12 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
   }
   // Map newly-inserted predictions back to player → internals
   const playerIdToHitter = new Map<string, any>();
+  const playerIdToPitcher = new Map<string, any>();
   for (const player of allPlayers) {
     const hitter = player.source_player_id ? hitterBySourceId.get(player.source_player_id) : null;
     if (hitter) playerIdToHitter.set(player.id, hitter);
+    const pitcher = player.source_player_id ? pitcherBySourceId.get(player.source_player_id) : null;
+    if (pitcher) playerIdToPitcher.set(player.id, pitcher);
   }
   for (const pred of insertedPreds) {
     const hitter = playerIdToHitter.get(pred.player_id);
@@ -304,6 +432,15 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
         obp_power_rating: (hitter as any).obp_plus ?? null,
         slg_power_rating: (hitter as any).iso_plus ?? null,
       });
+      continue;
+    }
+    const pitcher = playerIdToPitcher.get(pred.player_id);
+    if (pitcher) {
+      internalsByPredId.set(pred.id, {
+        era_power_rating: (pitcher as any).era_pr_plus ?? null,
+        fip_power_rating: (pitcher as any).fip_pr_plus ?? null,
+        whip_power_rating: (pitcher as any).whip_pr_plus ?? null,
+      } as any);
     }
   }
 

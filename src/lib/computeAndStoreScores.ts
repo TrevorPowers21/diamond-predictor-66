@@ -11,13 +11,14 @@ import {
   HITTER_AB_THRESHOLD,
   HITTER_AB_NOISE_FLOOR,
   PITCHER_IP_THRESHOLD,
+  PITCHER_IP_NOISE_FLOOR,
 } from "@/lib/combinedStats";
 
 const round2 = (v: number | null) => (v == null ? null : Math.round(v * 100) / 100);
 
 // Hitter columns we read for blending — must match HITTER_BLEND_COLS in combinedStats.ts
 const HITTER_PRIOR_SELECT = "source_player_id, Season, ab, Team, TeamID, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb";
-const PITCHER_PRIOR_SELECT = `source_player_id, Season, IP, ERA, FIP, WHIP, K9, BB9, HR9, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, h_pull_pct, la_10_30_pct, stuff_plus, "90th_vel"`;
+const PITCHER_PRIOR_SELECT = `source_player_id, Season, IP, Team, TeamID, ERA, FIP, WHIP, K9, BB9, HR9, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, h_pull_pct, la_10_30_pct, stuff_plus, "90th_vel"`;
 
 const HITTER_BLEND_COLS = [
   "AVG", "OBP", "SLG", "ISO",
@@ -114,8 +115,10 @@ function blendPitcherSync(
   if (priors.length === 0) {
     return { combined: false, totalIp: currentIp, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
   }
-  const collected: any[] = [currentRow];
-  let totalIp = currentIp;
+  // If current season is below noise floor, skip it entirely — use prior seasons only
+  const belowNoiseFloor = currentIp < PITCHER_IP_NOISE_FLOOR;
+  const collected: any[] = belowNoiseFloor ? [] : [currentRow];
+  let totalIp = belowNoiseFloor ? 0 : currentIp;
   for (const ps of priors) {
     const ip = Number(ps.IP) || 0;
     if (ip <= 0) continue;
@@ -123,7 +126,10 @@ function blendPitcherSync(
     totalIp += ip;
     if (totalIp >= PITCHER_IP_THRESHOLD) break;
   }
-  if (collected.length === 1) {
+  if (collected.length === 0) {
+    return { combined: false, totalIp: currentIp, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
+  }
+  if (collected.length === 1 && !belowNoiseFloor) {
     return { combined: false, totalIp: currentIp, seasonsUsed: [Number(currentRow?.Season)], values: passthroughValues };
   }
   const out: Record<string, number | null> = {};
@@ -135,11 +141,21 @@ function blendPitcherSync(
     }
     out[col] = ww > 0 ? sw / ww : null;
   }
+  // Determine the dominant team — the team with the most IP in the blend
+  let dominantTeam: string | null = null;
+  let dominantTeamId: string | null = null;
+  let maxIp = 0;
+  for (const r of collected) {
+    const ip = Number(r.IP) || 0;
+    if (ip > maxIp && r.Team) { maxIp = ip; dominantTeam = r.Team; dominantTeamId = r.TeamID ?? null; }
+  }
   return {
     combined: true,
     totalIp,
     seasonsUsed: collected.map((c) => Number(c.Season)).sort((a, b) => b - a),
     values: out,
+    dominantTeam,
+    dominantTeamId,
   };
 }
 
@@ -373,7 +389,7 @@ export async function computeAndStorePitchingScores(season = 2025): Promise<{ up
   while (true) {
     const { data: rows, error } = await supabase
       .from("Pitching Master")
-      .select("id, source_player_id, Season, IP, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, \"90th_vel\", h_pull_pct, la_10_30_pct, stuff_plus")
+      .select("id, source_player_id, Season, IP, Team, TeamID, ERA, FIP, WHIP, K9, BB9, HR9, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, \"90th_vel\", h_pull_pct, la_10_30_pct, stuff_plus")
       .eq("Season", season)
       .order("id", { ascending: true })
       .range(from, from + readPageSize - 1);
@@ -429,7 +445,16 @@ export async function computeAndStorePitchingScores(season = 2025): Promise<{ up
         combined_used: blended.combined,
         combined_ip: blended.combined ? blended.totalIp : null,
         combined_seasons: blended.combined ? blended.seasonsUsed.join(",") : null,
-      },
+        blended_era: blended.combined ? round2(blended.values.ERA ?? null) : null,
+        blended_fip: blended.combined ? round2(blended.values.FIP ?? null) : null,
+        blended_whip: blended.combined ? round2(blended.values.WHIP ?? null) : null,
+        blended_k9: blended.combined ? round2(blended.values.K9 ?? null) : null,
+        blended_bb9: blended.combined ? round2(blended.values.BB9 ?? null) : null,
+        blended_hr9: blended.combined ? round2(blended.values.HR9 ?? null) : null,
+        blended_stuff_plus: blended.combined ? round2(blended.values.stuff_plus ?? null) : null,
+        blended_from_team: blended.combined ? ((blended as any).dominantTeam ?? null) : null,
+        blended_from_team_id: blended.combined ? ((blended as any).dominantTeamId ?? null) : null,
+      } as any,
     };
   });
 
