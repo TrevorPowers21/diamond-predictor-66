@@ -25,7 +25,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 export default function StuffPlusRunner() {
-  const [season] = useState(2025);
+  const [season, setSeason] = useState(2025);
   const [running, setRunning] = useState(false);
   const [report, setReport] = useState<StuffPlusReport | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
@@ -51,13 +51,26 @@ export default function StuffPlusRunner() {
   return (
     <div className="space-y-4">
       <div className="flex items-end gap-4 border px-6 py-5" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+        <div>
+          <label className="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/50">Season</label>
+          <select
+            value={season}
+            onChange={(e) => setSeason(Number(e.target.value))}
+            className="cursor-pointer border bg-transparent px-3 py-2 text-sm text-white focus:outline-none"
+            style={{ borderColor: NAVY_BORDER }}
+          >
+            <option value={2025}>2025</option>
+            <option value={2024}>2024</option>
+            <option value={2023}>2023</option>
+          </select>
+        </div>
         <button
           onClick={handleRun}
           disabled={running}
           className="cursor-pointer border px-5 py-2 text-xs font-bold uppercase tracking-[0.15em] transition-colors duration-150 hover:bg-[#D4AF37]/10 disabled:cursor-not-allowed disabled:opacity-50"
           style={{ borderColor: GOLD, color: GOLD }}
         >
-          {running ? "Calculating Stuff+…" : "Run Stuff+ Equations"}
+          {running ? "Calculating Stuff+…" : `Run Stuff+ Equations (${season})`}
         </button>
       </div>
 
