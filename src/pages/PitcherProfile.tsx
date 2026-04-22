@@ -21,6 +21,9 @@ import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
+import CoachNotes from "@/components/CoachNotes";
+import { useCoachNotes } from "@/hooks/useCoachNotes";
+import { generateCoachNotesPdf, generateReportPdf } from "@/lib/pdfGenerator";
 import { assessPitcherRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
@@ -335,6 +338,7 @@ export default function PitcherProfile() {
   const isAdmin = hasRole("admin");
   const queryClient = useQueryClient();
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
+  const { notes: coachNotesForExport } = useCoachNotes(id ?? null);
 
   const updatePortalStatus = useMutation({
     mutationFn: async ({ playerId, value }: { playerId: string; value: string }) => {
@@ -1422,6 +1426,151 @@ export default function PitcherProfile() {
           </div>
           {player && (
             <>
+              <CoachNotes
+                playerId={player.id}
+                playerName={`${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName}
+                onExportPdf={(notes, format) => {
+                  const hand = displayHandedness === "R" ? "RHP" : displayHandedness === "L" ? "LHP" : effectiveRoleDisplay || "P";
+                  if (format === "full") {
+                    const rp: ReportPlayer = {
+                      id: player.id,
+                      player_type: "pitcher",
+                      name: `${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName,
+                      school: displayTeam,
+                      position: hand,
+                      class_year: displayClass || undefined,
+                      bats_throws: player.throws_hand ? `${player.throws_hand}/${player.throws_hand}` : undefined,
+                      conference: displayConference !== "—" ? displayConference : undefined,
+                      height: player.height_inches ? `${Math.floor(player.height_inches / 12)}'${player.height_inches % 12}"` : undefined,
+                      weight: player.weight,
+                      hometown: [player.home_state, player.high_school].filter(Boolean).join(", ") || undefined,
+                      p_era: projectedPitching.pEra, p_fip: projectedPitching.pFip,
+                      p_whip: projectedPitching.pWhip, p_k9: projectedPitching.pK9,
+                      p_bb9: projectedPitching.pBb9, p_hr9: projectedPitching.pHr9,
+                      p_war: projectedPitching.pWar,
+                      market_value: projectedPitching.marketValue,
+                      nil_value: projectedPitching.marketValue,
+                      overall_pr_plus: internalPowerRatings?.overallPlus,
+                      stuff_plus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
+                      whiff_pct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                      stuff_score: internalPowerRatings?.scores?.stuff,
+                      whiff_score: internalPowerRatings?.scores?.whiff,
+                      bb_score: internalPowerRatings?.scores?.bb,
+                      barrel_score: internalPowerRatings?.scores?.barrel,
+                      career_seasons: pitcherMasterSeasons as any[],
+                      pitches: pitchArsenal.rows.map((r) => ({
+                        pitch_name: r.pitchType, usage: r.usagePct,
+                        whiff: r.whiffPct, stuff_plus: r.stuffPlus,
+                      })),
+                      scouting_notes: (() => {
+                        if ((player as any).notes) return (player as any).notes;
+                        const pitchesForReport = pitchArsenal.rows.map((r) => ({
+                          name: r.pitchType || "",
+                          count: r.count ?? null,
+                          velocity: r.velocity ?? null,
+                          ivb: r.ivb ?? null,
+                          hb: r.hb ?? null,
+                          whiffPct: r.whiffPct ?? null,
+                          stuffPlus: r.stuffPlus ?? null,
+                          relHeight: r.relHeight ?? null,
+                          extension: r.extension ?? null,
+                          vaa: r.vaa ?? null,
+                        }));
+                        return generatePitcherReport({
+                          throwHand: (masterRow as any)?.throwHand || player?.throws_hand || displayHandedness,
+                          role: effectiveRoleDisplay || (masterRow as any)?.role,
+                          conference: displayConference !== "—" ? displayConference : undefined,
+                          era: (masterRow as any)?.era, fip: (masterRow as any)?.fip,
+                          whip: (masterRow as any)?.whip, k9: (masterRow as any)?.k9,
+                          bb9: (masterRow as any)?.bb9, hr9: (masterRow as any)?.hr9,
+                          ip: (masterRow as any)?.ip ?? (masterRow as any)?.IP,
+                          stuffPlus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
+                          whiffPct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                          izWhiffPct: internalPowerRatings?.metrics?.izWhiff,
+                          chasePct: internalPowerRatings?.metrics?.chase,
+                          bbPct: internalPowerRatings?.metrics?.bb,
+                          hardHitPct: internalPowerRatings?.metrics?.hh,
+                          barrelPct: internalPowerRatings?.metrics?.barrel,
+                          exitVel: internalPowerRatings?.metrics?.avgEv,
+                          gbPct: internalPowerRatings?.metrics?.gb,
+                          pitches: pitchesForReport,
+                        }, "rstriq", "full");
+                      })(),
+                      coach_notes: notes,
+                    };
+                    const prvForRisk = computePrvPlus(
+                      (historicalRow as any)?.era_pr_plus ?? null,
+                      (historicalRow as any)?.fip_pr_plus ?? null,
+                      (historicalRow as any)?.whip_pr_plus ?? null,
+                      (historicalRow as any)?.k9_pr_plus ?? null,
+                      (historicalRow as any)?.bb9_pr_plus ?? null,
+                      (historicalRow as any)?.hr9_pr_plus ?? null,
+                    );
+                    const riskResult = assessPitcherRisk({
+                      conference: displayConference !== "—" ? displayConference : undefined,
+                      projectedPrvPlus: prvForRisk,
+                      confHitterTalentPlus: confStatsRow?.overall_power_rating != null && confStatsRow?.stuff_plus != null && confStatsRow?.wrc_plus != null
+                        ? confStatsRow.overall_power_rating + (1.25 * (confStatsRow.stuff_plus - 100)) + (0.75 * (100 - confStatsRow.wrc_plus))
+                        : null,
+                      careerSeasons: pitcherMasterSeasons as any[],
+                      ip: (masterRow as any)?.ip ?? (masterRow as any)?.IP ?? null,
+                      classYear: displayClass || undefined,
+                      stuffPlus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
+                      whiffPct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                      bbPct: internalPowerRatings?.metrics?.bb,
+                      chase: internalPowerRatings?.metrics?.chase,
+                      barrel: internalPowerRatings?.metrics?.barrel,
+                      hardHit: internalPowerRatings?.metrics?.hh,
+                      gb: internalPowerRatings?.metrics?.gb,
+                    });
+                    rp.risk_grade = riskResult.grade;
+                    rp.risk_score = riskResult.overall;
+                    rp.risk_trajectory = riskResult.trajectory;
+                    rp.risk_summary = riskResult.summary;
+                    rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
+                    const url = generateReportPdf([rp]);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = `${player.first_name}-${player.last_name}-scouting-report.pdf`.toLowerCase().replace(/\s+/g, "-");
+                    link.click();
+                  } else {
+                    const rp: ReportPlayer = {
+                      id: player.id,
+                      player_type: "pitcher",
+                      name: `${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName,
+                      school: displayTeam,
+                      position: hand,
+                      class_year: displayClass || undefined,
+                      conference: displayConference !== "—" ? displayConference : undefined,
+                      p_era: projectedPitching.pEra, p_fip: projectedPitching.pFip,
+                      p_whip: projectedPitching.pWhip, p_k9: projectedPitching.pK9,
+                      p_bb9: projectedPitching.pBb9, p_hr9: projectedPitching.pHr9,
+                      p_war: projectedPitching.pWar,
+                      overall_pr_plus: internalPowerRatings?.overallPlus,
+                      coach_notes: notes,
+                    };
+                    const url = generateCoachNotesPdf(rp, notes);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = `${player.first_name}-${player.last_name}-coach-notes.pdf`.toLowerCase().replace(/\s+/g, "-");
+                    link.click();
+                  }
+                }}
+              />
+              <Button
+                variant={isOnBoard(player.id) ? "default" : "outline"}
+                size="sm"
+                onClick={() => {
+                  if (isOnBoard(player.id)) {
+                    removeFromBoard(player.id);
+                  } else {
+                    addToBoard({ playerId: player.id });
+                  }
+                }}
+              >
+                <Target className="mr-2 h-3.5 w-3.5" />
+                {isOnBoard(player.id) ? "On Board" : "Add to Target Board"}
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -1535,25 +1684,12 @@ export default function PitcherProfile() {
                   rp.risk_trajectory = riskResult.trajectory;
                   rp.risk_summary = riskResult.summary;
                   rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
+                  rp.coach_notes = coachNotesForExport;
                   try { downloadSinglePlayerReport(rp); } catch (err: any) { toast.error(`Export failed: ${err.message}`); }
                 }}
               >
                 <Download className="mr-2 h-3.5 w-3.5" />
-                Export PDF
-              </Button>
-              <Button
-                variant={isOnBoard(player.id) ? "default" : "outline"}
-                size="sm"
-                onClick={() => {
-                  if (isOnBoard(player.id)) {
-                    removeFromBoard(player.id);
-                  } else {
-                    addToBoard({ playerId: player.id });
-                  }
-                }}
-              >
-                <Target className="mr-2 h-3.5 w-3.5" />
-                {isOnBoard(player.id) ? "On Board" : "Target Board"}
+                Export Report
               </Button>
             </>
           )}
@@ -1960,6 +2096,7 @@ export default function PitcherProfile() {
 
           </div>
         </div>
+
       </div>
     </DashboardLayout>
   );

@@ -1776,30 +1776,41 @@ export default function ReturningPlayers() {
     <DashboardLayout>
       <ScoutingReportProvider>
       <div className="space-y-4 max-w-[1600px] mx-auto pb-20">
-        {/* Header */}
-        <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* Header — brand Oswald + gold accent, consistent with Overview */}
+        <div className="rounded-lg border-l-[3px] border-l-[#D4AF37] border-t border-r border-b border-border/60 bg-muted/20 px-4 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight">Player Dashboard</h2>
-            <p className="text-muted-foreground text-sm">
-              2025 season — all players including transfers and departed
+            <h2
+              className="text-2xl font-bold tracking-[0.04em] uppercase leading-none"
+              style={{ fontFamily: "'Oswald', sans-serif", color: "#D4AF37" }}
+            >
+              Player Dashboard
+            </h2>
+            <p className="text-muted-foreground text-xs mt-1.5 tracking-wide">
+              2025 season · all players including transfers and departed
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex gap-1 rounded-lg border bg-muted p-1">
+            <div className="flex gap-1 rounded-lg border border-border/60 bg-muted/40 p-1">
               <button
                 className={cn(
-                  "px-5 py-2 text-sm rounded-md font-medium transition-colors",
-                  dashboardView === "hitting" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                  "px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer",
+                  dashboardView === "hitting"
+                    ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30"
+                    : "text-muted-foreground hover:text-foreground"
                 )}
+                style={{ fontFamily: "'Oswald', sans-serif" }}
                 onClick={() => setDashboardView("hitting")}
               >
                 Hitting
               </button>
               <button
                 className={cn(
-                  "px-5 py-2 text-sm rounded-md font-medium transition-colors",
-                  dashboardView === "pitching" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                  "px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer",
+                  dashboardView === "pitching"
+                    ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30"
+                    : "text-muted-foreground hover:text-foreground"
                 )}
+                style={{ fontFamily: "'Oswald', sans-serif" }}
                 onClick={() => setDashboardView("pitching")}
               >
                 Pitching
@@ -1880,7 +1891,12 @@ export default function ReturningPlayers() {
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
-              <CardTitle className="text-base">Player Projections</CardTitle>
+              <CardTitle
+                className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]"
+                style={{ fontFamily: "'Oswald', sans-serif" }}
+              >
+                Player Projections
+              </CardTitle>
               {bulkEditMode ? (
                 <div className="flex gap-1">
                   <Button
@@ -2172,7 +2188,12 @@ export default function ReturningPlayers() {
         <Card>
             <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
-                <CardTitle className="text-base">Pitching Projections</CardTitle>
+                <CardTitle
+                  className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]"
+                  style={{ fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Pitching Projections
+                </CardTitle>
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <div className="flex items-center gap-1 overflow-x-auto max-w-[360px]">

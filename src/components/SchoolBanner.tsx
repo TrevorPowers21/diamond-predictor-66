@@ -146,12 +146,13 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
               className="absolute inset-0 flex items-center justify-center"
               style={{ transformStyle: 'preserve-3d' }}
             >
-              <div className="flex items-center gap-6">
+              <div className="flex items-center gap-1">
                 <img
                   src={schoolLogoUrl}
                   alt={schoolName}
-                  className="h-24 w-auto object-contain"
+                  className="h-28 w-auto object-contain"
                 />
+                <div className="h-20 w-px bg-[#D4AF37]/30" />
                 {DEMO_SCHOOL.name ? (
                   <div>
                     <h2
@@ -174,7 +175,7 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
                     </p>
                   </div>
                 ) : (
-                  <img src="/rstr-iq-logo.png" alt="RSTR IQ" className="h-16 object-contain" />
+                  <img src="/newtforce-logo.png" alt="NewtForce" className="h-28 object-contain" />
                 )}
               </div>
             </motion.div>

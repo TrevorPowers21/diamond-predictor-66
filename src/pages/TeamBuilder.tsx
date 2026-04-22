@@ -4855,11 +4855,16 @@ export default function TeamBuilder() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        {/* Header — brand Oswald + gold accent, consistent with Overview & Player Dashboard */}
+        <div className="rounded-lg border-l-[3px] border-l-[#D4AF37] border-t border-r border-b border-border/60 bg-muted/20 px-4 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight">Team Builder</h2>
-            <p className="text-muted-foreground text-sm">Build rosters, track NIL budget, and manage depth charts.</p>
+            <h2
+              className="text-2xl font-bold tracking-[0.04em] uppercase leading-none"
+              style={{ fontFamily: "'Oswald', sans-serif", color: "#D4AF37" }}
+            >
+              Team Builder
+            </h2>
+            <p className="text-muted-foreground text-xs mt-1.5 tracking-wide">Build rosters · track NIL budget · manage depth charts</p>
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-[220px]">
@@ -5009,7 +5014,7 @@ export default function TeamBuilder() {
           <TabsContent value="roster" className="space-y-6">
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Add Incoming Freshman <span className="text-xs font-normal text-muted-foreground italic ml-2">Coming soon</span></CardTitle>
+                <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Add Incoming Freshman <span className="text-xs font-normal text-muted-foreground italic ml-2">Coming soon</span></CardTitle>
                 <CardDescription>Add a player with no projected stats; NIL can still be tracked.</CardDescription>
               </CardHeader>
               <CardContent>
@@ -5055,7 +5060,7 @@ export default function TeamBuilder() {
             {/* Position Players */}
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Position Players ({positionPlayers.length})</CardTitle>
+                <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Position Players ({positionPlayers.length})</CardTitle>
               </CardHeader>
               <CardContent className="p-0 overflow-x-auto">
                 <Table className="min-w-[1200px]">
@@ -5118,7 +5123,7 @@ export default function TeamBuilder() {
             {/* Pitchers */}
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Pitchers ({pitchers.length})</CardTitle>
+                <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Pitchers ({pitchers.length})</CardTitle>
               </CardHeader>
               <CardContent className="p-0 overflow-x-auto">
                 <Table className="min-w-[1200px]">
@@ -5183,7 +5188,7 @@ export default function TeamBuilder() {
               <Card>
                 <CardHeader className="pb-3 cursor-pointer select-none" onClick={() => setNilEquationOpen(o => !o)}>
                   <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">Projected NIL Equation</CardTitle>
+                    <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Projected NIL Equation</CardTitle>
                     {nilEquationOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
                   </div>
                 </CardHeader>
@@ -5217,7 +5222,7 @@ export default function TeamBuilder() {
             <Card>
               <CardHeader className="pb-3 cursor-pointer select-none" onClick={() => setMetricsUploadOpen(o => !o)}>
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">Team-Only Power Metrics Upload <span className="text-xs font-normal text-muted-foreground italic ml-2">Coming soon</span></CardTitle>
+                  <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Team-Only Power Metrics Upload <span className="text-xs font-normal text-muted-foreground italic ml-2">Coming soon</span></CardTitle>
                   {metricsUploadOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
                 </div>
               </CardHeader>
@@ -5232,7 +5237,7 @@ export default function TeamBuilder() {
           <TabsContent value="target-board" className="space-y-6">
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Add Player Target</CardTitle>
+                <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Add Player Target</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="relative">
@@ -5278,7 +5283,7 @@ export default function TeamBuilder() {
 
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Target Position Players ({targetPositionPlayers.length})</CardTitle>
+                <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Target Position Players ({targetPositionPlayers.length})</CardTitle>
               </CardHeader>
               <CardContent className="p-0 overflow-x-auto">
                 <Table className="min-w-[1200px]">
@@ -5339,7 +5344,7 @@ export default function TeamBuilder() {
 
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Target Pitchers ({targetPitchers.length})</CardTitle>
+                <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Target Pitchers ({targetPitchers.length})</CardTitle>
               </CardHeader>
               <CardContent className="p-0 overflow-x-auto">
                 <Table className="min-w-[1200px]">
@@ -5411,7 +5416,7 @@ export default function TeamBuilder() {
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Compare A</CardTitle>
+                  <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Compare A</CardTitle>
                   <CardDescription>Run Transfer Portal simulation inputs in a standalone panel.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -5533,7 +5538,7 @@ export default function TeamBuilder() {
 
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Compare B</CardTitle>
+                  <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Compare B</CardTitle>
                   <CardDescription>Independent panel. You can select the same player as Compare A.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -5658,7 +5663,7 @@ export default function TeamBuilder() {
           <TabsContent value="depth">
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Depth Chart Board</CardTitle>
+                <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Depth Chart Board</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="mb-3 flex items-center gap-4 text-xs">
@@ -5759,7 +5764,7 @@ export default function TeamBuilder() {
 
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-base">Spending by Position Group</CardTitle>
+                      <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Spending by Position Group</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-3">
@@ -5787,7 +5792,7 @@ export default function TeamBuilder() {
 
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-base">WAR by Position Group</CardTitle>
+                      <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>WAR by Position Group</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-3">
@@ -5816,7 +5821,7 @@ export default function TeamBuilder() {
 
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-base">Cost Efficiency</CardTitle>
+                      <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Cost Efficiency</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <table className="w-full text-sm">

@@ -1,212 +1,269 @@
-import { useMemo, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
-import { Link, useNavigate } from "react-router-dom";
+import { useHighFollow } from "@/hooks/useHighFollow";
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Eye, LogIn, X, CheckCircle } from "lucide-react";
-import {
-  DEFAULT_NIL_TIER_MULTIPLIERS,
-  getProgramTierMultiplierByConference,
-  getPositionValueMultiplier,
-} from "@/lib/nilProgramSpecific";
+import { Eye, LogIn, X, CheckCircle, TrendingUp, Users, Calendar, Activity, ArrowRight } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import SchoolBanner from "@/components/SchoolBanner";
 
-type MetricKey = "p_avg" | "p_obp" | "p_slg" | "p_ops" | "p_iso" | "p_wrc_plus" | "owar" | "nil_value";
-type PoolKey = "all" | string;
-
-type PlayerRow = {
+type HitterRow = {
   player_id: string;
-  model_type: "returner" | "transfer" | string;
   first_name: string;
   last_name: string;
   team: string | null;
   from_team: string | null;
   conference: string | null;
   position: string | null;
+  model_type: string;
+  p_wrc_plus: number;
   p_avg: number | null;
   p_obp: number | null;
   p_slg: number | null;
-  p_ops: number | null;
-  p_iso: number | null;
-  p_wrc_plus: number | null;
-  nil_value: number | null;
 };
 
-const METRICS: { key: MetricKey; label: string }[] = [
-  { key: "p_avg", label: "pAVG" },
-  { key: "p_obp", label: "pOBP" },
-  { key: "p_slg", label: "pSLG" },
-  { key: "p_ops", label: "pOPS" },
-  { key: "p_iso", label: "pISO" },
-  { key: "p_wrc_plus", label: "pWRC+" },
-  { key: "owar", label: "oWAR" },
-  { key: "nil_value", label: "NIL" },
-];
-
-const compactDollar = new Intl.NumberFormat("en-US", {
-  notation: "compact",
-  compactDisplay: "short",
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 1,
-});
-
-const formatCompactUsd = (value: number | null) =>
-  value == null ? "-" : compactDollar.format(value).replace("k", "K").replace("m", "M").replace("b", "B");
-
-const formatMetric = (metric: MetricKey, value: number | null) => {
-  if (value == null) return "-";
-  if (metric === "p_wrc_plus") return Math.round(value).toString();
-  if (metric === "nil_value") return formatCompactUsd(value);
-  if (metric === "owar") return value.toFixed(2);
-  return value.toFixed(3);
+type PitcherRow = {
+  player_id: string;
+  first_name: string;
+  last_name: string;
+  team: string | null;
+  from_team: string | null;
+  conference: string | null;
+  position: string | null;
+  model_type: string;
+  p_rv_plus: number;
+  p_era: number | null;
+  p_fip: number | null;
+  p_k9: number | null;
 };
 
-
-const computeOWar = (wrcPlus: number | null | undefined, actualPa?: number | null): number | null => {
-  if (wrcPlus == null) return null;
-  const pa = actualPa ?? 260;
-  const runsPerPa = 0.13;
-  const replacementRuns = (pa / 600) * 25;
-  const offValue = (wrcPlus - 100) / 100;
-  const raa = offValue * pa * runsPerPa;
-  const rar = raa + replacementRuns;
-  return rar / 10;
+const todayString = () => {
+  const now = new Date();
+  return now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 };
 
+const timeSince = (iso: string | null | undefined): string => {
+  if (!iso) return "—";
+  const diff = Date.now() - new Date(iso).getTime();
+  const hrs = Math.floor(diff / 3_600_000);
+  if (hrs < 1) return "just now";
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return `${Math.floor(days / 7)}w ago`;
+};
 
 export default function Dashboard() {
   const { devBypassed, disableDevBypass } = useAuth();
-  const navigate = useNavigate();
   const serviceKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
-  const [metric, setMetric] = useState<MetricKey>("p_avg");
-  const [pool, setPool] = useState<PoolKey>("all");
 
-  const { data: players = [], isLoading } = useQuery({
-    queryKey: ["overview-top10-base"],
-    staleTime: 0,
+  const { data: topHitters = [] } = useQuery({
+    queryKey: ["overview-top-hitters"],
+    staleTime: 5 * 60 * 1000,
     queryFn: async () => {
-      // Paginate predictions — Supabase caps single requests at 1000 rows
-      // and there are ~10k+ rows in player_predictions, so without paging
-      // we'd silently miss most players.
-      const allPreds: any[] = [];
+      const all: any[] = [];
       let from = 0;
       const PAGE = 1000;
       while (true) {
         const { data, error } = await supabase
           .from("player_predictions")
           .select(
-            "id, player_id, model_type, variant, status, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, players!inner(first_name, last_name, team, from_team, conference, position, pa, ip)",
+            "id, player_id, model_type, variant, status, p_wrc_plus, p_avg, p_obp, p_slg, players!inner(first_name, last_name, team, from_team, conference, position, pa)",
           )
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
           .in("model_type", ["returner", "transfer"])
           .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
           .gte("players.pa", 75)
+          .not("p_wrc_plus", "is", null)
           .range(from, from + PAGE - 1);
         if (error) throw error;
         const rows = data || [];
-        allPreds.push(...rows);
+        all.push(...rows);
         if (rows.length < PAGE) break;
         from += PAGE;
       }
+      const byPlayer = new Map<string, any>();
+      for (const row of all) {
+        const existing = byPlayer.get(row.player_id);
+        if (!existing || (row.p_wrc_plus ?? -Infinity) > (existing.p_wrc_plus ?? -Infinity)) {
+          byPlayer.set(row.player_id, row);
+        }
+      }
+      const rows: HitterRow[] = Array.from(byPlayer.values())
+        .map((r) => ({
+          player_id: r.player_id,
+          first_name: r.players.first_name,
+          last_name: r.players.last_name,
+          team: r.players.team ?? null,
+          from_team: r.players.from_team ?? null,
+          conference: r.players.conference ?? null,
+          position: r.players.position ?? null,
+          model_type: r.model_type,
+          p_wrc_plus: Number(r.p_wrc_plus),
+          p_avg: r.p_avg,
+          p_obp: r.p_obp,
+          p_slg: r.p_slg,
+        }))
+        .sort((a, b) => b.p_wrc_plus - a.p_wrc_plus)
+        .slice(0, 5);
+      return rows;
+    },
+  });
 
-      const nilRes = await supabase.from("nil_valuations").select("player_id, estimated_value, season");
-      if (nilRes.error) throw nilRes.error;
-      const predRes = { data: allPreds, error: null as any };
+  const { data: topPitchers = [] } = useQuery({
+    queryKey: ["overview-top-pitchers"],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      // Load top pitchers from Pitching Master (overall_pr_plus is the pRV+ equivalent)
+      const { data: pmRows, error: pmErr } = await supabase
+        .from("Pitching Master")
+        .select("source_player_id, playerFullName, Team, Conference, Role, IP, ERA, FIP, K9, overall_pr_plus")
+        .eq("Season", 2025)
+        .gte("IP", 20)
+        .not("overall_pr_plus", "is", null)
+        .order("overall_pr_plus", { ascending: false })
+        .limit(25);
+      if (pmErr) throw pmErr;
+      const pitchers = pmRows || [];
+      if (pitchers.length === 0) return [];
 
-      const nilByPlayer = new Map<string, { season: number; value: number | null }>();
-      for (const row of nilRes.data || []) {
-        const existing = nilByPlayer.get(row.player_id);
-        if (!existing || (row.season ?? 0) > existing.season) {
-          nilByPlayer.set(row.player_id, { season: row.season ?? 0, value: row.estimated_value ?? null });
+      // Resolve players.id for each source_player_id so profile links work
+      const sourceIds = pitchers.map((p: any) => p.source_player_id).filter(Boolean);
+      const playerMap = new Map<string, { id: string; team: string | null; position: string | null }>();
+      if (sourceIds.length > 0) {
+        const { data: plRows } = await supabase
+          .from("players")
+          .select("id, source_player_id, team, position")
+          .in("source_player_id", sourceIds);
+        for (const pl of (plRows || []) as any[]) {
+          if (pl.source_player_id) playerMap.set(pl.source_player_id, { id: pl.id, team: pl.team, position: pl.position });
         }
       }
 
-      const rankRow = (row: any) => {
-        const coverage = [row.p_avg, row.p_obp, row.p_slg, row.p_ops, row.p_iso, row.p_wrc_plus].filter((v) => v != null).length;
-        return coverage + (row.model_type === "transfer" ? 0.1 : 0);
-      };
-
-      const bestByPlayer = new Map<string, any>();
-      for (const row of predRes.data || []) {
-        const existing = bestByPlayer.get(row.player_id);
-        if (!existing || rankRow(row) > rankRow(existing)) bestByPlayer.set(row.player_id, row);
-      }
-
-      const out: PlayerRow[] = [];
-      for (const row of bestByPlayer.values()) {
-        const nil = nilByPlayer.get(row.player_id);
+      const out: PitcherRow[] = [];
+      for (const r of pitchers as any[]) {
+        const pl = playerMap.get(r.source_player_id);
+        if (!pl) continue; // skip pitchers not yet linked to a player record
+        const fullName = (r.playerFullName || "").trim();
+        const [first, ...rest] = fullName.split(" ");
         out.push({
-          player_id: row.player_id,
-          model_type: row.model_type,
-          first_name: row.players.first_name,
-          last_name: row.players.last_name,
-          team: row.players.team ?? null,
-          from_team: row.players.from_team ?? null,
-          conference: row.players.conference ?? null,
-          position: row.players.position ?? null,
-          p_avg: row.p_avg,
-          p_obp: row.p_obp,
-          p_slg: row.p_slg,
-          p_ops: row.p_ops,
-          p_iso: row.p_iso,
-          p_wrc_plus: row.p_wrc_plus,
-          nil_value: nil?.value ?? null,
+          player_id: pl.id,
+          first_name: first || "",
+          last_name: rest.join(" ") || "",
+          team: r.Team ?? pl.team,
+          from_team: null,
+          conference: r.Conference ?? null,
+          position: r.Role ?? pl.position,
+          model_type: "returner",
+          p_rv_plus: Number(r.overall_pr_plus),
+          p_era: r.ERA,
+          p_fip: r.FIP,
+          p_k9: r.K9,
         });
+        if (out.length >= 5) break;
       }
-
       return out;
     },
   });
 
-  const conferenceOptions = useMemo(() => {
-    return [...new Set(players.map((p) => (p.conference || "").trim()).filter(Boolean))].sort();
-  }, [players]);
+  // Total player counts + recent portal activity for the briefing
+  const { data: briefingStats } = useQuery({
+    queryKey: ["overview-briefing-stats"],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const [portalCountRes, committedCountRes, recentPortalRes, lastPredRes] = await Promise.all([
+        supabase.from("players").select("id", { count: "exact", head: true }).eq("portal_status", "IN PORTAL"),
+        supabase.from("players").select("id", { count: "exact", head: true }).eq("portal_status", "COMMITTED"),
+        supabase
+          .from("players")
+          .select("id, first_name, last_name, team, portal_status")
+          .eq("portal_status", "IN PORTAL")
+          .order("updated_at", { ascending: false })
+          .limit(3),
+        supabase
+          .from("player_predictions")
+          .select("updated_at")
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+      return {
+        portalCount: portalCountRes.count ?? 0,
+        committedCount: committedCountRes.count ?? 0,
+        recentPortal: (recentPortalRes.data || []) as Array<{ id: string; first_name: string; last_name: string; team: string | null; portal_status: string }>,
+        lastPredictionAt: (lastPredRes.data as any)?.updated_at ?? null,
+      };
+    },
+  });
 
-  const top10 = useMemo(() => {
-    const source = pool === "all" ? players : players.filter((p) => (p.conference || "").trim() === pool);
-    return source
-      .map((p) => {
-        const owarValue = computeOWar(p.p_wrc_plus);
-        const fallbackNilValue =
-          owarValue == null
-            ? null
-            : owarValue *
-              25000 *
-              getProgramTierMultiplierByConference(p.conference, DEFAULT_NIL_TIER_MULTIPLIERS) *
-              getPositionValueMultiplier(p.position);
-        const resolvedNilValue = p.nil_value ?? fallbackNilValue;
-        const value =
-          metric === "owar"
-            ? owarValue
-            : metric === "nil_value"
-              ? resolvedNilValue
-              : (p[metric] as number | null);
-        return {
-          ...p,
-          metric_value: value,
-          chart_name: `${p.first_name[0]}. ${p.last_name}`,
-          full_name: `${p.first_name} ${p.last_name}`,
-          school: p.from_team || p.team || "-",
-        };
-      })
-      .filter((p) => p.metric_value != null)
-      .sort((a, b) => (b.metric_value ?? -Infinity) - (a.metric_value ?? -Infinity))
-      .slice(0, 10);
-  }, [players, metric, pool]);
-
-  const metricLabel = METRICS.find((m) => m.key === metric)?.label ?? metric;
-
-  // Single source of truth: Supabase target_board table
   const { board: targetBoard, removePlayer: removeFromBoard } = useTargetBoard();
+  const { list: highFollowList } = useHighFollow();
+
+  // Trigger activity query to re-run when followed/board player sets change
+  const watchedIdsKey = [
+    ...new Set([...highFollowList.map((p) => p.player_id), ...targetBoard.map((p) => p.player_id)]),
+  ].sort().join(",");
+
+  const { data: personalActivity = [] } = useQuery({
+    queryKey: ["overview-personal-activity", watchedIdsKey],
+    enabled: watchedIdsKey.length > 0,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const ids = watchedIdsKey.split(",").filter(Boolean);
+      if (ids.length === 0) return [];
+      const { data, error } = await supabase
+        .from("players")
+        .select("id, first_name, last_name, team, from_team, portal_status, updated_at")
+        .in("id", ids)
+        .in("portal_status", ["IN PORTAL", "COMMITTED"])
+        .order("updated_at", { ascending: false })
+        .limit(10);
+      if (error) throw error;
+      // Flag which list each player belongs to
+      const followSet = new Set(highFollowList.map((p) => p.player_id));
+      const boardSet = new Set(targetBoard.map((p) => p.player_id));
+      return (data || []).map((p: any) => ({
+        ...p,
+        source: followSet.has(p.id) ? "following" : boardSet.has(p.id) ? "board" : "other",
+      })) as Array<{ id: string; first_name: string; last_name: string; team: string | null; from_team: string | null; portal_status: string; updated_at: string; source: "following" | "board" | "other" }>;
+    },
+  });
+
+  const stats = briefingStats ?? { portalCount: 0, committedCount: 0, recentPortal: [], lastPredictionAt: null };
+
+  // ─── DEMO MOCK (remove after filming) ────────────────────────────────
+  // Sample updates so the briefing has content to screenshot for sales demos
+  const DEMO_UPDATES = [
+    {
+      id: "demo-1",
+      first_name: "Michael",
+      last_name: "Anderson",
+      team: null,
+      from_team: "Arkansas",
+      portal_status: "IN PORTAL",
+      updated_at: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+      source: "following" as const,
+    },
+    {
+      id: "demo-2",
+      first_name: "Konni",
+      last_name: "Durschlag",
+      team: "Arkansas",
+      from_team: "High Point",
+      portal_status: "COMMITTED",
+      updated_at: new Date(Date.now() - 26 * 3_600_000).toISOString(),
+      source: "board" as const,
+    },
+  ];
+  const displayActivity = personalActivity.length > 0 ? personalActivity : DEMO_UPDATES;
+
+  const fmt3 = (v: number | null) => (v == null ? "—" : v.toFixed(3));
+  const fmt2 = (v: number | null) => (v == null ? "—" : v.toFixed(2));
 
   return (
     <DashboardLayout>
@@ -226,163 +283,339 @@ export default function Dashboard() {
       )}
 
       <div className="space-y-4 max-w-[1400px] mx-auto">
-        {/* ─── Banner ─── */}
         <SchoolBanner />
 
-        {/* ─── Controls bar ─── */}
-        <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <Tabs value={metric} onValueChange={(v) => setMetric(v as MetricKey)}>
-            <TabsList className="flex-wrap h-auto gap-0.5 bg-background/60">
-              {METRICS.map((m) => (
-                <TabsTrigger key={m.key} value={m.key} className="text-xs px-2.5 py-1">
-                  {m.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-          <div className="min-w-[170px]">
-            <Select value={pool} onValueChange={(v) => setPool(v as PoolKey)}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="All Conferences" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Conferences</SelectItem>
-                {conferenceOptions.map((conf) => (
-                  <SelectItem key={conf} value={conf}>{conf}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        {/* Morning Briefing — top strip with gold accent, then metric tiles row */}
+        <div className="space-y-0">
+          <div
+            className="rounded-t-lg border-l-[3px] border-l-[#D4AF37] bg-[#0D1B3E] px-4 py-3 flex items-center flex-wrap gap-x-4 gap-y-1"
+            style={{ fontFamily: "Inter, sans-serif" }}
+          >
+            <span
+              className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#D4AF37]"
+              style={{ fontFamily: "Oswald, sans-serif" }}
+            >
+              Today's Briefing
+            </span>
+            <span className="flex items-center gap-1.5 text-xs text-slate-300">
+              <Calendar className="h-3 w-3" />
+              {todayString()}
+            </span>
+            <span className="text-slate-500">·</span>
+            <span className="flex items-center gap-1.5 text-xs text-slate-300">
+              <Activity className="h-3 w-3" />
+              Projections updated {timeSince(stats.lastPredictionAt)}
+            </span>
           </div>
+          {/* Tile row */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 rounded-b-lg border border-t-0 border-[#162241] bg-[#0a1428] divide-x divide-[#162241]">
+            <BriefingTile
+              label="In Portal"
+              value={String(stats.portalCount)}
+              icon={<LogIn className="h-3.5 w-3.5" />}
+              accent="emerald"
+            />
+            <BriefingTile
+              label="Players Following"
+              value={String(highFollowList.length)}
+              icon={<Users className="h-3.5 w-3.5" />}
+            />
+            <BriefingTile
+              label="Your Board"
+              value={String(targetBoard.length)}
+              icon={<TrendingUp className="h-3.5 w-3.5" />}
+              accent="gold"
+            />
+            <BriefingTile
+              label="Committed"
+              value={String(stats.committedCount)}
+              icon={<CheckCircle className="h-3.5 w-3.5" />}
+              accent="blue"
+            />
+          </div>
+          {/* Personalized updates — your followed/board players with recent portal activity */}
+          {displayActivity.length > 0 ? (
+            <div className="mt-2 rounded-lg border border-border/60 bg-muted/20 px-4 py-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <span
+                  className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#D4AF37]"
+                  style={{ fontFamily: "Oswald, sans-serif" }}
+                >
+                  Your Updates
+                </span>
+                <span className="text-[10px] text-muted-foreground font-mono">{displayActivity.length} {displayActivity.length === 1 ? "update" : "updates"}</span>
+              </div>
+              <div className="divide-y divide-border/30">
+                {displayActivity.slice(0, 5).map((p) => {
+                  const isPortal = p.portal_status === "IN PORTAL";
+                  const arrowClass = isPortal ? "text-emerald-500" : "text-blue-500";
+                  const destClass = isPortal ? "text-emerald-600" : "text-blue-600";
+                  const sourceLabel = p.source === "following" ? "Following" : p.source === "board" ? "On Board" : null;
+                  const fromTeam = p.from_team;
+                  const toLabel = isPortal ? "Portal" : (p.team || "—");
+                  return (
+                    <Link
+                      key={p.id}
+                      to={`/dashboard/player/${p.id}`}
+                      className="flex items-center gap-2 py-1.5 text-xs hover:text-primary transition-colors cursor-pointer"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#D4AF37] shrink-0" />
+                      <span className="font-semibold">{p.first_name} {p.last_name}</span>
+                      {sourceLabel && (
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-px rounded">
+                          {sourceLabel}
+                        </span>
+                      )}
+                      <span className="flex items-center gap-1.5 ml-1">
+                        <span className="text-muted-foreground">{fromTeam || "—"}</span>
+                        <ArrowRight className={cn("h-3 w-3 shrink-0", arrowClass)} />
+                        <span className={cn("font-semibold", destClass)}>{toLabel}</span>
+                      </span>
+                      <span className="ml-auto text-[10px] text-muted-foreground font-mono">{timeSince(p.updated_at)}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ) : highFollowList.length === 0 && targetBoard.length === 0 ? (
+            <div className="mt-2 rounded-lg border border-dashed border-border/60 bg-muted/10 px-4 py-2 text-xs text-muted-foreground">
+              Add players to your High Follow list or Target Board to see personalized updates here.
+            </div>
+          ) : null}
         </div>
 
-        {/* ─── Main content: Top 10 + Target Board ─── */}
-        <div className="grid lg:grid-cols-[1.2fr_0.8fr] gap-4 items-start">
-          {/* Top 10 Leaderboard */}
+        {/* Top 5 Hitters + Top 5 Pitchers (data-dense dashboard style) */}
+        <div className="grid lg:grid-cols-2 gap-4 items-start">
           <Card className="border-border/60">
-            <CardHeader className="pb-2 pt-4 px-4">
-              <CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Top 10 — {metricLabel}{pool !== "all" ? ` · ${pool}` : ""}
-              </CardTitle>
+            <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle
+                  className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#D4AF37] shrink-0"
+                  style={{ fontFamily: "Oswald, sans-serif" }}
+                >
+                  Top 5 Hitters
+                </CardTitle>
+                <span className="hidden sm:block text-[10px] uppercase tracking-wider text-muted-foreground font-mono whitespace-nowrap">
+                  pAVG / pOBP / pSLG · pWRC+
+                </span>
+                <span className="sm:hidden text-[10px] uppercase tracking-wider text-muted-foreground font-mono">pWRC+</span>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
-              {isLoading ? (
-                <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>
-              ) : top10.length === 0 ? (
-                <div className="py-16 text-center text-sm text-muted-foreground">No data available for this metric / pool.</div>
-              ) : (
-                <div className="divide-y divide-border/30">
-                  {top10.map((row, idx) => (
+              <div className="divide-y divide-border/30">
+                {topHitters.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground">No data.</div>
+                ) : (
+                  topHitters.map((row, idx) => (
                     <Link
-                      key={`${row.player_id}-${idx}`}
+                      key={row.player_id}
                       to={profileRouteFor(row.player_id, row.position)}
-                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/40 transition-colors group"
+                      className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors duration-150 group cursor-pointer"
                     >
                       <span className={cn(
-                        "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold tabular-nums",
-                        idx === 0 ? "bg-primary/10 text-primary" : idx <= 2 ? "bg-muted text-foreground" : "text-muted-foreground"
+                        "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[11px] font-bold tabular-nums",
+                        idx === 0 ? "bg-[#D4AF37]/15 text-[#D4AF37]" : idx <= 2 ? "bg-muted text-foreground" : "text-muted-foreground",
                       )}>
                         {idx + 1}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium group-hover:text-primary transition-colors">
-                          {row.full_name}
-                        </span>
-                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                          <span className="truncate">{row.school}</span>
-                          {row.position && <><span>·</span><span>{row.position}</span></>}
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm font-semibold group-hover:text-primary transition-colors">
+                            {row.first_name} {row.last_name}
+                          </span>
                           {row.model_type === "transfer" && (
-                            <span className="text-amber-600 font-medium">Portal</span>
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-amber-600 bg-amber-50 border border-amber-200 rounded px-1 py-px">
+                              Portal
+                            </span>
                           )}
                         </div>
+                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <span className="truncate">{row.from_team || row.team || "-"}</span>
+                          {row.position && <><span className="text-muted-foreground/50">·</span><span>{row.position}</span></>}
+                        </div>
                       </div>
-                      <div className="ml-2 font-mono text-sm font-bold tabular-nums">
-                        {formatMetric(metric, row.metric_value)}
+                      <div className="hidden sm:block text-[10px] text-muted-foreground font-mono tabular-nums shrink-0 pr-2 whitespace-nowrap">
+                        {fmt3(row.p_avg)} / {fmt3(row.p_obp)} / {fmt3(row.p_slg)}
+                      </div>
+                      <div className="font-mono text-base font-bold tabular-nums shrink-0">
+                        {Math.round(row.p_wrc_plus)}
                       </div>
                     </Link>
-                  ))}
-                </div>
-              )}
+                  ))
+                )}
+              </div>
             </CardContent>
           </Card>
 
-          {/* Target Board — independent card */}
           <Card className="border-border/60">
-            <CardHeader className="pb-2 pt-4 px-4 flex flex-row items-center justify-between">
-              <CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Target Board</CardTitle>
-              <span className="text-[10px] text-muted-foreground/60">{targetBoard.length} players</span>
+            <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle
+                  className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#D4AF37] shrink-0"
+                  style={{ fontFamily: "Oswald, sans-serif" }}
+                >
+                  Top 5 Pitchers
+                </CardTitle>
+                <span className="hidden sm:block text-[10px] uppercase tracking-wider text-muted-foreground font-mono whitespace-nowrap">
+                  pERA / pFIP / pK/9 · pRV+
+                </span>
+                <span className="sm:hidden text-[10px] uppercase tracking-wider text-muted-foreground font-mono">pRV+</span>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <div className="divide-y divide-border/30">
-                {targetBoard.length === 0 ? (
-                  <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-                    No players on your board yet. Add players from the Player Dashboard or player profiles.
-                  </div>
+                {topPitchers.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground">No data.</div>
                 ) : (
-                  targetBoard.map((row) => {
-                    const initials = `${(row.first_name?.[0] || "").toUpperCase()}${(row.last_name?.[0] || "").toUpperCase()}`;
-                    // Players on the board with NOT IN PORTAL status display as WATCHING
-                    // (since they're on the board, they're being watched by the coach)
-                    const displayStatus = row.portal_status === "NOT IN PORTAL" ? "WATCHING" : row.portal_status;
-                    const statusConfig = {
-                      "IN PORTAL": { bg: "bg-emerald-500/10", text: "text-emerald-600", icon: LogIn, label: "In Portal" },
-                      "COMMITTED": { bg: "bg-blue-500/10", text: "text-blue-600", icon: CheckCircle, label: "Committed" },
-                      "WATCHING": { bg: "bg-[#D4AF37]/10", text: "text-[#D4AF37]", icon: Eye, label: "Watching" },
-                    }[displayStatus] || { bg: "bg-[#D4AF37]/10", text: "text-[#D4AF37]", icon: Eye, label: "Watching" };
-                    const StatusIcon = statusConfig.icon;
-                    return (
-                      <div
-                        key={row.player_id}
-                        className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors group"
-                      >
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#A08820]/15 text-[12px] font-bold text-[#D4AF37] ring-1 ring-[#D4AF37]/20">
-                          {initials}
-                        </div>
-                        <Link
-                          to={profileRouteFor(row.player_id, row.position)}
-                          className="min-w-0 flex-1 cursor-pointer"
-                        >
-                          <span className="block truncate text-sm font-medium group-hover:text-primary transition-colors">
+                  topPitchers.map((row, idx) => (
+                    <Link
+                      key={row.player_id}
+                      to={profileRouteFor(row.player_id, row.position)}
+                      className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors duration-150 group cursor-pointer"
+                    >
+                      <span className={cn(
+                        "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[11px] font-bold tabular-nums",
+                        idx === 0 ? "bg-[#D4AF37]/15 text-[#D4AF37]" : idx <= 2 ? "bg-muted text-foreground" : "text-muted-foreground",
+                      )}>
+                        {idx + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm font-semibold group-hover:text-primary transition-colors">
                             {row.first_name} {row.last_name}
                           </span>
-                          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                            <span className="truncate">{row.team || "—"}</span>
-                            {row.position && <><span>·</span><span>{row.position}</span></>}
-                          </div>
-                        </Link>
-                        <div className="flex flex-col items-end gap-1 shrink-0">
-                          <span className={cn(
-                            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
-                            statusConfig.bg, statusConfig.text,
-                          )}>
-                            <StatusIcon className="h-2.5 w-2.5" />
-                            {statusConfig.label}
-                          </span>
-                          <button
-                            onClick={() => removeFromBoard(row.player_id)}
-                            className="text-muted-foreground/40 hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
-                            title="Remove from board"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
+                          {row.model_type === "transfer" && (
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-amber-600 bg-amber-50 border border-amber-200 rounded px-1 py-px">
+                              Portal
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <span className="truncate">{row.from_team || row.team || "-"}</span>
+                          {row.position && <><span className="text-muted-foreground/50">·</span><span>{row.position}</span></>}
                         </div>
                       </div>
-                    );
-                  })
+                      <div className="hidden sm:block text-[10px] text-muted-foreground font-mono tabular-nums shrink-0 pr-2 whitespace-nowrap">
+                        {fmt2(row.p_era)} / {fmt2(row.p_fip)} / {fmt2(row.p_k9)}
+                      </div>
+                      <div className="font-mono text-base font-bold tabular-nums shrink-0">
+                        {Math.round(row.p_rv_plus)}
+                      </div>
+                    </Link>
+                  ))
                 )}
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* View Full Leaderboard */}
-        {!isLoading && players.length > 0 && (
-          <div className="text-center pb-2">
-            <Link to="/dashboard/returning" className="text-xs font-medium text-primary hover:underline">
-              View Full Leaderboard →
-            </Link>
-          </div>
-        )}
+        {/* Target Board */}
+        <Card className="border-border/60">
+          <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40 flex flex-row items-center justify-between">
+            <CardTitle
+              className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]"
+              style={{ fontFamily: "Oswald, sans-serif" }}
+            >
+              Target Board
+            </CardTitle>
+            <span className="text-[10px] text-muted-foreground/70 font-mono">{targetBoard.length} {targetBoard.length === 1 ? "player" : "players"}</span>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y divide-border/30">
+              {targetBoard.length === 0 ? (
+                <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  No players on your board yet. Add players from the Player Dashboard or player profiles.
+                </div>
+              ) : (
+                targetBoard.map((row) => {
+                  const initials = `${(row.first_name?.[0] || "").toUpperCase()}${(row.last_name?.[0] || "").toUpperCase()}`;
+                  const displayStatus = row.portal_status === "NOT IN PORTAL" ? "WATCHING" : row.portal_status;
+                  const statusConfig = {
+                    "IN PORTAL": { bg: "bg-emerald-500/10", text: "text-emerald-600", icon: LogIn, label: "In Portal" },
+                    "COMMITTED": { bg: "bg-blue-500/10", text: "text-blue-600", icon: CheckCircle, label: "Committed" },
+                    "WATCHING": { bg: "bg-[#D4AF37]/10", text: "text-[#D4AF37]", icon: Eye, label: "Watching" },
+                  }[displayStatus] || { bg: "bg-[#D4AF37]/10", text: "text-[#D4AF37]", icon: Eye, label: "Watching" };
+                  const StatusIcon = statusConfig.icon;
+                  return (
+                    <div
+                      key={row.player_id}
+                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/40 transition-colors duration-150 group"
+                    >
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#A08820]/15 text-[11px] font-bold text-[#D4AF37] ring-1 ring-[#D4AF37]/20">
+                        {initials}
+                      </div>
+                      <Link
+                        to={profileRouteFor(row.player_id, row.position)}
+                        className="min-w-0 flex-1 cursor-pointer"
+                      >
+                        <span className="block truncate text-sm font-semibold group-hover:text-primary transition-colors">
+                          {row.first_name} {row.last_name}
+                        </span>
+                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <span className="truncate">{row.team || "—"}</span>
+                          {row.position && <><span className="text-muted-foreground/50">·</span><span>{row.position}</span></>}
+                        </div>
+                      </Link>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                          statusConfig.bg, statusConfig.text,
+                        )}>
+                          <StatusIcon className="h-2.5 w-2.5" />
+                          {statusConfig.label}
+                        </span>
+                        <button
+                          onClick={() => removeFromBoard(row.player_id)}
+                          className="text-muted-foreground/40 hover:text-destructive transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+                          title="Remove from board"
+                          aria-label="Remove from board"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="text-center pb-2">
+          <Link to="/dashboard/returning" className="text-xs font-medium text-primary hover:underline">
+            View Full Leaderboard →
+          </Link>
+        </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+function BriefingTile({
+  label,
+  value,
+  icon,
+  accent,
+}: {
+  label: string;
+  value: string;
+  icon: React.ReactNode;
+  accent?: "emerald" | "blue" | "gold";
+}) {
+  const accentColor =
+    accent === "emerald" ? "text-emerald-400" : accent === "blue" ? "text-blue-400" : accent === "gold" ? "text-[#D4AF37]" : "text-white";
+  return (
+    <div className="px-4 py-3 flex flex-col gap-0.5">
+      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+        <span className="text-slate-500">{icon}</span>
+        {label}
+      </span>
+      <span
+        className={cn("text-xl font-bold tabular-nums", accentColor)}
+        style={{ fontFamily: "Oswald, sans-serif" }}
+      >
+        {value}
+      </span>
+    </div>
   );
 }

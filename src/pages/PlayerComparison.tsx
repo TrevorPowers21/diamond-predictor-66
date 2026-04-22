@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 import { computeTransferProjection } from "@/lib/transferProjection";
 import {
   DEFAULT_NIL_TIER_MULTIPLIERS,
@@ -1011,7 +1012,7 @@ export default function PlayerComparison() {
   ) => (
     <Card className="overflow-visible border-border/70 shadow-sm bg-card">
       <CardHeader className="pb-2 border-b bg-muted/20">
-        <CardTitle className="text-base">{title}</CardTitle>
+        <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>{title}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 pt-3">
         {/* Inputs */}
@@ -1105,7 +1106,7 @@ export default function PlayerComparison() {
   ) => (
     <Card className="overflow-visible border-border/70 shadow-sm bg-card">
       <CardHeader className="pb-2 border-b bg-muted/20">
-        <CardTitle className="text-base">{title}</CardTitle>
+        <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>{title}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 pt-3">
         {/* Inputs */}
@@ -1210,14 +1211,41 @@ export default function PlayerComparison() {
   return (
     <DashboardLayout>
       <div className="space-y-4 max-w-[1400px] mx-auto">
-        <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-4 flex items-center justify-between">
+        <div className="rounded-lg border-l-[3px] border-l-[#D4AF37] border-t border-r border-b border-border/60 bg-muted/20 px-4 py-4 flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight">Compare Dashboard</h2>
-            <p className="text-muted-foreground text-sm">Side-by-side player comparison using the transfer simulator engine.</p>
+            <h2
+              className="text-2xl font-bold tracking-[0.04em] uppercase leading-none"
+              style={{ fontFamily: "'Oswald', sans-serif", color: "#D4AF37" }}
+            >
+              Compare Dashboard
+            </h2>
+            <p className="text-muted-foreground text-xs mt-1.5 tracking-wide">Side-by-side player comparison · powered by the transfer simulator engine</p>
           </div>
-          <div className="flex gap-1 rounded-lg border bg-muted p-1">
-            <button className={`px-4 py-1.5 text-sm rounded-md font-medium transition-colors ${simType === "hitting" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`} onClick={() => setSimType("hitting")}>Hitting</button>
-            <button className={`px-4 py-1.5 text-sm rounded-md font-medium transition-colors ${simType === "pitching" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`} onClick={() => setSimType("pitching")}>Pitching</button>
+          <div className="flex gap-1 rounded-lg border border-border/60 bg-muted/40 p-1">
+            <button
+              className={cn(
+                "px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer",
+                simType === "hitting"
+                  ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              style={{ fontFamily: "'Oswald', sans-serif" }}
+              onClick={() => setSimType("hitting")}
+            >
+              Hitting
+            </button>
+            <button
+              className={cn(
+                "px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer",
+                simType === "pitching"
+                  ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              style={{ fontFamily: "'Oswald', sans-serif" }}
+              onClick={() => setSimType("pitching")}
+            >
+              Pitching
+            </button>
           </div>
         </div>
 

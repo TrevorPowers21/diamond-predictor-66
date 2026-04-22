@@ -86,6 +86,7 @@ export interface ReportPlayer {
   career_seasons?: any[];
   pitches?: any[];
   scouting_notes?: string | null;
+  coach_notes?: Array<{ id: string; content: string; tag: string | null; created_at: string; updated_at: string; author_email?: string | null }> | null;
   // Risk assessment
   risk_grade?: string | null;
   risk_score?: number | null;

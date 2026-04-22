@@ -1680,15 +1680,32 @@ export default function TransferPortal() {
   return (
     <DashboardLayout>
       <div className="space-y-4 max-w-[1400px] mx-auto">
-        {/* ─── Header ─── */}
-        <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-4 flex items-center justify-between">
+        {/* ─── Header — brand Oswald + gold accent ─── */}
+        <div className="rounded-lg border-l-[3px] border-l-[#D4AF37] border-t border-r border-b border-border/60 bg-muted/20 px-4 py-4 flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight">Transfer Portal</h2>
-            <p className="text-muted-foreground text-sm">Simulate player projections at a new school.</p>
+            <h2
+              className="text-2xl font-bold tracking-[0.04em] uppercase leading-none"
+              style={{ fontFamily: "'Oswald', sans-serif", color: "#D4AF37" }}
+            >
+              Transfer Portal
+            </h2>
+            <p className="text-muted-foreground text-xs mt-1.5 tracking-wide">Simulate player projections at a new school</p>
           </div>
-          <div className="flex gap-1 rounded-lg border bg-muted p-1">
-            <button className={`px-4 py-1.5 text-sm rounded-md font-medium transition-colors ${simType === "hitting" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`} onClick={() => setSimType("hitting")}>Hitting</button>
-            <button className={`px-4 py-1.5 text-sm rounded-md font-medium transition-colors ${simType === "pitching" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`} onClick={() => setSimType("pitching")}>Pitching</button>
+          <div className="flex gap-1 rounded-lg border border-border/60 bg-muted/40 p-1">
+            <button
+              className={`px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer ${simType === "hitting" ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30" : "text-muted-foreground hover:text-foreground"}`}
+              style={{ fontFamily: "'Oswald', sans-serif" }}
+              onClick={() => setSimType("hitting")}
+            >
+              Hitting
+            </button>
+            <button
+              className={`px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer ${simType === "pitching" ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30" : "text-muted-foreground hover:text-foreground"}`}
+              style={{ fontFamily: "'Oswald', sans-serif" }}
+              onClick={() => setSimType("pitching")}
+            >
+              Pitching
+            </button>
           </div>
         </div>
 

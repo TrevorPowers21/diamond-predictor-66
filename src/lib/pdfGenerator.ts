@@ -120,6 +120,7 @@ function drawSportStrip(doc: jsPDF, player: ReportPlayer, y: number): number {
     player.school,
     player.conference,
     player.season || "2025",
+    player.bats_throws || null,
   ].filter(Boolean);
   doc.text(parts.join("   ·   ").toUpperCase(), MARGIN + 12, y + 13);
 
@@ -534,16 +535,13 @@ function drawRiskAssessment(doc: jsPDF, player: ReportPlayer, y: number): number
 }
 
 // ── Section 8: Scouting Notes (auto-fill remaining) ─────────────────
-function drawScoutingNotes(doc: jsPDF, player: ReportPlayer, y: number, footerTop: number): number {
-  const minH = 50;
-  const maxH = 90;
-  const available = footerTop - y - GAP;
-  const H = Math.max(minH, Math.min(maxH, available));
+function drawScoutingNotes(doc: jsPDF, player: ReportPlayer, y: number, footerTopOrHeight: number, fixedHeight = false): number {
+  const H = fixedHeight
+    ? footerTopOrHeight
+    : Math.max(50, Math.min(90, footerTopOrHeight - y - GAP));
 
-  // Background
+  // Background + border
   rect(doc, MARGIN, y, CONTENT_W, H, WHITE);
-
-  // Border
   doc.setDrawColor(200, 200, 200);
   doc.setLineWidth(0.3);
   doc.rect(MARGIN, y, CONTENT_W, H, "S");
@@ -557,28 +555,22 @@ function drawScoutingNotes(doc: jsPDF, player: ReportPlayer, y: number, footerTo
   doc.setFont("helvetica", "bold");
   doc.text("SCOUTING NOTES", MARGIN + 10, y + 10);
 
-  // Horizontal lines for writing
-  doc.setDrawColor(220, 220, 220);
-  doc.setLineWidth(0.2);
-  const lineStart = y + titleH + 12;
-  const lineSpacing = 12;
-  for (let ly = lineStart; ly < y + H - 4; ly += lineSpacing) {
-    doc.line(MARGIN + 6, ly, PAGE_W - MARGIN - 6, ly);
-  }
-
-  // Notes text or placeholder
+  // Notes text or placeholder — no ruled lines behind the text
   const notes = player.scouting_notes;
+  const contentTop = y + titleH + 10;
+  const contentW = CONTENT_W - 16;
+  const lineSpacing = 10;
   doc.setFontSize(8.5);
   if (notes) {
     doc.setTextColor(...DARKGRAY);
     doc.setFont("helvetica", "normal");
-    const lines = doc.splitTextToSize(notes, CONTENT_W - 16);
+    const lines = doc.splitTextToSize(notes, contentW);
     const maxLines = Math.floor((H - titleH - 8) / lineSpacing);
-    doc.text(lines.slice(0, maxLines), MARGIN + 8, y + titleH + 10);
+    doc.text(lines.slice(0, maxLines), MARGIN + 8, contentTop);
   } else {
     doc.setTextColor(...MIDGRAY);
     doc.setFont("helvetica", "italic");
-    doc.text("Notes / analysis to be completed by staff.", MARGIN + 8, y + titleH + 10);
+    doc.text("Notes / analysis to be completed by staff.", MARGIN + 8, contentTop);
   }
 
   return y + H;
@@ -622,29 +614,24 @@ function generatePlayerPage(doc: jsPDF, player: ReportPlayer, reportTitle?: stri
   // 2. Sport Strip (20pt)
   y = drawSportStrip(doc, player, y);
 
-  // 3. Bio Row (40pt)
-  y = drawBioRow(doc, player, y);
+  // 3. Scouting Report (moved to top — fixed height)
+  y = drawScoutingNotes(doc, player, y, 120, true);
+  y += GAP;
 
-  // 4. Projected Stats
-  y = drawProjectedStats(doc, player, y);
-
-  // 5. IQ Stuff+ Grades (pitchers only)
-  y = drawStuffPlusGrades(doc, player, y);
-
-  // 6. Scouting Grades (55pt)
-  y = drawScoutingGrades(doc, player, y);
-
-  // 7. NIL Block (36pt)
-  y = drawNilBlock(doc, player, y);
-
-  // 7b. Risk Assessment
+  // 4. Risk Assessment (directly under scouting report)
   y = drawRiskAssessment(doc, player, y);
 
-  // Footer area
-  const footerTop = PAGE_H - 26;
+  // 5. Bio Row — HIDDEN for now (no TruMedia data). Keep code for future rollout.
+  // y = drawBioRow(doc, player, y);
 
-  // 8. Scouting Notes (fills remaining space)
-  drawScoutingNotes(doc, player, y, footerTop);
+  // 6. Projected Stats
+  y = drawProjectedStats(doc, player, y);
+
+  // 7. IQ Stuff+ Grades (pitchers only)
+  y = drawStuffPlusGrades(doc, player, y);
+
+  // 8. NIL Block (36pt)
+  y = drawNilBlock(doc, player, y);
 
   // Footer
   drawFooter(doc, reportTitle);
@@ -663,5 +650,150 @@ export function generateReportPdf(
     generatePlayerPage(doc, players[i], reportTitle);
   }
 
+  return doc.output("bloburl") as string;
+}
+
+// ── Coach Notes PDF ─────────────────────────────────────────────────
+/** Render a single-player PDF focused on coach notes (chronological, newest first).
+ *  Handles overflow onto additional pages. */
+function drawCoachNotesPage(
+  doc: jsPDF,
+  player: ReportPlayer,
+  notes: NonNullable<ReportPlayer["coach_notes"]>,
+  startIdx: number,
+): number {
+  rect(doc, 0, 0, PAGE_W, PAGE_H, WHITE);
+  let y = 0;
+  y = drawHeader(doc, player, y);
+  y = drawSportStrip(doc, player, y);
+  y = drawBioRow(doc, player, y);
+
+  // Snapshot stat row — single compact band
+  const snapY = y + 3;
+  const snapH = 36;
+  rect(doc, MARGIN, snapY, CONTENT_W, snapH, OFFWHITE);
+  doc.setDrawColor(200, 200, 200);
+  doc.setLineWidth(0.3);
+  doc.rect(MARGIN, snapY, CONTENT_W, snapH, "S");
+
+  const isPitcher = player.player_type === "pitcher";
+  const snapStats = isPitcher
+    ? [
+      { label: "pERA", value: fmtStat(player.p_era, 2) },
+      { label: "pFIP", value: fmtStat(player.p_fip, 2) },
+      { label: "pWHIP", value: fmtStat(player.p_whip, 2) },
+      { label: "pK/9", value: fmtStat(player.p_k9, 2) },
+      { label: "pRV+", value: player.overall_pr_plus == null ? "—" : Math.round(Number(player.overall_pr_plus)).toString() },
+      { label: "pWAR", value: fmtStat(player.p_war, 2) },
+    ]
+    : [
+      { label: "pAVG", value: fmtStat(player.p_avg, 3) },
+      { label: "pOBP", value: fmtStat(player.p_obp, 3) },
+      { label: "pSLG", value: fmtStat(player.p_slg, 3) },
+      { label: "pWRC+", value: player.p_wrc_plus == null ? "—" : Math.round(Number(player.p_wrc_plus)).toString() },
+      { label: "oWAR", value: fmtStat(player.owar, 2) },
+      { label: "Power+", value: player.power_rating_plus == null ? "—" : Math.round(Number(player.power_rating_plus)).toString() },
+    ];
+  const colW = CONTENT_W / snapStats.length;
+  snapStats.forEach((s, i) => {
+    const cx = MARGIN + i * colW;
+    doc.setTextColor(...MIDGRAY);
+    doc.setFontSize(6.5);
+    doc.setFont("helvetica", "bold");
+    centeredText(doc, s.label.toUpperCase(), cx, colW, snapY + 12);
+    doc.setTextColor(...DARK);
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "bold");
+    centeredText(doc, s.value, cx, colW, snapY + 28);
+  });
+  y = snapY + snapH + GAP;
+
+  // Notes section header
+  const headerH = 18;
+  rect(doc, MARGIN, y, CONTENT_W, headerH, NAVY);
+  rect(doc, MARGIN, y, 3, headerH, GOLD);
+  doc.setTextColor(...GOLD);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.text("COACH NOTES", MARGIN + 10, y + 12);
+  doc.setTextColor(...MIDGRAY);
+  doc.setFontSize(6.5);
+  doc.setFont("helvetica", "normal");
+  rightText(doc, `${notes.length} ${notes.length === 1 ? "entry" : "entries"}`, MARGIN, CONTENT_W - 10, y + 12);
+  y += headerH + 6;
+
+  // Notes list
+  const footerTop = PAGE_H - 26;
+  const contentW = CONTENT_W - 20;
+  doc.setFontSize(8.5);
+
+  let idx = startIdx;
+  while (idx < notes.length) {
+    const note = notes[idx];
+    const dateStr = new Date(note.created_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+    const tagStr = note.tag ? ` · ${note.tag.toUpperCase()}` : "";
+    const header = `${dateStr}${tagStr}`;
+
+    doc.setFont("helvetica", "normal");
+    const bodyLines = doc.splitTextToSize(note.content, contentW);
+    const entryHeight = 14 + bodyLines.length * 11 + 6; // header + body + padding
+
+    if (y + entryHeight > footerTop - 4) break; // overflow — caller handles page
+
+    // Entry card
+    rect(doc, MARGIN, y, CONTENT_W, entryHeight, OFFWHITE);
+    doc.setDrawColor(220, 220, 220);
+    doc.setLineWidth(0.2);
+    doc.rect(MARGIN, y, CONTENT_W, entryHeight, "S");
+    // Gold left accent
+    rect(doc, MARGIN, y, 2, entryHeight, GOLD);
+
+    // Date header
+    doc.setTextColor(...GOLD);
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "bold");
+    doc.text(header, MARGIN + 10, y + 11);
+
+    // Body
+    doc.setTextColor(...DARK);
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "normal");
+    doc.text(bodyLines, MARGIN + 10, y + 22);
+
+    y += entryHeight + 4;
+    idx++;
+  }
+
+  drawFooter(doc, `${player.name} · Coach Notes`);
+  return idx; // return next note index to resume from
+}
+
+export function generateCoachNotesPdf(
+  player: ReportPlayer,
+  notes: NonNullable<ReportPlayer["coach_notes"]>,
+): string {
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+
+  if (notes.length === 0) {
+    rect(doc, 0, 0, PAGE_W, PAGE_H, WHITE);
+    let y = 0;
+    y = drawHeader(doc, player, y);
+    y = drawSportStrip(doc, player, y);
+    y = drawBioRow(doc, player, y);
+    doc.setTextColor(...MIDGRAY);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "italic");
+    centeredText(doc, "No coach notes yet.", MARGIN, CONTENT_W, y + 40);
+    drawFooter(doc, `${player.name} · Coach Notes`);
+    return doc.output("bloburl") as string;
+  }
+
+  let idx = 0;
+  while (idx < notes.length) {
+    if (idx > 0) doc.addPage();
+    const next = drawCoachNotesPage(doc, player, notes, idx);
+    if (next === idx) break; // prevent infinite loop if a single note is too large
+    idx = next;
+  }
   return doc.output("bloburl") as string;
 }

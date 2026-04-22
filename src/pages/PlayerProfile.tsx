@@ -26,6 +26,9 @@ import { readPlayerOverrides } from "@/lib/playerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
+import CoachNotes from "@/components/CoachNotes";
+import { useCoachNotes } from "@/hooks/useCoachNotes";
+import { generateCoachNotesPdf, generateReportPdf } from "@/lib/pdfGenerator";
 import { assessHitterRisk } from "@/lib/playerRisk";
 import { generateHitterReport } from "@/lib/scoutingReportGenerator";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
@@ -179,6 +182,7 @@ export default function PlayerProfile() {
   const { hasRole } = useAuth();
   const isAdmin = hasRole("admin");
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
+  const { notes: coachNotesForExport } = useCoachNotes(id ?? null);
   const { conferenceStatsByKey } = useConferenceStats(2025);
   const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
 
@@ -822,6 +826,112 @@ export default function PlayerProfile() {
           </div>
           {
             <>
+              <CoachNotes
+                playerId={player.id}
+                playerName={`${player.first_name} ${player.last_name}`}
+                onExportPdf={(notes, format) => {
+                  if (format === "full") {
+                    // Build same rich rp as Export Report button, plus coach notes
+                    const rp: ReportPlayer = {
+                      id: player.id,
+                      player_type: "hitter",
+                      name: `${player.first_name || ""} ${player.last_name || ""}`.trim(),
+                      school: displayTeam2025 || player.team,
+                      position: effectivePosition,
+                      class_year: player.class_year,
+                      bats_throws: [(player as any).bats_hand, (player as any).throws_hand].filter(Boolean).join("/") || undefined,
+                      conference: resolvedConference || player.conference,
+                      height: player.height_inches ? `${Math.floor(player.height_inches / 12)}'${player.height_inches % 12}"` : undefined,
+                      weight: player.weight,
+                      hometown: [player.home_state, player.high_school].filter(Boolean).join(", ") || undefined,
+                      p_avg: projectedAvg, p_obp: projectedObp, p_slg: projectedSlg,
+                      p_ops: projectedDerived.ops, p_iso: projectedDerived.iso,
+                      p_wrc_plus: projectedWrcPlus,
+                      owar: displayOWar,
+                      nil_value: displayNilValuation,
+                      power_rating_plus: seedPowerDerived?.overallPlus,
+                      barrel_score: seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined,
+                      ev_score: seedPowerDerived?.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : undefined,
+                      contact_score: seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined,
+                      chase_score: seedPowerDerived?.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : undefined,
+                      career_seasons: hitterMasterSeasons as any[],
+                      scouting_notes: (() => {
+                        if ((player as any).notes) return (player as any).notes;
+                        if (!seedPowerRow) return undefined;
+                        return generateHitterReport({
+                          batHand: (player as any).bats_hand,
+                          position: effectivePosition,
+                          conference: resolvedConference || player.conference,
+                          avg: seedStatRow?.avg, obp: seedStatRow?.obp, slg: seedStatRow?.slg,
+                          iso: seedDerived?.iso,
+                          pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
+                          contact: seedPowerRow.contact, chase: seedPowerRow.chase, bb: seedPowerRow.bb,
+                          avgEv: seedPowerRow.avgExitVelo, ev90: seedPowerRow.ev90,
+                          barrel: seedPowerRow.barrel, laSweet: seedPowerRow.la10_30,
+                          lineDrive: seedPowerRow.lineDrive, gb: seedPowerRow.gb,
+                          pull: seedPowerRow.pull, popUp: seedPowerRow.popUp,
+                        }, "rstriq", "full");
+                      })(),
+                      coach_notes: notes,
+                    };
+                    const riskResult = assessHitterRisk({
+                      conference: resolvedConference || player.conference,
+                      projectedWrcPlus: projectedWrcPlus,
+                      careerSeasons: hitterMasterSeasons as any[],
+                      pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
+                      chase: seedPowerRow?.chase, contact: seedPowerRow?.contact,
+                      whiff: seedPowerRow?.whiff, barrel: seedPowerRow?.barrel,
+                      lineDrive: seedPowerRow?.lineDrive, avgEv: seedPowerRow?.avgExitVelo,
+                      ev90: seedPowerRow?.ev90, gb: seedPowerRow?.gb, bb: seedPowerRow?.bb,
+                    });
+                    rp.risk_grade = riskResult.grade;
+                    rp.risk_score = riskResult.overall;
+                    rp.risk_trajectory = riskResult.trajectory;
+                    rp.risk_summary = riskResult.summary;
+                    rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
+                    const url = generateReportPdf([rp]);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = `${player.first_name}-${player.last_name}-scouting-report.pdf`.toLowerCase().replace(/\s+/g, "-");
+                    link.click();
+                  } else {
+                    // Coach notes only — minimal rp for the focused notes PDF
+                    const rp: ReportPlayer = {
+                      id: player.id,
+                      player_type: "hitter",
+                      name: `${player.first_name || ""} ${player.last_name || ""}`.trim(),
+                      school: displayTeam2025 || player.team,
+                      position: effectivePosition,
+                      class_year: player.class_year,
+                      conference: resolvedConference || player.conference,
+                      p_avg: projectedAvg, p_obp: projectedObp, p_slg: projectedSlg,
+                      p_wrc_plus: projectedWrcPlus,
+                      owar: displayOWar,
+                      power_rating_plus: seedPowerDerived?.overallPlus,
+                      coach_notes: notes,
+                    };
+                    const url = generateCoachNotesPdf(rp, notes);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = `${player.first_name}-${player.last_name}-coach-notes.pdf`.toLowerCase().replace(/\s+/g, "-");
+                    link.click();
+                  }
+                }}
+              />
+              <Button
+                variant={isOnBoard(player.id) ? "default" : "outline"}
+                size="sm"
+                onClick={() => {
+                  if (isOnBoard(player.id)) {
+                    removeFromBoard(player.id);
+                  } else {
+                    addToBoard({ playerId: player.id });
+                  }
+                }}
+              >
+                <Target className="mr-2 h-3.5 w-3.5" />
+                {isOnBoard(player.id) ? "On Board" : "Add to Target Board"}
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -861,7 +971,6 @@ export default function PlayerProfile() {
                     grade_ofp: seedPowerDerived?.overallPlus != null ? Math.min(80, Math.max(20, Math.round(seedPowerDerived.overallPlus / 2.5 + 20))) : undefined,
                     career_seasons: hitterMasterSeasons as any[],
                     scouting_notes: (() => {
-                      // Use manual notes if present, otherwise generate full report
                       if ((player as any).notes) return (player as any).notes;
                       if (!seedPowerRow) return undefined;
                       return generateHitterReport({
@@ -879,7 +988,6 @@ export default function PlayerProfile() {
                       }, "rstriq", "full");
                     })(),
                   };
-                  // Attach risk assessment
                   const riskResult = assessHitterRisk({
                     conference: resolvedConference || player.conference,
                     projectedWrcPlus: projectedWrcPlus,
@@ -895,42 +1003,15 @@ export default function PlayerProfile() {
                   rp.risk_trajectory = riskResult.trajectory;
                   rp.risk_summary = riskResult.summary;
                   rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
+                  rp.coach_notes = coachNotesForExport;
                   try { downloadSinglePlayerReport(rp); } catch (err: any) { toast.error(`Export failed: ${err.message}`); }
                 }}
               >
                 <Download className="mr-2 h-3.5 w-3.5" />
-                Export PDF
-              </Button>
-              <Button
-                variant={isOnBoard(player.id) ? "default" : "outline"}
-                size="sm"
-                onClick={() => {
-                  if (isOnBoard(player.id)) {
-                    removeFromBoard(player.id);
-                  } else {
-                    addToBoard({ playerId: player.id });
-                  }
-                }}
-              >
-                <Target className="mr-2 h-3.5 w-3.5" />
-                {isOnBoard(player.id) ? "On Board" : "Target Board"}
+                Export Report
               </Button>
             </>
           }
-          {!editing ? (
-            <Button variant="outline" size="sm" onClick={startEdit}>
-              <Pencil className="mr-2 h-3.5 w-3.5" />Edit
-            </Button>
-          ) : (
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => setEditing(false)}>
-                <X className="mr-1 h-3.5 w-3.5" />Cancel
-              </Button>
-              <Button size="sm" onClick={saveEdit} disabled={updatePlayer.isPending}>
-                <Save className="mr-1 h-3.5 w-3.5" />Save
-              </Button>
-            </div>
-          )}
         </div>
 
         <div className="grid gap-4 lg:grid-cols-3">
@@ -1393,6 +1474,7 @@ export default function PlayerProfile() {
             )}
           </div>
         </div>
+
       </div>
     </DashboardLayout>
   );
