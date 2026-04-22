@@ -734,12 +734,15 @@ async function writeResults(
   }
 
   for (const [cls, ids] of classGroups) {
+    // Strip _v1/_v2 suffix so pitch_type matches canonical bucket (Stuff+ engine reads pitch_type)
+    const canonicalPitchType = cls.replace(/_v\d+$/, "");
     for (let i = 0; i < ids.length; i += 500) {
       const batch = ids.slice(i, i + 500);
       const { error } = await (supabase as any)
         .from("pitcher_stuff_plus_inputs")
         .update({
           rstr_pitch_class: cls,
+          pitch_type: canonicalPitchType,
           needs_review: false,
           p_consolidated: false,
           boundary_case: false,
