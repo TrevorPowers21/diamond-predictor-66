@@ -45,7 +45,7 @@ Tables split into two buckets:
 ### Shared (no RLS — all authenticated users can read)
 The RSTR IQ data platform. This is what every customer pays for access to.
 - `Hitter Master`, `Pitching Master`, `Teams Table`, `Conference Stats`, `Park Factors`, `Conference Names`, `NCAA Averages`
-- `Equation Weights`, `model_config`
+- `Equation Weights`, `model_config` — **global defaults**; customized per team via the overlay table below
 - `pitcher_stuff_plus_inputs`, `pitcher_stuff_plus_ncaa`
 - `pitcher_role_overrides` (global overrides, debatable — current plan keeps it global)
 - `player_predictions` — **kept global in v1**. Class transition and dev aggressiveness are objective facts about the player, not team-specific beliefs. If teams later want their own overrides, add a `team_prediction_overrides` layer on top. Don't over-engineer now.
@@ -56,8 +56,14 @@ Tables where coaches store team-specific work. These need a `team_id` column and
 - `coach_notes` — scouting notes on players
 - `team_builds` / `team_builds_members` — Team Builder saved drafts (if the tables exist yet)
 - `nil_valuations` — if per-team (confirm current use)
+- `team_equation_overrides` — **Tier 3 (custom equations) overlay**. Created empty in v1; populated when the Custom Equations UI ships post-launch. At compute time, projection engine reads per-team overrides first, falls back to global `Equation Weights` defaults.
 
 Any table we add post-launch that holds per-coach-team data follows the same pattern.
+
+### Customization architecture (for Peyton)
+This is how we offer per-program equation customization without spinning up separate Supabase projects per customer. **Global defaults + per-team overlay.** Pattern used by Stripe, Linear, Notion, essentially every multi-tenant SaaS. Data platform stays one source of truth, customizations stack on top.
+
+When Tier 3 (custom equations) ships, a team admin opens a Custom Equations page, tweaks weight sliders, saves → rows land in `team_equation_overrides`. No data duplication. When RSTR IQ pushes an update to the global equations, their overrides stay intact — anything they haven't customized picks up the update, anything they have sticks.
 
 ---
 
@@ -117,6 +123,24 @@ Tables to verify + add column if missing:
 - `coach_notes` — check current schema
 - `team_builds` / `team_builds_members` — check
 - `nil_valuations` — check
+
+### New table: `team_equation_overrides` (Tier 3 overlay)
+Built empty in v1. Populated when the Custom Equations UI ships. Projection engine reads this first, falls back to global `Equation Weights`.
+
+```sql
+CREATE TABLE team_equation_overrides (
+  team_id uuid REFERENCES teams(id) ON DELETE CASCADE,
+  equation_key text NOT NULL,        -- matches a key in Equation Weights (e.g. "r_w_obp")
+  value numeric NOT NULL,
+  updated_at timestamptz DEFAULT now(),
+  updated_by uuid REFERENCES auth.users(id),
+  PRIMARY KEY (team_id, equation_key)
+);
+
+CREATE INDEX idx_team_equation_overrides_team_id ON team_equation_overrides(team_id);
+```
+
+RLS follows the standard team-scoped pattern (superadmin or team_admin of that team). General users can't modify equations.
 
 ---
 
@@ -252,6 +276,8 @@ Need a Supabase Edge Function for the admin API call (can't call `auth.admin.*` 
 4. **Superadmin impersonation = Option A** (view exactly what the team sees) ✓
 5. **player_predictions stays global in v1** — team-specific overrides deferred ✓
 6. **Existing `user_roles` table repurposed for superadmin only** — team roles live in new `user_team_access` table ✓
+7. **Shared tables + RLS (not per-tenant Supabase projects)** — RSTR IQ data platform is one source of truth across all customers. One update, everyone benefits. ✓
+8. **Per-team customization via overlay tables** — team_equation_overrides (Tier 3), team_prediction_overrides (future). Global defaults stay shared; per-team tweaks stack on top. No data duplication. ✓
 
 ---
 
@@ -274,12 +300,13 @@ Need a Supabase Edge Function for the admin API call (can't call `auth.admin.*` 
 Work happens on `feature/auth` branch off `staging`. PR into `staging` when each chunk is tested.
 
 ### Step 1 — Schema + seed (1 day)
-- Create `teams` and `user_team_access` tables
+- Create `teams`, `user_team_access`, and `team_equation_overrides` tables
 - Add `team_id` column to every team-scoped table
 - Backfill `team_id` on existing rows (demo school → one initial team)
 - Seed superadmin rows in `user_roles`
 - Create initial "UCSB" or whichever demo team in `teams`
 - Move Trevor + Peyton into it as team_admin too for local testing
+- Wire projection engine to read `team_equation_overrides` first, fall back to `Equation Weights` (reads always stay safe — empty overrides table means no change in behavior)
 
 ### Step 2 — useAuth refactor (half day)
 - Add superadmin detection, effectiveTeamId, impersonation state
