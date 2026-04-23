@@ -2158,18 +2158,37 @@ export default function ReturningPlayers() {
         ) : (
           <>
         <div className="space-y-2">
-          <div className="relative w-full max-w-md">
+          <div className="relative w-full max-w-md" ref={searchRef}>
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
             <Input
-              placeholder="Search pitchers, teams..."
-              value={pitchingSearch}
-              onChange={(e) => setPitchingSearch(e.target.value)}
+              placeholder="Search all players..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onFocus={() => { if (searchResults.length > 0) setShowSearchDropdown(true); }}
               className="pl-9 pr-8 h-9 text-sm rounded-lg border-border/60 focus-visible:ring-primary/30"
             />
-            {pitchingSearch && (
-              <button onClick={() => setPitchingSearch("")} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+            {search && (
+              <button onClick={() => { setSearch(""); setShowSearchDropdown(false); }} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
                 <X className="h-4 w-4" />
               </button>
+            )}
+            {showSearchDropdown && searchResults.length > 0 && (
+              <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-80 overflow-y-auto">
+                {searchResults.map((p) => (
+                  <button
+                    key={p.id}
+                    className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors cursor-pointer flex items-center justify-between gap-2 text-sm"
+                    onClick={() => {
+                      setShowSearchDropdown(false);
+                      setSearch("");
+                      navigate(profileRouteFor(p.id, p.position));
+                    }}
+                  >
+                    <span className="font-medium">{p.first_name} {p.last_name}</span>
+                    <span className="text-xs text-muted-foreground">{p.position || ""} · {p.team || ""}</span>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
           <div className="flex flex-wrap gap-1.5">
