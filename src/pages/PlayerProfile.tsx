@@ -600,6 +600,38 @@ export default function PlayerProfile() {
     enabled: !!player?.from_team && !!isTransferPortal,
   });
 
+  // Pinned 2025 row — anchors projections, risk, and scouting report so they
+  // don't shift when the scouting grades dropdown changes season. Substitutes
+  // blended_* columns when combined_used (under-qualified 2025 sample).
+  // MUST be declared before early returns to keep hook order stable.
+  const projectionSourceRow = useMemo(() => {
+    const row = (hitterMasterSeasons as any[]).find((r) => Number(r.Season) === 2025);
+    if (!row) return null;
+    const combinedUsed = !!row.combined_used;
+    return {
+      combined_used: combinedUsed,
+      combined_pa: row.combined_pa ?? null,
+      combined_seasons: row.combined_seasons ?? null,
+      AVG: combinedUsed ? (row.blended_avg ?? row.AVG) : row.AVG,
+      OBP: combinedUsed ? (row.blended_obp ?? row.OBP) : row.OBP,
+      SLG: combinedUsed ? (row.blended_slg ?? row.SLG) : row.SLG,
+      ISO: combinedUsed ? (row.blended_iso ?? row.ISO) : row.ISO,
+      contact: combinedUsed ? (row.blended_contact ?? row.contact) : row.contact,
+      line_drive: combinedUsed ? (row.blended_line_drive ?? row.line_drive) : row.line_drive,
+      avg_exit_velo: combinedUsed ? (row.blended_avg_exit_velo ?? row.avg_exit_velo) : row.avg_exit_velo,
+      pop_up: combinedUsed ? (row.blended_pop_up ?? row.pop_up) : row.pop_up,
+      bb: combinedUsed ? (row.blended_bb ?? row.bb) : row.bb,
+      chase: combinedUsed ? (row.blended_chase ?? row.chase) : row.chase,
+      barrel: combinedUsed ? (row.blended_barrel ?? row.barrel) : row.barrel,
+      ev90: combinedUsed ? (row.blended_ev90 ?? row.ev90) : row.ev90,
+      pull: combinedUsed ? (row.blended_pull ?? row.pull) : row.pull,
+      la_10_30: combinedUsed ? (row.blended_la_10_30 ?? row.la_10_30) : row.la_10_30,
+      gb: combinedUsed ? (row.blended_gb ?? row.gb) : row.gb,
+      ab: row.ab ?? null,
+      pa: row.pa ?? null,
+    };
+  }, [hitterMasterSeasons]);
+
   if (isLoading) {
     return (
       <DashboardLayout>
@@ -710,37 +742,6 @@ export default function PlayerProfile() {
   // Season-aware scouting grades + power ratings from Hitter Master
   // Falls back to seedPowerDerived (2025) when no Hitter Master row exists for the selected season
   const activeSeasonRow = (hitterMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason) || null;
-
-  // Pinned 2025 row — anchors projections, risk, and scouting report so they
-  // don't shift when the scouting grades dropdown changes season. Substitutes
-  // blended_* columns when combined_used (under-qualified 2025 sample).
-  const projectionSourceRow = useMemo(() => {
-    const row = (hitterMasterSeasons as any[]).find((r) => Number(r.Season) === 2025);
-    if (!row) return null;
-    const combinedUsed = !!row.combined_used;
-    return {
-      combined_used: combinedUsed,
-      combined_pa: row.combined_pa ?? null,
-      combined_seasons: row.combined_seasons ?? null,
-      AVG: combinedUsed ? (row.blended_avg ?? row.AVG) : row.AVG,
-      OBP: combinedUsed ? (row.blended_obp ?? row.OBP) : row.OBP,
-      SLG: combinedUsed ? (row.blended_slg ?? row.SLG) : row.SLG,
-      ISO: combinedUsed ? (row.blended_iso ?? row.ISO) : row.ISO,
-      contact: combinedUsed ? (row.blended_contact ?? row.contact) : row.contact,
-      line_drive: combinedUsed ? (row.blended_line_drive ?? row.line_drive) : row.line_drive,
-      avg_exit_velo: combinedUsed ? (row.blended_avg_exit_velo ?? row.avg_exit_velo) : row.avg_exit_velo,
-      pop_up: combinedUsed ? (row.blended_pop_up ?? row.pop_up) : row.pop_up,
-      bb: combinedUsed ? (row.blended_bb ?? row.bb) : row.bb,
-      chase: combinedUsed ? (row.blended_chase ?? row.chase) : row.chase,
-      barrel: combinedUsed ? (row.blended_barrel ?? row.barrel) : row.barrel,
-      ev90: combinedUsed ? (row.blended_ev90 ?? row.ev90) : row.ev90,
-      pull: combinedUsed ? (row.blended_pull ?? row.pull) : row.pull,
-      la_10_30: combinedUsed ? (row.blended_la_10_30 ?? row.la_10_30) : row.la_10_30,
-      gb: combinedUsed ? (row.blended_gb ?? row.gb) : row.gb,
-      ab: row.ab ?? null,
-      pa: row.pa ?? null,
-    };
-  }, [hitterMasterSeasons]);
 
   const activeSeasonScoutingGrades = activeSeasonRow ? {
     barrelScore: activeSeasonRow.barrel_score ?? seedPowerDerived?.barrelScore ?? null,
