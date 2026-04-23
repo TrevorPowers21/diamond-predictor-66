@@ -76,9 +76,10 @@ export default function ReclassificationRunner() {
             className="cursor-pointer border bg-transparent px-3 py-2 text-sm text-white focus:outline-none"
             style={{ borderColor: NAVY_BORDER }}
           >
+            <option value={2026}>2026</option>
             <option value={2025}>2025</option>
             <option value={2024}>2024</option>
-            <option value={2026}>2026</option>
+            <option value={2023}>2023</option>
           </select>
         </div>
         <button

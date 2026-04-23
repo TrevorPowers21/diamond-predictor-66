@@ -552,7 +552,7 @@ export default function PitcherProfile() {
     return normalizePitcherTeamName(player?.team || "");
   }, [player?.team, storageRef?.teamName]);
   const { data: pitchArsenalRows = [] } = useQuery({
-    queryKey: ["pitcher-profile-pitch-arsenal", id, lookupPlayerName, (player as any)?.source_player_id],
+    queryKey: ["pitcher-profile-pitch-arsenal", id, lookupPlayerName, (player as any)?.source_player_id, effectiveSeason],
     enabled: !!lookupPlayerName || !!(player as any)?.source_player_id || !!id,
     queryFn: async () => {
       // Resolve the source_player_id that pitcher_stuff_plus_inputs uses.
@@ -570,7 +570,7 @@ export default function PitcherProfile() {
         const { data: masterRow } = await (supabase as any)
           .from("Pitching Master")
           .select("source_player_id")
-          .eq("Season", 2025)
+          .eq("Season", effectiveSeason)
           .ilike("playerFullName", lookupPlayerName)
           .limit(1)
           .maybeSingle();
@@ -584,7 +584,7 @@ export default function PitcherProfile() {
         .from("pitcher_stuff_plus_inputs")
         .select("season, source_player_id, hand, pitch_type, pitches, whiff_pct, stuff_plus")
         .eq("source_player_id", sourceId)
-        .eq("season", 2025)
+        .eq("season", effectiveSeason)
         .gte("pitches", 5)
         .order("pitches", { ascending: false });
 
@@ -612,7 +612,7 @@ export default function PitcherProfile() {
           .from("Pitch Arsenal")
           .select("season, source_player_id, player_name, hand, pitch_type, stuff_plus, whiff_pct, total_pitches, total_pitches_all, overall_stuff_plus")
           .eq("source_player_id", sourceId)
-          .eq("season", 2025)
+          .eq("season", effectiveSeason)
           .order("total_pitches", { ascending: false });
         if (error) throw error;
         return (data || []).map((r: any) => ({ ...r, usage_pct: null })) as PitchArsenalRow[];
@@ -623,7 +623,7 @@ export default function PitcherProfile() {
           .from("Pitch Arsenal")
           .select("season, source_player_id, player_name, hand, pitch_type, stuff_plus, whiff_pct, total_pitches, total_pitches_all, overall_stuff_plus")
           .eq("player_name", lookupPlayerName)
-          .eq("season", 2025)
+          .eq("season", effectiveSeason)
           .order("total_pitches", { ascending: false });
         if (error) throw error;
         return (data || []).map((r: any) => ({ ...r, usage_pct: null })) as PitchArsenalRow[];
