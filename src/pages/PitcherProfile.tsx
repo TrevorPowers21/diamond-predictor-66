@@ -709,6 +709,8 @@ export default function PitcherProfile() {
         ev90_score: fromSeasons.ev90_score ?? null,
         pull_score: fromSeasons.pull_score ?? null,
         la_score: fromSeasons.la_score ?? null,
+        combined_used: combinedUsed,
+        combined_seasons: fromSeasons.combined_seasons ?? null,
         miss_pct: fromSeasons.miss_pct ?? null,
         bb_pct: fromSeasons.bb_pct ?? null,
         hard_hit_pct: fromSeasons.hard_hit_pct ?? null,
@@ -1791,7 +1793,11 @@ export default function PitcherProfile() {
                       );
                     })()}
                     {(() => {
-                      const wp = (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct;
+                      // For pullback pitchers (combined_used), prefer arsenal-derived whiff% which is blend-aware.
+                      const combinedUsedForOverview = !!(masterRow as any)?.combined_used;
+                      const wp = combinedUsedForOverview
+                        ? (pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null)
+                        : ((masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct);
                       const tierStyle = wp == null ? { border: "#162241", bg: "#0d1a30", text: "#8a94a6" }
                         : wp >= 27 ? { border: "hsl(142,71%,45%,0.3)", bg: "hsl(142,71%,45%,0.12)", text: "hsl(142,71%,35%)" }
                         : wp >= 21 ? { border: "hsl(200,80%,50%,0.3)", bg: "hsl(200,80%,50%,0.12)", text: "hsl(200,80%,35%)" }
