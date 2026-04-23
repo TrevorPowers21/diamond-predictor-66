@@ -629,6 +629,22 @@ export default function PlayerProfile() {
       gb: combinedUsed ? (row.blended_gb ?? row.gb) : row.gb,
       ab: row.ab ?? null,
       pa: row.pa ?? null,
+      // Stored power ratings — already computed from blended inputs by the pipeline
+      overall_plus: row.overall_plus ?? null,
+      ba_plus: row.ba_plus ?? null,
+      obp_plus: row.obp_plus ?? null,
+      iso_plus: row.iso_plus ?? null,
+      barrel_score: row.barrel_score ?? null,
+      avg_ev_score: row.avg_ev_score ?? null,
+      contact_score: row.contact_score ?? null,
+      chase_score: row.chase_score ?? null,
+      bb_score: row.bb_score ?? null,
+      line_drive_score: row.line_drive_score ?? null,
+      pop_up_score: row.pop_up_score ?? null,
+      ev90_score: row.ev90_score ?? null,
+      pull_score: row.pull_score ?? null,
+      la_score: row.la_score ?? null,
+      gb_score: row.gb_score ?? null,
     };
   }, [hitterMasterSeasons]);
 
@@ -1355,8 +1371,11 @@ export default function PlayerProfile() {
                 <div className="text-2xl font-bold tracking-tight mt-1 text-[#D4AF37]">{displayNilValuation != null ? `$${Math.round(displayNilValuation).toLocaleString()}` : "—"}</div>
               </div>
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
-                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Power Rating</div>
-                <div className={`text-3xl font-bold tracking-tight mt-1 ${powerTierClass(seedPowerDerived?.overallPlus ?? null)}`}>{pctFormat(seedPowerDerived?.overallPlus ?? null)}</div>
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Power Rating{projectionSourceRow?.combined_used ? "*" : ""}</div>
+                <div className={`text-3xl font-bold tracking-tight mt-1 ${powerTierClass(projectionSourceRow?.overall_plus ?? seedPowerDerived?.overallPlus ?? null)}`}>{pctFormat(projectionSourceRow?.overall_plus ?? seedPowerDerived?.overallPlus ?? null)}</div>
+                {projectionSourceRow?.combined_used && (
+                  <div className="mt-1 text-[9px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"}</div>
+                )}
               </div>
             </div>
 
@@ -1466,7 +1485,14 @@ export default function PlayerProfile() {
                 gb: p?.gb ?? seedPowerRow?.gb,
                 bb: p?.bb ?? seedPowerRow?.bb,
               });
-              return <RiskAssessmentCardRSTR risk={risk} />;
+              return (
+                <>
+                  <RiskAssessmentCardRSTR risk={risk} />
+                  {projectionSourceRow?.combined_used && (
+                    <div className="-mt-2 text-[10px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"} sample</div>
+                  )}
+                </>
+              );
             })()}
 
             {/* Scouting Report */}
@@ -1496,11 +1522,14 @@ export default function PlayerProfile() {
                 <Card className="border-[#162241] bg-[#0a1428]">
                   <CardHeader className="pb-2 pt-3 px-4">
                     <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>
-                      Scouting Report
+                      Scouting Report{projectionSourceRow?.combined_used ? "*" : ""}
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
                     <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{report}</p>
+                    {projectionSourceRow?.combined_used && (
+                      <p className="mt-2 text-[10px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"} sample</p>
+                    )}
                   </CardContent>
                 </Card>
               );
@@ -1511,7 +1540,9 @@ export default function PlayerProfile() {
               <Card className="border-[#162241] bg-[#0a1428]">
                 <CardHeader className="pb-2 pt-3 px-4">
                   <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Scouting Grades</CardTitle>
+                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>
+                      Scouting Grades{effectiveSeason === 2025 && projectionSourceRow?.combined_used ? "*" : ""}
+                    </CardTitle>
                     {availableSeasons.length > 1 && (
                       <Select value={String(effectiveSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
                         <SelectTrigger className="h-8 w-[75px] text-xs font-semibold border-[#162241] bg-[#0d1a30] text-slate-200">
@@ -1533,6 +1564,9 @@ export default function PlayerProfile() {
                     <ScoutGrade label="Con" value={activeSeasonScoutingGrades.contactScore != null ? Math.round(activeSeasonScoutingGrades.contactScore) : null} fullLabel="Contact%" />
                     <ScoutGrade label="Chs" value={activeSeasonScoutingGrades.chaseScore != null ? Math.round(activeSeasonScoutingGrades.chaseScore) : null} fullLabel="Chase%" />
                   </div>
+                  {effectiveSeason === 2025 && projectionSourceRow?.combined_used && (
+                    <p className="mt-2 text-[10px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"} sample</p>
+                  )}
                 </CardContent>
               </Card>
             )}
