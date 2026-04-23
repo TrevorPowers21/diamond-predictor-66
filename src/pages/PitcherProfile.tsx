@@ -946,7 +946,18 @@ export default function PitcherProfile() {
     }
     return map;
   }, [teamDirectory]);
-  // Map: any team name (full or abbrev) → abbreviation. Used by career stats table.
+  // Lookup maps for career stats Team column display.
+  // Prefer TeamID (numeric source id — shared between Pitching Master and Teams Table)
+  // because TruMedia team names often don't match Teams Table full_name exactly.
+  const teamAbbrevById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of teamDirectory as Array<{ source_team_id: string | number | null; abbreviation: string | null; name: string | null }>) {
+      if (t.source_team_id == null) continue;
+      const abbrev = t.abbreviation || t.name;
+      if (abbrev) map.set(String(t.source_team_id), abbrev);
+    }
+    return map;
+  }, [teamDirectory]);
   const teamAbbrevByName = useMemo(() => {
     const map = new Map<string, string>();
     for (const t of teamDirectory as Array<{ name: string | null; fullName: string | null; abbreviation: string | null }>) {
@@ -958,7 +969,11 @@ export default function PitcherProfile() {
     }
     return map;
   }, [teamDirectory]);
-  const teamAbbrev = (name: string | null | undefined): string => {
+  const teamAbbrev = (name: string | null | undefined, teamId?: string | number | null): string => {
+    if (teamId != null) {
+      const byId = teamAbbrevById.get(String(teamId));
+      if (byId) return byId;
+    }
     if (!name) return "—";
     const hit = teamAbbrevByName.get(name.toLowerCase().trim());
     return hit || name;
@@ -1910,7 +1925,7 @@ export default function PitcherProfile() {
                         .map((row: any, i: number) => (
                         <tr key={row.Season} className={`border-b border-[#162241]/60 last:border-0 transition-colors duration-150 hover:bg-[#162241]/40 ${i % 2 === 1 ? "bg-[#0d1a30]" : ""}`}>
                           <td className="py-1.5 pr-1 font-semibold text-white">{row.Season}</td>
-                          <td className="py-1.5 px-1 text-[#8a94a6] truncate max-w-[60px]">{teamAbbrev(row.Team)}</td>
+                          <td className="py-1.5 px-1 text-[#8a94a6] truncate max-w-[60px]">{teamAbbrev(row.Team, row.TeamID)}</td>
                           <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{fmt(row.IP, 1)}</td>
                           <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{fmt(row.ERA, 2)}</td>
                           <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{fmt(row.FIP, 2)}</td>
