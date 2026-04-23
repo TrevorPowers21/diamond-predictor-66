@@ -540,7 +540,17 @@ export function generatePitcherReport(
   } else if (hasAvgStuff && hasEliteCommand) {
     opener = `${hand.charAt(0).toUpperCase() + hand.slice(1)} ${role} with average stuff and elite command — a reliable innings eater that survives on limiting damage`;
   } else {
-    opener = `${hand.charAt(0).toUpperCase() + hand.slice(1)} ${role} with ${pctToTier(p.stuffPlus || 50)} stuff`;
+    // Fall back to Stuff+ value thresholds when percentile isn't available
+    const stuffTier: Tier = p.stuffPlus != null
+      ? pctToTier(p.stuffPlus)
+      : input.stuffPlus != null
+        ? (input.stuffPlus >= 108 ? "elite"
+           : input.stuffPlus >= 103 ? "plus"
+           : input.stuffPlus >= 98 ? "average"
+           : input.stuffPlus >= 93 ? "slightly below-average"
+           : "below-average")
+        : "average";
+    opener = `${hand.charAt(0).toUpperCase() + hand.slice(1)} ${role} with ${stuffTier} stuff`;
   }
 
   // Stuff+ detail
@@ -581,6 +591,11 @@ export function generatePitcherReport(
     opener += s
       ? ` Plus command with a ${input.bbPct?.toFixed(1)}% walk rate${p.bbPct ? ` at the ${p.bbPct}th percentile` : ""}.`
       : " Plus command.";
+  } else if (hasBelowCommand) {
+    // Significant walk problem must be called out, not silently omitted
+    opener += s
+      ? ` Command is a real concern — ${input.bbPct?.toFixed(1)}% walk rate${input.bb9 != null ? ` and ${input.bb9.toFixed(2)} BB/9` : ""} will cap his upside if it doesn't improve.`
+      : " Command is a real concern that will cap his upside if it doesn't improve.";
   }
 
   paragraphs.push(opener.replace(/\.\./g, ".").replace(/\s+/g, " ").trim());
@@ -666,10 +681,23 @@ export function generatePitcherReport(
   // ── Closer ──
   const closerParts: string[] = [];
 
+  // Helper: tier from Stuff+ value when percentile missing
+  const projTier: Tier = p.stuffPlus != null
+    ? pctToTier(p.stuffPlus)
+    : input.stuffPlus != null
+      ? (input.stuffPlus >= 108 ? "elite"
+         : input.stuffPlus >= 103 ? "plus"
+         : input.stuffPlus >= 98 ? "average"
+         : input.stuffPlus >= 93 ? "slightly below-average"
+         : "below-average")
+      : "average";
+
   if (hasEliteStuff && hasEliteCommand) {
     closerParts.push("One of the best pitchers in the sport.");
   } else if (hasEliteStuff && hasBelowCommand) {
-    closerParts.push("Elite ceiling with real variance.");
+    closerParts.push("Elite ceiling with real variance — command needs to come forward for this to translate.");
+  } else if (hasPlusStuff && hasBelowCommand) {
+    closerParts.push("Plus stuff with a real walk problem — the strikeouts make him intriguing, but until the command improves his results will bounce around.");
   } else if (sinkerProfile) {
     closerParts.push("The combination of above-average whiff, elite strike-throwing ability, and elite ground ball rates is a recipe for a high-level pitcher year over year. Limited variance because the ground ball skill translates across every level. All-American caliber arm.");
   } else if (chaseDependentProfile) {
@@ -677,7 +705,7 @@ export function generatePitcherReport(
   } else if (hasAvgStuff && hasEliteCommand) {
     closerParts.push("Reliable innings eater. Could have an All-Conference season, but the lack of swing-and-miss limits the upside.");
   } else {
-    closerParts.push(`${pctToTier(p.stuffPlus || 50).charAt(0).toUpperCase() + pctToTier(p.stuffPlus || 50).slice(1)} overall projection.`);
+    closerParts.push(`${projTier.charAt(0).toUpperCase() + projTier.slice(1)} overall projection.`);
   }
 
   // Competition note
