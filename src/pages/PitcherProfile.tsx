@@ -1000,16 +1000,44 @@ export default function PitcherProfile() {
     if (seasons === 1) return "Fr";
     return null;
   })();
-  // Read pitching stats directly from masterRow (no intermediate parse needed)
-  const storageEra = masterRow?.era ?? null;
-  const storageFip = masterRow?.fip ?? null;
-  const storageWhip = masterRow?.whip ?? null;
-  const storageK9 = masterRow?.k9 ?? null;
-  const storageBb9 = masterRow?.bb9 ?? null;
-  const storageHr9 = masterRow?.hr9 ?? null;
-  const storageIp = parseBaseballInnings(masterRow?.ip != null ? String(masterRow.ip) : null);
-  const storageGames = masterRow?.g ?? null;
-  const storageGamesStarted = masterRow?.gs ?? null;
+  // Projection source row: always the latest season (2025) with blending applied so
+  // changing the Scouting Grades / Input Metrics dropdown does NOT move projections.
+  // Projections represent 2026 expectation, always anchored to most recent actuals.
+  const projectionSourceRow = useMemo(() => {
+    const row = (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === 2025);
+    if (!row) return masterRow;  // fallback: if no 2025 data, use whatever we have
+    const combinedUsed = !!row.combined_used;
+    return {
+      era: combinedUsed ? (row.blended_era ?? row.ERA) : row.ERA,
+      fip: combinedUsed ? (row.blended_fip ?? row.FIP) : row.FIP,
+      whip: combinedUsed ? (row.blended_whip ?? row.WHIP) : row.WHIP,
+      k9: combinedUsed ? (row.blended_k9 ?? row.K9) : row.K9,
+      bb9: combinedUsed ? (row.blended_bb9 ?? row.BB9) : row.BB9,
+      hr9: combinedUsed ? (row.blended_hr9 ?? row.HR9) : row.HR9,
+      ip: row.IP ?? null,
+      g: row.G ?? null,
+      gs: row.GS ?? null,
+      role: row.Role ?? null,
+      // Stored PR+ values (pipeline computed these from blended inputs when combined_used)
+      era_pr_plus: row.era_pr_plus ?? null,
+      fip_pr_plus: row.fip_pr_plus ?? null,
+      whip_pr_plus: row.whip_pr_plus ?? null,
+      k9_pr_plus: row.k9_pr_plus ?? null,
+      bb9_pr_plus: row.bb9_pr_plus ?? null,
+      hr9_pr_plus: row.hr9_pr_plus ?? null,
+    };
+  }, [pitcherMasterSeasons, masterRow]);
+
+  // Read pitching stats from projectionSourceRow so projections stay pinned to 2025
+  const storageEra = projectionSourceRow?.era ?? null;
+  const storageFip = projectionSourceRow?.fip ?? null;
+  const storageWhip = projectionSourceRow?.whip ?? null;
+  const storageK9 = projectionSourceRow?.k9 ?? null;
+  const storageBb9 = projectionSourceRow?.bb9 ?? null;
+  const storageHr9 = projectionSourceRow?.hr9 ?? null;
+  const storageIp = parseBaseballInnings(projectionSourceRow?.ip != null ? String(projectionSourceRow.ip) : null);
+  const storageGames = projectionSourceRow?.g ?? null;
+  const storageGamesStarted = projectionSourceRow?.gs ?? null;
   const derivedRole = (() => {
     const roleRaw = toPitchingRole(masterRow?.role);
     if (roleRaw) return roleRaw;
@@ -1079,12 +1107,16 @@ export default function PitcherProfile() {
         : "SJ";
     const devAggressiveness = projectedDevAggressiveness;
 
-    const eraPrPlus = internalPowerRatings?.eraPlus ?? parseNum(powerRatingsRow?.[30]);
-    const fipPrPlus = internalPowerRatings?.fipPlus ?? parseNum(powerRatingsRow?.[31]);
-    const whipPrPlus = internalPowerRatings?.whipPlus ?? parseNum(powerRatingsRow?.[32]);
-    const k9PrPlus = internalPowerRatings?.k9Plus ?? parseNum(powerRatingsRow?.[33]);
-    const hr9PrPlus = internalPowerRatings?.hr9Plus ?? parseNum(powerRatingsRow?.[34]);
-    const bb9PrPlus = internalPowerRatings?.bb9Plus ?? parseNum(powerRatingsRow?.[35]);
+    // Use stored PR+ values from the 2025 projection source row (pipeline computed
+    // these from blended inputs). Falls back to locally-computed internalPowerRatings
+    // only if the stored values aren't available. This pins projections to 2025
+    // regardless of which season the Scouting Grades dropdown is viewing.
+    const eraPrPlus = (projectionSourceRow as any)?.era_pr_plus ?? internalPowerRatings?.eraPlus ?? parseNum(powerRatingsRow?.[30]);
+    const fipPrPlus = (projectionSourceRow as any)?.fip_pr_plus ?? internalPowerRatings?.fipPlus ?? parseNum(powerRatingsRow?.[31]);
+    const whipPrPlus = (projectionSourceRow as any)?.whip_pr_plus ?? internalPowerRatings?.whipPlus ?? parseNum(powerRatingsRow?.[32]);
+    const k9PrPlus = (projectionSourceRow as any)?.k9_pr_plus ?? internalPowerRatings?.k9Plus ?? parseNum(powerRatingsRow?.[33]);
+    const hr9PrPlus = (projectionSourceRow as any)?.hr9_pr_plus ?? internalPowerRatings?.hr9Plus ?? parseNum(powerRatingsRow?.[34]);
+    const bb9PrPlus = (projectionSourceRow as any)?.bb9_pr_plus ?? internalPowerRatings?.bb9Plus ?? parseNum(powerRatingsRow?.[35]);
 
     const classEraAdj = toPitchingClassAdj(classTransition, eq.class_era_fs, eq.class_era_sj, eq.class_era_js, eq.class_era_gr);
     const classFipAdj = toPitchingClassAdj(classTransition, eq.class_fip_fs, eq.class_fip_sj, eq.class_fip_js, eq.class_fip_gr);
@@ -1256,6 +1288,7 @@ export default function PitcherProfile() {
     latestStats?.era,
     latestStats?.whip,
     powerRatingsRow,
+    projectionSourceRow,
     storageBb9,
     storageEra,
     storageFip,
