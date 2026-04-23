@@ -1156,6 +1156,47 @@ export default function TeamBuilder() {
     staleTime: 30 * 60 * 1000,
   });
 
+  // Thin-sample lookup: which 2025 returners have too little playing time and
+  // no priors to blend. Keyed by player UUID so row rendering can asterisk +
+  // dim the projection display.
+  const { data: thinSampleMap = new Map<string, boolean>() } = useQuery({
+    queryKey: ["team-builder-thin-sample-lookup"],
+    queryFn: async () => {
+      const map = new Map<string, boolean>();
+      const [{ data: hmRows }, { data: pmRows }, { data: playerRows }] = await Promise.all([
+        (supabase as any)
+          .from("Hitter Master")
+          .select("source_player_id, ab, combined_used")
+          .eq("Season", 2025),
+        (supabase as any)
+          .from("Pitching Master")
+          .select("source_player_id, IP, combined_used")
+          .eq("Season", 2025),
+        supabase.from("players").select("id, source_player_id"),
+      ]);
+      const hitterThin = new Set<string>();
+      const pitcherThin = new Set<string>();
+      for (const r of (hmRows || [])) {
+        if (!r.source_player_id) continue;
+        const ab = Number(r.ab) || 0;
+        if (ab < 15 && !r.combined_used) hitterThin.add(r.source_player_id);
+      }
+      for (const r of (pmRows || [])) {
+        if (!r.source_player_id) continue;
+        const ip = Number(r.IP) || 0;
+        if (ip < 5 && !r.combined_used) pitcherThin.add(r.source_player_id);
+      }
+      for (const p of (playerRows || [])) {
+        if (!p.source_player_id) continue;
+        if (hitterThin.has(p.source_player_id) || pitcherThin.has(p.source_player_id)) {
+          map.set(p.id, true);
+        }
+      }
+      return map;
+    },
+    staleTime: 30 * 60 * 1000,
+  });
+
   const powerLookup = useMemo(() => {
     const map = new Map<string, any>();
     const rows = (powerRatingsData as Array<any>) || [];
@@ -4773,6 +4814,9 @@ export default function TeamBuilder() {
         {(() => {
           const isPitcherRow = isPitcher(p);
           const shown: any = projection.shown ?? null;
+          const thin = p.player_id ? thinSampleMap.get(p.player_id) === true : false;
+          const thinCls = thin ? " opacity-60" : "";
+          const suffix = thin ? "*" : "";
           if (isPitcherRow) {
             const source: any = shown ?? ((p.roster_status === "target") ? p.transfer_snapshot : p.prediction) ?? null;
             const pEra = source?.p_era ?? null;
@@ -4781,8 +4825,8 @@ export default function TeamBuilder() {
             const pBb9 = source?.p_bb9 ?? null;
             if (pEra == null && pWhip == null && pK9 == null && pBb9 == null) return "—";
             return (
-              <span className="inline-block whitespace-nowrap text-[12px] font-mono">
-                {pEra != null ? Number(pEra).toFixed(2) : "—"} / {pWhip != null ? Number(pWhip).toFixed(2) : "—"} / {pK9 != null ? Number(pK9).toFixed(2) : "—"} / {pBb9 != null ? Number(pBb9).toFixed(2) : "—"}
+              <span className={`inline-block whitespace-nowrap text-[12px] font-mono${thinCls}`} title={thin ? "Thin sample — under 5 IP with no prior-season data" : undefined}>
+                {pEra != null ? Number(pEra).toFixed(2) : "—"} / {pWhip != null ? Number(pWhip).toFixed(2) : "—"} / {pK9 != null ? Number(pK9).toFixed(2) : "—"} / {pBb9 != null ? Number(pBb9).toFixed(2) : "—"}{suffix}
               </span>
             );
           }
@@ -4793,8 +4837,8 @@ export default function TeamBuilder() {
           };
           if (projected.p_avg == null && projected.p_obp == null && projected.p_slg == null) return "—";
           return (
-            <span className="inline-block whitespace-nowrap text-[12px] font-mono">
-              {projected.p_avg?.toFixed(3) || "—"} / {projected.p_obp?.toFixed(3) || "—"} / {projected.p_slg?.toFixed(3) || "—"}
+            <span className={`inline-block whitespace-nowrap text-[12px] font-mono${thinCls}`} title={thin ? "Thin sample — under 15 AB with no prior-season data" : undefined}>
+              {projected.p_avg?.toFixed(3) || "—"} / {projected.p_obp?.toFixed(3) || "—"} / {projected.p_slg?.toFixed(3) || "—"}{suffix}
             </span>
           );
         })()}
@@ -4803,6 +4847,7 @@ export default function TeamBuilder() {
         {(() => {
           const sim = projection.sim ?? null;
           const shown: any = projection.shown ?? null;
+          const thin = p.player_id ? thinSampleMap.get(p.player_id) === true : false;
           const shownMetric = isPitcherRow
             ? ((p.roster_status === "target")
                 ? (shown?.p_rv_plus ?? shown?.p_wrc_plus ?? sim?.p_rv_plus ?? p.transfer_snapshot?.p_rv_plus ?? p.transfer_snapshot?.p_wrc_plus ?? null)
@@ -4810,7 +4855,10 @@ export default function TeamBuilder() {
             : ((p.roster_status === "target")
                 ? (shown?.p_wrc_plus ?? sim?.p_wrc_plus ?? p.transfer_snapshot?.p_wrc_plus ?? null)
                 : (shown?.p_wrc_plus ?? null));
-          return shownMetric != null ? shownMetric.toFixed(0) : "—";
+          if (shownMetric == null) return "—";
+          return (
+            <span className={thin ? "opacity-60" : ""}>{shownMetric.toFixed(0)}{thin ? "*" : ""}</span>
+          );
         })()}
       </TableCell>
       <TableCell className={`text-center font-mono text-[12px] whitespace-nowrap ${(p.roster_status || "returner") === "leaving"

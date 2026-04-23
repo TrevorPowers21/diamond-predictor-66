@@ -33,6 +33,7 @@ import { assessHitterRisk } from "@/lib/playerRisk";
 import { generateHitterReport } from "@/lib/scoutingReportGenerator";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
+import { isThinSampleHitter } from "@/lib/combinedStats";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -647,6 +648,8 @@ export default function PlayerProfile() {
       gb_score: row.gb_score ?? null,
     };
   }, [hitterMasterSeasons]);
+
+  const isThinSample = isThinSampleHitter(projectionSourceRow);
 
   if (isLoading) {
     return (
@@ -1363,7 +1366,7 @@ export default function PlayerProfile() {
           <div className="lg:col-span-2 space-y-4">
             <div className="grid gap-3 grid-cols-3">
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
-                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">oWAR</div>
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">oWAR{isThinSample ? "*" : ""}</div>
                 <div className={`text-3xl font-bold tracking-tight mt-1 ${warTierClass(displayOWar)}`}>{displayOWar != null ? displayOWar.toFixed(1) : "—"}</div>
               </div>
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
@@ -1401,7 +1404,7 @@ export default function PlayerProfile() {
               <Card className="border-[#162241] bg-[#0a1428]">
                 <CardHeader className="pb-2 pt-3 px-4">
                   <div className="flex items-center gap-3 flex-wrap">
-                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2026 Projected Stats</CardTitle>
+                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2026 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
                     {editingPrediction && regularPred ? (
                       <div className="flex items-center gap-1.5">
                         <Select value={predForm.class_transition || "none"} onValueChange={(v) => setPredForm({ ...predForm, class_transition: v === "none" ? "" : v })}>
@@ -1458,6 +1461,9 @@ export default function PlayerProfile() {
                       </div>
                     ))}
                   </div>
+                  {isThinSample && (
+                    <p className="mt-2 text-[10px] text-[#8a94a6]">*thin sample — fewer than 15 AB with no prior-season data; projection is speculative</p>
+                  )}
                 </CardContent>
               </Card>
 

@@ -54,6 +54,31 @@ export type CombinedPitcherResult = {
 };
 
 /**
+ * Thin-sample detection: current-season playing time is below the noise
+ * floor AND no prior-season blend was applied (either no priors existed or
+ * they had no playing time either). Projections for these players should
+ * be shown with an asterisk — the sample is too thin to trust.
+ */
+export function isThinSampleHitter(row: {
+  ab?: number | null;
+  combined_used?: boolean | null;
+} | null | undefined): boolean {
+  if (!row) return false;
+  const ab = Number(row.ab) || 0;
+  return ab < HITTER_AB_NOISE_FLOOR && !row.combined_used;
+}
+
+export function isThinSamplePitcher(row: {
+  IP?: number | null;
+  ip?: number | null;
+  combined_used?: boolean | null;
+} | null | undefined): boolean {
+  if (!row) return false;
+  const ip = Number(row.IP ?? row.ip) || 0;
+  return ip < PITCHER_IP_NOISE_FLOOR && !row.combined_used;
+}
+
+/**
  * AB-weighted blend across multiple Hitter Master season rows.
  * Each row's contribution = (row.ab / totalAb) * row.value
  * Null values are dropped from the weighting (column-by-column).

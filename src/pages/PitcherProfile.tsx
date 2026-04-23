@@ -26,6 +26,7 @@ import { useCoachNotes } from "@/hooks/useCoachNotes";
 import { generateCoachNotesPdf, generateReportPdf } from "@/lib/pdfGenerator";
 import { assessPitcherRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
+import { isThinSamplePitcher } from "@/lib/combinedStats";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { usePitcherRoleOverrides } from "@/hooks/usePitcherRoleOverrides";
 import { computePrvPlus } from "@/savant/lib/prvPlus";
@@ -1080,6 +1081,10 @@ export default function PitcherProfile() {
     };
   }, [pitcherMasterSeasons, masterRow]);
 
+  // Thin sample: current 2025 IP below the noise floor with no prior seasons to
+  // blend in. Projections for these pitchers are speculative — flag with *.
+  const isThinSample = isThinSamplePitcher(projectionSourceRow);
+
   // Read pitching stats from projectionSourceRow so projections stay pinned to 2025
   const storageEra = projectionSourceRow?.era ?? null;
   const storageFip = projectionSourceRow?.fip ?? null;
@@ -2041,7 +2046,7 @@ export default function PitcherProfile() {
             <Card className="border-[#162241] bg-[#0a1428]">
               <CardHeader className="pb-2 pt-3 px-4">
                 <div className="flex items-center gap-3 flex-wrap">
-                  <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2026 Projected Stats</CardTitle>
+                  <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2026 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
                   <div className="flex items-center gap-1.5">
                     <Select value={projectedRole} onValueChange={(v) => updateProjectedInputs({ pitcher_role: v as "SP" | "RP" | "SM" })}>
                       <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
@@ -2087,6 +2092,9 @@ export default function PitcherProfile() {
                     </div>
                   ))}
                 </div>
+                {isThinSample && (
+                  <p className="mt-2 text-[10px] text-[#8a94a6]">*thin sample — fewer than 5 IP with no prior-season data; projection is speculative</p>
+                )}
               </CardContent>
             </Card>
 
