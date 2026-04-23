@@ -644,6 +644,9 @@ export default function PitcherProfile() {
     const fromSeasons = (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason)
       ?? (pitcherMasterSeasons as any[])[0];
     if (fromSeasons) {
+      // When combined_used=true (below IP threshold with prior-season blend), anchor
+      // projections on blended stats so the noisy small-sample values don't distort pEra.
+      const combinedUsed = !!fromSeasons.combined_used;
       // Map raw DB shape into the seed-data shape downstream code expects
       return {
         source_player_id: fromSeasons.source_player_id ?? null,
@@ -657,12 +660,12 @@ export default function PitcherProfile() {
         ip: fromSeasons.IP ?? null,
         g: fromSeasons.G ?? null,
         gs: fromSeasons.GS ?? null,
-        era: fromSeasons.ERA ?? null,
-        fip: fromSeasons.FIP ?? null,
-        whip: fromSeasons.WHIP ?? null,
-        k9: fromSeasons.K9 ?? null,
-        bb9: fromSeasons.BB9 ?? null,
-        hr9: fromSeasons.HR9 ?? null,
+        era: combinedUsed ? (fromSeasons.blended_era ?? fromSeasons.ERA) : fromSeasons.ERA,
+        fip: combinedUsed ? (fromSeasons.blended_fip ?? fromSeasons.FIP) : fromSeasons.FIP,
+        whip: combinedUsed ? (fromSeasons.blended_whip ?? fromSeasons.WHIP) : fromSeasons.WHIP,
+        k9: combinedUsed ? (fromSeasons.blended_k9 ?? fromSeasons.K9) : fromSeasons.K9,
+        bb9: combinedUsed ? (fromSeasons.blended_bb9 ?? fromSeasons.BB9) : fromSeasons.BB9,
+        hr9: combinedUsed ? (fromSeasons.blended_hr9 ?? fromSeasons.HR9) : fromSeasons.HR9,
         miss_pct: fromSeasons.miss_pct ?? null,
         bb_pct: fromSeasons.bb_pct ?? null,
         hard_hit_pct: fromSeasons.hard_hit_pct ?? null,
