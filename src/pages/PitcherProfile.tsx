@@ -1106,13 +1106,17 @@ export default function PitcherProfile() {
   const supabaseRole = id ? getSupabaseRole(id) : null;
   const initialProjectedRole = supabaseRole || playerOverride?.pitcher_role || storageProjectionOverride?.pitcher_role || derivedRole || "SM";
   const effectiveRoleDisplay = supabaseRole || playerOverride?.pitcher_role || derivedRole;
+  // DB (activePrediction) is the authoritative source once a coach saves an
+  // edit; localStorage only fills gaps for storage-backed profile editing.
   const initialProjectedClassTransition = (() => {
-    const raw = String(playerOverride?.class_transition || storageProjectionOverride?.class_transition || activePrediction?.class_transition || "SJ").toUpperCase();
+    const raw = String(activePrediction?.class_transition || playerOverride?.class_transition || storageProjectionOverride?.class_transition || "SJ").toUpperCase();
     return raw === "FS" || raw === "SJ" || raw === "JS" || raw === "GR" ? raw : "SJ";
   })();
-  const initialProjectedDevAggressiveness = Number.isFinite(Number(playerOverride?.dev_aggressiveness ?? storageProjectionOverride?.dev_aggressiveness))
-    ? Number(playerOverride?.dev_aggressiveness ?? storageProjectionOverride?.dev_aggressiveness)
-    : (Number.isFinite(Number(activePrediction?.dev_aggressiveness)) ? Number(activePrediction?.dev_aggressiveness) : 0);
+  const initialProjectedDevAggressiveness = Number.isFinite(Number(activePrediction?.dev_aggressiveness))
+    ? Number(activePrediction?.dev_aggressiveness)
+    : (Number.isFinite(Number(playerOverride?.dev_aggressiveness ?? storageProjectionOverride?.dev_aggressiveness))
+        ? Number(playerOverride?.dev_aggressiveness ?? storageProjectionOverride?.dev_aggressiveness)
+        : 0);
   const [projectedRole, setProjectedRole] = useState<"SP" | "RP" | "SM">(initialProjectedRole as "SP" | "RP" | "SM");
   const [projectedClassTransition, setProjectedClassTransition] = useState<"FS" | "SJ" | "JS" | "GR">(initialProjectedClassTransition as "FS" | "SJ" | "JS" | "GR");
   const [projectedDevAggressiveness, setProjectedDevAggressiveness] = useState<number>(initialProjectedDevAggressiveness);
@@ -1121,13 +1125,36 @@ export default function PitcherProfile() {
     setProjectedClassTransition(initialProjectedClassTransition as "FS" | "SJ" | "JS" | "GR");
     setProjectedDevAggressiveness(initialProjectedDevAggressiveness);
   }, [initialProjectedRole, initialProjectedClassTransition, initialProjectedDevAggressiveness]);
-  const updateProjectedInputs = (updates: { pitcher_role?: "SP" | "RP" | "SM"; class_transition?: "FS" | "SJ" | "JS" | "GR"; dev_aggressiveness?: number }) => {
+  const updateProjectedInputs = async (updates: { pitcher_role?: "SP" | "RP" | "SM"; class_transition?: "FS" | "SJ" | "JS" | "GR"; dev_aggressiveness?: number }) => {
     if (updates.pitcher_role) setProjectedRole(updates.pitcher_role);
     if (updates.class_transition) setProjectedClassTransition(updates.class_transition);
     if (Number.isFinite(Number(updates.dev_aggressiveness))) setProjectedDevAggressiveness(Number(updates.dev_aggressiveness));
-    // Persist pitcher role to Supabase
+    // Persist pitcher role to Supabase (separate override table, read at display time)
     if (updates.pitcher_role && id) {
       setSupabaseRole(id, updates.pitcher_role);
+    }
+    // Persist class_transition + dev_aggressiveness to player_predictions for
+    // all of this pitcher's active returner predictions, unlocking first to
+    // satisfy the trigger, then re-locking so the nightly compute pipeline
+    // can't overwrite the coach's edits.
+    if (isDbRoute && id && (updates.class_transition !== undefined || updates.dev_aggressiveness !== undefined)) {
+      const returnerPreds = (predictions as any[]).filter((p) => p.model_type === "returner");
+      if (returnerPreds.length > 0) {
+        const patch: Record<string, any> = {};
+        if (updates.class_transition !== undefined) patch.class_transition = updates.class_transition;
+        if (updates.dev_aggressiveness !== undefined) patch.dev_aggressiveness = Number(updates.dev_aggressiveness);
+        try {
+          for (const pred of returnerPreds) {
+            await supabase.from("player_predictions").update({ locked: false }).eq("id", pred.id);
+            const { error } = await supabase.from("player_predictions").update(patch).eq("id", pred.id);
+            if (error) throw error;
+            await supabase.from("player_predictions").update({ locked: true }).eq("id", pred.id);
+          }
+          queryClient.invalidateQueries({ queryKey: ["pitcher-profile-predictions", id] });
+        } catch (e: any) {
+          toast.error(`Save failed: ${e.message}`);
+        }
+      }
     }
     if (isDbRoute && id) {
       const next = {
