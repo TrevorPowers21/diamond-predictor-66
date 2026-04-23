@@ -367,12 +367,12 @@ export default function PlayerProfile() {
   });
 
   const { teams: teamsForConference } = useTeamsTable();
-  // Lookup maps for career stats Team column display. Prefer TeamID (source id)
-  // since TruMedia team names don't always match Teams Table full_name exactly.
+  // Lookup maps for career stats Team column display.
+  // Prefer TeamID (holds Teams Table UUID id); fall back to aggressive name normalization.
   const teamAbbrevById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const t of teamsForConference as Array<{ id: string | null; source_team_id: string | number | null; abbreviation: string | null; name: string | null }>) {
-      const abbrev = t.abbreviation || t.name;
+    for (const t of teamsForConference as Array<{ id: string | null; source_team_id: string | number | null; abbreviation: string | null; fullName: string | null; name: string | null }>) {
+      const abbrev = t.abbreviation || t.name || t.fullName;
       if (!abbrev) continue;
       if (t.id) map.set(String(t.id), abbrev);
       if (t.source_team_id != null) map.set(String(t.source_team_id), abbrev);
@@ -384,9 +384,11 @@ export default function PlayerProfile() {
     for (const t of teamsForConference as Array<{ name: string | null; fullName: string | null; abbreviation: string | null }>) {
       const abbrev = t.abbreviation || t.name || t.fullName;
       if (!abbrev) continue;
-      if (t.fullName) map.set(t.fullName.toLowerCase().trim(), abbrev);
-      if (t.name) map.set(t.name.toLowerCase().trim(), abbrev);
-      if (t.abbreviation) map.set(t.abbreviation.toLowerCase().trim(), abbrev);
+      const keys = [t.fullName, t.name, t.abbreviation].filter(Boolean) as string[];
+      for (const k of keys) {
+        const norm = normalizeName(k);
+        if (norm && !map.has(norm)) map.set(norm, abbrev);
+      }
     }
     return map;
   }, [teamsForConference]);
@@ -396,7 +398,7 @@ export default function PlayerProfile() {
       if (byId) return byId;
     }
     if (!name) return "—";
-    const hit = teamAbbrevByName.get(name.toLowerCase().trim());
+    const hit = teamAbbrevByName.get(normalizeName(name));
     return hit || name;
   };
 

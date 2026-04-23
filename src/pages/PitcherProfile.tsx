@@ -947,16 +947,13 @@ export default function PitcherProfile() {
     return map;
   }, [teamDirectory]);
   // Lookup maps for career stats Team column display.
-  // Prefer TeamID (numeric source id — shared between Pitching Master and Teams Table)
-  // because TruMedia team names often don't match Teams Table full_name exactly.
+  // Prefer TeamID (holds Teams Table UUID id); fall back to aggressive name normalization.
   const teamAbbrevById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const t of teamDirectory as Array<{ id: string | null; source_team_id: string | number | null; abbreviation: string | null; name: string | null }>) {
-      const abbrev = t.abbreviation || t.name;
+    for (const t of teamDirectory as Array<{ id: string | null; source_team_id: string | number | null; abbreviation: string | null; fullName: string | null; name: string | null }>) {
+      const abbrev = t.abbreviation || t.name || t.fullName;
       if (!abbrev) continue;
-      // Pitching Master/Hitter Master TeamID holds the Teams Table UUID id
       if (t.id) map.set(String(t.id), abbrev);
-      // Also index by source_team_id (TruMedia numeric) in case any caller passes that
       if (t.source_team_id != null) map.set(String(t.source_team_id), abbrev);
     }
     return map;
@@ -966,9 +963,11 @@ export default function PitcherProfile() {
     for (const t of teamDirectory as Array<{ name: string | null; fullName: string | null; abbreviation: string | null }>) {
       const abbrev = t.abbreviation || t.name || t.fullName;
       if (!abbrev) continue;
-      if (t.fullName) map.set(t.fullName.toLowerCase().trim(), abbrev);
-      if (t.name) map.set(t.name.toLowerCase().trim(), abbrev);
-      if (t.abbreviation) map.set(t.abbreviation.toLowerCase().trim(), abbrev);
+      const keys = [t.fullName, t.name, t.abbreviation].filter(Boolean) as string[];
+      for (const k of keys) {
+        const norm = normalize(k);
+        if (norm && !map.has(norm)) map.set(norm, abbrev);
+      }
     }
     return map;
   }, [teamDirectory]);
@@ -978,7 +977,7 @@ export default function PitcherProfile() {
       if (byId) return byId;
     }
     if (!name) return "—";
-    const hit = teamAbbrevByName.get(name.toLowerCase().trim());
+    const hit = teamAbbrevByName.get(normalize(name));
     return hit || name;
   };
   const { parkMap: teamParkComponents } = useParkFactors();
