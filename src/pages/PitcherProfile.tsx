@@ -695,6 +695,20 @@ export default function PitcherProfile() {
         k9: combinedUsed ? (fromSeasons.blended_k9 ?? fromSeasons.K9) : fromSeasons.K9,
         bb9: combinedUsed ? (fromSeasons.blended_bb9 ?? fromSeasons.BB9) : fromSeasons.BB9,
         hr9: combinedUsed ? (fromSeasons.blended_hr9 ?? fromSeasons.HR9) : fromSeasons.HR9,
+        // Stored scouting scores (already blended-based if pipeline ran with combined_used)
+        whiff_score: fromSeasons.whiff_score ?? null,
+        bb_score: fromSeasons.bb_score ?? null,
+        hh_score: fromSeasons.hh_score ?? null,
+        iz_whiff_score: fromSeasons.iz_whiff_score ?? null,
+        chase_score: fromSeasons.chase_score ?? null,
+        barrel_score: fromSeasons.barrel_score ?? null,
+        ld_score: fromSeasons.ld_score ?? null,
+        ev_score: fromSeasons.ev_score ?? null,
+        gb_score: fromSeasons.gb_score ?? null,
+        iz_score: fromSeasons.iz_score ?? null,
+        ev90_score: fromSeasons.ev90_score ?? null,
+        pull_score: fromSeasons.pull_score ?? null,
+        la_score: fromSeasons.la_score ?? null,
         miss_pct: fromSeasons.miss_pct ?? null,
         bb_pct: fromSeasons.bb_pct ?? null,
         hard_hit_pct: fromSeasons.hard_hit_pct ?? null,
@@ -708,7 +722,7 @@ export default function PitcherProfile() {
         vel_90th: fromSeasons["90th_vel"] ?? null,
         h_pull_pct: fromSeasons.h_pull_pct ?? null,
         la_10_30_pct: fromSeasons.la_10_30_pct ?? null,
-        stuffPlus: fromSeasons.stuff_plus ?? null,
+        stuffPlus: combinedUsed ? (fromSeasons.blended_stuff_plus ?? fromSeasons.stuff_plus ?? null) : (fromSeasons.stuff_plus ?? null),
       } as any;
     }
     // Fallback: legacy hook lookup (kept so name-only routes still resolve)
@@ -742,17 +756,22 @@ export default function PitcherProfile() {
   }, [masterRow]);
   const powerRatingsRow = useMemo(() => {
     if (!masterRow) return null;
-    const m = masterRow;
+    const m = masterRow as any;
     // [0]=name, [1]=team,
-    // [2..15] = raw metrics
-    // [16..29] = stored scores (not in master, so all "")
+    // [2..15] = raw metrics (uses blended values when combined_used=true via masterRow mapping)
+    // [16..29] = stored scouting scores (computed by pipeline from blended inputs)
     return [
       m.playerName || "", m.team || "",
       String(m.stuffPlus ?? ""), String(m.miss_pct ?? ""), String(m.bb_pct ?? ""), String(m.hard_hit_pct ?? ""),
       String(m.in_zone_whiff_pct ?? ""), String(m.chase_pct ?? ""), String(m.barrel_pct ?? ""), String(m.line_pct ?? ""),
       String(m.exit_vel ?? ""), String(m.ground_pct ?? ""), String(m.in_zone_pct ?? ""), String(m.vel_90th ?? ""),
       String(m.h_pull_pct ?? ""), String(m.la_10_30_pct ?? ""),
-      /* scores 16-29: not stored in master */ "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+      /* stuff score: no dedicated column, computed from stuffPlus */ "",
+      String(m.whiff_score ?? ""), String(m.bb_score ?? ""), String(m.hh_score ?? ""),
+      String(m.iz_whiff_score ?? ""), String(m.chase_score ?? ""), String(m.barrel_score ?? ""),
+      String(m.ld_score ?? ""), String(m.ev_score ?? ""), String(m.gb_score ?? ""),
+      String(m.iz_score ?? ""), String(m.ev90_score ?? ""), String(m.pull_score ?? ""),
+      String(m.la_score ?? ""),
     ] as string[];
   }, [masterRow]);
 
