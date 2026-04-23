@@ -620,6 +620,75 @@ function assessWorkload(ip: number | null | undefined, classYear: string | null 
   return { label: "Workload", score: clamp(risk), grade: toGrade(clamp(risk)), detail };
 }
 
+// ── Factor 6: Durability (Pitchers Only) ────────────────────────────
+
+/**
+ * Assess durability / availability risk based on career IP patterns across seasons.
+ * Flags pitchers with low cumulative innings over multiple years (injury history or
+ * limited role) or dramatic workload dropoffs (likely injury or role loss).
+ *
+ * Returns null if < 2 seasons of data (can't assess pattern).
+ */
+function assessPitcherDurability(seasons: any[] | undefined): RiskFactor | null {
+  if (!seasons || seasons.length < 2) return null;
+
+  const seasonsWithData = seasons
+    .map((s) => ({ season: Number(s.Season ?? s.season), ip: Number(s.IP ?? s.ip) || 0 }))
+    .filter((s) => s.ip > 0);
+
+  if (seasonsWithData.length < 2) return null;
+
+  const totalIp = seasonsWithData.reduce((sum, s) => sum + s.ip, 0);
+  const avgPerSeason = totalIp / seasonsWithData.length;
+
+  // Detect dropoff: most recent season vs prior peak
+  const sorted = [...seasonsWithData].sort((a, b) => b.season - a.season);
+  const recentIp = sorted[0].ip;
+  const priorPeak = Math.max(...sorted.slice(1).map((s) => s.ip));
+
+  // Severe dropoff: was at a real workload, now minimal. Likely injury / role loss.
+  if (priorPeak >= 30 && recentIp < 10) {
+    const risk = 80;
+    return {
+      label: "Durability",
+      score: risk,
+      grade: toGrade(risk),
+      detail: `Workload crashed from ${priorPeak.toFixed(0)} IP to ${recentIp.toFixed(0)} IP — injury or role loss concern`,
+    };
+  }
+
+  // Chronic low availability: multi-season but never builds volume
+  if (seasonsWithData.length >= 2 && avgPerSeason < 15) {
+    const risk = 70;
+    return {
+      label: "Durability",
+      score: risk,
+      grade: toGrade(risk),
+      detail: `Only ${totalIp.toFixed(0)} IP across ${seasonsWithData.length} seasons — limited availability history`,
+    };
+  }
+
+  // Moderate dropoff
+  if (priorPeak >= 40 && recentIp < priorPeak * 0.4) {
+    const risk = 55;
+    return {
+      label: "Durability",
+      score: risk,
+      grade: toGrade(risk),
+      detail: `Workload dropped from ${priorPeak.toFixed(0)} IP to ${recentIp.toFixed(0)} IP — possible injury or role change`,
+    };
+  }
+
+  // Healthy pattern
+  const risk = 20;
+  return {
+    label: "Durability",
+    score: risk,
+    grade: toGrade(risk),
+    detail: `${totalIp.toFixed(0)} IP across ${seasonsWithData.length} seasons — healthy workload history`,
+  };
+}
+
 // ── Summary Generator ───────────────────────────────────────────────
 
 function buildSummary(grade: RiskGrade, trajectory: Trajectory, factors: RiskFactor[], playerType: "hitter" | "pitcher"): string {
@@ -767,13 +836,21 @@ export function assessPitcherRisk(input: PitcherRiskInput): RiskAssessment {
   const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "pitcher");
   factors.push(trajFactor);
 
-  // 5. Sample Size — "Is the sample large enough?" (weight: 8%)
+  // 5. Sample Size — "Is the sample large enough?" (weight: 6%)
   factors.push(assessSampleSize(null, input.ip, "pitcher"));
 
-  // 6. Workload (weight: 10%)
+  // 6. Workload — current-season workload vs class (weight: 8%)
   factors.push(assessWorkload(input.ip, input.classYear));
 
-  const weights = [0.30, 0.22, 0.18, 0.12, 0.08, 0.10];
+  // 7. Durability — multi-season availability pattern (weight: 10%)
+  //    Catches chronic low availability and workload crashes that Sample Size
+  //    alone can't see (a pitcher with 60 IP as a Jr then 4 IP as a Sr).
+  const durability = assessPitcherDurability(input.careerSeasons);
+  if (durability) factors.push(durability);
+
+  const weights = durability
+    ? [0.28, 0.20, 0.16, 0.12, 0.06, 0.08, 0.10]
+    : [0.30, 0.22, 0.18, 0.12, 0.08, 0.10];
   const overall = computeComposite(factors, weights);
   const grade = toGrade(overall);
   const summary = buildSummary(grade, trajectory, factors, "pitcher");
