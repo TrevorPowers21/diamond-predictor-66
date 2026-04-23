@@ -711,6 +711,37 @@ export default function PlayerProfile() {
   // Falls back to seedPowerDerived (2025) when no Hitter Master row exists for the selected season
   const activeSeasonRow = (hitterMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason) || null;
 
+  // Pinned 2025 row — anchors projections, risk, and scouting report so they
+  // don't shift when the scouting grades dropdown changes season. Substitutes
+  // blended_* columns when combined_used (under-qualified 2025 sample).
+  const projectionSourceRow = useMemo(() => {
+    const row = (hitterMasterSeasons as any[]).find((r) => Number(r.Season) === 2025);
+    if (!row) return null;
+    const combinedUsed = !!row.combined_used;
+    return {
+      combined_used: combinedUsed,
+      combined_pa: row.combined_pa ?? null,
+      combined_seasons: row.combined_seasons ?? null,
+      AVG: combinedUsed ? (row.blended_avg ?? row.AVG) : row.AVG,
+      OBP: combinedUsed ? (row.blended_obp ?? row.OBP) : row.OBP,
+      SLG: combinedUsed ? (row.blended_slg ?? row.SLG) : row.SLG,
+      ISO: combinedUsed ? (row.blended_iso ?? row.ISO) : row.ISO,
+      contact: combinedUsed ? (row.blended_contact ?? row.contact) : row.contact,
+      line_drive: combinedUsed ? (row.blended_line_drive ?? row.line_drive) : row.line_drive,
+      avg_exit_velo: combinedUsed ? (row.blended_avg_exit_velo ?? row.avg_exit_velo) : row.avg_exit_velo,
+      pop_up: combinedUsed ? (row.blended_pop_up ?? row.pop_up) : row.pop_up,
+      bb: combinedUsed ? (row.blended_bb ?? row.bb) : row.bb,
+      chase: combinedUsed ? (row.blended_chase ?? row.chase) : row.chase,
+      barrel: combinedUsed ? (row.blended_barrel ?? row.barrel) : row.barrel,
+      ev90: combinedUsed ? (row.blended_ev90 ?? row.ev90) : row.ev90,
+      pull: combinedUsed ? (row.blended_pull ?? row.pull) : row.pull,
+      la_10_30: combinedUsed ? (row.blended_la_10_30 ?? row.la_10_30) : row.la_10_30,
+      gb: combinedUsed ? (row.blended_gb ?? row.gb) : row.gb,
+      ab: row.ab ?? null,
+      pa: row.pa ?? null,
+    };
+  }, [hitterMasterSeasons]);
+
   const activeSeasonScoutingGrades = activeSeasonRow ? {
     barrelScore: activeSeasonRow.barrel_score ?? seedPowerDerived?.barrelScore ?? null,
     avgEVScore: activeSeasonRow.avg_ev_score ?? seedPowerDerived?.avgEVScore ?? null,
@@ -891,32 +922,45 @@ export default function PlayerProfile() {
                       career_seasons: hitterMasterSeasons as any[],
                       scouting_notes: (() => {
                         if ((player as any).notes) return (player as any).notes;
-                        if (!seedPowerRow) return undefined;
+                        const p = projectionSourceRow;
+                        if (!p && !seedPowerRow) return undefined;
                         return generateHitterReport({
                           batHand: (player as any).bats_hand,
                           position: effectivePosition,
                           conference: resolvedConference || player.conference,
-                          avg: seedStatRow?.avg, obp: seedStatRow?.obp, slg: seedStatRow?.slg,
-                          iso: seedDerived?.iso,
-                          pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
-                          contact: seedPowerRow.contact, chase: seedPowerRow.chase, bb: seedPowerRow.bb,
-                          avgEv: seedPowerRow.avgExitVelo, ev90: seedPowerRow.ev90,
-                          barrel: seedPowerRow.barrel, laSweet: seedPowerRow.la10_30,
-                          lineDrive: seedPowerRow.lineDrive, gb: seedPowerRow.gb,
-                          pull: seedPowerRow.pull, popUp: seedPowerRow.popUp,
+                          avg: p?.AVG ?? seedStatRow?.avg, obp: p?.OBP ?? seedStatRow?.obp, slg: p?.SLG ?? seedStatRow?.slg,
+                          iso: p?.ISO ?? seedDerived?.iso,
+                          pa: p?.pa ?? (player as any).pa ?? seedPowerRow?.pa ?? null,
+                          contact: p?.contact ?? seedPowerRow?.contact,
+                          chase: p?.chase ?? seedPowerRow?.chase,
+                          bb: p?.bb ?? seedPowerRow?.bb,
+                          avgEv: p?.avg_exit_velo ?? seedPowerRow?.avgExitVelo,
+                          ev90: p?.ev90 ?? seedPowerRow?.ev90,
+                          barrel: p?.barrel ?? seedPowerRow?.barrel,
+                          laSweet: p?.la_10_30 ?? seedPowerRow?.la10_30,
+                          lineDrive: p?.line_drive ?? seedPowerRow?.lineDrive,
+                          gb: p?.gb ?? seedPowerRow?.gb,
+                          pull: p?.pull ?? seedPowerRow?.pull,
+                          popUp: p?.pop_up ?? seedPowerRow?.popUp,
                         }, "rstriq", "full");
                       })(),
                       coach_notes: notes,
                     };
+                    const p2 = projectionSourceRow;
                     const riskResult = assessHitterRisk({
                       conference: resolvedConference || player.conference,
                       projectedWrcPlus: projectedWrcPlus,
                       careerSeasons: hitterMasterSeasons as any[],
-                      pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
-                      chase: seedPowerRow?.chase, contact: seedPowerRow?.contact,
-                      whiff: seedPowerRow?.whiff, barrel: seedPowerRow?.barrel,
-                      lineDrive: seedPowerRow?.lineDrive, avgEv: seedPowerRow?.avgExitVelo,
-                      ev90: seedPowerRow?.ev90, gb: seedPowerRow?.gb, bb: seedPowerRow?.bb,
+                      pa: p2?.pa ?? (player as any).pa ?? seedPowerRow?.pa ?? null,
+                      chase: p2?.chase ?? seedPowerRow?.chase,
+                      contact: p2?.contact ?? seedPowerRow?.contact,
+                      whiff: seedPowerRow?.whiff,
+                      barrel: p2?.barrel ?? seedPowerRow?.barrel,
+                      lineDrive: p2?.line_drive ?? seedPowerRow?.lineDrive,
+                      avgEv: p2?.avg_exit_velo ?? seedPowerRow?.avgExitVelo,
+                      ev90: p2?.ev90 ?? seedPowerRow?.ev90,
+                      gb: p2?.gb ?? seedPowerRow?.gb,
+                      bb: p2?.bb ?? seedPowerRow?.bb,
                     });
                     rp.risk_grade = riskResult.grade;
                     rp.risk_score = riskResult.overall;
@@ -1006,31 +1050,44 @@ export default function PlayerProfile() {
                     career_seasons: hitterMasterSeasons as any[],
                     scouting_notes: (() => {
                       if ((player as any).notes) return (player as any).notes;
-                      if (!seedPowerRow) return undefined;
+                      const p = projectionSourceRow;
+                      if (!p && !seedPowerRow) return undefined;
                       return generateHitterReport({
                         batHand: (player as any).bats_hand,
                         position: effectivePosition,
                         conference: resolvedConference || player.conference,
-                        avg: seedStatRow?.avg, obp: seedStatRow?.obp, slg: seedStatRow?.slg,
-                        iso: seedDerived?.iso,
-                        pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
-                        contact: seedPowerRow.contact, chase: seedPowerRow.chase, bb: seedPowerRow.bb,
-                        avgEv: seedPowerRow.avgExitVelo, ev90: seedPowerRow.ev90,
-                        barrel: seedPowerRow.barrel, laSweet: seedPowerRow.la10_30,
-                        lineDrive: seedPowerRow.lineDrive, gb: seedPowerRow.gb,
-                        pull: seedPowerRow.pull, popUp: seedPowerRow.popUp,
+                        avg: p?.AVG ?? seedStatRow?.avg, obp: p?.OBP ?? seedStatRow?.obp, slg: p?.SLG ?? seedStatRow?.slg,
+                        iso: p?.ISO ?? seedDerived?.iso,
+                        pa: p?.pa ?? (player as any).pa ?? seedPowerRow?.pa ?? null,
+                        contact: p?.contact ?? seedPowerRow?.contact,
+                        chase: p?.chase ?? seedPowerRow?.chase,
+                        bb: p?.bb ?? seedPowerRow?.bb,
+                        avgEv: p?.avg_exit_velo ?? seedPowerRow?.avgExitVelo,
+                        ev90: p?.ev90 ?? seedPowerRow?.ev90,
+                        barrel: p?.barrel ?? seedPowerRow?.barrel,
+                        laSweet: p?.la_10_30 ?? seedPowerRow?.la10_30,
+                        lineDrive: p?.line_drive ?? seedPowerRow?.lineDrive,
+                        gb: p?.gb ?? seedPowerRow?.gb,
+                        pull: p?.pull ?? seedPowerRow?.pull,
+                        popUp: p?.pop_up ?? seedPowerRow?.popUp,
                       }, "rstriq", "full");
                     })(),
                   };
+                  const p3 = projectionSourceRow;
                   const riskResult = assessHitterRisk({
                     conference: resolvedConference || player.conference,
                     projectedWrcPlus: projectedWrcPlus,
                     careerSeasons: hitterMasterSeasons as any[],
-                    pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
-                    chase: seedPowerRow?.chase, contact: seedPowerRow?.contact,
-                    whiff: seedPowerRow?.whiff, barrel: seedPowerRow?.barrel,
-                    lineDrive: seedPowerRow?.lineDrive, avgEv: seedPowerRow?.avgExitVelo,
-                    ev90: seedPowerRow?.ev90, gb: seedPowerRow?.gb, bb: seedPowerRow?.bb,
+                    pa: p3?.pa ?? (player as any).pa ?? seedPowerRow?.pa ?? null,
+                    chase: p3?.chase ?? seedPowerRow?.chase,
+                    contact: p3?.contact ?? seedPowerRow?.contact,
+                    whiff: seedPowerRow?.whiff,
+                    barrel: p3?.barrel ?? seedPowerRow?.barrel,
+                    lineDrive: p3?.line_drive ?? seedPowerRow?.lineDrive,
+                    avgEv: p3?.avg_exit_velo ?? seedPowerRow?.avgExitVelo,
+                    ev90: p3?.ev90 ?? seedPowerRow?.ev90,
+                    gb: p3?.gb ?? seedPowerRow?.gb,
+                    bb: p3?.bb ?? seedPowerRow?.bb,
                   });
                   rp.risk_grade = riskResult.grade;
                   rp.risk_score = riskResult.overall;
@@ -1388,35 +1445,50 @@ export default function PlayerProfile() {
             {(() => {
               const confKey = (resolvedConference || player.conference || "").toLowerCase().trim();
               const confRow = conferenceStatsByKey.get(confKey);
+              // Pull scouting inputs from projectionSourceRow (2025-pinned, blended when
+              // combined_used) so risk anchors on the same sample as projections.
+              const p = projectionSourceRow;
               const risk = assessHitterRisk({
                 conference: resolvedConference || player.conference,
                 projectedWrcPlus: projectedWrcPlus,
                 confStuffPlus: confRow?.stuff_plus,
                 careerSeasons: hitterMasterSeasons as any[],
-                pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
-                chase: seedPowerRow?.chase, contact: seedPowerRow?.contact,
-                whiff: seedPowerRow?.whiff, barrel: seedPowerRow?.barrel,
-                lineDrive: seedPowerRow?.lineDrive, avgEv: seedPowerRow?.avgExitVelo,
-                ev90: seedPowerRow?.ev90, pull: seedPowerRow?.pull,
-                gb: seedPowerRow?.gb, bb: seedPowerRow?.bb,
+                pa: p?.pa ?? (player as any).pa ?? seedPowerRow?.pa ?? null,
+                chase: p?.chase ?? seedPowerRow?.chase,
+                contact: p?.contact ?? seedPowerRow?.contact,
+                whiff: seedPowerRow?.whiff,
+                barrel: p?.barrel ?? seedPowerRow?.barrel,
+                lineDrive: p?.line_drive ?? seedPowerRow?.lineDrive,
+                avgEv: p?.avg_exit_velo ?? seedPowerRow?.avgExitVelo,
+                ev90: p?.ev90 ?? seedPowerRow?.ev90,
+                pull: p?.pull ?? seedPowerRow?.pull,
+                gb: p?.gb ?? seedPowerRow?.gb,
+                bb: p?.bb ?? seedPowerRow?.bb,
               });
               return <RiskAssessmentCardRSTR risk={risk} />;
             })()}
 
             {/* Scouting Report */}
-            {seedPowerRow && (() => {
+            {(projectionSourceRow || seedPowerRow) && (() => {
+              const p = projectionSourceRow;
               const report = generateHitterReport({
                 batHand: (player as any).bats_hand,
                 position: seedPos || player.position,
                 conference: resolvedConference || player.conference,
-                avg: seedStatRow?.avg, obp: seedStatRow?.obp, slg: seedStatRow?.slg,
-                iso: seedDerived?.iso,
-                pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
-                contact: seedPowerRow.contact, chase: seedPowerRow.chase, bb: seedPowerRow.bb,
-                avgEv: seedPowerRow.avgExitVelo, ev90: seedPowerRow.ev90,
-                barrel: seedPowerRow.barrel, laSweet: seedPowerRow.la10_30,
-                lineDrive: seedPowerRow.lineDrive, gb: seedPowerRow.gb,
-                pull: seedPowerRow.pull, popUp: seedPowerRow.popUp,
+                avg: p?.AVG ?? seedStatRow?.avg, obp: p?.OBP ?? seedStatRow?.obp, slg: p?.SLG ?? seedStatRow?.slg,
+                iso: p?.ISO ?? seedDerived?.iso,
+                pa: p?.pa ?? (player as any).pa ?? seedPowerRow?.pa ?? null,
+                contact: p?.contact ?? seedPowerRow?.contact,
+                chase: p?.chase ?? seedPowerRow?.chase,
+                bb: p?.bb ?? seedPowerRow?.bb,
+                avgEv: p?.avg_exit_velo ?? seedPowerRow?.avgExitVelo,
+                ev90: p?.ev90 ?? seedPowerRow?.ev90,
+                barrel: p?.barrel ?? seedPowerRow?.barrel,
+                laSweet: p?.la_10_30 ?? seedPowerRow?.la10_30,
+                lineDrive: p?.line_drive ?? seedPowerRow?.lineDrive,
+                gb: p?.gb ?? seedPowerRow?.gb,
+                pull: p?.pull ?? seedPowerRow?.pull,
+                popUp: p?.pop_up ?? seedPowerRow?.popUp,
               }, "rstriq", "short");
 
               return (

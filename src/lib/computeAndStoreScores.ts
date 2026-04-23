@@ -337,6 +337,17 @@ export async function computeAndStoreHitterScores(season = 2025): Promise<{ upda
         blended_iso: blended.combined ? round2(blended.values.ISO ?? null) : null,
         blended_from_team: blended.combined ? (blended.dominantTeam ?? null) : null,
         blended_from_team_id: blended.combined ? (blended.dominantTeamId ?? null) : null,
+        blended_contact: blended.combined ? round2(blended.values.contact ?? null) : null,
+        blended_line_drive: blended.combined ? round2(blended.values.line_drive ?? null) : null,
+        blended_avg_exit_velo: blended.combined ? round2(blended.values.avg_exit_velo ?? null) : null,
+        blended_pop_up: blended.combined ? round2(blended.values.pop_up ?? null) : null,
+        blended_bb: blended.combined ? round2(blended.values.bb ?? null) : null,
+        blended_chase: blended.combined ? round2(blended.values.chase ?? null) : null,
+        blended_barrel: blended.combined ? round2(blended.values.barrel ?? null) : null,
+        blended_ev90: blended.combined ? round2(blended.values.ev90 ?? null) : null,
+        blended_pull: blended.combined ? round2(blended.values.pull ?? null) : null,
+        blended_la_10_30: blended.combined ? round2(blended.values.la_10_30 ?? null) : null,
+        blended_gb: blended.combined ? round2(blended.values.gb ?? null) : null,
       } as any,
     };
   });
