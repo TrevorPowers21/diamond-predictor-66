@@ -371,10 +371,11 @@ export default function PlayerProfile() {
   // since TruMedia team names don't always match Teams Table full_name exactly.
   const teamAbbrevById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const t of teamsForConference as Array<{ source_team_id: string | number | null; abbreviation: string | null; name: string | null }>) {
-      if (t.source_team_id == null) continue;
+    for (const t of teamsForConference as Array<{ id: string | null; source_team_id: string | number | null; abbreviation: string | null; name: string | null }>) {
       const abbrev = t.abbreviation || t.name;
-      if (abbrev) map.set(String(t.source_team_id), abbrev);
+      if (!abbrev) continue;
+      if (t.id) map.set(String(t.id), abbrev);
+      if (t.source_team_id != null) map.set(String(t.source_team_id), abbrev);
     }
     return map;
   }, [teamsForConference]);

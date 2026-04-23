@@ -951,10 +951,13 @@ export default function PitcherProfile() {
   // because TruMedia team names often don't match Teams Table full_name exactly.
   const teamAbbrevById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const t of teamDirectory as Array<{ source_team_id: string | number | null; abbreviation: string | null; name: string | null }>) {
-      if (t.source_team_id == null) continue;
+    for (const t of teamDirectory as Array<{ id: string | null; source_team_id: string | number | null; abbreviation: string | null; name: string | null }>) {
       const abbrev = t.abbreviation || t.name;
-      if (abbrev) map.set(String(t.source_team_id), abbrev);
+      if (!abbrev) continue;
+      // Pitching Master/Hitter Master TeamID holds the Teams Table UUID id
+      if (t.id) map.set(String(t.id), abbrev);
+      // Also index by source_team_id (TruMedia numeric) in case any caller passes that
+      if (t.source_team_id != null) map.set(String(t.source_team_id), abbrev);
     }
     return map;
   }, [teamDirectory]);
