@@ -551,8 +551,19 @@ export default function PitcherProfile() {
     if (storageRef?.teamName) return storageRef.teamName;
     return normalizePitcherTeamName(player?.team || "");
   }, [player?.team, storageRef?.teamName]);
+  // Blend-aware arsenal: if this season's row is a pullback candidate (combined_used),
+  // fetch rows from the blended priors too and aggregate per pitch type.
+  const arsenalCombineSeasons = useMemo(() => {
+    const row = (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason);
+    if (!row?.combined_used) return { combined: false, seasons: [effectiveSeason], label: null as string | null };
+    const combinedStr = String(row.combined_seasons ?? "");
+    const extra = combinedStr.split(",").map((s) => Number(s.trim())).filter((n) => Number.isFinite(n));
+    const seasons = Array.from(new Set([effectiveSeason, ...extra])).sort((a, b) => b - a);
+    return { combined: seasons.length > 1, seasons, label: seasons.join(" & ") };
+  }, [pitcherMasterSeasons, effectiveSeason]);
+
   const { data: pitchArsenalRows = [] } = useQuery({
-    queryKey: ["pitcher-profile-pitch-arsenal", id, lookupPlayerName, (player as any)?.source_player_id, effectiveSeason],
+    queryKey: ["pitcher-profile-pitch-arsenal", id, lookupPlayerName, (player as any)?.source_player_id, effectiveSeason, arsenalCombineSeasons.seasons.join(",")],
     enabled: !!lookupPlayerName || !!(player as any)?.source_player_id || !!id,
     queryFn: async () => {
       // Resolve the source_player_id that pitcher_stuff_plus_inputs uses.
@@ -579,27 +590,45 @@ export default function PitcherProfile() {
 
       if (!sourceId) return [] as PitchArsenalRow[];
 
-      // Primary: pull from pitcher_stuff_plus_inputs
+      const seasonsToQuery = arsenalCombineSeasons.seasons;
+
+      // Primary: pull from pitcher_stuff_plus_inputs across all blended seasons
       const { data: stuffRows, error } = await (supabase as any)
         .from("pitcher_stuff_plus_inputs")
         .select("season, source_player_id, hand, pitch_type, pitches, whiff_pct, stuff_plus")
         .eq("source_player_id", sourceId)
-        .eq("season", effectiveSeason)
-        .gte("pitches", 5)
+        .in("season", seasonsToQuery)
         .order("pitches", { ascending: false });
 
       if (!error && stuffRows && stuffRows.length > 0) {
-        const totalPitchesAll = stuffRows.reduce((s: number, r: any) => s + (r.pitches ?? 0), 0);
-        return stuffRows.map((r: any) => ({
-          season: r.season,
-          source_player_id: r.source_player_id,
+        // Aggregate per (pitch_type, hand): sum pitches, pitch-weighted stuff_plus and whiff_pct
+        type Agg = { season: number; source_player_id: string; pitch_type: string; hand: string; pitches: number; wStuff: number; wWhiff: number };
+        const aggMap = new Map<string, Agg>();
+        for (const r of stuffRows as any[]) {
+          const pt = String(r.pitch_type || "").trim();
+          if (!pt) continue;
+          const key = `${pt}::${r.hand}`;
+          if (!aggMap.has(key)) {
+            aggMap.set(key, { season: effectiveSeason, source_player_id: r.source_player_id, pitch_type: pt, hand: r.hand, pitches: 0, wStuff: 0, wWhiff: 0 });
+          }
+          const agg = aggMap.get(key)!;
+          const p = Number(r.pitches ?? 0);
+          agg.pitches += p;
+          if (r.stuff_plus != null) agg.wStuff += Number(r.stuff_plus) * p;
+          if (r.whiff_pct != null) agg.wWhiff += Number(r.whiff_pct) * p;
+        }
+        const aggregated = Array.from(aggMap.values()).filter((a) => a.pitches >= 5);
+        const totalPitchesAll = aggregated.reduce((s, a) => s + a.pitches, 0);
+        return aggregated.map((a) => ({
+          season: a.season,
+          source_player_id: a.source_player_id,
           player_name: null,
-          hand: r.hand,
-          pitch_type: r.pitch_type,
-          stuff_plus: r.stuff_plus,
+          hand: a.hand,
+          pitch_type: a.pitch_type,
+          stuff_plus: a.pitches > 0 ? a.wStuff / a.pitches : null,
           usage_pct: null,
-          whiff_pct: r.whiff_pct,
-          total_pitches: r.pitches,
+          whiff_pct: a.pitches > 0 ? a.wWhiff / a.pitches : null,
+          total_pitches: a.pitches,
           total_pitches_all: totalPitchesAll,
           overall_stuff_plus: null,
         })) as PitchArsenalRow[];
@@ -1983,6 +2012,9 @@ export default function PitcherProfile() {
               <Card className="border-[#162241] bg-[#0a1428]">
                 <CardHeader className="pb-1 pt-3 px-4">
                   <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Pitch Arsenal</CardTitle>
+                  {arsenalCombineSeasons.combined && (
+                    <div className="text-[10px] text-white/50 italic mt-0.5">*combined {arsenalCombineSeasons.label} metrics</div>
+                  )}
                 </CardHeader>
                 <CardContent className="px-4 pb-4">
                   <table className="w-full text-sm" style={{ fontFamily: "Inter, sans-serif" }}>
