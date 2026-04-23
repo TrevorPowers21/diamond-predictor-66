@@ -699,11 +699,19 @@ export default function ReturningPlayers() {
     }
     let cancelled = false;
     const q = debouncedSearch.replace(/[%]/g, "").trim();
-    supabase
+    const parts = q.split(/\s+/).filter(Boolean);
+    // If multi-word ("Hudson Barrett"), require BOTH parts to match somewhere in the name/team.
+    // Otherwise fall back to single-term OR across first_name/last_name/team.
+    const baseQuery = supabase
       .from("players")
-      .select("id, first_name, last_name, team, position")
-      .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,team.ilike.%${q}%`)
-      .limit(15)
+      .select("id, first_name, last_name, team, position");
+    const withFilter = parts.length >= 2
+      ? baseQuery
+          .or(`first_name.ilike.%${parts[0]}%,last_name.ilike.%${parts[0]}%,team.ilike.%${parts[0]}%`)
+          .or(`first_name.ilike.%${parts[1]}%,last_name.ilike.%${parts[1]}%,team.ilike.%${parts[1]}%`)
+      : baseQuery.or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,team.ilike.%${q}%`);
+    withFilter
+      .limit(40)
       .then(({ data }) => {
         if (cancelled) return;
         setSearchResults((data || []) as any);
