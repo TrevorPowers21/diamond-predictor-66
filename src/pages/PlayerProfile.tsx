@@ -779,7 +779,12 @@ export default function PlayerProfile() {
     isoPlus: activeSeasonRow.iso_plus ?? seedPowerDerived?.isoPlus ?? null,
     overallPlus: activeSeasonRow.overall_plus ?? seedPowerDerived?.overallPlus ?? null,
   } : seedPowerDerived;
-  const projectedOWar = computeOWarFromWrcPlus(regularPred?.p_wrc_plus ?? null);
+  // Carry 2025 PA forward as expected 2026 PA so projected WAR scales with
+  // actual playing-time history. A fringe starter with 100 PA last year
+  // projects to ~100 PA of WAR, not a full-time 260. Prevents misleading
+  // 2 WAR / 90K valuations for limited-role returners.
+  const carryForwardPa = projectionSourceRow?.pa ?? (player as any)?.pa ?? null;
+  const projectedOWar = computeOWarFromWrcPlus(regularPred?.p_wrc_plus ?? null, carryForwardPa);
   const historicalOWar = computeOWarFromWrcPlus(seedDerived?.wrcPlus ?? null, (player as any)?.pa ?? null);
   const displayOWar =
     projectedOWar ??
