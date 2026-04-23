@@ -367,6 +367,23 @@ export default function PlayerProfile() {
   });
 
   const { teams: teamsForConference } = useTeamsTable();
+  // Map any team name (full or abbrev) → abbreviation for career stats display
+  const teamAbbrevByName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of teamsForConference as Array<{ name: string | null; fullName: string | null; abbreviation: string | null }>) {
+      const abbrev = t.abbreviation || t.name || t.fullName;
+      if (!abbrev) continue;
+      if (t.fullName) map.set(t.fullName.toLowerCase().trim(), abbrev);
+      if (t.name) map.set(t.name.toLowerCase().trim(), abbrev);
+      if (t.abbreviation) map.set(t.abbreviation.toLowerCase().trim(), abbrev);
+    }
+    return map;
+  }, [teamsForConference]);
+  const teamAbbrev = (name: string | null | undefined): string => {
+    if (!name) return "—";
+    const hit = teamAbbrevByName.get(name.toLowerCase().trim());
+    return hit || name;
+  };
 
   const { data: nilValuation } = useQuery({
     queryKey: ["player-nil", id],
@@ -1155,7 +1172,7 @@ export default function PlayerProfile() {
                           return (
                             <tr key={row.Season} className={`border-b border-[#162241]/60 last:border-0 transition-colors duration-150 hover:bg-[#162241]/40 ${i % 2 === 1 ? "bg-[#0d1a30]" : ""}`}>
                               <td className="py-1.5 pr-1 font-semibold text-white">{row.Season}</td>
-                              <td className="py-1.5 px-1 text-[#8a94a6] truncate max-w-[60px]">{row.Team ?? "—"}</td>
+                              <td className="py-1.5 px-1 text-[#8a94a6] truncate max-w-[60px]">{teamAbbrev(row.Team)}</td>
                               <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.pa ?? "—"}</td>
                               <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.AVG != null ? Number(row.AVG).toFixed(3) : "—"}</td>
                               <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.OBP != null ? Number(row.OBP).toFixed(3) : "—"}</td>

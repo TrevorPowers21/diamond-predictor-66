@@ -1664,7 +1664,10 @@ export default function ReturningPlayers() {
     return [] as PitchingDashboardRow[];
   }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq]);
   const filteredPitchingRows = useMemo(() => {
-    let rows = pitchingRows;
+    // Qualification threshold: pitchers need at least 25 IP to show in the table
+    // (parallel to hitters needing 75 PA). Profile pages are still searchable/accessible
+    // for everyone — this only affects the table listing.
+    let rows = pitchingRows.filter((r) => (Number((r as any).ip) || 0) >= 25);
     if (pitchingRoleFilter !== "all") {
       rows = rows.filter((r) => r.role === pitchingRoleFilter);
     }
