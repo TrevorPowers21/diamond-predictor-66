@@ -104,6 +104,7 @@ interface PitchingDashboardRow {
   whiff_score: number | null;
   bb_score: number | null;
   barrel_score: number | null;
+  ip: number | null;
   era: number | null;
   fip: number | null;
   whip: number | null;
@@ -1653,6 +1654,7 @@ export default function ReturningPlayers() {
             k9_pr_plus: scoreObj.k9PrPlus,
             hr9_pr_plus: scoreObj.hr9PrPlus,
             bb9_pr_plus: scoreObj.bb9PrPlus,
+            ip: Number(r.ip) || 0,
             era, fip, whip, k9, bb9, hr9,
             p_era: parkAdjustedEra, p_fip: pFip, p_whip: parkAdjustedWhip,
             p_k9: pK9, p_bb9: pBb9, p_hr9: parkAdjustedHr9,
@@ -1667,7 +1669,7 @@ export default function ReturningPlayers() {
     // Qualification threshold: pitchers need at least 25 IP to show in the table
     // (parallel to hitters needing 75 PA). Profile pages are still searchable/accessible
     // for everyone — this only affects the table listing.
-    let rows = pitchingRows.filter((r) => (Number((r as any).ip) || 0) >= 25);
+    let rows = pitchingRows.filter((r) => (Number(r.ip) || 0) >= 25);
     if (pitchingRoleFilter !== "all") {
       rows = rows.filter((r) => r.role === pitchingRoleFilter);
     }
