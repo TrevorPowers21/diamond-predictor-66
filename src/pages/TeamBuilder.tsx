@@ -1156,13 +1156,22 @@ export default function TeamBuilder() {
     staleTime: 30 * 60 * 1000,
   });
 
-  // Thin-sample lookup: which 2025 returners have too little playing time and
-  // no priors to blend. Keyed by player UUID so row rendering can asterisk +
-  // dim the projection display.
-  const { data: thinSampleMap = new Map<string, boolean>() } = useQuery({
-    queryKey: ["team-builder-thin-sample-lookup"],
+  // 2025 playing-time lookup for seeding + thin-sample flagging. One query
+  // produces three maps keyed by player UUID: AB (hitter), GS/G (pitcher),
+  // and a derived thin-sample boolean. Used for initial depth_role seeding
+  // plus the row dim/asterisk in the projection display.
+  const { data: seasonUsage = {
+    thinSample: new Map<string, boolean>(),
+    hitterAb: new Map<string, number>(),
+    pitcherGs: new Map<string, number>(),
+    pitcherG: new Map<string, number>(),
+  } } = useQuery({
+    queryKey: ["team-builder-season-usage-lookup"],
     queryFn: async () => {
-      const map = new Map<string, boolean>();
+      const thinSample = new Map<string, boolean>();
+      const hitterAb = new Map<string, number>();
+      const pitcherGs = new Map<string, number>();
+      const pitcherG = new Map<string, number>();
       const [{ data: hmRows }, { data: pmRows }, { data: playerRows }] = await Promise.all([
         (supabase as any)
           .from("Hitter Master")
@@ -1170,32 +1179,43 @@ export default function TeamBuilder() {
           .eq("Season", 2025),
         (supabase as any)
           .from("Pitching Master")
-          .select("source_player_id, IP, combined_used")
+          .select("source_player_id, IP, GS, G, combined_used")
           .eq("Season", 2025),
         supabase.from("players").select("id, source_player_id"),
       ]);
-      const hitterThin = new Set<string>();
-      const pitcherThin = new Set<string>();
+      const hitterBySource = new Map<string, { ab: number; thin: boolean }>();
+      const pitcherBySource = new Map<string, { gs: number; g: number; thin: boolean }>();
       for (const r of (hmRows || [])) {
         if (!r.source_player_id) continue;
         const ab = Number(r.ab) || 0;
-        if (ab < 15 && !r.combined_used) hitterThin.add(r.source_player_id);
+        hitterBySource.set(r.source_player_id, { ab, thin: ab < 15 && !r.combined_used });
       }
       for (const r of (pmRows || [])) {
         if (!r.source_player_id) continue;
         const ip = Number(r.IP) || 0;
-        if (ip < 5 && !r.combined_used) pitcherThin.add(r.source_player_id);
+        const gs = Number(r.GS) || 0;
+        const g = Number(r.G) || 0;
+        pitcherBySource.set(r.source_player_id, { gs, g, thin: ip < 5 && !r.combined_used });
       }
       for (const p of (playerRows || [])) {
         if (!p.source_player_id) continue;
-        if (hitterThin.has(p.source_player_id) || pitcherThin.has(p.source_player_id)) {
-          map.set(p.id, true);
+        const h = hitterBySource.get(p.source_player_id);
+        if (h) {
+          hitterAb.set(p.id, h.ab);
+          if (h.thin) thinSample.set(p.id, true);
+        }
+        const pit = pitcherBySource.get(p.source_player_id);
+        if (pit) {
+          pitcherGs.set(p.id, pit.gs);
+          pitcherG.set(p.id, pit.g);
+          if (pit.thin) thinSample.set(p.id, true);
         }
       }
-      return map;
+      return { thinSample, hitterAb, pitcherGs, pitcherG };
     },
     staleTime: 30 * 60 * 1000,
   });
+  const thinSampleMap = seasonUsage.thinSample;
 
   const powerLookup = useMemo(() => {
     const map = new Map<string, any>();
@@ -1907,7 +1927,19 @@ export default function TeamBuilder() {
         || (_pmSid ? pitchingStatsByNameTeam.bySourceId.get(_pmSid) : null)
         || (() => { const b = pitchingStatsByNameTeam.byName.get(normalizeName(_pName)) || []; return b.length >= 1 ? b[0] : null; })();
       const pmRole = asPitcherRole(pmRec?.role ?? null);
-      const inferredRole = overrideRole || pmRole || asPitcherRole(player.position || null);
+      // Pitcher role seed: coach override wins; otherwise derive from GS/G with
+      // the "5 starts minimum" floor so a pitcher who made 2 emergency starts
+      // doesn't get tagged as a starter. pmRole is ignored when there's enough
+      // GS/G signal because stored Role can lag reality.
+      const seedPitcherGs = seasonUsage.pitcherGs.get(player.id) ?? pmRec?.gs ?? 0;
+      const seedPitcherG = seasonUsage.pitcherG.get(player.id) ?? pmRec?.g ?? 0;
+      const seedIsStarter = seedPitcherGs >= 5 && seedPitcherG > 0 && (seedPitcherGs / seedPitcherG) >= 0.5;
+      const inferredRole: "SP" | "RP" | "SM" = overrideRole || (seedPitcherG > 0 ? (seedIsStarter ? "SP" : "RP") : (pmRole || asPitcherRole(player.position || null) || "RP"));
+      // Hitter role seed: tier by 2025 AB (coach can override in the UI).
+      // Starter 150+, Utility 60-149, Bench <60.
+      const seedHitterAb = seasonUsage.hitterAb.get(player.id) ?? 0;
+      const seedHitterDepth: "starter" | "utility" | "bench" =
+        seedHitterAb >= 150 ? "starter" : seedHitterAb >= 60 ? "utility" : "bench";
       return {
         player_id: player.id,
         source: "returner" as const,
@@ -1919,7 +1951,7 @@ export default function TeamBuilder() {
         roster_status: "returner" as const,
         depth_role: isPitcherRow
           ? ((inferredRole === "SP") ? "weekend_starter" : "high_leverage_reliever")
-          : ("starter" as const),
+          : seedHitterDepth,
         class_transition: r.class_transition ?? "SJ",
         dev_aggressiveness: r.dev_aggressiveness ?? 0,
         class_transition_overridden: false,
@@ -4463,7 +4495,19 @@ export default function TeamBuilder() {
         || (_pmSid ? pitchingStatsByNameTeam.bySourceId.get(_pmSid) : null)
         || (() => { const b = pitchingStatsByNameTeam.byName.get(normalizeName(_pName)) || []; return b.length >= 1 ? b[0] : null; })();
       const pmRole = asPitcherRole(pmRec?.role ?? null);
-      const inferredRole = overrideRole || pmRole || asPitcherRole(player.position || null);
+      // Pitcher role seed: coach override wins; otherwise derive from GS/G with
+      // the "5 starts minimum" floor so a pitcher who made 2 emergency starts
+      // doesn't get tagged as a starter. pmRole is ignored when there's enough
+      // GS/G signal because stored Role can lag reality.
+      const seedPitcherGs = seasonUsage.pitcherGs.get(player.id) ?? pmRec?.gs ?? 0;
+      const seedPitcherG = seasonUsage.pitcherG.get(player.id) ?? pmRec?.g ?? 0;
+      const seedIsStarter = seedPitcherGs >= 5 && seedPitcherG > 0 && (seedPitcherGs / seedPitcherG) >= 0.5;
+      const inferredRole: "SP" | "RP" | "SM" = overrideRole || (seedPitcherG > 0 ? (seedIsStarter ? "SP" : "RP") : (pmRole || asPitcherRole(player.position || null) || "RP"));
+      // Hitter role seed: tier by 2025 AB (coach can override in the UI).
+      // Starter 150+, Utility 60-149, Bench <60.
+      const seedHitterAb = seasonUsage.hitterAb.get(player.id) ?? 0;
+      const seedHitterDepth: "starter" | "utility" | "bench" =
+        seedHitterAb >= 150 ? "starter" : seedHitterAb >= 60 ? "utility" : "bench";
       return {
         player_id: player.id,
         source: "returner" as const,
@@ -4475,7 +4519,7 @@ export default function TeamBuilder() {
         roster_status: "returner" as const,
         depth_role: isPitcherRow
           ? ((inferredRole === "SP") ? "weekend_starter" : "high_leverage_reliever")
-          : ("starter" as const),
+          : seedHitterDepth,
         class_transition: r.class_transition ?? "SJ",
         dev_aggressiveness: r.dev_aggressiveness ?? 0,
         class_transition_overridden: false,
