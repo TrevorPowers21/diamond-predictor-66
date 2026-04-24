@@ -91,7 +91,6 @@ export async function seedAllStarDemoData(userId: string): Promise<SeedResult> {
   const HITTER_QUALIFY_AB = 30;  // demo-friendly floor; 75 was excluding too many real candidates
   const PITCHER_QUALIFY_IP = 8;  // covers legit relievers without letting noise through
   const hitterAb = (p: PlayerRow) => (p.source_player_id ? (hmBySourceId.get(p.source_player_id)?.ab ?? 0) : 0);
-  console.log(`[seedAllStarDemoData] Loaded ${players.length} players, ${preds.length} predictions, ${hmRows.length} hitter master rows, ${pmRows.length} pitcher master rows`);
 
   // ─── 2. Need pitching master for GS to classify SP vs RP ────────────────
   // Pitching Master has "Role" but we'll derive SP/RP from GS/G to match the
@@ -120,6 +119,10 @@ export async function seedAllStarDemoData(userId: string): Promise<SeedResult> {
       overall_pr_plus: r.overall_pr_plus != null ? Number(r.overall_pr_plus) : null,
     });
   }
+
+  const hittersWithAb = Array.from(hmBySourceId.values()).filter((x) => x.ab >= 30).length;
+  const pitchersWithIp = Array.from(pmBySourceId.values()).filter((x) => x.ip >= 8 && x.overall_pr_plus != null).length;
+  console.log(`[seedAllStarDemoData] players=${players.length} preds=${preds.length} hmRows=${hmRows.length} pmRows=${pmRows.length} hittersOver30AB=${hittersWithAb} pitchersOver8IP=${pitchersWithIp}`);
 
   // ─── 3. Pick top hitter per position (qualified returners only) ─────────
   const returners = players.filter((p) => !p.transfer_portal);
