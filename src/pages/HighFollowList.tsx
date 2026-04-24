@@ -67,7 +67,7 @@ export default function HighFollowList() {
   const { list, isLoading, removePlayer } = useHighFollow();
   const [search, setSearch] = useState("");
   const [positionFilters, setPositionFilters] = useState<Set<string>>(new Set());
-  const [typeFilter, setTypeFilter] = useState<"all" | "hitter" | "pitcher">("all");
+  const [typeFilter, setTypeFilter] = useState<"hitter" | "pitcher">("hitter");
   const [sortKey, setSortKey] = useState<SortKey>("added_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -226,13 +226,13 @@ export default function HighFollowList() {
             </div>
             <div className="flex items-center gap-2">
               <div className="flex gap-0.5 rounded-lg border border-[#162241] bg-[#0d1a30] p-0.5">
-                {(["all", "hitter", "pitcher"] as const).map((t) => (
+                {(["hitter", "pitcher"] as const).map((t) => (
                   <button
                     key={t}
                     className={cn("px-3 py-1.5 text-xs rounded-md font-medium transition-colors duration-150 cursor-pointer", typeFilter === t ? "bg-[#162241] text-white shadow-sm" : "text-[#8a94a6] hover:text-slate-200")}
                     onClick={() => setTypeFilter(t)}
                   >
-                    {t === "all" ? "All" : t === "hitter" ? "Hitting" : "Pitching"}
+                    {t === "hitter" ? "Hitting" : "Pitching"}
                   </button>
                 ))}
               </div>
@@ -303,7 +303,6 @@ export default function HighFollowList() {
                       <TableRow className="border-b border-[#162241] hover:bg-transparent">
                         <TableHead className="w-[32px] p-1"></TableHead>
                         <TableHead className="min-w-[160px] sticky left-0 z-10 bg-[#0a1428]"><SortBtn label="Player" sk="name" /></TableHead>
-                        {typeFilter === "all" && <TableHead className="text-center w-[50px]"><SortBtn label="Type" sk="type" /></TableHead>}
                         <TableHead className="text-right"><SortBtn label="AVG" sk="p_avg" /></TableHead>
                         <TableHead className="text-right"><SortBtn label="OBP" sk="p_obp" /></TableHead>
                         <TableHead className="text-right"><SortBtn label="SLG" sk="p_slg" /></TableHead>
@@ -350,14 +349,6 @@ export default function HighFollowList() {
                                 {[r.hf.position, r.hf.team].filter(Boolean).join(" · ")}
                               </div>
                             </TableCell>
-
-                            {typeFilter === "all" && (
-                              <TableCell className="text-center">
-                                <Badge variant="outline" className={cn("text-[9px] uppercase tracking-wider font-semibold px-1.5", isP ? "border-blue-500/30 text-blue-400 bg-blue-500/8" : "border-[#D4AF37]/30 text-[#D4AF37] bg-[#D4AF37]/8")}>
-                                  {isP ? "PIT" : "HIT"}
-                                </Badge>
-                              </TableCell>
-                            )}
 
                             {/* Stat cells — hitters: AVG/OBP/SLG/OPS/wRC+, pitchers: ERA/FIP/WHIP/K9/pRV+ */}
                             {isP ? (
