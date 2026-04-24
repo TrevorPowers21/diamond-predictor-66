@@ -264,22 +264,21 @@ export async function seedAllStarDemoData(userId: string): Promise<SeedResult> {
   const { error: membersErr } = await supabase.from("team_build_players").insert(memberRows);
   if (membersErr) throw membersErr;
 
-  // ─── 8. Target Board — mix of portal targets + qualified next-tier returners ─────
-  // Portal players first (they're the recruiting use case), then next-tier
-  // returners to show the "high-follow" flow. All filtered by sample size
-  // so we don't surface 4-AB noise.
+  // ─── 8. Target Board — top qualified players not on the roster ──────────
+  // Portal status ignored — this is purely to demonstrate the targeting
+  // interface, so any top-tier name (returner or in-portal) works.
 
-  // Top 5 portal hitters by wRC+ (qualifying AB)
-  const portalHitters = players
-    .filter((p) => p.transfer_portal && !isPitcher(p.position) && hitterAb(p) >= HITTER_QUALIFY_AB)
+  // Top 10 qualified hitters not on the roster
+  const targetHitterPool = players
+    .filter((p) => !isPitcher(p.position) && !used.has(p.id) && hitterAb(p) >= HITTER_QUALIFY_AB)
     .map((p) => ({ player: p, pred: predByPlayerId.get(p.id) }))
     .filter((x) => x.pred && x.pred.p_wrc_plus != null) as Array<{ player: PlayerRow; pred: PredRow }>;
-  portalHitters.sort((a, b) => (b.pred.p_wrc_plus ?? 0) - (a.pred.p_wrc_plus ?? 0));
-  const targetPortalHitters = portalHitters.slice(0, 5);
+  targetHitterPool.sort((a, b) => (b.pred.p_wrc_plus ?? 0) - (a.pred.p_wrc_plus ?? 0));
+  const targetHitters = targetHitterPool.slice(0, 10);
 
-  // Top 5 portal pitchers by overall_pr_plus (qualifying IP)
-  const portalPitchersAll = players
-    .filter((p) => p.transfer_portal && isPitcher(p.position))
+  // Top 5 qualified pitchers not on the roster
+  const targetPitcherPool = players
+    .filter((p) => isPitcher(p.position) && !used.has(p.id))
     .map((p) => {
       const pmInfo = p.source_player_id ? pmBySourceId.get(p.source_player_id) : null;
       return {
@@ -289,24 +288,15 @@ export async function seedAllStarDemoData(userId: string): Promise<SeedResult> {
       };
     })
     .filter((x) => x.overallPrPlus != null && x.ip >= PITCHER_QUALIFY_IP) as Array<{ player: PlayerRow; ip: number; overallPrPlus: number }>;
-  portalPitchersAll.sort((a, b) => b.overallPrPlus - a.overallPrPlus);
-  const targetPortalPitchers = portalPitchersAll.slice(0, 5);
-
-  // Top 5 qualified next-tier returners (hitters first, mixing a pitcher or two)
-  const nextTierReturnerHitters = returners
-    .filter((p) => !isPitcher(p.position) && !used.has(p.id) && hitterAb(p) >= HITTER_QUALIFY_AB)
-    .map((p) => ({ player: p, pred: predByPlayerId.get(p.id) }))
-    .filter((x) => x.pred && x.pred.p_wrc_plus != null) as Array<{ player: PlayerRow; pred: PredRow }>;
-  nextTierReturnerHitters.sort((a, b) => (b.pred.p_wrc_plus ?? 0) - (a.pred.p_wrc_plus ?? 0));
-  const targetReturnerHitters = nextTierReturnerHitters.slice(0, 5);
+  targetPitcherPool.sort((a, b) => b.overallPrPlus - a.overallPrPlus);
+  const targetPitchers = targetPitcherPool.slice(0, 5);
 
   // Clear user's existing target board (idempotent demo seed)
   await (supabase as any).from("target_board").delete().eq("user_id", userId);
 
   const targetRows = [
-    ...targetPortalHitters.map((x) => ({ user_id: userId, player_id: x.player.id })),
-    ...targetPortalPitchers.map((x) => ({ user_id: userId, player_id: x.player.id })),
-    ...targetReturnerHitters.map((x) => ({ user_id: userId, player_id: x.player.id })),
+    ...targetHitters.map((x) => ({ user_id: userId, player_id: x.player.id })),
+    ...targetPitchers.map((x) => ({ user_id: userId, player_id: x.player.id })),
   ];
   if (targetRows.length > 0) {
     const { error: tbErr } = await (supabase as any).from("target_board").insert(targetRows);

@@ -7,10 +7,10 @@
  */
 
 export const DEMO_SCHOOL = {
-  name: "",
-  fullName: "",
+  name: "RSTR IQ All-Americans",
+  fullName: "RSTR IQ All-Americans",
   logo: "/rstr-iq-logo.png",
   primaryColor: "#D4AF37",
   secondaryColor: "#0a1428",
-  mascot: "",
+  mascot: "All-Americans",
 } as const;
