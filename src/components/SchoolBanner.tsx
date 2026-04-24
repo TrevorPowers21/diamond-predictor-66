@@ -153,7 +153,9 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
                   className="h-28 w-auto object-contain"
                 />
                 <div className="h-20 w-px bg-[#D4AF37]/30" />
-                {DEMO_SCHOOL.name ? (
+                {DEMO_SCHOOL.useNewtForceLogo || !DEMO_SCHOOL.name ? (
+                  <img src="/newtforce-logo.png" alt="NewtForce" className="h-28 object-contain" />
+                ) : (
                   <div>
                     <h2
                       className="text-2xl font-bold tracking-wider leading-none uppercase"
@@ -174,8 +176,6 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
                       {DEMO_SCHOOL.mascot}
                     </p>
                   </div>
-                ) : (
-                  <img src="/newtforce-logo.png" alt="NewtForce" className="h-28 object-contain" />
                 )}
               </div>
             </motion.div>

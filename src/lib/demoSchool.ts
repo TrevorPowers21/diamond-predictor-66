@@ -13,4 +13,7 @@ export const DEMO_SCHOOL = {
   primaryColor: "#D4AF37",
   secondaryColor: "#0a1428",
   mascot: "All-Americans",
+  // Synthetic demo team — keep NewtForce branding in the banner instead of
+  // rendering the name/mascot text. Flip to false for real customer schools.
+  useNewtForceLogo: true,
 } as const;

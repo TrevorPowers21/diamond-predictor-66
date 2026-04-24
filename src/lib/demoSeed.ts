@@ -88,9 +88,10 @@ export async function seedAllStarDemoData(userId: string): Promise<SeedResult> {
     if (!r.source_player_id) continue;
     hmBySourceId.set(r.source_player_id, { ab: Number(r.ab) || 0, pa: Number(r.pa) || 0 });
   }
-  const HITTER_QUALIFY_AB = 75;
-  const PITCHER_QUALIFY_IP = 15;
+  const HITTER_QUALIFY_AB = 30;  // demo-friendly floor; 75 was excluding too many real candidates
+  const PITCHER_QUALIFY_IP = 8;  // covers legit relievers without letting noise through
   const hitterAb = (p: PlayerRow) => (p.source_player_id ? (hmBySourceId.get(p.source_player_id)?.ab ?? 0) : 0);
+  console.log(`[seedAllStarDemoData] Loaded ${players.length} players, ${preds.length} predictions, ${hmRows.length} hitter master rows, ${pmRows.length} pitcher master rows`);
 
   // ─── 2. Need pitching master for GS to classify SP vs RP ────────────────
   // Pitching Master has "Role" but we'll derive SP/RP from GS/G to match the
