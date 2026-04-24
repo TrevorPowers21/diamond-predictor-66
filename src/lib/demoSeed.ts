@@ -88,8 +88,8 @@ export async function seedAllStarDemoData(userId: string): Promise<SeedResult> {
     if (!r.source_player_id) continue;
     hmBySourceId.set(r.source_player_id, { ab: Number(r.ab) || 0, pa: Number(r.pa) || 0 });
   }
-  const HITTER_QUALIFY_AB = 30;  // demo-friendly floor; 75 was excluding too many real candidates
-  const PITCHER_QUALIFY_IP = 8;  // covers legit relievers without letting noise through
+  const HITTER_QUALIFY_AB = 30;
+  const PITCHER_QUALIFY_IP = 5;  // dropped to catch more relievers with short bullpen loads
   const hitterAb = (p: PlayerRow) => (p.source_player_id ? (hmBySourceId.get(p.source_player_id)?.ab ?? 0) : 0);
 
   // ─── 2. Need pitching master for GS to classify SP vs RP ────────────────
@@ -159,6 +159,36 @@ export async function seedAllStarDemoData(userId: string): Promise<SeedResult> {
   addIfFound("CF", "OF", (p) => isOutfield(p.position));
   addIfFound("RF", "OF", (p) => isOutfield(p.position));
   addIfFound("DH", "DH", (p) => normalizePos(p.position) === "DH");
+
+  // Fallback fill: any slot without an exact-position candidate gets the
+  // next-best qualified hitter regardless of position. Slot label preserved
+  // so the Team Builder shows a 9-deep lineup.
+  const fallbackPool = returners
+    .filter((p) => !isPitcher(p.position) && !used.has(p.id) && hitterAb(p) >= HITTER_QUALIFY_AB)
+    .map((p) => ({ player: p, pred: predByPlayerId.get(p.id) }))
+    .filter((x) => x.pred && x.pred.p_wrc_plus != null) as Array<{ player: PlayerRow; pred: PredRow }>;
+  fallbackPool.sort((a, b) => (b.pred.p_wrc_plus ?? 0) - (a.pred.p_wrc_plus ?? 0));
+  const filledBefore = rosterSlots.length;
+  const desiredSlots = ["C", "1B", "2B", "3B", "SS", "OF", "OF", "OF", "DH"];
+  const filledLabels = rosterSlots.map((r) => r.slot);
+  const missingLabels = [...desiredSlots];
+  for (const label of filledLabels) {
+    const idx = missingLabels.indexOf(label);
+    if (idx >= 0) missingLabels.splice(idx, 1);
+  }
+  for (const label of missingLabels) {
+    const pick = fallbackPool.find((x) => !used.has(x.player.id));
+    if (!pick) break;
+    used.add(pick.player.id);
+    rosterSlots.push({ pos: label, player: pick.player, pred: pick.pred, slot: label });
+  }
+  if (rosterSlots.length > filledBefore) {
+    // Scrub from skipped[] the slots we just filled
+    for (const label of missingLabels.slice(0, rosterSlots.length - filledBefore)) {
+      const idx = skipped.indexOf(label);
+      if (idx >= 0) skipped.splice(idx, 1);
+    }
+  }
 
   // ─── 4. Pick top 5 SP + top 5 RP by Pitching Master overall_pr_plus ─────
   // player_predictions doesn't have a pitcher-specific rating column — use
