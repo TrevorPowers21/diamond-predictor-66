@@ -26,8 +26,6 @@ type PlayerRow = {
 type PredRow = {
   player_id: string;
   p_wrc_plus: number | null;
-  p_rv_plus: number | null;
-  p_era: number | null;
   p_avg: number | null;
   power_rating_plus: number | null;
   model_type: string | null;
@@ -62,7 +60,7 @@ export async function seedAllStarDemoData(userId: string): Promise<SeedResult> {
 
   const { data: allPreds, error: predsErr } = await supabase
     .from("player_predictions")
-    .select("player_id, p_wrc_plus, p_rv_plus, p_era, p_avg, power_rating_plus, model_type, variant, status")
+    .select("player_id, p_wrc_plus, p_avg, power_rating_plus, model_type, variant, status")
     .eq("status", "active")
     .eq("variant", "regular");
   if (predsErr) throw predsErr;
@@ -77,16 +75,27 @@ export async function seedAllStarDemoData(userId: string): Promise<SeedResult> {
   // Pitching Master has "Role" but we'll derive SP/RP from GS/G to match the
   // Team Builder seeding logic shipped earlier in the session.
   const sourceIds = players.filter((p) => p.source_player_id).map((p) => p.source_player_id!);
-  const { data: pmRows } = await (supabase as any)
-    .from("Pitching Master")
-    .select("source_player_id, GS, G")
-    .eq("Season", 2025)
-    .in("source_player_id", sourceIds);
+  // Batch the .in() query — Supabase rejects giant IN lists
+  const pmRows: any[] = [];
+  const BATCH = 500;
+  for (let i = 0; i < sourceIds.length; i += BATCH) {
+    const slice = sourceIds.slice(i, i + BATCH);
+    const { data } = await (supabase as any)
+      .from("Pitching Master")
+      .select("source_player_id, GS, G, overall_pr_plus")
+      .eq("Season", 2025)
+      .in("source_player_id", slice);
+    if (data) pmRows.push(...data);
+  }
 
-  const gsBySourceId = new Map<string, { gs: number; g: number }>();
-  for (const r of (pmRows || [])) {
+  const pmBySourceId = new Map<string, { gs: number; g: number; overall_pr_plus: number | null }>();
+  for (const r of pmRows) {
     if (!r.source_player_id) continue;
-    gsBySourceId.set(r.source_player_id, { gs: Number(r.GS) || 0, g: Number(r.G) || 0 });
+    pmBySourceId.set(r.source_player_id, {
+      gs: Number(r.GS) || 0,
+      g: Number(r.G) || 0,
+      overall_pr_plus: r.overall_pr_plus != null ? Number(r.overall_pr_plus) : null,
+    });
   }
 
   // ─── 3. Pick top hitter per position ────────────────────────────────────
@@ -102,7 +111,7 @@ export async function seedAllStarDemoData(userId: string): Promise<SeedResult> {
   };
 
   const used = new Set<string>();
-  const rosterSlots: Array<{ pos: string; player: PlayerRow; pred: PredRow; slot: string }> = [];
+  const rosterSlots: Array<{ pos: string; player: PlayerRow; pred: PredRow | null; slot: string }> = [];
   const skipped: string[] = [];
 
   const addIfFound = (slot: string, posLabel: string, match: (p: PlayerRow) => boolean) => {
@@ -125,24 +134,32 @@ export async function seedAllStarDemoData(userId: string): Promise<SeedResult> {
   addIfFound("RF", "OF", (p) => isOutfield(p.position));
   addIfFound("DH", "DH", (p) => normalizePos(p.position) === "DH");
 
-  // ─── 4. Pick top 5 SP + top 5 RP by p_rv_plus ───────────────────────────
-  const pitcherReturners = returners
+  // ─── 4. Pick top 5 SP + top 5 RP by Pitching Master overall_pr_plus ─────
+  // player_predictions doesn't have a pitcher-specific rating column — use
+  // the Pitching Master overall_pr_plus (set by the scoring pipeline) instead.
+  const classified = returners
     .filter((p) => isPitcher(p.position))
-    .map((p) => ({ player: p, pred: predByPlayerId.get(p.id) }))
-    .filter((x) => x.pred && x.pred.p_rv_plus != null) as Array<{ player: PlayerRow; pred: PredRow }>;
+    .map((p) => {
+      const pmInfo = p.source_player_id ? pmBySourceId.get(p.source_player_id) : null;
+      return {
+        player: p,
+        pred: predByPlayerId.get(p.id) ?? null,
+        gs: pmInfo?.gs ?? 0,
+        g: pmInfo?.g ?? 0,
+        overallPrPlus: pmInfo?.overall_pr_plus ?? null,
+      };
+    })
+    .filter((x) => x.overallPrPlus != null) as Array<{ player: PlayerRow; pred: PredRow | null; gs: number; g: number; overallPrPlus: number }>;
 
-  const classified = pitcherReturners.map((x) => {
-    const gsInfo = x.player.source_player_id ? gsBySourceId.get(x.player.source_player_id) : null;
-    const gs = gsInfo?.gs ?? 0;
-    const g = gsInfo?.g ?? 0;
-    const isStarter = gs >= 5 && g > 0 && (gs / g) >= 0.5;
+  const classifiedWithRole = classified.map((x) => {
+    const isStarter = x.gs >= 5 && x.g > 0 && (x.gs / x.g) >= 0.5;
     return { ...x, isStarter };
   });
 
-  classified.sort((a, b) => (b.pred.p_rv_plus ?? 0) - (a.pred.p_rv_plus ?? 0));
+  classifiedWithRole.sort((a, b) => b.overallPrPlus - a.overallPrPlus);
 
-  const topSP = classified.filter((x) => x.isStarter).slice(0, 5);
-  const topRP = classified.filter((x) => !x.isStarter).slice(0, 5);
+  const topSP = classifiedWithRole.filter((x) => x.isStarter).slice(0, 5);
+  const topRP = classifiedWithRole.filter((x) => !x.isStarter).slice(0, 5);
 
   for (const x of topSP) {
     rosterSlots.push({ pos: "SP", player: x.player, pred: x.pred, slot: "SP" });
@@ -199,7 +216,7 @@ export async function seedAllStarDemoData(userId: string): Promise<SeedResult> {
   nextTierHitters.sort((a, b) => (b.pred.p_wrc_plus ?? 0) - (a.pred.p_wrc_plus ?? 0));
   const targetHitters = nextTierHitters.slice(0, 10);
 
-  const nextTierPitchers = classified.filter((x) => !used.has(x.player.id)).slice(0, 5);
+  const nextTierPitchers = classifiedWithRole.filter((x) => !used.has(x.player.id)).slice(0, 5);
 
   // Clear user's existing target board (idempotent demo seed)
   await (supabase as any).from("target_board").delete().eq("user_id", userId);
