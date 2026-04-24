@@ -147,12 +147,16 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
               style={{ transformStyle: 'preserve-3d' }}
             >
               <div className="flex items-center gap-1">
-                <img
-                  src={schoolLogoUrl}
-                  alt={schoolName}
-                  className="h-28 w-auto object-contain"
-                />
-                <div className="h-20 w-px bg-[#D4AF37]/30" />
+                {schoolLogoUrl && (
+                  <>
+                    <img
+                      src={schoolLogoUrl}
+                      alt={schoolName}
+                      className="h-28 w-auto object-contain"
+                    />
+                    <div className="h-20 w-px bg-[#D4AF37]/30" />
+                  </>
+                )}
                 {DEMO_SCHOOL.useNewtForceLogo || !DEMO_SCHOOL.name ? (
                   <img src="/newtforce-logo.png" alt="NewtForce" className="h-28 object-contain" />
                 ) : (

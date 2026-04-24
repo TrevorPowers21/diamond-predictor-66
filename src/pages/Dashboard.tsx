@@ -236,31 +236,7 @@ export default function Dashboard() {
 
   const stats = briefingStats ?? { portalCount: 0, committedCount: 0, recentPortal: [], lastPredictionAt: null };
 
-  // ─── DEMO MOCK (remove after filming) ────────────────────────────────
-  // Sample updates so the briefing has content to screenshot for sales demos
-  const DEMO_UPDATES = [
-    {
-      id: "demo-1",
-      first_name: "Michael",
-      last_name: "Anderson",
-      team: null,
-      from_team: "Arkansas",
-      portal_status: "IN PORTAL",
-      updated_at: new Date(Date.now() - 3 * 3_600_000).toISOString(),
-      source: "following" as const,
-    },
-    {
-      id: "demo-2",
-      first_name: "Konni",
-      last_name: "Durschlag",
-      team: "Arkansas",
-      from_team: "High Point",
-      portal_status: "COMMITTED",
-      updated_at: new Date(Date.now() - 26 * 3_600_000).toISOString(),
-      source: "board" as const,
-    },
-  ];
-  const displayActivity = personalActivity.length > 0 ? personalActivity : DEMO_UPDATES;
+  const displayActivity = personalActivity;
 
   const fmt3 = (v: number | null) => (v == null ? "—" : v.toFixed(3));
   const fmt2 = (v: number | null) => (v == null ? "—" : v.toFixed(2));

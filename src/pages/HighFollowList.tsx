@@ -11,6 +11,11 @@ import { useHighFollow, type HighFollowRow } from "@/hooks/useHighFollow";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { profileRouteFor } from "@/lib/profileRoutes";
+import { useTeamsTable } from "@/hooks/useTeamsTable";
+import { useParkFactors } from "@/hooks/useParkFactors";
+import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
+import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { computePitcherProjection, type PitcherProjectionResult } from "@/lib/pitcherProjection";
 import {
   ScoutingReportProvider,
   PlayerSelectCheckbox,
@@ -40,6 +45,7 @@ interface MergedRow {
   hitter: any | null;
   pitcher: any | null;
   pred: any | null;
+  pitcherProjection: PitcherProjectionResult | null;
 }
 
 // ── Scouting mini box ───────────────────────────────────────────────
@@ -112,6 +118,64 @@ export default function HighFollowList() {
 
   const hitterMap = useMemo(() => { const m = new Map<string, any>(); for (const r of hitterRows) m.set(r.source_player_id, r); return m; }, [hitterRows]);
   const pitcherMap = useMemo(() => { const m = new Map<string, any>(); for (const r of pitcherRows) m.set(r.source_player_id, r); return m; }, [pitcherRows]);
+
+  const { teamsByName } = useTeamsTable();
+  const { parkMap } = useParkFactors();
+  const pitchingPowerEq = usePitchingEquationWeights();
+
+  // Build a map of source_player_id → projected pitching line using the same
+  // math as Returning Players (shared lib at src/lib/pitcherProjection.ts).
+  const pitcherProjectionMap = useMemo(() => {
+    const m = new Map<string, PitcherProjectionResult>();
+    if (!pitcherRows.length) return m;
+    const eq = readPitchingWeights();
+    for (const r of pitcherRows) {
+      const sourceId = (r as any).source_player_id;
+      if (!sourceId) continue;
+      const teamName = ((r as any).Team as string | null) ?? null;
+      const teamMatch = teamName ? teamsByName.get(teamName.toLowerCase().trim()) : undefined;
+      const projection = computePitcherProjection(
+        {
+          era: (r as any).ERA ?? null,
+          fip: (r as any).FIP ?? null,
+          whip: (r as any).WHIP ?? null,
+          k9: (r as any).K9 ?? null,
+          bb9: (r as any).BB9 ?? null,
+          hr9: (r as any).HR9 ?? null,
+          stuffPlus: (r as any).stuff_plus ?? null,
+          miss_pct: (r as any).miss_pct ?? null,
+          bb_pct: (r as any).bb_pct ?? null,
+          hard_hit_pct: (r as any).hard_hit_pct ?? null,
+          in_zone_whiff_pct: (r as any).in_zone_whiff_pct ?? null,
+          chase_pct: (r as any).chase_pct ?? null,
+          barrel_pct: (r as any).barrel_pct ?? null,
+          line_pct: (r as any).line_pct ?? null,
+          exit_vel: (r as any).exit_vel ?? null,
+          ground_pct: (r as any).ground_pct ?? null,
+          in_zone_pct: (r as any).in_zone_pct ?? null,
+          vel_90th: (r as any)["90th_vel"] ?? null,
+          h_pull_pct: (r as any).h_pull_pct ?? null,
+          la_10_30_pct: (r as any).la_10_30_pct ?? null,
+          role: (r as any).Role ?? null,
+          g: (r as any).G ?? null,
+          gs: (r as any).GS ?? null,
+          team: teamName,
+          teamId: (r as any).TeamID ?? null,
+          conference: teamMatch?.conference ?? (r as any).Conference ?? null,
+        },
+        {
+          eq,
+          powerEq: pitchingPowerEq as unknown as Record<string, number>,
+          parkMap,
+          teamMatch: teamMatch
+            ? { id: teamMatch.id, name: teamMatch.name, park_factor: teamMatch.park_factor }
+            : null,
+        },
+      );
+      m.set(sourceId, projection);
+    }
+    return m;
+  }, [pitcherRows, teamsByName, parkMap, pitchingPowerEq]);
   const predMap = useMemo(() => { const m = new Map<string, any>(); for (const r of predictions) m.set(r.player_id, r); return m; }, [predictions]);
 
   const merged: MergedRow[] = useMemo(() => list.map((hf) => ({
@@ -119,7 +183,8 @@ export default function HighFollowList() {
     hitter: hf.source_player_id ? hitterMap.get(hf.source_player_id) || null : null,
     pitcher: hf.source_player_id ? pitcherMap.get(hf.source_player_id) || null : null,
     pred: predMap.get(hf.player_id) || null,
-  })), [list, hitterMap, pitcherMap, predMap]);
+    pitcherProjection: hf.source_player_id ? pitcherProjectionMap.get(hf.source_player_id) || null : null,
+  })), [list, hitterMap, pitcherMap, predMap, pitcherProjectionMap]);
 
   const filtered = useMemo(() => {
     let rows = merged;
@@ -127,7 +192,7 @@ export default function HighFollowList() {
       const q = search.toLowerCase();
       rows = rows.filter((r) => `${r.hf.first_name} ${r.hf.last_name}`.toLowerCase().includes(q) || (r.hf.team || "").toLowerCase().includes(q));
     }
-    if (typeFilter !== "all") rows = rows.filter((r) => r.hf.player_type === typeFilter);
+    rows = rows.filter((r) => r.hf.player_type === typeFilter);
     if (positionFilters.size > 0) {
       rows = rows.filter((r) => {
         const p = (r.hf.position || "").toUpperCase();
@@ -155,14 +220,14 @@ export default function HighFollowList() {
         case "p_wrc_plus": av = a.pred?.p_wrc_plus ?? -999; bv = b.pred?.p_wrc_plus ?? -999; break;
         case "owar": av = a.pred?.p_wrc_plus ?? -999; bv = b.pred?.p_wrc_plus ?? -999; break;
         case "nil": av = a.pred?.nil_value ?? -999; bv = b.pred?.nil_value ?? -999; break;
-        case "p_era": av = a.pitcher?.ERA ?? 999; bv = b.pitcher?.ERA ?? 999; break;
-        case "p_fip": av = a.pitcher?.FIP ?? 999; bv = b.pitcher?.FIP ?? 999; break;
-        case "p_whip": av = a.pitcher?.WHIP ?? 999; bv = b.pitcher?.WHIP ?? 999; break;
-        case "p_k9": av = a.pitcher?.K9 ?? -999; bv = b.pitcher?.K9 ?? -999; break;
-        case "p_bb9": av = a.pitcher?.BB9 ?? 999; bv = b.pitcher?.BB9 ?? 999; break;
-        case "p_hr9": av = a.pitcher?.HR9 ?? 999; bv = b.pitcher?.HR9 ?? 999; break;
-        case "p_rv_plus": av = a.pitcher?.overall_pr_plus ?? -999; bv = b.pitcher?.overall_pr_plus ?? -999; break;
-        case "p_war": av = a.pred?.p_war ?? -999; bv = b.pred?.p_war ?? -999; break;
+        case "p_era": av = a.pitcherProjection?.p_era ?? 999; bv = b.pitcherProjection?.p_era ?? 999; break;
+        case "p_fip": av = a.pitcherProjection?.p_fip ?? 999; bv = b.pitcherProjection?.p_fip ?? 999; break;
+        case "p_whip": av = a.pitcherProjection?.p_whip ?? 999; bv = b.pitcherProjection?.p_whip ?? 999; break;
+        case "p_k9": av = a.pitcherProjection?.p_k9 ?? -999; bv = b.pitcherProjection?.p_k9 ?? -999; break;
+        case "p_bb9": av = a.pitcherProjection?.p_bb9 ?? 999; bv = b.pitcherProjection?.p_bb9 ?? 999; break;
+        case "p_hr9": av = a.pitcherProjection?.p_hr9 ?? 999; bv = b.pitcherProjection?.p_hr9 ?? 999; break;
+        case "p_rv_plus": av = a.pitcherProjection?.p_rv_plus ?? -999; bv = b.pitcherProjection?.p_rv_plus ?? -999; break;
+        case "p_war": av = a.pitcherProjection?.p_war ?? -999; bv = b.pitcherProjection?.p_war ?? -999; break;
         default: av = a.hf.added_at; bv = b.hf.added_at;
       }
       if (typeof av === "string") return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
@@ -199,7 +264,7 @@ export default function HighFollowList() {
       name: `${r.hf.first_name} ${r.hf.last_name}`, school: r.hf.team,
       position: r.hf.position, class_year: r.hf.class_year,
       ...(!isP && r.pred ? { p_avg: r.pred.p_avg, p_obp: r.pred.p_obp, p_slg: r.pred.p_slg, p_ops: r.pred.p_ops, p_iso: r.pred.p_iso, p_wrc_plus: r.pred.p_wrc_plus, barrel_score: r.pred.barrel_score, ev_score: r.pred.ev_score, contact_score: r.pred.contact_score, chase_score: r.pred.chase_score } : {}),
-      ...(isP && r.pitcher ? { p_era: r.pitcher.ERA, p_fip: r.pitcher.FIP, p_whip: r.pitcher.WHIP, p_k9: r.pitcher.K9, p_bb9: r.pitcher.BB9, p_hr9: r.pitcher.HR9, stuff_score: r.pitcher.stuff_plus, whiff_score: r.pitcher.whiff_score, bb_score: r.pitcher.bb_score, barrel_score: r.pitcher.barrel_score } : {}),
+      ...(isP ? { p_era: r.pitcherProjection?.p_era, p_fip: r.pitcherProjection?.p_fip, p_whip: r.pitcherProjection?.p_whip, p_k9: r.pitcherProjection?.p_k9, p_bb9: r.pitcherProjection?.p_bb9, p_hr9: r.pitcherProjection?.p_hr9, stuff_score: r.pitcherProjection?.scores.stuff, whiff_score: r.pitcherProjection?.scores.whiff, bb_score: r.pitcherProjection?.scores.bb, barrel_score: r.pitcherProjection?.scores.barrel } : {}),
     };
   };
 
@@ -303,11 +368,23 @@ export default function HighFollowList() {
                       <TableRow className="border-b border-[#162241] hover:bg-transparent">
                         <TableHead className="w-[32px] p-1"></TableHead>
                         <TableHead className="min-w-[160px] sticky left-0 z-10 bg-[#0a1428]"><SortBtn label="Player" sk="name" /></TableHead>
-                        <TableHead className="text-right"><SortBtn label="AVG" sk="p_avg" /></TableHead>
-                        <TableHead className="text-right"><SortBtn label="OBP" sk="p_obp" /></TableHead>
-                        <TableHead className="text-right"><SortBtn label="SLG" sk="p_slg" /></TableHead>
-                        <TableHead className="text-right"><SortBtn label="OPS" sk="p_ops" /></TableHead>
-                        <TableHead className="text-right"><SortBtn label="wRC+" sk="p_wrc_plus" /></TableHead>
+                        {typeFilter === "pitcher" ? (
+                          <>
+                            <TableHead className="text-right"><SortBtn label="ERA" sk="p_era" /></TableHead>
+                            <TableHead className="text-right"><SortBtn label="FIP" sk="p_fip" /></TableHead>
+                            <TableHead className="text-right"><SortBtn label="WHIP" sk="p_whip" /></TableHead>
+                            <TableHead className="text-right"><SortBtn label="K/9" sk="p_k9" /></TableHead>
+                            <TableHead className="text-right"><SortBtn label="pRV+" sk="p_rv_plus" /></TableHead>
+                          </>
+                        ) : (
+                          <>
+                            <TableHead className="text-right"><SortBtn label="AVG" sk="p_avg" /></TableHead>
+                            <TableHead className="text-right"><SortBtn label="OBP" sk="p_obp" /></TableHead>
+                            <TableHead className="text-right"><SortBtn label="SLG" sk="p_slg" /></TableHead>
+                            <TableHead className="text-right"><SortBtn label="OPS" sk="p_ops" /></TableHead>
+                            <TableHead className="text-right"><SortBtn label="wRC+" sk="p_wrc_plus" /></TableHead>
+                          </>
+                        )}
                         <TableHead className="text-center min-w-[140px]"><span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Scouting</span></TableHead>
                         <TableHead className="w-[36px] p-0"></TableHead>
                       </TableRow>
@@ -353,11 +430,11 @@ export default function HighFollowList() {
                             {/* Stat cells — hitters: AVG/OBP/SLG/OPS/wRC+, pitchers: ERA/FIP/WHIP/K9/pRV+ */}
                             {isP ? (
                               <>
-                                <TableCell className="text-right tabular-nums text-slate-200 text-sm">{pm ? statFmt(pm.ERA, 2) : "—"}</TableCell>
-                                <TableCell className="text-right tabular-nums text-slate-200 text-sm">{pm ? statFmt(pm.FIP, 2) : "—"}</TableCell>
-                                <TableCell className="text-right tabular-nums text-slate-200 text-sm">{pm ? statFmt(pm.WHIP, 2) : "—"}</TableCell>
-                                <TableCell className="text-right tabular-nums text-slate-200 text-sm">{pm ? statFmt(pm.K9, 1) : "—"}</TableCell>
-                                <TableCell className="text-right tabular-nums text-white text-sm font-semibold">{pm?.overall_pr_plus != null ? pctFmt(pm.overall_pr_plus) : "—"}</TableCell>
+                                <TableCell className="text-right tabular-nums text-slate-200 text-sm">{statFmt(r.pitcherProjection?.p_era, 2)}</TableCell>
+                                <TableCell className="text-right tabular-nums text-slate-200 text-sm">{statFmt(r.pitcherProjection?.p_fip, 2)}</TableCell>
+                                <TableCell className="text-right tabular-nums text-slate-200 text-sm">{statFmt(r.pitcherProjection?.p_whip, 2)}</TableCell>
+                                <TableCell className="text-right tabular-nums text-slate-200 text-sm">{statFmt(r.pitcherProjection?.p_k9, 1)}</TableCell>
+                                <TableCell className="text-right tabular-nums text-white text-sm font-semibold">{pctFmt(r.pitcherProjection?.p_rv_plus)}</TableCell>
                               </>
                             ) : (
                               <>
@@ -380,10 +457,10 @@ export default function HighFollowList() {
                               <div className="flex gap-0.5 justify-center flex-wrap">
                                 {isP ? (
                                   <>
-                                    <ScoutMini label="Stf+" value={pm?.stuff_plus} />
-                                    <ScoutMini label="Whf" value={pm?.whiff_score} />
-                                    <ScoutMini label="BB" value={pm?.bb_score} />
-                                    <ScoutMini label="Brl" value={pm?.barrel_score} />
+                                    <ScoutMini label="Stf+" value={r.pitcherProjection?.scores.stuff} />
+                                    <ScoutMini label="Whf" value={r.pitcherProjection?.scores.whiff} />
+                                    <ScoutMini label="BB" value={r.pitcherProjection?.scores.bb} />
+                                    <ScoutMini label="Brl" value={r.pitcherProjection?.scores.barrel} />
                                   </>
                                 ) : (
                                   <>

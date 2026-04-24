@@ -33,7 +33,6 @@ import powerRatings2025Seed from "@/data/power_ratings_2025_seed.json";
 import exitPositions2025Seed from "@/data/exit_positions_2025_seed.json";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
-import { seedAllStarDemoData, ALL_STAR_BUILD_NAME } from "@/lib/demoSeed";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import StuffPlusImporter from "@/components/StuffPlusImporter";
 
@@ -314,42 +313,6 @@ function AddMissingPlayersButton() {
         <p className="text-sm text-muted-foreground">
           Added {result.inserted} new players. {result.skipped} already existed.
           {result.errors.length > 0 && ` Errors: ${result.errors.join("; ")}`}
-        </p>
-      )}
-    </>
-  );
-}
-
-function SeedDemoDataButton() {
-  const { user } = useAuth();
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<{ roster_count: number; target_count: number; skipped_positions: string[] } | null>(null);
-  return (
-    <>
-      <Button
-        onClick={async () => {
-          if (!user?.id) return;
-          setLoading(true);
-          setResult(null);
-          try {
-            const r = await seedAllStarDemoData(user.id);
-            setResult({ roster_count: r.roster_count, target_count: r.target_count, skipped_positions: r.skipped_positions });
-          } catch (e: any) {
-            setResult({ roster_count: 0, target_count: 0, skipped_positions: [`Error: ${e.message}`] });
-          }
-          setLoading(false);
-        }}
-        disabled={loading || !user?.id}
-        variant="outline"
-        className="gap-2"
-      >
-        {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Trophy className="h-4 w-4" />}
-        {loading ? "Seeding demo data…" : "Seed All-Star Demo Data"}
-      </Button>
-      {result && (
-        <p className="text-sm text-muted-foreground">
-          Built &quot;{ALL_STAR_BUILD_NAME}&quot; with {result.roster_count} players. Added {result.target_count} to Target Board.
-          {result.skipped_positions.length > 0 && ` Skipped (no candidate): ${result.skipped_positions.join(", ")}`}
         </p>
       )}
     </>
@@ -3743,13 +3706,6 @@ function QuickActionsTab() {
             </p>
           </div>
           <SyncMasterButton />
-          <div className="border-t pt-4">
-            <p className="font-medium">Seed All-Star Demo Data</p>
-            <p className="text-sm text-muted-foreground">
-              Builds a saved Team Builder roster called &quot;{ALL_STAR_BUILD_NAME}&quot; with the top wRC+ returner at every hitting position + top 5 starters and top 5 relievers by pRV+. Also populates your Target Board with the next-tier names. Idempotent — re-run any time to refresh.
-            </p>
-          </div>
-          <SeedDemoDataButton />
           <div className="border-t pt-4">
             <p className="font-medium">Compute All Scores</p>
             <p className="text-sm text-muted-foreground">

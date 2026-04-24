@@ -7,13 +7,12 @@
  */
 
 export const DEMO_SCHOOL = {
-  name: "RSTR IQ All-Americans",
-  fullName: "RSTR IQ All-Americans",
-  logo: "/rstr-iq-logo.png",
+  name: "",
+  fullName: "",
+  logo: "",
   primaryColor: "#D4AF37",
   secondaryColor: "#0a1428",
-  mascot: "All-Americans",
-  // Synthetic demo team — keep NewtForce branding in the banner instead of
-  // rendering the name/mascot text. Flip to false for real customer schools.
+  mascot: "",
+  // When no demo school is set, fall back to NewtForce branding in the banner.
   useNewtForceLogo: true,
 } as const;

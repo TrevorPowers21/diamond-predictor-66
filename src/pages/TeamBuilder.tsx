@@ -1016,7 +1016,7 @@ export default function TeamBuilder() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, team, from_team, conference, transfer_portal, portal_status, player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at), nil_valuations(estimated_value, component_breakdown)")
+          .select("id, first_name, last_name, position, team, from_team, conference, transfer_portal, portal_status, player_predictions(id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at), nil_valuations(estimated_value, component_breakdown)")
           .range(from, from + PAGE - 1);
         if (error) throw error;
         all = all.concat(data || []);
@@ -1739,9 +1739,8 @@ export default function TeamBuilder() {
 
         const { data: predData, error: predErr } = await supabase
           .from("player_predictions")
-          .select("id, player_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at")
+          .select("id, player_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at")
           .in("player_id", playerIds)
-          .in("model_type", ["returner", "transfer"])
           .eq("variant", "regular")
           .in("status", ["active", "departed"]);
         if (predErr) {
@@ -1758,9 +1757,24 @@ export default function TeamBuilder() {
         for (const [pid, rows] of grouped.entries()) {
           const player = playerMap[pid];
           if (!player) continue;
-          predictionMap[pid] = player.transfer_portal === true
-            ? selectTransferPortalPreferredPrediction(rows)
-            : selectPreferredReturnerPrediction(rows);
+          // Match the auto-load path's picker: don't hard-filter by model_type
+          // (some predictions are stored as "transfer" even for returning
+          // players). Pick the best-scoring prediction among regular+active
+          // rows and tie-break on updated_at. This is copy-paste of the
+          // logic at lines ~1573-1585 in the returners useQuery.
+          const preds = rows.filter((r: any) => r.variant === "regular" && (r.status === "active" || r.status === "departed"));
+          if (preds.length === 0) continue;
+          let best = preds[0];
+          for (const row of preds) {
+            if (!best) { best = row; continue; }
+            const rowScore = scorePredictionLikeDashboard(row, false);
+            const bestScore = scorePredictionLikeDashboard(best, false);
+            if (rowScore > bestScore) best = row;
+            else if (rowScore === bestScore) {
+              if (new Date(row.updated_at || 0).getTime() > new Date(best.updated_at || 0).getTime()) best = row;
+            }
+          }
+          predictionMap[pid] = best;
         }
       }
 
@@ -2219,7 +2233,13 @@ export default function TeamBuilder() {
       }
     }
 
-    targetSyncedRef.current = true;
+    // Only lock the one-shot sync after we've actually seen the Supabase board
+    // load. Without this guard, a first render where supabaseTargetBoard is
+    // still empty (query in-flight) would skip the pull and then refuse to
+    // re-run when data arrives, so seeded target rows would never appear.
+    if (supabaseTargetBoard.length > 0) {
+      targetSyncedRef.current = true;
+    }
   }, [supabaseTargetBoard, rosterPlayers]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
@@ -2418,6 +2438,7 @@ export default function TeamBuilder() {
         .map((p) => p.player_id as string),
     [rosterPlayers],
   );
+
 
   const { data: liveTargetPredictions = [] } = useQuery({
     queryKey: ["team-builder-live-target-predictions", targetPlayerIds],
@@ -4618,43 +4639,6 @@ export default function TeamBuilder() {
           </div>
         )}
       </TableCell>
-      {isTarget && (
-      <TableCell className="text-center">
-        {(() => {
-          const pName = p.player ? `${p.player.first_name || ""} ${p.player.last_name || ""}`.trim() : "";
-          const pTeam = p.player?.from_team || p.player?.team || "";
-          const pSourceId = p.player?.source_player_id || null;
-          const spKey = `${normalizeName(pName)}|${normalizeName(pTeam)}`;
-          // ID-first: try source_player_id, then name|team, then name-only
-          const sp = (pSourceId ? powerLookup.get(`sid:${pSourceId}`) : null) ?? powerLookup.get(spKey) ?? powerLookup.get(normalizeName(pName)) ?? null;
-          const transferWrc = sim?.pWrcPlus ?? p.transfer_snapshot?.p_wrc_plus ?? null;
-          const destConf = selectedTeam ? (teamByKey.get(normalizeKey(selectedTeam))?.conference ?? null) : null;
-
-          const resolvedPa = p.player_id ? (hitterMasterPaMap.get(p.player_id) ?? null) : null;
-
-          const risk = assessHitterRisk({
-            conference: destConf,
-            projectedWrcPlus: transferWrc,
-            pa: resolvedPa,
-            chase: sp?.chase, contact: sp?.contact,
-            barrel: sp?.barrel, lineDrive: sp?.lineDrive,
-            avgEv: sp?.avgExitVelo, ev90: sp?.ev90,
-            pull: sp?.pull, gb: sp?.gb, bb: sp?.bb,
-          });
-          const colors: Record<string, string> = {
-            Low: "text-[hsl(142,71%,35%)] bg-[hsl(142,71%,45%,0.12)]",
-            Moderate: "text-[hsl(200,80%,35%)] bg-[hsl(200,80%,50%,0.12)]",
-            Elevated: "text-[hsl(40,90%,38%)] bg-[hsl(40,90%,50%,0.12)]",
-            High: "text-[hsl(0,72%,41%)] bg-[hsl(0,72%,51%,0.12)]",
-          };
-          return (
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${colors[risk.grade] || ""}`}>
-              {risk.grade}
-            </span>
-          );
-        })()}
-      </TableCell>
-      )}
       <TableCell>
         {(p.roster_status || (p.source === "portal" ? "target" : "returner")) === "target" ? (
           (() => {
@@ -4698,16 +4682,47 @@ export default function TeamBuilder() {
           </Select>
         )}
       </TableCell>
-      <TableCell>{(() => {
+      <TableCell className={isTarget ? "text-center" : undefined}>{isTarget ? (
+        (() => {
+          const pName = p.player ? `${p.player.first_name || ""} ${p.player.last_name || ""}`.trim() : "";
+          const pTeam = p.player?.from_team || p.player?.team || "";
+          const pSourceId = p.player?.source_player_id || null;
+          const spKey = `${normalizeName(pName)}|${normalizeName(pTeam)}`;
+          const sp = (pSourceId ? powerLookup.get(`sid:${pSourceId}`) : null) ?? powerLookup.get(spKey) ?? powerLookup.get(normalizeName(pName)) ?? null;
+          const originConf = p.player?.conference ?? p.transfer_snapshot?.from_conference ?? null;
+          const pureWrc = p.prediction?.p_wrc_plus ?? p.transfer_snapshot?.p_wrc_plus ?? sim?.pWrcPlus ?? null;
+          const confRow = originConf ? confByKey.get(normalizeKey(originConf)) : null;
+          const resolvedPa = p.player_id ? (hitterMasterPaMap.get(p.player_id) ?? null) : null;
+          const risk = assessHitterRisk({
+            conference: originConf,
+            projectedWrcPlus: pureWrc,
+            confStuffPlus: confRow?.stuff_plus,
+            pa: resolvedPa,
+            chase: sp?.chase, contact: sp?.contact,
+            barrel: sp?.barrel, lineDrive: sp?.lineDrive,
+            avgEv: sp?.avgExitVelo, ev90: sp?.ev90,
+            pull: sp?.pull, gb: sp?.gb, bb: sp?.bb,
+          });
+          const colors: Record<string, string> = {
+            Low: "text-[hsl(142,71%,35%)] bg-[hsl(142,71%,45%,0.12)]",
+            Moderate: "text-[hsl(200,80%,35%)] bg-[hsl(200,80%,50%,0.12)]",
+            Elevated: "text-[hsl(40,90%,38%)] bg-[hsl(40,90%,50%,0.12)]",
+            High: "text-[hsl(0,72%,41%)] bg-[hsl(0,72%,51%,0.12)]",
+          };
+          return (
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${colors[risk.grade] || ""}`}>
+              {risk.grade}
+            </span>
+          );
+        })()
+      ) : (() => {
         const dbPos = p.player?.position || "";
         if (dbPos === "OF" || !dbPos) {
           const fullName = `${p.player?.first_name || ""} ${p.player?.last_name || ""}`.trim();
           const team = p.player?.team || "";
           const posMap = exitPositions as Record<string, string>;
-          // Try exact match, then check all keys containing player name
           const exact = posMap[`${fullName}|${team}`] || posMap[fullName];
           if (exact) return exact;
-          // Fuzzy: find any key starting with the player name
           const namePrefix = `${fullName}|`;
           for (const key of Object.keys(posMap)) {
             if (key.startsWith(namePrefix)) return posMap[key];
@@ -4746,7 +4761,7 @@ export default function TeamBuilder() {
           </Select>
         ) : (
           <Select
-            value={p.position_slot || "none"}
+            value={p.position_slot || (isTarget ? (p.player?.position || "none") : "none")}
             onValueChange={(v) => {
               const nextSlot = v === "none" ? null : v;
               updatePlayer(globalIdx, { position_slot: nextSlot });
@@ -5382,9 +5397,8 @@ export default function TeamBuilder() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="sticky left-0 z-20 bg-muted/95 backdrop-blur-sm shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] min-w-[180px]">Player</TableHead>
-                      <TableHead className="text-center">Risk</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Pos</TableHead>
+                      <TableHead className="text-center">Risk</TableHead>
                       <TableHead>Position Change</TableHead>
                       <TableHead>Class Adj</TableHead>
                       <TableHead>Dev Agg</TableHead>
@@ -5400,7 +5414,7 @@ export default function TeamBuilder() {
                   </TableHeader>
                   <TableBody>
                     {targetPositionPlayers.length === 0 ? (
-                      <TableRow><TableCell colSpan={14} className="text-center text-muted-foreground py-8">No target position players</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={13} className="text-center text-muted-foreground py-8">No target position players</TableCell></TableRow>
                     ) : (
                       targetPositionPlayers.map((p, i) => {
                         const globalIdx = rosterPlayers.indexOf(p);
