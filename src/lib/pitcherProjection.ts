@@ -2,11 +2,17 @@ import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { resolveMetricParkFactor, type ParkFactorsMap } from "@/lib/parkFactors";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
 
-// Mirrors the inline pitcher projection pipeline from ReturningPlayers so other
-// pages (High Follow, etc.) can produce the same projected ERA / FIP / WHIP /
-// K/9 / BB/9 / HR/9 / pRV+ / pWAR / market value without duplicating the math.
-// Keep this file in sync with the inline version until the DB-backed
-// player_predictions mirror (hitter pattern) lands for pitchers.
+// Canonical pitcher projection pipeline — mirrors PitcherProfile's
+// projectedPitching useMemo exactly. The sequence is:
+//   scores → PR+ (live from scores) → projectPitchingRate (6 rates)
+//     → park adjust (ERA/WHIP/HR9)
+//     → role-transition adjust (all 6)
+//     → calcPitchingPlus per rate (era+/fip+/whip+/k9+/bb9+/hr9+)
+//     → pRvPlus = weighted composite of the six +-stats
+//     → pWar from pRvPlus + projected IP
+//     → market value from pWar + conf tier + PVF + eligibility
+// Every weight and NCAA constant flows through readPitchingWeights(); this file
+// introduces none of its own weights.
 
 const PITCHING_POWER_RATING_WEIGHT = 0.7;
 const PITCHING_DEV_FACTOR = 0.06;
@@ -48,6 +54,19 @@ export type PitcherProjectionContext = {
   roleOverride?: "SP" | "RP" | "SM" | null;
   classTransition?: "FS" | "SJ" | "JS" | "GR";
   devAggressiveness?: number;
+  // Pipeline-stored PR+ values from player_prediction_internals. Used as the
+  // primary source (mirrors PitcherProfile.tsx:1205) — live compute from
+  // scouting scores is a fallback when stored is null. This lets pitchers with
+  // missing Stuff+ / scouting gaps still get projections from the pipeline's
+  // precomputed PR+ values.
+  storedPrPlus?: {
+    era?: number | null;
+    fip?: number | null;
+    whip?: number | null;
+    k9?: number | null;
+    bb9?: number | null;
+    hr9?: number | null;
+  };
 };
 
 export type PitcherProjectionResult = {
@@ -61,15 +80,24 @@ export type PitcherProjectionResult = {
   p_war: number | null;
   market_value: number | null;
   projected_role: "SP" | "RP" | "SM";
+  base_role: "SP" | "RP" | "SM" | null;
   scores: {
     stuff: number | null;
     whiff: number | null;
     bb: number | null;
     barrel: number | null;
   };
+  pr_plus: {
+    era: number | null;
+    fip: number | null;
+    whip: number | null;
+    k9: number | null;
+    bb9: number | null;
+    hr9: number | null;
+  };
 };
 
-// ── Helpers (mirror of the ReturningPlayers module-local versions) ─────────
+// ── Helpers (mirror of PitcherProfile's module-local versions) ─────────────
 
 const parkToIndex = (v: number | null | undefined) => {
   if (v == null || !Number.isFinite(v)) return 100;
@@ -213,6 +241,21 @@ const calcScore = (value: number | null, avg: number, sd: number, lowerIsBetter 
   return lowerIsBetter ? 100 - pct : pct;
 };
 
+// Mirror of PitcherProfile's calcPitchingPlus (PitcherProfile.tsx:274).
+// Given a projected rate, produces a 100-centered +stat scaled by scale.
+const calcPitchingPlus = (
+  value: number | null,
+  ncaaAvg: number,
+  ncaaSd: number,
+  scale: number,
+  higherIsBetter = false,
+) => {
+  if (value == null || !Number.isFinite(value) || !Number.isFinite(ncaaAvg) || !Number.isFinite(ncaaSd) || ncaaSd === 0) return null;
+  const core = higherIsBetter ? ((value - ncaaAvg) / ncaaSd) : ((ncaaAvg - value) / ncaaSd);
+  const raw = 100 + (core * scale);
+  return Number.isFinite(raw) ? raw : null;
+};
+
 const computePitchingPrPlusFromScores = (
   scores: {
     stuff: number | null;
@@ -314,6 +357,8 @@ export function computePitcherProjection(
   const classTransition = ctx.classTransition ?? "SJ";
   const devAggressiveness = ctx.devAggressiveness ?? 0;
 
+  // Role detection: baseRole from input (G/GS if role string missing).
+  // projectedRole = override → baseRole → "SM".
   const games = input.g != null ? Number(input.g) : null;
   const starts = input.gs != null ? Number(input.gs) : null;
   const baseRole = toPitchingRole(input.role) || (games != null && games > 0 && starts != null
@@ -322,6 +367,7 @@ export function computePitcherProjection(
   const projectedRole: "SP" | "RP" | "SM" = ctx.roleOverride || baseRole || "SM";
   const projectedIp = projectedRole === "SP" ? eq.pwar_ip_sp : projectedRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
 
+  // Score each scouting metric against NCAA avg/sd.
   const scoreObj = {
     stuff: input.stuffPlus != null ? calcScore(input.stuffPlus, powerEq.p_ncaa_avg_stuff_plus, powerEq.p_sd_stuff_plus) : null,
     whiff: calcScore(input.miss_pct, powerEq.p_ncaa_avg_whiff_pct, powerEq.p_sd_whiff_pct),
@@ -339,8 +385,22 @@ export function computePitcherProjection(
     la1030: calcScore(input.la_10_30_pct, powerEq.p_ncaa_avg_la_10_30_pct, powerEq.p_sd_la_10_30_pct, true),
   };
 
-  const prPlus = computePitchingPrPlusFromScores(scoreObj, powerEq);
+  const livePrPlus = computePitchingPrPlusFromScores(scoreObj, powerEq);
 
+  // Stored PR+ from pipeline takes precedence; live compute is fallback.
+  // This matches PitcherProfile.tsx's selection logic exactly.
+  const readStored = (v: number | null | undefined) =>
+    v != null && Number.isFinite(Number(v)) ? Number(v) : null;
+  const prPlus = {
+    eraPrPlus: readStored(ctx.storedPrPlus?.era) ?? livePrPlus.eraPrPlus,
+    fipPrPlus: readStored(ctx.storedPrPlus?.fip) ?? livePrPlus.fipPrPlus,
+    whipPrPlus: readStored(ctx.storedPrPlus?.whip) ?? livePrPlus.whipPrPlus,
+    k9PrPlus: readStored(ctx.storedPrPlus?.k9) ?? livePrPlus.k9PrPlus,
+    bb9PrPlus: readStored(ctx.storedPrPlus?.bb9) ?? livePrPlus.bb9PrPlus,
+    hr9PrPlus: readStored(ctx.storedPrPlus?.hr9) ?? livePrPlus.hr9PrPlus,
+  };
+
+  // Class-adjustment percentages for each rate.
   const classEraAdj = toPitchingClassAdj(classTransition, eq.class_era_fs, eq.class_era_sj, eq.class_era_js, eq.class_era_gr);
   const classFipAdj = toPitchingClassAdj(classTransition, eq.class_fip_fs, eq.class_fip_sj, eq.class_fip_js, eq.class_fip_gr);
   const classWhipAdj = toPitchingClassAdj(classTransition, eq.class_whip_fs, eq.class_whip_sj, eq.class_whip_js, eq.class_whip_gr);
@@ -348,6 +408,7 @@ export function computePitcherProjection(
   const classBb9Adj = toPitchingClassAdj(classTransition, eq.class_bb9_fs, eq.class_bb9_sj, eq.class_bb9_js, eq.class_bb9_gr);
   const classHr9Adj = toPitchingClassAdj(classTransition, eq.class_hr9_fs, eq.class_hr9_sj, eq.class_hr9_js, eq.class_hr9_gr);
 
+  // Step 1: raw projected rates from last-stat + PR+ + class/dev.
   const pEra = projectPitchingRate({ lastStat: input.era, prPlus: prPlus.eraPrPlus, ncaaAvg: eq.era_plus_ncaa_avg, ncaaSd: eq.era_plus_ncaa_sd, prSd: eq.era_pr_sd, classAdjustment: classEraAdj, devAggressiveness, thresholds: eq.era_damp_thresholds, impacts: eq.era_damp_impacts, lowerIsBetter: true });
   const pFip = projectPitchingRate({ lastStat: input.fip, prPlus: prPlus.fipPrPlus, ncaaAvg: eq.fip_plus_ncaa_avg, ncaaSd: eq.fip_plus_ncaa_sd, prSd: eq.fip_pr_sd, classAdjustment: classFipAdj, devAggressiveness, thresholds: eq.fip_damp_thresholds, impacts: eq.fip_damp_impacts, lowerIsBetter: true });
   const pWhip = projectPitchingRate({ lastStat: input.whip, prPlus: prPlus.whipPrPlus, ncaaAvg: eq.whip_plus_ncaa_avg, ncaaSd: eq.whip_plus_ncaa_sd, prSd: eq.whip_pr_sd, classAdjustment: classWhipAdj, devAggressiveness, thresholds: eq.whip_damp_thresholds, impacts: eq.whip_damp_impacts, lowerIsBetter: true });
@@ -355,6 +416,7 @@ export function computePitcherProjection(
   const pBb9 = projectPitchingRate({ lastStat: input.bb9, prPlus: prPlus.bb9PrPlus, ncaaAvg: eq.bb9_plus_ncaa_avg, ncaaSd: eq.bb9_plus_ncaa_sd, prSd: eq.bb9_pr_sd, classAdjustment: classBb9Adj, devAggressiveness, thresholds: eq.bb9_damp_thresholds, impacts: eq.bb9_damp_impacts, lowerIsBetter: true });
   const pHr9 = projectPitchingRate({ lastStat: input.hr9, prPlus: prPlus.hr9PrPlus, ncaaAvg: eq.hr9_plus_ncaa_avg, ncaaSd: eq.hr9_plus_ncaa_sd, prSd: eq.hr9_pr_sd, classAdjustment: classHr9Adj, devAggressiveness, thresholds: eq.hr9_damp_thresholds, impacts: eq.hr9_damp_impacts, lowerIsBetter: true });
 
+  // Step 2: park-adjust ERA / WHIP / HR9 (FIP / K9 / BB9 are park-neutral).
   const teamNameForPark = teamMatch?.name || input.team || null;
   const fallbackPark = teamMatch?.park_factor ?? null;
   const avgPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id ?? null, "avg", parkMap, teamNameForPark, fallbackPark));
@@ -370,12 +432,47 @@ export function computePitcherProjection(
   const parkAdjustedWhip = pWhip == null ? null : pWhip * whipParkFactor;
   const parkAdjustedHr9 = pHr9 == null ? null : pHr9 * hr9ParkFactor;
 
-  const pRvPlus = prPlus.eraPrPlus;
+  // Step 3: role-transition adjust all six rates. No-op when baseRole === projectedRole.
+  const roleCurve = {
+    tier1Max: eq.rp_to_sp_low_better_tier1_max,
+    tier2Max: eq.rp_to_sp_low_better_tier2_max,
+    tier3Max: eq.rp_to_sp_low_better_tier3_max,
+    tier1Mult: eq.rp_to_sp_low_better_tier1_mult,
+    tier2Mult: eq.rp_to_sp_low_better_tier2_mult,
+    tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
+  };
+  const roleAdjustedEra = applyRoleTransitionAdjustment(parkAdjustedEra, eq.sp_to_rp_reg_era_pct, baseRole, projectedRole, true, roleCurve);
+  const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, eq.sp_to_rp_reg_fip_pct, baseRole, projectedRole, true, roleCurve);
+  const roleAdjustedWhip = applyRoleTransitionAdjustment(parkAdjustedWhip, eq.sp_to_rp_reg_whip_pct, baseRole, projectedRole, true, roleCurve);
+  const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, eq.sp_to_rp_reg_k9_pct, baseRole, projectedRole, false, roleCurve);
+  const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, eq.sp_to_rp_reg_bb9_pct, baseRole, projectedRole, true, roleCurve);
+  const roleAdjustedHr9 = applyRoleTransitionAdjustment(parkAdjustedHr9, eq.sp_to_rp_reg_hr9_pct, baseRole, projectedRole, true, roleCurve);
+
+  // Step 4: convert role-adjusted rates into per-rate +stats.
+  const eraPlus = calcPitchingPlus(roleAdjustedEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale);
+  const fipPlus = calcPitchingPlus(roleAdjustedFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale);
+  const whipPlus = calcPitchingPlus(roleAdjustedWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale);
+  const k9Plus = calcPitchingPlus(roleAdjustedK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
+  const bb9Plus = calcPitchingPlus(roleAdjustedBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale);
+  const hr9Plus = calcPitchingPlus(roleAdjustedHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale);
+
+  // Step 5: pRvPlus = weighted composite of the six +-stats.
+  const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
+    ? (Number(eraPlus) * eq.era_plus_weight) +
+      (Number(fipPlus) * eq.fip_plus_weight) +
+      (Number(whipPlus) * eq.whip_plus_weight) +
+      (Number(k9Plus) * eq.k9_plus_weight) +
+      (Number(bb9Plus) * eq.bb9_plus_weight) +
+      (Number(hr9Plus) * eq.hr9_plus_weight)
+    : null;
+
+  // Step 6: pWar from pRvPlus + projected IP.
   const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);
   const pWar = pitcherValue == null || eq.pwar_runs_per_win === 0
     ? null
     : ((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
 
+  // Step 7: market value from pWar + conf tier + PVF + eligibility.
   const pitchingTierMultipliers = {
     sec: eq.market_tier_sec,
     p4: eq.market_tier_acc_big12,
@@ -390,21 +487,30 @@ export function computePitcherProjection(
   const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
 
   return {
-    p_era: parkAdjustedEra,
-    p_fip: pFip,
-    p_whip: parkAdjustedWhip,
-    p_k9: pK9,
-    p_bb9: pBb9,
-    p_hr9: parkAdjustedHr9,
+    p_era: roleAdjustedEra,
+    p_fip: roleAdjustedFip,
+    p_whip: roleAdjustedWhip,
+    p_k9: roleAdjustedK9,
+    p_bb9: roleAdjustedBb9,
+    p_hr9: roleAdjustedHr9,
     p_rv_plus: pRvPlus,
     p_war: pWar,
     market_value: marketValue,
     projected_role: projectedRole,
+    base_role: baseRole,
     scores: {
       stuff: scoreObj.stuff,
       whiff: scoreObj.whiff,
       bb: scoreObj.bb,
       barrel: scoreObj.barrel,
+    },
+    pr_plus: {
+      era: prPlus.eraPrPlus,
+      fip: prPlus.fipPrPlus,
+      whip: prPlus.whipPrPlus,
+      k9: prPlus.k9PrPlus,
+      bb9: prPlus.bb9PrPlus,
+      hr9: prPlus.hr9PrPlus,
     },
   };
 }

@@ -1524,6 +1524,57 @@ export default function ReturningPlayers() {
   // Pitching Master – single source for stats + power metrics
   const { pitchers: pitchingMasterRows } = usePitchingSeedData();
 
+  // Pitcher projections from player_predictions (written by the recalc engine).
+  // Keyed by source_player_id so we can join against Pitching Master rows below.
+  // These are the canonical values shown on PitcherProfile; live compute here is
+  // a fallback for pitchers whose preds haven't been backfilled yet.
+  const { data: pitcherPredBySourceId } = useQuery({
+    queryKey: ["returning-pitcher-predictions-by-source-id"],
+    queryFn: async () => {
+      const map = new Map<string, {
+        p_era: number | null;
+        p_fip: number | null;
+        p_whip: number | null;
+        p_k9: number | null;
+        p_bb9: number | null;
+        p_hr9: number | null;
+        p_rv_plus: number | null;
+        pitcher_role: string | null;
+      }>();
+      let from = 0;
+      const PAGE = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("player_predictions")
+          .select("p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, players!inner(source_player_id)")
+          .eq("variant", "regular")
+          .in("status", ["active", "departed"])
+          .not("p_era", "is", null)
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        for (const r of (data || []) as any[]) {
+          const srcId = r.players?.source_player_id;
+          if (srcId) {
+            map.set(srcId, {
+              p_era: r.p_era,
+              p_fip: r.p_fip,
+              p_whip: r.p_whip,
+              p_k9: r.p_k9,
+              p_bb9: r.p_bb9,
+              p_hr9: r.p_hr9,
+              p_rv_plus: r.p_rv_plus,
+              pitcher_role: r.pitcher_role,
+            });
+          }
+        }
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+      }
+      return map;
+    },
+    staleTime: 30 * 60 * 1000,
+  });
+
   const pitchingRows = useMemo<PitchingDashboardRow[]>(() => {
     const eq = readPitchingWeights();
     const powerEq = pitchingPowerEq;
@@ -1644,6 +1695,27 @@ export default function ReturningPlayers() {
           const marketEligible = canShowPitchingMarketValue(normalizedTeam, conferenceForMarket);
           const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
 
+          // DB-stored projections take precedence over live compute. If the
+          // recalc engine has processed this pitcher, use those canonical
+          // values. pWAR is re-derived from the stored p_rv_plus + projected
+          // IP so it stays consistent with the displayed pRV+.
+          const dbPred = r.source_player_id ? pitcherPredBySourceId?.get(r.source_player_id) : null;
+          const dbPRvPlus = dbPred?.p_rv_plus ?? null;
+          const dbRole = (dbPred?.pitcher_role as "SP" | "RP" | "SM" | null) ?? null;
+          const effectiveRole: "SP" | "RP" | "SM" = dbRole || projectedRole;
+          const dbProjectedIp = effectiveRole === "SP" ? eq.pwar_ip_sp : effectiveRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
+          const dbPitcherValue = dbPRvPlus == null ? null : ((dbPRvPlus - 100) / 100);
+          const dbPWar = dbPitcherValue == null || eq.pwar_runs_per_win === 0
+            ? null
+            : ((((dbPitcherValue * (dbProjectedIp / 9) * eq.pwar_r_per_9) + ((dbProjectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
+          const dbMarketValue = (() => {
+            if (dbPWar == null) return null;
+            const dbPtm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
+            const dbPvm = getPitchingPvfForRole(effectiveRole, eq);
+            if (!marketEligible) return null;
+            return dbPWar * eq.market_dollars_per_war * dbPtm * dbPvm;
+          })();
+
           return {
             id: r.id || `pitching-master-${idx}`,
             playerName,
@@ -1664,15 +1736,21 @@ export default function ReturningPlayers() {
             bb9_pr_plus: scoreObj.bb9PrPlus,
             ip: Number(r.ip) || 0,
             era, fip, whip, k9, bb9, hr9,
-            p_era: parkAdjustedEra, p_fip: pFip, p_whip: parkAdjustedWhip,
-            p_k9: pK9, p_bb9: pBb9, p_hr9: parkAdjustedHr9,
-            p_rv_plus: pRvPlus, p_war: pWar, market_value: marketValue,
+            p_era: dbPred?.p_era ?? parkAdjustedEra,
+            p_fip: dbPred?.p_fip ?? pFip,
+            p_whip: dbPred?.p_whip ?? parkAdjustedWhip,
+            p_k9: dbPred?.p_k9 ?? pK9,
+            p_bb9: dbPred?.p_bb9 ?? pBb9,
+            p_hr9: dbPred?.p_hr9 ?? parkAdjustedHr9,
+            p_rv_plus: dbPRvPlus ?? pRvPlus,
+            p_war: dbPWar ?? pWar,
+            market_value: dbMarketValue ?? marketValue,
           } as PitchingDashboardRow;
         })
         .filter((r) => !!r.playerName);
     }
     return [] as PitchingDashboardRow[];
-  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq]);
+  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq, pitcherPredBySourceId]);
   const filteredPitchingRows = useMemo(() => {
     // Qualification threshold: pitchers need at least 25 IP to show in the table
     // (parallel to hitters needing 75 PA). Profile pages are still searchable/accessible

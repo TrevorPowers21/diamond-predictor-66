@@ -1,9 +1,14 @@
 import { supabase } from "@/integrations/supabase/client";
 import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
 import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
+import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { fetchParkFactorsMap, type ParkFactorsMap } from "@/lib/parkFactors";
+import { computePitcherProjection, type PitcherProjectionInput } from "@/lib/pitcherProjection";
+import { PITCHING_EQ_DEFAULTS } from "@/hooks/usePitchingEquationWeights";
 
 type PredictionRow = {
   id: string;
+  player_id?: string | null;
   model_type: "returner" | "transfer" | string;
   status: string | null;
   class_transition?: string | null;
@@ -11,6 +16,14 @@ type PredictionRow = {
   from_avg?: number | null;
   from_obp?: number | null;
   from_slg?: number | null;
+  // Pitcher inputs (present when prediction is for a pitcher)
+  from_era?: number | null;
+  from_fip?: number | null;
+  from_whip?: number | null;
+  from_k9?: number | null;
+  from_bb9?: number | null;
+  from_hr9?: number | null;
+  pitcher_role?: string | null;
   power_rating_plus?: number | null;
   from_avg_plus?: number | null;
   to_avg_plus?: number | null;
@@ -23,6 +36,9 @@ type PredictionRow = {
   from_park_factor?: number | null;
   to_park_factor?: number | null;
 };
+
+const isPitcherPred = (pred: PredictionRow) =>
+  pred.from_era != null && Number.isFinite(Number(pred.from_era));
 
 type UpdateFields = {
   class_transition?: string;
@@ -516,6 +532,280 @@ function calculatePrediction(pred: PredictionRow, config: EngineConfig, override
   return recalcReturner(pred, config.returner, undefined, overrides);
 }
 
+// ── Pitcher path ───────────────────────────────────────────────────────────
+
+type PitcherScoutingRow = {
+  source_player_id: string;
+  stuff_plus: number | null;
+  miss_pct: number | null;
+  bb_pct: number | null;
+  hard_hit_pct: number | null;
+  in_zone_whiff_pct: number | null;
+  chase_pct: number | null;
+  barrel_pct: number | null;
+  line_pct: number | null;
+  exit_vel: number | null;
+  ground_pct: number | null;
+  in_zone_pct: number | null;
+  vel_90th: number | null;
+  h_pull_pct: number | null;
+  la_10_30_pct: number | null;
+  G: number | null;
+  GS: number | null;
+  Role: string | null;
+  Team: string | null;
+  TeamID: string | null;
+  Conference: string | null;
+  // Pipeline-precomputed PR+ values from Pitching Master. These are the primary
+  // source for projections (matches PitcherProfile). Only era/fip/whip are
+  // pipeline-computed today; k9/bb9/hr9 fall back to live compute from scores.
+  era_pr_plus: number | null;
+  fip_pr_plus: number | null;
+  whip_pr_plus: number | null;
+};
+
+type PitcherPlayerContext = {
+  team: string | null;
+  teamId: string | null;
+  conference: string | null;
+};
+
+// Pitcher power-rating equation weights (NCAA avgs/SDs + weight constants used
+// by computePitchingPrPlusFromScores). Mirrors usePitchingEquationWeights query.
+async function loadPitchingPowerEq(season = 2025): Promise<Record<string, number>> {
+  const merged: Record<string, number> = { ...PITCHING_EQ_DEFAULTS };
+  try {
+    const { data } = await supabase
+      .from("model_config")
+      .select("config_key, config_value")
+      .eq("model_type", "admin_ui")
+      .eq("season", season);
+    for (const row of (data || []) as Array<{ config_key: string | null; config_value: any }>) {
+      const key = row.config_key;
+      if (key?.startsWith("p_")) {
+        const n = Number(row.config_value);
+        if (Number.isFinite(n)) merged[key] = n;
+      }
+    }
+  } catch {
+    // Fall back to defaults when model_config read fails.
+  }
+  // Locked constant — keep in sync with usePitchingEquationWeights.
+  merged.p_whip_chase_pct_weight = 0.05;
+  return merged;
+}
+
+const PITCHER_SCOUTING_SELECT =
+  "source_player_id, stuff_plus, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, \"90th_vel\", h_pull_pct, la_10_30_pct, G, GS, Role, Team, TeamID, Conference, era_pr_plus, fip_pr_plus, whip_pr_plus";
+
+const mapPitchingMasterRow = (row: any): PitcherScoutingRow => ({
+  source_player_id: row.source_player_id,
+  stuff_plus: row.stuff_plus ?? null,
+  miss_pct: row.miss_pct ?? null,
+  bb_pct: row.bb_pct ?? null,
+  hard_hit_pct: row.hard_hit_pct ?? null,
+  in_zone_whiff_pct: row.in_zone_whiff_pct ?? null,
+  chase_pct: row.chase_pct ?? null,
+  barrel_pct: row.barrel_pct ?? null,
+  line_pct: row.line_pct ?? null,
+  exit_vel: row.exit_vel ?? null,
+  ground_pct: row.ground_pct ?? null,
+  in_zone_pct: row.in_zone_pct ?? null,
+  vel_90th: row["90th_vel"] ?? null,
+  h_pull_pct: row.h_pull_pct ?? null,
+  la_10_30_pct: row.la_10_30_pct ?? null,
+  G: row.G ?? null,
+  GS: row.GS ?? null,
+  Role: row.Role ?? null,
+  Team: row.Team ?? null,
+  TeamID: row.TeamID ?? null,
+  Conference: row.Conference ?? null,
+  era_pr_plus: row.era_pr_plus ?? null,
+  fip_pr_plus: row.fip_pr_plus ?? null,
+  whip_pr_plus: row.whip_pr_plus ?? null,
+});
+
+const normalizeRole = (raw: string | null | undefined): "SP" | "RP" | "SM" | null => {
+  const v = String(raw || "").trim().toUpperCase();
+  if (v === "SP" || v === "RP" || v === "SM") return v;
+  return null;
+};
+
+type StoredPitcherPrPlus = {
+  era: number | null;
+  fip: number | null;
+  whip: number | null;
+  k9: number | null;
+  bb9: number | null;
+  hr9: number | null;
+};
+
+// Run the shared computePitcherProjection against a prediction row. The engine
+// passes the coach-overridden pitcher_role (when present) as roleOverride so
+// the projection respects staff decisions. Weight source is readPitchingWeights()
+// + loadPitchingPowerEq() — the same sources every surface uses today.
+// Stored PR+ values from player_prediction_internals are the primary source
+// (mirrors PitcherProfile); live compute is fallback.
+function recalcPitcher(
+  pred: PredictionRow,
+  eq: ReturnType<typeof readPitchingWeights>,
+  powerEq: Record<string, number>,
+  parkMap: ParkFactorsMap,
+  scouting: PitcherScoutingRow | null,
+  player: PitcherPlayerContext,
+  storedPrPlus: StoredPitcherPrPlus | null,
+  overrides?: UpdateFields,
+) {
+  const rawClass = overrides?.class_transition ?? pred.class_transition ?? "SJ";
+  const ct = normalizeClassTransition(rawClass) as "FS" | "SJ" | "JS" | "GR";
+  const rawDev = overrides?.dev_aggressiveness ?? pred.dev_aggressiveness ?? 0;
+  const devAggressiveness = Number.isFinite(Number(rawDev)) ? Number(rawDev) : 0;
+  const roleOverride = normalizeRole(pred.pitcher_role);
+
+  const input: PitcherProjectionInput = {
+    era: Number.isFinite(Number(pred.from_era)) ? Number(pred.from_era) : null,
+    fip: Number.isFinite(Number(pred.from_fip)) ? Number(pred.from_fip) : null,
+    whip: Number.isFinite(Number(pred.from_whip)) ? Number(pred.from_whip) : null,
+    k9: Number.isFinite(Number(pred.from_k9)) ? Number(pred.from_k9) : null,
+    bb9: Number.isFinite(Number(pred.from_bb9)) ? Number(pred.from_bb9) : null,
+    hr9: Number.isFinite(Number(pred.from_hr9)) ? Number(pred.from_hr9) : null,
+    stuffPlus: scouting?.stuff_plus ?? null,
+    miss_pct: scouting?.miss_pct ?? null,
+    bb_pct: scouting?.bb_pct ?? null,
+    hard_hit_pct: scouting?.hard_hit_pct ?? null,
+    in_zone_whiff_pct: scouting?.in_zone_whiff_pct ?? null,
+    chase_pct: scouting?.chase_pct ?? null,
+    barrel_pct: scouting?.barrel_pct ?? null,
+    line_pct: scouting?.line_pct ?? null,
+    exit_vel: scouting?.exit_vel ?? null,
+    ground_pct: scouting?.ground_pct ?? null,
+    in_zone_pct: scouting?.in_zone_pct ?? null,
+    vel_90th: scouting?.vel_90th ?? null,
+    h_pull_pct: scouting?.h_pull_pct ?? null,
+    la_10_30_pct: scouting?.la_10_30_pct ?? null,
+    role: scouting?.Role ?? null,
+    g: scouting?.G ?? null,
+    gs: scouting?.GS ?? null,
+    team: player.team ?? scouting?.Team ?? null,
+    teamId: player.teamId ?? scouting?.TeamID ?? null,
+    conference: player.conference ?? scouting?.Conference ?? null,
+  };
+
+  const result = computePitcherProjection(input, {
+    eq,
+    powerEq,
+    parkMap,
+    teamMatch: {
+      id: input.teamId,
+      name: input.team,
+      park_factor: null,
+    },
+    roleOverride,
+    classTransition: ct,
+    devAggressiveness,
+    storedPrPlus: storedPrPlus ?? undefined,
+  });
+
+  return {
+    predictionUpdate: {
+      p_era: result.p_era,
+      p_fip: result.p_fip,
+      p_whip: result.p_whip,
+      p_k9: result.p_k9,
+      p_bb9: result.p_bb9,
+      p_hr9: result.p_hr9,
+      p_rv_plus: result.p_rv_plus,
+      pitcher_role: result.projected_role,
+      class_transition: ct,
+      dev_aggressiveness: devAggressiveness,
+    },
+    internalsUpdate: {
+      era_power_rating: result.pr_plus.era,
+      fip_power_rating: result.pr_plus.fip,
+      whip_power_rating: result.pr_plus.whip,
+      k9_power_rating: result.pr_plus.k9,
+      bb9_power_rating: result.pr_plus.bb9,
+      hr9_power_rating: result.pr_plus.hr9,
+    },
+  };
+}
+
+async function fetchPitcherContext(
+  predictionId: string,
+  pred: PredictionRow,
+): Promise<{
+  eq: ReturnType<typeof readPitchingWeights>;
+  powerEq: Record<string, number>;
+  parkMap: ParkFactorsMap;
+  scouting: PitcherScoutingRow | null;
+  player: PitcherPlayerContext;
+  storedPrPlus: StoredPitcherPrPlus | null;
+}> {
+  const eq = readPitchingWeights();
+  const [powerEq, parkMap, internalsResp] = await Promise.all([
+    loadPitchingPowerEq(),
+    fetchParkFactorsMap(2025),
+    supabase
+      .from("player_prediction_internals")
+      .select("era_power_rating, fip_power_rating, whip_power_rating, k9_power_rating, bb9_power_rating, hr9_power_rating")
+      .eq("prediction_id", predictionId)
+      .maybeSingle(),
+  ]);
+
+  const internal = internalsResp.data as any;
+  const internalsPr = internal
+    ? {
+        era: internal.era_power_rating ?? null,
+        fip: internal.fip_power_rating ?? null,
+        whip: internal.whip_power_rating ?? null,
+        k9: internal.k9_power_rating ?? null,
+        bb9: internal.bb9_power_rating ?? null,
+        hr9: internal.hr9_power_rating ?? null,
+      }
+    : null;
+
+  let scouting: PitcherScoutingRow | null = null;
+  let player: PitcherPlayerContext = { team: null, teamId: null, conference: null };
+
+  if (pred.player_id) {
+    const { data: playerRow } = await supabase
+      .from("players")
+      .select("source_player_id, team, team_id, conference")
+      .eq("id", pred.player_id)
+      .maybeSingle();
+    if (playerRow) {
+      player = {
+        team: (playerRow as any).team ?? null,
+        teamId: (playerRow as any).team_id ?? null,
+        conference: (playerRow as any).conference ?? null,
+      };
+      const sourceId = (playerRow as any).source_player_id;
+      if (sourceId) {
+        const { data: pm } = await supabase
+          .from("Pitching Master")
+          .select(PITCHER_SCOUTING_SELECT)
+          .eq("source_player_id", sourceId)
+          .eq("Season", 2025)
+          .maybeSingle();
+        if (pm) scouting = mapPitchingMasterRow(pm);
+      }
+    }
+  }
+
+  // Merge stored PR+ sources: Pitching Master first (matches PitcherProfile's
+  // primary source), internals second (sparse), live compute third (inside lib).
+  const storedPrPlus: StoredPitcherPrPlus = {
+    era: scouting?.era_pr_plus ?? internalsPr?.era ?? null,
+    fip: scouting?.fip_pr_plus ?? internalsPr?.fip ?? null,
+    whip: scouting?.whip_pr_plus ?? internalsPr?.whip ?? null,
+    k9: internalsPr?.k9 ?? null,
+    bb9: internalsPr?.bb9 ?? null,
+    hr9: internalsPr?.hr9 ?? null,
+  };
+
+  return { eq, powerEq, parkMap, scouting, player, storedPrPlus };
+}
+
 async function fetchAllPredictionsForReturnerMode(): Promise<PredictionRow[]> {
   const out: PredictionRow[] = [];
   const pageSize = 1000;
@@ -523,14 +813,14 @@ async function fetchAllPredictionsForReturnerMode(): Promise<PredictionRow[]> {
   for (let page = 0; ; page++) {
     const from = page * pageSize;
     const to = from + pageSize - 1;
-    // Skip stub predictions (no input stats) — they have nothing to recalculate.
-    // Stubs are characterized by having from_avg = null.
+    // Include hitter rows (from_avg set) AND pitcher rows (from_era set).
+    // Stub rows with neither populated are still skipped.
     const { data, error } = await supabase
       .from("player_predictions")
       .select("*")
       .in("model_type", ["returner", "transfer"])
       .in("status", ["active", "departed"])
-      .not("from_avg", "is", null)
+      .or("from_avg.not.is.null,from_era.not.is.null")
       .range(from, to);
 
     if (error) throw error;
@@ -543,8 +833,6 @@ async function fetchAllPredictionsForReturnerMode(): Promise<PredictionRow[]> {
 }
 
 export async function recalculatePredictionById(predictionId: string, updates: UpdateFields = {}) {
-  const config = await loadEngineConfig();
-
   const { data: pred, error: predErr } = await supabase
     .from("player_predictions")
     .select("*")
@@ -553,6 +841,42 @@ export async function recalculatePredictionById(predictionId: string, updates: U
   if (predErr || !pred) throw predErr || new Error("Prediction not found");
 
   const merged = { ...(pred as PredictionRow), ...updates };
+
+  // ─── Pitcher path ───────────────────────────────────────────────────
+  if (isPitcherPred(merged)) {
+    const { eq, powerEq, parkMap, scouting, player, storedPrPlus } = await fetchPitcherContext(predictionId, merged);
+    const { predictionUpdate, internalsUpdate } = recalcPitcher(merged, eq, powerEq, parkMap, scouting, player, storedPrPlus, updates);
+
+    const { error: unlockErr } = await supabase
+      .from("player_predictions")
+      .update({ locked: false })
+      .eq("id", predictionId);
+    if (unlockErr) throw unlockErr;
+
+    const extraFields: Record<string, any> = {};
+    if (updates.class_transition !== undefined) {
+      extraFields.class_transition_overridden = true;
+    }
+    const { error: updateErr } = await supabase
+      .from("player_predictions")
+      .update({ ...predictionUpdate, ...extraFields, locked: true })
+      .eq("id", predictionId);
+    if (updateErr) throw updateErr;
+
+    // Upsert internals (pitcher power ratings) — keyed by prediction_id.
+    const { error: internalsErr } = await supabase
+      .from("player_prediction_internals")
+      .upsert({ prediction_id: predictionId, ...internalsUpdate }, { onConflict: "prediction_id" });
+    if (internalsErr) {
+      // Non-fatal: predictions succeeded, internals are admin-only visibility.
+      console.warn("[recalcPitcher] internals upsert failed:", internalsErr.message);
+    }
+
+    return { success: true, prediction: predictionUpdate };
+  }
+
+  // ─── Hitter path (unchanged) ────────────────────────────────────────
+  const config = await loadEngineConfig();
   let powerContext: ReturnerPowerContext | undefined;
   let combinedUsed = false;
   if (merged.model_type === "returner") {
@@ -615,7 +939,10 @@ export async function recalculatePredictionById(predictionId: string, updates: U
 
 export async function bulkRecalculatePredictionsLocal() {
   const config = await loadEngineConfig();
-  const preds = await fetchAllPredictionsForReturnerMode();
+  const allPreds = await fetchAllPredictionsForReturnerMode();
+  const hitterPreds = allPreds.filter((p) => !isPitcherPred(p));
+  const pitcherPreds = allPreds.filter((p) => isPitcherPred(p));
+  const preds = hitterPreds; // keep original var name for the existing hitter loop below
 
   // Pre-fetch power ratings keyed by players.id (the FK predictions use), so the
   // fallback lookup actually finds anything. We resolve the join via Hitter Master
@@ -746,5 +1073,152 @@ export async function bulkRecalculatePredictionsLocal() {
     );
   }
 
-  return { success: true, updated, updated_returner: updatedReturner, updated_transfer: updatedTransfer, errors, total: preds.length };
+  // ─── Pitcher bulk path ─────────────────────────────────────────────
+  // Preload everything we need so each batch is DB-round-trip-light.
+  let updatedPitcher = 0;
+  if (pitcherPreds.length > 0) {
+    const pitchingEq = readPitchingWeights();
+    const [pitchingPowerEq, parkMap] = await Promise.all([
+      loadPitchingPowerEq(),
+      fetchParkFactorsMap(2025),
+    ]);
+
+    // player_id -> { team, teamId, conference, source_player_id }
+    // NOTE: chunk size capped at 100 to avoid Supabase .in() URL-length
+    // overflow — 1000 UUIDs per .in() silently truncates results at ~8KB.
+    const playerCtxById = new Map<string, { team: string | null; teamId: string | null; conference: string | null; sourceId: string | null }>();
+    const pitcherPlayerIds = Array.from(new Set(pitcherPreds.map((p) => p.player_id).filter((v): v is string => !!v)));
+    for (let i = 0; i < pitcherPlayerIds.length; i += 100) {
+      const chunk = pitcherPlayerIds.slice(i, i + 100);
+      const { data } = await supabase
+        .from("players")
+        .select("id, source_player_id, team, team_id, conference")
+        .in("id", chunk);
+      for (const r of (data || []) as any[]) {
+        playerCtxById.set(r.id, {
+          team: r.team ?? null,
+          teamId: r.team_id ?? null,
+          conference: r.conference ?? null,
+          sourceId: r.source_player_id ?? null,
+        });
+      }
+    }
+
+    // source_player_id -> Pitching Master scouting row (Season 2025)
+    const scoutingBySourceId = new Map<string, PitcherScoutingRow>();
+    const pitcherSourceIds = Array.from(
+      new Set(
+        Array.from(playerCtxById.values())
+          .map((v) => v.sourceId)
+          .filter((v): v is string => !!v),
+      ),
+    );
+    for (let i = 0; i < pitcherSourceIds.length; i += 100) {
+      const chunk = pitcherSourceIds.slice(i, i + 100);
+      const { data } = await supabase
+        .from("Pitching Master")
+        .select(PITCHER_SCOUTING_SELECT)
+        .eq("Season", 2025)
+        .in("source_player_id", chunk);
+      for (const r of (data || []) as any[]) {
+        if (r.source_player_id) scoutingBySourceId.set(r.source_player_id, mapPitchingMasterRow(r));
+      }
+    }
+
+    const PITCHER_BATCH = 25;
+    for (let i = 0; i < pitcherPreds.length; i += PITCHER_BATCH) {
+      const batch = pitcherPreds.slice(i, i + PITCHER_BATCH);
+      const batchIds = batch.map((p) => p.id);
+
+      // Preload stored PR+ from internals for this batch.
+      const { data: pitcherInternals } = await supabase
+        .from("player_prediction_internals")
+        .select("prediction_id, era_power_rating, fip_power_rating, whip_power_rating, k9_power_rating, bb9_power_rating, hr9_power_rating")
+        .in("prediction_id", batchIds);
+      const storedByPredId = new Map<string, StoredPitcherPrPlus>();
+      for (const row of (pitcherInternals || []) as any[]) {
+        storedByPredId.set(row.prediction_id, {
+          era: row.era_power_rating ?? null,
+          fip: row.fip_power_rating ?? null,
+          whip: row.whip_power_rating ?? null,
+          k9: row.k9_power_rating ?? null,
+          bb9: row.bb9_power_rating ?? null,
+          hr9: row.hr9_power_rating ?? null,
+        });
+      }
+
+      await Promise.all(
+        batch.map(async (pred) => {
+          try {
+            const ctx = pred.player_id ? playerCtxById.get(pred.player_id) : null;
+            const scouting = ctx?.sourceId ? scoutingBySourceId.get(ctx.sourceId) ?? null : null;
+            const player = {
+              team: ctx?.team ?? null,
+              teamId: ctx?.teamId ?? null,
+              conference: ctx?.conference ?? null,
+            };
+            const internalsPr = storedByPredId.get(pred.id) ?? null;
+            // Pitching Master's precomputed PR+ takes precedence over internals
+            // (matches PitcherProfile). internals is sparse; PM is dense.
+            const storedPrPlus: StoredPitcherPrPlus = {
+              era: scouting?.era_pr_plus ?? internalsPr?.era ?? null,
+              fip: scouting?.fip_pr_plus ?? internalsPr?.fip ?? null,
+              whip: scouting?.whip_pr_plus ?? internalsPr?.whip ?? null,
+              k9: internalsPr?.k9 ?? null,
+              bb9: internalsPr?.bb9 ?? null,
+              hr9: internalsPr?.hr9 ?? null,
+            };
+            const { predictionUpdate, internalsUpdate } = recalcPitcher(pred, pitchingEq, pitchingPowerEq, parkMap, scouting, player, storedPrPlus);
+
+            // Unlock → update → re-lock (same pattern as hitter loop).
+            let lastErr: any = null;
+            let success = false;
+            for (let attempt = 0; attempt < 3; attempt++) {
+              try {
+                const { error: unlockErr } = await supabase
+                  .from("player_predictions")
+                  .update({ locked: false })
+                  .eq("id", pred.id);
+                if (unlockErr) { lastErr = unlockErr; throw unlockErr; }
+                const { error: e } = await supabase
+                  .from("player_predictions")
+                  .update({ ...predictionUpdate, locked: true })
+                  .eq("id", pred.id);
+                if (!e) { success = true; break; }
+                lastErr = e;
+              } catch (e) {
+                lastErr = e;
+              }
+              await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+            }
+            if (!success) {
+              errors += 1;
+              return;
+            }
+
+            // Non-fatal internals upsert.
+            await supabase
+              .from("player_prediction_internals")
+              .upsert({ prediction_id: pred.id, ...internalsUpdate }, { onConflict: "prediction_id" });
+
+            updated += 1;
+            updatedPitcher += 1;
+          } catch {
+            errors += 1;
+          }
+        }),
+      );
+    }
+
+  }
+
+  return {
+    success: true,
+    updated,
+    updated_returner: updatedReturner,
+    updated_transfer: updatedTransfer,
+    updated_pitcher: updatedPitcher,
+    errors,
+    total: allPreds.length,
+  };
 }
