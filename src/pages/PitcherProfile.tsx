@@ -844,7 +844,14 @@ export default function PitcherProfile() {
       la1030: parseNum(powerRatingsRow[29]),
     };
     const scores = {
-      stuff: storedScores.stuff ?? scoreFromMetric(metrics.stuff, pitchingEq.p_ncaa_avg_stuff_plus, pitchingEq.p_sd_stuff_plus),
+      // Stuff+ has no dedicated stored score column in Pitching Master — always
+      // compute from raw stuff+. Guarded on equation constants so a misconfigured
+      // model_config row can't accidentally leak the raw value through.
+      stuff: (() => {
+        const avg = Number.isFinite(pitchingEq.p_ncaa_avg_stuff_plus) ? pitchingEq.p_ncaa_avg_stuff_plus : 100;
+        const sd = Number.isFinite(pitchingEq.p_sd_stuff_plus) && pitchingEq.p_sd_stuff_plus > 0 ? pitchingEq.p_sd_stuff_plus : 3.97;
+        return scoreFromMetric(metrics.stuff, avg, sd);
+      })(),
       whiff: storedScores.whiff ?? scoreFromMetric(metrics.whiff, pitchingEq.p_ncaa_avg_whiff_pct, pitchingEq.p_sd_whiff_pct),
       bb: storedScores.bb ?? scoreFromMetric(metrics.bb, pitchingEq.p_ncaa_avg_bb_pct, pitchingEq.p_sd_bb_pct, true),
       hh: storedScores.hh ?? scoreFromMetric(metrics.hh, pitchingEq.p_ncaa_avg_hh_pct, pitchingEq.p_sd_hh_pct, true),
