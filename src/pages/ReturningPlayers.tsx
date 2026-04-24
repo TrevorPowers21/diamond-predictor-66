@@ -2376,8 +2376,40 @@ export default function ReturningPlayers() {
           </>
         )}
       </div>
-      <DownloadReportBar onAddToHighFollow={(players) => {
-        addToHighFollow(players.map((p) => ({ playerId: p.id, playerType: p.player_type })));
+      <DownloadReportBar onAddToHighFollow={async (players) => {
+        // Pitcher rows carry id = source_player_id (not a UUID). Resolve those
+        // against the players table before inserting into high_follow.
+        const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        const needsLookup = players.filter((p) => !uuidRe.test(String(p.id)));
+        const sidToPlayerId = new Map<string, string>();
+        if (needsLookup.length > 0) {
+          const sids = needsLookup.map((p) => String(p.id));
+          for (let i = 0; i < sids.length; i += 500) {
+            const slice = sids.slice(i, i + 500);
+            const { data } = await supabase
+              .from("players")
+              .select("id, source_player_id")
+              .in("source_player_id", slice);
+            for (const r of (data || [])) {
+              if (r.source_player_id) sidToPlayerId.set(String(r.source_player_id), r.id);
+            }
+          }
+        }
+        const resolved: Array<{ playerId: string; playerType: "hitter" | "pitcher" }> = [];
+        const unresolved: string[] = [];
+        for (const p of players) {
+          if (uuidRe.test(String(p.id))) {
+            resolved.push({ playerId: String(p.id), playerType: p.player_type });
+          } else {
+            const uuid = sidToPlayerId.get(String(p.id));
+            if (uuid) resolved.push({ playerId: uuid, playerType: p.player_type });
+            else unresolved.push(p.name);
+          }
+        }
+        if (resolved.length > 0) addToHighFollow(resolved);
+        if (unresolved.length > 0) {
+          toast.error(`Could not resolve: ${unresolved.join(", ")}`);
+        }
       }} />
       </ScoutingReportProvider>
     </DashboardLayout>
