@@ -43,6 +43,7 @@ const isPitcherPred = (pred: PredictionRow) =>
 type UpdateFields = {
   class_transition?: string;
   dev_aggressiveness?: number;
+  pitcher_role?: "SP" | "RP" | "SM" | null;
 };
 
 const DEFAULT_CLASS_BASES: Record<string, { avg: number; obp: number; slg: number }> = {
@@ -654,13 +655,24 @@ function recalcPitcher(
   scouting: PitcherScoutingRow | null,
   player: PitcherPlayerContext,
   storedPrPlus: StoredPitcherPrPlus | null,
+  coachRoleOverride: "SP" | "RP" | "SM" | null,
   overrides?: UpdateFields,
 ) {
   const rawClass = overrides?.class_transition ?? pred.class_transition ?? "SJ";
   const ct = normalizeClassTransition(rawClass) as "FS" | "SJ" | "JS" | "GR";
   const rawDev = overrides?.dev_aggressiveness ?? pred.dev_aggressiveness ?? 0;
   const devAggressiveness = Number.isFinite(Number(rawDev)) ? Number(rawDev) : 0;
-  const roleOverride = normalizeRole(pred.pitcher_role);
+  // Role override sources, in priority order:
+  //   1. Explicit updates from recalculatePredictionById (coach just saved)
+  //   2. Coach's persisted override from pitcher_role_overrides table
+  //   3. No override — use the detected base role (PitcherProfile's behavior)
+  // We do NOT read pred.pitcher_role — that's the engine's own output from the
+  // previous run. Reading it back as an override creates a feedback loop where
+  // the engine's default ("SM" when base role undetected) gets persisted, then
+  // triggers a phantom SP→SM role transition on next recalc.
+  const roleOverride = overrides?.pitcher_role !== undefined
+    ? normalizeRole(overrides.pitcher_role)
+    : normalizeRole(coachRoleOverride ?? null);
 
   const input: PitcherProjectionInput = {
     era: Number.isFinite(Number(pred.from_era)) ? Number(pred.from_era) : null,
@@ -740,6 +752,7 @@ async function fetchPitcherContext(
   scouting: PitcherScoutingRow | null;
   player: PitcherPlayerContext;
   storedPrPlus: StoredPitcherPrPlus | null;
+  coachRoleOverride: "SP" | "RP" | "SM" | null;
 }> {
   const eq = readPitchingWeights();
   const [powerEq, parkMap, internalsResp] = await Promise.all([
@@ -766,6 +779,7 @@ async function fetchPitcherContext(
 
   let scouting: PitcherScoutingRow | null = null;
   let player: PitcherPlayerContext = { team: null, teamId: null, conference: null };
+  let coachRoleOverride: "SP" | "RP" | "SM" | null = null;
 
   if (pred.player_id) {
     const { data: playerRow } = await supabase
@@ -790,6 +804,15 @@ async function fetchPitcherContext(
         if (pm) scouting = mapPitchingMasterRow(pm);
       }
     }
+
+    // Coach role override lives in a separate table, NOT in pred.pitcher_role
+    // (which is the engine's own previous output).
+    const { data: roleRow } = await supabase
+      .from("pitcher_role_overrides")
+      .select("role")
+      .eq("player_id", pred.player_id)
+      .maybeSingle();
+    if (roleRow) coachRoleOverride = normalizeRole((roleRow as any).role);
   }
 
   // Merge stored PR+ sources: Pitching Master first (matches PitcherProfile's
@@ -803,7 +826,7 @@ async function fetchPitcherContext(
     hr9: internalsPr?.hr9 ?? null,
   };
 
-  return { eq, powerEq, parkMap, scouting, player, storedPrPlus };
+  return { eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride };
 }
 
 async function fetchAllPredictionsForReturnerMode(): Promise<PredictionRow[]> {
@@ -844,8 +867,8 @@ export async function recalculatePredictionById(predictionId: string, updates: U
 
   // ─── Pitcher path ───────────────────────────────────────────────────
   if (isPitcherPred(merged)) {
-    const { eq, powerEq, parkMap, scouting, player, storedPrPlus } = await fetchPitcherContext(predictionId, merged);
-    const { predictionUpdate, internalsUpdate } = recalcPitcher(merged, eq, powerEq, parkMap, scouting, player, storedPrPlus, updates);
+    const { eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride } = await fetchPitcherContext(predictionId, merged);
+    const { predictionUpdate, internalsUpdate } = recalcPitcher(merged, eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride, updates);
 
     const { error: unlockErr } = await supabase
       .from("player_predictions")
@@ -1104,6 +1127,24 @@ export async function bulkRecalculatePredictionsLocal() {
       }
     }
 
+    // Coach role overrides from pitcher_role_overrides table, keyed by player_id.
+    // Deliberately NOT using pred.pitcher_role (which is the engine's own
+    // previous output — treating it as an override creates a feedback loop).
+    const coachRoleByPlayerId = new Map<string, "SP" | "RP" | "SM">();
+    if (pitcherPlayerIds.length > 0) {
+      for (let i = 0; i < pitcherPlayerIds.length; i += 100) {
+        const chunk = pitcherPlayerIds.slice(i, i + 100);
+        const { data } = await supabase
+          .from("pitcher_role_overrides")
+          .select("player_id, role")
+          .in("player_id", chunk);
+        for (const r of (data || []) as any[]) {
+          const normalized = normalizeRole(r.role);
+          if (normalized && r.player_id) coachRoleByPlayerId.set(r.player_id, normalized);
+        }
+      }
+    }
+
     // source_player_id -> Pitching Master scouting row (Season 2025)
     const scoutingBySourceId = new Map<string, PitcherScoutingRow>();
     const pitcherSourceIds = Array.from(
@@ -1168,7 +1209,8 @@ export async function bulkRecalculatePredictionsLocal() {
               bb9: internalsPr?.bb9 ?? null,
               hr9: internalsPr?.hr9 ?? null,
             };
-            const { predictionUpdate, internalsUpdate } = recalcPitcher(pred, pitchingEq, pitchingPowerEq, parkMap, scouting, player, storedPrPlus);
+            const coachRoleOverride = pred.player_id ? coachRoleByPlayerId.get(pred.player_id) ?? null : null;
+            const { predictionUpdate, internalsUpdate } = recalcPitcher(pred, pitchingEq, pitchingPowerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride);
 
             // Unlock → update → re-lock (same pattern as hitter loop).
             let lastErr: any = null;

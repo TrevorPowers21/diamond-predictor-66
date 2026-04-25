@@ -31,6 +31,7 @@ import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { usePitcherRoleOverrides } from "@/hooks/usePitcherRoleOverrides";
 import { computePrvPlus } from "@/savant/lib/prvPlus";
 import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
+import { recalculatePredictionById } from "@/lib/predictionEngine";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
@@ -1140,24 +1141,25 @@ export default function PitcherProfile() {
     if (updates.pitcher_role && id) {
       setSupabaseRole(id, updates.pitcher_role);
     }
-    // Persist class_transition + dev_aggressiveness to player_predictions for
-    // all of this pitcher's active returner predictions, unlocking first to
-    // satisfy the trigger, then re-locking so the nightly compute pipeline
-    // can't overwrite the coach's edits.
-    if (isDbRoute && id && (updates.class_transition !== undefined || updates.dev_aggressiveness !== undefined)) {
+    // Route coach edits through the recalc engine so it re-runs the projection
+    // with the new inputs and writes fresh p_era/p_fip/p_whip/p_k9/p_bb9/p_hr9/
+    // p_rv_plus/pitcher_role to player_predictions. Every downstream surface
+    // (Returning Players, High Follow, Team Builder) picks up the updated
+    // values on next render without recomputing.
+    if (isDbRoute && id && (updates.class_transition !== undefined || updates.dev_aggressiveness !== undefined || updates.pitcher_role !== undefined)) {
       const returnerPreds = (predictions as any[]).filter((p) => p.model_type === "returner");
       if (returnerPreds.length > 0) {
         const patch: Record<string, any> = {};
         if (updates.class_transition !== undefined) patch.class_transition = updates.class_transition;
         if (updates.dev_aggressiveness !== undefined) patch.dev_aggressiveness = Number(updates.dev_aggressiveness);
+        if (updates.pitcher_role !== undefined) patch.pitcher_role = updates.pitcher_role;
         try {
           for (const pred of returnerPreds) {
-            await supabase.from("player_predictions").update({ locked: false }).eq("id", pred.id);
-            const { error } = await supabase.from("player_predictions").update(patch).eq("id", pred.id);
-            if (error) throw error;
-            await supabase.from("player_predictions").update({ locked: true }).eq("id", pred.id);
+            await recalculatePredictionById(pred.id, patch);
           }
           queryClient.invalidateQueries({ queryKey: ["pitcher-profile-predictions", id] });
+          queryClient.invalidateQueries({ queryKey: ["returning-pitcher-predictions-by-source-id"] });
+          queryClient.invalidateQueries({ queryKey: ["hf-predictions"] });
         } catch (e: any) {
           toast.error(`Save failed: ${e.message}`);
         }

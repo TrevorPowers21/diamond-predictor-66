@@ -170,6 +170,17 @@ export default function HighFollowList() {
           teamMatch: teamMatch
             ? { id: teamMatch.id, name: teamMatch.name, park_factor: teamMatch.park_factor }
             : null,
+          // Prefer pipeline-computed PR+ from Pitching Master — same hierarchy
+          // PitcherProfile + the recalc engine use. This fills era/fip/whip
+          // projections for pitchers missing full scouting (no Stuff+).
+          storedPrPlus: {
+            era: (r as any).era_pr_plus ?? null,
+            fip: (r as any).fip_pr_plus ?? null,
+            whip: (r as any).whip_pr_plus ?? null,
+            k9: null,
+            bb9: null,
+            hr9: null,
+          },
         },
       );
       m.set(sourceId, projection);
@@ -178,13 +189,33 @@ export default function HighFollowList() {
   }, [pitcherRows, teamsByName, parkMap, pitchingPowerEq]);
   const predMap = useMemo(() => { const m = new Map<string, any>(); for (const r of predictions) m.set(r.player_id, r); return m; }, [predictions]);
 
-  const merged: MergedRow[] = useMemo(() => list.map((hf) => ({
-    hf,
-    hitter: hf.source_player_id ? hitterMap.get(hf.source_player_id) || null : null,
-    pitcher: hf.source_player_id ? pitcherMap.get(hf.source_player_id) || null : null,
-    pred: predMap.get(hf.player_id) || null,
-    pitcherProjection: hf.source_player_id ? pitcherProjectionMap.get(hf.source_player_id) || null : null,
-  })), [list, hitterMap, pitcherMap, predMap, pitcherProjectionMap]);
+  const merged: MergedRow[] = useMemo(() => list.map((hf) => {
+    const liveProjection = hf.source_player_id ? pitcherProjectionMap.get(hf.source_player_id) || null : null;
+    const pred = predMap.get(hf.player_id) || null;
+    // DB-stored pitcher projection wins over live compute — matches the
+    // ReturningPlayers pattern and reflects the canonical values PitcherProfile
+    // produces when coaches save class transition / dev / role changes.
+    const pitcherProjection = liveProjection && pred?.p_era != null
+      ? {
+          ...liveProjection,
+          p_era: pred.p_era,
+          p_fip: pred.p_fip,
+          p_whip: pred.p_whip,
+          p_k9: pred.p_k9,
+          p_bb9: pred.p_bb9,
+          p_hr9: pred.p_hr9,
+          p_rv_plus: pred.p_rv_plus,
+          projected_role: (pred.pitcher_role as "SP" | "RP" | "SM" | null) || liveProjection.projected_role,
+        }
+      : liveProjection;
+    return {
+      hf,
+      hitter: hf.source_player_id ? hitterMap.get(hf.source_player_id) || null : null,
+      pitcher: hf.source_player_id ? pitcherMap.get(hf.source_player_id) || null : null,
+      pred,
+      pitcherProjection,
+    };
+  }), [list, hitterMap, pitcherMap, predMap, pitcherProjectionMap]);
 
   const filtered = useMemo(() => {
     let rows = merged;
