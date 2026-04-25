@@ -1179,7 +1179,11 @@ export default function PitcherProfile() {
       }
       return;
     }
-    // Storage-backed profile editing fallback.
+    // Legacy storage-only path: only reached when the route is non-UUID
+    // (e.g., /dashboard/pitcher/storage__name__team for custom-roster pitchers
+    // without a Supabase UUID). DB-backed pitchers save through the engine
+    // above and never reach this branch. Don't migrate edits made here to the
+    // DB — they belong to phantom pitchers that have no DB row.
     try {
       const raw = localStorage.getItem(PITCHER_PROFILE_STORAGE_OVERRIDE_KEY);
       const parsed = raw ? (JSON.parse(raw) as Record<string, { pitcher_role?: "SP" | "RP" | "SM"; class_transition?: "FS" | "SJ" | "JS" | "GR"; dev_aggressiveness?: number }>) : {};
