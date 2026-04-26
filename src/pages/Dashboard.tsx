@@ -243,7 +243,7 @@ export default function Dashboard() {
 
   return (
     <DashboardLayout>
-      {devBypassed && !serviceKey && (
+      {import.meta.env.DEV && devBypassed && !serviceKey && (
         <div className="mb-4 space-y-2 rounded border border-yellow-300 bg-yellow-100 p-3 text-yellow-800">
           <p>Warning: Dev bypass active but no service role key provided. Data may be empty.</p>
           <button
