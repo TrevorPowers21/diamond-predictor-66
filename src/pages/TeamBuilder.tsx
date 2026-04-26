@@ -2724,8 +2724,6 @@ export default function TeamBuilder() {
       // stats not loaded, stored PR+ null). Surface this as the snapshot only
       // — don't paper it over with a base projection that would mislead.
       if (result.blocked) {
-        // eslint-disable-next-line no-console
-        console.warn("[simulateTransferProjection] pitcher blocked:", livePlayer.first_name, livePlayer.last_name, result.missingInputs);
         return snapshotFallback;
       }
 
