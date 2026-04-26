@@ -254,12 +254,16 @@ async function fetchSeasonBaselines(season: number): Promise<{ hitter: HitterBas
 export async function computeAndStoreHitterScores(season = 2025): Promise<{ updated: number; errors: number }> {
   let updated = 0;
   let errors = 0;
+  console.time("[ComputeHitter] TOTAL");
 
+  console.time("[ComputeHitter] 1. fetch baselines");
   const { hitter: hitterBaselines } = await fetchSeasonBaselines(season);
+  console.timeEnd("[ComputeHitter] 1. fetch baselines");
   console.log(`[computeAndStoreHitterScores] Using baselines for ${season}:`, hitterBaselines);
 
   // Pre-fetch ALL prior-season hitter rows in one paginated pass, then index by source_player_id.
   // Eliminates the per-row Supabase query that getBlendedHitterStats was doing.
+  console.time("[ComputeHitter] 2. fetch prior seasons");
   console.log(`[computeAndStoreHitterScores] Pre-fetching prior seasons (< ${season})...`);
   const priorRows = await fetchAllPrior("Hitter Master", HITTER_PRIOR_SELECT, season);
   const priorMap = new Map<string, any[]>();
@@ -272,8 +276,10 @@ export async function computeAndStoreHitterScores(season = 2025): Promise<{ upda
   // Sort each player's history newest-first (fetch is already sorted, but ensure it)
   for (const arr of priorMap.values()) arr.sort((a, b) => Number(b.Season) - Number(a.Season));
   console.log(`[computeAndStoreHitterScores] Indexed ${priorRows.length} prior rows for ${priorMap.size} players`);
+  console.timeEnd("[ComputeHitter] 2. fetch prior seasons");
 
   // Fetch all current-season rows in pages
+  console.time("[ComputeHitter] 3. fetch current season rows");
   console.log(`[computeAndStoreHitterScores] Fetching ${season} rows...`);
   const currentRows: any[] = [];
   let from = 0;
@@ -291,9 +297,11 @@ export async function computeAndStoreHitterScores(season = 2025): Promise<{ upda
     if (rows.length < readPageSize) break;
     from += readPageSize;
   }
+  console.timeEnd("[ComputeHitter] 3. fetch current season rows");
   console.log(`[computeAndStoreHitterScores] Computing scores for ${currentRows.length} rows...`);
 
   // Compute updates in-memory (synchronous, no DB calls)
+  console.time("[ComputeHitter] 4. compute scores (in-memory)");
   const updates = currentRows.map((row) => {
     const blended = blendHitterSync((row as any).source_player_id ?? null, row, priorMap);
     const v = blended.values;
@@ -352,7 +360,10 @@ export async function computeAndStoreHitterScores(season = 2025): Promise<{ upda
     };
   });
 
+  console.timeEnd("[ComputeHitter] 4. compute scores (in-memory)");
+
   // Write updates with bounded concurrency (50 in flight at a time).
+  console.time("[ComputeHitter] 5. write updates (50-concurrent)");
   console.log(`[computeAndStoreHitterScores] Writing ${updates.length} updates...`);
   await runWithConcurrency(updates, 50, async (u) => {
     const { error: updateErr } = await supabase
@@ -366,6 +377,8 @@ export async function computeAndStoreHitterScores(season = 2025): Promise<{ upda
       updated++;
     }
   });
+  console.timeEnd("[ComputeHitter] 5. write updates (50-concurrent)");
+  console.timeEnd("[ComputeHitter] TOTAL");
 
   return { updated, errors };
 }
@@ -377,10 +390,14 @@ export async function computeAndStoreHitterScores(season = 2025): Promise<{ upda
 export async function computeAndStorePitchingScores(season = 2025): Promise<{ updated: number; errors: number }> {
   let updated = 0;
   let errors = 0;
+  console.time("[ComputePitching] TOTAL");
 
+  console.time("[ComputePitching] 1. fetch baselines");
   const { pitcher: pitcherBaselines } = await fetchSeasonBaselines(season);
+  console.timeEnd("[ComputePitching] 1. fetch baselines");
   console.log(`[computeAndStorePitchingScores] Using baselines for ${season}:`, pitcherBaselines);
 
+  console.time("[ComputePitching] 2. fetch prior seasons");
   console.log(`[computeAndStorePitchingScores] Pre-fetching prior seasons (< ${season})...`);
   const priorRows = await fetchAllPrior("Pitching Master", PITCHER_PRIOR_SELECT, season);
   const priorMap = new Map<string, any[]>();
@@ -392,7 +409,9 @@ export async function computeAndStorePitchingScores(season = 2025): Promise<{ up
   }
   for (const arr of priorMap.values()) arr.sort((a, b) => Number(b.Season) - Number(a.Season));
   console.log(`[computeAndStorePitchingScores] Indexed ${priorRows.length} prior rows for ${priorMap.size} players`);
+  console.timeEnd("[ComputePitching] 2. fetch prior seasons");
 
+  console.time("[ComputePitching] 3. fetch current season rows");
   console.log(`[computeAndStorePitchingScores] Fetching ${season} rows...`);
   const currentRows: any[] = [];
   let from = 0;
@@ -410,8 +429,10 @@ export async function computeAndStorePitchingScores(season = 2025): Promise<{ up
     if (rows.length < readPageSize) break;
     from += readPageSize;
   }
+  console.timeEnd("[ComputePitching] 3. fetch current season rows");
   console.log(`[computeAndStorePitchingScores] Computing scores for ${currentRows.length} rows...`);
 
+  console.time("[ComputePitching] 4. compute scores (in-memory)");
   const updates = currentRows.map((row) => {
     const blended = blendPitcherSync((row as any).source_player_id ?? null, row, priorMap);
     const v = blended.values;
@@ -482,6 +503,9 @@ export async function computeAndStorePitchingScores(season = 2025): Promise<{ up
     };
   });
 
+  console.timeEnd("[ComputePitching] 4. compute scores (in-memory)");
+
+  console.time("[ComputePitching] 5. write updates (50-concurrent)");
   console.log(`[computeAndStorePitchingScores] Writing ${updates.length} updates...`);
   await runWithConcurrency(updates, 50, async (u) => {
     const { error: updateErr } = await supabase
@@ -495,6 +519,8 @@ export async function computeAndStorePitchingScores(season = 2025): Promise<{ up
       updated++;
     }
   });
+  console.timeEnd("[ComputePitching] 5. write updates (50-concurrent)");
+  console.timeEnd("[ComputePitching] TOTAL");
 
   return { updated, errors };
 }

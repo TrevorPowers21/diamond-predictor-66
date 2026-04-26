@@ -43,8 +43,10 @@ export async function calculateConferenceStuffPlus(
   season: number,
 ): Promise<{ report: ConferenceStuffPlusReport; errors: string[] }> {
   const errors: string[] = [];
+  console.time("[ConfStuff+V1] TOTAL");
 
   // ── Step 1: Pull all pitchers with overall Stuff+ for the season ────────
+  console.time("[ConfStuff+V1] 1. fetch pitchers + pitch rows");
   // Get stuff_plus (overall composite) from Pitching Master
   const pitchers = await fetchAll<{
     source_player_id: string;
@@ -79,7 +81,10 @@ export async function calculateConferenceStuffPlus(
     pitcherTotalPitches.set(r.source_player_id, cur + (r.pitches ?? 0));
   }
 
+  console.timeEnd("[ConfStuff+V1] 1. fetch pitchers + pitch rows");
+
   // ── Step 2: Group by conference, calculate weighted Stuff+ ─────────────
+  console.time("[ConfStuff+V1] 2. group + compute weighted stuff+");
   const confGroups = new Map<string, Array<{ stuffPlus: number; totalPitches: number; name: string }>>();
 
   for (const p of pitchers) {
@@ -113,7 +118,10 @@ export async function calculateConferenceStuffPlus(
 
   results.sort((a, b) => b.stuffPlus - a.stuffPlus);
 
+  console.timeEnd("[ConfStuff+V1] 2. group + compute weighted stuff+");
+
   // ── Step 3: Upsert to Conference Stats table ───────────────────────────
+  console.time("[ConfStuff+V1] 3. write to Conference Stats");
   let written = 0;
 
   for (const r of results) {
@@ -131,6 +139,9 @@ export async function calculateConferenceStuffPlus(
       written++;
     }
   }
+
+  console.timeEnd("[ConfStuff+V1] 3. write to Conference Stats");
+  console.timeEnd("[ConfStuff+V1] TOTAL");
 
   return {
     report: { results, written },

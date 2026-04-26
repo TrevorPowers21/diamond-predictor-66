@@ -109,12 +109,15 @@ export async function calculateConferenceStuffPlusV2(
   season: number,
 ): Promise<{ report: ConferenceStuffPlusV2Report; errors: string[] }> {
   const errors: string[] = [];
+  console.time("[ConfStuff+V2] TOTAL");
 
   // ── Pull population constants ──────────────────────────────────────────
+  console.time("[ConfStuff+V2] 1. fetch population constants");
   const { data: popData } = await (supabase as any)
     .from("pitcher_stuff_plus_ncaa")
     .select("*")
     .eq("season", season);
+  console.timeEnd("[ConfStuff+V2] 1. fetch population constants");
 
   if (!popData || popData.length === 0) {
     return { report: { overall: [], written: 0 }, errors: ["No population constants found"] };
@@ -126,17 +129,21 @@ export async function calculateConferenceStuffPlusV2(
   }
 
   // ── Step 1: Pull all pitch-level data ──────────────────────────────────
+  console.time("[ConfStuff+V2] 2. fetch pitch rows");
   const allRows = await fetchAll<RawPitchRow>(
     "pitcher_stuff_plus_inputs",
     "source_player_id, pitch_type, hand, conference, pitches, velocity, ivb, hb, rel_height, rel_side, extension, spin, fb_ch_velo_diff",
     (q: any) => q.eq("season", season).not("ivb", "is", null).not("hb", "is", null).gt("pitches", 0),
   );
 
+  console.timeEnd("[ConfStuff+V2] 2. fetch pitch rows");
+
   if (allRows.length === 0) {
     return { report: { overall: [], written: 0 }, errors: ["No pitch data found"] };
   }
 
   // ── Step 2: Group by conference + pitch_type + hand → weighted profiles
+  console.time("[ConfStuff+V2] 3. group + compute profiles");
   type GroupKey = string; // "conference::pitch_type::hand"
   const groups = new Map<GroupKey, RawPitchRow[]>();
 
@@ -188,7 +195,10 @@ export async function calculateConferenceStuffPlusV2(
     });
   }
 
+  console.timeEnd("[ConfStuff+V2] 3. group + compute profiles");
+
   // ── Step 3: Run profiles through Stuff+ equations ──────────────────────
+  console.time("[ConfStuff+V2] 4. score profiles");
   // Group profiles by (conference, pitch_type) to blend RHP + LHP
   const confPitchGroups = new Map<string, ConfPitchProfile[]>();
   for (const p of profiles) {
@@ -255,7 +265,10 @@ export async function calculateConferenceStuffPlusV2(
     });
   }
 
+  console.timeEnd("[ConfStuff+V2] 4. score profiles");
+
   // ── Step 4: Overall conference Stuff+ ──────────────────────────────────
+  console.time("[ConfStuff+V2] 5. compute overall");
   const confOverall = new Map<string, {
     totalWeighted: number;
     totalPitches: number;
@@ -300,7 +313,10 @@ export async function calculateConferenceStuffPlusV2(
   }
   overallResults.sort((a, b) => b.overall - a.overall);
 
+  console.timeEnd("[ConfStuff+V2] 5. compute overall");
+
   // ── Step 5: Write to Conference Stats ──────────────────────────────────
+  console.time("[ConfStuff+V2] 6. write to Conference Stats");
   let written = 0;
 
   for (const r of overallResults) {
@@ -339,6 +355,9 @@ export async function calculateConferenceStuffPlusV2(
       written++;
     }
   }
+
+  console.timeEnd("[ConfStuff+V2] 6. write to Conference Stats");
+  console.timeEnd("[ConfStuff+V2] TOTAL");
 
   return {
     report: { overall: overallResults, written },

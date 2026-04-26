@@ -931,8 +931,10 @@ export async function runBreakingBallReclassification(
   season: number = 2025,
 ): Promise<{ report: ReclassificationReport; errors: string[] }> {
   const errors: string[] = [];
+  console.time("[Reclass] TOTAL");
 
   // ── Diagnostic: fetch ALL distinct pitch_type values in the table ─────
+  console.time("[Reclass] 1. diagnostic pitch_type fetch");
   const { data: diagRows } = await fetchAllRows<{ pitch_type: string; hand: string }>(
     "pitcher_stuff_plus_inputs",
     "pitch_type, hand",
@@ -951,7 +953,10 @@ export async function runBreakingBallReclassification(
   }
   allPitchTypes.sort((a, b) => b.count - a.count);
 
+  console.timeEnd("[Reclass] 1. diagnostic pitch_type fetch");
+
   // ── Step 1: Pull ALL breaking ball rows ─────────────────────────────────
+  console.time("[Reclass] 2. fetch breaking ball rows");
   const { data: rawData, error: pullErrMsg } = await fetchAllRows<RawBreakingBallRow>(
     "pitcher_stuff_plus_inputs",
     "*",
@@ -1001,7 +1006,10 @@ export async function runBreakingBallReclassification(
     }
   }
 
+  console.timeEnd("[Reclass] 2. fetch breaking ball rows");
+
   // ── Step 1b: Filter ────────────────────────────────────────────────────
+  console.time("[Reclass] 3. filter + reclassify (compute)");
   const { surviving, filter1Dropped, filter2Dropped, filterPDropped } = applyFilters(rawRows, nameMap);
 
   // ── Step 2: Reclassify (4-bucket movement classification) ─────────────
@@ -1059,19 +1067,27 @@ export async function runBreakingBallReclassification(
     subThresholdDropped,
   } = consolidate(classified, nameMap);
 
+  console.timeEnd("[Reclass] 3. filter + reclassify (compute)");
+
   // ── Step 4: Calculate population averages from final rows ─────────────
+  console.time("[Reclass] 4. population averages + write");
   const populationAverages = calcPopulationAverages(outputRows, season);
 
   // Write population averages to Supabase
   const popWriteResult = await writePopulationAverages(populationAverages);
   errors.push(...popWriteResult.errors);
+  console.timeEnd("[Reclass] 4. population averages + write");
 
   // ── Step 5: Discrepancy detection ─────────────────────────────────────
+  console.time("[Reclass] 5. discrepancy detection");
   const discrepancy = runDiscrepancyDetection(outputRows, populationAverages);
+  console.timeEnd("[Reclass] 5. discrepancy detection");
 
   // ── Step 6: Write back ─────────────────────────────────────────────────
+  console.time("[Reclass] 6. write back to inputs table");
   const writeResult = await writeResults(outputRows, season);
   errors.push(...writeResult.errors);
+  console.timeEnd("[Reclass] 6. write back to inputs table");
 
   // ── Step 7: Build report ───────────────────────────────────────────────
   const report: ReclassificationReport = {
@@ -1100,6 +1116,7 @@ export async function runBreakingBallReclassification(
     populationAverages,
   };
 
+  console.timeEnd("[Reclass] TOTAL");
   return { report, errors };
 }
 

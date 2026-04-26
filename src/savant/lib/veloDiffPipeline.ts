@@ -53,13 +53,16 @@ export async function runVeloDiffPipeline(
   season: number = 2025,
 ): Promise<{ report: VeloDiffReport; errors: string[] }> {
   const errors: string[] = [];
+  console.time("[VeloDiff] TOTAL");
 
   // ── Step 1: Pull all relevant rows ─────────────────────────────────────
+  console.time("[VeloDiff] 1. fetch pitch rows");
   const allRows = await fetchAll<PitchRow>(
     "pitcher_stuff_plus_inputs",
     "id, source_player_id, pitch_type, hand, pitches, velocity",
     (q: any) => q.eq("season", season).in("pitch_type", ["4S FB", "Sinker", "Change-up"]),
   );
+  console.timeEnd("[VeloDiff] 1. fetch pitch rows");
 
   // Group by player
   const playerMap = new Map<string, PitchRow[]>();
@@ -69,6 +72,7 @@ export async function runVeloDiffPipeline(
   }
 
   // ── Step 2: Calculate fb_ch_velo_diff per player ───────────────────────
+  console.time("[VeloDiff] 2. compute fb_ch_velo_diff");
   let totalChangeupRows = 0;
   let fbFromBoth = 0;
   let fbFrom4SOnly = 0;
@@ -127,7 +131,10 @@ export async function runVeloDiffPipeline(
     }
   }
 
+  console.timeEnd("[VeloDiff] 2. compute fb_ch_velo_diff");
+
   // ── Step 3: Write fb_ch_velo_diff to pitcher_stuff_plus_inputs ─────────
+  console.time("[VeloDiff] 3. write fb_ch_velo_diff");
   // Group by diff value for efficient batch updates
   const diffGroups = new Map<string, string[]>();
   for (const u of updates) {
@@ -165,7 +172,10 @@ export async function runVeloDiffPipeline(
     }
   }
 
+  console.timeEnd("[VeloDiff] 3. write fb_ch_velo_diff");
+
   // ── Step 4: Calculate weighted mean and SD per hand ────────────────────
+  console.time("[VeloDiff] 4. weighted stats + write to ncaa table");
   function calcWeightedStats(rows: Array<{ diff: number; p: number }>): { mean: number; sd: number } | null {
     if (rows.length === 0) return null;
     const totalP = rows.reduce((s, r) => s + r.p, 0);
@@ -207,6 +217,9 @@ export async function runVeloDiffPipeline(
 
     if (error) errors.push(`NCAA LHP update: ${error.message}`);
   }
+
+  console.timeEnd("[VeloDiff] 4. weighted stats + write to ncaa table");
+  console.timeEnd("[VeloDiff] TOTAL");
 
   // ── Step 5: Report ─────────────────────────────────────────────────────
   return {

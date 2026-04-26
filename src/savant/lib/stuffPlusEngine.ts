@@ -329,12 +329,15 @@ export async function runStuffPlusPipeline(
   season: number = 2025,
 ): Promise<{ report: StuffPlusReport; errors: string[] }> {
   const errors: string[] = [];
+  console.time("[Stuff+] TOTAL");
 
   // ── Pull population constants ──────────────────────────────────────────
+  console.time("[Stuff+] 1. fetch population constants");
   const { data: popData, error: popErr } = await (supabase as any)
     .from("pitcher_stuff_plus_ncaa")
     .select("*")
     .eq("season", season);
+  console.timeEnd("[Stuff+] 1. fetch population constants");
 
   if (popErr || !popData) {
     return { report: emptyReport(), errors: [`Failed to pull population constants: ${popErr?.message}`] };
@@ -346,13 +349,16 @@ export async function runStuffPlusPipeline(
   }
 
   // ── Pull all pitch rows ────────────────────────────────────────────────
+  console.time("[Stuff+] 2. fetch pitch rows");
   const allRows = await fetchAll<PitchRow>(
     "pitcher_stuff_plus_inputs",
     "id, source_player_id, pitch_type, hand, pitches, velocity, ivb, hb, rel_height, rel_side, extension, spin, fb_ch_velo_diff, needs_review",
     (q: any) => q.eq("season", season).in("pitch_type", ALL_PITCH_TYPES),
   );
+  console.timeEnd("[Stuff+] 2. fetch pitch rows");
 
   // ── Pull player names ──────────────────────────────────────────────────
+  console.time("[Stuff+] 3. fetch player names");
   const playerIds = [...new Set(allRows.map((r) => r.source_player_id))];
   const nameMap = new Map<string, { name: string; team: string }>();
   for (let i = 0; i < playerIds.length; i += 100) {
@@ -368,8 +374,10 @@ export async function runStuffPlusPipeline(
       }
     }
   }
+  console.timeEnd("[Stuff+] 3. fetch player names");
 
   // ── Filter and score ───────────────────────────────────────────────────
+  console.time("[Stuff+] 4. filter + score (compute)");
   const dropped: Map<string, number> = new Map();
   const scored: ScoredRow[] = [];
 
@@ -412,7 +420,10 @@ export async function runStuffPlusPipeline(
     });
   }
 
+  console.timeEnd("[Stuff+] 4. filter + score (compute)");
+
   // ── Write stuff_plus scores back in batches ────────────────────────────
+  console.time("[Stuff+] 5. write per-pitch scores");
   let written = 0;
 
   // Group by rounded score for efficient batch updates
@@ -436,7 +447,10 @@ export async function runStuffPlusPipeline(
     }
   }
 
+  console.timeEnd("[Stuff+] 5. write per-pitch scores");
+
   // Flag outliers
+  console.time("[Stuff+] 6. flag outliers");
   const outlierIds = scored.filter((s) => s.needs_review && s.review_note).map((s) => s.id);
   if (outlierIds.length > 0) {
     for (let i = 0; i < outlierIds.length; i += 500) {
@@ -447,8 +461,10 @@ export async function runStuffPlusPipeline(
         .in("id", batch);
     }
   }
+  console.timeEnd("[Stuff+] 6. flag outliers");
 
   // ── Overall Composite Stuff+ ───────────────────────────────────────────
+  console.time("[Stuff+] 7. compute overall composite");
   const playerScores = new Map<string, ScoredRow[]>();
   for (const s of scored) {
     if (!playerScores.has(s.source_player_id)) playerScores.set(s.source_player_id, []);
@@ -488,8 +504,11 @@ export async function runStuffPlusPipeline(
     });
   }
 
+  console.timeEnd("[Stuff+] 7. compute overall composite");
+
   // ── Write overall Stuff+ to Pitching Master (for RSTR IQ) ──────────────
   // Group by rounded overall score for batch updates
+  console.time("[Stuff+] 8. write overall to Pitching Master");
   const overallGroups = new Map<number, string[]>();
   for (const o of overallResults) {
     if (!overallGroups.has(o.overall)) overallGroups.set(o.overall, []);
@@ -508,8 +527,10 @@ export async function runStuffPlusPipeline(
       if (error) errors.push(`Pitching Master update: ${error.message}`);
     }
   }
+  console.timeEnd("[Stuff+] 8. write overall to Pitching Master");
 
   // ── Build report ───────────────────────────────────────────────────────
+  console.time("[Stuff+] 9. build report");
   const byPitchType: StuffPlusReport["byPitchType"] = [];
   const calibrationWarnings: string[] = [];
 
@@ -561,6 +582,9 @@ export async function runStuffPlusPipeline(
       pitchScores: o.pitchScores,
     };
   });
+
+  console.timeEnd("[Stuff+] 9. build report");
+  console.timeEnd("[Stuff+] TOTAL");
 
   return {
     report: {

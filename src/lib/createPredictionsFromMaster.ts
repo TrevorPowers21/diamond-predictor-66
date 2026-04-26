@@ -15,8 +15,10 @@ type Result = {
  */
 export async function createPredictionsFromMaster(season = 2025): Promise<Result> {
   const result: Result = { predictionsCreated: 0, internalsCreated: 0, errors: [] };
+  console.time("[CreatePreds] TOTAL");
 
   // ─── Load all players ────────────────────────────────────────────────
+  console.time("[CreatePreds] 1. load players");
   console.log("[createPredictions] Loading players...");
   const allPlayers: any[] = [];
   let from = 0;
@@ -31,8 +33,10 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
     from += 1000;
   }
   console.log(`[createPredictions] ${allPlayers.length} players loaded`);
+  console.timeEnd("[CreatePreds] 1. load players");
 
   // ─── Load existing 2025 predictions (returner + transfer), indexed by player_id ───
+  console.time("[CreatePreds] 2. load existing predictions");
   // We need the prediction id (to update), not just whether one exists.
   const existingPredByPlayerId = new Map<string, { id: string; from_avg: number | null; from_era: number | null }>();
   from = 0;
@@ -52,8 +56,10 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
     from += 1000;
   }
   console.log(`[createPredictions] ${existingPredByPlayerId.size} existing 2025 predictions`);
+  console.timeEnd("[CreatePreds] 2. load existing predictions");
 
   // ─── Load Hitter Master with canonical scores by source_player_id ────
+  console.time("[CreatePreds] 3. load Hitter Master");
   // Read ba_plus/obp_plus/iso_plus directly (already computed by Compute Scores)
   // instead of recomputing here — keeps internals in sync with master.
   const hitterBySourceId = new Map<string, any>();
@@ -75,8 +81,10 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
     from += 1000;
   }
   console.log(`[createPredictions] ${hitterBySourceId.size} hitters loaded from master`);
+  console.timeEnd("[CreatePreds] 3. load Hitter Master");
 
   // ─── Load Pitching Master with canonical scores by source_player_id ──
+  console.time("[CreatePreds] 4. load Pitching Master");
   const pitcherBySourceId = new Map<string, any>();
   const pitcherByNameTeam = new Map<string, any>();
   from = 0;
@@ -96,8 +104,10 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
     from += 1000;
   }
   console.log(`[createPredictions] ${pitcherBySourceId.size} pitchers loaded from master`);
+  console.timeEnd("[CreatePreds] 4. load Pitching Master");
 
   // ─── Load conference stats + park factors for transfer context ────────
+  console.time("[CreatePreds] 5. load conference + park context");
   // Used when a noise-floor player transferred (blended_from_team ≠ current team)
   const { data: confStatsRaw } = await supabase
     .from("Conference Stats")
@@ -197,7 +207,10 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
     return resolveMetricParkFactor(teamId ?? null, "avg", parkMap, team);
   };
 
+  console.timeEnd("[CreatePreds] 5. load conference + park context");
+
   // ─── Build update + insert plans ─────────────────────────────────────
+  console.time("[CreatePreds] 6. build update+insert plans (in-memory)");
   const predsToInsert: any[] = [];
   const predsToUpdate: Array<{ id: string; patch: any }> = [];
   const internalsByPredId = new Map<string, { avg_power_rating: number | null; obp_power_rating: number | null; slg_power_rating: number | null }>();
@@ -400,7 +413,10 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
     }
   }
 
+  console.timeEnd("[CreatePreds] 6. build update+insert plans (in-memory)");
+
   // ─── INSERT new predictions ──────────────────────────────────────────
+  console.time("[CreatePreds] 7. INSERT new predictions");
   const insertedPreds: Array<{ id: string; player_id: string }> = [];
   for (let i = 0; i < predsToInsert.length; i += CHUNK) {
     const chunk = predsToInsert.slice(i, i + CHUNK);
@@ -444,7 +460,10 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
     }
   }
 
+  console.timeEnd("[CreatePreds] 7. INSERT new predictions");
+
   // ─── UPDATE existing stubs (with retry to bypass lock trigger) ───────
+  console.time("[CreatePreds] 8. UPDATE existing stubs (sequential)");
   console.log(`[createPredictions] Updating ${predsToUpdate.length} existing stubs...`);
   for (const u of predsToUpdate) {
     let success = false;
@@ -463,7 +482,10 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
     }
   }
 
+  console.timeEnd("[CreatePreds] 8. UPDATE existing stubs (sequential)");
+
   // ─── UPSERT internals for everything we touched ──────────────────────
+  console.time("[CreatePreds] 9. UPSERT internals");
   console.log(`[createPredictions] Upserting ${internalsByPredId.size} internals rows...`);
   const internalsRows = Array.from(internalsByPredId.entries()).map(([prediction_id, vals]) => ({
     prediction_id,
@@ -481,13 +503,19 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
     }
   }
 
+  console.timeEnd("[CreatePreds] 9. UPSERT internals");
+
   // ─── UPDATE player from_team for blended players ─────────────────────
+  console.time("[CreatePreds] 10. UPDATE blended player from_team");
   if (playerFromTeamUpdates.length > 0) {
     console.log(`[createPredictions] Updating from_team for ${playerFromTeamUpdates.length} blended players...`);
     for (const u of playerFromTeamUpdates) {
       await supabase.from("players").update({ from_team: u.from_team }).eq("id", u.id);
     }
   }
+
+  console.timeEnd("[CreatePreds] 10. UPDATE blended player from_team");
+  console.timeEnd("[CreatePreds] TOTAL");
 
   console.log(`[createPredictions] Done!`, result);
   return result;
