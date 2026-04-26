@@ -28,7 +28,7 @@ import { computeTransferProjection } from "@/lib/transferProjection";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
-import { readPlayerOverrides, updatePlayerOverride } from "@/lib/playerOverrides";
+import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { usePitcherRoleOverrides } from "@/hooks/usePitcherRoleOverrides";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
@@ -1000,7 +1000,14 @@ export default function TeamBuilder() {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const skipAutoSeedOnceRef = useRef(false);
   const autoSeededTeamRef = useRef<string>("");
-  const playerOverrides = useMemo(() => readPlayerOverrides(), [rosterPlayers.length]);
+  const { overrides: playerOverrideMap, updateOverride: updatePlayerOverrideFn } = usePlayerOverrides();
+  const playerOverrides = useMemo(() => {
+    const obj: Record<string, { position?: string | null }> = {};
+    for (const [pid, ov] of playerOverrideMap.entries()) {
+      obj[pid] = { position: ov.position };
+    }
+    return obj;
+  }, [playerOverrideMap]);
 
   useEffect(() => {
     setTeamSearchQuery(selectedTeam || "");
@@ -1884,7 +1891,7 @@ export default function TeamBuilder() {
                 conference: meta.localPlayer.conference ?? null,
               }
             : null;
-          const overrideRole = asPitcherRole(pd?.id ? (getSupabaseRole(pd.id) || playerOverrides?.[pd.id]?.pitcher_role || null) : null);
+          const overrideRole = asPitcherRole(pd?.id ? (getSupabaseRole(pd.id) || null) : null);
           const inferredRole = overrideRole || asPitcherRole(pd?.position || null);
           const positionForPitcherInference = pd?.position || localPlayerRaw?.position || "";
           const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(positionForPitcherInference));
@@ -1962,7 +1969,7 @@ export default function TeamBuilder() {
       // TWP (two-way) defaults to hitter side on the team builder — coaches
       // can click into the profile to see the pitching view.
       const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)$/i.test(String(player.position || ""));
-      const overrideRole = asPitcherRole(getSupabaseRole(player.id) || playerOverrides?.[player.id]?.pitcher_role || null);
+      const overrideRole = asPitcherRole(getSupabaseRole(player.id) || null);
       // Check Pitching Master Role for accurate SP/RP from last season
       const _pName = `${player.first_name || ""} ${player.last_name || ""}`.trim();
       const _pmKey = `${normalizeName(_pName)}|${normalizeName(player.team || "")}`;
@@ -1988,7 +1995,7 @@ export default function TeamBuilder() {
         player_id: player.id,
         source: "returner" as const,
         custom_name: null,
-        position_slot: isPitcherRow ? (inferredRole || "RP") : null,
+        position_slot: isPitcherRow ? (inferredRole || "RP") : (playerOverrides[player.id]?.position ?? null),
         depth_order: 1,
         nil_value: 0,
         production_notes: null,
@@ -2235,7 +2242,7 @@ export default function TeamBuilder() {
               player_id: sb.player_id,
               source: "portal",
               custom_name: `${sb.first_name} ${sb.last_name}`.trim() || null,
-              position_slot: isPitcherRow ? (inferredRole || "RP") : null,
+              position_slot: isPitcherRow ? (inferredRole || "RP") : (playerOverrides[sb.player_id]?.position ?? null),
               depth_order: 1,
               nil_value: 0,
               production_notes: null,
@@ -3596,7 +3603,7 @@ export default function TeamBuilder() {
     const chosenPred = selectTransferPortalPreferredPrediction(
       (row.player_predictions || []).filter((pr: any) => pr.variant === "regular")
     );
-    const overrideRole = asPitcherRole(getSupabaseRole(row.id) || playerOverrides?.[row.id]?.pitcher_role || null);
+    const overrideRole = asPitcherRole(getSupabaseRole(row.id) || null);
     const inferredRole = overrideRole || asPitcherRole(row.position || null);
     const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(row.position || ""));
 
@@ -3756,7 +3763,7 @@ export default function TeamBuilder() {
       player_id: row.id,
       source: "portal",
       custom_name: `${row.first_name || ""} ${row.last_name || ""}`.trim() || null,
-      position_slot: isPitcherRow ? (inferredRole || "RP") : null,
+      position_slot: isPitcherRow ? (inferredRole || "RP") : (playerOverrides[row.id]?.position ?? null),
       depth_order: 1,
       nil_value: row.nil_valuations?.[0]?.estimated_value ? Number(row.nil_valuations[0].estimated_value) : 0,
       production_notes: null,
@@ -4691,7 +4698,7 @@ export default function TeamBuilder() {
       // TWP (two-way) defaults to hitter side on the team builder — coaches
       // can click into the profile to see the pitching view.
       const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)$/i.test(String(player.position || ""));
-      const overrideRole = asPitcherRole(getSupabaseRole(player.id) || playerOverrides?.[player.id]?.pitcher_role || null);
+      const overrideRole = asPitcherRole(getSupabaseRole(player.id) || null);
       // Check Pitching Master Role for accurate SP/RP from last season
       const _pName = `${player.first_name || ""} ${player.last_name || ""}`.trim();
       const _pmKey = `${normalizeName(_pName)}|${normalizeName(player.team || "")}`;
@@ -4717,7 +4724,7 @@ export default function TeamBuilder() {
         player_id: player.id,
         source: "returner" as const,
         custom_name: null,
-        position_slot: isPitcherRow ? (inferredRole || "RP") : null,
+        position_slot: isPitcherRow ? (inferredRole || "RP") : (playerOverrides[player.id]?.position ?? null),
         depth_order: 1,
         nil_value: 0,
         production_notes: null,
@@ -4926,10 +4933,7 @@ export default function TeamBuilder() {
                 depth_role: normalizePitcherDepthRole(p.depth_role, nextRole),
               });
               if (p.player_id) {
-                updatePlayerOverride(p.player_id, {
-                  position: nextRole,
-                  pitcher_role: nextRole,
-                });
+                updatePlayerOverrideFn(p.player_id, { position: nextRole });
                 writeLegacyPitchingRoleOverride(getPlayerName(p), p.player?.team || null, nextRole);
                 if (p.player_id) setSupabaseRole(p.player_id, nextRole);
               }
@@ -4952,10 +4956,7 @@ export default function TeamBuilder() {
               if (p.player_id) {
                 const isPitchSlot = !!nextSlot && [...PITCHER_SLOTS].includes(nextSlot as typeof PITCHER_SLOTS[number]);
                 const nextPitchRole = isPitchSlot ? pitcherRoleFromSlot(nextSlot) : null;
-                updatePlayerOverride(p.player_id, {
-                  position: nextSlot,
-                  pitcher_role: nextPitchRole,
-                });
+                updatePlayerOverrideFn(p.player_id, { position: nextSlot });
                 writeLegacyPitchingRoleOverride(getPlayerName(p), p.player?.team || null, nextPitchRole);
                 if (p.player_id) setSupabaseRole(p.player_id, nextPitchRole);
               }

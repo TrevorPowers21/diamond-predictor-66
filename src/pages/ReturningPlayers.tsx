@@ -32,7 +32,7 @@ import {
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { profileRouteFor } from "@/lib/profileRoutes";
-import { readPlayerOverrides } from "@/lib/playerOverrides";
+import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
@@ -672,7 +672,14 @@ export default function ReturningPlayers() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [bulkEditMode, setBulkEditMode] = useState(false);
   const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string | null; position?: string | null }>>({});
-  const playerOverrides = useMemo(() => readPlayerOverrides(), []);
+  const { overrides: playerOverrideMap } = usePlayerOverrides();
+  const playerOverrides = useMemo(() => {
+    const obj: Record<string, { position?: string | null }> = {};
+    for (const [pid, ov] of playerOverrideMap.entries()) {
+      obj[pid] = { position: ov.position };
+    }
+    return obj;
+  }, [playerOverrideMap]);
   const [showMissingOnly, setShowMissingOnly] = useState(false);
   const [selectedSeason, setSelectedSeason] = useState<number>(2025);
   const [dashboardView, setDashboardView] = useState<"hitting" | "pitching">("hitting");

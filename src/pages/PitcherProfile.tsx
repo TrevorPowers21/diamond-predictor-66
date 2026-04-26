@@ -12,7 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
-import { readPlayerOverrides } from "@/lib/playerOverrides";
+import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
@@ -998,10 +998,8 @@ export default function PitcherProfile() {
     storageRef?.playerName ||
     "Pitcher";
   const displayTeam = normalizePitcherTeamName(player?.team || masterRow?.team || anyPitcherMasterRow?.Team || storageRef?.teamName || "") || "—";
-  const playerOverride = useMemo(
-    () => (isDbRoute && id ? readPlayerOverrides()[id] : undefined),
-    [id, isDbRoute],
-  );
+  const { getOverride } = usePlayerOverrides();
+  const playerOverride = isDbRoute && id ? getOverride(id) : null;
   const storageOverrideKey = useMemo(
     () => `${normalize(lookupPlayerName)}|${normalize(displayTeam)}`,
     [lookupPlayerName, displayTeam],
@@ -1112,8 +1110,8 @@ export default function PitcherProfile() {
     return null;
   })();
   const supabaseRole = id ? getSupabaseRole(id) : null;
-  const initialProjectedRole = supabaseRole || playerOverride?.pitcher_role || storageProjectionOverride?.pitcher_role || derivedRole || "SM";
-  const effectiveRoleDisplay = supabaseRole || playerOverride?.pitcher_role || derivedRole;
+  const initialProjectedRole = supabaseRole || storageProjectionOverride?.pitcher_role || derivedRole || "SM";
+  const effectiveRoleDisplay = supabaseRole || derivedRole;
   // DB (activePrediction) is the authoritative source once a coach saves an
   // edit; localStorage only fills gaps for storage-backed profile editing.
   const initialProjectedClassTransition = (() => {
@@ -1166,17 +1164,8 @@ export default function PitcherProfile() {
       }
     }
     if (isDbRoute && id) {
-      const next = {
-        ...(playerOverride || {}),
-        ...updates,
-      };
-      const all = readPlayerOverrides();
-      all[id] = next;
-      try {
-        localStorage.setItem("team_builder_player_overrides_v1", JSON.stringify(all));
-      } catch {
-        // ignore local storage failures
-      }
+      // DB-route edits are persisted by the recalc engine + setSupabaseRole
+      // above. No additional localStorage write needed.
       return;
     }
     // Legacy storage-only path: only reached when the route is non-UUID

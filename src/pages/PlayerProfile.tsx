@@ -22,7 +22,7 @@ import {
   getPositionValueMultiplier,
   getProgramTierMultiplierByConference,
 } from "@/lib/nilProgramSpecific";
-import { readPlayerOverrides } from "@/lib/playerOverrides";
+import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
@@ -538,10 +538,8 @@ export default function PlayerProfile() {
   const regularPred = predictions.find((p) => p.variant === "regular");
   const isTransferPortal = player?.transfer_portal && predictions.some((p) => p.model_type === "transfer");
   const isReturner = predictions.some((p) => p.model_type === "returner");
-  const playerOverride = useMemo(
-    () => (id ? readPlayerOverrides()[id] : undefined),
-    [id],
-  );
+  const { getOverride } = usePlayerOverrides();
+  const playerOverride = id ? getOverride(id) : null;
   const effectivePosition = playerOverride?.position ?? player?.position ?? null;
 
   const startPredEdit = () => {
