@@ -19,6 +19,7 @@ import {
   getProgramTierMultiplierByConference,
 } from "@/lib/nilProgramSpecific";
 import { computeTransferProjection } from "@/lib/transferProjection";
+import { computeTransferPitcherProjection } from "@/lib/transferPitcherProjection";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
@@ -445,6 +446,17 @@ const calcPitchingPlus = (
     ? ((statValue - ncaaAvg) / ncaaSd)
     : ((ncaaAvg - statValue) / ncaaSd);
   return round3(100 + (z * scale));
+};
+
+const toPitchingClassAdj = (
+  classTransition: "FS" | "SJ" | "JS" | "GR",
+  fs: number,
+  sj: number,
+  js: number,
+  gr: number,
+) => {
+  const pct = classTransition === "FS" ? fs : classTransition === "SJ" ? sj : classTransition === "JS" ? js : gr;
+  return Number.isFinite(pct) ? pct / 100 : 0;
 };
 
 const calcHitterTalentPlusFromConference = (
@@ -1459,82 +1471,9 @@ export default function TransferPortal() {
       };
     }
 
-    const toParkIdx = (n: number | null) => normalizeParkToIndex(n);
-    const fromRg = toParkIdx(fromEraParkRaw);
-    const toRg = toParkIdx(toEraParkRaw);
-    const fromWhipPf = toParkIdx(fromWhipParkRaw);
-    const toWhipPf = toParkIdx(toWhipParkRaw);
-    const fromHr9Pf = toParkIdx(fromHr9ParkRaw);
-    const toHr9Pf = toParkIdx(toHr9ParkRaw);
-
-    const calcLowerWork = (
-      last: number,
-      prPlus: number,
-      ncaaAvg: number,
-      prSd: number,
-      ncaaSd: number,
-      powerWeight: number,
-      confWeight: number,
-      fromPlus: number,
-      toPlus: number,
-      compWeight: number,
-      fromTalent: number,
-      toTalent: number,
-      parkWeight: number | null,
-      fromPark: number | null,
-      toPark: number | null,
-      dampFactor: number = 1,
-    ) => {
-      const safePrSd = prSd === 0 ? 1 : prSd;
-      const powerAdj = ncaaAvg - (((prPlus - 100) / safePrSd) * ncaaSd);
-      const blended = (last * (1 - powerWeight)) + (powerAdj * powerWeight);
-      const confTerm = confWeight * ((toPlus - fromPlus) / 100);
-      const compTerm = compWeight * ((toTalent - fromTalent) / 100);
-      const parkTerm = parkWeight != null && fromPark != null && toPark != null ? parkWeight * ((toPark - fromPark) / 100) : 0;
-      const mult = 1 - confTerm + compTerm + parkTerm;
-      const adjustedMult = 1 + ((mult - 1) * dampFactor);
-      return {
-        powerAdj: round3(powerAdj),
-        blended: round3(blended),
-        mult: round3(adjustedMult),
-        projected: round3(blended * adjustedMult),
-        confTerm: round3(confTerm),
-        compTerm: round3(compTerm),
-        parkTerm: round3(parkTerm),
-      };
-    };
-
-    const calcHigherWork = (
-      last: number,
-      prPlus: number,
-      ncaaAvg: number,
-      prSd: number,
-      ncaaSd: number,
-      powerWeight: number,
-      confWeight: number,
-      fromPlus: number,
-      toPlus: number,
-      compWeight: number,
-      fromTalent: number,
-      toTalent: number,
-    ) => {
-      const safePrSd = prSd === 0 ? 1 : prSd;
-      const powerAdj = ncaaAvg + (((prPlus - 100) / safePrSd) * ncaaSd);
-      const blended = (last * (1 - powerWeight)) + (powerAdj * powerWeight);
-      const confTerm = confWeight * ((toPlus - fromPlus) / 100);
-      const compTerm = compWeight * ((toTalent - fromTalent) / 100);
-      const mult = 1 + confTerm - compTerm;
-      return {
-        powerAdj: round3(powerAdj),
-        blended: round3(blended),
-        mult: round3(mult),
-        projected: round3(blended * mult),
-        confTerm: round3(confTerm),
-        compTerm: round3(compTerm),
-        parkTerm: 0,
-      };
-    };
-
+    // Pull stored PR+ values from the pitcher power-ratings lookup; surface
+    // any that are missing so the user sees an actionable "missing input"
+    // message rather than a silently-broken projection.
     const eraPr = selectedPitcherPower?.eraPrPlus ?? null;
     const fipPr = selectedPitcherPower?.fipPrPlus ?? null;
     const whipPr = selectedPitcherPower?.whipPrPlus ?? null;
@@ -1561,73 +1500,95 @@ export default function TransferPortal() {
       };
     }
 
-    const eraWork = calcLowerWork(selectedPitcher.era!, eraPr!, eq.era_plus_ncaa_avg, eq.era_pr_sd, eq.era_plus_ncaa_sd, eq.transfer_era_power_weight, eq.transfer_era_conference_weight, fromEraPlus!, toEraPlus!, eq.transfer_era_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_era_park_weight, fromRg, toRg);
-    const fipWork = calcLowerWork(selectedPitcher.fip!, fipPr!, eq.fip_plus_ncaa_avg, eq.fip_pr_sd, eq.fip_plus_ncaa_sd, eq.transfer_fip_power_weight, eq.transfer_fip_conference_weight, fromFipPlus!, toFipPlus!, eq.transfer_fip_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_fip_park_weight, fromRg, toRg);
-    const whipWork = calcLowerWork(selectedPitcher.whip!, whipPr!, eq.whip_plus_ncaa_avg, eq.whip_pr_sd, eq.whip_plus_ncaa_sd, eq.transfer_whip_power_weight, eq.transfer_whip_conference_weight, fromWhipPlus!, toWhipPlus!, eq.transfer_whip_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_whip_park_weight, fromWhipPf, toWhipPf, 0.75);
-    const k9Work = calcHigherWork(selectedPitcher.k9!, k9Pr!, eq.k9_plus_ncaa_avg, eq.k9_pr_sd, eq.k9_plus_ncaa_sd, eq.transfer_k9_power_weight, eq.transfer_k9_conference_weight, fromK9Plus!, toK9Plus!, eq.transfer_k9_competition_weight, fromHitterTalent!, toHitterTalent!);
-    const bb9Work = calcLowerWork(selectedPitcher.bb9!, bb9Pr!, eq.bb9_plus_ncaa_avg, eq.bb9_pr_sd, eq.bb9_plus_ncaa_sd, eq.transfer_bb9_power_weight, eq.transfer_bb9_conference_weight, fromBb9Plus!, toBb9Plus!, eq.transfer_bb9_competition_weight, fromHitterTalent!, toHitterTalent!, null, null, null);
-    const hr9Work = calcLowerWork(selectedPitcher.hr9!, hr9Pr!, eq.hr9_plus_ncaa_avg, eq.hr9_pr_sd, eq.hr9_plus_ncaa_sd, eq.transfer_hr9_power_weight, eq.transfer_hr9_conference_weight, fromHr9Plus!, toHr9Plus!, eq.transfer_hr9_competition_weight, fromHitterTalent!, toHitterTalent!, eq.transfer_hr9_park_weight, fromHr9Pf, toHr9Pf);
-    const pEra = eraWork.projected;
-    const pFip = fipWork.projected;
-    const pWhip = whipWork.projected;
-    const pK9 = k9Work.projected;
-    const pBb9 = bb9Work.projected;
-    const pHr9 = hr9Work.projected;
-
+    // Delegate to the canonical transfer pitcher projection. Same code TB
+    // simulateTransferProjection / TB add-target / PlayerComparison use, so
+    // numbers match exactly across surfaces (no math drift).
     const baseRole: "SP" | "RP" = selectedPitcher.role === "SP" ? "SP" : "RP";
     const projectedRole: "SP" | "RP" = pitchingRoleOverride;
-    const roleCurve = {
-      tier1Max: eq.rp_to_sp_low_better_tier1_max,
-      tier2Max: eq.rp_to_sp_low_better_tier2_max,
-      tier3Max: eq.rp_to_sp_low_better_tier3_max,
-      tier1Mult: eq.rp_to_sp_low_better_tier1_mult,
-      tier2Mult: eq.rp_to_sp_low_better_tier2_mult,
-      tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
-    };
-    const roleAdjustedEra = applyRoleTransitionAdjustment(pEra, eq.sp_to_rp_reg_era_pct, baseRole, projectedRole, true, roleCurve);
-    const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, eq.sp_to_rp_reg_fip_pct, baseRole, projectedRole, true, roleCurve);
-    const roleAdjustedWhip = applyRoleTransitionAdjustment(pWhip, eq.sp_to_rp_reg_whip_pct, baseRole, projectedRole, true, roleCurve);
-    const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, eq.sp_to_rp_reg_k9_pct, baseRole, projectedRole, false, roleCurve);
-    const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, eq.sp_to_rp_reg_bb9_pct, baseRole, projectedRole, true, roleCurve);
-    const roleAdjustedHr9 = applyRoleTransitionAdjustment(pHr9, eq.sp_to_rp_reg_hr9_pct, baseRole, projectedRole, true, roleCurve);
+    const libResult = computeTransferPitcherProjection(
+      {
+        era: selectedPitcher.era,
+        fip: selectedPitcher.fip,
+        whip: selectedPitcher.whip,
+        k9: selectedPitcher.k9,
+        bb9: selectedPitcher.bb9,
+        hr9: selectedPitcher.hr9,
+        storedPrPlus: { era: eraPr, fip: fipPr, whip: whipPr, k9: k9Pr, bb9: bb9Pr, hr9: hr9Pr },
+        baseRole,
+        fromEraPlus, toEraPlus,
+        fromFipPlus, toFipPlus,
+        fromWhipPlus, toWhipPlus,
+        fromK9Plus, toK9Plus,
+        fromBb9Plus, toBb9Plus,
+        fromHr9Plus, toHr9Plus,
+        fromHitterTalent, toHitterTalent,
+        fromEraParkRaw, toEraParkRaw,
+        fromWhipParkRaw, toWhipParkRaw,
+        fromHr9ParkRaw, toHr9ParkRaw,
+        toTeam: selectedDestinationTeam || null,
+        toConference: toPitchConference,
+      },
+      { eq, roleOverride: projectedRole },
+    );
 
-    const pEraPlus = calcPitchingPlus(roleAdjustedEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
-    const pFipPlus = calcPitchingPlus(roleAdjustedFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
-    const pWhipPlus = calcPitchingPlus(roleAdjustedWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
-    const pK9Plus = calcPitchingPlus(roleAdjustedK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
-    const pBb9Plus = calcPitchingPlus(roleAdjustedBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
-    const pHr9Plus = calcPitchingPlus(roleAdjustedHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
-    const pRvPlus = [pEraPlus, pFipPlus, pWhipPlus, pK9Plus, pBb9Plus, pHr9Plus].every((v) => v != null)
-      ? round3(
-          (eq.era_plus_weight * Number(pEraPlus)) +
-          (eq.fip_plus_weight * Number(pFipPlus)) +
-          (eq.whip_plus_weight * Number(pWhipPlus)) +
-          (eq.k9_plus_weight * Number(pK9Plus)) +
-          (eq.bb9_plus_weight * Number(pBb9Plus)) +
-          (eq.hr9_plus_weight * Number(pHr9Plus))
-        )
-      : null;
-    const projectedIp = projectedRole === "SP" ? eq.pwar_ip_sp : eq.pwar_ip_rp;
-    const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);
-    const pWar = pitcherValue == null || eq.pwar_runs_per_win === 0
-      ? null
-      : round3((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
-    const pitchingTierMultipliers = {
-      sec: eq.market_tier_sec,
-      p4: eq.market_tier_acc_big12,
-      bigTen: eq.market_tier_big_ten,
-      strongMid: eq.market_tier_strong_mid,
-      lowMajor: eq.market_tier_low_major,
-    };
-    const ptm = getProgramTierMultiplierByConference(toPitchConference, pitchingTierMultipliers);
-    const pvm = getPitchingPvfForRole(projectedRole, eq);
-    const marketEligible = canShowPitchingMarketValue(selectedDestinationTeam || null, toPitchConference);
-    const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
+    // Apply class transition + dev aggressiveness adjustment on top of the
+    // base transfer projection. Mirrors the hitter pattern: TP and TB both
+    // layer the class bump over the raw transfer math. Pitcher dropdown
+    // doesn't carry per-player class transition, so default to SJ + 0 dev
+    // (same default TB uses for newly added portal targets).
+    const classTransitionRaw = String((selectedPitcher as any).class_transition || "SJ").toUpperCase();
+    const classTransition: "FS" | "SJ" | "JS" | "GR" =
+      classTransitionRaw === "FS" || classTransitionRaw === "SJ" || classTransitionRaw === "JS" || classTransitionRaw === "GR"
+        ? classTransitionRaw
+        : "SJ";
+    const devAgg = Number.isFinite(Number((selectedPitcher as any).dev_aggressiveness))
+      ? Number((selectedPitcher as any).dev_aggressiveness)
+      : 0;
+    const classEraAdj = toPitchingClassAdj(classTransition, eq.class_era_fs, eq.class_era_sj, eq.class_era_js, eq.class_era_gr);
+    const classFipAdj = toPitchingClassAdj(classTransition, eq.class_fip_fs, eq.class_fip_sj, eq.class_fip_js, eq.class_fip_gr);
+    const classWhipAdj = toPitchingClassAdj(classTransition, eq.class_whip_fs, eq.class_whip_sj, eq.class_whip_js, eq.class_whip_gr);
+    const classK9Adj = toPitchingClassAdj(classTransition, eq.class_k9_fs, eq.class_k9_sj, eq.class_k9_js, eq.class_k9_gr);
+    const classBb9Adj = toPitchingClassAdj(classTransition, eq.class_bb9_fs, eq.class_bb9_sj, eq.class_bb9_js, eq.class_bb9_gr);
+    const classHr9Adj = toPitchingClassAdj(classTransition, eq.class_hr9_fs, eq.class_hr9_sj, eq.class_hr9_js, eq.class_hr9_gr);
+    const lowBetterMult = (adj: number) => 1 - adj - (devAgg * 0.06);
+    const highBetterMult = (adj: number) => 1 + adj + (devAgg * 0.06);
+
+    const adjEra = libResult.p_era == null ? null : libResult.p_era * lowBetterMult(classEraAdj);
+    const adjFip = libResult.p_fip == null ? null : libResult.p_fip * lowBetterMult(classFipAdj);
+    const adjWhip = libResult.p_whip == null ? null : libResult.p_whip * lowBetterMult(classWhipAdj);
+    const adjK9 = libResult.p_k9 == null ? null : libResult.p_k9 * highBetterMult(classK9Adj);
+    const adjBb9 = libResult.p_bb9 == null ? null : libResult.p_bb9 * lowBetterMult(classBb9Adj);
+    const adjHr9 = libResult.p_hr9 == null ? null : libResult.p_hr9 * lowBetterMult(classHr9Adj);
+
+    const eraPlusAdj = calcPitchingPlus(adjEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
+    const fipPlusAdj = calcPitchingPlus(adjFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
+    const whipPlusAdj = calcPitchingPlus(adjWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
+    const k9PlusAdj = calcPitchingPlus(adjK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
+    const bb9PlusAdj = calcPitchingPlus(adjBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
+    const hr9PlusAdj = calcPitchingPlus(adjHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
+
+    const pRvPlusAdj = [eraPlusAdj, fipPlusAdj, whipPlusAdj, k9PlusAdj, bb9PlusAdj, hr9PlusAdj].every((v) => v != null)
+      ? (Number(eraPlusAdj) * eq.era_plus_weight) +
+        (Number(fipPlusAdj) * eq.fip_plus_weight) +
+        (Number(whipPlusAdj) * eq.whip_plus_weight) +
+        (Number(k9PlusAdj) * eq.k9_plus_weight) +
+        (Number(bb9PlusAdj) * eq.bb9_plus_weight) +
+        (Number(hr9PlusAdj) * eq.hr9_plus_weight)
+      : libResult.p_rv_plus;
 
     return {
       blocked: false,
       missingInputs: [],
-      pEra: roleAdjustedEra, pFip: roleAdjustedFip, pWhip: roleAdjustedWhip, pK9: roleAdjustedK9, pBb9: roleAdjustedBb9, pHr9: roleAdjustedHr9, pRvPlus, pWar, marketValue, projectedRole,
+      pEra: adjEra,
+      pFip: adjFip,
+      pWhip: adjWhip,
+      pK9: adjK9,
+      pBb9: adjBb9,
+      pHr9: adjHr9,
+      pRvPlus: pRvPlusAdj,
+      pWar: libResult.p_war,
+      marketValue: libResult.market_value,
+      projectedRole: projectedRole,
       fromConference: fromPitchConference,
       toConference: toPitchConference,
       fromEraPlus, toEraPlus, fromFipPlus, toFipPlus, fromWhipPlus, toWhipPlus,
@@ -1658,16 +1619,10 @@ export default function TransferPortal() {
         hr9Competition: eq.transfer_hr9_competition_weight,
         hr9Park: eq.transfer_hr9_park_weight,
       },
-      showWork: {
-        era: { last: selectedPitcher.era!, powerAdj: eraWork.powerAdj, blended: eraWork.blended, mult: eraWork.mult, projected: eraWork.projected, roleAdjusted: roleAdjustedEra, confTerm: eraWork.confTerm, compTerm: eraWork.compTerm, parkTerm: eraWork.parkTerm, powerRatingPlus: eraPr, powerRatingStdDev: eq.era_pr_sd, ncaaStatStdDev: eq.era_plus_ncaa_sd, ncaaAvg: eq.era_plus_ncaa_avg },
-        fip: { last: selectedPitcher.fip!, powerAdj: fipWork.powerAdj, blended: fipWork.blended, mult: fipWork.mult, projected: fipWork.projected, roleAdjusted: roleAdjustedFip, confTerm: fipWork.confTerm, compTerm: fipWork.compTerm, parkTerm: fipWork.parkTerm, powerRatingPlus: fipPr, powerRatingStdDev: eq.fip_pr_sd, ncaaStatStdDev: eq.fip_plus_ncaa_sd, ncaaAvg: eq.fip_plus_ncaa_avg },
-        whip: { last: selectedPitcher.whip!, powerAdj: whipWork.powerAdj, blended: whipWork.blended, mult: whipWork.mult, projected: whipWork.projected, roleAdjusted: roleAdjustedWhip, confTerm: whipWork.confTerm, compTerm: whipWork.compTerm, parkTerm: whipWork.parkTerm, powerRatingPlus: whipPr, powerRatingStdDev: eq.whip_pr_sd, ncaaStatStdDev: eq.whip_plus_ncaa_sd, ncaaAvg: eq.whip_plus_ncaa_avg },
-        k9: { last: selectedPitcher.k9!, powerAdj: k9Work.powerAdj, blended: k9Work.blended, mult: k9Work.mult, projected: k9Work.projected, roleAdjusted: roleAdjustedK9, confTerm: k9Work.confTerm, compTerm: k9Work.compTerm, parkTerm: k9Work.parkTerm, powerRatingPlus: k9Pr, powerRatingStdDev: eq.k9_pr_sd, ncaaStatStdDev: eq.k9_plus_ncaa_sd, ncaaAvg: eq.k9_plus_ncaa_avg },
-        bb9: { last: selectedPitcher.bb9!, powerAdj: bb9Work.powerAdj, blended: bb9Work.blended, mult: bb9Work.mult, projected: bb9Work.projected, roleAdjusted: roleAdjustedBb9, confTerm: bb9Work.confTerm, compTerm: bb9Work.compTerm, parkTerm: bb9Work.parkTerm, powerRatingPlus: bb9Pr, powerRatingStdDev: eq.bb9_pr_sd, ncaaStatStdDev: eq.bb9_plus_ncaa_sd, ncaaAvg: eq.bb9_plus_ncaa_avg },
-        hr9: { last: selectedPitcher.hr9!, powerAdj: hr9Work.powerAdj, blended: hr9Work.blended, mult: hr9Work.mult, projected: hr9Work.projected, roleAdjusted: roleAdjustedHr9, confTerm: hr9Work.confTerm, compTerm: hr9Work.compTerm, parkTerm: hr9Work.parkTerm, powerRatingPlus: hr9Pr, powerRatingStdDev: eq.hr9_pr_sd, ncaaStatStdDev: eq.hr9_plus_ncaa_sd, ncaaAvg: eq.hr9_plus_ncaa_avg },
-      },
+      showWork: libResult.showWork,
     };
-  }, [selectedPitcher, selectedPitcherPower, selectedDestinationTeam, teamByKey, teamParkComponents, pitchingConfByKey, pitchingRoleOverride, teams]);
+
+  }, [selectedPitcher, selectedPitcherPower, selectedDestinationTeam, teamByKey, teamParkComponents, pitchingConfByKey, pitchingRoleOverride, teams, secAveragePreset, secAverageParkFactors, resolvePitchingConferenceStats]);
 
   const addToTargetBoard = () => {
     if (!selectedPlayer || !selectedDestinationTeam) return;
