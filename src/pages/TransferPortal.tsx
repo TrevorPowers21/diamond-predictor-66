@@ -448,6 +448,17 @@ const calcPitchingPlus = (
   return round3(100 + (z * scale));
 };
 
+const toPitchingClassAdj = (
+  classTransition: "FS" | "SJ" | "JS" | "GR",
+  fs: number,
+  sj: number,
+  js: number,
+  gr: number,
+) => {
+  const pct = classTransition === "FS" ? fs : classTransition === "SJ" ? sj : classTransition === "JS" ? js : gr;
+  return Number.isFinite(pct) ? pct / 100 : 0;
+};
+
 const calcHitterTalentPlusFromConference = (
   overallHitterPowerRatingPlus: number | null | undefined,
   stuffPlus: number | null | undefined,
@@ -1520,16 +1531,61 @@ export default function TransferPortal() {
       { eq, roleOverride: projectedRole },
     );
 
+    // Apply class transition + dev aggressiveness adjustment on top of the
+    // base transfer projection. Mirrors the hitter pattern: TP and TB both
+    // layer the class bump over the raw transfer math. Pitcher dropdown
+    // doesn't carry per-player class transition, so default to SJ + 0 dev
+    // (same default TB uses for newly added portal targets).
+    const classTransitionRaw = String((selectedPitcher as any).class_transition || "SJ").toUpperCase();
+    const classTransition: "FS" | "SJ" | "JS" | "GR" =
+      classTransitionRaw === "FS" || classTransitionRaw === "SJ" || classTransitionRaw === "JS" || classTransitionRaw === "GR"
+        ? classTransitionRaw
+        : "SJ";
+    const devAgg = Number.isFinite(Number((selectedPitcher as any).dev_aggressiveness))
+      ? Number((selectedPitcher as any).dev_aggressiveness)
+      : 0;
+    const classEraAdj = toPitchingClassAdj(classTransition, eq.class_era_fs, eq.class_era_sj, eq.class_era_js, eq.class_era_gr);
+    const classFipAdj = toPitchingClassAdj(classTransition, eq.class_fip_fs, eq.class_fip_sj, eq.class_fip_js, eq.class_fip_gr);
+    const classWhipAdj = toPitchingClassAdj(classTransition, eq.class_whip_fs, eq.class_whip_sj, eq.class_whip_js, eq.class_whip_gr);
+    const classK9Adj = toPitchingClassAdj(classTransition, eq.class_k9_fs, eq.class_k9_sj, eq.class_k9_js, eq.class_k9_gr);
+    const classBb9Adj = toPitchingClassAdj(classTransition, eq.class_bb9_fs, eq.class_bb9_sj, eq.class_bb9_js, eq.class_bb9_gr);
+    const classHr9Adj = toPitchingClassAdj(classTransition, eq.class_hr9_fs, eq.class_hr9_sj, eq.class_hr9_js, eq.class_hr9_gr);
+    const lowBetterMult = (adj: number) => 1 - adj - (devAgg * 0.06);
+    const highBetterMult = (adj: number) => 1 + adj + (devAgg * 0.06);
+
+    const adjEra = libResult.p_era == null ? null : libResult.p_era * lowBetterMult(classEraAdj);
+    const adjFip = libResult.p_fip == null ? null : libResult.p_fip * lowBetterMult(classFipAdj);
+    const adjWhip = libResult.p_whip == null ? null : libResult.p_whip * lowBetterMult(classWhipAdj);
+    const adjK9 = libResult.p_k9 == null ? null : libResult.p_k9 * highBetterMult(classK9Adj);
+    const adjBb9 = libResult.p_bb9 == null ? null : libResult.p_bb9 * lowBetterMult(classBb9Adj);
+    const adjHr9 = libResult.p_hr9 == null ? null : libResult.p_hr9 * lowBetterMult(classHr9Adj);
+
+    const eraPlusAdj = calcPitchingPlus(adjEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
+    const fipPlusAdj = calcPitchingPlus(adjFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
+    const whipPlusAdj = calcPitchingPlus(adjWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
+    const k9PlusAdj = calcPitchingPlus(adjK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
+    const bb9PlusAdj = calcPitchingPlus(adjBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
+    const hr9PlusAdj = calcPitchingPlus(adjHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
+
+    const pRvPlusAdj = [eraPlusAdj, fipPlusAdj, whipPlusAdj, k9PlusAdj, bb9PlusAdj, hr9PlusAdj].every((v) => v != null)
+      ? (Number(eraPlusAdj) * eq.era_plus_weight) +
+        (Number(fipPlusAdj) * eq.fip_plus_weight) +
+        (Number(whipPlusAdj) * eq.whip_plus_weight) +
+        (Number(k9PlusAdj) * eq.k9_plus_weight) +
+        (Number(bb9PlusAdj) * eq.bb9_plus_weight) +
+        (Number(hr9PlusAdj) * eq.hr9_plus_weight)
+      : libResult.p_rv_plus;
+
     return {
       blocked: false,
       missingInputs: [],
-      pEra: libResult.p_era,
-      pFip: libResult.p_fip,
-      pWhip: libResult.p_whip,
-      pK9: libResult.p_k9,
-      pBb9: libResult.p_bb9,
-      pHr9: libResult.p_hr9,
-      pRvPlus: libResult.p_rv_plus,
+      pEra: adjEra,
+      pFip: adjFip,
+      pWhip: adjWhip,
+      pK9: adjK9,
+      pBb9: adjBb9,
+      pHr9: adjHr9,
+      pRvPlus: pRvPlusAdj,
       pWar: libResult.p_war,
       marketValue: libResult.market_value,
       projectedRole: projectedRole,
