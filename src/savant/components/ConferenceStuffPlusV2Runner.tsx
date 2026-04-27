@@ -28,7 +28,7 @@ function stuffColor(v: number | null): string {
 }
 
 export default function ConferenceStuffPlusV2Runner() {
-  const [season] = useState(2025);
+  const season = 2026;
   const [running, setRunning] = useState(false);
   const [report, setReport] = useState<ConferenceStuffPlusV2Report | null>(null);
   const [errors, setErrors] = useState<string[]>([]);

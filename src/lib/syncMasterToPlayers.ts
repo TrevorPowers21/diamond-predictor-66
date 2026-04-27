@@ -174,6 +174,7 @@ export async function syncMasterToPlayers(season = 2025): Promise<SyncResult> {
       .from("Hitter Master")
       .select("source_player_id, playerFullName, Team, TeamID, Conference, Pos, BatHand, ThrowHand, Season, pa, ab")
       .order("Season", { ascending: false })
+      .order("source_player_id", { ascending: true })
       .range(from, from + 999);
     if (error) { result.errors.push(`Hitter Master load: ${error.message}`); break; }
     hitterRows.push(...(data || []));
@@ -190,6 +191,7 @@ export async function syncMasterToPlayers(season = 2025): Promise<SyncResult> {
       .from("Pitching Master")
       .select("source_player_id, playerFullName, Team, TeamID, Conference, ThrowHand, Role, Season, IP, G, GS")
       .order("Season", { ascending: false })
+      .order("source_player_id", { ascending: true })
       .range(from, from + 999);
     if (error) { result.errors.push(`Pitching Master load: ${error.message}`); break; }
     pitcherRows.push(...(data || []));

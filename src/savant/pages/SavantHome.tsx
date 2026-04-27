@@ -3,6 +3,7 @@ import { useSavantHitters } from "@/savant/hooks/useSavantHitters";
 import { useSavantPitchers } from "@/savant/hooks/useSavantPitchers";
 import LeaderboardCard, { type LeaderboardEntry } from "@/savant/components/LeaderboardCard";
 import ReclassificationRunner from "@/savant/components/ReclassificationRunner";
+import NonBreakingBallPopRunner from "@/savant/components/NonBreakingBallPopRunner";
 import VeloDiffRunner from "@/savant/components/VeloDiffRunner";
 import StuffPlusRunner from "@/savant/components/StuffPlusRunner";
 import ConferenceStuffPlusRunner from "@/savant/components/ConferenceStuffPlusRunner";
@@ -112,6 +113,7 @@ export default function SavantHome() {
       {showPipeline && (
         <div className="mt-4 space-y-4">
           <ReclassificationRunner />
+          <NonBreakingBallPopRunner />
           <VeloDiffRunner />
           <StuffPlusRunner />
           <ConferenceStuffPlusRunner />
