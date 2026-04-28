@@ -21,6 +21,7 @@ interface ConfPitchResult {
 }
 
 export interface ConfOverallResult {
+  conference_id: string;
   conference: string;
   overall: number;
   totalPitches: number;
@@ -96,26 +97,53 @@ export async function calculateConferenceStuffPlusV2(
     return { report: { overall: [], written: 0 }, errors: ["No scored pitch data found — run Stuff+ first"] };
   }
 
-  // ── Per-pitcher composite per (conference × pitch_type × hand) ─────────
-  // For each (conf, pitch_type, hand) bucket, weighted-mean of individual
-  // stuff_plus scores, weighted by each pitcher's pitch count for that pitch.
+  // ── Pull conference_id mapping from Pitching Master ─────────────────────
+  // pitcher_stuff_plus_inputs only has the string conference name, but
+  // Conference Stats keys by conference_id (UUID). Build source_player_id →
+  // conference_id map so we can update by ID, not by name.
+  console.time("[ConfStuff+V2] 1b. fetch conference_id map");
+  const confIdBySourceId = new Map<string, string>();
+  let pmFrom = 0;
+  while (true) {
+    const { data, error } = await (supabase as any)
+      .from("Pitching Master")
+      .select("source_player_id, conference_id")
+      .eq("Season", season)
+      .order("source_player_id", { ascending: true })
+      .range(pmFrom, pmFrom + 999);
+    if (error || !data || data.length === 0) break;
+    for (const r of data as any[]) {
+      if (r.source_player_id && r.conference_id) {
+        confIdBySourceId.set(r.source_player_id, r.conference_id);
+      }
+    }
+    if (data.length < 1000) break;
+    pmFrom += 1000;
+  }
+  console.timeEnd("[ConfStuff+V2] 1b. fetch conference_id map");
+
+  // ── Per-pitcher composite per (conf_id × pitch_type × hand) ────────────
+  // Key by conference_id (UUID) so cross-naming variations don't break matching.
   console.time("[ConfStuff+V2] 2. aggregate by conf × pitch × hand");
-  const bucketKey = (r: ScoredPitchRow) => `${r.conference}::${r.pitch_type}::${r.hand}`;
+  const labelByConfId = new Map<string, string>();
   const bucketRows = new Map<string, ScoredPitchRow[]>();
   for (const r of allRows) {
-    if (!r.conference || r.stuff_plus == null) continue;
-    const key = bucketKey(r);
+    if (r.stuff_plus == null) continue;
+    const cid = confIdBySourceId.get(r.source_player_id);
+    if (!cid) continue;
+    if (r.conference && !labelByConfId.has(cid)) labelByConfId.set(cid, r.conference);
+    const key = `${cid}::${r.pitch_type}::${r.hand}`;
     if (!bucketRows.has(key)) bucketRows.set(key, []);
     bucketRows.get(key)!.push(r);
   }
   console.timeEnd("[ConfStuff+V2] 2. aggregate by conf × pitch × hand");
 
-  // ── Blend RHP + LHP within (conference × pitch_type), pitch-weighted ───
+  // ── Blend RHP + LHP within (conf_id × pitch_type), pitch-weighted ──────
   console.time("[ConfStuff+V2] 3. blend hands → conf × pitch");
   const confPitchAgg = new Map<string, { weighted: number; pitches: number; pitcherIds: Set<string> }>();
   for (const [key, rows] of bucketRows) {
-    const [conference, pitch_type] = key.split("::");
-    const confPitchKey = `${conference}::${pitch_type}`;
+    const [confId, pitch_type] = key.split("::");
+    const confPitchKey = `${confId}::${pitch_type}`;
     if (!confPitchAgg.has(confPitchKey)) {
       confPitchAgg.set(confPitchKey, { weighted: 0, pitches: 0, pitcherIds: new Set() });
     }
@@ -129,12 +157,14 @@ export async function calculateConferenceStuffPlusV2(
     }
   }
 
-  const pitchResults: ConfPitchResult[] = [];
+  type PitchResultByConfId = ConfPitchResult & { conference_id: string };
+  const pitchResults: PitchResultByConfId[] = [];
   for (const [key, agg] of confPitchAgg) {
     if (agg.pitches === 0) continue;
-    const [conference, pitch_type] = key.split("::");
+    const [confId, pitch_type] = key.split("::");
     pitchResults.push({
-      conference,
+      conference_id: confId,
+      conference: labelByConfId.get(confId) ?? confId,
       pitch_type,
       stuff_plus: Math.round((agg.weighted / agg.pitches) * 10) / 10,
       total_pitches: agg.pitches,
@@ -154,15 +184,15 @@ export async function calculateConferenceStuffPlusV2(
   }>();
 
   for (const pr of pitchResults) {
-    if (!confOverall.has(pr.conference)) {
-      confOverall.set(pr.conference, {
+    if (!confOverall.has(pr.conference_id)) {
+      confOverall.set(pr.conference_id, {
         totalWeighted: 0,
         totalPitches: 0,
         pitcherIds: new Set(),
         byPitch: {},
       });
     }
-    const entry = confOverall.get(pr.conference)!;
+    const entry = confOverall.get(pr.conference_id)!;
     entry.totalWeighted += pr.stuff_plus * pr.total_pitches;
     entry.totalPitches += pr.total_pitches;
     entry.byPitch[pr.pitch_type] = { stuff_plus: pr.stuff_plus, pitches: pr.total_pitches };
@@ -170,16 +200,18 @@ export async function calculateConferenceStuffPlusV2(
 
   // Pitcher IDs across the whole conference
   for (const r of allRows) {
-    if (!r.conference) continue;
-    const entry = confOverall.get(r.conference);
+    const cid = confIdBySourceId.get(r.source_player_id);
+    if (!cid) continue;
+    const entry = confOverall.get(cid);
     if (entry) entry.pitcherIds.add(r.source_player_id);
   }
 
   const overallResults: ConfOverallResult[] = [];
-  for (const [conference, entry] of confOverall) {
+  for (const [confId, entry] of confOverall) {
     if (entry.totalPitches === 0) continue;
     overallResults.push({
-      conference,
+      conference_id: confId,
+      conference: labelByConfId.get(confId) ?? confId,
       overall: Math.round((entry.totalWeighted / entry.totalPitches) * 10) / 10,
       totalPitches: entry.totalPitches,
       pitcherCount: entry.pitcherIds.size,
@@ -204,14 +236,14 @@ export async function calculateConferenceStuffPlusV2(
     const { error } = await (supabase as any)
       .from("Conference Stats")
       .update(updatePayload)
-      .eq("conference abbreviation", r.conference)
+      .eq("conference_id", r.conference_id)
       .eq("season", season);
 
     if (error) {
       const { error: fallbackErr } = await (supabase as any)
         .from("Conference Stats")
         .update({ Stuff_plus: r.overall })
-        .eq("conference abbreviation", r.conference)
+        .eq("conference_id", r.conference_id)
         .eq("season", season);
       if (fallbackErr) errors.push(`Update ${r.conference}: ${fallbackErr.message}`);
       else written++;

@@ -40,7 +40,7 @@ export type PitchingMasterSeedRow = {
  * Returns pitching seed data from the unified "Pitching Master" Supabase table.
  * Combines what was previously split across pitching_stats_storage and pitching_power_ratings_storage.
  */
-export function usePitchingSeedData(season = 2025) {
+export function usePitchingSeedData(season = 2026) {
   const { data: dbRows = [], isLoading } = useQuery({
     queryKey: ["pitching_master", season],
     queryFn: async () => {

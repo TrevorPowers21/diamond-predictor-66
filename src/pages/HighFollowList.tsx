@@ -93,7 +93,7 @@ export default function HighFollowList() {
     queryKey: ["hf-hitter-master", sourceIds],
     enabled: sourceIds.length > 0,
     queryFn: async () => {
-      const { data } = await supabase.from("Hitter Master").select("*").in("source_player_id", sourceIds).eq("Season", 2025);
+      const { data } = await supabase.from("Hitter Master").select("*").in("source_player_id", sourceIds).eq("Season", 2026);
       return data || [];
     },
   });
@@ -102,7 +102,7 @@ export default function HighFollowList() {
     queryKey: ["hf-pitcher-master", sourceIds],
     enabled: sourceIds.length > 0,
     queryFn: async () => {
-      const { data } = await supabase.from("Pitching Master").select("*").in("source_player_id", sourceIds).eq("Season", 2025);
+      const { data } = await supabase.from("Pitching Master").select("*").in("source_player_id", sourceIds).eq("Season", 2026);
       return data || [];
     },
   });

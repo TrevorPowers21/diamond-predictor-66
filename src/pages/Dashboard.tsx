@@ -123,7 +123,7 @@ export default function Dashboard() {
       const { data: pmRows, error: pmErr } = await supabase
         .from("Pitching Master")
         .select("source_player_id, playerFullName, Team, Conference, Role, IP, ERA, FIP, K9, overall_pr_plus")
-        .eq("Season", 2025)
+        .eq("Season", 2026)
         .gte("IP", 20)
         .not("overall_pr_plus", "is", null)
         .order("overall_pr_plus", { ascending: false })

@@ -13,9 +13,10 @@ export const TRANSFER_WEIGHT_DEFAULTS = {
   t_iso_conference_weight: 0.25,
 
   // Pitching / competition weights
-  t_ba_pitching_weight: 2.0,
-  t_obp_pitching_weight: 2.0,
-  t_iso_pitching_weight: 2.0,
+  // Tuned 2026-04-27: dropped from 2.0 → 1.5 after Stuff+ recalibration widened SD.
+  t_ba_pitching_weight: 1.5,
+  t_obp_pitching_weight: 1.5,
+  t_iso_pitching_weight: 1.5,
 
   // Park factor weights
   t_ba_park_weight: 0.15,

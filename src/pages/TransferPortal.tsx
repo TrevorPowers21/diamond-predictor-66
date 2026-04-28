@@ -503,7 +503,7 @@ export default function TransferPortal() {
   const [pitchingRoleOverride, setPitchingRoleOverride] = useState<"SP" | "RP">("RP");
   const [secAveragePreset, setSecAveragePreset] = useState<boolean>(false);
   const pitchingEqForTiers = useMemo(() => readPitchingWeights(), []);
-  const { conferenceStats: newConfStats } = useConferenceStats(2025);
+  const { conferenceStats: newConfStats } = useConferenceStats(2026);
 
   const { data: players = [], isLoading: playersLoading } = useQuery({
     queryKey: ["transfer-sim-players"],

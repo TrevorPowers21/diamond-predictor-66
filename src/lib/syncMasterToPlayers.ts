@@ -19,7 +19,7 @@ type AddMissingResult = {
  * that don't exist in the players table yet, and insert them. Does NOT delete or
  * modify any existing player rows.
  */
-export async function addMissingPlayers(season = 2025): Promise<AddMissingResult> {
+export async function addMissingPlayers(season = 2026): Promise<AddMissingResult> {
   const result: AddMissingResult = { inserted: 0, skipped: 0, errors: [] };
 
   // 1. Load all existing source_player_ids from players table
@@ -154,7 +154,7 @@ export async function addMissingPlayers(season = 2025): Promise<AddMissingResult
  * Players who don't appear in that season fall back to the most recent season
  * they DO appear in.
  */
-export async function syncMasterToPlayers(season = 2025): Promise<SyncResult> {
+export async function syncMasterToPlayers(season = 2026): Promise<SyncResult> {
   const result: SyncResult = { hittersInserted: 0, pitchersInserted: 0, errors: [] };
 
   // ─── Clear players table ─────────────────────────────────────────────

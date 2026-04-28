@@ -928,7 +928,7 @@ async function fetchAllRows<T>(
 // ─── Main Pipeline ──────────────────────────────────────────────────────────
 
 export async function runBreakingBallReclassification(
-  season: number = 2025,
+  season: number = 2026,
 ): Promise<{ report: ReclassificationReport; errors: string[] }> {
   const errors: string[] = [];
   console.time("[Reclass] TOTAL");

@@ -326,7 +326,7 @@ async function fetchAll<T>(
 const ALL_PITCH_TYPES = ["4S FB", "Sinker", "Cutter", "Gyro Slider", "Slider", "Sweeper", "Curveball", "Change-up", "Splitter"];
 
 export async function runStuffPlusPipeline(
-  season: number = 2025,
+  season: number = 2026,
 ): Promise<{ report: StuffPlusReport; errors: string[] }> {
   const errors: string[] = [];
   console.time("[Stuff+] TOTAL");

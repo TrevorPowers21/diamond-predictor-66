@@ -926,7 +926,7 @@ export default function TeamBuilder() {
   const [metricsUploadOpen, setMetricsUploadOpen] = useState(false);
   const pitchingEq = useMemo(() => readPitchingWeights(), []);
   const pitchingPowerEq = usePitchingEquationWeights();
-  const { conferenceStats: newConfStats } = useConferenceStats(2025);
+  const { conferenceStats: newConfStats } = useConferenceStats(2026);
 
   // Derive pitching conference plus-stats lookup from Supabase conference stats
   const pitchingConfLookup = useMemo(() => {
@@ -1441,7 +1441,7 @@ export default function TeamBuilder() {
         (row.obp_plus != null ? 1 : 0) +
         (row.iso_plus != null ? 1 : 0) +
         (row.stuff_plus != null ? 1 : 0) +
-        (row.season === 2025 ? 2 : 0);
+        (row.season === 2026 ? 2 : 0);
       const existing = byConf.get(key);
       if (!existing || score > existing.score) {
         byConf.set(key, { row, score });

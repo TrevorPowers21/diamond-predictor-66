@@ -184,7 +184,7 @@ export default function PlayerProfile() {
   const isAdmin = hasRole("admin");
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
   const { notes: coachNotesForExport } = useCoachNotes(id ?? null);
-  const { conferenceStatsByKey } = useConferenceStats(2025);
+  const { conferenceStatsByKey } = useConferenceStats(2026);
   const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
 
   const [storageByName, storageByNameTeam, storageByPlayerId] = useMemo(() => {
@@ -339,14 +339,14 @@ export default function PlayerProfile() {
   }, [hitterMasterSeasons, seasonStats]);
 
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
-  // Default to 2025 if it's available, else the most recent season
-  const defaultSeason = availableSeasons.includes(2025) ? 2025 : (availableSeasons[0] ?? 2025);
+  // Default to 2026 if it's available, else the most recent season
+  const defaultSeason = availableSeasons.includes(2026) ? 2026 : (availableSeasons[0] ?? 2026);
   const effectiveSeason = selectedSeason ?? defaultSeason;
 
-  // Pick the 2025 Hitter Master row to check if combined stats were used
+  // Pick the 2026 Hitter Master row to check if combined stats were used
   // (badge only shows on the current season view, not historical)
   const currentHitterRow = useMemo(() => {
-    return hitterMasterSeasons.find((r: any) => Number(r.Season) === 2025) || null;
+    return hitterMasterSeasons.find((r: any) => Number(r.Season) === 2026) || null;
   }, [hitterMasterSeasons]);
   const combinedUsed = !!(currentHitterRow as any)?.combined_used;
   const combinedPa = (currentHitterRow as any)?.combined_pa as number | null | undefined;
@@ -355,7 +355,7 @@ export default function PlayerProfile() {
   // Fetch NCAA wRC mean for the historical season (for wRC+ calculation)
   const { data: ncaaWrcForSeason } = useQuery({
     queryKey: ["ncaa-wrc-mean-profile", effectiveSeason],
-    enabled: effectiveSeason !== 2025,
+    enabled: effectiveSeason !== 2026,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("ncaa_averages" as any)
@@ -599,12 +599,12 @@ export default function PlayerProfile() {
     enabled: !!player?.from_team && !!isTransferPortal,
   });
 
-  // Pinned 2025 row — anchors projections, risk, and scouting report so they
+  // Pinned 2026 row — anchors projections, risk, and scouting report so they
   // don't shift when the scouting grades dropdown changes season. Substitutes
-  // blended_* columns when combined_used (under-qualified 2025 sample).
+  // blended_* columns when combined_used (under-qualified 2026 sample).
   // MUST be declared before early returns to keep hook order stable.
   const projectionSourceRow = useMemo(() => {
-    const row = (hitterMasterSeasons as any[]).find((r) => Number(r.Season) === 2025);
+    const row = (hitterMasterSeasons as any[]).find((r) => Number(r.Season) === 2026);
     if (!row) return null;
     const combinedUsed = !!row.combined_used;
     return {
@@ -734,7 +734,7 @@ export default function PlayerProfile() {
     // Ambiguous name with no reliable discriminator: do not guess.
     return null;
   })();
-  const displayTeam2025 = seedStatRow?.team || player.from_team || player.team || null;
+  const displayTeamCurrent = seedStatRow?.team || player.from_team || player.team || null;
   const abbrevName = `${player.first_name?.[0] || ""}. ${player.last_name || ""}`.trim();
   const seedPos =
     exitPositions[`${player.first_name} ${player.last_name}|${player.team || ""}`] ||
@@ -867,7 +867,7 @@ export default function PlayerProfile() {
             )}
               <div className="flex items-center gap-2 mt-1 flex-wrap">
               {effectivePosition && <Badge variant="secondary">{effectivePosition}</Badge>}
-              {displayTeam2025 && <Badge variant="outline">{displayTeam2025}</Badge>}
+              {displayTeamCurrent && <Badge variant="outline">{displayTeamCurrent}</Badge>}
               {(() => {
                 const norm = (v: string) => (v || "").trim().toLowerCase().replace(/\b(university|college|of)\b/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
                 const teamConf = teamsForConference.find(t => norm(t.name) === norm(player.team || ""))?.conference;
@@ -924,7 +924,7 @@ export default function PlayerProfile() {
                       id: player.id,
                       player_type: "hitter",
                       name: `${player.first_name || ""} ${player.last_name || ""}`.trim(),
-                      school: displayTeam2025 || player.team,
+                      school: displayTeamCurrent || player.team,
                       position: effectivePosition,
                       class_year: player.class_year,
                       bats_throws: [(player as any).bats_hand, (player as any).throws_hand].filter(Boolean).join("/") || undefined,
@@ -1001,7 +1001,7 @@ export default function PlayerProfile() {
                       id: player.id,
                       player_type: "hitter",
                       name: `${player.first_name || ""} ${player.last_name || ""}`.trim(),
-                      school: displayTeam2025 || player.team,
+                      school: displayTeamCurrent || player.team,
                       position: effectivePosition,
                       class_year: player.class_year,
                       conference: resolvedConference || player.conference,
@@ -1041,7 +1041,7 @@ export default function PlayerProfile() {
                     id: player.id,
                     player_type: "hitter",
                     name: `${player.first_name || ""} ${player.last_name || ""}`.trim(),
-                    school: displayTeam2025 || player.team,
+                    school: displayTeamCurrent || player.team,
                     position: effectivePosition,
                     class_year: player.class_year,
                     bats_throws: [(player as any).bats_hand, (player as any).throws_hand].filter(Boolean).join("/") || undefined,
@@ -1223,7 +1223,7 @@ export default function PlayerProfile() {
                 ) : (
                   <div className="space-y-2.5 text-sm">
                   {[
-                    ["Team", displayTeam2025 || "—"],
+                    ["Team", displayTeamCurrent || "—"],
                     ["Conference", resolvedConference || "—"],
                     ["Position", effectivePosition || "—"],
                     ["Class", (isReturner && regularPred?.class_transition ? classTransitionToYear[regularPred.class_transition] : null) || player.class_year || "—"],
@@ -1390,7 +1390,7 @@ export default function PlayerProfile() {
                 <Card>
                   <CardContent className="pt-3 pb-2.5">
                     <div className="text-xs font-medium text-muted-foreground">2025 Team</div>
-                    <div className={`text-lg font-bold mt-1 ${displayTeam2025 ? "" : "text-muted-foreground"}`}>{displayTeam2025 || "TBD"}</div>
+                    <div className={`text-lg font-bold mt-1 ${displayTeamCurrent ? "" : "text-muted-foreground"}`}>{displayTeamCurrent || "TBD"}</div>
                     {fromTeamData?.conference && <div className="text-xs text-muted-foreground">{fromTeamData.conference}</div>}
                   </CardContent>
                 </Card>
@@ -1407,7 +1407,7 @@ export default function PlayerProfile() {
               <Card className="border-[#162241] bg-[#0a1428]">
                 <CardHeader className="pb-2 pt-3 px-4">
                   <div className="flex items-center gap-3 flex-wrap">
-                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2026 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
+                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2027 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
                     {editingPrediction && regularPred ? (
                       <div className="flex items-center gap-1.5">
                         <Select value={predForm.class_transition || "none"} onValueChange={(v) => setPredForm({ ...predForm, class_transition: v === "none" ? "" : v })}>
@@ -1469,6 +1469,42 @@ export default function PlayerProfile() {
                   )}
                 </CardContent>
               </Card>
+
+            {/* Scouting Grades */}
+            {activeSeasonScoutingGrades && (
+              <Card className="border-[#162241] bg-[#0a1428]">
+                <CardHeader className="pb-2 pt-3 px-4">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>
+                      Scouting Grades{effectiveSeason === 2026 && projectionSourceRow?.combined_used ? "*" : ""}
+                    </CardTitle>
+                    {availableSeasons.length > 1 && (
+                      <Select value={String(effectiveSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
+                        <SelectTrigger className="h-8 w-[75px] text-xs font-semibold border-[#162241] bg-[#0d1a30] text-slate-200">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableSeasons.map((y) => (
+                            <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="px-4 pb-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <ScoutGrade label="Brl" value={activeSeasonScoutingGrades.barrelScore != null ? Math.round(activeSeasonScoutingGrades.barrelScore) : null} fullLabel="Barrel%" />
+                    <ScoutGrade label="EV" value={activeSeasonScoutingGrades.avgEVScore != null ? Math.round(activeSeasonScoutingGrades.avgEVScore) : null} fullLabel="Exit Velo" />
+                    <ScoutGrade label="Con" value={activeSeasonScoutingGrades.contactScore != null ? Math.round(activeSeasonScoutingGrades.contactScore) : null} fullLabel="Contact%" />
+                    <ScoutGrade label="Chs" value={activeSeasonScoutingGrades.chaseScore != null ? Math.round(activeSeasonScoutingGrades.chaseScore) : null} fullLabel="Chase%" />
+                  </div>
+                  {effectiveSeason === 2026 && projectionSourceRow?.combined_used && (
+                    <p className="mt-2 text-[10px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"} sample</p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Risk Assessment */}
             {(() => {
@@ -1543,42 +1579,6 @@ export default function PlayerProfile() {
                 </Card>
               );
             })()}
-
-            {/* Scouting Grades */}
-            {activeSeasonScoutingGrades && (
-              <Card className="border-[#162241] bg-[#0a1428]">
-                <CardHeader className="pb-2 pt-3 px-4">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>
-                      Scouting Grades{effectiveSeason === 2025 && projectionSourceRow?.combined_used ? "*" : ""}
-                    </CardTitle>
-                    {availableSeasons.length > 1 && (
-                      <Select value={String(effectiveSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
-                        <SelectTrigger className="h-8 w-[75px] text-xs font-semibold border-[#162241] bg-[#0d1a30] text-slate-200">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableSeasons.map((y) => (
-                            <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent className="px-4 pb-4">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <ScoutGrade label="Brl" value={activeSeasonScoutingGrades.barrelScore != null ? Math.round(activeSeasonScoutingGrades.barrelScore) : null} fullLabel="Barrel%" />
-                    <ScoutGrade label="EV" value={activeSeasonScoutingGrades.avgEVScore != null ? Math.round(activeSeasonScoutingGrades.avgEVScore) : null} fullLabel="Exit Velo" />
-                    <ScoutGrade label="Con" value={activeSeasonScoutingGrades.contactScore != null ? Math.round(activeSeasonScoutingGrades.contactScore) : null} fullLabel="Contact%" />
-                    <ScoutGrade label="Chs" value={activeSeasonScoutingGrades.chaseScore != null ? Math.round(activeSeasonScoutingGrades.chaseScore) : null} fullLabel="Chase%" />
-                  </div>
-                  {effectiveSeason === 2025 && projectionSourceRow?.combined_used && (
-                    <p className="mt-2 text-[10px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"} sample</p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
 
             {/* Season Stats */}
             {seasonStats.length > 0 && (

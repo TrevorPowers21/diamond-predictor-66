@@ -31,6 +31,11 @@ export type PowerRatingsSeedRow = {
   pull: number | null;
   la10_30: number | null;
   gb: number | null;
+  // Pre-computed scores from Hitter Master (populated by Compute Scores).
+  contactScore: number | null;
+  evScore: number | null;
+  barrelScore: number | null;
+  chaseScore: number | null;
   source: string;
   position?: string | null;
 };
@@ -41,9 +46,9 @@ export type ExitPositionsSeed = Record<string, string>;
  * Returns hitter seed data from the unified "Hitter Master" Supabase table.
  * The returned shape matches what all existing consumers expect.
  */
-export function useHitterSeedData() {
+export function useHitterSeedData(season = 2026) {
   const { data: dbRows = [] } = useQuery({
-    queryKey: ["hitter_master_2025"],
+    queryKey: ["hitter_master", season],
     queryFn: async () => {
       const all: any[] = [];
       let from = 0;
@@ -51,8 +56,8 @@ export function useHitterSeedData() {
       while (true) {
         const { data, error } = await supabase
           .from("Hitter Master")
-          .select("source_player_id, playerFullName, Team, TeamID, Conference, conference_id, Season, Pos, BatHand, ThrowHand, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb, ab")
-          .eq("Season", 2025)
+          .select("source_player_id, playerFullName, Team, TeamID, Conference, conference_id, Season, Pos, BatHand, ThrowHand, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb, ab, contact_score, avg_ev_score, barrel_score, chase_score")
+          .eq("Season", season)
           .range(from, from + pageSize - 1);
         if (error) throw error;
         all.push(...(data || []));
@@ -96,6 +101,10 @@ export function useHitterSeedData() {
     pull: r.pull,
     la10_30: r.la_10_30,
     gb: r.gb,
+    contactScore: r.contact_score ?? null,
+    evScore: r.avg_ev_score ?? null,
+    barrelScore: r.barrel_score ?? null,
+    chaseScore: r.chase_score ?? null,
     source: "hitter_master",
     position: r.Pos ?? null,
   }));

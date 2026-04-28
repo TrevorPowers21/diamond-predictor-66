@@ -109,7 +109,7 @@ function BarGroup({ bars }: { bars: BarConfig[] }) {
 
 export default function HitterPage() {
   const { id } = useParams<{ id: string }>();
-  const [selectedSeason, setSelectedSeason] = useState<number>(2025);
+  const [selectedSeason, setSelectedSeason] = useState<number>(2026);
   const [seasonOpen, setSeasonOpen] = useState(false);
   const seasonRef = useRef<HTMLDivElement>(null);
 
@@ -128,7 +128,7 @@ export default function HitterPage() {
   const { data: hitters = [], isLoading } = useSavantHitters(selectedSeason);
   const { data: careerRows = [] } = usePlayerCareer(id);
   const { data: prediction = null } = usePlayerPrediction(id);
-  const { conferenceStatsByKey } = useConferenceStats(2025);
+  const { conferenceStatsByKey } = useConferenceStats(2026);
 
   // Years this player actually has data for — drives the season dropdown
   const availableSeasons = useMemo(() => {
@@ -196,7 +196,7 @@ export default function HitterPage() {
             {/* Year-over-year scouting metrics */}
             <CareerScoutingTable rows={careerRows} />
 
-            {/* 2025 Power Ratings tile strip */}
+            {/* 2026 Power Ratings tile strip */}
             <PowerRatingsCard player={player} />
 
             {/* Scouting Report */}
@@ -299,7 +299,7 @@ export default function HitterPage() {
                           className="absolute left-0 top-full z-20 mt-1 min-w-full overflow-hidden border shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]"
                           style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
                         >
-                          {(availableSeasons.length > 0 ? availableSeasons : [2025]).map((s) => {
+                          {(availableSeasons.length > 0 ? availableSeasons : [2026]).map((s) => {
                             const isActive = s === selectedSeason;
                             return (
                               <button

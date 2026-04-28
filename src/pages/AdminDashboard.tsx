@@ -297,8 +297,47 @@ function AddMissingPlayersButton() {
 
 function ComputeNcaaAveragesButton() {
   const [loading, setLoading] = useState(false);
+  const [allSeasonsRunning, setAllSeasonsRunning] = useState(false);
+  const [allSeasonsLog, setAllSeasonsLog] = useState<string[]>([]);
   const season = 2026;
   const [result, setResult] = useState<{ hittersUsed: number; pitchersUsed: number; fieldsWritten: number; errors: string[] } | null>(null);
+
+  const runAllSeasons = async () => {
+    if (!confirm(
+      "Compute NCAA Averages for ALL historical seasons?\n\n" +
+      "Refreshes ncaa_averages mean + SD across every season — required after Stuff+ recalibration so equations use correct baselines.",
+    )) return;
+
+    setAllSeasonsRunning(true);
+    setAllSeasonsLog([]);
+    const log: string[] = [];
+    const append = (msg: string) => {
+      log.push(msg);
+      setAllSeasonsLog([...log]);
+    };
+
+    try {
+      const { computeAndStoreNcaaAverages } = await import("@/lib/computeNcaaAverages");
+      const { data: sData } = await supabase
+        .from("Hitter Master")
+        .select("Season")
+        .not("Season", "is", null);
+      const seasons = [...new Set((sData || []).map((r: any) => r.Season))].sort((a, b) => b - a);
+      append(`Found seasons: ${seasons.join(", ")}`);
+
+      for (const s of seasons) {
+        append(`\n[${s}] Compute NCAA Averages…`);
+        const r = await computeAndStoreNcaaAverages(s);
+        append(`[${s}] hitters=${r.hittersUsed} pitchers=${r.pitchersUsed} fields=${r.fieldsWritten}${r.errors.length ? ` errors=${r.errors.length}` : ""}`);
+      }
+      append("\n✓ Done.");
+    } catch (err: any) {
+      append(`✗ Error: ${err.message || String(err)}`);
+    } finally {
+      setAllSeasonsRunning(false);
+    }
+  };
+
   return (
     <>
       <div className="flex items-center gap-2">
@@ -315,12 +354,21 @@ function ComputeNcaaAveragesButton() {
             }
             setLoading(false);
           }}
-          disabled={loading}
+          disabled={loading || allSeasonsRunning}
           variant="outline"
           className="gap-2"
         >
           {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
           {loading ? `Computing ${season} NCAA Averages…` : `Compute ${season} NCAA Averages`}
+        </Button>
+        <Button
+          onClick={runAllSeasons}
+          disabled={loading || allSeasonsRunning}
+          variant="outline"
+          className="gap-2 border-red-500 text-red-500 hover:bg-red-500/10"
+        >
+          {allSeasonsRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
+          {allSeasonsRunning ? "Recomputing All Seasons…" : "↻ ALL Seasons"}
         </Button>
       </div>
       {result && (
@@ -328,6 +376,11 @@ function ComputeNcaaAveragesButton() {
           {result.hittersUsed} hitters + {result.pitchersUsed} pitchers used. {result.fieldsWritten} fields written.
           {result.errors.length > 0 && ` Errors: ${result.errors.join("; ")}`}
         </p>
+      )}
+      {allSeasonsLog.length > 0 && (
+        <pre className="border bg-muted px-3 py-2 text-xs whitespace-pre-wrap font-mono">
+          {allSeasonsLog.join("\n")}
+        </pre>
       )}
     </>
   );
@@ -479,7 +532,7 @@ function CreatePredictionsButton() {
 
 function EquationConstantsTab() {
   const ADMIN_UI_MODEL_TYPE = "admin_ui";
-  const ADMIN_UI_SEASON = 2025;
+  const ADMIN_UI_SEASON = 2026;
   const [editableSections, setEditableSections] = useState<Record<string, boolean>>({});
   const defaultEditableValues: Record<string, string> = {
     r_ncaa_avg_ba: "0.280",
@@ -2041,7 +2094,7 @@ function AdminPowerRatingsTab() {
 
 function PitchingPowerRatingsTab() {
   const PITCHING_MODEL_TYPE = "admin_ui";
-  const PITCHING_SEASON = 2025;
+  const PITCHING_SEASON = 2026;
   const [editableSections, setEditableSections] = useState<Record<string, boolean>>({});
   const defaultValues: Record<string, string> = {
     p_era_ncaa_avg_power_rating: "50",

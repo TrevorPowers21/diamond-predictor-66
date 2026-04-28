@@ -8,6 +8,7 @@ import VeloDiffRunner from "@/savant/components/VeloDiffRunner";
 import StuffPlusRunner from "@/savant/components/StuffPlusRunner";
 import ConferenceStuffPlusRunner from "@/savant/components/ConferenceStuffPlusRunner";
 import ConferenceStuffPlusV2Runner from "@/savant/components/ConferenceStuffPlusV2Runner";
+import ConferenceScoutingRunner from "@/savant/components/ConferenceScoutingRunner";
 import { GOLD, NAVY_BORDER } from "@/savant/lib/theme";
 
 const fmtPct = (v: number) => `${v.toFixed(1)}%`;
@@ -118,6 +119,7 @@ export default function SavantHome() {
           <StuffPlusRunner />
           <ConferenceStuffPlusRunner />
           <ConferenceStuffPlusV2Runner />
+          <ConferenceScoutingRunner />
         </div>
       )}
     </>

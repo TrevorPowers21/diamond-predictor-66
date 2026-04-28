@@ -719,7 +719,7 @@ export default function PlayerComparison() {
   const { hitterStats, powerRatings } = useHitterSeedData();
   const { pitchers: pitchingMasterRows } = usePitchingSeedData();
   const { teams } = useTeamsTable();
-  const { conferenceStats: rawConfStats } = useConferenceStats(2025);
+  const { conferenceStats: rawConfStats } = useConferenceStats(2026);
   const pitchingEq = useMemo(() => readPitchingWeights(), []);
 
   const [simType, setSimType] = useState<"hitting" | "pitching">("hitting");
@@ -762,7 +762,7 @@ export default function PlayerComparison() {
         iso_plus: raw.iso != null ? Math.round((raw.iso / 0.162) * 100) : null,
         stuff_plus: raw.stuff_plus,
       };
-      const score = (row.avg_plus != null ? 1 : 0) + (row.obp_plus != null ? 1 : 0) + (row.iso_plus != null ? 1 : 0) + (row.stuff_plus != null ? 1 : 0) + (row.season === 2025 ? 2 : 0);
+      const score = (row.avg_plus != null ? 1 : 0) + (row.obp_plus != null ? 1 : 0) + (row.iso_plus != null ? 1 : 0) + (row.stuff_plus != null ? 1 : 0) + (row.season === 2026 ? 2 : 0);
       const ex = byConf.get(key);
       if (!ex || score > ex.score) byConf.set(key, { row, score });
     }
