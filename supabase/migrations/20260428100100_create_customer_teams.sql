@@ -1,8 +1,9 @@
 -- Step 1b — Create customer_teams table.
 --
 -- Each row is one school that pays for RSTR IQ. This is the unit of tenancy
--- for multi-tenant access control. Distinct from the existing public.teams
--- table, which holds D1 program lookup data referenced by players.team_id.
+-- for multi-tenant access control. Distinct from the existing
+-- public."Teams Table" (note the space + capitals — that's the D1 program
+-- lookup, used by players.team_id and other roster code).
 --
 -- school_team_id is a FK back to that D1 program lookup, so a customer team
 -- can be linked to "their" D1 program for branding (logo, colors, etc).
@@ -10,7 +11,7 @@
 CREATE TABLE public.customer_teams (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
-  school_team_id uuid REFERENCES public.teams(id),
+  school_team_id uuid REFERENCES public."Teams Table"(id),
   savant_enabled boolean NOT NULL DEFAULT false,
   active boolean NOT NULL DEFAULT true,
   created_at timestamp with time zone NOT NULL DEFAULT now(),

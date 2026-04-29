@@ -18,7 +18,8 @@ import { inviteUserToTeam } from "@/lib/inviteUser";
 
 interface SchoolRow {
   id: string;
-  name: string;
+  full_name: string;
+  abbreviation: string | null;
   conference: string | null;
 }
 
@@ -46,9 +47,9 @@ export default function AdminTeams() {
     queryKey: ["admin-d1-schools"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("teams")
-        .select("id, name, conference")
-        .order("name");
+        .from("Teams Table")
+        .select("id, full_name, abbreviation, conference")
+        .order("full_name");
       if (error) throw error;
       return (data || []) as SchoolRow[];
     },
@@ -134,7 +135,9 @@ export default function AdminTeams() {
                       <TableRow key={team.id}>
                         <TableCell className="font-medium">{team.name}</TableCell>
                         <TableCell className="text-muted-foreground">
-                          {school ? `${school.name}${school.conference ? ` · ${school.conference}` : ""}` : "—"}
+                          {school
+                            ? `${school.full_name}${school.conference ? ` · ${school.conference}` : ""}`
+                            : "—"}
                         </TableCell>
                         <TableCell className="text-center">
                           <Switch
@@ -285,7 +288,9 @@ function CreateTeamDialog({
                 <SelectItem value={NO_SCHOOL}>No linked program</SelectItem>
                 {schools.map((s) => (
                   <SelectItem key={s.id} value={s.id}>
-                    {s.name}{s.conference ? ` · ${s.conference}` : ""}
+                    {s.full_name}
+                    {s.abbreviation ? ` (${s.abbreviation})` : ""}
+                    {s.conference ? ` · ${s.conference}` : ""}
                   </SelectItem>
                 ))}
               </SelectContent>
