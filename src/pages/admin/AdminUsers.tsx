@@ -20,6 +20,7 @@ interface MemberRow {
   role: "team_admin" | "general_user";
   created_at: string;
   display_name: string | null;
+  email: string | null;
 }
 
 export default function AdminUsers() {
@@ -50,13 +51,17 @@ export default function AdminUsers() {
 
       const userIds = accessRows.map((r) => r.user_id);
       const profilesById = new Map<string, { display_name: string | null }>();
+      const emailsById = new Map<string, string | null>();
       if (userIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("user_id, display_name")
-          .in("user_id", userIds);
-        for (const p of profiles ?? []) {
+        const [profilesResult, emailsResult] = await Promise.all([
+          supabase.from("profiles").select("user_id, display_name").in("user_id", userIds),
+          supabase.rpc("get_team_member_emails", { _team_id: scopedTeamId }),
+        ]);
+        for (const p of profilesResult.data ?? []) {
           profilesById.set(p.user_id, { display_name: p.display_name });
+        }
+        for (const e of (emailsResult.data ?? []) as Array<{ user_id: string; email: string | null }>) {
+          emailsById.set(e.user_id, e.email);
         }
       }
 
@@ -66,6 +71,7 @@ export default function AdminUsers() {
         role: r.role as MemberRow["role"],
         created_at: r.created_at,
         display_name: profilesById.get(r.user_id)?.display_name ?? null,
+        email: emailsById.get(r.user_id) ?? null,
       }));
     },
   });
@@ -168,14 +174,14 @@ export default function AdminUsers() {
                       <TableRow key={m.user_id}>
                         <TableCell>
                           <div className="font-medium">
-                            {m.display_name ?? "—"}
+                            {m.email ?? m.display_name ?? "—"}
                             {isSelf && (
                               <span className="ml-2 text-[10px] uppercase tracking-wider text-[#D4AF37]/80">you</span>
                             )}
                           </div>
-                          <div className="text-xs text-muted-foreground font-mono">
-                            {m.user_id.slice(0, 8)}…
-                          </div>
+                          {m.display_name && m.email && (
+                            <div className="text-xs text-muted-foreground">{m.display_name}</div>
+                          )}
                         </TableCell>
                         <TableCell>
                           <span className="text-xs uppercase tracking-wider text-muted-foreground">
