@@ -22,6 +22,10 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
 
+  // Password recovery — true while the user has a recovery session
+  // (clicked an email link) but has not yet set a new password.
+  isRecoveringPassword: boolean;
+
   // Global roles
   roles: AppRole[];
   hasRole: (role: AppRole) => boolean;
@@ -65,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   const [loading, setLoading] = useState(true);
   const [devBypassed, setDevBypassed] = useState(false);
+  const [isRecoveringPassword, setIsRecoveringPassword] = useState(false);
 
   const isDevBypassAllowed = import.meta.env.DEV;
   const isSuperadmin = roles.includes("superadmin");
@@ -136,9 +141,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, newSession) => {
+      async (event, newSession) => {
         setSession(newSession);
         setUser(newSession?.user ?? null);
+        if (event === "PASSWORD_RECOVERY") {
+          setIsRecoveringPassword(true);
+        } else if (event === "USER_UPDATED" || event === "SIGNED_OUT") {
+          setIsRecoveringPassword(false);
+        }
         if (newSession?.user) {
           setTimeout(() => fetchUserContext(newSession.user.id), 0);
         } else {
@@ -219,6 +229,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         user,
         loading,
+        isRecoveringPassword,
         roles,
         hasRole,
         isSuperadmin,

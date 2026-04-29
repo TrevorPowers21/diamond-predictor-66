@@ -19,18 +19,16 @@ function detectInitialMode(): Mode {
 }
 
 export default function Auth() {
-  const { session, loading, devBypassed, disableDevBypass, enableDevBypass, isDevBypassAllowed } = useAuth();
+  const { session, loading, devBypassed, disableDevBypass, enableDevBypass, isDevBypassAllowed, isRecoveringPassword } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>(detectInitialMode);
 
-  // If a PASSWORD_RECOVERY auth event fires after page load (e.g. tab focus),
-  // switch to the recovery form so the user can set a new password.
+  // Sync mode with the global recovery flag so any path that lands the user
+  // here with a recovery session (including landing on / or /dashboard
+  // first and getting redirected here) shows the password-reset form.
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY") setMode("recovery");
-    });
-    return () => subscription.unsubscribe();
-  }, []);
+    if (isRecoveringPassword) setMode("recovery");
+  }, [isRecoveringPassword]);
 
   if (loading) {
     return (
@@ -43,7 +41,7 @@ export default function Auth() {
   // Don't redirect away from /auth while we're showing the recovery form —
   // the user is technically signed in (recovery session) but needs to set
   // a password before being kicked into the dashboard.
-  if (session && !devBypassed && mode !== "recovery") {
+  if (session && !devBypassed && mode !== "recovery" && !isRecoveringPassword) {
     return <Navigate to="/dashboard" replace />;
   }
 
