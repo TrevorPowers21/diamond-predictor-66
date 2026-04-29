@@ -34,12 +34,12 @@ export default function AdminTeams() {
   const teamsQuery = useQuery({
     queryKey: ["admin-customer-teams"],
     queryFn: async () => {
-      const { data, error } = await (supabase
-        .from("customer_teams" as any)
+      const { data, error } = await supabase
+        .from("customer_teams")
         .select("id, name, school_team_id, savant_enabled, active, created_at")
-        .order("created_at", { ascending: false }) as any);
+        .order("created_at", { ascending: false });
       if (error) throw error;
-      return (data || []) as Array<CustomerTeam & { created_at: string }>;
+      return data ?? [];
     },
   });
 
@@ -58,12 +58,12 @@ export default function AdminTeams() {
   const memberCountsQuery = useQuery({
     queryKey: ["admin-team-member-counts"],
     queryFn: async () => {
-      const { data, error } = await (supabase
-        .from("user_team_access" as any)
-        .select("customer_team_id") as any);
+      const { data, error } = await supabase
+        .from("user_team_access")
+        .select("customer_team_id");
       if (error) throw error;
       const counts = new Map<string, number>();
-      for (const row of (data || []) as Array<{ customer_team_id: string }>) {
+      for (const row of data ?? []) {
         counts.set(row.customer_team_id, (counts.get(row.customer_team_id) ?? 0) + 1);
       }
       return counts;
@@ -72,10 +72,10 @@ export default function AdminTeams() {
 
   const updateTeam = useMutation({
     mutationFn: async ({ id, patch }: { id: string; patch: Partial<{ savant_enabled: boolean; active: boolean }> }) => {
-      const { error } = await (supabase
-        .from("customer_teams" as any)
+      const { error } = await supabase
+        .from("customer_teams")
         .update(patch)
-        .eq("id", id) as any);
+        .eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -236,15 +236,15 @@ function CreateTeamDialog({
     e.preventDefault();
     if (!name.trim()) return;
     setSubmitting(true);
-    const { error } = await (supabase
-      .from("customer_teams" as any)
+    const { error } = await supabase
+      .from("customer_teams")
       .insert({
         name: name.trim(),
         school_team_id: schoolTeamId === NO_SCHOOL ? null : schoolTeamId,
         savant_enabled: savantEnabled,
         active: true,
         created_by: createdById,
-      }) as any);
+      });
     setSubmitting(false);
     if (error) {
       toast.error(`Could not create team: ${error.message}`);

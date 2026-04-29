@@ -39,42 +39,44 @@ export default function AdminUsers() {
     enabled: !!scopedTeamId,
     queryFn: async () => {
       if (!scopedTeamId) return [];
-      const { data: rows, error } = await (supabase
-        .from("user_team_access" as any)
+      const { data: rows, error } = await supabase
+        .from("user_team_access")
         .select("user_id, customer_team_id, role, created_at")
         .eq("customer_team_id", scopedTeamId)
-        .order("created_at", { ascending: true }) as any);
+        .order("created_at", { ascending: true });
       if (error) throw error;
-      const accessRows = (rows || []) as Array<Omit<MemberRow, "display_name">>;
+      const accessRows = rows ?? [];
 
-      // Profile join for display names
       const userIds = accessRows.map((r) => r.user_id);
-      let profilesById = new Map<string, { display_name: string | null }>();
+      const profilesById = new Map<string, { display_name: string | null }>();
       if (userIds.length > 0) {
         const { data: profiles } = await supabase
           .from("profiles")
           .select("user_id, display_name")
           .in("user_id", userIds);
-        for (const p of (profiles || []) as Array<{ user_id: string; display_name: string | null }>) {
+        for (const p of profiles ?? []) {
           profilesById.set(p.user_id, { display_name: p.display_name });
         }
       }
 
-      return accessRows.map((r) => ({
-        ...r,
+      return accessRows.map<MemberRow>((r) => ({
+        user_id: r.user_id,
+        customer_team_id: r.customer_team_id,
+        role: r.role as MemberRow["role"],
+        created_at: r.created_at,
         display_name: profilesById.get(r.user_id)?.display_name ?? null,
-      })) as MemberRow[];
+      }));
     },
   });
 
   const removeMember = useMutation({
     mutationFn: async (userId: string) => {
       if (!scopedTeamId) throw new Error("No team selected");
-      const { error } = await (supabase
-        .from("user_team_access" as any)
+      const { error } = await supabase
+        .from("user_team_access")
         .delete()
         .eq("user_id", userId)
-        .eq("customer_team_id", scopedTeamId) as any);
+        .eq("customer_team_id", scopedTeamId);
       if (error) throw error;
     },
     onSuccess: () => {

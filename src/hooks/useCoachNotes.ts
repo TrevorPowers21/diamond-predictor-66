@@ -15,7 +15,7 @@ export interface CoachNote {
   author_email?: string | null;
 }
 
-const cn = () => supabase.from("coach_notes" as any);
+const cn = () => supabase.from("coach_notes");
 
 export function useCoachNotes(playerId: string | null | undefined) {
   const { user, effectiveTeamId } = useAuth();

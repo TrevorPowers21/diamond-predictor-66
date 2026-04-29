@@ -80,14 +80,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const isSuper = fetchedRoles.includes("superadmin");
 
     // 2. Team membership (one row per user in v1)
-    const { data: accessRow } = await (supabase
-      .from("user_team_access" as any)
+    const { data: accessRow } = await supabase
+      .from("user_team_access")
       .select("customer_team_id, role")
       .eq("user_id", userId)
-      .maybeSingle() as any);
+      .maybeSingle();
 
     if (accessRow) {
-      setUserTeamId(accessRow.customer_team_id as string);
+      setUserTeamId(accessRow.customer_team_id);
       setUserTeamRole(accessRow.role as TeamRole);
     } else {
       setUserTeamId(null);
@@ -96,19 +96,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // 3. Available teams: superadmins see all active, others see their own.
     if (isSuper) {
-      const { data: allTeams } = await (supabase
-        .from("customer_teams" as any)
+      const { data: allTeams } = await supabase
+        .from("customer_teams")
         .select("id, name, school_team_id, savant_enabled, active")
         .eq("active", true)
-        .order("name") as any);
-      setAvailableTeams((allTeams || []) as CustomerTeam[]);
+        .order("name");
+      setAvailableTeams(allTeams ?? []);
     } else if (accessRow) {
-      const { data: oneTeam } = await (supabase
-        .from("customer_teams" as any)
+      const { data: oneTeam } = await supabase
+        .from("customer_teams")
         .select("id, name, school_team_id, savant_enabled, active")
         .eq("id", accessRow.customer_team_id)
-        .maybeSingle() as any);
-      setAvailableTeams(oneTeam ? [oneTeam as CustomerTeam] : []);
+        .maybeSingle();
+      setAvailableTeams(oneTeam ? [oneTeam] : []);
     } else {
       setAvailableTeams([]);
     }
