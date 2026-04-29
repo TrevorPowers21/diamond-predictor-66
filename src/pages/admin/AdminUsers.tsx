@@ -24,7 +24,8 @@ interface MemberRow {
 
 export default function AdminUsers() {
   const qc = useQueryClient();
-  const { isSuperadmin, userTeamId, userTeamRole, effectiveTeamId, availableTeams } = useAuth();
+  const { user, isSuperadmin, userTeamId, userTeamRole, effectiveTeamId, availableTeams } = useAuth();
+  const currentUserId = user?.id ?? null;
 
   // Effective scope: superadmin uses impersonation, team_admin uses their own team.
   const scopedTeamId = isSuperadmin ? effectiveTeamId : userTeamId;
@@ -161,38 +162,48 @@ export default function AdminUsers() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {members.map((m) => (
-                    <TableRow key={m.user_id}>
-                      <TableCell>
-                        <div className="font-medium">{m.display_name ?? "—"}</div>
-                        <div className="text-xs text-muted-foreground font-mono">
-                          {m.user_id.slice(0, 8)}…
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-xs uppercase tracking-wider text-muted-foreground">
-                          {m.role.replace("_", " ")}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {new Date(m.created_at).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="gap-1.5 h-8 text-muted-foreground hover:text-destructive"
-                          onClick={() => {
-                            if (confirm(`Remove this user from ${scopedTeam.name}?`)) {
-                              removeMember.mutate(m.user_id);
-                            }
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" /> Remove
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {members.map((m) => {
+                    const isSelf = m.user_id === currentUserId;
+                    return (
+                      <TableRow key={m.user_id}>
+                        <TableCell>
+                          <div className="font-medium">
+                            {m.display_name ?? "—"}
+                            {isSelf && (
+                              <span className="ml-2 text-[10px] uppercase tracking-wider text-[#D4AF37]/80">you</span>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground font-mono">
+                            {m.user_id.slice(0, 8)}…
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs uppercase tracking-wider text-muted-foreground">
+                            {m.role.replace("_", " ")}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {new Date(m.created_at).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={isSelf}
+                            className="gap-1.5 h-8 text-muted-foreground hover:text-destructive disabled:opacity-30"
+                            title={isSelf ? "You can't remove yourself" : undefined}
+                            onClick={() => {
+                              if (confirm(`Remove ${m.display_name ?? "this user"} from ${scopedTeam.name}?`)) {
+                                removeMember.mutate(m.user_id);
+                              }
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> Remove
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}
