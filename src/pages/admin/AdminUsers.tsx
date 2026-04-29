@@ -239,7 +239,13 @@ function InviteMemberDialog({
     });
     setSubmitting(false);
     if (result.success) {
-      toast.success(`Invited ${email.trim()} to ${teamName}`);
+      if (result.alreadyMember) {
+        toast.info(`${email.trim()} is already on ${teamName}`);
+      } else if (result.isExisting) {
+        toast.success(`Added existing user ${email.trim()} to ${teamName} (no email sent)`);
+      } else {
+        toast.success(`Invited ${email.trim()} to ${teamName}`);
+      }
       setEmail("");
       onOpenChange(false);
     } else if (result.pending) {

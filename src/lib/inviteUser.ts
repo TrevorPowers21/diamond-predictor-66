@@ -1,11 +1,6 @@
-// Wrapper around the (forthcoming) Supabase Edge Function that handles
-// invite-by-email + user_team_access seeding.
-//
-// The Edge Function is required because supabase.auth.admin.inviteUserByEmail
-// needs the service role key, which cannot be exposed to the browser.
-//
-// Until the function is deployed, this is a stub that surfaces the intent
-// to the caller without performing any side effects.
+// Wrapper around the invite-user-to-team Supabase Edge Function. The
+// function (a) sends a magic-link invite to a brand-new email or (b)
+// attaches an already-registered user to the team without sending email.
 
 import { supabase } from "@/integrations/supabase/client";
 
@@ -18,7 +13,24 @@ export interface InviteUserParams {
 export interface InviteUserResult {
   success: boolean;
   error?: string;
-  pending?: boolean; // true when the stub no-ops (Edge Function not deployed yet)
+  pending?: boolean;       // Edge Function not deployed yet
+  isExisting?: boolean;    // Email matched an existing auth.users row → no email sent
+  alreadyMember?: boolean; // User was already on this team → no-op
+  invitedUserId?: string;
+}
+
+async function readErrorBody(error: unknown): Promise<string | null> {
+  const ctx = (error as { context?: { json?: () => Promise<unknown> } } | null)?.context;
+  if (ctx && typeof ctx.json === "function") {
+    try {
+      const body = await ctx.json();
+      const msg = (body as { error?: string } | null)?.error;
+      if (msg) return msg;
+    } catch {
+      /* fall through */
+    }
+  }
+  return null;
 }
 
 export async function inviteUserToTeam(params: InviteUserParams): Promise<InviteUserResult> {
@@ -27,18 +39,17 @@ export async function inviteUserToTeam(params: InviteUserParams): Promise<Invite
       body: params,
     });
     if (error) {
-      // The function is not deployed yet — fall through to stub behavior so the
-      // UI flow can be tested locally without backend wiring.
-      const msg = (error as any)?.message ?? String(error);
-      const notDeployed = /not found|404|FunctionsHttpError/i.test(msg);
-      if (notDeployed) {
-        console.warn("[inviteUserToTeam] Edge Function not deployed — invite is a no-op", params);
-        return { success: false, pending: true, error: "Invite delivery is not wired up yet (Step 5b)." };
+      const fallbackMsg = (error as { message?: string }).message ?? String(error);
+      // Edge Function not deployed yet
+      if (/not found|404/i.test(fallbackMsg)) {
+        return { success: false, pending: true, error: "Invite delivery is not wired up yet." };
       }
-      return { success: false, error: msg };
+      const serverMsg = await readErrorBody(error);
+      return { success: false, error: serverMsg ?? fallbackMsg };
     }
     return { success: true, ...(data ?? {}) };
-  } catch (err: any) {
-    return { success: false, error: err?.message ?? "Unknown error" };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    return { success: false, error: msg };
   }
 }

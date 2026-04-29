@@ -1,25 +1,21 @@
 // Edge Function: invite-user-to-team
 //
-// Creates an auth user via magic-link invite and attaches them to a
-// customer_team in user_team_access. Uses the service role key (server-only)
-// because supabase.auth.admin.inviteUserByEmail cannot be called from the
-// browser.
+// Attaches a user (existing or new) to a customer_team in user_team_access.
+// If the email is not yet registered, sends a magic-link invite. If the
+// email already exists, attaches the existing user without sending email.
 //
 // Authorization:
 //   - Superadmins can invite anyone, with any role, to any team.
 //   - Team admins can invite ONLY general_user to their own team.
 //   - Anyone else: 403.
 //
-// Required env vars (set via `supabase secrets set ...`):
+// Required env vars (auto-provided in the Supabase Edge runtime):
 //   - SUPABASE_URL
 //   - SUPABASE_ANON_KEY
 //   - SUPABASE_SERVICE_ROLE_KEY
 //
 // Deploy:
 //   supabase functions deploy invite-user-to-team
-//
-// Invoke from the client via:
-//   supabase.functions.invoke("invite-user-to-team", { body: {...} })
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -43,6 +39,13 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+function isAlreadyRegisteredError(err: { status?: number; message?: string } | null): boolean {
+  if (!err) return false;
+  if (err.status === 422) return true;
+  const msg = (err.message ?? "").toLowerCase();
+  return msg.includes("already") && (msg.includes("registered") || msg.includes("exists"));
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -59,7 +62,6 @@ Deno.serve(async (req) => {
     return json({ error: "Server is misconfigured (missing env vars)" }, 500);
   }
 
-  // Identify caller from their JWT.
   const callerClient = createClient(supabaseUrl, anonKey, {
     global: { headers: { Authorization: authHeader } },
   });
@@ -69,7 +71,6 @@ Deno.serve(async (req) => {
   } = await callerClient.auth.getUser();
   if (callerErr || !caller) return json({ error: "Invalid or expired token" }, 401);
 
-  // Privileged client for admin ops.
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
   let body: InviteBody;
@@ -86,7 +87,6 @@ Deno.serve(async (req) => {
     return json({ error: "role must be 'team_admin' or 'general_user'" }, 400);
   }
 
-  // Resolve caller's authorization.
   const { data: roleRows } = await adminClient
     .from("user_roles")
     .select("role")
@@ -113,7 +113,6 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Verify target team exists and is active.
   const { data: team, error: teamErr } = await adminClient
     .from("customer_teams")
     .select("id, active")
@@ -124,12 +123,52 @@ Deno.serve(async (req) => {
     return json({ error: "Customer team is inactive" }, 400);
   }
 
-  // Send the invite (creates auth.users row if not present, emails magic link).
+  // Try the magic-link invite first.
+  let invitedUserId: string;
+  let isExisting = false;
   const { data: invited, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(email);
-  if (inviteErr || !invited?.user) {
-    return json({ error: `Invite failed: ${inviteErr?.message ?? "unknown error"}` }, 500);
+
+  if (inviteErr) {
+    if (!isAlreadyRegisteredError(inviteErr)) {
+      return json({ error: `Invite failed: ${inviteErr.message ?? "unknown error"}` }, 500);
+    }
+
+    // Email is already registered — look up the existing user_id and attach
+    // them to the team without sending another invite email.
+    const { data: foundId, error: findErr } = await adminClient.rpc(
+      "find_user_id_by_email",
+      { _email: email },
+    );
+    if (findErr || !foundId) {
+      return json({ error: `User exists but lookup failed: ${findErr?.message ?? "no id returned"}` }, 500);
+    }
+    invitedUserId = foundId as string;
+    isExisting = true;
+
+    // v1 rule: one user, one team. Reject if they're already on a different team.
+    const { data: existingAccess } = await adminClient
+      .from("user_team_access")
+      .select("customer_team_id, role")
+      .eq("user_id", invitedUserId);
+    const accessRows = (existingAccess ?? []) as Array<{ customer_team_id: string; role: string }>;
+
+    const onThisTeam = accessRows.find((r) => r.customer_team_id === customerTeamId);
+    const onAnotherTeam = accessRows.find((r) => r.customer_team_id !== customerTeamId);
+
+    if (onAnotherTeam) {
+      return json(
+        { error: "User is already a member of another customer team. Remove them from that team before adding here." },
+        409,
+      );
+    }
+    if (onThisTeam) {
+      return json({ success: true, alreadyMember: true, invitedUserId, isExisting: true });
+    }
+  } else if (!invited?.user) {
+    return json({ error: "Invite returned no user" }, 500);
+  } else {
+    invitedUserId = invited.user.id;
   }
-  const invitedUserId = invited.user.id;
 
   // Attach to the team. Upsert so re-invites don't blow up on the PK.
   const { error: accessErr } = await adminClient
@@ -141,11 +180,11 @@ Deno.serve(async (req) => {
         role,
         created_by: caller.id,
       },
-      { onConflict: "user_id,customer_team_id" }
+      { onConflict: "user_id,customer_team_id" },
     );
   if (accessErr) {
     return json({ error: `Could not assign team access: ${accessErr.message}` }, 500);
   }
 
-  return json({ success: true, invitedUserId });
+  return json({ success: true, invitedUserId, isExisting });
 });

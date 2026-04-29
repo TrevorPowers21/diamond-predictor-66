@@ -338,7 +338,13 @@ function InviteAdminDialog({
     });
     setSubmitting(false);
     if (result.success) {
-      toast.success(`Invited ${email.trim()} as team admin of ${team.name}`);
+      if (result.alreadyMember) {
+        toast.info(`${email.trim()} is already a team admin of ${team.name}`);
+      } else if (result.isExisting) {
+        toast.success(`Added existing user ${email.trim()} as team admin (no email sent — they already have an account)`);
+      } else {
+        toast.success(`Invited ${email.trim()} as team admin of ${team.name}`);
+      }
       setEmail("");
       onOpenChange(false);
     } else if (result.pending) {
