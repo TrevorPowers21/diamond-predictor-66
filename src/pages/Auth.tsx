@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Activity, Eye, EyeOff } from "lucide-react";
 
 export default function Auth() {
-  const { session, loading, devBypassed, disableDevBypass } = useAuth();
+  const { session, loading, devBypassed, disableDevBypass, enableDevBypass, isDevBypassAllowed } = useAuth();
   const navigate = useNavigate();
 
   if (loading) {
@@ -58,11 +58,20 @@ export default function Auth() {
           </CardHeader>
         </Card>
 
-        <div className="text-center">
-          <Button variant="ghost" className="text-muted-foreground text-sm" onClick={() => navigate("/dashboard")}>
-            Continue without signing in
-          </Button>
-        </div>
+        {isDevBypassAllowed && (
+          <div className="text-center">
+            <Button
+              variant="ghost"
+              className="text-muted-foreground text-sm"
+              onClick={() => {
+                enableDevBypass();
+                navigate("/dashboard");
+              }}
+            >
+              Continue without signing in (dev)
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

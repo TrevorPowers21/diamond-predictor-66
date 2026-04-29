@@ -7,7 +7,7 @@ export interface CoachNote {
   id: string;
   player_id: string;
   user_id: string;
-  team_id: string | null;
+  customer_team_id: string | null;
   content: string;
   tag: string | null;
   created_at: string;
@@ -18,7 +18,7 @@ export interface CoachNote {
 const cn = () => supabase.from("coach_notes" as any);
 
 export function useCoachNotes(playerId: string | null | undefined) {
-  const { user } = useAuth();
+  const { user, effectiveTeamId } = useAuth();
   const qc = useQueryClient();
   const queryKey = ["coach-notes", playerId];
 
@@ -43,6 +43,7 @@ export function useCoachNotes(playerId: string | null | undefined) {
         .insert({
           player_id: playerId,
           user_id: user.id,
+          customer_team_id: effectiveTeamId,
           content: content.trim(),
           tag: tag ?? null,
         })
