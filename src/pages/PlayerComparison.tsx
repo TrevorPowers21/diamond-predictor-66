@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
+import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -747,6 +748,22 @@ export default function PlayerComparison() {
   const [bPitcherSearch, setBPitcherSearch] = useState("");
   const [bPitcherOpen, setBPitcherOpen] = useState(false);
   const [bRoleOverride, setBRoleOverride] = useState<"SP" | "RP">("RP");
+
+  // Pre-fill both compare panels' destination team with the impersonated
+  // school. Coaches comparing two transfers usually want to see what each
+  // would do at THEIR school. Replaces the old DEMO_SCHOOL default.
+  const { schoolName: effectiveSchoolName } = useEffectiveSchool();
+  useEffect(() => {
+    if (!effectiveSchoolName) return;
+    if (!aDestTeam) {
+      setADestTeam(effectiveSchoolName);
+      setATeamSearch(effectiveSchoolName);
+    }
+    if (!bDestTeam) {
+      setBDestTeam(effectiveSchoolName);
+      setBTeamSearch(effectiveSchoolName);
+    }
+  }, [effectiveSchoolName, aDestTeam, bDestTeam]);
 
   /* ─── shared data ─── */
   const conferenceStats: HitterConfRow[] = useMemo(() => {

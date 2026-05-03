@@ -32,6 +32,7 @@ import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { usePitcherRoleOverrides } from "@/hooks/usePitcherRoleOverrides";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
+import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { computePitcherProjection } from "@/lib/pitcherProjection";
@@ -1015,6 +1016,18 @@ export default function TeamBuilder() {
 
   // Fetch teams from Teams Table
   const { teams } = useTeamsTable();
+
+  // When the user is impersonating a customer team (or has a default team),
+  // auto-fill the team picker with that school. Replaces the old
+  // DEMO_SCHOOL.name default. Only fires when no team is currently picked
+  // and no build is loaded — never overrides an active selection.
+  const { schoolName: effectiveSchoolName } = useEffectiveSchool();
+  useEffect(() => {
+    if (!effectiveSchoolName) return;
+    if (selectedBuildId) return;
+    if (selectedTeam) return;
+    setSelectedTeam(effectiveSchoolName);
+  }, [effectiveSchoolName, selectedBuildId, selectedTeam]);
 
   const selectedTeamRow = useMemo(() => {
     if (!selectedTeam) return null;
@@ -4811,8 +4824,8 @@ export default function TeamBuilder() {
     setBuildName("My Team Build");
     setTotalBudget(0);
     setDirty(false);
-    setSelectedTeam("");
-    setTeamSearchQuery("");
+    setSelectedTeam(effectiveSchoolName ?? "");
+    setTeamSearchQuery(effectiveSchoolName ?? "");
     // Clear depth assignments — old indices would silently point at the new
     // roster's players at those array slots, which is worse than empty.
     setDepthAssignments({});

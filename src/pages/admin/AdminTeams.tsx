@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { Plus, UserPlus, Users } from "lucide-react";
 import { inviteUserToTeam } from "@/lib/inviteUser";
+import { CURRENT_SEASON } from "@/lib/seasonConstants";
 
 interface SchoolRow {
   id: string;
@@ -44,11 +45,19 @@ export default function AdminTeams() {
   });
 
   const schoolsQuery = useQuery({
-    queryKey: ["admin-d1-schools"],
+    queryKey: ["admin-d1-schools", CURRENT_SEASON],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Teams Table holds one row per (program × season). Without filtering by
+      // Season, every school shows up multiple times in the picker (Georgia
+      // 2023, Georgia 2024, Georgia 2025, Georgia 2026). Filter to the current
+      // season so each program appears exactly once.
+      // NOTE: school_team_id stored on customer_teams will be this season's
+      // UUID. Year-rollover work (punch list item 2) needs to re-point these
+      // to the new season's UUIDs via source_id.
+      const { data, error } = await (supabase as any)
         .from("Teams Table")
         .select("id, full_name, abbreviation, conference")
+        .eq("Season", CURRENT_SEASON)
         .order("full_name");
       if (error) throw error;
       return (data || []) as SchoolRow[];

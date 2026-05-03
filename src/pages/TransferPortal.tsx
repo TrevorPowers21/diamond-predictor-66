@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { CURRENT_SEASON, PRIOR_SEASON } from "@/lib/seasonConstants";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,6 +26,7 @@ import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
+import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
@@ -497,6 +498,17 @@ export default function TransferPortal() {
   const [playerSearch, setPlayerSearch] = useState<string>("");
   const [selectedDestinationTeam, setSelectedDestinationTeam] = useState<string>("");
   const [teamSearch, setTeamSearch] = useState<string>("");
+
+  // Pre-fill the destination team with the impersonated school. Coaches
+  // demoing as their program shouldn't have to retype "Kansas Jayhawks"
+  // every time they open the simulator. Replaces the old DEMO_SCHOOL default.
+  const { schoolName: effectiveSchoolName } = useEffectiveSchool();
+  useEffect(() => {
+    if (!effectiveSchoolName) return;
+    if (selectedDestinationTeam) return;
+    setSelectedDestinationTeam(effectiveSchoolName);
+    setTeamSearch(effectiveSchoolName);
+  }, [effectiveSchoolName, selectedDestinationTeam]);
   const [simType, setSimType] = useState<"hitting" | "pitching">("hitting");
   const [selectedPitcherId, setSelectedPitcherId] = useState<string>("");
   const [pitcherSearch, setPitcherSearch] = useState<string>("");
