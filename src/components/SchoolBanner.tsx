@@ -146,7 +146,7 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
               className="absolute inset-0 flex items-center justify-center"
               style={{ transformStyle: 'preserve-3d' }}
             >
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-8">
                 {schoolLogoUrl && (
                   <>
                     <img
@@ -162,19 +162,27 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
                 ) : (
                   <div>
                     <h2
-                      className="text-2xl font-bold tracking-wider leading-none uppercase"
+                      className={`text-2xl font-bold tracking-wider leading-none uppercase ${
+                        DEMO_SCHOOL.primaryColor === "auto" ? "text-foreground" : ""
+                      }`}
                       style={{
                         fontFamily: "'Oswald', sans-serif",
-                        color: DEMO_SCHOOL.primaryColor,
+                        ...(DEMO_SCHOOL.primaryColor !== "auto" && {
+                          color: DEMO_SCHOOL.primaryColor,
+                        }),
                       }}
                     >
                       {DEMO_SCHOOL.name}
                     </h2>
                     <p
-                      className="text-4xl font-bold tracking-wide uppercase mt-0.5"
+                      className={`text-4xl font-bold tracking-wide uppercase mt-0.5 ${
+                        DEMO_SCHOOL.secondaryColor === "auto" ? "text-foreground" : ""
+                      }`}
                       style={{
                         fontFamily: "'Oswald', sans-serif",
-                        color: DEMO_SCHOOL.secondaryColor,
+                        ...(DEMO_SCHOOL.secondaryColor !== "auto" && {
+                          color: DEMO_SCHOOL.secondaryColor,
+                        }),
                       }}
                     >
                       {DEMO_SCHOOL.mascot}

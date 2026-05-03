@@ -64,6 +64,24 @@ export interface ReportPlayer {
   ev_score?: number | null;
   contact_score?: number | null;
   chase_score?: number | null;
+  // Hitter raw rates for IQ Hitting Metrics 3-column grid (Stitch v2 layout)
+  contact_pct?: number | null;
+  bb_pct?: number | null;
+  chase_pct?: number | null;
+  avg_ev?: number | null;
+  barrel_pct?: number | null;
+  ev90?: number | null;
+  ld_pct?: number | null;
+  pull_pct?: number | null;
+  gb_pct?: number | null;
+  la_10_30_pct?: number | null;
+  // Hitter percentile scores for additional metrics (chip badge coloring)
+  ev90_score?: number | null;
+  ld_score?: number | null;
+  pull_score?: number | null;
+  gb_score?: number | null;
+  la_score?: number | null;
+  bb_pct_score?: number | null;
   // Pitcher scouting scores (used in tables)
   stuff_plus?: number | null;
   whiff_pct?: number | null;

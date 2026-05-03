@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Search, X, ArrowUpDown, Star } from "lucide-react";
+import { CURRENT_SEASON } from "@/lib/seasonConstants";
 import { cn } from "@/lib/utils";
 import { useHighFollow, type HighFollowRow } from "@/hooks/useHighFollow";
 import { useQuery } from "@tanstack/react-query";
@@ -93,7 +94,7 @@ export default function HighFollowList() {
     queryKey: ["hf-hitter-master", sourceIds],
     enabled: sourceIds.length > 0,
     queryFn: async () => {
-      const { data } = await supabase.from("Hitter Master").select("*").in("source_player_id", sourceIds).eq("Season", 2026);
+      const { data } = await supabase.from("Hitter Master").select("*").in("source_player_id", sourceIds).eq("Season", CURRENT_SEASON);
       return data || [];
     },
   });
@@ -102,7 +103,7 @@ export default function HighFollowList() {
     queryKey: ["hf-pitcher-master", sourceIds],
     enabled: sourceIds.length > 0,
     queryFn: async () => {
-      const { data } = await supabase.from("Pitching Master").select("*").in("source_player_id", sourceIds).eq("Season", 2026);
+      const { data } = await supabase.from("Pitching Master").select("*").in("source_player_id", sourceIds).eq("Season", CURRENT_SEASON);
       return data || [];
     },
   });

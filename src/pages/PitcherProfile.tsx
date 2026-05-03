@@ -1601,7 +1601,7 @@ export default function PitcherProfile() {
               <CoachNotes
                 playerId={player.id}
                 playerName={`${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName}
-                onExportPdf={(notes, format) => {
+                onExportPdf={(notes, format, mode = "download") => {
                   const hand = displayHandedness === "R" ? "RHP" : displayHandedness === "L" ? "LHP" : effectiveRoleDisplay || "P";
                   if (format === "full") {
                     const rp: ReportPlayer = {
@@ -1701,10 +1701,14 @@ export default function PitcherProfile() {
                     rp.risk_summary = riskResult.summary;
                     rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
                     const url = generateReportPdf([rp]);
-                    const link = document.createElement("a");
-                    link.href = url;
-                    link.download = `${player.first_name}-${player.last_name}-scouting-report.pdf`.toLowerCase().replace(/\s+/g, "-");
-                    link.click();
+                    if (mode === "preview") {
+                      window.open(url, "_blank");
+                    } else {
+                      const link = document.createElement("a");
+                      link.href = url;
+                      link.download = `${player.first_name}-${player.last_name}-scouting-report.pdf`.toLowerCase().replace(/\s+/g, "-");
+                      link.click();
+                    }
                   } else {
                     const rp: ReportPlayer = {
                       id: player.id,
@@ -1722,10 +1726,14 @@ export default function PitcherProfile() {
                       coach_notes: notes,
                     };
                     const url = generateCoachNotesPdf(rp, notes);
-                    const link = document.createElement("a");
-                    link.href = url;
-                    link.download = `${player.first_name}-${player.last_name}-coach-notes.pdf`.toLowerCase().replace(/\s+/g, "-");
-                    link.click();
+                    if (mode === "preview") {
+                      window.open(url, "_blank");
+                    } else {
+                      const link = document.createElement("a");
+                      link.href = url;
+                      link.download = `${player.first_name}-${player.last_name}-coach-notes.pdf`.toLowerCase().replace(/\s+/g, "-");
+                      link.click();
+                    }
                   }
                 }}
               />

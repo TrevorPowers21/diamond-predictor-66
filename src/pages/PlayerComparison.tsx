@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { DEMO_SCHOOL } from "@/lib/demoSchool";
+import { CURRENT_SEASON } from "@/lib/seasonConstants";
 import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -770,9 +771,9 @@ export default function PlayerComparison() {
   }, [rawConfStats]);
 
   const { data: remoteEquationValues = {} } = useQuery({
-    queryKey: ["compare-admin-ui-equation-values"],
+    queryKey: ["compare-admin-ui-equation-values", CURRENT_SEASON],
     queryFn: async () => {
-      const { data, error } = await supabase.from("model_config").select("config_key, config_value").eq("model_type", "admin_ui").eq("season", 2025);
+      const { data, error } = await supabase.from("model_config").select("config_key, config_value").eq("model_type", "admin_ui").eq("season", CURRENT_SEASON);
       if (error) throw error;
       const map: Record<string, number> = {};
       for (const row of data || []) map[row.config_key] = Number(row.config_value);

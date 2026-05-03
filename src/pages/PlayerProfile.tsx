@@ -917,7 +917,7 @@ export default function PlayerProfile() {
               <CoachNotes
                 playerId={player.id}
                 playerName={`${player.first_name} ${player.last_name}`}
-                onExportPdf={(notes, format) => {
+                onExportPdf={(notes, format, mode = "download") => {
                   if (format === "full") {
                     // Build same rich rp as Export Report button, plus coach notes
                     const rp: ReportPlayer = {
@@ -937,11 +937,30 @@ export default function PlayerProfile() {
                       p_wrc_plus: projectedWrcPlus,
                       owar: displayOWar,
                       nil_value: displayNilValuation,
-                      power_rating_plus: seedPowerDerived?.overallPlus,
-                      barrel_score: seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined,
-                      ev_score: seedPowerDerived?.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : undefined,
-                      contact_score: seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined,
-                      chase_score: seedPowerDerived?.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : undefined,
+                      power_rating_plus: (projectionSourceRow as any)?.overall_plus ?? seedPowerDerived?.overallPlus,
+                      // Prefer stored Hitter Master scores (match UI scouting grades);
+                      // fall back to derived only if the stored value is null.
+                      barrel_score: (projectionSourceRow as any)?.barrel_score ?? (seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined),
+                      ev_score: (projectionSourceRow as any)?.avg_ev_score ?? (seedPowerDerived?.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : undefined),
+                      contact_score: (projectionSourceRow as any)?.contact_score ?? (seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined),
+                      chase_score: (projectionSourceRow as any)?.chase_score ?? (seedPowerDerived?.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : undefined),
+                      // Raw rates for the IQ Hitting Metrics 3-column grid
+                      contact_pct: projectionSourceRow?.contact ?? seedPowerRow?.contact ?? undefined,
+                      bb_pct: projectionSourceRow?.bb ?? seedPowerRow?.bb ?? undefined,
+                      chase_pct: projectionSourceRow?.chase ?? seedPowerRow?.chase ?? undefined,
+                      avg_ev: projectionSourceRow?.avg_exit_velo ?? seedPowerRow?.avgExitVelo ?? undefined,
+                      barrel_pct: projectionSourceRow?.barrel ?? seedPowerRow?.barrel ?? undefined,
+                      ev90: projectionSourceRow?.ev90 ?? seedPowerRow?.ev90 ?? undefined,
+                      ld_pct: projectionSourceRow?.line_drive ?? seedPowerRow?.lineDrive ?? undefined,
+                      pull_pct: projectionSourceRow?.pull ?? seedPowerRow?.pull ?? undefined,
+                      gb_pct: projectionSourceRow?.gb ?? seedPowerRow?.gb ?? undefined,
+                      la_10_30_pct: projectionSourceRow?.la_10_30 ?? seedPowerRow?.la10_30 ?? undefined,
+                      ev90_score: (projectionSourceRow as any)?.ev90_score ?? undefined,
+                      ld_score: (projectionSourceRow as any)?.line_drive_score ?? undefined,
+                      pull_score: (projectionSourceRow as any)?.pull_score ?? undefined,
+                      gb_score: (projectionSourceRow as any)?.gb_score ?? undefined,
+                      la_score: (projectionSourceRow as any)?.la_score ?? undefined,
+                      bb_pct_score: (projectionSourceRow as any)?.bb_score ?? undefined,
                       career_seasons: hitterMasterSeasons as any[],
                       scouting_notes: (() => {
                         if ((player as any).notes) return (player as any).notes;
@@ -991,10 +1010,14 @@ export default function PlayerProfile() {
                     rp.risk_summary = riskResult.summary;
                     rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
                     const url = generateReportPdf([rp]);
-                    const link = document.createElement("a");
-                    link.href = url;
-                    link.download = `${player.first_name}-${player.last_name}-scouting-report.pdf`.toLowerCase().replace(/\s+/g, "-");
-                    link.click();
+                    if (mode === "preview") {
+                      window.open(url, "_blank");
+                    } else {
+                      const link = document.createElement("a");
+                      link.href = url;
+                      link.download = `${player.first_name}-${player.last_name}-scouting-report.pdf`.toLowerCase().replace(/\s+/g, "-");
+                      link.click();
+                    }
                   } else {
                     // Coach notes only — minimal rp for the focused notes PDF
                     const rp: ReportPlayer = {
@@ -1008,14 +1031,18 @@ export default function PlayerProfile() {
                       p_avg: projectedAvg, p_obp: projectedObp, p_slg: projectedSlg,
                       p_wrc_plus: projectedWrcPlus,
                       owar: displayOWar,
-                      power_rating_plus: seedPowerDerived?.overallPlus,
+                      power_rating_plus: (projectionSourceRow as any)?.overall_plus ?? seedPowerDerived?.overallPlus,
                       coach_notes: notes,
                     };
                     const url = generateCoachNotesPdf(rp, notes);
-                    const link = document.createElement("a");
-                    link.href = url;
-                    link.download = `${player.first_name}-${player.last_name}-coach-notes.pdf`.toLowerCase().replace(/\s+/g, "-");
-                    link.click();
+                    if (mode === "preview") {
+                      window.open(url, "_blank");
+                    } else {
+                      const link = document.createElement("a");
+                      link.href = url;
+                      link.download = `${player.first_name}-${player.last_name}-coach-notes.pdf`.toLowerCase().replace(/\s+/g, "-");
+                      link.click();
+                    }
                   }
                 }}
               />
@@ -1057,12 +1084,31 @@ export default function PlayerProfile() {
                     owar: displayOWar,
                     // Valuation
                     nil_value: displayNilValuation,
-                    power_rating_plus: seedPowerDerived?.overallPlus,
+                    power_rating_plus: (projectionSourceRow as any)?.overall_plus ?? seedPowerDerived?.overallPlus,
                     // Scouting scores (for tables)
-                    barrel_score: seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined,
-                    ev_score: seedPowerDerived?.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : undefined,
-                    contact_score: seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined,
-                    chase_score: seedPowerDerived?.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : undefined,
+                    // Prefer stored Hitter Master scores (match UI scouting grades);
+                    // fall back to derived only if the stored value is null.
+                    barrel_score: (projectionSourceRow as any)?.barrel_score ?? (seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined),
+                    ev_score: (projectionSourceRow as any)?.avg_ev_score ?? (seedPowerDerived?.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : undefined),
+                    contact_score: (projectionSourceRow as any)?.contact_score ?? (seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined),
+                    chase_score: (projectionSourceRow as any)?.chase_score ?? (seedPowerDerived?.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : undefined),
+                    // Raw rates for the IQ Hitting Metrics 3-column grid
+                    contact_pct: projectionSourceRow?.contact ?? seedPowerRow?.contact ?? undefined,
+                    bb_pct: projectionSourceRow?.bb ?? seedPowerRow?.bb ?? undefined,
+                    chase_pct: projectionSourceRow?.chase ?? seedPowerRow?.chase ?? undefined,
+                    avg_ev: projectionSourceRow?.avg_exit_velo ?? seedPowerRow?.avgExitVelo ?? undefined,
+                    barrel_pct: projectionSourceRow?.barrel ?? seedPowerRow?.barrel ?? undefined,
+                    ev90: projectionSourceRow?.ev90 ?? seedPowerRow?.ev90 ?? undefined,
+                    ld_pct: projectionSourceRow?.line_drive ?? seedPowerRow?.lineDrive ?? undefined,
+                    pull_pct: projectionSourceRow?.pull ?? seedPowerRow?.pull ?? undefined,
+                    gb_pct: projectionSourceRow?.gb ?? seedPowerRow?.gb ?? undefined,
+                    la_10_30_pct: projectionSourceRow?.la_10_30 ?? seedPowerRow?.la10_30 ?? undefined,
+                    ev90_score: (projectionSourceRow as any)?.ev90_score ?? undefined,
+                    ld_score: (projectionSourceRow as any)?.line_drive_score ?? undefined,
+                    pull_score: (projectionSourceRow as any)?.pull_score ?? undefined,
+                    gb_score: (projectionSourceRow as any)?.gb_score ?? undefined,
+                    la_score: (projectionSourceRow as any)?.la_score ?? undefined,
+                    bb_pct_score: (projectionSourceRow as any)?.bb_score ?? undefined,
                     // Scouting grades (20-80 for PDF)
                     grade_hit: seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined,
                     grade_power: seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined,

@@ -3,6 +3,7 @@ import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
 import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { fetchParkFactorsMap, type ParkFactorsMap } from "@/lib/parkFactors";
+import { PRIOR_SEASON } from "@/lib/seasonConstants";
 import { computePitcherProjection, type PitcherProjectionInput } from "@/lib/pitcherProjection";
 import { PITCHING_EQ_DEFAULTS } from "@/hooks/usePitchingEquationWeights";
 
@@ -799,7 +800,7 @@ async function fetchPitcherContext(
           .from("Pitching Master")
           .select(PITCHER_SCOUTING_SELECT)
           .eq("source_player_id", sourceId)
-          .eq("Season", 2025)
+          .eq("Season", PRIOR_SEASON)
           .maybeSingle();
         if (pm) scouting = mapPitchingMasterRow(pm);
       }
@@ -930,7 +931,7 @@ export async function recalculatePredictionById(predictionId: string, updates: U
           .from("Hitter Master")
           .select("combined_used")
           .eq("source_player_id", sourceId)
-          .eq("Season", 2025)
+          .eq("Season", PRIOR_SEASON)
           .maybeSingle();
         combinedUsed = !!(hm as any)?.combined_used;
       }

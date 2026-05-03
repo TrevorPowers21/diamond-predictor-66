@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { CURRENT_SEASON } from "@/lib/seasonConstants";
 
 /** Default pitching equation weights — used as fallback if Supabase has no value */
 const DEFAULTS: Record<string, number> = {
@@ -73,13 +74,13 @@ const DEFAULTS: Record<string, number> = {
  */
 export function usePitchingEquationWeights() {
   const { data: weights = DEFAULTS } = useQuery({
-    queryKey: ["pitching_equation_weights"],
+    queryKey: ["pitching_equation_weights", CURRENT_SEASON],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("model_config")
         .select("config_key, config_value")
         .eq("model_type", "admin_ui")
-        .eq("season", 2025);
+        .eq("season", CURRENT_SEASON);
       if (error) throw error;
 
       const merged = { ...DEFAULTS };
