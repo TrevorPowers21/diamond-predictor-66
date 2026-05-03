@@ -2490,13 +2490,18 @@ export default function TeamBuilder() {
       const fipPr = hr9Pr != null && bb9Pr != null && k9Pr != null
         ? (hr9Pr * EQ.p_fip_hr9_power_rating_plus_weight) + (bb9Pr * EQ.p_fip_bb9_power_rating_plus_weight) + (k9Pr * EQ.p_fip_k9_power_rating_plus_weight)
         : null;
+      // Prefer pipeline-computed PR+ values stored on the Pitching Master row
+      // over the live recompute above. The live recompute uses hardcoded EQ
+      // weights that drift away from `model_config` whenever the equation gets
+      // recalibrated — silently producing TB-returners projections that don't
+      // match PitcherProfile (which always reads the stored values).
       addRec(name, team, {
-        eraPrPlus: eraPr,
-        fipPrPlus: fipPr,
-        whipPrPlus: whipPr,
-        k9PrPlus: k9Pr,
-        hr9PrPlus: hr9Pr,
-        bb9PrPlus: bb9Pr,
+        eraPrPlus: pr.era_pr_plus ?? eraPr,
+        fipPrPlus: pr.fip_pr_plus ?? fipPr,
+        whipPrPlus: pr.whip_pr_plus ?? whipPr,
+        k9PrPlus: pr.k9_pr_plus ?? k9Pr,
+        hr9PrPlus: pr.hr9_pr_plus ?? hr9Pr,
+        bb9PrPlus: pr.bb9_pr_plus ?? bb9Pr,
       }, pr.source_player_id);
     }
     return { byKey, byName, bySourceId };

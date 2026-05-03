@@ -34,6 +34,18 @@ export type PitchingMasterSeedRow = {
   h_pull_pct: number | null;
   la_10_30_pct: number | null;
   stuffPlus: number | null;
+  // Pre-computed PR+ values written by the projection pipeline. PitcherProfile
+  // reads these as the canonical PR+ source; surfacing them here lets Team
+  // Builder do the same instead of recomputing live with stale hardcoded
+  // weights, which used to produce returners-table values that didn't match
+  // the player profile's 2027 projection.
+  era_pr_plus: number | null;
+  fip_pr_plus: number | null;
+  whip_pr_plus: number | null;
+  k9_pr_plus: number | null;
+  bb9_pr_plus: number | null;
+  hr9_pr_plus: number | null;
+  overall_pr_plus: number | null;
 };
 
 /**
@@ -100,6 +112,13 @@ export function usePitchingSeedData(season = 2026) {
     h_pull_pct: r.h_pull_pct ?? null,
     la_10_30_pct: r.la_10_30_pct ?? null,
     stuffPlus: r.stuff_plus ?? null,
+    era_pr_plus: r.era_pr_plus ?? null,
+    fip_pr_plus: r.fip_pr_plus ?? null,
+    whip_pr_plus: r.whip_pr_plus ?? null,
+    k9_pr_plus: r.k9_pr_plus ?? null,
+    bb9_pr_plus: r.bb9_pr_plus ?? null,
+    hr9_pr_plus: r.hr9_pr_plus ?? null,
+    overall_pr_plus: r.overall_pr_plus ?? null,
   }));
 
   return { pitchers, loading: isLoading };
