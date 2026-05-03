@@ -112,24 +112,12 @@ function ImportPaAbButton() {
 
 function ImportHistoricalHittersButton() {
   const [loading, setLoading] = useState(false);
-  const [season, setSeason] = useState(2024);
+  const season = 2026;
   const [result, setResult] = useState<{ inserted: number; skipped: number; teamsResolved: number; teamsUnresolved: string[]; errors: string[] } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   return (
     <>
       <div className="flex items-center gap-2">
-        <Select value={String(season)} onValueChange={(v) => setSeason(Number(v))}>
-          <SelectTrigger className="h-9 w-[90px] text-sm font-semibold">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="2026">2026</SelectItem>
-            <SelectItem value="2025">2025</SelectItem>
-            <SelectItem value="2024">2024</SelectItem>
-            <SelectItem value="2023">2023</SelectItem>
-            <SelectItem value="2022">2022</SelectItem>
-          </SelectContent>
-        </Select>
         <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={async (e) => {
           const file = e.target.files?.[0];
           if (!file) return;
@@ -148,7 +136,7 @@ function ImportHistoricalHittersButton() {
         }} />
         <Button onClick={() => fileRef.current?.click()} disabled={loading} variant="outline" className="gap-2">
           {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-          {loading ? `Importing ${season} Hitters…` : `Import Hitter CSV`}
+          {loading ? `Importing ${season} Hitters…` : `Import ${season} Hitter CSV`}
         </Button>
       </div>
       {result && (
@@ -200,24 +188,12 @@ function ImportPitcherEv90Button() {
 
 function ImportHistoricalPitchersButton() {
   const [loading, setLoading] = useState(false);
-  const [season, setSeason] = useState(2024);
+  const season = 2026;
   const [result, setResult] = useState<{ inserted: number; skipped: number; teamsResolved: number; teamsUnresolved: string[]; errors: string[] } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   return (
     <>
       <div className="flex items-center gap-2">
-        <Select value={String(season)} onValueChange={(v) => setSeason(Number(v))}>
-          <SelectTrigger className="h-9 w-[90px] text-sm font-semibold">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="2026">2026</SelectItem>
-            <SelectItem value="2025">2025</SelectItem>
-            <SelectItem value="2024">2024</SelectItem>
-            <SelectItem value="2023">2023</SelectItem>
-            <SelectItem value="2022">2022</SelectItem>
-          </SelectContent>
-        </Select>
         <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={async (e) => {
           const file = e.target.files?.[0];
           if (!file) return;
@@ -236,7 +212,7 @@ function ImportHistoricalPitchersButton() {
         }} />
         <Button onClick={() => fileRef.current?.click()} disabled={loading} variant="outline" className="gap-2">
           {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-          {loading ? `Importing ${season} Pitchers…` : `Import Pitcher CSV`}
+          {loading ? `Importing ${season} Pitchers…` : `Import ${season} Pitcher CSV`}
         </Button>
       </div>
       {result && (
@@ -260,7 +236,7 @@ function SyncMasterButton() {
           setLoading(true);
           setResult(null);
           try {
-            const r = await syncMasterToPlayers(2025);
+            const r = await syncMasterToPlayers(2026);
             setResult(r);
           } catch (e: any) {
             setResult({ hittersInserted: 0, pitchersInserted: 0, hittersSkipped: 0, pitchersSkipped: 0, errors: [e.message] });
@@ -295,7 +271,7 @@ function AddMissingPlayersButton() {
           setLoading(true);
           setResult(null);
           try {
-            const r = await addMissingPlayers(2025);
+            const r = await addMissingPlayers(2026);
             setResult(r);
           } catch (e: any) {
             setResult({ inserted: 0, skipped: 0, errors: [e.message] });
@@ -319,24 +295,104 @@ function AddMissingPlayersButton() {
   );
 }
 
+function ComputeNcaaAveragesButton() {
+  const [loading, setLoading] = useState(false);
+  const [allSeasonsRunning, setAllSeasonsRunning] = useState(false);
+  const [allSeasonsLog, setAllSeasonsLog] = useState<string[]>([]);
+  const season = 2026;
+  const [result, setResult] = useState<{ hittersUsed: number; pitchersUsed: number; fieldsWritten: number; errors: string[] } | null>(null);
+
+  const runAllSeasons = async () => {
+    if (!confirm(
+      "Compute NCAA Averages for ALL historical seasons?\n\n" +
+      "Refreshes ncaa_averages mean + SD across every season — required after Stuff+ recalibration so equations use correct baselines.",
+    )) return;
+
+    setAllSeasonsRunning(true);
+    setAllSeasonsLog([]);
+    const log: string[] = [];
+    const append = (msg: string) => {
+      log.push(msg);
+      setAllSeasonsLog([...log]);
+    };
+
+    try {
+      const { computeAndStoreNcaaAverages } = await import("@/lib/computeNcaaAverages");
+      const { data: sData } = await supabase
+        .from("Hitter Master")
+        .select("Season")
+        .not("Season", "is", null);
+      const seasons = [...new Set((sData || []).map((r: any) => r.Season))].sort((a, b) => b - a);
+      append(`Found seasons: ${seasons.join(", ")}`);
+
+      for (const s of seasons) {
+        append(`\n[${s}] Compute NCAA Averages…`);
+        const r = await computeAndStoreNcaaAverages(s);
+        append(`[${s}] hitters=${r.hittersUsed} pitchers=${r.pitchersUsed} fields=${r.fieldsWritten}${r.errors.length ? ` errors=${r.errors.length}` : ""}`);
+      }
+      append("\n✓ Done.");
+    } catch (err: any) {
+      append(`✗ Error: ${err.message || String(err)}`);
+    } finally {
+      setAllSeasonsRunning(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="flex items-center gap-2">
+        <Button
+          onClick={async () => {
+            setLoading(true);
+            setResult(null);
+            try {
+              const { computeAndStoreNcaaAverages } = await import("@/lib/computeNcaaAverages");
+              const r = await computeAndStoreNcaaAverages(season);
+              setResult(r);
+            } catch (e: any) {
+              setResult({ hittersUsed: 0, pitchersUsed: 0, fieldsWritten: 0, errors: [e.message] });
+            }
+            setLoading(false);
+          }}
+          disabled={loading || allSeasonsRunning}
+          variant="outline"
+          className="gap-2"
+        >
+          {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+          {loading ? `Computing ${season} NCAA Averages…` : `Compute ${season} NCAA Averages`}
+        </Button>
+        <Button
+          onClick={runAllSeasons}
+          disabled={loading || allSeasonsRunning}
+          variant="outline"
+          className="gap-2 border-red-500 text-red-500 hover:bg-red-500/10"
+        >
+          {allSeasonsRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
+          {allSeasonsRunning ? "Recomputing All Seasons…" : "↻ ALL Seasons"}
+        </Button>
+      </div>
+      {result && (
+        <p className="text-sm text-muted-foreground">
+          {result.hittersUsed} hitters + {result.pitchersUsed} pitchers used. {result.fieldsWritten} fields written.
+          {result.errors.length > 0 && ` Errors: ${result.errors.join("; ")}`}
+        </p>
+      )}
+      {allSeasonsLog.length > 0 && (
+        <pre className="border bg-muted px-3 py-2 text-xs whitespace-pre-wrap font-mono">
+          {allSeasonsLog.join("\n")}
+        </pre>
+      )}
+    </>
+  );
+}
+
 function ComputeScoresButton() {
   const [loading, setLoading] = useState(false);
-  const [season, setSeason] = useState(2025);
+  const season = 2026;
   const [result, setResult] = useState<{ hitters: { updated: number; errors: number }; pitchers: { updated: number; errors: number } } | null>(null);
   return (
     <>
       <div className="flex items-center gap-2">
-        <Select value={String(season)} onValueChange={(v) => setSeason(Number(v))}>
-          <SelectTrigger className="h-9 w-[90px] text-sm font-semibold">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="2025">2025</SelectItem>
-            <SelectItem value="2024">2024</SelectItem>
-            <SelectItem value="2023">2023</SelectItem>
-            <SelectItem value="2022">2022</SelectItem>
-          </SelectContent>
-        </Select>
         <Button
           onClick={async () => {
             setLoading(true);
@@ -378,7 +434,7 @@ function InferClassTransitionsButton() {
           setResult(null);
           try {
             const { inferAllClassTransitions } = await import("@/lib/inferClassTransitions");
-            const r = await inferAllClassTransitions(2025);
+            const r = await inferAllClassTransitions(2026);
             setResult(r);
           } catch (e: any) {
             setResult({ updated: 0, skipped: 0, errors: -1 });
@@ -414,7 +470,7 @@ function CreateStubPredictionsButton() {
           setResult(null);
           try {
             const { createStubPredictionsForAllPlayers } = await import("@/lib/createPredictionsFromMaster");
-            const r = await createStubPredictionsForAllPlayers(2025);
+            const r = await createStubPredictionsForAllPlayers(2026);
             setResult(r);
           } catch (e: any) {
             setResult({ created: 0, errors: [e.message] });
@@ -448,7 +504,7 @@ function CreatePredictionsButton() {
           setLoading(true);
           setResult(null);
           try {
-            const r = await createPredictionsFromMaster(2025);
+            const r = await createPredictionsFromMaster(2026);
             setResult(r);
           } catch (e: any) {
             setResult({ predictionsCreated: 0, internalsCreated: 0, errors: [e.message] });
@@ -476,7 +532,7 @@ function CreatePredictionsButton() {
 
 function EquationConstantsTab() {
   const ADMIN_UI_MODEL_TYPE = "admin_ui";
-  const ADMIN_UI_SEASON = 2025;
+  const ADMIN_UI_SEASON = 2026;
   const [editableSections, setEditableSections] = useState<Record<string, boolean>>({});
   const defaultEditableValues: Record<string, string> = {
     r_ncaa_avg_ba: "0.280",
@@ -2038,7 +2094,7 @@ function AdminPowerRatingsTab() {
 
 function PitchingPowerRatingsTab() {
   const PITCHING_MODEL_TYPE = "admin_ui";
-  const PITCHING_SEASON = 2025;
+  const PITCHING_SEASON = 2026;
   const [editableSections, setEditableSections] = useState<Record<string, boolean>>({});
   const defaultValues: Record<string, string> = {
     p_era_ncaa_avg_power_rating: "50",
@@ -3706,6 +3762,13 @@ function QuickActionsTab() {
             </p>
           </div>
           <SyncMasterButton />
+          <div className="border-t pt-4">
+            <p className="font-medium">Compute NCAA Averages</p>
+            <p className="text-sm text-muted-foreground">
+              Auto-calculates weighted means + SDs for every hitter and pitcher metric from Hitter Master / Pitching Master. Hitters weighted by PA (AB fallback), pitchers weighted by IP. Writes to <code>ncaa_averages</code>. Run this BEFORE Compute Scores so the +stats use fresh baselines.
+            </p>
+          </div>
+          <ComputeNcaaAveragesButton />
           <div className="border-t pt-4">
             <p className="font-medium">Compute All Scores</p>
             <p className="text-sm text-muted-foreground">

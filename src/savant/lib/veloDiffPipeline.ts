@@ -50,7 +50,7 @@ async function fetchAll<T>(
 // ─── Main Pipeline ──────────────────────────────────────────────────────────
 
 export async function runVeloDiffPipeline(
-  season: number = 2025,
+  season: number = 2026,
 ): Promise<{ report: VeloDiffReport; errors: string[] }> {
   const errors: string[] = [];
   console.time("[VeloDiff] TOTAL");

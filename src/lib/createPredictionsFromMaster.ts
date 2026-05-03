@@ -13,7 +13,7 @@ type Result = {
  * Create returner predictions + internals for all players in the players table
  * who don't have predictions yet. Uses Hitter Master for stats and power ratings.
  */
-export async function createPredictionsFromMaster(season = 2025): Promise<Result> {
+export async function createPredictionsFromMaster(season = 2026): Promise<Result> {
   const result: Result = { predictionsCreated: 0, internalsCreated: 0, errors: [] };
   console.time("[CreatePreds] TOTAL");
 
@@ -526,7 +526,7 @@ export async function createPredictionsFromMaster(season = 2025): Promise<Result
  * departed) so class_transition has a row to live on. Skips players who
  * already have a 2025 returner/regular prediction. Idempotent.
  */
-export async function createStubPredictionsForAllPlayers(season = 2025): Promise<{ created: number; errors: string[] }> {
+export async function createStubPredictionsForAllPlayers(season = 2026): Promise<{ created: number; errors: string[] }> {
   const errors: string[] = [];
   let created = 0;
 

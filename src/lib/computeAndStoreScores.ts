@@ -251,7 +251,7 @@ async function fetchSeasonBaselines(season: number): Promise<{ hitter: HitterBas
  * Compute and store all hitter power rating scores for a given season.
  * Reads raw sub-metrics from Hitter Master, computes scores, writes back.
  */
-export async function computeAndStoreHitterScores(season = 2025): Promise<{ updated: number; errors: number }> {
+export async function computeAndStoreHitterScores(season = 2026): Promise<{ updated: number; errors: number }> {
   let updated = 0;
   let errors = 0;
   console.time("[ComputeHitter] TOTAL");
@@ -387,7 +387,7 @@ export async function computeAndStoreHitterScores(season = 2025): Promise<{ upda
  * Compute and store all pitching power rating scores for a given season.
  * Reads raw sub-metrics from Pitching Master, computes scores, writes back.
  */
-export async function computeAndStorePitchingScores(season = 2025): Promise<{ updated: number; errors: number }> {
+export async function computeAndStorePitchingScores(season = 2026): Promise<{ updated: number; errors: number }> {
   let updated = 0;
   let errors = 0;
   console.time("[ComputePitching] TOTAL");
@@ -526,7 +526,7 @@ export async function computeAndStorePitchingScores(season = 2025): Promise<{ up
 }
 
 /** Run both hitter and pitcher score computations */
-export async function computeAndStoreAllScores(season = 2025) {
+export async function computeAndStoreAllScores(season = 2026) {
   const hitters = await computeAndStoreHitterScores(season);
   const pitchers = await computeAndStorePitchingScores(season);
   return { hitters, pitchers };
@@ -537,7 +537,7 @@ export async function computeAndStoreAllScores(season = 2025) {
 let _autoComputeRunning = false;
 
 /** Check if any hitters/pitchers for a season are missing scores, and compute them if so */
-export async function autoComputeUnscoredRows(season = 2025): Promise<void> {
+export async function autoComputeUnscoredRows(season = 2026): Promise<void> {
   if (_autoComputeRunning) return;
   _autoComputeRunning = true;
   try {

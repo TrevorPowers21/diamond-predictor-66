@@ -25,7 +25,7 @@ export interface PitcherStuffPlusRow {
 
 export function usePitcherStuffPlus(
   sourcePlayerId: string | null | undefined,
-  season: number = 2025,
+  season: number = 2026,
 ) {
   return useQuery({
     queryKey: ["savant_pitcher_stuff_plus", sourcePlayerId, season],

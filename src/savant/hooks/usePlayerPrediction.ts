@@ -19,8 +19,8 @@ export interface PlayerPredictionRow {
 }
 
 /**
- * Fetches the 2025 returner prediction for a player by source_player_id.
- * Used to render the "2026 projection" card on the savant hitter profile.
+ * Fetches the active returner prediction (current season) for a player by source_player_id.
+ * Used to render the next-season projection card on the savant hitter profile.
  */
 export function usePlayerPrediction(sourcePlayerId: string | null | undefined) {
   return useQuery({
@@ -41,7 +41,7 @@ export function usePlayerPrediction(sourcePlayerId: string | null | undefined) {
           "id, player_id, season, class_transition, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus",
         )
         .eq("player_id", (playerRow as any).id)
-        .eq("season", 2025)
+        .eq("season", 2026)
         .eq("model_type", "returner")
         .eq("variant", "regular")
         .maybeSingle();

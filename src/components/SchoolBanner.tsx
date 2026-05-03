@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { DEMO_SCHOOL } from '@/lib/demoSchool';
+import { useAuth } from '@/hooks/useAuth';
 
 interface SchoolBannerProps {
   schoolLogoUrl?: string;
@@ -9,10 +9,16 @@ interface SchoolBannerProps {
 }
 
 const SchoolBanner: React.FC<SchoolBannerProps> = ({
-  schoolLogoUrl = DEMO_SCHOOL.logo,
-  schoolName = DEMO_SCHOOL.name,
+  schoolLogoUrl,
+  schoolName,
   className = '',
 }) => {
+  const { effectiveTeamId, availableTeams } = useAuth();
+  const effectiveTeam = effectiveTeamId
+    ? availableTeams.find((t) => t.id === effectiveTeamId) ?? null
+    : null;
+  const resolvedSchoolName = schoolName ?? effectiveTeam?.name ?? '';
+  const resolvedSchoolLogo = schoolLogoUrl ?? '';
   const [showSchool, setShowSchool] = React.useState(false);
   const [hasAnimatedOnce, setHasAnimatedOnce] = React.useState(false);
   const [isHovering, setIsHovering] = React.useState(false);
@@ -146,40 +152,26 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
               className="absolute inset-0 flex items-center justify-center"
               style={{ transformStyle: 'preserve-3d' }}
             >
-              <div className="flex items-center gap-1">
-                {schoolLogoUrl && (
+              <div className="flex items-center gap-8">
+                {resolvedSchoolLogo && (
                   <>
                     <img
-                      src={schoolLogoUrl}
-                      alt={schoolName}
+                      src={resolvedSchoolLogo}
+                      alt={resolvedSchoolName}
                       className="h-28 w-auto object-contain"
                     />
                     <div className="h-20 w-px bg-[#D4AF37]/30" />
                   </>
                 )}
-                {DEMO_SCHOOL.useNewtForceLogo || !DEMO_SCHOOL.name ? (
-                  <img src="/newtforce-logo.png" alt="NewtForce" className="h-28 object-contain" />
+                {resolvedSchoolName ? (
+                  <h2
+                    className="text-2xl font-bold tracking-wider leading-none uppercase"
+                    style={{ fontFamily: "'Oswald', sans-serif", color: '#D4AF37' }}
+                  >
+                    {resolvedSchoolName}
+                  </h2>
                 ) : (
-                  <div>
-                    <h2
-                      className="text-2xl font-bold tracking-wider leading-none uppercase"
-                      style={{
-                        fontFamily: "'Oswald', sans-serif",
-                        color: DEMO_SCHOOL.primaryColor,
-                      }}
-                    >
-                      {DEMO_SCHOOL.name}
-                    </h2>
-                    <p
-                      className="text-4xl font-bold tracking-wide uppercase mt-0.5"
-                      style={{
-                        fontFamily: "'Oswald', sans-serif",
-                        color: DEMO_SCHOOL.secondaryColor,
-                      }}
-                    >
-                      {DEMO_SCHOOL.mascot}
-                    </p>
-                  </div>
+                  <img src="/newtforce-logo.png" alt="NewtForce" className="h-28 object-contain" />
                 )}
               </div>
             </motion.div>

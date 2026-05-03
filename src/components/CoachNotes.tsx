@@ -20,11 +20,12 @@ import { Pencil, Trash2, FileText, X, Check, ChevronDown, StickyNote } from "luc
 import { cn } from "@/lib/utils";
 
 export type CoachNotesExportFormat = "notes" | "full";
+export type CoachNotesExportMode = "download" | "preview";
 
 interface CoachNotesProps {
   playerId: string;
   playerName: string;
-  onExportPdf?: (notes: CoachNote[], format: CoachNotesExportFormat) => void;
+  onExportPdf?: (notes: CoachNote[], format: CoachNotesExportFormat, mode?: CoachNotesExportMode) => void;
   /** When true, render as an inline action button instead of a full card (default: true) */
   buttonSize?: "sm" | "default";
 }
@@ -109,23 +110,44 @@ export default function CoachNotes({ playerId, playerName, onExportPdf, buttonSi
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
-                    onClick={() => onExportPdf(notes, "notes")}
+                    onClick={() => onExportPdf(notes, "notes", "preview")}
                     className="cursor-pointer"
                     disabled={notes.length === 0}
                   >
                     <FileText className="h-3.5 w-3.5 mr-2" />
                     <div className="flex flex-col">
-                      <span className="text-sm">Coach Notes Only</span>
-                      <span className="text-[10px] text-muted-foreground">Snapshot stats + all notes</span>
+                      <span className="text-sm">Preview Coach Notes</span>
+                      <span className="text-[10px] text-muted-foreground">Open snapshot stats + notes in new tab</span>
                     </div>
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onClick={() => onExportPdf(notes, "full")}
+                    onClick={() => onExportPdf(notes, "full", "preview")}
                     className="cursor-pointer"
                   >
                     <FileText className="h-3.5 w-3.5 mr-2" />
                     <div className="flex flex-col">
-                      <span className="text-sm">Full Scouting Report</span>
+                      <span className="text-sm">Preview Full Report</span>
+                      <span className="text-[10px] text-muted-foreground">Open full profile + notes in new tab</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => onExportPdf(notes, "notes", "download")}
+                    className="cursor-pointer"
+                    disabled={notes.length === 0}
+                  >
+                    <FileText className="h-3.5 w-3.5 mr-2" />
+                    <div className="flex flex-col">
+                      <span className="text-sm">Download Coach Notes</span>
+                      <span className="text-[10px] text-muted-foreground">Snapshot stats + all notes</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => onExportPdf(notes, "full", "download")}
+                    className="cursor-pointer"
+                  >
+                    <FileText className="h-3.5 w-3.5 mr-2" />
+                    <div className="flex flex-col">
+                      <span className="text-sm">Download Full Report</span>
                       <span className="text-[10px] text-muted-foreground">Full profile + notes</span>
                     </div>
                   </DropdownMenuItem>

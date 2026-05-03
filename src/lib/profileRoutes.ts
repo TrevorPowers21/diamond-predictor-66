@@ -3,8 +3,9 @@ const normalize = (v: string | null | undefined) => (v || "").trim().toLowerCase
 export const isPitcherPosition = (position: string | null | undefined) => {
   const pos = normalize(position);
   if (!pos) return false;
-  if (["p", "sp", "rp", "lhp", "rhp", "cl", "closer", "twp"].includes(pos)) return true;
-  return /(^|[\/,\s-])(p|sp|rp|lhp|rhp|cl|twp)($|[\/,\s-])/.test(pos);
+  // TWP intentionally excluded — defaults to hitter profile per TeamBuilder convention.
+  if (["p", "sp", "rp", "lhp", "rhp", "cl", "closer"].includes(pos)) return true;
+  return /(^|[\/,\s-])(p|sp|rp|lhp|rhp|cl)($|[\/,\s-])/.test(pos);
 };
 
 export const isPitcherProfile = (

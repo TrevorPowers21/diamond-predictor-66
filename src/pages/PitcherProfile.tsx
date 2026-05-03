@@ -500,14 +500,14 @@ export default function PitcherProfile() {
   }, [pitcherMasterSeasons, seasonStats]);
 
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
-  const defaultSeason = availableSeasons.includes(2025) ? 2025 : (availableSeasons[0] ?? 2025);
+  const defaultSeason = availableSeasons.includes(2026) ? 2026 : (availableSeasons[0] ?? 2026);
   const effectiveSeason = selectedSeason ?? defaultSeason;
   const historicalRow = useMemo(() => {
     return (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason) || null;
   }, [pitcherMasterSeasons, effectiveSeason]);
 
   const currentPitcherRow = useMemo(() => {
-    return (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === 2025) || null;
+    return (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === 2026) || null;
   }, [pitcherMasterSeasons]);
   const combinedUsed = !!(currentPitcherRow as any)?.combined_used;
   const combinedIp = (currentPitcherRow as any)?.combined_ip as number | null | undefined;
@@ -543,7 +543,7 @@ export default function PitcherProfile() {
     },
   });
   const { teams: teamDirectory } = useTeamsTable();
-  const { conferenceStatsByKey } = useConferenceStats(2025);
+  const { conferenceStatsByKey } = useConferenceStats(2026);
   const lookupPlayerName = useMemo(() => {
     if (storageRef?.playerName) return storageRef.playerName;
     const fullName = `${player?.first_name || ""} ${player?.last_name || ""}`.trim();
@@ -1045,12 +1045,12 @@ export default function PitcherProfile() {
     if (seasons === 1) return "Fr";
     return null;
   })();
-  // Projection source row: always the latest season (2025) with blending applied so
+  // Projection source row: always the latest season (2026) with blending applied so
   // changing the Scouting Grades / Input Metrics dropdown does NOT move projections.
-  // Projections represent 2026 expectation, always anchored to most recent actuals.
+  // Projections represent 2027 expectation, always anchored to most recent actuals.
   const projectionSourceRow = useMemo(() => {
-    const row = (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === 2025);
-    if (!row) return masterRow;  // fallback: if no 2025 data, use whatever we have
+    const row = (pitcherMasterSeasons as any[]).find((r) => Number(r.Season) === 2026);
+    if (!row) return masterRow;  // fallback: if no 2026 data, use whatever we have
     const combinedUsed = !!row.combined_used;
     return {
       era: combinedUsed ? (row.blended_era ?? row.ERA) : row.ERA,
@@ -1500,7 +1500,7 @@ export default function PitcherProfile() {
     );
   }
 
-  const activePitcherRow = (effectiveSeason !== 2025) ? historicalRow : currentPitcherRow;
+  const activePitcherRow = (effectiveSeason !== 2026) ? historicalRow : currentPitcherRow;
   const currentIp = (currentPitcherRow as any)?.IP;
   if (currentPitcherRow != null && (currentIp == null || Number(currentIp) === 0)) {
     return (
@@ -1601,7 +1601,7 @@ export default function PitcherProfile() {
               <CoachNotes
                 playerId={player.id}
                 playerName={`${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName}
-                onExportPdf={(notes, format) => {
+                onExportPdf={(notes, format, mode = "download") => {
                   const hand = displayHandedness === "R" ? "RHP" : displayHandedness === "L" ? "LHP" : effectiveRoleDisplay || "P";
                   if (format === "full") {
                     const rp: ReportPlayer = {
@@ -1701,10 +1701,14 @@ export default function PitcherProfile() {
                     rp.risk_summary = riskResult.summary;
                     rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
                     const url = generateReportPdf([rp]);
-                    const link = document.createElement("a");
-                    link.href = url;
-                    link.download = `${player.first_name}-${player.last_name}-scouting-report.pdf`.toLowerCase().replace(/\s+/g, "-");
-                    link.click();
+                    if (mode === "preview") {
+                      window.open(url, "_blank");
+                    } else {
+                      const link = document.createElement("a");
+                      link.href = url;
+                      link.download = `${player.first_name}-${player.last_name}-scouting-report.pdf`.toLowerCase().replace(/\s+/g, "-");
+                      link.click();
+                    }
                   } else {
                     const rp: ReportPlayer = {
                       id: player.id,
@@ -1722,10 +1726,14 @@ export default function PitcherProfile() {
                       coach_notes: notes,
                     };
                     const url = generateCoachNotesPdf(rp, notes);
-                    const link = document.createElement("a");
-                    link.href = url;
-                    link.download = `${player.first_name}-${player.last_name}-coach-notes.pdf`.toLowerCase().replace(/\s+/g, "-");
-                    link.click();
+                    if (mode === "preview") {
+                      window.open(url, "_blank");
+                    } else {
+                      const link = document.createElement("a");
+                      link.href = url;
+                      link.download = `${player.first_name}-${player.last_name}-coach-notes.pdf`.toLowerCase().replace(/\s+/g, "-");
+                      link.click();
+                    }
                   }
                 }}
               />
@@ -2075,7 +2083,7 @@ export default function PitcherProfile() {
             <Card className="border-[#162241] bg-[#0a1428]">
               <CardHeader className="pb-2 pt-3 px-4">
                 <div className="flex items-center gap-3 flex-wrap">
-                  <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2026 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
+                  <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2027 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
                   <div className="flex items-center gap-1.5">
                     <Select value={projectedRole} onValueChange={(v) => updateProjectedInputs({ pitcher_role: v as "SP" | "RP" | "SM" })}>
                       <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>

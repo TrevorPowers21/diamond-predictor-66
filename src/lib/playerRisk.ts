@@ -447,56 +447,78 @@ function assessPitcherTypeRisk(metrics: {
 // ── Factor 2: Competition Factor ────────────────────────────────────
 
 /**
- * Competition risk — driven by actual conference talent data.
- *
- * For hitters: uses Stuff+ (pitching quality faced)
- * For pitchers: uses Hitter Talent+ (hitting quality faced)
- *
- * Higher opposing talent = lower risk (stats earned against real competition).
- * Lower opposing talent = higher risk (stats may be inflated).
- * Tier-based fallback only when conference metrics are unavailable.
+/**
+ * Tier fallback — used by both hitter & pitcher when no metric is available.
  */
-function assessCompetitionRisk(conference: string | null | undefined, confOpposingMetric?: number | null, confOpposingLabel?: string): RiskFactor {
+function tierFallbackRisk(conference: string | null | undefined): { risk: number; tierDetail: string } {
+  const tier = getConfTier(conference);
+  if (tier === 1) return { risk: 15, tierDetail: "Power conference (no metric data)" };
+  if (tier === 2) return { risk: 35, tierDetail: "Strong conference (no metric data)" };
+  if (tier === 3) return { risk: 55, tierDetail: "Mid-tier conference (no metric data)" };
+  return { risk: 75, tierDetail: "Lower conference (no metric data)" };
+}
+
+function buildCompetitionFactor(
+  conference: string | null | undefined,
+  metric: number | null | undefined,
+  metricLabel: string,
+  riskFromMetric: (m: number) => { risk: number; gradeText: string },
+): RiskFactor {
   let risk: number;
-  let detailParts: string[] = [];
+  const detailParts: string[] = [];
 
-  if (confOpposingMetric != null && Number.isFinite(confOpposingMetric)) {
-    // Data-driven competition risk calibrated to actual NCAA conference data.
-    // Hitters use Stuff+ (range ~93–106), pitchers use Hitter Talent+ (range ~70–117).
-    // SEC is the benchmark at the top (~106 Stuff+, ~117 HT+).
-    //
-    // For Stuff+ (hitter-facing): range 93–106, 100 = NCAA avg
-    // For HT+ (pitcher-facing): range 70–117, ~103 = NCAA avg
-    //
-    // We normalize both to a common scale where higher = tougher competition.
-    const m = confOpposingMetric;
-    if (m >= 112) { risk = 5; detailParts.push("elite competition"); }
-    else if (m >= 106) { risk = 12; detailParts.push("top-tier competition"); }
-    else if (m >= 103) { risk = 20; detailParts.push("above-avg competition"); }
-    else if (m >= 100) { risk = 30; detailParts.push("solid competition"); }
-    else if (m >= 96) { risk = 45; detailParts.push("average competition"); }
-    else if (m >= 92) { risk = 60; detailParts.push("below-avg competition — stats may be inflated"); }
-    else if (m >= 85) { risk = 75; detailParts.push("weak competition — significant inflation risk"); }
-    else { risk = 88; detailParts.push("very weak competition — stats unreliable"); }
-
-    const label = confOpposingLabel || "Conf Quality";
-    // Format: "SoCon; Stuff+ 99; average competition"
-    const gradeText = detailParts.pop()!; // the competition grade label
-    detailParts.length = 0;
+  if (metric != null && Number.isFinite(metric)) {
+    const { risk: r, gradeText } = riskFromMetric(metric);
+    risk = r;
     if (conference) detailParts.push(conference);
-    detailParts.push(`${label} ${Math.round(m)}`);
+    detailParts.push(`${metricLabel} ${Math.round(metric)}`);
     detailParts.push(gradeText);
   } else {
-    // Fallback: tier-based when no data available
-    const tier = getConfTier(conference);
+    const fallback = tierFallbackRisk(conference);
+    risk = fallback.risk;
     if (conference) detailParts.push(conference);
-    if (tier === 1) { risk = 15; detailParts.push("Power conference (no metric data)"); }
-    else if (tier === 2) { risk = 35; detailParts.push("Strong conference (no metric data)"); }
-    else if (tier === 3) { risk = 55; detailParts.push("Mid-tier conference (no metric data)"); }
-    else { risk = 75; detailParts.push("Lower conference (no metric data)"); }
+    detailParts.push(fallback.tierDetail);
   }
 
   return { label: "Competition", score: clamp(risk), grade: toGrade(clamp(risk)), detail: detailParts.join("; ") };
+}
+
+/**
+ * Hitter competition risk — uses Stuff+ (pitching quality faced).
+ * Calibrated against the realistic D1 range (~92–108).
+ * NEC / SWAC at the bottom (~92) land in High (red).
+ */
+function assessHitterCompetitionRisk(conference: string | null | undefined, confStuffPlus?: number | null): RiskFactor {
+  return buildCompetitionFactor(conference, confStuffPlus, "Stuff+", (m) => {
+    if (m >= 108) return { risk: 5,  gradeText: "elite competition" };
+    if (m >= 105) return { risk: 12, gradeText: "top-tier competition" };
+    if (m >= 102) return { risk: 22, gradeText: "above-avg competition" };
+    if (m >= 100) return { risk: 32, gradeText: "solid competition" };
+    if (m >= 98)  return { risk: 45, gradeText: "average competition" };
+    if (m >= 96)  return { risk: 58, gradeText: "below-avg competition" };
+    if (m >= 94)  return { risk: 70, gradeText: "weak competition — stats may be inflated" };
+    if (m >= 92)  return { risk: 80, gradeText: "bottom-tier competition — significant inflation risk" };
+    return { risk: 90, gradeText: "very weak competition — stats unreliable" };
+  });
+}
+
+/**
+ * Pitcher competition risk — uses Hitter Talent+ (hitting quality faced).
+ * Wider range than Stuff+ (~70–117) since HT+ aggregates OPR + Stuff+ + wRC+.
+ * NCAA average is ~103.
+ */
+function assessPitcherCompetitionRisk(conference: string | null | undefined, confHitterTalentPlus?: number | null): RiskFactor {
+  return buildCompetitionFactor(conference, confHitterTalentPlus, "Hitter Talent+", (m) => {
+    if (m >= 115) return { risk: 5,  gradeText: "elite competition" };
+    if (m >= 110) return { risk: 12, gradeText: "top-tier competition" };
+    if (m >= 105) return { risk: 22, gradeText: "above-avg competition" };
+    if (m >= 100) return { risk: 35, gradeText: "solid competition" };
+    if (m >= 95)  return { risk: 50, gradeText: "average competition" };
+    if (m >= 90)  return { risk: 62, gradeText: "below-avg competition" };
+    if (m >= 85)  return { risk: 73, gradeText: "weak competition — stats may be inflated" };
+    if (m >= 78)  return { risk: 82, gradeText: "bottom-tier competition — significant inflation risk" };
+    return { risk: 90, gradeText: "very weak competition — stats unreliable" };
+  });
 }
 
 // ── Factor 3: Performance Trajectory ────────────────────────────────
@@ -799,7 +821,7 @@ export function assessHitterRisk(input: HitterRiskInput): RiskAssessment {
   }));
 
   // 3. Competition — "How reliable is the competition?" (weight: 20%)
-  factors.push(assessCompetitionRisk(input.conference, input.confStuffPlus, "Stuff+"));
+  factors.push(assessHitterCompetitionRisk(input.conference, input.confStuffPlus));
 
   // 4. Trajectory — "How is he trending?" (weight: 12%)
   const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "hitter");
@@ -830,7 +852,7 @@ export function assessPitcherRisk(input: PitcherRiskInput): RiskAssessment {
   }));
 
   // 3. Competition — "How reliable is the competition?" (weight: 18%)
-  factors.push(assessCompetitionRisk(input.conference, input.confHitterTalentPlus, "Hitter Talent+"));
+  factors.push(assessPitcherCompetitionRisk(input.conference, input.confHitterTalentPlus));
 
   // 4. Trajectory — "How is he trending?" (weight: 12%)
   const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "pitcher");

@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { DEMO_SCHOOL } from "@/lib/demoSchool";
+import { useMemo, useState, useEffect } from "react";
+import { CURRENT_SEASON, PRIOR_SEASON } from "@/lib/seasonConstants";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -26,6 +26,7 @@ import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
+import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
@@ -495,15 +496,25 @@ export default function TransferPortal() {
   const isAdmin = hasRole("admin");
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>("");
   const [playerSearch, setPlayerSearch] = useState<string>("");
-  const [selectedDestinationTeam, setSelectedDestinationTeam] = useState<string>(DEMO_SCHOOL.name);
-  const [teamSearch, setTeamSearch] = useState<string>(DEMO_SCHOOL.name);
+  const [selectedDestinationTeam, setSelectedDestinationTeam] = useState<string>("");
+  const [teamSearch, setTeamSearch] = useState<string>("");
+
+  // Pre-fill the destination team with the impersonated school. Coaches
+  // demoing as their program shouldn't have to retype "Kansas Jayhawks"
+  // every time they open the simulator. Replaces the old DEMO_SCHOOL default.
+  const { schoolName: effectiveSchoolName } = useEffectiveSchool();
+  useEffect(() => {
+    if (!effectiveSchoolName) return;
+    if (selectedDestinationTeam) return;
+    setSelectedDestinationTeam(effectiveSchoolName);
+    setTeamSearch(effectiveSchoolName);
+  }, [effectiveSchoolName, selectedDestinationTeam]);
   const [simType, setSimType] = useState<"hitting" | "pitching">("hitting");
   const [selectedPitcherId, setSelectedPitcherId] = useState<string>("");
   const [pitcherSearch, setPitcherSearch] = useState<string>("");
   const [pitchingRoleOverride, setPitchingRoleOverride] = useState<"SP" | "RP">("RP");
-  const [secAveragePreset, setSecAveragePreset] = useState<boolean>(false);
   const pitchingEqForTiers = useMemo(() => readPitchingWeights(), []);
-  const { conferenceStats: newConfStats } = useConferenceStats(2025);
+  const { conferenceStats: newConfStats } = useConferenceStats(2026);
 
   const { data: players = [], isLoading: playersLoading } = useQuery({
     queryKey: ["transfer-sim-players"],
@@ -647,13 +658,13 @@ export default function TransferPortal() {
   }, [newConfStats]);
 
   const { data: remoteEquationValues = {} } = useQuery({
-    queryKey: ["admin-ui-equation-values"],
+    queryKey: ["admin-ui-equation-values", CURRENT_SEASON],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("model_config")
         .select("config_key, config_value")
         .eq("model_type", "admin_ui")
-        .eq("season", 2025);
+        .eq("season", CURRENT_SEASON);
       if (error) throw error;
       const map: Record<string, number> = {};
       for (const row of data || []) map[row.config_key] = Number(row.config_value);
@@ -688,24 +699,6 @@ export default function TransferPortal() {
     return pool.slice(0, 30);
   }, [teams, teamSearch]);
   const { parkMap: teamParkComponents } = useParkFactors();
-
-  // SEC Average preset — mean of SEC teams' park factors across the six metrics.
-  // Used by the demo "Set to SEC Average" button so a coach can see what a
-  // transfer's projection looks like landing in a neutral SEC program.
-  const secAverageParkFactors = useMemo(() => {
-    const secTeams = teams.filter((t) => (t.conference || "").toLowerCase() === "sec");
-    const keys: Array<"avg" | "obp" | "iso" | "era" | "whip" | "hr9"> = ["avg", "obp", "iso", "era", "whip", "hr9"];
-    const out: Record<string, number> = {};
-    for (const k of keys) {
-      let sum = 0, n = 0;
-      for (const t of secTeams) {
-        const v = resolveMetricParkFactor(t.id, k, teamParkComponents, t.name);
-        if (v != null && Number.isFinite(Number(v))) { sum += Number(v); n++; }
-      }
-      if (n > 0) out[k] = sum / n;
-    }
-    return out;
-  }, [teams, teamParkComponents]);
 
   const { pitchers: pitchingMasterRows } = usePitchingSeedData();
 
@@ -853,15 +846,17 @@ export default function TransferPortal() {
     return map;
   }, [teams]);
 
-  // PA lookup by player UUID for risk assessment sample size
+  // PA lookup by player UUID for risk assessment sample size. Uses PRIOR_SEASON
+  // because risk is measured against the data the projection was BUILT on; the
+  // in-progress current season would falsely flag every player as thin sample.
   const { data: hitterPaMap = new Map<string, number>() } = useQuery({
-    queryKey: ["transfer-portal-pa-lookup"],
+    queryKey: ["transfer-portal-pa-lookup", PRIOR_SEASON],
     queryFn: async () => {
       const map = new Map<string, number>();
       const { data: hmRows } = await (supabase as any)
         .from("Hitter Master")
         .select("source_player_id, pa, ab")
-        .eq("Season", 2025)
+        .eq("Season", PRIOR_SEASON)
         .gt("ab", 0);
       const sourceIdToPa = new Map<string, number>();
       for (const r of (hmRows || [])) {
@@ -984,7 +979,7 @@ export default function TransferPortal() {
   const toTeamRow = resolveTeamRowFromCandidates([selectedDestinationTeam], teamByKey, teams);
 
   const fromConference = fromTeamRow?.conference || selectedPlayer?.conference || null;
-  const toConference = secAveragePreset ? "SEC" : (toTeamRow?.conference || null);
+  const toConference = toTeamRow?.conference || null;
 
   const resolveConferenceStats = (conference: string | null | undefined): ConferenceRow | null => {
     const aliases = conferenceKeyAliases(conference);
@@ -1040,7 +1035,7 @@ export default function TransferPortal() {
 
   const simulation = useMemo(() => {
     if (!selectedPlayer) return null;
-    if (!toTeamRow && !secAveragePreset) return null;
+    if (!toTeamRow) return null;
 
     const missingInputs: string[] = [];
     const lastAvg = selectedPlayer.from_avg;
@@ -1088,11 +1083,11 @@ export default function TransferPortal() {
     const toStuff = toConfStats?.stuff_plus ?? null;
 
     const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name);
-    const toParkAvgRaw = secAveragePreset ? (secAverageParkFactors.avg ?? null) : resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name);
+    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name);
     const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name);
-    const toParkObpRaw = secAveragePreset ? (secAverageParkFactors.obp ?? null) : resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name);
+    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name);
     const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name);
-    const toParkIsoRaw = secAveragePreset ? (secAverageParkFactors.iso ?? null) : resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name);
+    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name);
     if (fromAvgPlus == null) missingInputs.push("From AVG+");
     if (toAvgPlus == null) missingInputs.push("To AVG+");
     if (fromObpPlus == null) missingInputs.push("From OBP+");
@@ -1386,18 +1381,18 @@ export default function TransferPortal() {
 
   const pitchingSimulation = useMemo<PitchingSim | null>(() => {
     if (!selectedPitcher) return null;
-    if (!selectedDestinationTeam && !secAveragePreset) return null;
+    if (!selectedDestinationTeam) return null;
     const eq = readPitchingWeights();
     const toPitchTeamRow = resolveTeamRowFromCandidates([selectedDestinationTeam], teamByKey, teams);
-    if (!toPitchTeamRow && !secAveragePreset) return null;
+    if (!toPitchTeamRow) return null;
     // Resolve from-team by UUID first, then name fallback
     const fromPitchTeamRow = selectedPitcher.teamId
       ? (teams.find((t) => t.id === selectedPitcher.teamId) ?? resolveTeamRowFromCandidates([selectedPitcher.team], teamByKey, teams))
       : resolveTeamRowFromCandidates([selectedPitcher.team], teamByKey, teams);
     const fromPitchConference = selectedPitcher.conference || fromPitchTeamRow?.conference || null;
-    const toPitchConference = secAveragePreset ? "SEC" : (toPitchTeamRow?.conference || null);
+    const toPitchConference = toPitchTeamRow?.conference || null;
     const fromPitchConfStats = resolvePitchingConferenceStats(fromPitchConference, selectedPitcher.conferenceId);
-    const toPitchConfStats = resolvePitchingConferenceStats(toPitchConference, secAveragePreset ? null : toPitchTeamRow?.conference_id);
+    const toPitchConfStats = resolvePitchingConferenceStats(toPitchConference, toPitchTeamRow?.conference_id);
 
 
     const missing: string[] = [];
@@ -1445,11 +1440,11 @@ export default function TransferPortal() {
     // Pitching transfer must use pitching-specific park factors only (R/G, WHIP, HR/9).
     // Do not fallback to generic park_factor so bad mappings are exposed instead of silently masked.
     const fromEraParkRaw = resolveParkFactorFromCandidates(fromPitchTeamRow?.id, [selectedPitcher.team, fromPitchTeamRow?.name], "era", teamParkComponents);
-    const toEraParkRaw = secAveragePreset ? (secAverageParkFactors.era ?? null) : resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "era", teamParkComponents);
+    const toEraParkRaw = resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "era", teamParkComponents);
     const fromWhipParkRaw = resolveParkFactorFromCandidates(fromPitchTeamRow?.id, [selectedPitcher.team, fromPitchTeamRow?.name], "whip", teamParkComponents);
-    const toWhipParkRaw = secAveragePreset ? (secAverageParkFactors.whip ?? null) : resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "whip", teamParkComponents);
+    const toWhipParkRaw = resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "whip", teamParkComponents);
     const fromHr9ParkRaw = resolveParkFactorFromCandidates(fromPitchTeamRow?.id, [selectedPitcher.team, fromPitchTeamRow?.name], "hr9", teamParkComponents);
-    const toHr9ParkRaw = secAveragePreset ? (secAverageParkFactors.hr9 ?? null) : resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "hr9", teamParkComponents);
+    const toHr9ParkRaw = resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "hr9", teamParkComponents);
     requireNum("From R/G Park Factor", fromEraParkRaw);
     requireNum("To R/G Park Factor", toEraParkRaw);
     requireNum("From WHIP Park Factor", fromWhipParkRaw);
@@ -1622,7 +1617,7 @@ export default function TransferPortal() {
       showWork: libResult.showWork,
     };
 
-  }, [selectedPitcher, selectedPitcherPower, selectedDestinationTeam, teamByKey, teamParkComponents, pitchingConfByKey, pitchingRoleOverride, teams, secAveragePreset, secAverageParkFactors, resolvePitchingConferenceStats]);
+  }, [selectedPitcher, selectedPitcherPower, selectedDestinationTeam, teamByKey, teamParkComponents, pitchingConfByKey, pitchingRoleOverride, teams, resolvePitchingConferenceStats]);
 
   const addToTargetBoard = () => {
     if (!selectedPlayer || !selectedDestinationTeam) return;
@@ -1710,21 +1705,8 @@ export default function TransferPortal() {
                   {/* Destination team */}
                   <div className="relative flex-1 min-w-[200px]">
                     <Label className="text-xs mb-1 block">Destination</Label>
-                    <div className="flex gap-1">
-                      <Input placeholder="Search team..." value={secAveragePreset ? "SEC Average" : teamSearch} disabled={secAveragePreset} onChange={(e) => { setTeamSearch(e.target.value); setTeamDropdownOpen(true); }} onFocus={() => setTeamDropdownOpen(true)} onBlur={() => setTimeout(() => setTeamDropdownOpen(false), 150)} />
-                      <Button type="button" variant={secAveragePreset ? "default" : "outline"} size="sm" className="shrink-0 text-xs" onClick={() => {
-                        const next = !secAveragePreset;
-                        setSecAveragePreset(next);
-                        if (next) {
-                          setSelectedDestinationTeam("SEC Average");
-                          setTeamSearch("SEC Average");
-                        } else {
-                          setSelectedDestinationTeam(DEMO_SCHOOL.name);
-                          setTeamSearch(DEMO_SCHOOL.name);
-                        }
-                      }}>{secAveragePreset ? "SEC Avg ✓" : "SEC Avg"}</Button>
-                    </div>
-                    {teamDropdownOpen && !secAveragePreset && filteredTeams.length > 0 && (
+                    <Input placeholder="Search team..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamDropdownOpen(true); }} onFocus={() => setTeamDropdownOpen(true)} onBlur={() => setTimeout(() => setTeamDropdownOpen(false), 150)} />
+                    {teamDropdownOpen && filteredTeams.length > 0 && (
                       <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
                         {filteredTeams.map((t) => (
                           <div key={t.name} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => { setSelectedDestinationTeam(t.name); setTeamSearch(t.name); setTeamDropdownOpen(false); }}>

@@ -3,6 +3,7 @@ import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
 import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { fetchParkFactorsMap, type ParkFactorsMap } from "@/lib/parkFactors";
+import { PRIOR_SEASON } from "@/lib/seasonConstants";
 import { computePitcherProjection, type PitcherProjectionInput } from "@/lib/pitcherProjection";
 import { PITCHING_EQ_DEFAULTS } from "@/hooks/usePitchingEquationWeights";
 
@@ -573,7 +574,7 @@ type PitcherPlayerContext = {
 
 // Pitcher power-rating equation weights (NCAA avgs/SDs + weight constants used
 // by computePitchingPrPlusFromScores). Mirrors usePitchingEquationWeights query.
-async function loadPitchingPowerEq(season = 2025): Promise<Record<string, number>> {
+async function loadPitchingPowerEq(season = 2026): Promise<Record<string, number>> {
   const merged: Record<string, number> = { ...PITCHING_EQ_DEFAULTS };
   try {
     const { data } = await supabase
@@ -799,7 +800,7 @@ async function fetchPitcherContext(
           .from("Pitching Master")
           .select(PITCHER_SCOUTING_SELECT)
           .eq("source_player_id", sourceId)
-          .eq("Season", 2025)
+          .eq("Season", PRIOR_SEASON)
           .maybeSingle();
         if (pm) scouting = mapPitchingMasterRow(pm);
       }
@@ -829,7 +830,7 @@ async function fetchPitcherContext(
   return { eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride };
 }
 
-async function fetchAllPredictionsForReturnerMode(): Promise<PredictionRow[]> {
+async function fetchAllPredictionsForReturnerMode(season = 2026): Promise<PredictionRow[]> {
   const out: PredictionRow[] = [];
   const pageSize = 1000;
 
@@ -841,6 +842,7 @@ async function fetchAllPredictionsForReturnerMode(): Promise<PredictionRow[]> {
     const { data, error } = await supabase
       .from("player_predictions")
       .select("*")
+      .eq("season", season)
       .in("model_type", ["returner", "transfer"])
       .in("status", ["active", "departed"])
       .or("from_avg.not.is.null,from_era.not.is.null")
@@ -929,7 +931,7 @@ export async function recalculatePredictionById(predictionId: string, updates: U
           .from("Hitter Master")
           .select("combined_used")
           .eq("source_player_id", sourceId)
-          .eq("Season", 2025)
+          .eq("Season", PRIOR_SEASON)
           .maybeSingle();
         combinedUsed = !!(hm as any)?.combined_used;
       }
@@ -960,9 +962,9 @@ export async function recalculatePredictionById(predictionId: string, updates: U
   return { success: true, prediction: result };
 }
 
-export async function bulkRecalculatePredictionsLocal() {
+export async function bulkRecalculatePredictionsLocal(season = 2026) {
   const config = await loadEngineConfig();
-  const allPreds = await fetchAllPredictionsForReturnerMode();
+  const allPreds = await fetchAllPredictionsForReturnerMode(season);
   const hitterPreds = allPreds.filter((p) => !isPitcherPred(p));
   const pitcherPreds = allPreds.filter((p) => isPitcherPred(p));
   const preds = hitterPreds; // keep original var name for the existing hitter loop below
@@ -985,7 +987,7 @@ export async function bulkRecalculatePredictionsLocal() {
   // 2) Hitter Master scouting -> bucket under players.id
   let pfrom = 0;
   while (true) {
-    const { data } = await supabase.from("Hitter Master").select("source_player_id, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb").eq("Season", 2025).not("source_player_id", "is", null).range(pfrom, pfrom + 999);
+    const { data } = await supabase.from("Hitter Master").select("source_player_id, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb").eq("Season", season).not("source_player_id", "is", null).range(pfrom, pfrom + 999);
     for (const r of data || []) {
       const playerId = r.source_player_id ? sourceToPlayerId.get(r.source_player_id) : null;
       if (!playerId) continue;
@@ -1102,8 +1104,8 @@ export async function bulkRecalculatePredictionsLocal() {
   if (pitcherPreds.length > 0) {
     const pitchingEq = readPitchingWeights();
     const [pitchingPowerEq, parkMap] = await Promise.all([
-      loadPitchingPowerEq(),
-      fetchParkFactorsMap(2025),
+      loadPitchingPowerEq(season),
+      fetchParkFactorsMap(season),
     ]);
 
     // player_id -> { team, teamId, conference, source_player_id }
@@ -1145,7 +1147,7 @@ export async function bulkRecalculatePredictionsLocal() {
       }
     }
 
-    // source_player_id -> Pitching Master scouting row (Season 2025)
+    // source_player_id -> Pitching Master scouting row (Season-scoped)
     const scoutingBySourceId = new Map<string, PitcherScoutingRow>();
     const pitcherSourceIds = Array.from(
       new Set(
@@ -1159,7 +1161,7 @@ export async function bulkRecalculatePredictionsLocal() {
       const { data } = await supabase
         .from("Pitching Master")
         .select(PITCHER_SCOUTING_SELECT)
-        .eq("Season", 2025)
+        .eq("Season", season)
         .in("source_player_id", chunk);
       for (const r of (data || []) as any[]) {
         if (r.source_player_id) scoutingBySourceId.set(r.source_player_id, mapPitchingMasterRow(r));

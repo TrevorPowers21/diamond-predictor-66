@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { Eye, LogIn, X, CheckCircle, TrendingUp, Users, Calendar, Activity, ArrowRight } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import SchoolBanner from "@/components/SchoolBanner";
+import { CURRENT_SEASON } from "@/lib/seasonConstants";
 
 type HitterRow = {
   player_id: string;
@@ -123,7 +124,7 @@ export default function Dashboard() {
       const { data: pmRows, error: pmErr } = await supabase
         .from("Pitching Master")
         .select("source_player_id, playerFullName, Team, Conference, Role, IP, ERA, FIP, K9, overall_pr_plus")
-        .eq("Season", 2025)
+        .eq("Season", CURRENT_SEASON)
         .gte("IP", 20)
         .not("overall_pr_plus", "is", null)
         .order("overall_pr_plus", { ascending: false })
@@ -353,11 +354,45 @@ export default function Dashboard() {
                 })}
               </div>
             </div>
-          ) : highFollowList.length === 0 && targetBoard.length === 0 ? (
-            <div className="mt-2 rounded-lg border border-dashed border-border/60 bg-muted/10 px-4 py-2 text-xs text-muted-foreground">
-              Add players to your High Follow list or Target Board to see personalized updates here.
+          ) : (
+            // Demo placeholder — shown when there's no personalized activity yet.
+            // TODO: replace with real portal activity feed once portal data is populated.
+            <div className="mt-2 rounded-lg border border-border/60 bg-muted/20 px-4 py-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <span
+                  className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#D4AF37]"
+                  style={{ fontFamily: "Oswald, sans-serif" }}
+                >
+                  Recent Portal Activity
+                </span>
+                <span className="text-[10px] text-muted-foreground font-mono">2 updates</span>
+              </div>
+              <div className="divide-y divide-border/30">
+                {/* Example 1: Player entering the portal */}
+                <div className="flex items-center gap-2 py-1.5 text-xs">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#D4AF37] shrink-0" />
+                  <span className="font-semibold">Mason Carter</span>
+                  <span className="flex items-center gap-1.5 ml-1">
+                    <span className="text-muted-foreground">Vanderbilt</span>
+                    <ArrowRight className="h-3 w-3 shrink-0 text-emerald-500" />
+                    <span className="font-semibold text-emerald-600">Portal</span>
+                  </span>
+                  <span className="ml-auto text-[10px] text-muted-foreground font-mono">2h ago</span>
+                </div>
+                {/* Example 2: Player committing to the demo school */}
+                <div className="flex items-center gap-2 py-1.5 text-xs">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#D4AF37] shrink-0" />
+                  <span className="font-semibold">Tyler Bridges</span>
+                  <span className="flex items-center gap-1.5 ml-1">
+                    <span className="text-muted-foreground">Auburn</span>
+                    <ArrowRight className="h-3 w-3 shrink-0 text-blue-500" />
+                    <span className="font-semibold text-blue-600">Georgia</span>
+                  </span>
+                  <span className="ml-auto text-[10px] text-muted-foreground font-mono">5h ago</span>
+                </div>
+              </div>
             </div>
-          ) : null}
+          )}
         </div>
 
         {/* Top 5 Hitters + Top 5 Pitchers (data-dense dashboard style) */}

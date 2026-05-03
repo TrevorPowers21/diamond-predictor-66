@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useState } from "react";
-import { DEMO_SCHOOL } from "@/lib/demoSchool";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CURRENT_SEASON } from "@/lib/seasonConstants";
+import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -719,7 +720,7 @@ export default function PlayerComparison() {
   const { hitterStats, powerRatings } = useHitterSeedData();
   const { pitchers: pitchingMasterRows } = usePitchingSeedData();
   const { teams } = useTeamsTable();
-  const { conferenceStats: rawConfStats } = useConferenceStats(2025);
+  const { conferenceStats: rawConfStats } = useConferenceStats(2026);
   const pitchingEq = useMemo(() => readPitchingWeights(), []);
 
   const [simType, setSimType] = useState<"hitting" | "pitching">("hitting");
@@ -728,9 +729,9 @@ export default function PlayerComparison() {
   const [aPlayerSearch, setAPlayerSearch] = useState("");
   const [aPlayerOpen, setAPlayerOpen] = useState(false);
   const [aPlayerId, setAPlayerId] = useState("");
-  const [aTeamSearch, setATeamSearch] = useState(DEMO_SCHOOL.name);
+  const [aTeamSearch, setATeamSearch] = useState("");
   const [aTeamOpen, setATeamOpen] = useState(false);
-  const [aDestTeam, setADestTeam] = useState(DEMO_SCHOOL.name);
+  const [aDestTeam, setADestTeam] = useState("");
   const [aPitcherId, setAPitcherId] = useState("");
   const [aPitcherSearch, setAPitcherSearch] = useState("");
   const [aPitcherOpen, setAPitcherOpen] = useState(false);
@@ -740,13 +741,29 @@ export default function PlayerComparison() {
   const [bPlayerSearch, setBPlayerSearch] = useState("");
   const [bPlayerOpen, setBPlayerOpen] = useState(false);
   const [bPlayerId, setBPlayerId] = useState("");
-  const [bTeamSearch, setBTeamSearch] = useState(DEMO_SCHOOL.name);
+  const [bTeamSearch, setBTeamSearch] = useState("");
   const [bTeamOpen, setBTeamOpen] = useState(false);
-  const [bDestTeam, setBDestTeam] = useState(DEMO_SCHOOL.name);
+  const [bDestTeam, setBDestTeam] = useState("");
   const [bPitcherId, setBPitcherId] = useState("");
   const [bPitcherSearch, setBPitcherSearch] = useState("");
   const [bPitcherOpen, setBPitcherOpen] = useState(false);
   const [bRoleOverride, setBRoleOverride] = useState<"SP" | "RP">("RP");
+
+  // Pre-fill both compare panels' destination team with the impersonated
+  // school. Coaches comparing two transfers usually want to see what each
+  // would do at THEIR school. Replaces the old DEMO_SCHOOL default.
+  const { schoolName: effectiveSchoolName } = useEffectiveSchool();
+  useEffect(() => {
+    if (!effectiveSchoolName) return;
+    if (!aDestTeam) {
+      setADestTeam(effectiveSchoolName);
+      setATeamSearch(effectiveSchoolName);
+    }
+    if (!bDestTeam) {
+      setBDestTeam(effectiveSchoolName);
+      setBTeamSearch(effectiveSchoolName);
+    }
+  }, [effectiveSchoolName, aDestTeam, bDestTeam]);
 
   /* ─── shared data ─── */
   const conferenceStats: HitterConfRow[] = useMemo(() => {
@@ -762,7 +779,7 @@ export default function PlayerComparison() {
         iso_plus: raw.iso != null ? Math.round((raw.iso / 0.162) * 100) : null,
         stuff_plus: raw.stuff_plus,
       };
-      const score = (row.avg_plus != null ? 1 : 0) + (row.obp_plus != null ? 1 : 0) + (row.iso_plus != null ? 1 : 0) + (row.stuff_plus != null ? 1 : 0) + (row.season === 2025 ? 2 : 0);
+      const score = (row.avg_plus != null ? 1 : 0) + (row.obp_plus != null ? 1 : 0) + (row.iso_plus != null ? 1 : 0) + (row.stuff_plus != null ? 1 : 0) + (row.season === 2026 ? 2 : 0);
       const ex = byConf.get(key);
       if (!ex || score > ex.score) byConf.set(key, { row, score });
     }
@@ -770,9 +787,9 @@ export default function PlayerComparison() {
   }, [rawConfStats]);
 
   const { data: remoteEquationValues = {} } = useQuery({
-    queryKey: ["compare-admin-ui-equation-values"],
+    queryKey: ["compare-admin-ui-equation-values", CURRENT_SEASON],
     queryFn: async () => {
-      const { data, error } = await supabase.from("model_config").select("config_key, config_value").eq("model_type", "admin_ui").eq("season", 2025);
+      const { data, error } = await supabase.from("model_config").select("config_key, config_value").eq("model_type", "admin_ui").eq("season", CURRENT_SEASON);
       if (error) throw error;
       const map: Record<string, number> = {};
       for (const row of data || []) map[row.config_key] = Number(row.config_value);

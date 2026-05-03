@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { runStuffPlusPipeline, type StuffPlusReport } from "@/savant/lib/stuffPlusEngine";
+import { calculateConferenceStuffPlusV2 } from "@/savant/lib/conferenceStuffPlusV2";
+import { supabase } from "@/integrations/supabase/client";
 
 const NAVY_CARD = "#0a1428";
 const NAVY_BORDER = "#1f2d52";
@@ -25,8 +27,10 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 export default function StuffPlusRunner() {
-  const [season, setSeason] = useState(2025);
+  const season = 2026;
   const [running, setRunning] = useState(false);
+  const [allSeasonsRunning, setAllSeasonsRunning] = useState(false);
+  const [allSeasonsLog, setAllSeasonsLog] = useState<string[]>([]);
   const [report, setReport] = useState<StuffPlusReport | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
 
@@ -48,31 +52,74 @@ export default function StuffPlusRunner() {
     }
   }
 
+  async function handleRunAllSeasons() {
+    if (!confirm(
+      "Re-run Stuff+ Equations + Conference Stuff+ V2 for ALL historical seasons?\n\n" +
+      "This will overwrite every Stuff+ value in the database with the recalibrated formulas. " +
+      "Use sparingly — typically only after a formula change.",
+    )) return;
+
+    setAllSeasonsRunning(true);
+    setAllSeasonsLog([]);
+    const log: string[] = [];
+    const append = (msg: string) => {
+      log.push(msg);
+      setAllSeasonsLog([...log]);
+    };
+
+    try {
+      const { data: sData, error: sErr } = await supabase
+        .from("pitcher_stuff_plus_inputs")
+        .select("season")
+        .not("season", "is", null);
+      if (sErr) throw sErr;
+      const seasons = [...new Set((sData || []).map((r: any) => r.season))].sort((a, b) => b - a);
+      append(`Found seasons: ${seasons.join(", ")}`);
+
+      for (const s of seasons) {
+        append(`\n[${s}] Stuff+ Equations…`);
+        const sp = await runStuffPlusPipeline(s);
+        append(`[${s}] Stuff+ written=${sp.report.written} overall=${sp.report.overallCount}${sp.errors.length ? ` errors=${sp.errors.length}` : ""}`);
+
+        append(`[${s}] Conference Stuff+ V2…`);
+        const conf = await calculateConferenceStuffPlusV2(s);
+        append(`[${s}] Conference V2 written=${conf.report.written}${conf.errors.length ? ` errors=${conf.errors.length}` : ""}`);
+      }
+      append("\n✓ Done.");
+    } catch (err: any) {
+      append(`✗ Error: ${err.message || String(err)}`);
+    } finally {
+      setAllSeasonsRunning(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-end gap-4 border px-6 py-5" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
-        <div>
-          <label className="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/50">Season</label>
-          <select
-            value={season}
-            onChange={(e) => setSeason(Number(e.target.value))}
-            className="cursor-pointer border bg-transparent px-3 py-2 text-sm text-white focus:outline-none"
-            style={{ borderColor: NAVY_BORDER }}
-          >
-            <option value={2025}>2025</option>
-            <option value={2024}>2024</option>
-            <option value={2023}>2023</option>
-          </select>
-        </div>
         <button
           onClick={handleRun}
-          disabled={running}
+          disabled={running || allSeasonsRunning}
           className="cursor-pointer border px-5 py-2 text-xs font-bold uppercase tracking-[0.15em] transition-colors duration-150 hover:bg-[#D4AF37]/10 disabled:cursor-not-allowed disabled:opacity-50"
           style={{ borderColor: GOLD, color: GOLD }}
         >
           {running ? "Calculating Stuff+…" : `Run Stuff+ Equations (${season})`}
         </button>
+        <button
+          onClick={handleRunAllSeasons}
+          disabled={running || allSeasonsRunning}
+          className="cursor-pointer border px-5 py-2 text-xs font-bold uppercase tracking-[0.15em] transition-colors duration-150 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+          style={{ borderColor: "#ef4444", color: "#ef4444" }}
+          title="Re-runs Stuff+ Equations + Conference V2 for every season in the DB. Use sparingly."
+        >
+          {allSeasonsRunning ? "Recalibrating All Seasons…" : "↻ Recalibrate ALL Historical Stuff+"}
+        </button>
       </div>
+
+      {allSeasonsLog.length > 0 && (
+        <div className="border px-4 py-3 font-mono text-xs text-white/80 whitespace-pre-line" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+          {allSeasonsLog.join("\n")}
+        </div>
+      )}
 
       {errors.length > 0 && (
         <div className="border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">

@@ -1,38 +1,14 @@
 import { supabase } from "@/integrations/supabase/client";
-import { calculateStuffPlus, type PopConstants, type PitchRow } from "./stuffPlusEngine";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-interface RawPitchRow {
+interface ScoredPitchRow {
   source_player_id: string;
   pitch_type: string;
   hand: string;
   conference: string | null;
   pitches: number | null;
-  velocity: number | null;
-  ivb: number | null;
-  hb: number | null;
-  rel_height: number | null;
-  rel_side: number | null;
-  extension: number | null;
-  spin: number | null;
-  fb_ch_velo_diff: number | null;
-}
-
-interface ConfPitchProfile {
-  conference: string;
-  pitch_type: string;
-  hand: string;
-  velocity: number;
-  ivb: number;
-  hb: number;
-  rel_height: number;
-  rel_side: number;
-  extension: number;
-  spin: number;
-  fb_ch_velo_diff: number | null;
-  total_pitches: number;
-  pitcher_count: number;
+  stuff_plus: number | null;
 }
 
 interface ConfPitchResult {
@@ -45,6 +21,7 @@ interface ConfPitchResult {
 }
 
 export interface ConfOverallResult {
+  conference_id: string;
   conference: string;
   overall: number;
   totalPitches: number;
@@ -93,16 +70,6 @@ async function fetchAll<T>(
   return all;
 }
 
-function weightedAvg(values: Array<{ val: number | null; w: number }>): number | null {
-  let sumV = 0, sumW = 0;
-  for (const { val, w } of values) {
-    if (val == null) continue;
-    sumV += val * w;
-    sumW += w;
-  }
-  return sumW > 0 ? sumV / sumW : null;
-}
-
 // ─── Main Pipeline ──────────────────────────────────────────────────────────
 
 export async function calculateConferenceStuffPlusV2(
@@ -111,164 +78,104 @@ export async function calculateConferenceStuffPlusV2(
   const errors: string[] = [];
   console.time("[ConfStuff+V2] TOTAL");
 
-  // ── Pull population constants ──────────────────────────────────────────
-  console.time("[ConfStuff+V2] 1. fetch population constants");
-  const { data: popData } = await (supabase as any)
-    .from("pitcher_stuff_plus_ncaa")
-    .select("*")
-    .eq("season", season);
-  console.timeEnd("[ConfStuff+V2] 1. fetch population constants");
-
-  if (!popData || popData.length === 0) {
-    return { report: { overall: [], written: 0 }, errors: ["No population constants found"] };
-  }
-
-  const popMap = new Map<string, PopConstants>();
-  for (const p of popData as PopConstants[]) {
-    popMap.set(`${p.pitch_type}::${p.hand}`, p);
-  }
-
-  // ── Step 1: Pull all pitch-level data ──────────────────────────────────
-  console.time("[ConfStuff+V2] 2. fetch pitch rows");
-  const allRows = await fetchAll<RawPitchRow>(
+  // ── Pull per-pitcher scored rows. Each row already has a Stuff+ value
+  // computed by the Stuff+ engine for that specific (pitcher, pitch_type,
+  // hand). We aggregate those individual scores — never a synthetic profile.
+  console.time("[ConfStuff+V2] 1. fetch scored rows");
+  const allRows = await fetchAll<ScoredPitchRow>(
     "pitcher_stuff_plus_inputs",
-    "source_player_id, pitch_type, hand, conference, pitches, velocity, ivb, hb, rel_height, rel_side, extension, spin, fb_ch_velo_diff",
-    (q: any) => q.eq("season", season).not("ivb", "is", null).not("hb", "is", null).gt("pitches", 0),
+    "source_player_id, pitch_type, hand, conference, pitches, stuff_plus",
+    (q: any) =>
+      q
+        .eq("season", season)
+        .not("stuff_plus", "is", null)
+        .gt("pitches", 0),
   );
-
-  console.timeEnd("[ConfStuff+V2] 2. fetch pitch rows");
+  console.timeEnd("[ConfStuff+V2] 1. fetch scored rows");
 
   if (allRows.length === 0) {
-    return { report: { overall: [], written: 0 }, errors: ["No pitch data found"] };
+    return { report: { overall: [], written: 0 }, errors: ["No scored pitch data found — run Stuff+ first"] };
   }
 
-  // ── Step 2: Group by conference + pitch_type + hand → weighted profiles
-  console.time("[ConfStuff+V2] 3. group + compute profiles");
-  type GroupKey = string; // "conference::pitch_type::hand"
-  const groups = new Map<GroupKey, RawPitchRow[]>();
-
-  for (const row of allRows) {
-    if (!row.conference) continue;
-    const key = `${row.conference}::${row.pitch_type}::${row.hand}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(row);
-  }
-
-  // Build weighted profiles per (conference, pitch_type, hand)
-  const profiles: ConfPitchProfile[] = [];
-  for (const [key, rows] of groups) {
-    const [conference, pitch_type, hand] = key.split("::");
-    const items = rows.map((r) => ({ ...r, p: r.pitches ?? 0 })).filter((r) => r.p > 0);
-    if (items.length === 0) continue;
-
-    const totalP = items.reduce((s, r) => s + r.p, 0);
-    const wAvg = (getter: (r: RawPitchRow) => number | null) =>
-      weightedAvg(items.map((r) => ({ val: getter(r), w: r.p })));
-
-    const vel = wAvg((r) => r.velocity);
-    const ivb = wAvg((r) => r.ivb);
-    const hb = wAvg((r) => r.hb);
-    const relH = wAvg((r) => r.rel_height);
-    const relS = wAvg((r) => r.rel_side);
-    const ext = wAvg((r) => r.extension);
-    const spin = wAvg((r) => r.spin);
-    const veloDiff = pitch_type === "Change-up" ? wAvg((r) => r.fb_ch_velo_diff) : null;
-
-    if (vel == null || ivb == null || hb == null) continue;
-
-    const uniquePitchers = new Set(items.map((r) => r.source_player_id));
-
-    profiles.push({
-      conference,
-      pitch_type,
-      hand,
-      velocity: vel,
-      ivb,
-      hb,
-      rel_height: relH ?? 0,
-      rel_side: relS ?? 0,
-      extension: ext ?? 0,
-      spin: spin ?? 0,
-      fb_ch_velo_diff: veloDiff,
-      total_pitches: totalP,
-      pitcher_count: uniquePitchers.size,
-    });
-  }
-
-  console.timeEnd("[ConfStuff+V2] 3. group + compute profiles");
-
-  // ── Step 3: Run profiles through Stuff+ equations ──────────────────────
-  console.time("[ConfStuff+V2] 4. score profiles");
-  // Group profiles by (conference, pitch_type) to blend RHP + LHP
-  const confPitchGroups = new Map<string, ConfPitchProfile[]>();
-  for (const p of profiles) {
-    const key = `${p.conference}::${p.pitch_type}`;
-    if (!confPitchGroups.has(key)) confPitchGroups.set(key, []);
-    confPitchGroups.get(key)!.push(p);
-  }
-
-  const pitchResults: ConfPitchResult[] = [];
-
-  for (const [key, handProfiles] of confPitchGroups) {
-    const [conference, pitch_type] = key.split("::");
-
-    let totalWeightedScore = 0;
-    let totalPitches = 0;
-    const allPitcherIds = new Set<string>();
-
-    for (const profile of handProfiles) {
-      const popKey = `${pitch_type}::${profile.hand}`;
-      const pop = popMap.get(popKey);
-      if (!pop) continue;
-
-      // Build a synthetic PitchRow for the equation
-      const syntheticRow: PitchRow = {
-        id: "",
-        source_player_id: "",
-        pitch_type,
-        hand: profile.hand,
-        pitches: profile.total_pitches,
-        velocity: profile.velocity,
-        ivb: profile.ivb,
-        hb: profile.hb,
-        rel_height: profile.rel_height,
-        rel_side: profile.rel_side,
-        extension: profile.extension,
-        spin: profile.spin,
-        fb_ch_velo_diff: profile.fb_ch_velo_diff,
-        needs_review: false,
-      };
-
-      const result = calculateStuffPlus(pitch_type, syntheticRow, pop);
-      if (!result) continue;
-
-      totalWeightedScore += result.score * profile.total_pitches;
-      totalPitches += profile.total_pitches;
-
-      // Collect pitcher IDs from the raw rows for this hand
-      const rawKey = `${conference}::${pitch_type}::${profile.hand}`;
-      const rawRows = groups.get(rawKey) ?? [];
-      for (const r of rawRows) allPitcherIds.add(r.source_player_id);
+  // ── Pull conference_id mapping from Pitching Master ─────────────────────
+  // pitcher_stuff_plus_inputs only has the string conference name, but
+  // Conference Stats keys by conference_id (UUID). Build source_player_id →
+  // conference_id map so we can update by ID, not by name.
+  console.time("[ConfStuff+V2] 1b. fetch conference_id map");
+  const confIdBySourceId = new Map<string, string>();
+  let pmFrom = 0;
+  while (true) {
+    const { data, error } = await (supabase as any)
+      .from("Pitching Master")
+      .select("source_player_id, conference_id")
+      .eq("Season", season)
+      .order("source_player_id", { ascending: true })
+      .range(pmFrom, pmFrom + 999);
+    if (error || !data || data.length === 0) break;
+    for (const r of data as any[]) {
+      if (r.source_player_id && r.conference_id) {
+        confIdBySourceId.set(r.source_player_id, r.conference_id);
+      }
     }
+    if (data.length < 1000) break;
+    pmFrom += 1000;
+  }
+  console.timeEnd("[ConfStuff+V2] 1b. fetch conference_id map");
 
-    if (totalPitches === 0) continue;
+  // ── Per-pitcher composite per (conf_id × pitch_type × hand) ────────────
+  // Key by conference_id (UUID) so cross-naming variations don't break matching.
+  console.time("[ConfStuff+V2] 2. aggregate by conf × pitch × hand");
+  const labelByConfId = new Map<string, string>();
+  const bucketRows = new Map<string, ScoredPitchRow[]>();
+  for (const r of allRows) {
+    if (r.stuff_plus == null) continue;
+    const cid = confIdBySourceId.get(r.source_player_id);
+    if (!cid) continue;
+    if (r.conference && !labelByConfId.has(cid)) labelByConfId.set(cid, r.conference);
+    const key = `${cid}::${r.pitch_type}::${r.hand}`;
+    if (!bucketRows.has(key)) bucketRows.set(key, []);
+    bucketRows.get(key)!.push(r);
+  }
+  console.timeEnd("[ConfStuff+V2] 2. aggregate by conf × pitch × hand");
 
-    const blendedScore = Math.round((totalWeightedScore / totalPitches) * 10) / 10;
-
-    pitchResults.push({
-      conference,
-      pitch_type,
-      stuff_plus: blendedScore,
-      total_pitches: totalPitches,
-      pitcher_count: allPitcherIds.size,
-      thin_sample: allPitcherIds.size < 3,
-    });
+  // ── Blend RHP + LHP within (conf_id × pitch_type), pitch-weighted ──────
+  console.time("[ConfStuff+V2] 3. blend hands → conf × pitch");
+  const confPitchAgg = new Map<string, { weighted: number; pitches: number; pitcherIds: Set<string> }>();
+  for (const [key, rows] of bucketRows) {
+    const [confId, pitch_type] = key.split("::");
+    const confPitchKey = `${confId}::${pitch_type}`;
+    if (!confPitchAgg.has(confPitchKey)) {
+      confPitchAgg.set(confPitchKey, { weighted: 0, pitches: 0, pitcherIds: new Set() });
+    }
+    const agg = confPitchAgg.get(confPitchKey)!;
+    for (const r of rows) {
+      const w = r.pitches ?? 0;
+      if (w <= 0) continue;
+      agg.weighted += Number(r.stuff_plus) * w;
+      agg.pitches += w;
+      agg.pitcherIds.add(r.source_player_id);
+    }
   }
 
-  console.timeEnd("[ConfStuff+V2] 4. score profiles");
+  type PitchResultByConfId = ConfPitchResult & { conference_id: string };
+  const pitchResults: PitchResultByConfId[] = [];
+  for (const [key, agg] of confPitchAgg) {
+    if (agg.pitches === 0) continue;
+    const [confId, pitch_type] = key.split("::");
+    pitchResults.push({
+      conference_id: confId,
+      conference: labelByConfId.get(confId) ?? confId,
+      pitch_type,
+      stuff_plus: Math.round((agg.weighted / agg.pitches) * 10) / 10,
+      total_pitches: agg.pitches,
+      pitcher_count: agg.pitcherIds.size,
+      thin_sample: agg.pitcherIds.size < 3,
+    });
+  }
+  console.timeEnd("[ConfStuff+V2] 3. blend hands → conf × pitch");
 
-  // ── Step 4: Overall conference Stuff+ ──────────────────────────────────
-  console.time("[ConfStuff+V2] 5. compute overall");
+  // ── Conference overall — pitch-weighted across all pitch types ─────────
+  console.time("[ConfStuff+V2] 4. compute conf overall");
   const confOverall = new Map<string, {
     totalWeighted: number;
     totalPitches: number;
@@ -277,34 +184,34 @@ export async function calculateConferenceStuffPlusV2(
   }>();
 
   for (const pr of pitchResults) {
-    if (!confOverall.has(pr.conference)) {
-      confOverall.set(pr.conference, {
+    if (!confOverall.has(pr.conference_id)) {
+      confOverall.set(pr.conference_id, {
         totalWeighted: 0,
         totalPitches: 0,
         pitcherIds: new Set(),
         byPitch: {},
       });
     }
-    const entry = confOverall.get(pr.conference)!;
+    const entry = confOverall.get(pr.conference_id)!;
     entry.totalWeighted += pr.stuff_plus * pr.total_pitches;
     entry.totalPitches += pr.total_pitches;
     entry.byPitch[pr.pitch_type] = { stuff_plus: pr.stuff_plus, pitches: pr.total_pitches };
+  }
 
-    // Add pitcher IDs
-    const rawKeys = profiles
-      .filter((p) => p.conference === pr.conference && p.pitch_type === pr.pitch_type)
-      .flatMap((p) => {
-        const rawKey = `${pr.conference}::${pr.pitch_type}::${p.hand}`;
-        return (groups.get(rawKey) ?? []).map((r) => r.source_player_id);
-      });
-    for (const id of rawKeys) entry.pitcherIds.add(id);
+  // Pitcher IDs across the whole conference
+  for (const r of allRows) {
+    const cid = confIdBySourceId.get(r.source_player_id);
+    if (!cid) continue;
+    const entry = confOverall.get(cid);
+    if (entry) entry.pitcherIds.add(r.source_player_id);
   }
 
   const overallResults: ConfOverallResult[] = [];
-  for (const [conference, entry] of confOverall) {
+  for (const [confId, entry] of confOverall) {
     if (entry.totalPitches === 0) continue;
     overallResults.push({
-      conference,
+      conference_id: confId,
+      conference: labelByConfId.get(confId) ?? confId,
       overall: Math.round((entry.totalWeighted / entry.totalPitches) * 10) / 10,
       totalPitches: entry.totalPitches,
       pitcherCount: entry.pitcherIds.size,
@@ -312,19 +219,13 @@ export async function calculateConferenceStuffPlusV2(
     });
   }
   overallResults.sort((a, b) => b.overall - a.overall);
+  console.timeEnd("[ConfStuff+V2] 4. compute conf overall");
 
-  console.timeEnd("[ConfStuff+V2] 5. compute overall");
-
-  // ── Step 5: Write to Conference Stats ──────────────────────────────────
-  console.time("[ConfStuff+V2] 6. write to Conference Stats");
+  // ── Write to Conference Stats ──────────────────────────────────────────
+  console.time("[ConfStuff+V2] 5. write to Conference Stats");
   let written = 0;
-
   for (const r of overallResults) {
-    const updatePayload: Record<string, any> = {
-      Stuff_plus: r.overall,
-    };
-
-    // Per pitch type columns
+    const updatePayload: Record<string, any> = { Stuff_plus: r.overall };
     for (const pt of ALL_PITCH_TYPES) {
       const colKey = PITCH_COL_KEYS[pt];
       const pitchData = r.byPitch[pt];
@@ -335,32 +236,23 @@ export async function calculateConferenceStuffPlusV2(
     const { error } = await (supabase as any)
       .from("Conference Stats")
       .update(updatePayload)
-      .eq("conference abbreviation", r.conference)
+      .eq("conference_id", r.conference_id)
       .eq("season", season);
 
     if (error) {
-      // If columns don't exist yet, just write the overall
       const { error: fallbackErr } = await (supabase as any)
         .from("Conference Stats")
         .update({ Stuff_plus: r.overall })
-        .eq("conference abbreviation", r.conference)
+        .eq("conference_id", r.conference_id)
         .eq("season", season);
-
-      if (fallbackErr) {
-        errors.push(`Update ${r.conference}: ${fallbackErr.message}`);
-      } else {
-        written++;
-      }
+      if (fallbackErr) errors.push(`Update ${r.conference}: ${fallbackErr.message}`);
+      else written++;
     } else {
       written++;
     }
   }
-
-  console.timeEnd("[ConfStuff+V2] 6. write to Conference Stats");
+  console.timeEnd("[ConfStuff+V2] 5. write to Conference Stats");
   console.timeEnd("[ConfStuff+V2] TOTAL");
 
-  return {
-    report: { overall: overallResults, written },
-    errors,
-  };
+  return { report: { overall: overallResults, written }, errors };
 }

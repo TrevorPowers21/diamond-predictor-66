@@ -110,7 +110,7 @@ function BarGroup({ bars }: { bars: BarConfig[] }) {
 
 export default function PitcherPage() {
   const { id } = useParams<{ id: string }>();
-  const [selectedSeason, setSelectedSeason] = useState<number>(2025);
+  const [selectedSeason, setSelectedSeason] = useState<number>(2026);
   const [seasonOpen, setSeasonOpen] = useState(false);
   const seasonRef = useRef<HTMLDivElement>(null);
 
@@ -128,11 +128,11 @@ export default function PitcherPage() {
 
   const { data: pitchers = [], isLoading } = useSavantPitchers(selectedSeason);
   const { data: careerRows = [] } = usePitcherCareer(id);
-  const { conferenceStatsByKey } = useConferenceStats(2025);
+  const { conferenceStatsByKey } = useConferenceStats(2026);
 
   // Stuff+ table has its own season state since the dropdown only includes
   // seasons that have Stuff+ data (forward only, no historical backfill).
-  const [stuffSeason, setStuffSeason] = useState<number>(2025);
+  const [stuffSeason, setStuffSeason] = useState<number>(2026);
   const { data: stuffRows = [] } = usePitcherStuffPlus(id, stuffSeason);
 
   const availableSeasons = useMemo(() => {
@@ -198,7 +198,7 @@ export default function PitcherPage() {
             <PitcherStuffPlusTable
               rows={stuffRows}
               selectedSeason={stuffSeason}
-              availableSeasons={[2025, 2024, 2023]}
+              availableSeasons={[2026, 2025, 2024, 2023]}
               onSeasonChange={setStuffSeason}
               overallStuffPlus={player.stuff_plus}
             />
@@ -335,7 +335,7 @@ export default function PitcherPage() {
                           className="absolute left-0 top-full z-20 mt-1 min-w-full overflow-hidden border shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]"
                           style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
                         >
-                          {(availableSeasons.length > 0 ? availableSeasons : [2025]).map((s) => {
+                          {(availableSeasons.length > 0 ? availableSeasons : [2026]).map((s) => {
                             const isActive = s === selectedSeason;
                             return (
                               <button

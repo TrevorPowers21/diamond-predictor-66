@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
-import { DEMO_SCHOOL } from "@/lib/demoSchool";
+import { CURRENT_SEASON, PRIOR_SEASON } from "@/lib/seasonConstants";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,7 @@ import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { usePitcherRoleOverrides } from "@/hooks/usePitcherRoleOverrides";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
+import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { computePitcherProjection } from "@/lib/pitcherProjection";
@@ -926,7 +927,7 @@ export default function TeamBuilder() {
   const [metricsUploadOpen, setMetricsUploadOpen] = useState(false);
   const pitchingEq = useMemo(() => readPitchingWeights(), []);
   const pitchingPowerEq = usePitchingEquationWeights();
-  const { conferenceStats: newConfStats } = useConferenceStats(2025);
+  const { conferenceStats: newConfStats } = useConferenceStats(2026);
 
   // Derive pitching conference plus-stats lookup from Supabase conference stats
   const pitchingConfLookup = useMemo(() => {
@@ -969,7 +970,7 @@ export default function TeamBuilder() {
   }, [newConfStats, pitchingEq]);
 
   const [buildName, setBuildName] = useState("My Team Build");
-  const [selectedTeam, setSelectedTeam] = useState<string>(DEMO_SCHOOL.name);
+  const [selectedTeam, setSelectedTeam] = useState<string>("");
   const [totalBudget, setTotalBudget] = useState<number>(0);
   const [rosterPlayers, setRosterPlayers] = useState<BuildPlayer[]>([]);
   const [dirty, setDirty] = useState(false);
@@ -1016,6 +1017,18 @@ export default function TeamBuilder() {
   // Fetch teams from Teams Table
   const { teams } = useTeamsTable();
 
+  // When the user is impersonating a customer team (or has a default team),
+  // auto-fill the team picker with that school. Replaces the old
+  // DEMO_SCHOOL.name default. Only fires when no team is currently picked
+  // and no build is loaded — never overrides an active selection.
+  const { schoolName: effectiveSchoolName } = useEffectiveSchool();
+  useEffect(() => {
+    if (!effectiveSchoolName) return;
+    if (selectedBuildId) return;
+    if (selectedTeam) return;
+    setSelectedTeam(effectiveSchoolName);
+  }, [effectiveSchoolName, selectedBuildId, selectedTeam]);
+
   const selectedTeamRow = useMemo(() => {
     if (!selectedTeam) return null;
     const exact = (teams as TeamRow[]).find((t) => t.name === selectedTeam);
@@ -1028,13 +1041,13 @@ export default function TeamBuilder() {
   const selectedTeamId = selectedTeamRow?.id ?? null;
 
   const { data: remoteEquationValues = {} } = useQuery({
-    queryKey: ["admin-ui-equation-values"],
+    queryKey: ["admin-ui-equation-values", CURRENT_SEASON],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("model_config")
         .select("config_key, config_value")
         .eq("model_type", "admin_ui")
-        .eq("season", 2025);
+        .eq("season", CURRENT_SEASON);
       if (error) throw error;
       const map: Record<string, number> = {};
       for (const row of data || []) map[row.config_key] = Number(row.config_value);
@@ -1164,16 +1177,18 @@ export default function TeamBuilder() {
     return out;
   }, [teams, hitterStats, powerRatingsData, exitPositions]);
 
-  // PA lookup by player UUID for risk assessment sample size
+  // PA lookup by player UUID for risk assessment sample size. Uses PRIOR_SEASON
+  // because risk is measured against the data the projection was BUILT on; the
+  // in-progress current season would falsely flag every player as thin sample.
   const { data: hitterMasterPaMap = new Map<string, number>() } = useQuery({
-    queryKey: ["team-builder-pa-lookup"],
+    queryKey: ["team-builder-pa-lookup", PRIOR_SEASON],
     queryFn: async () => {
       const map = new Map<string, number>();
       // Get source_player_id → PA from Hitter Master
       const { data: hmRows } = await (supabase as any)
         .from("Hitter Master")
         .select("source_player_id, pa, ab")
-        .eq("Season", 2025)
+        .eq("Season", PRIOR_SEASON)
         .gt("ab", 0);
       const sourceIdToPa = new Map<string, number>();
       for (const r of (hmRows || [])) {
@@ -1201,32 +1216,67 @@ export default function TeamBuilder() {
   const { data: seasonUsage = {
     thinSample: new Map<string, boolean>(),
     hitterAb: new Map<string, number>(),
+    hitterAbByNameTeam: new Map<string, number>(),
     pitcherGs: new Map<string, number>(),
     pitcherG: new Map<string, number>(),
   } } = useQuery({
-    queryKey: ["team-builder-season-usage-lookup"],
+    queryKey: ["team-builder-season-usage-lookup-v5"],
     queryFn: async () => {
       const thinSample = new Map<string, boolean>();
       const hitterAb = new Map<string, number>();
+      const hitterAbByNameTeam = new Map<string, number>();
       const pitcherGs = new Map<string, number>();
       const pitcherG = new Map<string, number>();
-      const [{ data: hmRows }, { data: pmRows }, { data: playerRows }] = await Promise.all([
-        (supabase as any)
-          .from("Hitter Master")
-          .select("source_player_id, ab, combined_used")
-          .eq("Season", 2025),
-        (supabase as any)
-          .from("Pitching Master")
-          .select("source_player_id, IP, GS, G, combined_used")
-          .eq("Season", 2025),
-        supabase.from("players").select("id, source_player_id"),
+      // Paginate the master tables — Supabase caps default selects at 1000 rows.
+      const fetchAllPaged = async <T,>(builder: () => any): Promise<T[]> => {
+        const out: T[] = [];
+        let from = 0;
+        const PAGE = 1000;
+        while (true) {
+          const { data, error } = await builder().range(from, from + PAGE - 1);
+          if (error) throw error;
+          out.push(...((data || []) as T[]));
+          if (!data || data.length < PAGE) break;
+          from += PAGE;
+        }
+        return out;
+      };
+      const [hmRows, pmRows, playerRows] = await Promise.all([
+        fetchAllPaged<any>(() =>
+          (supabase as any)
+            .from("Hitter Master")
+            .select("source_player_id, pa, ab, combined_used, Season, playerFullName, Team")
+            .eq("Season", CURRENT_SEASON),
+        ),
+        fetchAllPaged<any>(() =>
+          (supabase as any)
+            .from("Pitching Master")
+            .select("source_player_id, IP, GS, G, combined_used")
+            .eq("Season", CURRENT_SEASON),
+        ),
+        fetchAllPaged<any>(() =>
+          supabase.from("players").select("id, source_player_id"),
+        ),
       ]);
       const hitterBySource = new Map<string, { ab: number; thin: boolean }>();
       const pitcherBySource = new Map<string, { gs: number; g: number; thin: boolean }>();
       for (const r of (hmRows || [])) {
-        if (!r.source_player_id) continue;
-        const ab = Number(r.ab) || 0;
-        hitterBySource.set(r.source_player_id, { ab, thin: ab < 15 && !r.combined_used });
+        // 2026 PA (current season). Returners with low 2026 PA are correctly
+        // flagged as bench/utility regardless of their prior-season totals.
+        const playingTime = Number(r.pa ?? r.ab) || 0;
+        if (r.source_player_id) {
+          const existing = hitterBySource.get(r.source_player_id);
+          if (!existing || playingTime > existing.ab) {
+            hitterBySource.set(r.source_player_id, { ab: playingTime, thin: playingTime < 15 && !r.combined_used });
+          }
+        }
+        // Name+team fallback for players whose source_player_id doesn't reconcile
+        // with the Hitter Master keys (drift between players table and master ingestion).
+        const nameKey = `${normalizeName(r.playerFullName || "")}|${normalizeName(r.Team || "")}`;
+        if (nameKey !== "|") {
+          const prev = hitterAbByNameTeam.get(nameKey) ?? 0;
+          if (playingTime > prev) hitterAbByNameTeam.set(nameKey, playingTime);
+        }
       }
       for (const r of (pmRows || [])) {
         if (!r.source_player_id) continue;
@@ -1249,7 +1299,7 @@ export default function TeamBuilder() {
           if (pit.thin) thinSample.set(p.id, true);
         }
       }
-      return { thinSample, hitterAb, pitcherGs, pitcherG };
+      return { thinSample, hitterAb, hitterAbByNameTeam, pitcherGs, pitcherG };
     },
     staleTime: 30 * 60 * 1000,
   });
@@ -1441,7 +1491,7 @@ export default function TeamBuilder() {
         (row.obp_plus != null ? 1 : 0) +
         (row.iso_plus != null ? 1 : 0) +
         (row.stuff_plus != null ? 1 : 0) +
-        (row.season === 2025 ? 2 : 0);
+        (row.season === 2026 ? 2 : 0);
       const existing = byConf.get(key);
       if (!existing || score > existing.score) {
         byConf.set(key, { row, score });
@@ -1959,7 +2009,10 @@ export default function TeamBuilder() {
       return;
     }
     const selectedTeamKey = normalizeName(selectedTeam);
-    if (autoSeededTeamRef.current === selectedTeamKey) return;
+    // Include seasonUsage load state so the effect re-runs once the playing-time
+    // maps populate after the initial seed (which may have happened with empty maps).
+    const seedKey = `${selectedTeamKey}|usage:${(seasonUsage.hitterAbByNameTeam?.size ?? 0) > 0 ? "loaded" : "empty"}`;
+    if (autoSeededTeamRef.current === seedKey) return;
     // Wait for the query to have actually fetched data for this team
     if (returnersUpdatedAt === 0) return;
 
@@ -1986,9 +2039,11 @@ export default function TeamBuilder() {
       const seedPitcherG = seasonUsage.pitcherG.get(player.id) ?? pmRec?.g ?? 0;
       const seedIsStarter = seedPitcherGs >= 5 && seedPitcherG > 0 && (seedPitcherGs / seedPitcherG) >= 0.5;
       const inferredRole: "SP" | "RP" | "SM" = overrideRole || (seedPitcherG > 0 ? (seedIsStarter ? "SP" : "RP") : (pmRole || asPitcherRole(player.position || null) || "RP"));
-      // Hitter role seed: tier by 2025 AB (coach can override in the UI).
-      // Starter 150+, Utility 60-149, Bench <60.
-      const seedHitterAb = seasonUsage.hitterAb.get(player.id) ?? 0;
+      // Hitter role seed: tier by PA (coach can override in the UI).
+      // Starter 150+, Utility 60-149, Bench <60. Falls back to name+team
+      // when the player.source_player_id doesn't reconcile with master ingestion.
+      const _hNameKey = `${normalizeName(`${player.first_name || ""} ${player.last_name || ""}`.trim())}|${normalizeName(player.team || "")}`;
+      const seedHitterAb = seasonUsage.hitterAb?.get(player.id) ?? seasonUsage.hitterAbByNameTeam?.get(_hNameKey) ?? 0;
       const seedHitterDepth: "starter" | "utility" | "bench" =
         seedHitterAb >= 150 ? "starter" : seedHitterAb >= 60 ? "utility" : "bench";
       return {
@@ -2025,11 +2080,11 @@ export default function TeamBuilder() {
       };
     }).filter(Boolean) as BuildPlayer[];
 
-    if (roster.length > 0 || autoSeededTeamRef.current !== selectedTeamKey) {
+    if (roster.length > 0 || autoSeededTeamRef.current !== seedKey) {
       setRosterPlayers(roster);
-      autoSeededTeamRef.current = selectedTeamKey;
+      autoSeededTeamRef.current = seedKey;
     }
-  }, [returners, returnersUpdatedAt, selectedTeam, selectedBuildId, playerOverrides]);
+  }, [returners, returnersUpdatedAt, selectedTeam, selectedBuildId, playerOverrides, seasonUsage]);
 
   // Restore unsaved Team Builder draft when coming back from another page.
   useEffect(() => {
@@ -2053,7 +2108,7 @@ export default function TeamBuilder() {
 
       setSelectedBuildId(draft.selectedBuildId ?? null);
       setBuildName(draft.buildName ?? "My Team Build");
-      setSelectedTeam(draft.selectedTeam ?? DEMO_SCHOOL.name);
+      setSelectedTeam(draft.selectedTeam ?? "");
       setTotalBudget(Number(draft.totalBudget) || 0);
       setRosterPlayers(Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers : []);
       setProgramTierMultiplier(Number(draft.programTierMultiplier) || 1.2);
@@ -2114,6 +2169,26 @@ export default function TeamBuilder() {
     setProgramTierConference(conf);
     setProgramTierMultiplier(getProgramTierMultiplierByConference(conf, DEFAULT_NIL_TIER_MULTIPLIERS));
   }, [selectedTeam, teams]);
+
+  // Reset depth assignments when the selected team changes (after the initial
+  // localStorage restore). Without this, old indices silently re-assign to
+  // whoever happens to be at that array position in the new team's roster.
+  const lastDepthTeamRef = useRef<string | null>(null);
+  useEffect(() => {
+    const current = selectedTeam || null;
+    const last = lastDepthTeamRef.current;
+    if (last === null) {
+      // First settling of selectedTeam (initial mount + draft restore) — record
+      // it without clearing so the restored depth chart stays put.
+      lastDepthTeamRef.current = current;
+      return;
+    }
+    if (current !== last) {
+      lastDepthTeamRef.current = current;
+      setDepthAssignments({});
+      setDepthPlaceholders({});
+    }
+  }, [selectedTeam]);
 
   const askBuildName = (seed?: string) => {
     const fallback = selectedTeam ? `${selectedTeam} Build` : "My Team Build";
@@ -2206,8 +2281,10 @@ export default function TeamBuilder() {
       setSelectedBuildId(null);
       setRosterPlayers([]);
       setBuildName("My Team Build");
-      setSelectedTeam(DEMO_SCHOOL.name);
+      setSelectedTeam("");
       setTotalBudget(0);
+      setDepthAssignments({});
+      setDepthPlaceholders({});
       queryClient.invalidateQueries({ queryKey: ["team-builds"] });
       toast({ title: "Build deleted" });
     },
@@ -2425,13 +2502,18 @@ export default function TeamBuilder() {
       const fipPr = hr9Pr != null && bb9Pr != null && k9Pr != null
         ? (hr9Pr * EQ.p_fip_hr9_power_rating_plus_weight) + (bb9Pr * EQ.p_fip_bb9_power_rating_plus_weight) + (k9Pr * EQ.p_fip_k9_power_rating_plus_weight)
         : null;
+      // Prefer pipeline-computed PR+ values stored on the Pitching Master row
+      // over the live recompute above. The live recompute uses hardcoded EQ
+      // weights that drift away from `model_config` whenever the equation gets
+      // recalibrated — silently producing TB-returners projections that don't
+      // match PitcherProfile (which always reads the stored values).
       addRec(name, team, {
-        eraPrPlus: eraPr,
-        fipPrPlus: fipPr,
-        whipPrPlus: whipPr,
-        k9PrPlus: k9Pr,
-        hr9PrPlus: hr9Pr,
-        bb9PrPlus: bb9Pr,
+        eraPrPlus: pr.era_pr_plus ?? eraPr,
+        fipPrPlus: pr.fip_pr_plus ?? fipPr,
+        whipPrPlus: pr.whip_pr_plus ?? whipPr,
+        k9PrPlus: pr.k9_pr_plus ?? k9Pr,
+        hr9PrPlus: pr.hr9_pr_plus ?? hr9Pr,
+        bb9PrPlus: pr.bb9_pr_plus ?? bb9Pr,
       }, pr.source_player_id);
     }
     return { byKey, byName, bySourceId };
@@ -4009,8 +4091,34 @@ export default function TeamBuilder() {
     return /^(SP|RP|CL|P|LHP|RHP)/i.test(pos);
   };
 
-  const positionPlayers = rosterPlayers.filter((p) => !isPitcher(p));
-  const pitchers = rosterPlayers.filter((p) => isPitcher(p));
+  const hitterDepthRank = (role: BuildPlayer["depth_role"]) =>
+    role === "starter" ? 0 : role === "utility" ? 1 : 2;
+  const pitcherDepthRank = (role: BuildPlayer["depth_role"]) =>
+    role === "weekend_starter" ? 0 :
+    role === "weekday_starter" ? 1 :
+    role === "high_leverage_reliever" ? 2 :
+    role === "low_impact_reliever" ? 3 :
+    4;
+  const positionPlayers = rosterPlayers
+    .filter((p) => !isPitcher(p))
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => {
+      const ra = hitterDepthRank(a.p.depth_role);
+      const rb = hitterDepthRank(b.p.depth_role);
+      if (ra !== rb) return ra - rb;
+      return a.i - b.i;
+    })
+    .map((x) => x.p);
+  const pitchers = rosterPlayers
+    .filter((p) => isPitcher(p))
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => {
+      const ra = pitcherDepthRank(a.p.depth_role);
+      const rb = pitcherDepthRank(b.p.depth_role);
+      if (ra !== rb) return ra - rb;
+      return a.i - b.i;
+    })
+    .map((x) => x.p);
   const targetPlayers = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target");
   const targetPositionPlayers = targetPlayers.filter((p) => !isPitcher(p));
   const targetPitchers = targetPlayers.filter((p) => isPitcher(p));
@@ -4478,13 +4586,29 @@ export default function TeamBuilder() {
         }
       }
 
-      // Auto-assign pitchers: weekend starters → SP slots, relievers → RP slots
+      // Auto-assign pitchers: weekend starters → SP slots, relievers → RP slots.
+      // Sort so weekend_starters get SP1→SP3 before weekday_starters fill SP4→SP5,
+      // and high_leverage_relievers get RP1→RP4 before low_impact fill RP5→RP8.
+      const spRank = (p: BuildPlayer) => p.depth_role === "weekend_starter" ? 0 : 1;
+      const rpRank = (p: BuildPlayer) => p.depth_role === "high_leverage_reliever" ? 0 : 1;
       const spPitchers = rosterPlayers
         .map((p, idx) => ({ p, idx }))
-        .filter(({ p, idx }) => !usedIdxs.has(idx) && (p.roster_status || "returner") !== "leaving" && isPitcher(p) && (p.depth_role === "weekend_starter" || p.depth_role === "weekday_starter"));
+        .filter(({ p, idx }) => !usedIdxs.has(idx) && (p.roster_status || "returner") !== "leaving" && isPitcher(p) && (p.depth_role === "weekend_starter" || p.depth_role === "weekday_starter"))
+        .sort((a, b) => {
+          const ra = spRank(a.p);
+          const rb = spRank(b.p);
+          if (ra !== rb) return ra - rb;
+          return a.idx - b.idx;
+        });
       const rpPitchers = rosterPlayers
         .map((p, idx) => ({ p, idx }))
-        .filter(({ p, idx }) => !usedIdxs.has(idx) && (p.roster_status || "returner") !== "leaving" && isPitcher(p) && (p.depth_role === "high_leverage_reliever" || p.depth_role === "low_impact_reliever"));
+        .filter(({ p, idx }) => !usedIdxs.has(idx) && (p.roster_status || "returner") !== "leaving" && isPitcher(p) && (p.depth_role === "high_leverage_reliever" || p.depth_role === "low_impact_reliever"))
+        .sort((a, b) => {
+          const ra = rpRank(a.p);
+          const rb = rpRank(b.p);
+          if (ra !== rb) return ra - rb;
+          return a.idx - b.idx;
+        });
       // Fallback: any unassigned pitchers
       const remainingPitchers = rosterPlayers
         .map((p, idx) => ({ p, idx }))
@@ -4527,7 +4651,13 @@ export default function TeamBuilder() {
     () =>
       rosterPlayers
         .map((rp, idx) => ({ rp, idx }))
-        .filter(({ rp }) => !isPitcher(rp) && (rp.roster_status || "returner") !== "leaving"),
+        .filter(({ rp }) => !isPitcher(rp) && (rp.roster_status || "returner") !== "leaving")
+        .sort((a, b) => {
+          const ra = hitterDepthRank(a.rp.depth_role);
+          const rb = hitterDepthRank(b.rp.depth_role);
+          if (ra !== rb) return ra - rb;
+          return a.idx - b.idx;
+        }),
     [rosterPlayers],
   );
 
@@ -4535,7 +4665,13 @@ export default function TeamBuilder() {
     () =>
       rosterPlayers
         .map((rp, idx) => ({ rp, idx }))
-        .filter(({ rp }) => isPitcher(rp) && (rp.roster_status || "returner") !== "leaving"),
+        .filter(({ rp }) => isPitcher(rp) && (rp.roster_status || "returner") !== "leaving")
+        .sort((a, b) => {
+          const ra = pitcherDepthRank(a.rp.depth_role);
+          const rb = pitcherDepthRank(b.rp.depth_role);
+          if (ra !== rb) return ra - rb;
+          return a.idx - b.idx;
+        }),
     [rosterPlayers],
   );
 
@@ -4688,6 +4824,12 @@ export default function TeamBuilder() {
     setBuildName("My Team Build");
     setTotalBudget(0);
     setDirty(false);
+    setSelectedTeam(effectiveSchoolName ?? "");
+    setTeamSearchQuery(effectiveSchoolName ?? "");
+    // Clear depth assignments — old indices would silently point at the new
+    // roster's players at those array slots, which is worse than empty.
+    setDepthAssignments({});
+    setDepthPlaceholders({});
     skipAutoSeedOnceRef.current = true;
     // Rebuild roster from returners only (no targets)
     const roster: BuildPlayer[] = returners.map((r: any) => {
@@ -4713,9 +4855,11 @@ export default function TeamBuilder() {
       const seedPitcherG = seasonUsage.pitcherG.get(player.id) ?? pmRec?.g ?? 0;
       const seedIsStarter = seedPitcherGs >= 5 && seedPitcherG > 0 && (seedPitcherGs / seedPitcherG) >= 0.5;
       const inferredRole: "SP" | "RP" | "SM" = overrideRole || (seedPitcherG > 0 ? (seedIsStarter ? "SP" : "RP") : (pmRole || asPitcherRole(player.position || null) || "RP"));
-      // Hitter role seed: tier by 2025 AB (coach can override in the UI).
-      // Starter 150+, Utility 60-149, Bench <60.
-      const seedHitterAb = seasonUsage.hitterAb.get(player.id) ?? 0;
+      // Hitter role seed: tier by PA (coach can override in the UI).
+      // Starter 150+, Utility 60-149, Bench <60. Falls back to name+team
+      // when the player.source_player_id doesn't reconcile with master ingestion.
+      const _hNameKey = `${normalizeName(`${player.first_name || ""} ${player.last_name || ""}`.trim())}|${normalizeName(player.team || "")}`;
+      const seedHitterAb = seasonUsage.hitterAb?.get(player.id) ?? seasonUsage.hitterAbByNameTeam?.get(_hNameKey) ?? 0;
       const seedHitterDepth: "starter" | "utility" | "bench" =
         seedHitterAb >= 150 ? "starter" : seedHitterAb >= 60 ? "utility" : "bench";
       return {

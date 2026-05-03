@@ -15,12 +15,48 @@ type AddMissingResult = {
 };
 
 /**
+ * Load a map from Teams Table.id (per-season UUID) → Teams Table.source_id
+ * (stable program identifier). Master tables store the per-season UUID in
+ * their TeamID column, but `players.source_team_id` is meant to be the
+ * program-level identifier — so we translate via this map.
+ */
+async function loadTeamIdToSourceIdMap(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("Teams Table")
+      .select("id, source_id")
+      .range(from, from + 999);
+    if (error) throw error;
+    for (const row of data || []) {
+      if (row.id && row.source_id) map.set(row.id, String(row.source_id));
+    }
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  return map;
+}
+
+/**
  * Non-destructive sync: find source_player_ids in Hitter Master + Pitching Master
  * that don't exist in the players table yet, and insert them. Does NOT delete or
  * modify any existing player rows.
  */
-export async function addMissingPlayers(season = 2025): Promise<AddMissingResult> {
+export async function addMissingPlayers(season = 2026): Promise<AddMissingResult> {
   const result: AddMissingResult = { inserted: 0, skipped: 0, errors: [] };
+
+  // Build the Teams Table id → source_id map up front so we can translate the
+  // master tables' TeamID (which is the per-season Teams Table UUID) into the
+  // stable program identifier when writing players.source_team_id.
+  console.log("[addMissing] Loading Teams Table id → source_id map...");
+  let teamSourceMap: Map<string, string>;
+  try {
+    teamSourceMap = await loadTeamIdToSourceIdMap();
+  } catch (err: any) {
+    result.errors.push(`Teams Table load: ${err?.message || String(err)}`);
+    return result;
+  }
 
   // 1. Load all existing source_player_ids from players table
   console.log("[addMissing] Loading existing player source IDs...");
@@ -93,7 +129,7 @@ export async function addMissingPlayers(season = 2025): Promise<AddMissingResult
       bats_hand: h.BatHand ?? null,
       throws_hand: h.ThrowHand ?? null,
       source_player_id: sid,
-      source_team_id: h.TeamID ?? null,
+      source_team_id: h.TeamID ? (teamSourceMap.get(h.TeamID) ?? null) : null,
       transfer_portal: false,
       from_team: h.Team ?? null,
       pa: h.pa ?? null,
@@ -115,7 +151,7 @@ export async function addMissingPlayers(season = 2025): Promise<AddMissingResult
       position: role === "SP" || role === "RP" ? role : "P",
       throws_hand: p.ThrowHand ?? null,
       source_player_id: sid,
-      source_team_id: p.TeamID ?? null,
+      source_team_id: p.TeamID ? (teamSourceMap.get(p.TeamID) ?? null) : null,
       transfer_portal: false,
       from_team: p.Team ?? null,
       ip: p.IP ?? null,
@@ -154,8 +190,20 @@ export async function addMissingPlayers(season = 2025): Promise<AddMissingResult
  * Players who don't appear in that season fall back to the most recent season
  * they DO appear in.
  */
-export async function syncMasterToPlayers(season = 2025): Promise<SyncResult> {
+export async function syncMasterToPlayers(season = 2026): Promise<SyncResult> {
   const result: SyncResult = { hittersInserted: 0, pitchersInserted: 0, errors: [] };
+
+  // Build the Teams Table id → source_id map up front so source_team_id on
+  // each player ends up as the program-level identifier, not the per-season
+  // Teams Table UUID that lives on master rows' TeamID column.
+  console.log("[syncMaster] Loading Teams Table id → source_id map...");
+  let teamSourceMap: Map<string, string>;
+  try {
+    teamSourceMap = await loadTeamIdToSourceIdMap();
+  } catch (err: any) {
+    result.errors.push(`Teams Table load: ${err?.message || String(err)}`);
+    return result;
+  }
 
   // ─── Clear players table ─────────────────────────────────────────────
   console.log("[syncMaster] Clearing players table...");
@@ -174,6 +222,7 @@ export async function syncMasterToPlayers(season = 2025): Promise<SyncResult> {
       .from("Hitter Master")
       .select("source_player_id, playerFullName, Team, TeamID, Conference, Pos, BatHand, ThrowHand, Season, pa, ab")
       .order("Season", { ascending: false })
+      .order("source_player_id", { ascending: true })
       .range(from, from + 999);
     if (error) { result.errors.push(`Hitter Master load: ${error.message}`); break; }
     hitterRows.push(...(data || []));
@@ -190,6 +239,7 @@ export async function syncMasterToPlayers(season = 2025): Promise<SyncResult> {
       .from("Pitching Master")
       .select("source_player_id, playerFullName, Team, TeamID, Conference, ThrowHand, Role, Season, IP, G, GS")
       .order("Season", { ascending: false })
+      .order("source_player_id", { ascending: true })
       .range(from, from + 999);
     if (error) { result.errors.push(`Pitching Master load: ${error.message}`); break; }
     pitcherRows.push(...(data || []));
@@ -246,7 +296,7 @@ export async function syncMasterToPlayers(season = 2025): Promise<SyncResult> {
       position: h.Pos ?? null,
       bats_hand: h.BatHand ?? null,
       throws_hand: h.ThrowHand ?? null,
-      source_team_id: h.TeamID ?? null,
+      source_team_id: h.TeamID ? (teamSourceMap.get(h.TeamID) ?? null) : null,
       bestSeason: Number(h.Season) || 0,
       isPitcher: false,
       pa: h.pa ?? null,
@@ -289,7 +339,7 @@ export async function syncMasterToPlayers(season = 2025): Promise<SyncResult> {
       position,
       bats_hand: null,
       throws_hand: p.ThrowHand ?? null,
-      source_team_id: p.TeamID ?? null,
+      source_team_id: p.TeamID ? (teamSourceMap.get(p.TeamID) ?? null) : null,
       bestSeason: Number(p.Season) || 0,
       isPitcher: true,
       pa: null,
@@ -353,7 +403,8 @@ export async function syncMasterToPlayers(season = 2025): Promise<SyncResult> {
     if (t) {
       rec.team = t.team;
       rec.conference = t.conference;
-      rec.source_team_id = t.teamId;
+      // Translate per-season Teams Table UUID into the program-level source_id
+      rec.source_team_id = t.teamId ? (teamSourceMap.get(t.teamId) ?? null) : null;
     } else {
       // Player has no 2025 row — they're a departed player. Clear roster fields
       // so they don't pollute current rosters; profile lookups still work via id.
