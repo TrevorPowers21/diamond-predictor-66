@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/hooks/useAuth';
+import { useEffectiveSchool } from '@/hooks/useEffectiveSchool';
 
 interface SchoolBannerProps {
   schoolLogoUrl?: string;
@@ -17,8 +18,11 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
   const effectiveTeam = effectiveTeamId
     ? availableTeams.find((t) => t.id === effectiveTeamId) ?? null
     : null;
+  // Pulls logo + branding (split name + colors) from the SCHOOL_BRANDING
+  // lookup based on the impersonated school. Prop overrides logo only.
+  const { logoUrl: effectiveLogoUrl, branding } = useEffectiveSchool();
   const resolvedSchoolName = schoolName ?? effectiveTeam?.name ?? '';
-  const resolvedSchoolLogo = schoolLogoUrl ?? '';
+  const resolvedSchoolLogo = schoolLogoUrl ?? effectiveLogoUrl ?? '';
   const [showSchool, setShowSchool] = React.useState(false);
   const [hasAnimatedOnce, setHasAnimatedOnce] = React.useState(false);
   const [isHovering, setIsHovering] = React.useState(false);
@@ -163,7 +167,22 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
                     <div className="h-20 w-px bg-[#D4AF37]/30" />
                   </>
                 )}
-                {resolvedSchoolName ? (
+                {branding ? (
+                  <div>
+                    <h2
+                      className="text-2xl font-bold tracking-wider leading-none uppercase"
+                      style={{ fontFamily: "'Oswald', sans-serif", color: branding.primaryColor }}
+                    >
+                      {branding.displayName}
+                    </h2>
+                    <p
+                      className="text-4xl font-bold tracking-wide uppercase mt-0.5"
+                      style={{ fontFamily: "'Oswald', sans-serif", color: branding.secondaryColor }}
+                    >
+                      {branding.mascot}
+                    </p>
+                  </div>
+                ) : resolvedSchoolName ? (
                   <h2
                     className="text-2xl font-bold tracking-wider leading-none uppercase"
                     style={{ fontFamily: "'Oswald', sans-serif", color: '#D4AF37' }}

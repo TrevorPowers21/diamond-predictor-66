@@ -2,6 +2,50 @@ import { useMemo } from "react";
 import { useAuth } from "./useAuth";
 import { useTeamsTable } from "./useTeamsTable";
 
+// School branding lookup keyed by normalized school name. Drop a logo file
+// in /public and add an entry here when onboarding a new customer team.
+// Long-term this should move to columns on customer_teams; for now this
+// keeps it close to a one-line edit per school.
+//
+// `displayName` + `mascot` drive the two-line styled banner (e.g. KANSAS /
+// JAYHAWKS). `primaryColor` colors the top line; `secondaryColor` colors
+// the larger bottom mascot line.
+type SchoolBranding = {
+  logoUrl: string;
+  displayName: string;
+  mascot: string;
+  primaryColor: string;
+  secondaryColor: string;
+};
+
+const SCHOOL_BRANDING: Record<string, SchoolBranding> = {
+  "kansas jayhawks": {
+    logoUrl: "/Kansas Logo.svg",
+    displayName: "KANSAS",
+    mascot: "JAYHAWKS",
+    primaryColor: "#0051BA",   // KU Blue
+    secondaryColor: "#E8000D", // KU Crimson
+  },
+  "georgia bulldogs": {
+    logoUrl: "/Georgia_Athletics_logo.svg.webp",
+    displayName: "GEORGIA",
+    mascot: "BULLDOGS",
+    primaryColor: "#BA0C2F",   // UGA Red
+    secondaryColor: "#000000", // UGA Black
+  },
+};
+
+const normalizeForLookup = (name: string | null | undefined) =>
+  (name ?? "").toLowerCase().trim().replace(/\s+/g, " ");
+
+const resolveBranding = (...candidates: Array<string | null | undefined>): SchoolBranding | null => {
+  for (const c of candidates) {
+    const key = normalizeForLookup(c);
+    if (key && SCHOOL_BRANDING[key]) return SCHOOL_BRANDING[key];
+  }
+  return null;
+};
+
 /**
  * Bridges the auth `effectiveTeamId` (a customer_team UUID) to the school
  * the user is currently viewing as. This is the post-DEMO_SCHOOL replacement
@@ -24,30 +68,39 @@ export function useEffectiveSchool() {
   const { teams } = useTeamsTable();
 
   return useMemo(() => {
-    if (!effectiveTeamId) {
-      return { schoolName: null, schoolFullName: null, schoolTeamId: null };
-    }
+    const empty = { schoolName: null, schoolFullName: null, schoolTeamId: null, logoUrl: null, branding: null as SchoolBranding | null };
+    if (!effectiveTeamId) return empty;
     const customerTeam = availableTeams.find((t) => t.id === effectiveTeamId);
-    if (!customerTeam) {
-      return { schoolName: null, schoolFullName: null, schoolTeamId: null };
-    }
+    if (!customerTeam) return empty;
     const schoolTeamId = customerTeam.school_team_id;
     if (!schoolTeamId) {
-      // Customer team exists but isn't linked to a D1 program (admin
-      // didn't pick one). Fall back to the customer team's display name.
-      return { schoolName: customerTeam.name, schoolFullName: customerTeam.name, schoolTeamId: null };
+      const branding = resolveBranding(customerTeam.name);
+      return {
+        schoolName: customerTeam.name,
+        schoolFullName: customerTeam.name,
+        schoolTeamId: null,
+        logoUrl: branding?.logoUrl ?? null,
+        branding,
+      };
     }
     const schoolRow = teams.find((t) => t.id === schoolTeamId);
     if (!schoolRow) {
-      // Team Builder etc. expect the abbreviation/full_name string used in
-      // their pickers. If the school row isn't loaded yet, fall back to the
-      // customer team name so we still set _something_.
-      return { schoolName: customerTeam.name, schoolFullName: customerTeam.name, schoolTeamId };
+      const branding = resolveBranding(customerTeam.name);
+      return {
+        schoolName: customerTeam.name,
+        schoolFullName: customerTeam.name,
+        schoolTeamId,
+        logoUrl: branding?.logoUrl ?? null,
+        branding,
+      };
     }
+    const branding = resolveBranding(schoolRow.fullName, schoolRow.name, customerTeam.name);
     return {
       schoolName: schoolRow.name,
       schoolFullName: schoolRow.fullName,
       schoolTeamId,
+      logoUrl: branding?.logoUrl ?? null,
+      branding,
     };
   }, [effectiveTeamId, availableTeams, teams]);
 }
