@@ -1,6 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
-import { DEMO_SCHOOL } from "@/lib/demoSchool";
 import { CURRENT_SEASON, PRIOR_SEASON } from "@/lib/seasonConstants";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -970,7 +969,7 @@ export default function TeamBuilder() {
   }, [newConfStats, pitchingEq]);
 
   const [buildName, setBuildName] = useState("My Team Build");
-  const [selectedTeam, setSelectedTeam] = useState<string>(DEMO_SCHOOL.name);
+  const [selectedTeam, setSelectedTeam] = useState<string>("");
   const [totalBudget, setTotalBudget] = useState<number>(0);
   const [rosterPlayers, setRosterPlayers] = useState<BuildPlayer[]>([]);
   const [dirty, setDirty] = useState(false);
@@ -2096,7 +2095,7 @@ export default function TeamBuilder() {
 
       setSelectedBuildId(draft.selectedBuildId ?? null);
       setBuildName(draft.buildName ?? "My Team Build");
-      setSelectedTeam(draft.selectedTeam ?? DEMO_SCHOOL.name);
+      setSelectedTeam(draft.selectedTeam ?? "");
       setTotalBudget(Number(draft.totalBudget) || 0);
       setRosterPlayers(Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers : []);
       setProgramTierMultiplier(Number(draft.programTierMultiplier) || 1.2);
@@ -2269,7 +2268,7 @@ export default function TeamBuilder() {
       setSelectedBuildId(null);
       setRosterPlayers([]);
       setBuildName("My Team Build");
-      setSelectedTeam(DEMO_SCHOOL.name);
+      setSelectedTeam("");
       setTotalBudget(0);
       setDepthAssignments({});
       setDepthPlaceholders({});
@@ -4812,7 +4811,7 @@ export default function TeamBuilder() {
     setBuildName("My Team Build");
     setTotalBudget(0);
     setDirty(false);
-    setSelectedTeam(DEMO_SCHOOL.name);
+    setSelectedTeam("");
     setTeamSearchQuery("");
     // Clear depth assignments — old indices would silently point at the new
     // roster's players at those array slots, which is worse than empty.

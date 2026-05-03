@@ -10,7 +10,6 @@ import { cn } from "@/lib/utils";
 import { Eye, LogIn, X, CheckCircle, TrendingUp, Users, Calendar, Activity, ArrowRight } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import SchoolBanner from "@/components/SchoolBanner";
-import { DEMO_SCHOOL } from "@/lib/demoSchool";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
 
 type HitterRow = {
@@ -387,7 +386,7 @@ export default function Dashboard() {
                   <span className="flex items-center gap-1.5 ml-1">
                     <span className="text-muted-foreground">Auburn</span>
                     <ArrowRight className="h-3 w-3 shrink-0 text-blue-500" />
-                    <span className="font-semibold text-blue-600">{DEMO_SCHOOL.name || "Georgia"}</span>
+                    <span className="font-semibold text-blue-600">Georgia</span>
                   </span>
                   <span className="ml-auto text-[10px] text-muted-foreground font-mono">5h ago</span>
                 </div>

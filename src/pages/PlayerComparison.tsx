@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useState } from "react";
-import { DEMO_SCHOOL } from "@/lib/demoSchool";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
 import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -729,9 +728,9 @@ export default function PlayerComparison() {
   const [aPlayerSearch, setAPlayerSearch] = useState("");
   const [aPlayerOpen, setAPlayerOpen] = useState(false);
   const [aPlayerId, setAPlayerId] = useState("");
-  const [aTeamSearch, setATeamSearch] = useState(DEMO_SCHOOL.name);
+  const [aTeamSearch, setATeamSearch] = useState("");
   const [aTeamOpen, setATeamOpen] = useState(false);
-  const [aDestTeam, setADestTeam] = useState(DEMO_SCHOOL.name);
+  const [aDestTeam, setADestTeam] = useState("");
   const [aPitcherId, setAPitcherId] = useState("");
   const [aPitcherSearch, setAPitcherSearch] = useState("");
   const [aPitcherOpen, setAPitcherOpen] = useState(false);
@@ -741,9 +740,9 @@ export default function PlayerComparison() {
   const [bPlayerSearch, setBPlayerSearch] = useState("");
   const [bPlayerOpen, setBPlayerOpen] = useState(false);
   const [bPlayerId, setBPlayerId] = useState("");
-  const [bTeamSearch, setBTeamSearch] = useState(DEMO_SCHOOL.name);
+  const [bTeamSearch, setBTeamSearch] = useState("");
   const [bTeamOpen, setBTeamOpen] = useState(false);
-  const [bDestTeam, setBDestTeam] = useState(DEMO_SCHOOL.name);
+  const [bDestTeam, setBDestTeam] = useState("");
   const [bPitcherId, setBPitcherId] = useState("");
   const [bPitcherSearch, setBPitcherSearch] = useState("");
   const [bPitcherOpen, setBPitcherOpen] = useState(false);
