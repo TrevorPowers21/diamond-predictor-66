@@ -678,7 +678,11 @@ export default function TransferPortal() {
   );
 
   const filteredPlayers = useMemo(() => {
-    const isPitcher = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP|TWP)/i.test(String(pos || ""));
+    // TWP intentionally NOT treated as pitcher — two-way players default to
+    // the hitter side per TeamBuilder convention, so they should appear in
+    // the hitter dropdown. They show up in the pitcher dropdown via
+    // pitchingMasterRows when their IP qualifies them.
+    const isPitcher = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
     const q = normalizeKey(playerSearch);
     const pool = (q
       ? players.filter((p) =>
