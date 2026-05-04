@@ -30,6 +30,9 @@ import PlayerProfile from "./pages/PlayerProfile";
 import PitcherProfile from "./pages/PitcherProfile";
 import TeamBuilder from "./pages/TeamBuilder";
 import AdminDashboard from "./pages/AdminDashboard";
+import AdminTeams from "./pages/admin/AdminTeams";
+import AdminUsers from "./pages/admin/AdminUsers";
+import RoleGuard from "@/components/RoleGuard";
 import HighFollowList from "./pages/HighFollowList";
 
 const queryClient = new QueryClient();
@@ -56,6 +59,22 @@ const App = () => (
             <Route path="/dashboard/team-builder" element={<ProtectedRoute><TeamBuilder /></ProtectedRoute>} />
             <Route path="/dashboard/high-follow" element={<ProtectedRoute><HighFollowList /></ProtectedRoute>} />
             <Route path="/dashboard/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+            <Route
+              path="/dashboard/admin/teams"
+              element={
+                <ProtectedRoute>
+                  <RoleGuard allow={["superadmin"]}><AdminTeams /></RoleGuard>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/admin/users"
+              element={
+                <ProtectedRoute>
+                  <RoleGuard allow={["superadmin", "team_admin"]}><AdminUsers /></RoleGuard>
+                </ProtectedRoute>
+              }
+            />
             <Route path="/dashboard/*" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             {/* Savant — internal only. Gated by SavantRoute (auth + email allowlist). */}
             <Route

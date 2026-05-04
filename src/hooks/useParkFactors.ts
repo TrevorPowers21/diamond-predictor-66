@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { fetchParkFactorsMap, type ParkFactorsMap } from "@/lib/parkFactors";
 
-const EMPTY_MAP: ParkFactorsMap = { byName: {}, byTeamId: {} };
+const EMPTY_MAP: ParkFactorsMap = { byName: {}, byTeamId: {}, bySourceTeamId: {} };
 let _cache: ParkFactorsMap | null = null;
 let _cachePromise: Promise<ParkFactorsMap> | null = null;
 

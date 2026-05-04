@@ -46,31 +46,35 @@ export async function importHistoricalHittersCsv(csvText: string, season: number
     const idx = header.indexOf(name);
     return idx;
   };
+  const colAny = (...names: string[]) => {
+    for (const n of names) { const i = col(n); if (i >= 0) return i; }
+    return -1;
+  };
 
-  const iPlayerId = col("playerId");
-  const iFullName = col("playerFullName");
-  const iTeamLocation = col("newestTeamLocation");
-  const iTeamId = col("newestTeamId");
-  const iPos = col("pos");
-  const iBatsHand = col("batsHand");
-  const iThrowsHand = col("throwsHand");
-  const iAB = col("AB");
-  const iPA = col("PA");
-  const iAVG = col("AVG");
-  const iOBP = col("OBP");
-  const iSLG = col("SLG");
-  const iISO = col("ISO");
-  const iContact = col("Contact%");
-  const iLine = col("Line%");
-  const iExitVel = col("ExitVel");
-  const iPopup = col("Popup%");
-  const iBB = col("BB%");
-  const iChase = col("Chase%");
-  const iBarrel = col("Barrel%");
-  const iEv90 = col("90thExitVel");
-  const iPull = col("HPull%");
-  const iLA = col("LA10-30%");
-  const iGround = col("Ground%");
+  const iPlayerId = colAny("playerId", "PlayerId", "playerID");
+  const iFullName = colAny("playerFullName", "PlayerFullName", "player");
+  const iTeamLocation = colAny("newestTeamLocation", "TeamLocation", "Team");
+  const iTeamId = colAny("newestTeamId", "TeamId", "teamId");
+  const iPos = colAny("pos", "Pos", "position", "Position");
+  const iBatsHand = colAny("batsHand", "BatsHand", "batHand");
+  const iThrowsHand = colAny("throwsHand", "ThrowsHand", "throwHand");
+  const iAB = colAny("AB", "ab");
+  const iPA = colAny("PA", "pa");
+  const iAVG = colAny("AVG", "avg", "BA", "Avg", "Average");
+  const iOBP = colAny("OBP", "obp");
+  const iSLG = colAny("SLG", "slg");
+  const iISO = colAny("ISO", "iso");
+  const iContact = colAny("Contact%", "ContactPct", "contact_pct");
+  const iLine = colAny("Line%", "LineDrive%", "LD%", "line_drive_pct");
+  const iExitVel = colAny("ExitVel", "AvgEV", "avg_exit_velo");
+  const iPopup = colAny("Popup%", "PopUp%", "pop_up_pct");
+  const iBB = colAny("BB%", "BBPct", "bb_pct");
+  const iChase = colAny("Chase%", "ChasePct", "chase_pct");
+  const iBarrel = colAny("Barrel%", "BarrelPct", "barrel_pct");
+  const iEv90 = colAny("90thExitVel", "EV90", "ev90");
+  const iPull = colAny("HPull%", "Pull%", "pull_pct");
+  const iLA = colAny("LA10-30%", "LA1030%", "la_10_30_pct");
+  const iGround = colAny("Ground%", "GB%", "ground_pct");
 
   if (iPlayerId === -1 || iFullName === -1) {
     result.errors.push(`Missing required columns. Need: playerId, playerFullName. Found: ${header.join(", ")}`);
@@ -106,6 +110,7 @@ export async function importHistoricalHittersCsv(csvText: string, season: number
   // Parse rows
   const rows: any[] = [];
   const unresolvedTeams = new Set<string>();
+  let skippedNonHitters = 0;
 
   for (let i = 1; i < lines.length; i++) {
     // Handle CSV fields that might contain commas in quotes
@@ -114,6 +119,17 @@ export async function importHistoricalHittersCsv(csvText: string, season: number
     const sourcePlayerId = cols[iPlayerId];
     const fullName = cols[iFullName];
     if (!sourcePlayerId || !fullName) continue;
+
+    // Skip non-hitters: TruMedia exports every player into the hitter CSV
+    // (pitchers included) with null AB/PA. 0 AB AND 0 PA = not a hitter.
+    const paParsed = parseNum(cols[iPA]);
+    const abParsed = parseNum(cols[iAB]);
+    const hasPa = paParsed != null && paParsed > 0;
+    const hasAb = abParsed != null && abParsed > 0;
+    if (!hasPa && !hasAb) {
+      skippedNonHitters++;
+      continue;
+    }
 
     const teamLocation = cols[iTeamLocation] || "";
     const teamId = cols[iTeamId] || "";
@@ -138,8 +154,8 @@ export async function importHistoricalHittersCsv(csvText: string, season: number
       Pos: cols[iPos] || null,
       BatHand: cols[iBatsHand] || null,
       ThrowHand: cols[iThrowsHand] || null,
-      pa: parseNum(cols[iPA]),
-      ab: parseNum(cols[iAB]),
+      pa: paParsed,
+      ab: abParsed,
       AVG: parseNum(cols[iAVG]),
       OBP: parseNum(cols[iOBP]),
       SLG: parseNum(cols[iSLG]),
@@ -158,7 +174,7 @@ export async function importHistoricalHittersCsv(csvText: string, season: number
     });
   }
 
-  console.log(`[importHistorical] Parsed ${rows.length} rows for season ${season}`);
+  console.log(`[importHistorical v2-skip-non-hitters] Parsed ${rows.length} hitter rows for season ${season}, skipped ${skippedNonHitters} non-hitters (0 AB and 0 PA)`);
   result.teamsUnresolved = [...unresolvedTeams].sort();
 
   // Delete existing data for this season only to avoid duplicates

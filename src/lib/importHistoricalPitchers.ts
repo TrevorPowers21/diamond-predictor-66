@@ -130,12 +130,25 @@ export async function importHistoricalPitchersCsv(csvText: string, season: numbe
   const rows: any[] = [];
   const unresolvedTeams = new Set<string>();
 
+  let skippedNonPitchers = 0;
   for (let i = 1; i < lines.length; i++) {
     const cols = parseCsvRow(lines[i]);
 
     const sourcePlayerId = cols[iPlayerId];
     const fullName = cols[iFullName];
     if (!sourcePlayerId || !fullName) continue;
+
+    // Skip non-pitchers: TruMedia exports every player into the pitcher CSV
+    // with default values (e.g., FIP=3.18) for hitters who never pitched.
+    // 0 IP = not a pitcher, regardless of G/Role (hitters often have fielding
+    // appearances counted in G and a default Role).
+    const ipParsed = parseIp(getCol(iIP, cols));
+    const gParsed = parseNum(getCol(iG, cols));
+    const roleRaw = (getCol(iRole, cols) || "").trim();
+    if (ipParsed == null || ipParsed <= 0) {
+      skippedNonPitchers++;
+      continue;
+    }
 
     const teamLocation = getCol(iTeamLocation, cols) || "";
     const teamIdRaw = getCol(iTeamId, cols) || "";
@@ -157,9 +170,9 @@ export async function importHistoricalPitchersCsv(csvText: string, season: numbe
       conference_id: teamInfo?.conference_id || null,
       Season: season,
       ThrowHand: getCol(iThrowHand, cols) || null,
-      Role: getCol(iRole, cols) || null,
-      IP: parseIp(getCol(iIP, cols)),
-      G: parseNum(getCol(iG, cols)),
+      Role: roleRaw || null,
+      IP: ipParsed,
+      G: gParsed,
       GS: parseNum(getCol(iGS, cols)),
       ERA: parseNum(getCol(iERA, cols)),
       FIP: parseNum(getCol(iFIP, cols)),
@@ -184,7 +197,7 @@ export async function importHistoricalPitchersCsv(csvText: string, season: numbe
     });
   }
 
-  console.log(`[importHistoricalPitchers v2-fractional-IP] Parsed ${rows.length} rows for season ${season}, sample IP:`, rows.slice(0, 3).map(r => r.IP));
+  console.log(`[importHistoricalPitchers v4-ip-required] Parsed ${rows.length} pitcher rows for season ${season}, skipped ${skippedNonPitchers} non-pitchers (0 IP), sample IP:`, rows.slice(0, 3).map(r => r.IP));
   result.teamsUnresolved = [...unresolvedTeams].sort();
 
   // Clear existing data for this season only

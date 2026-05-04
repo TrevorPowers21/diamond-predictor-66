@@ -60,7 +60,7 @@ async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T
   await Promise.all(runners);
 }
 
-export async function inferAllClassTransitions(season = 2025): Promise<InferResult> {
+export async function inferAllClassTransitions(season = 2026): Promise<InferResult> {
   const result: InferResult = { updated: 0, skipped: 0, errors: 0 };
 
   // 1) Pre-fetch earliest season per source_player_id from BOTH master tables.

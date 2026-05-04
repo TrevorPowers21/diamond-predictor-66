@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -32,7 +32,7 @@ import {
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { profileRouteFor } from "@/lib/profileRoutes";
-import { readPlayerOverrides } from "@/lib/playerOverrides";
+import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
@@ -104,6 +104,7 @@ interface PitchingDashboardRow {
   whiff_score: number | null;
   bb_score: number | null;
   barrel_score: number | null;
+  ip: number | null;
   era: number | null;
   fip: number | null;
   whip: number | null;
@@ -640,8 +641,12 @@ export default function ReturningPlayers() {
     return [byName, byNameTeam, byPlayerId];
   }, [powerRatingsData]);
 
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<Array<{ id: string; first_name: string; last_name: string; team: string | null; position: string | null }>>([]);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
   const [positionFilters, setPositionFilters] = useState<Set<string>>(new Set());
   const positionFilter = positionFilters.size === 0 ? "all" : Array.from(positionFilters)[0];
   const setPositionFilter = (v: string) => setPositionFilters(v === "all" ? new Set() : new Set([v]));
@@ -667,9 +672,16 @@ export default function ReturningPlayers() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [bulkEditMode, setBulkEditMode] = useState(false);
   const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string | null; position?: string | null }>>({});
-  const playerOverrides = useMemo(() => readPlayerOverrides(), []);
+  const { overrides: playerOverrideMap } = usePlayerOverrides();
+  const playerOverrides = useMemo(() => {
+    const obj: Record<string, { position?: string | null }> = {};
+    for (const [pid, ov] of playerOverrideMap.entries()) {
+      obj[pid] = { position: ov.position };
+    }
+    return obj;
+  }, [playerOverrideMap]);
   const [showMissingOnly, setShowMissingOnly] = useState(false);
-  const [selectedSeason, setSelectedSeason] = useState<number>(2025);
+  const [selectedSeason, setSelectedSeason] = useState<number>(2026);
   const [dashboardView, setDashboardView] = useState<"hitting" | "pitching">("hitting");
   const [pitchingRoleFilter, setPitchingRoleFilter] = useState<"all" | "SP" | "RP">("all");
   const [pitchingSearch, setPitchingSearch] = useState("");
@@ -684,6 +696,47 @@ export default function ReturningPlayers() {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 220);
     return () => window.clearTimeout(t);
   }, [search]);
+
+  // Live search dropdown — queries all players (no PA filter)
+  useEffect(() => {
+    if (!debouncedSearch || debouncedSearch.length < 2) {
+      setSearchResults([]);
+      setShowSearchDropdown(false);
+      return;
+    }
+    let cancelled = false;
+    const q = debouncedSearch.replace(/[%]/g, "").trim();
+    const parts = q.split(/\s+/).filter(Boolean);
+    // If multi-word ("Hudson Barrett"), require BOTH parts to match somewhere in the name/team.
+    // Otherwise fall back to single-term OR across first_name/last_name/team.
+    const baseQuery = supabase
+      .from("players")
+      .select("id, first_name, last_name, team, position");
+    const withFilter = parts.length >= 2
+      ? baseQuery
+          .or(`first_name.ilike.%${parts[0]}%,last_name.ilike.%${parts[0]}%,team.ilike.%${parts[0]}%`)
+          .or(`first_name.ilike.%${parts[1]}%,last_name.ilike.%${parts[1]}%,team.ilike.%${parts[1]}%`)
+      : baseQuery.or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,team.ilike.%${q}%`);
+    withFilter
+      .limit(40)
+      .then(({ data }) => {
+        if (cancelled) return;
+        setSearchResults((data || []) as any);
+        setShowSearchDropdown(true);
+      });
+    return () => { cancelled = true; };
+  }, [debouncedSearch]);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSearchDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   useEffect(() => {
     try {
@@ -843,7 +896,6 @@ export default function ReturningPlayers() {
         pageSize: sortKey === "name" || FAST_DB_SORT_KEYS.includes(sortKey) ? pageSize : null,
         positionFilter,
         showMissingOnly,
-        debouncedSearch,
         sortKey,
         sortDir,
         seedSource,
@@ -900,10 +952,13 @@ export default function ReturningPlayers() {
           if (variantCandidates.length === 1) return variantCandidates[0];
           return null;
         })();
-        const seedEvScore = scoreFromNormal(seedPowerRow?.avgExitVelo ?? null, 86.2, 4.28);
-        const seedBarrelScore = scoreFromNormal(seedPowerRow?.barrel ?? null, 17.3, 7.89);
-        const seedContactScore = scoreFromNormal(seedPowerRow?.contact ?? null, 77.1, 6.6);
-        const seedChaseScore = scoreFromNormal(seedPowerRow?.chase ?? null, 23.1, 5.58, true);
+        // Prefer stored scores from Hitter Master (computed against current-season
+        // NCAA mean/sd by Compute Scores). Fall back to client-side scoring only
+        // if a row is unscored — but those constants are stale and will be wrong.
+        const seedEvScore = seedPowerRow?.evScore ?? scoreFromNormal(seedPowerRow?.avgExitVelo ?? null, 86.2, 4.28);
+        const seedBarrelScore = seedPowerRow?.barrelScore ?? scoreFromNormal(seedPowerRow?.barrel ?? null, 17.3, 7.89);
+        const seedContactScore = seedPowerRow?.contactScore ?? scoreFromNormal(seedPowerRow?.contact ?? null, 77.1, 6.6);
+        const seedChaseScore = seedPowerRow?.chaseScore ?? scoreFromNormal(seedPowerRow?.chase ?? null, 23.1, 5.58, true);
         // ID-first: try source_player_id, then name|team, then name-only
         const bySourceIdStats = player.source_player_id ? statsByPlayerId.get(player.source_player_id) : undefined;
         const candidates = statsByName.get(normalize(fullName)) || [];
@@ -956,8 +1011,7 @@ export default function ReturningPlayers() {
       if (
         FAST_DB_SORT_KEYS.includes(sortKey) &&
         positionFilter === "all" &&
-        !showMissingOnly &&
-        !debouncedSearch
+        !showMissingOnly
       ) {
         const orderColumn =
           sortKey === "p_war"
@@ -971,6 +1025,7 @@ export default function ReturningPlayers() {
           .in("model_type", ["returner", "transfer"])
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
+          .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
           .gte("players.pa", 75)
           .order(orderColumn, { ascending: sortDir === "asc", nullsFirst: false })
           .range(from, to);
@@ -1015,6 +1070,7 @@ export default function ReturningPlayers() {
             .in("model_type", ["returner", "transfer"])
             .eq("variant", "regular")
             .in("status", ["active", "departed"])
+            .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
             .gte("players.pa", 75)
             .range(predFrom, predFrom + PRED_PAGE_SIZE - 1);
           if (error) throw error;
@@ -1092,15 +1148,6 @@ export default function ReturningPlayers() {
         let allRows = dedupedRows.map((row: any) => toReturnerRow(row, row.players, nilByPlayer));
         if (positionFilters.size > 0) allRows = allRows.filter((p) => positionMatchesFilter(p.position));
         if (showMissingOnly) allRows = allRows.filter((p) => !p.team);
-        if (debouncedSearch) {
-          const q = debouncedSearch.toLowerCase();
-          allRows = allRows.filter(
-            (p) =>
-              `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
-              (p.team || "").toLowerCase().includes(q) ||
-              (p.conference || "").toLowerCase().includes(q),
-          );
-        }
 
         const metricFor = (p: ReturnerPlayer): number => {
           if (sortKey === "p_avg") return p.prediction.p_avg ?? -999;
@@ -1127,6 +1174,7 @@ export default function ReturningPlayers() {
       let playersQuery = supabase
         .from("players")
         .select("id, first_name, last_name, team, conference, position, class_year, transfer_portal, pa, ip", { count: "exact" } as any)
+        .not("position", "in", "(SP,RP,CL,P,LHP,RHP)")
         .gte("pa", 75)
         .order("last_name", { ascending: true })
         .order("first_name", { ascending: true })
@@ -1134,14 +1182,6 @@ export default function ReturningPlayers() {
       if (positionFilters.size === 1) playersQuery = playersQuery.eq("position", Array.from(positionFilters)[0]);
       else if (positionFilters.size > 1) playersQuery = playersQuery.in("position", Array.from(positionFilters));
       if (showMissingOnly) playersQuery = playersQuery.is("team", null);
-      if (debouncedSearch) {
-        const q = debouncedSearch.replace(/[%]/g, "").trim();
-        if (q) {
-          playersQuery = playersQuery.or(
-            `first_name.ilike.%${q}%,last_name.ilike.%${q}%,team.ilike.%${q}%,conference.ilike.%${q}%`,
-          );
-        }
-      }
       const { data: playerRows, error: playersErr, count } = await playersQuery;
       if (playersErr) throw playersErr;
 
@@ -1494,6 +1534,57 @@ export default function ReturningPlayers() {
   // Pitching Master – single source for stats + power metrics
   const { pitchers: pitchingMasterRows } = usePitchingSeedData();
 
+  // Pitcher projections from player_predictions (written by the recalc engine).
+  // Keyed by source_player_id so we can join against Pitching Master rows below.
+  // These are the canonical values shown on PitcherProfile; live compute here is
+  // a fallback for pitchers whose preds haven't been backfilled yet.
+  const { data: pitcherPredBySourceId } = useQuery({
+    queryKey: ["returning-pitcher-predictions-by-source-id"],
+    queryFn: async () => {
+      const map = new Map<string, {
+        p_era: number | null;
+        p_fip: number | null;
+        p_whip: number | null;
+        p_k9: number | null;
+        p_bb9: number | null;
+        p_hr9: number | null;
+        p_rv_plus: number | null;
+        pitcher_role: string | null;
+      }>();
+      let from = 0;
+      const PAGE = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("player_predictions")
+          .select("p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, players!inner(source_player_id)")
+          .eq("variant", "regular")
+          .in("status", ["active", "departed"])
+          .not("p_era", "is", null)
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        for (const r of (data || []) as any[]) {
+          const srcId = r.players?.source_player_id;
+          if (srcId) {
+            map.set(srcId, {
+              p_era: r.p_era,
+              p_fip: r.p_fip,
+              p_whip: r.p_whip,
+              p_k9: r.p_k9,
+              p_bb9: r.p_bb9,
+              p_hr9: r.p_hr9,
+              p_rv_plus: r.p_rv_plus,
+              pitcher_role: r.pitcher_role,
+            });
+          }
+        }
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+      }
+      return map;
+    },
+    staleTime: 30 * 60 * 1000,
+  });
+
   const pitchingRows = useMemo<PitchingDashboardRow[]>(() => {
     const eq = readPitchingWeights();
     const powerEq = pitchingPowerEq;
@@ -1614,6 +1705,27 @@ export default function ReturningPlayers() {
           const marketEligible = canShowPitchingMarketValue(normalizedTeam, conferenceForMarket);
           const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
 
+          // DB-stored projections take precedence over live compute. If the
+          // recalc engine has processed this pitcher, use those canonical
+          // values. pWAR is re-derived from the stored p_rv_plus + projected
+          // IP so it stays consistent with the displayed pRV+.
+          const dbPred = r.source_player_id ? pitcherPredBySourceId?.get(r.source_player_id) : null;
+          const dbPRvPlus = dbPred?.p_rv_plus ?? null;
+          const dbRole = (dbPred?.pitcher_role as "SP" | "RP" | "SM" | null) ?? null;
+          const effectiveRole: "SP" | "RP" | "SM" = dbRole || projectedRole;
+          const dbProjectedIp = effectiveRole === "SP" ? eq.pwar_ip_sp : effectiveRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
+          const dbPitcherValue = dbPRvPlus == null ? null : ((dbPRvPlus - 100) / 100);
+          const dbPWar = dbPitcherValue == null || eq.pwar_runs_per_win === 0
+            ? null
+            : ((((dbPitcherValue * (dbProjectedIp / 9) * eq.pwar_r_per_9) + ((dbProjectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
+          const dbMarketValue = (() => {
+            if (dbPWar == null) return null;
+            const dbPtm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
+            const dbPvm = getPitchingPvfForRole(effectiveRole, eq);
+            if (!marketEligible) return null;
+            return dbPWar * eq.market_dollars_per_war * dbPtm * dbPvm;
+          })();
+
           return {
             id: r.id || `pitching-master-${idx}`,
             playerName,
@@ -1632,18 +1744,28 @@ export default function ReturningPlayers() {
             k9_pr_plus: scoreObj.k9PrPlus,
             hr9_pr_plus: scoreObj.hr9PrPlus,
             bb9_pr_plus: scoreObj.bb9PrPlus,
+            ip: Number(r.ip) || 0,
             era, fip, whip, k9, bb9, hr9,
-            p_era: parkAdjustedEra, p_fip: pFip, p_whip: parkAdjustedWhip,
-            p_k9: pK9, p_bb9: pBb9, p_hr9: parkAdjustedHr9,
-            p_rv_plus: pRvPlus, p_war: pWar, market_value: marketValue,
+            p_era: dbPred?.p_era ?? parkAdjustedEra,
+            p_fip: dbPred?.p_fip ?? pFip,
+            p_whip: dbPred?.p_whip ?? parkAdjustedWhip,
+            p_k9: dbPred?.p_k9 ?? pK9,
+            p_bb9: dbPred?.p_bb9 ?? pBb9,
+            p_hr9: dbPred?.p_hr9 ?? parkAdjustedHr9,
+            p_rv_plus: dbPRvPlus ?? pRvPlus,
+            p_war: dbPWar ?? pWar,
+            market_value: dbMarketValue ?? marketValue,
           } as PitchingDashboardRow;
         })
         .filter((r) => !!r.playerName);
     }
     return [] as PitchingDashboardRow[];
-  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq]);
+  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq, pitcherPredBySourceId]);
   const filteredPitchingRows = useMemo(() => {
-    let rows = pitchingRows;
+    // Qualification threshold: pitchers need at least 25 IP to show in the table
+    // (parallel to hitters needing 75 PA). Profile pages are still searchable/accessible
+    // for everyone — this only affects the table listing.
+    let rows = pitchingRows.filter((r) => (Number(r.ip) || 0) >= 25);
     if (pitchingRoleFilter !== "all") {
       rows = rows.filter((r) => r.role === pitchingRoleFilter);
     }
@@ -1755,43 +1877,41 @@ export default function ReturningPlayers() {
     <DashboardLayout>
       <ScoutingReportProvider>
       <div className="space-y-4 max-w-[1600px] mx-auto pb-20">
-        {/* Header */}
-        <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* Header — brand Oswald + gold accent, consistent with Overview */}
+        <div className="rounded-lg border-l-[3px] border-l-[#D4AF37] border-t border-r border-b border-border/60 bg-muted/20 px-4 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight">Player Dashboard</h2>
-            <p className="text-muted-foreground text-sm">
-              {selectedSeason === 2025
-                ? "2025 season — all players including transfers and departed"
-                : `${selectedSeason} historical — actual stats and scouting grades`}
+            <h2
+              className="text-2xl font-bold tracking-[0.04em] uppercase leading-none"
+              style={{ fontFamily: "'Oswald', sans-serif", color: "#D4AF37" }}
+            >
+              Player Dashboard
+            </h2>
+            <p className="text-muted-foreground text-xs mt-1.5 tracking-wide">
+              2025 season · all players including transfers and departed
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Select value={String(selectedSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
-              <SelectTrigger className="h-[42px] w-[80px] text-sm font-medium rounded-lg border bg-muted">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="2025">2025</SelectItem>
-                <SelectItem value="2024">2024</SelectItem>
-                <SelectItem value="2023">2023</SelectItem>
-                <SelectItem value="2022">2022</SelectItem>
-              </SelectContent>
-            </Select>
-            <div className="flex gap-1 rounded-lg border bg-muted p-1">
+            <div className="flex gap-1 rounded-lg border border-border/60 bg-muted/40 p-1">
               <button
                 className={cn(
-                  "px-5 py-2 text-sm rounded-md font-medium transition-colors",
-                  dashboardView === "hitting" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                  "px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer",
+                  dashboardView === "hitting"
+                    ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30"
+                    : "text-muted-foreground hover:text-foreground"
                 )}
+                style={{ fontFamily: "'Oswald', sans-serif" }}
                 onClick={() => setDashboardView("hitting")}
               >
                 Hitting
               </button>
               <button
                 className={cn(
-                  "px-5 py-2 text-sm rounded-md font-medium transition-colors",
-                  dashboardView === "pitching" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                  "px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer",
+                  dashboardView === "pitching"
+                    ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30"
+                    : "text-muted-foreground hover:text-foreground"
                 )}
+                style={{ fontFamily: "'Oswald', sans-serif" }}
                 onClick={() => setDashboardView("pitching")}
               >
                 Pitching
@@ -1800,25 +1920,40 @@ export default function ReturningPlayers() {
           </div>
         </div>
 
-        {selectedSeason !== 2025 ? (
-          dashboardView === "hitting"
-            ? <HistoricalPlayerTable season={selectedSeason} onPlayerClick={saveViewSnapshot} />
-            : <HistoricalPitcherTable season={selectedSeason} onPlayerClick={saveViewSnapshot} />
-        ) : dashboardView === "hitting" ? (
+        {dashboardView === "hitting" ? (
           <>
         <div className="space-y-2">
-          <div className="relative w-full max-w-md">
+          <div className="relative w-full max-w-md" ref={searchRef}>
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
             <Input
-              placeholder="Search players, teams, positions..."
+              placeholder="Search all players..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onFocus={() => { if (searchResults.length > 0) setShowSearchDropdown(true); }}
               className="pl-9 pr-8 h-9 text-sm rounded-lg border-border/60 focus-visible:ring-primary/30"
             />
             {search && (
-              <button onClick={() => setSearch("")} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+              <button onClick={() => { setSearch(""); setShowSearchDropdown(false); }} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
                 <X className="h-4 w-4" />
               </button>
+            )}
+            {showSearchDropdown && searchResults.length > 0 && (
+              <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-80 overflow-y-auto">
+                {searchResults.map((p) => (
+                  <button
+                    key={p.id}
+                    className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors cursor-pointer flex items-center justify-between gap-2 text-sm"
+                    onClick={() => {
+                      setShowSearchDropdown(false);
+                      setSearch("");
+                      navigate(profileRouteFor(p.id, p.position));
+                    }}
+                  >
+                    <span className="font-medium">{p.first_name} {p.last_name}</span>
+                    <span className="text-xs text-muted-foreground">{p.position || ""} · {p.team || ""}</span>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
           <div className="flex flex-wrap gap-1.5 items-center">
@@ -1857,7 +1992,12 @@ export default function ReturningPlayers() {
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
-              <CardTitle className="text-base">Player Projections</CardTitle>
+              <CardTitle
+                className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]"
+                style={{ fontFamily: "'Oswald', sans-serif" }}
+              >
+                Player Projections
+              </CardTitle>
               {bulkEditMode ? (
                 <div className="flex gap-1">
                   <Button
@@ -2114,18 +2254,37 @@ export default function ReturningPlayers() {
         ) : (
           <>
         <div className="space-y-2">
-          <div className="relative w-full max-w-md">
+          <div className="relative w-full max-w-md" ref={searchRef}>
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
             <Input
-              placeholder="Search pitchers, teams..."
-              value={pitchingSearch}
-              onChange={(e) => setPitchingSearch(e.target.value)}
+              placeholder="Search all players..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onFocus={() => { if (searchResults.length > 0) setShowSearchDropdown(true); }}
               className="pl-9 pr-8 h-9 text-sm rounded-lg border-border/60 focus-visible:ring-primary/30"
             />
-            {pitchingSearch && (
-              <button onClick={() => setPitchingSearch("")} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+            {search && (
+              <button onClick={() => { setSearch(""); setShowSearchDropdown(false); }} className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
                 <X className="h-4 w-4" />
               </button>
+            )}
+            {showSearchDropdown && searchResults.length > 0 && (
+              <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-80 overflow-y-auto">
+                {searchResults.map((p) => (
+                  <button
+                    key={p.id}
+                    className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors cursor-pointer flex items-center justify-between gap-2 text-sm"
+                    onClick={() => {
+                      setShowSearchDropdown(false);
+                      setSearch("");
+                      navigate(profileRouteFor(p.id, p.position));
+                    }}
+                  >
+                    <span className="font-medium">{p.first_name} {p.last_name}</span>
+                    <span className="text-xs text-muted-foreground">{p.position || ""} · {p.team || ""}</span>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -2149,7 +2308,12 @@ export default function ReturningPlayers() {
         <Card>
             <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
-                <CardTitle className="text-base">Pitching Projections</CardTitle>
+                <CardTitle
+                  className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]"
+                  style={{ fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Pitching Projections
+                </CardTitle>
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <div className="flex items-center gap-1 overflow-x-auto max-w-[360px]">
@@ -2300,8 +2464,40 @@ export default function ReturningPlayers() {
           </>
         )}
       </div>
-      <DownloadReportBar onAddToHighFollow={(players) => {
-        addToHighFollow(players.map((p) => ({ playerId: p.id, playerType: p.player_type })));
+      <DownloadReportBar onAddToHighFollow={async (players) => {
+        // Pitcher rows carry id = source_player_id (not a UUID). Resolve those
+        // against the players table before inserting into high_follow.
+        const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        const needsLookup = players.filter((p) => !uuidRe.test(String(p.id)));
+        const sidToPlayerId = new Map<string, string>();
+        if (needsLookup.length > 0) {
+          const sids = needsLookup.map((p) => String(p.id));
+          for (let i = 0; i < sids.length; i += 500) {
+            const slice = sids.slice(i, i + 500);
+            const { data } = await supabase
+              .from("players")
+              .select("id, source_player_id")
+              .in("source_player_id", slice);
+            for (const r of (data || [])) {
+              if (r.source_player_id) sidToPlayerId.set(String(r.source_player_id), r.id);
+            }
+          }
+        }
+        const resolved: Array<{ playerId: string; playerType: "hitter" | "pitcher" }> = [];
+        const unresolved: string[] = [];
+        for (const p of players) {
+          if (uuidRe.test(String(p.id))) {
+            resolved.push({ playerId: String(p.id), playerType: p.player_type });
+          } else {
+            const uuid = sidToPlayerId.get(String(p.id));
+            if (uuid) resolved.push({ playerId: uuid, playerType: p.player_type });
+            else unresolved.push(p.name);
+          }
+        }
+        if (resolved.length > 0) addToHighFollow(resolved);
+        if (unresolved.length > 0) {
+          toast.error(`Could not resolve: ${unresolved.join(", ")}`);
+        }
       }} />
       </ScoutingReportProvider>
     </DashboardLayout>

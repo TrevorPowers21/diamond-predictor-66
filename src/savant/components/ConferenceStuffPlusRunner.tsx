@@ -6,7 +6,7 @@ const NAVY_BORDER = "#1f2d52";
 const GOLD = "#D4AF37";
 
 export default function ConferenceStuffPlusRunner() {
-  const [season] = useState(2025);
+  const [season] = useState(2026);
   const [running, setRunning] = useState(false);
   const [report, setReport] = useState<ConferenceStuffPlusReport | null>(null);
   const [errors, setErrors] = useState<string[]>([]);

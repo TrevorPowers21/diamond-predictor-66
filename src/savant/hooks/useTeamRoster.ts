@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useMemo } from "react";
 
-export function useTeamRoster(teamId: string | undefined, season: number = 2025) {
+export function useTeamRoster(teamId: string | undefined, season: number = 2026) {
   const { teams } = useTeamsTable();
 
   // Resolve team UUID → lookup fields for master table queries

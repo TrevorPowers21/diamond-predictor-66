@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { PRIOR_SEASON } from "@/lib/seasonConstants";
 import { supabase } from "@/integrations/supabase/client";
 import {
   DEFAULT_PITCHING_WEIGHTS,
@@ -65,10 +66,10 @@ export default function PitchingEquationsTab() {
       const { data, error } = await supabase
         .from("Pitching Master")
         .select("ERA, FIP, WHIP, K9, BB9, HR9")
-        .eq("Season", 2025);
+        .eq("Season", PRIOR_SEASON);
       if (error) throw error;
       if (!data || data.length === 0) {
-        toast.error("No 2025 pitching stats found in Pitching Master table.");
+        toast.error(`No ${PRIOR_SEASON} pitching stats found in Pitching Master table.`);
         return;
       }
 

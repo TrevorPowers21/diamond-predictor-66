@@ -52,7 +52,7 @@ const SELECT_COLS = `source_player_id, playerFullName, Team, TeamID, Conference,
  */
 export const SAVANT_MIN_IP = 10;
 
-export function useSavantPitchers(season = 2025) {
+export function useSavantPitchers(season = 2026) {
   return useQuery({
     queryKey: ["savant_pitchers", season, "v1"],
     queryFn: async () => {

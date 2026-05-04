@@ -131,7 +131,7 @@ function calc4SFB(row: PitchRow, pop: PopConstants): { score: number; zs: ZScore
 
   const weighted = 0.3 * zv + 0.25 * zi + 0.15 * zh + 0.1 * zrh + 0.05 * zrs + 0.1 * ze + 0.05 * zsp;
   return {
-    score: 100 + weighted * 10,
+    score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: zsp },
   };
 }
@@ -147,7 +147,7 @@ function calcSinker(row: PitchRow, pop: PopConstants, hand: string): { score: nu
   const hbSign = hand === "L" ? -1 : 1;
   const weighted = 0.3 * zv + (-0.2) * zi + hbSign * 0.3 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze;
   return {
-    score: 100 + weighted * 10,
+    score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: 0 },
   };
 }
@@ -165,7 +165,7 @@ function calcCutter(row: PitchRow, pop: PopConstants, hand: string): { score: nu
   const hbSign = hand === "L" ? 1 : -1;
   const weighted = 0.3 * zv + 0.15 * zi + hbSign * 0.25 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.1 * zsp;
   return {
-    score: 100 + weighted * 10,
+    score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: zsp },
   };
 }
@@ -184,7 +184,7 @@ function calcGyroSlider(row: PitchRow, pop: PopConstants): { score: number; zs: 
   // Weights: 40 + 15 + 25 + 5 + 5 + 10 = 100%
   const weighted = 0.40 * zv + 0.15 * zi + 0.25 * zh + 0.05 * zrh + 0.05 * zrs + 0.10 * ze;
   return {
-    score: 100 + weighted * 10,
+    score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: 0 },
   };
 }
@@ -203,7 +203,7 @@ function calcSlider(row: PitchRow, pop: PopConstants, hand: string): { score: nu
   const hbSign = hand === "L" ? 1 : -1;
   const weighted = 0.15 * zv + 0.1 * zi + hbSign * 0.35 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.2 * zsp;
   return {
-    score: 100 + weighted * 10,
+    score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: zsp },
   };
 }
@@ -220,7 +220,7 @@ function calcSweeper(row: PitchRow, pop: PopConstants, hand: string): { score: n
   const hbSign = hand === "L" ? 1 : -1;
   const weighted = 0.1 * zv + (-0.1) * zi + hbSign * 0.4 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.2 * zsp;
   return {
-    score: 100 + weighted * 10,
+    score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: zsp },
   };
 }
@@ -237,7 +237,7 @@ function calcCurveball(row: PitchRow, pop: PopConstants, hand: string): { score:
   const hbSign = hand === "L" ? 1 : -1;
   const weighted = 0.1 * zv + (-0.3) * zi + hbSign * (-0.15) * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.25 * zsp;
   return {
-    score: 100 + weighted * 10,
+    score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: zsp },
   };
 }
@@ -254,7 +254,7 @@ function calcChangeup(row: PitchRow, pop: PopConstants, hand: string): { score: 
   const hbSign = hand === "L" ? -1 : 1;
   const weighted = 0.15 * zvd + (-0.2) * zi + hbSign * 0.35 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.1 * zsp;
   return {
-    score: 100 + weighted * 10,
+    score: 100 + weighted * 20,
     zs: { z_velocity: 0, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: zsp, z_velo_diff: zvd },
   };
 }
@@ -273,7 +273,7 @@ function calcSplitter(row: PitchRow, pop: PopConstants, hand: string): { score: 
   const hbSign = hand === "L" ? -1 : 1;
   const weighted = 0.1 * zv + (-0.2) * zi + hbSign * 0.25 * zh + 0.05 * zrh + 0.05 * zrs + 0.1 * ze + 0.25 * zsp;
   return {
-    score: 100 + weighted * 10,
+    score: 100 + weighted * 20,
     zs: { z_velocity: zv, z_ivb: zi, z_hb: zh, z_rel_height: zrh, z_rel_side: zrs, z_extension: ze, z_spin: zsp },
   };
 }
@@ -326,15 +326,18 @@ async function fetchAll<T>(
 const ALL_PITCH_TYPES = ["4S FB", "Sinker", "Cutter", "Gyro Slider", "Slider", "Sweeper", "Curveball", "Change-up", "Splitter"];
 
 export async function runStuffPlusPipeline(
-  season: number = 2025,
+  season: number = 2026,
 ): Promise<{ report: StuffPlusReport; errors: string[] }> {
   const errors: string[] = [];
+  console.time("[Stuff+] TOTAL");
 
   // ── Pull population constants ──────────────────────────────────────────
+  console.time("[Stuff+] 1. fetch population constants");
   const { data: popData, error: popErr } = await (supabase as any)
     .from("pitcher_stuff_plus_ncaa")
     .select("*")
     .eq("season", season);
+  console.timeEnd("[Stuff+] 1. fetch population constants");
 
   if (popErr || !popData) {
     return { report: emptyReport(), errors: [`Failed to pull population constants: ${popErr?.message}`] };
@@ -346,13 +349,16 @@ export async function runStuffPlusPipeline(
   }
 
   // ── Pull all pitch rows ────────────────────────────────────────────────
+  console.time("[Stuff+] 2. fetch pitch rows");
   const allRows = await fetchAll<PitchRow>(
     "pitcher_stuff_plus_inputs",
     "id, source_player_id, pitch_type, hand, pitches, velocity, ivb, hb, rel_height, rel_side, extension, spin, fb_ch_velo_diff, needs_review",
     (q: any) => q.eq("season", season).in("pitch_type", ALL_PITCH_TYPES),
   );
+  console.timeEnd("[Stuff+] 2. fetch pitch rows");
 
   // ── Pull player names ──────────────────────────────────────────────────
+  console.time("[Stuff+] 3. fetch player names");
   const playerIds = [...new Set(allRows.map((r) => r.source_player_id))];
   const nameMap = new Map<string, { name: string; team: string }>();
   for (let i = 0; i < playerIds.length; i += 100) {
@@ -368,8 +374,10 @@ export async function runStuffPlusPipeline(
       }
     }
   }
+  console.timeEnd("[Stuff+] 3. fetch player names");
 
   // ── Filter and score ───────────────────────────────────────────────────
+  console.time("[Stuff+] 4. filter + score (compute)");
   const dropped: Map<string, number> = new Map();
   const scored: ScoredRow[] = [];
 
@@ -412,7 +420,46 @@ export async function runStuffPlusPipeline(
     });
   }
 
+  console.timeEnd("[Stuff+] 4. filter + score (compute)");
+
+  // ── Per-pitch-type recentering: shift each (pitch_type × hand) bucket
+  // so its un-weighted per-pitcher mean lands at 100. Un-weighted = average
+  // PITCHER scores 100 (vs pitch-weighted = average PITCH scores 100). Better
+  // matches "what 100 means for the season's sample set" — pitch-weighted
+  // double-counts high-volume pitchers who tend to be the better ones.
+  console.time("[Stuff+] 4b. recenter to mean=100 (per-pitcher)");
+  const calibBuckets = new Map<string, { sum: number; count: number }>();
+  for (const s of scored) {
+    if (s.review_note?.startsWith("Outlier")) continue;
+    const key = `${s.pitch_type}::${s.hand}`;
+    if (!calibBuckets.has(key)) calibBuckets.set(key, { sum: 0, count: 0 });
+    const b = calibBuckets.get(key)!;
+    b.sum += s.stuff_plus;
+    b.count += 1;
+  }
+  const shifts = new Map<string, number>();
+  for (const [key, b] of calibBuckets) {
+    if (b.count === 0) continue;
+    shifts.set(key, b.sum / b.count - 100);
+  }
+  for (const s of scored) {
+    const key = `${s.pitch_type}::${s.hand}`;
+    const shift = shifts.get(key);
+    if (shift == null) continue;
+    s.stuff_plus = Math.round((s.stuff_plus - shift) * 10) / 10;
+    if (s.stuff_plus > 140 || s.stuff_plus < 60) {
+      s.needs_review = true;
+      s.review_note = `Outlier Stuff+ score: ${s.stuff_plus}`;
+    }
+  }
+  console.log(
+    `[Stuff+] Recenter shifts (μ_pop − 100):`,
+    [...shifts.entries()].map(([k, v]) => `${k}=${v.toFixed(2)}`).join(" | "),
+  );
+  console.timeEnd("[Stuff+] 4b. recenter to mean=100");
+
   // ── Write stuff_plus scores back in batches ────────────────────────────
+  console.time("[Stuff+] 5. write per-pitch scores");
   let written = 0;
 
   // Group by rounded score for efficient batch updates
@@ -436,7 +483,10 @@ export async function runStuffPlusPipeline(
     }
   }
 
+  console.timeEnd("[Stuff+] 5. write per-pitch scores");
+
   // Flag outliers
+  console.time("[Stuff+] 6. flag outliers");
   const outlierIds = scored.filter((s) => s.needs_review && s.review_note).map((s) => s.id);
   if (outlierIds.length > 0) {
     for (let i = 0; i < outlierIds.length; i += 500) {
@@ -447,8 +497,10 @@ export async function runStuffPlusPipeline(
         .in("id", batch);
     }
   }
+  console.timeEnd("[Stuff+] 6. flag outliers");
 
   // ── Overall Composite Stuff+ ───────────────────────────────────────────
+  console.time("[Stuff+] 7. compute overall composite");
   const playerScores = new Map<string, ScoredRow[]>();
   for (const s of scored) {
     if (!playerScores.has(s.source_player_id)) playerScores.set(s.source_player_id, []);
@@ -488,8 +540,11 @@ export async function runStuffPlusPipeline(
     });
   }
 
+  console.timeEnd("[Stuff+] 7. compute overall composite");
+
   // ── Write overall Stuff+ to Pitching Master (for RSTR IQ) ──────────────
   // Group by rounded overall score for batch updates
+  console.time("[Stuff+] 8. write overall to Pitching Master");
   const overallGroups = new Map<number, string[]>();
   for (const o of overallResults) {
     if (!overallGroups.has(o.overall)) overallGroups.set(o.overall, []);
@@ -508,8 +563,10 @@ export async function runStuffPlusPipeline(
       if (error) errors.push(`Pitching Master update: ${error.message}`);
     }
   }
+  console.timeEnd("[Stuff+] 8. write overall to Pitching Master");
 
   // ── Build report ───────────────────────────────────────────────────────
+  console.time("[Stuff+] 9. build report");
   const byPitchType: StuffPlusReport["byPitchType"] = [];
   const calibrationWarnings: string[] = [];
 
@@ -561,6 +618,9 @@ export async function runStuffPlusPipeline(
       pitchScores: o.pitchScores,
     };
   });
+
+  console.timeEnd("[Stuff+] 9. build report");
+  console.timeEnd("[Stuff+] TOTAL");
 
   return {
     report: {

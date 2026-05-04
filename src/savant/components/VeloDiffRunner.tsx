@@ -15,7 +15,7 @@ function StatBox({ label, value }: { label: string; value: string | number }) {
 }
 
 export default function VeloDiffRunner() {
-  const [season] = useState(2025);
+  const season = 2026;
   const [running, setRunning] = useState(false);
   const [report, setReport] = useState<VeloDiffReport | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
@@ -50,7 +50,7 @@ export default function VeloDiffRunner() {
           className="cursor-pointer border px-5 py-2 text-xs font-bold uppercase tracking-[0.15em] transition-colors duration-150 hover:bg-[#D4AF37]/10 disabled:cursor-not-allowed disabled:opacity-50"
           style={{ borderColor: GOLD, color: GOLD }}
         >
-          {running ? "Calculating…" : "Run FB/CH Velo Diff"}
+          {running ? "Calculating…" : `Run FB/CH Velo Diff (${season})`}
         </button>
       </div>
 

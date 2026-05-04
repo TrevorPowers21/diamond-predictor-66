@@ -117,7 +117,6 @@ export function HistoricalPlayerTable({ season, onPlayerClick }: { season: numbe
         if (data.length < pageSize) break;
         from += pageSize;
       }
-      console.log(`[HistoricalPlayerTable] Loaded ${all.length} hitters for ${season}`);
       return all;
     },
   });
@@ -456,7 +455,6 @@ export function HistoricalPitcherTable({ season, onPlayerClick }: { season: numb
         if (data.length < pageSize) break;
         from += pageSize;
       }
-      console.log(`[HistoricalPitcherTable] Loaded ${all.length} pitchers for ${season}`);
       return all;
     },
   });

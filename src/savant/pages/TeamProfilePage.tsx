@@ -42,7 +42,7 @@ function parkColorPitching(v: number | null): string {
 export default function TeamProfilePage() {
   const { id } = useParams<{ id: string }>();
   const { team, hitters, pitchers, isLoading } = useTeamRoster(id);
-  const { parkMap } = useParkFactors(2025);
+  const { parkMap } = useParkFactors(2026);
 
   const [outerTab, setOuterTab] = useState<"hitting" | "pitching">("hitting");
   const [innerTab, setInnerTab] = useState<"traditional" | "advanced">("traditional");

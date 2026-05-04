@@ -22,14 +22,18 @@ import {
   getPositionValueMultiplier,
   getProgramTierMultiplierByConference,
 } from "@/lib/nilProgramSpecific";
-import { readPlayerOverrides } from "@/lib/playerOverrides";
+import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
+import CoachNotes from "@/components/CoachNotes";
+import { useCoachNotes } from "@/hooks/useCoachNotes";
+import { generateCoachNotesPdf, generateReportPdf } from "@/lib/pdfGenerator";
 import { assessHitterRisk } from "@/lib/playerRisk";
 import { generateHitterReport } from "@/lib/scoutingReportGenerator";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
+import { isThinSampleHitter } from "@/lib/combinedStats";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -179,7 +183,8 @@ export default function PlayerProfile() {
   const { hasRole } = useAuth();
   const isAdmin = hasRole("admin");
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
-  const { conferenceStatsByKey } = useConferenceStats(2025);
+  const { notes: coachNotesForExport } = useCoachNotes(id ?? null);
+  const { conferenceStatsByKey } = useConferenceStats(2026);
   const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
 
   const [storageByName, storageByNameTeam, storageByPlayerId] = useMemo(() => {
@@ -334,27 +339,23 @@ export default function PlayerProfile() {
   }, [hitterMasterSeasons, seasonStats]);
 
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
-  // Default to 2025 if it's available, else the most recent season
-  const defaultSeason = availableSeasons.includes(2025) ? 2025 : (availableSeasons[0] ?? 2025);
+  // Default to 2026 if it's available, else the most recent season
+  const defaultSeason = availableSeasons.includes(2026) ? 2026 : (availableSeasons[0] ?? 2026);
   const effectiveSeason = selectedSeason ?? defaultSeason;
-  const isHistoricalView = effectiveSeason !== 2025;
-  const historicalRow = useMemo(() => {
-    return hitterMasterSeasons.find((r: any) => Number(r.Season) === effectiveSeason) || null;
-  }, [hitterMasterSeasons, effectiveSeason]);
 
-  // Pick the 2025 Hitter Master row to check if combined stats were used
+  // Pick the 2026 Hitter Master row to check if combined stats were used
   // (badge only shows on the current season view, not historical)
   const currentHitterRow = useMemo(() => {
-    return hitterMasterSeasons.find((r: any) => Number(r.Season) === 2025) || null;
+    return hitterMasterSeasons.find((r: any) => Number(r.Season) === 2026) || null;
   }, [hitterMasterSeasons]);
-  const combinedUsed = !isHistoricalView && !!(currentHitterRow as any)?.combined_used;
+  const combinedUsed = !!(currentHitterRow as any)?.combined_used;
   const combinedPa = (currentHitterRow as any)?.combined_pa as number | null | undefined;
   const combinedSeasonsLabel = (currentHitterRow as any)?.combined_seasons as string | null | undefined;
 
   // Fetch NCAA wRC mean for the historical season (for wRC+ calculation)
   const { data: ncaaWrcForSeason } = useQuery({
     queryKey: ["ncaa-wrc-mean-profile", effectiveSeason],
-    enabled: isHistoricalView,
+    enabled: effectiveSeason !== 2026,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("ncaa_averages" as any)
@@ -367,6 +368,40 @@ export default function PlayerProfile() {
   });
 
   const { teams: teamsForConference } = useTeamsTable();
+  // Lookup maps for career stats Team column display.
+  // Prefer TeamID (holds Teams Table UUID id); fall back to aggressive name normalization.
+  const teamAbbrevById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of teamsForConference as Array<{ id: string | null; source_team_id: string | number | null; abbreviation: string | null; fullName: string | null; name: string | null }>) {
+      const abbrev = t.abbreviation || t.name || t.fullName;
+      if (!abbrev) continue;
+      if (t.id) map.set(String(t.id), abbrev);
+      if (t.source_team_id != null) map.set(String(t.source_team_id), abbrev);
+    }
+    return map;
+  }, [teamsForConference]);
+  const teamAbbrevByName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of teamsForConference as Array<{ name: string | null; fullName: string | null; abbreviation: string | null }>) {
+      const abbrev = t.abbreviation || t.name || t.fullName;
+      if (!abbrev) continue;
+      const keys = [t.fullName, t.name, t.abbreviation].filter(Boolean) as string[];
+      for (const k of keys) {
+        const norm = normalizeName(k);
+        if (norm && !map.has(norm)) map.set(norm, abbrev);
+      }
+    }
+    return map;
+  }, [teamsForConference]);
+  const teamAbbrev = (name: string | null | undefined, teamId?: string | number | null): string => {
+    if (teamId != null) {
+      const byId = teamAbbrevById.get(String(teamId));
+      if (byId) return byId;
+    }
+    if (!name) return "—";
+    const hit = teamAbbrevByName.get(normalizeName(name));
+    return hit || name;
+  };
 
   const { data: nilValuation } = useQuery({
     queryKey: ["player-nil", id],
@@ -503,10 +538,8 @@ export default function PlayerProfile() {
   const regularPred = predictions.find((p) => p.variant === "regular");
   const isTransferPortal = player?.transfer_portal && predictions.some((p) => p.model_type === "transfer");
   const isReturner = predictions.some((p) => p.model_type === "returner");
-  const playerOverride = useMemo(
-    () => (id ? readPlayerOverrides()[id] : undefined),
-    [id],
-  );
+  const { getOverride } = usePlayerOverrides();
+  const playerOverride = id ? getOverride(id) : null;
   const effectivePosition = playerOverride?.position ?? player?.position ?? null;
 
   const startPredEdit = () => {
@@ -565,6 +598,56 @@ export default function PlayerProfile() {
     },
     enabled: !!player?.from_team && !!isTransferPortal,
   });
+
+  // Pinned 2026 row — anchors projections, risk, and scouting report so they
+  // don't shift when the scouting grades dropdown changes season. Substitutes
+  // blended_* columns when combined_used (under-qualified 2026 sample).
+  // MUST be declared before early returns to keep hook order stable.
+  const projectionSourceRow = useMemo(() => {
+    const row = (hitterMasterSeasons as any[]).find((r) => Number(r.Season) === 2026);
+    if (!row) return null;
+    const combinedUsed = !!row.combined_used;
+    return {
+      combined_used: combinedUsed,
+      combined_pa: row.combined_pa ?? null,
+      combined_seasons: row.combined_seasons ?? null,
+      AVG: combinedUsed ? (row.blended_avg ?? row.AVG) : row.AVG,
+      OBP: combinedUsed ? (row.blended_obp ?? row.OBP) : row.OBP,
+      SLG: combinedUsed ? (row.blended_slg ?? row.SLG) : row.SLG,
+      ISO: combinedUsed ? (row.blended_iso ?? row.ISO) : row.ISO,
+      contact: combinedUsed ? (row.blended_contact ?? row.contact) : row.contact,
+      line_drive: combinedUsed ? (row.blended_line_drive ?? row.line_drive) : row.line_drive,
+      avg_exit_velo: combinedUsed ? (row.blended_avg_exit_velo ?? row.avg_exit_velo) : row.avg_exit_velo,
+      pop_up: combinedUsed ? (row.blended_pop_up ?? row.pop_up) : row.pop_up,
+      bb: combinedUsed ? (row.blended_bb ?? row.bb) : row.bb,
+      chase: combinedUsed ? (row.blended_chase ?? row.chase) : row.chase,
+      barrel: combinedUsed ? (row.blended_barrel ?? row.barrel) : row.barrel,
+      ev90: combinedUsed ? (row.blended_ev90 ?? row.ev90) : row.ev90,
+      pull: combinedUsed ? (row.blended_pull ?? row.pull) : row.pull,
+      la_10_30: combinedUsed ? (row.blended_la_10_30 ?? row.la_10_30) : row.la_10_30,
+      gb: combinedUsed ? (row.blended_gb ?? row.gb) : row.gb,
+      ab: row.ab ?? null,
+      pa: row.pa ?? null,
+      // Stored power ratings — already computed from blended inputs by the pipeline
+      overall_plus: row.overall_plus ?? null,
+      ba_plus: row.ba_plus ?? null,
+      obp_plus: row.obp_plus ?? null,
+      iso_plus: row.iso_plus ?? null,
+      barrel_score: row.barrel_score ?? null,
+      avg_ev_score: row.avg_ev_score ?? null,
+      contact_score: row.contact_score ?? null,
+      chase_score: row.chase_score ?? null,
+      bb_score: row.bb_score ?? null,
+      line_drive_score: row.line_drive_score ?? null,
+      pop_up_score: row.pop_up_score ?? null,
+      ev90_score: row.ev90_score ?? null,
+      pull_score: row.pull_score ?? null,
+      la_score: row.la_score ?? null,
+      gb_score: row.gb_score ?? null,
+    };
+  }, [hitterMasterSeasons]);
+
+  const isThinSample = isThinSampleHitter(projectionSourceRow);
 
   if (isLoading) {
     return (
@@ -651,7 +734,7 @@ export default function PlayerProfile() {
     // Ambiguous name with no reliable discriminator: do not guess.
     return null;
   })();
-  const displayTeam2025 = seedStatRow?.team || player.from_team || player.team || null;
+  const displayTeamCurrent = seedStatRow?.team || player.from_team || player.team || null;
   const abbrevName = `${player.first_name?.[0] || ""}. ${player.last_name || ""}`.trim();
   const seedPos =
     exitPositions[`${player.first_name} ${player.last_name}|${player.team || ""}`] ||
@@ -672,7 +755,34 @@ export default function PlayerProfile() {
     la10_30: seedPowerRow.la10_30,
     gb: seedPowerRow.gb,
   }) : null;
-  const projectedOWar = computeOWarFromWrcPlus(regularPred?.p_wrc_plus ?? null);
+
+  // Season-aware scouting grades + power ratings from Hitter Master
+  // Falls back to seedPowerDerived (2025) when no Hitter Master row exists for the selected season
+  const activeSeasonRow = (hitterMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason) || null;
+
+  const activeSeasonScoutingGrades = activeSeasonRow ? {
+    barrelScore: activeSeasonRow.barrel_score ?? seedPowerDerived?.barrelScore ?? null,
+    avgEVScore: activeSeasonRow.avg_ev_score ?? seedPowerDerived?.avgEVScore ?? null,
+    contactScore: activeSeasonRow.contact_score ?? seedPowerDerived?.contactScore ?? null,
+    chaseScore: activeSeasonRow.chase_score ?? seedPowerDerived?.chaseScore ?? null,
+    bbScore: activeSeasonRow.bb_score ?? seedPowerDerived?.bbScore ?? null,
+    lineDriveScore: activeSeasonRow.line_drive_score ?? seedPowerDerived?.lineDriveScore ?? null,
+    popUpScore: activeSeasonRow.pop_up_score ?? seedPowerDerived?.popUpScore ?? null,
+    ev90Score: activeSeasonRow.ev90_score ?? seedPowerDerived?.ev90Score ?? null,
+    pullScore: activeSeasonRow.pull_score ?? seedPowerDerived?.pullScore ?? null,
+    laScore: activeSeasonRow.la_score ?? seedPowerDerived?.laScore ?? null,
+    gbScore: activeSeasonRow.gb_score ?? seedPowerDerived?.gbScore ?? null,
+    baPlus: activeSeasonRow.ba_plus ?? seedPowerDerived?.baPlus ?? null,
+    obpPlus: activeSeasonRow.obp_plus ?? seedPowerDerived?.obpPlus ?? null,
+    isoPlus: activeSeasonRow.iso_plus ?? seedPowerDerived?.isoPlus ?? null,
+    overallPlus: activeSeasonRow.overall_plus ?? seedPowerDerived?.overallPlus ?? null,
+  } : seedPowerDerived;
+  // Carry 2025 PA forward as expected 2026 PA so projected WAR scales with
+  // actual playing-time history. A fringe starter with 100 PA last year
+  // projects to ~100 PA of WAR, not a full-time 260. Prevents misleading
+  // 2 WAR / 90K valuations for limited-role returners.
+  const carryForwardPa = projectionSourceRow?.pa ?? (player as any)?.pa ?? null;
+  const projectedOWar = computeOWarFromWrcPlus(regularPred?.p_wrc_plus ?? null, carryForwardPa);
   const historicalOWar = computeOWarFromWrcPlus(seedDerived?.wrcPlus ?? null, (player as any)?.pa ?? null);
   const displayOWar =
     projectedOWar ??
@@ -704,7 +814,7 @@ export default function PlayerProfile() {
   // Always use 2025 row for determining if player has data — don't bail on historical year with no AB
   const activeMasterRow = currentHitterRow;
   const activeAb = (activeMasterRow as any)?.ab;
-  const hasZeroAb = activeMasterRow != null && (activeAb == null || Number(activeAb) === 0) && !isHistoricalView;
+  const hasZeroAb = activeMasterRow != null && (activeAb == null || Number(activeAb) === 0);
   if (hasZeroAb) {
     return (
       <DashboardLayout>
@@ -723,24 +833,9 @@ export default function PlayerProfile() {
               </div>
             </div>
           </div>
-          {availableSeasons.length > 1 && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs uppercase tracking-wide text-muted-foreground">Season:</span>
-              {availableSeasons.map((s) => (
-                <Button
-                  key={s}
-                  size="sm"
-                  variant={s === effectiveSeason ? "default" : "outline"}
-                  onClick={() => setSelectedSeason(s)}
-                >
-                  {s}
-                </Button>
-              ))}
-            </div>
-          )}
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground">
-              No hitting stats for the {effectiveSeason} season.
+              No hitting stats available.
             </CardContent>
           </Card>
         </div>
@@ -772,7 +867,7 @@ export default function PlayerProfile() {
             )}
               <div className="flex items-center gap-2 mt-1 flex-wrap">
               {effectivePosition && <Badge variant="secondary">{effectivePosition}</Badge>}
-              {displayTeam2025 && <Badge variant="outline">{displayTeam2025}</Badge>}
+              {displayTeamCurrent && <Badge variant="outline">{displayTeamCurrent}</Badge>}
               {(() => {
                 const norm = (v: string) => (v || "").trim().toLowerCase().replace(/\b(university|college|of)\b/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
                 const teamConf = teamsForConference.find(t => norm(t.name) === norm(player.team || ""))?.conference;
@@ -817,25 +912,154 @@ export default function PlayerProfile() {
               )}
             </div>
           </div>
-          {availableSeasons.length > 1 && (
-            <Select value={String(effectiveSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
-              <SelectTrigger className="h-9 w-[80px] text-sm font-semibold">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {availableSeasons.map((y) => (
-                  <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          {isHistoricalView && (
-            <Badge className="bg-muted text-muted-foreground border-0 uppercase tracking-wider text-[10px] font-semibold">
-              Historical
-            </Badge>
-          )}
-          {!isHistoricalView && (
+          {
             <>
+              <CoachNotes
+                playerId={player.id}
+                playerName={`${player.first_name} ${player.last_name}`}
+                onExportPdf={(notes, format, mode = "download") => {
+                  if (format === "full") {
+                    // Build same rich rp as Export Report button, plus coach notes
+                    const rp: ReportPlayer = {
+                      id: player.id,
+                      player_type: "hitter",
+                      name: `${player.first_name || ""} ${player.last_name || ""}`.trim(),
+                      school: displayTeamCurrent || player.team,
+                      position: effectivePosition,
+                      class_year: player.class_year,
+                      bats_throws: [(player as any).bats_hand, (player as any).throws_hand].filter(Boolean).join("/") || undefined,
+                      conference: resolvedConference || player.conference,
+                      height: player.height_inches ? `${Math.floor(player.height_inches / 12)}'${player.height_inches % 12}"` : undefined,
+                      weight: player.weight,
+                      hometown: [player.home_state, player.high_school].filter(Boolean).join(", ") || undefined,
+                      p_avg: projectedAvg, p_obp: projectedObp, p_slg: projectedSlg,
+                      p_ops: projectedDerived.ops, p_iso: projectedDerived.iso,
+                      p_wrc_plus: projectedWrcPlus,
+                      owar: displayOWar,
+                      nil_value: displayNilValuation,
+                      power_rating_plus: (projectionSourceRow as any)?.overall_plus ?? seedPowerDerived?.overallPlus,
+                      // Prefer stored Hitter Master scores (match UI scouting grades);
+                      // fall back to derived only if the stored value is null.
+                      barrel_score: (projectionSourceRow as any)?.barrel_score ?? (seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined),
+                      ev_score: (projectionSourceRow as any)?.avg_ev_score ?? (seedPowerDerived?.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : undefined),
+                      contact_score: (projectionSourceRow as any)?.contact_score ?? (seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined),
+                      chase_score: (projectionSourceRow as any)?.chase_score ?? (seedPowerDerived?.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : undefined),
+                      // Raw rates for the IQ Hitting Metrics 3-column grid
+                      contact_pct: projectionSourceRow?.contact ?? seedPowerRow?.contact ?? undefined,
+                      bb_pct: projectionSourceRow?.bb ?? seedPowerRow?.bb ?? undefined,
+                      chase_pct: projectionSourceRow?.chase ?? seedPowerRow?.chase ?? undefined,
+                      avg_ev: projectionSourceRow?.avg_exit_velo ?? seedPowerRow?.avgExitVelo ?? undefined,
+                      barrel_pct: projectionSourceRow?.barrel ?? seedPowerRow?.barrel ?? undefined,
+                      ev90: projectionSourceRow?.ev90 ?? seedPowerRow?.ev90 ?? undefined,
+                      ld_pct: projectionSourceRow?.line_drive ?? seedPowerRow?.lineDrive ?? undefined,
+                      pull_pct: projectionSourceRow?.pull ?? seedPowerRow?.pull ?? undefined,
+                      gb_pct: projectionSourceRow?.gb ?? seedPowerRow?.gb ?? undefined,
+                      la_10_30_pct: projectionSourceRow?.la_10_30 ?? seedPowerRow?.la10_30 ?? undefined,
+                      ev90_score: (projectionSourceRow as any)?.ev90_score ?? undefined,
+                      ld_score: (projectionSourceRow as any)?.line_drive_score ?? undefined,
+                      pull_score: (projectionSourceRow as any)?.pull_score ?? undefined,
+                      gb_score: (projectionSourceRow as any)?.gb_score ?? undefined,
+                      la_score: (projectionSourceRow as any)?.la_score ?? undefined,
+                      bb_pct_score: (projectionSourceRow as any)?.bb_score ?? undefined,
+                      career_seasons: hitterMasterSeasons as any[],
+                      scouting_notes: (() => {
+                        if ((player as any).notes) return (player as any).notes;
+                        const p = projectionSourceRow;
+                        if (!p && !seedPowerRow) return undefined;
+                        return generateHitterReport({
+                          batHand: (player as any).bats_hand,
+                          position: effectivePosition,
+                          conference: resolvedConference || player.conference,
+                          avg: p?.AVG ?? seedStatRow?.avg, obp: p?.OBP ?? seedStatRow?.obp, slg: p?.SLG ?? seedStatRow?.slg,
+                          iso: p?.ISO ?? seedDerived?.iso,
+                          pa: p?.pa ?? (player as any).pa ?? seedPowerRow?.pa ?? null,
+                          contact: p?.contact ?? seedPowerRow?.contact,
+                          chase: p?.chase ?? seedPowerRow?.chase,
+                          bb: p?.bb ?? seedPowerRow?.bb,
+                          avgEv: p?.avg_exit_velo ?? seedPowerRow?.avgExitVelo,
+                          ev90: p?.ev90 ?? seedPowerRow?.ev90,
+                          barrel: p?.barrel ?? seedPowerRow?.barrel,
+                          laSweet: p?.la_10_30 ?? seedPowerRow?.la10_30,
+                          lineDrive: p?.line_drive ?? seedPowerRow?.lineDrive,
+                          gb: p?.gb ?? seedPowerRow?.gb,
+                          pull: p?.pull ?? seedPowerRow?.pull,
+                          popUp: p?.pop_up ?? seedPowerRow?.popUp,
+                        }, "rstriq", "full");
+                      })(),
+                      coach_notes: notes,
+                    };
+                    const p2 = projectionSourceRow;
+                    const riskResult = assessHitterRisk({
+                      conference: resolvedConference || player.conference,
+                      projectedWrcPlus: projectedWrcPlus,
+                      careerSeasons: hitterMasterSeasons as any[],
+                      pa: p2?.pa ?? (player as any).pa ?? seedPowerRow?.pa ?? null,
+                      chase: p2?.chase ?? seedPowerRow?.chase,
+                      contact: p2?.contact ?? seedPowerRow?.contact,
+                      whiff: seedPowerRow?.whiff,
+                      barrel: p2?.barrel ?? seedPowerRow?.barrel,
+                      lineDrive: p2?.line_drive ?? seedPowerRow?.lineDrive,
+                      avgEv: p2?.avg_exit_velo ?? seedPowerRow?.avgExitVelo,
+                      ev90: p2?.ev90 ?? seedPowerRow?.ev90,
+                      gb: p2?.gb ?? seedPowerRow?.gb,
+                      bb: p2?.bb ?? seedPowerRow?.bb,
+                    });
+                    rp.risk_grade = riskResult.grade;
+                    rp.risk_score = riskResult.overall;
+                    rp.risk_trajectory = riskResult.trajectory;
+                    rp.risk_summary = riskResult.summary;
+                    rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
+                    const url = generateReportPdf([rp]);
+                    if (mode === "preview") {
+                      window.open(url, "_blank");
+                    } else {
+                      const link = document.createElement("a");
+                      link.href = url;
+                      link.download = `${player.first_name}-${player.last_name}-scouting-report.pdf`.toLowerCase().replace(/\s+/g, "-");
+                      link.click();
+                    }
+                  } else {
+                    // Coach notes only — minimal rp for the focused notes PDF
+                    const rp: ReportPlayer = {
+                      id: player.id,
+                      player_type: "hitter",
+                      name: `${player.first_name || ""} ${player.last_name || ""}`.trim(),
+                      school: displayTeamCurrent || player.team,
+                      position: effectivePosition,
+                      class_year: player.class_year,
+                      conference: resolvedConference || player.conference,
+                      p_avg: projectedAvg, p_obp: projectedObp, p_slg: projectedSlg,
+                      p_wrc_plus: projectedWrcPlus,
+                      owar: displayOWar,
+                      power_rating_plus: (projectionSourceRow as any)?.overall_plus ?? seedPowerDerived?.overallPlus,
+                      coach_notes: notes,
+                    };
+                    const url = generateCoachNotesPdf(rp, notes);
+                    if (mode === "preview") {
+                      window.open(url, "_blank");
+                    } else {
+                      const link = document.createElement("a");
+                      link.href = url;
+                      link.download = `${player.first_name}-${player.last_name}-coach-notes.pdf`.toLowerCase().replace(/\s+/g, "-");
+                      link.click();
+                    }
+                  }
+                }}
+              />
+              <Button
+                variant={isOnBoard(player.id) ? "default" : "outline"}
+                size="sm"
+                onClick={() => {
+                  if (isOnBoard(player.id)) {
+                    removeFromBoard(player.id);
+                  } else {
+                    addToBoard({ playerId: player.id });
+                  }
+                }}
+              >
+                <Target className="mr-2 h-3.5 w-3.5" />
+                {isOnBoard(player.id) ? "On Board" : "Add to Target Board"}
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -844,7 +1068,7 @@ export default function PlayerProfile() {
                     id: player.id,
                     player_type: "hitter",
                     name: `${player.first_name || ""} ${player.last_name || ""}`.trim(),
-                    school: displayTeam2025 || player.team,
+                    school: displayTeamCurrent || player.team,
                     position: effectivePosition,
                     class_year: player.class_year,
                     bats_throws: [(player as any).bats_hand, (player as any).throws_hand].filter(Boolean).join("/") || undefined,
@@ -860,12 +1084,31 @@ export default function PlayerProfile() {
                     owar: displayOWar,
                     // Valuation
                     nil_value: displayNilValuation,
-                    power_rating_plus: seedPowerDerived?.overallPlus,
+                    power_rating_plus: (projectionSourceRow as any)?.overall_plus ?? seedPowerDerived?.overallPlus,
                     // Scouting scores (for tables)
-                    barrel_score: seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined,
-                    ev_score: seedPowerDerived?.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : undefined,
-                    contact_score: seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined,
-                    chase_score: seedPowerDerived?.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : undefined,
+                    // Prefer stored Hitter Master scores (match UI scouting grades);
+                    // fall back to derived only if the stored value is null.
+                    barrel_score: (projectionSourceRow as any)?.barrel_score ?? (seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined),
+                    ev_score: (projectionSourceRow as any)?.avg_ev_score ?? (seedPowerDerived?.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : undefined),
+                    contact_score: (projectionSourceRow as any)?.contact_score ?? (seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined),
+                    chase_score: (projectionSourceRow as any)?.chase_score ?? (seedPowerDerived?.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : undefined),
+                    // Raw rates for the IQ Hitting Metrics 3-column grid
+                    contact_pct: projectionSourceRow?.contact ?? seedPowerRow?.contact ?? undefined,
+                    bb_pct: projectionSourceRow?.bb ?? seedPowerRow?.bb ?? undefined,
+                    chase_pct: projectionSourceRow?.chase ?? seedPowerRow?.chase ?? undefined,
+                    avg_ev: projectionSourceRow?.avg_exit_velo ?? seedPowerRow?.avgExitVelo ?? undefined,
+                    barrel_pct: projectionSourceRow?.barrel ?? seedPowerRow?.barrel ?? undefined,
+                    ev90: projectionSourceRow?.ev90 ?? seedPowerRow?.ev90 ?? undefined,
+                    ld_pct: projectionSourceRow?.line_drive ?? seedPowerRow?.lineDrive ?? undefined,
+                    pull_pct: projectionSourceRow?.pull ?? seedPowerRow?.pull ?? undefined,
+                    gb_pct: projectionSourceRow?.gb ?? seedPowerRow?.gb ?? undefined,
+                    la_10_30_pct: projectionSourceRow?.la_10_30 ?? seedPowerRow?.la10_30 ?? undefined,
+                    ev90_score: (projectionSourceRow as any)?.ev90_score ?? undefined,
+                    ld_score: (projectionSourceRow as any)?.line_drive_score ?? undefined,
+                    pull_score: (projectionSourceRow as any)?.pull_score ?? undefined,
+                    gb_score: (projectionSourceRow as any)?.gb_score ?? undefined,
+                    la_score: (projectionSourceRow as any)?.la_score ?? undefined,
+                    bb_pct_score: (projectionSourceRow as any)?.bb_score ?? undefined,
                     // Scouting grades (20-80 for PDF)
                     grade_hit: seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined,
                     grade_power: seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined,
@@ -875,76 +1118,60 @@ export default function PlayerProfile() {
                     grade_ofp: seedPowerDerived?.overallPlus != null ? Math.min(80, Math.max(20, Math.round(seedPowerDerived.overallPlus / 2.5 + 20))) : undefined,
                     career_seasons: hitterMasterSeasons as any[],
                     scouting_notes: (() => {
-                      // Use manual notes if present, otherwise generate full report
                       if ((player as any).notes) return (player as any).notes;
-                      if (!seedPowerRow) return undefined;
+                      const p = projectionSourceRow;
+                      if (!p && !seedPowerRow) return undefined;
                       return generateHitterReport({
                         batHand: (player as any).bats_hand,
                         position: effectivePosition,
                         conference: resolvedConference || player.conference,
-                        avg: seedStatRow?.avg, obp: seedStatRow?.obp, slg: seedStatRow?.slg,
-                        iso: seedDerived?.iso,
-                        pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
-                        contact: seedPowerRow.contact, chase: seedPowerRow.chase, bb: seedPowerRow.bb,
-                        avgEv: seedPowerRow.avgExitVelo, ev90: seedPowerRow.ev90,
-                        barrel: seedPowerRow.barrel, laSweet: seedPowerRow.la10_30,
-                        lineDrive: seedPowerRow.lineDrive, gb: seedPowerRow.gb,
-                        pull: seedPowerRow.pull, popUp: seedPowerRow.popUp,
+                        avg: p?.AVG ?? seedStatRow?.avg, obp: p?.OBP ?? seedStatRow?.obp, slg: p?.SLG ?? seedStatRow?.slg,
+                        iso: p?.ISO ?? seedDerived?.iso,
+                        pa: p?.pa ?? (player as any).pa ?? seedPowerRow?.pa ?? null,
+                        contact: p?.contact ?? seedPowerRow?.contact,
+                        chase: p?.chase ?? seedPowerRow?.chase,
+                        bb: p?.bb ?? seedPowerRow?.bb,
+                        avgEv: p?.avg_exit_velo ?? seedPowerRow?.avgExitVelo,
+                        ev90: p?.ev90 ?? seedPowerRow?.ev90,
+                        barrel: p?.barrel ?? seedPowerRow?.barrel,
+                        laSweet: p?.la_10_30 ?? seedPowerRow?.la10_30,
+                        lineDrive: p?.line_drive ?? seedPowerRow?.lineDrive,
+                        gb: p?.gb ?? seedPowerRow?.gb,
+                        pull: p?.pull ?? seedPowerRow?.pull,
+                        popUp: p?.pop_up ?? seedPowerRow?.popUp,
                       }, "rstriq", "full");
                     })(),
                   };
-                  // Attach risk assessment
+                  const p3 = projectionSourceRow;
                   const riskResult = assessHitterRisk({
                     conference: resolvedConference || player.conference,
                     projectedWrcPlus: projectedWrcPlus,
                     careerSeasons: hitterMasterSeasons as any[],
-                    pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
-                    chase: seedPowerRow?.chase, contact: seedPowerRow?.contact,
-                    whiff: seedPowerRow?.whiff, barrel: seedPowerRow?.barrel,
-                    lineDrive: seedPowerRow?.lineDrive, avgEv: seedPowerRow?.avgExitVelo,
-                    ev90: seedPowerRow?.ev90, gb: seedPowerRow?.gb, bb: seedPowerRow?.bb,
+                    pa: p3?.pa ?? (player as any).pa ?? seedPowerRow?.pa ?? null,
+                    chase: p3?.chase ?? seedPowerRow?.chase,
+                    contact: p3?.contact ?? seedPowerRow?.contact,
+                    whiff: seedPowerRow?.whiff,
+                    barrel: p3?.barrel ?? seedPowerRow?.barrel,
+                    lineDrive: p3?.line_drive ?? seedPowerRow?.lineDrive,
+                    avgEv: p3?.avg_exit_velo ?? seedPowerRow?.avgExitVelo,
+                    ev90: p3?.ev90 ?? seedPowerRow?.ev90,
+                    gb: p3?.gb ?? seedPowerRow?.gb,
+                    bb: p3?.bb ?? seedPowerRow?.bb,
                   });
                   rp.risk_grade = riskResult.grade;
                   rp.risk_score = riskResult.overall;
                   rp.risk_trajectory = riskResult.trajectory;
                   rp.risk_summary = riskResult.summary;
                   rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
+                  rp.coach_notes = coachNotesForExport;
                   try { downloadSinglePlayerReport(rp); } catch (err: any) { toast.error(`Export failed: ${err.message}`); }
                 }}
               >
                 <Download className="mr-2 h-3.5 w-3.5" />
-                Export PDF
-              </Button>
-              <Button
-                variant={isOnBoard(player.id) ? "default" : "outline"}
-                size="sm"
-                onClick={() => {
-                  if (isOnBoard(player.id)) {
-                    removeFromBoard(player.id);
-                  } else {
-                    addToBoard({ playerId: player.id });
-                  }
-                }}
-              >
-                <Target className="mr-2 h-3.5 w-3.5" />
-                {isOnBoard(player.id) ? "On Board" : "Target Board"}
+                Export Report
               </Button>
             </>
-          )}
-          {!editing ? (
-            <Button variant="outline" size="sm" onClick={startEdit}>
-              <Pencil className="mr-2 h-3.5 w-3.5" />Edit
-            </Button>
-          ) : (
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => setEditing(false)}>
-                <X className="mr-1 h-3.5 w-3.5" />Cancel
-              </Button>
-              <Button size="sm" onClick={saveEdit} disabled={updatePlayer.isPending}>
-                <Save className="mr-1 h-3.5 w-3.5" />Save
-              </Button>
-            </div>
-          )}
+          }
         </div>
 
         <div className="grid gap-4 lg:grid-cols-3">
@@ -1042,7 +1269,7 @@ export default function PlayerProfile() {
                 ) : (
                   <div className="space-y-2.5 text-sm">
                   {[
-                    ["Team", displayTeam2025 || "—"],
+                    ["Team", displayTeamCurrent || "—"],
                     ["Conference", resolvedConference || "—"],
                     ["Position", effectivePosition || "—"],
                     ["Class", (isReturner && regularPred?.class_transition ? classTransitionToYear[regularPred.class_transition] : null) || player.class_year || "—"],
@@ -1088,7 +1315,7 @@ export default function PlayerProfile() {
                           return (
                             <tr key={row.Season} className={`border-b border-[#162241]/60 last:border-0 transition-colors duration-150 hover:bg-[#162241]/40 ${i % 2 === 1 ? "bg-[#0d1a30]" : ""}`}>
                               <td className="py-1.5 pr-1 font-semibold text-white">{row.Season}</td>
-                              <td className="py-1.5 px-1 text-[#8a94a6] truncate max-w-[60px]">{row.Team ?? "—"}</td>
+                              <td className="py-1.5 px-1 text-[#8a94a6] truncate max-w-[60px]">{teamAbbrev(row.Team, row.TeamID)}</td>
                               <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.pa ?? "—"}</td>
                               <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.AVG != null ? Number(row.AVG).toFixed(3) : "—"}</td>
                               <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.OBP != null ? Number(row.OBP).toFixed(3) : "—"}</td>
@@ -1143,10 +1370,10 @@ export default function PlayerProfile() {
                 <CardContent className="px-4 pb-4 space-y-3">
                   <div className="grid grid-cols-2 gap-2">
                     {[
-                      ["Overall PR+", pctFormat(seedPowerDerived.overallPlus)],
-                      ["AVG PR+", pctFormat(seedPowerDerived.baPlus)],
-                      ["OBP PR+", pctFormat(seedPowerDerived.obpPlus)],
-                      ["ISO PR+", pctFormat(seedPowerDerived.isoPlus)],
+                      ["Overall PR+", pctFormat(activeSeasonScoutingGrades?.overallPlus ?? seedPowerDerived?.overallPlus)],
+                      ["AVG PR+", pctFormat(activeSeasonScoutingGrades?.baPlus ?? seedPowerDerived?.baPlus)],
+                      ["OBP PR+", pctFormat(activeSeasonScoutingGrades?.obpPlus ?? seedPowerDerived?.obpPlus)],
+                      ["ISO PR+", pctFormat(activeSeasonScoutingGrades?.isoPlus ?? seedPowerDerived?.isoPlus)],
                     ].map(([label, val]) => (
                       <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3">
                         <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
@@ -1154,32 +1381,30 @@ export default function PlayerProfile() {
                       </div>
                     ))}
                   </div>
-                  {seedPowerRow && (
-                    <>
+                  {(activeSeasonRow || seedPowerRow) && (
                       <div className="border-t border-[#162241] pt-3">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-[#8a94a6] mb-2">2025 Input Metrics</p>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-[#8a94a6] mb-2">{effectiveSeason} Input Metrics</p>
                         <div className="grid grid-cols-2 gap-2">
                           {[
-                            ["Contact %", `${seedPowerRow.contact?.toFixed(1)}%`],
-                            ["Line Drive %", `${seedPowerRow.lineDrive?.toFixed(1)}%`],
-                            ["Pop-Up %", `${seedPowerRow.popUp?.toFixed(1)}%`],
-                            ["BB %", `${seedPowerRow.bb?.toFixed(1)}%`],
-                            ["Chase %", `${seedPowerRow.chase?.toFixed(1)}%`],
-                            ["Barrel %", `${seedPowerRow.barrel?.toFixed(1)}%`],
-                            ["Pull %", `${seedPowerRow.pull?.toFixed(1)}%`],
-                            ["LA 10-30 %", `${seedPowerRow.la10_30?.toFixed(1)}%`],
-                            ["GB %", `${seedPowerRow.gb?.toFixed(1)}%`],
-                            ["Avg Exit Velo", `${seedPowerRow.avgExitVelo?.toFixed(1)} mph`],
-                            ["EV90", `${seedPowerRow.ev90?.toFixed(1)} mph`],
-                          ].map(([label, val]) => (
-                            <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-2.5">
+                            ["Contact %", activeSeasonRow ? (activeSeasonRow as any).contact : seedPowerRow?.contact, "%"],
+                            ["Line Drive %", activeSeasonRow ? (activeSeasonRow as any).line_drive : seedPowerRow?.lineDrive, "%"],
+                            ["Pop-Up %", activeSeasonRow ? (activeSeasonRow as any).pop_up : seedPowerRow?.popUp, "%"],
+                            ["BB %", activeSeasonRow ? (activeSeasonRow as any).bb : seedPowerRow?.bb, "%"],
+                            ["Chase %", activeSeasonRow ? (activeSeasonRow as any).chase : seedPowerRow?.chase, "%"],
+                            ["Barrel %", activeSeasonRow ? (activeSeasonRow as any).barrel : seedPowerRow?.barrel, "%"],
+                            ["Pull %", activeSeasonRow ? (activeSeasonRow as any).pull : seedPowerRow?.pull, "%"],
+                            ["LA 10-30 %", activeSeasonRow ? (activeSeasonRow as any).la_10_30 : seedPowerRow?.la10_30, "%"],
+                            ["GB %", activeSeasonRow ? (activeSeasonRow as any).gb : seedPowerRow?.gb, "%"],
+                            ["Avg Exit Velo", activeSeasonRow ? (activeSeasonRow as any).avg_exit_velo : seedPowerRow?.avgExitVelo, " mph"],
+                            ["EV90", activeSeasonRow ? (activeSeasonRow as any).ev90 : seedPowerRow?.ev90, " mph"],
+                          ].map(([label, val, suffix]) => (
+                            <div key={label as string} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-2.5">
                               <div className="text-[9px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
-                              <div className="font-semibold text-lg mt-0.5 text-slate-100 tabular-nums">{val}</div>
+                              <div className="font-semibold text-lg mt-0.5 text-slate-100 tabular-nums">{val != null ? `${Number(val).toFixed(1)}${suffix}` : "—"}</div>
                             </div>
                           ))}
                         </div>
                       </div>
-                    </>
                   )}
                 </CardContent>
               </Card>
@@ -1190,7 +1415,7 @@ export default function PlayerProfile() {
           <div className="lg:col-span-2 space-y-4">
             <div className="grid gap-3 grid-cols-3">
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
-                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">oWAR</div>
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">oWAR{isThinSample ? "*" : ""}</div>
                 <div className={`text-3xl font-bold tracking-tight mt-1 ${warTierClass(displayOWar)}`}>{displayOWar != null ? displayOWar.toFixed(1) : "—"}</div>
               </div>
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
@@ -1198,8 +1423,11 @@ export default function PlayerProfile() {
                 <div className="text-2xl font-bold tracking-tight mt-1 text-[#D4AF37]">{displayNilValuation != null ? `$${Math.round(displayNilValuation).toLocaleString()}` : "—"}</div>
               </div>
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
-                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Power Rating</div>
-                <div className={`text-3xl font-bold tracking-tight mt-1 ${powerTierClass(seedPowerDerived?.overallPlus ?? null)}`}>{pctFormat(seedPowerDerived?.overallPlus ?? null)}</div>
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Power Rating{projectionSourceRow?.combined_used ? "*" : ""}</div>
+                <div className={`text-3xl font-bold tracking-tight mt-1 ${powerTierClass(projectionSourceRow?.overall_plus ?? seedPowerDerived?.overallPlus ?? null)}`}>{pctFormat(projectionSourceRow?.overall_plus ?? seedPowerDerived?.overallPlus ?? null)}</div>
+                {projectionSourceRow?.combined_used && (
+                  <div className="mt-1 text-[9px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"}</div>
+                )}
               </div>
             </div>
 
@@ -1208,7 +1436,7 @@ export default function PlayerProfile() {
                 <Card>
                   <CardContent className="pt-3 pb-2.5">
                     <div className="text-xs font-medium text-muted-foreground">2025 Team</div>
-                    <div className={`text-lg font-bold mt-1 ${displayTeam2025 ? "" : "text-muted-foreground"}`}>{displayTeam2025 || "TBD"}</div>
+                    <div className={`text-lg font-bold mt-1 ${displayTeamCurrent ? "" : "text-muted-foreground"}`}>{displayTeamCurrent || "TBD"}</div>
                     {fromTeamData?.conference && <div className="text-xs text-muted-foreground">{fromTeamData.conference}</div>}
                   </CardContent>
                 </Card>
@@ -1225,7 +1453,7 @@ export default function PlayerProfile() {
               <Card className="border-[#162241] bg-[#0a1428]">
                 <CardHeader className="pb-2 pt-3 px-4">
                   <div className="flex items-center gap-3 flex-wrap">
-                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2026 Projected Stats</CardTitle>
+                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2027 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
                     {editingPrediction && regularPred ? (
                       <div className="flex items-center gap-1.5">
                         <Select value={predForm.class_transition || "none"} onValueChange={(v) => setPredForm({ ...predForm, class_transition: v === "none" ? "" : v })}>
@@ -1282,64 +1510,20 @@ export default function PlayerProfile() {
                       </div>
                     ))}
                   </div>
+                  {isThinSample && (
+                    <p className="mt-2 text-[10px] text-[#8a94a6]">*thin sample — fewer than 15 AB with no prior-season data; projection is speculative</p>
+                  )}
                 </CardContent>
               </Card>
 
-            {/* Risk Assessment */}
-            {(() => {
-              const confKey = (resolvedConference || player.conference || "").toLowerCase().trim();
-              const confRow = conferenceStatsByKey.get(confKey);
-              const risk = assessHitterRisk({
-                conference: resolvedConference || player.conference,
-                projectedWrcPlus: projectedWrcPlus,
-                confStuffPlus: confRow?.stuff_plus,
-                careerSeasons: hitterMasterSeasons as any[],
-                pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
-                chase: seedPowerRow?.chase, contact: seedPowerRow?.contact,
-                whiff: seedPowerRow?.whiff, barrel: seedPowerRow?.barrel,
-                lineDrive: seedPowerRow?.lineDrive, avgEv: seedPowerRow?.avgExitVelo,
-                ev90: seedPowerRow?.ev90, pull: seedPowerRow?.pull,
-                gb: seedPowerRow?.gb, bb: seedPowerRow?.bb,
-              });
-              return <RiskAssessmentCardRSTR risk={risk} />;
-            })()}
-
-            {/* Scouting Report */}
-            {seedPowerRow && (() => {
-              const report = generateHitterReport({
-                batHand: (player as any).bats_hand,
-                position: seedPos || player.position,
-                conference: resolvedConference || player.conference,
-                avg: seedStatRow?.avg, obp: seedStatRow?.obp, slg: seedStatRow?.slg,
-                iso: seedDerived?.iso,
-                pa: (player as any).pa ?? seedPowerRow?.pa ?? null,
-                contact: seedPowerRow.contact, chase: seedPowerRow.chase, bb: seedPowerRow.bb,
-                avgEv: seedPowerRow.avgExitVelo, ev90: seedPowerRow.ev90,
-                barrel: seedPowerRow.barrel, laSweet: seedPowerRow.la10_30,
-                lineDrive: seedPowerRow.lineDrive, gb: seedPowerRow.gb,
-                pull: seedPowerRow.pull, popUp: seedPowerRow.popUp,
-              }, "rstriq", "short");
-
-              return (
-                <Card className="border-[#162241] bg-[#0a1428]">
-                  <CardHeader className="pb-2 pt-3 px-4">
-                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>
-                      Scouting Report
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="px-4 pb-4">
-                    <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{report}</p>
-                  </CardContent>
-                </Card>
-              );
-            })()}
-
             {/* Scouting Grades */}
-            {seedPowerDerived && (
+            {activeSeasonScoutingGrades && (
               <Card className="border-[#162241] bg-[#0a1428]">
                 <CardHeader className="pb-2 pt-3 px-4">
                   <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Scouting Grades</CardTitle>
+                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>
+                      Scouting Grades{effectiveSeason === 2026 && projectionSourceRow?.combined_used ? "*" : ""}
+                    </CardTitle>
                     {availableSeasons.length > 1 && (
                       <Select value={String(effectiveSeason)} onValueChange={(v) => setSelectedSeason(Number(v))}>
                         <SelectTrigger className="h-8 w-[75px] text-xs font-semibold border-[#162241] bg-[#0d1a30] text-slate-200">
@@ -1356,14 +1540,91 @@ export default function PlayerProfile() {
                 </CardHeader>
                 <CardContent className="px-4 pb-4">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <ScoutGrade label="Brl" value={seedPowerDerived.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : null} fullLabel="Barrel%" />
-                    <ScoutGrade label="EV" value={seedPowerDerived.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : null} fullLabel="Exit Velo" />
-                    <ScoutGrade label="Con" value={seedPowerDerived.contactScore != null ? Math.round(seedPowerDerived.contactScore) : null} fullLabel="Contact%" />
-                    <ScoutGrade label="Chs" value={seedPowerDerived.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : null} fullLabel="Chase%" />
+                    <ScoutGrade label="Brl" value={activeSeasonScoutingGrades.barrelScore != null ? Math.round(activeSeasonScoutingGrades.barrelScore) : null} fullLabel="Barrel%" />
+                    <ScoutGrade label="EV" value={activeSeasonScoutingGrades.avgEVScore != null ? Math.round(activeSeasonScoutingGrades.avgEVScore) : null} fullLabel="Exit Velo" />
+                    <ScoutGrade label="Con" value={activeSeasonScoutingGrades.contactScore != null ? Math.round(activeSeasonScoutingGrades.contactScore) : null} fullLabel="Contact%" />
+                    <ScoutGrade label="Chs" value={activeSeasonScoutingGrades.chaseScore != null ? Math.round(activeSeasonScoutingGrades.chaseScore) : null} fullLabel="Chase%" />
                   </div>
+                  {effectiveSeason === 2026 && projectionSourceRow?.combined_used && (
+                    <p className="mt-2 text-[10px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"} sample</p>
+                  )}
                 </CardContent>
               </Card>
             )}
+
+            {/* Risk Assessment */}
+            {(() => {
+              const confKey = (resolvedConference || player.conference || "").toLowerCase().trim();
+              const confRow = conferenceStatsByKey.get(confKey);
+              // Pull scouting inputs from projectionSourceRow (2025-pinned, blended when
+              // combined_used) so risk anchors on the same sample as projections.
+              const p = projectionSourceRow;
+              const risk = assessHitterRisk({
+                conference: resolvedConference || player.conference,
+                projectedWrcPlus: projectedWrcPlus,
+                confStuffPlus: confRow?.stuff_plus,
+                careerSeasons: hitterMasterSeasons as any[],
+                pa: p?.pa ?? (player as any).pa ?? seedPowerRow?.pa ?? null,
+                chase: p?.chase ?? seedPowerRow?.chase,
+                contact: p?.contact ?? seedPowerRow?.contact,
+                whiff: seedPowerRow?.whiff,
+                barrel: p?.barrel ?? seedPowerRow?.barrel,
+                lineDrive: p?.line_drive ?? seedPowerRow?.lineDrive,
+                avgEv: p?.avg_exit_velo ?? seedPowerRow?.avgExitVelo,
+                ev90: p?.ev90 ?? seedPowerRow?.ev90,
+                pull: p?.pull ?? seedPowerRow?.pull,
+                gb: p?.gb ?? seedPowerRow?.gb,
+                bb: p?.bb ?? seedPowerRow?.bb,
+              });
+              return (
+                <>
+                  <RiskAssessmentCardRSTR risk={risk} />
+                  {projectionSourceRow?.combined_used && (
+                    <div className="-mt-2 text-[10px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"} sample</div>
+                  )}
+                </>
+              );
+            })()}
+
+            {/* Scouting Report */}
+            {(projectionSourceRow || seedPowerRow) && (() => {
+              const p = projectionSourceRow;
+              const report = generateHitterReport({
+                batHand: (player as any).bats_hand,
+                position: seedPos || player.position,
+                conference: resolvedConference || player.conference,
+                avg: p?.AVG ?? seedStatRow?.avg, obp: p?.OBP ?? seedStatRow?.obp, slg: p?.SLG ?? seedStatRow?.slg,
+                iso: p?.ISO ?? seedDerived?.iso,
+                pa: p?.pa ?? (player as any).pa ?? seedPowerRow?.pa ?? null,
+                contact: p?.contact ?? seedPowerRow?.contact,
+                chase: p?.chase ?? seedPowerRow?.chase,
+                bb: p?.bb ?? seedPowerRow?.bb,
+                avgEv: p?.avg_exit_velo ?? seedPowerRow?.avgExitVelo,
+                ev90: p?.ev90 ?? seedPowerRow?.ev90,
+                barrel: p?.barrel ?? seedPowerRow?.barrel,
+                laSweet: p?.la_10_30 ?? seedPowerRow?.la10_30,
+                lineDrive: p?.line_drive ?? seedPowerRow?.lineDrive,
+                gb: p?.gb ?? seedPowerRow?.gb,
+                pull: p?.pull ?? seedPowerRow?.pull,
+                popUp: p?.pop_up ?? seedPowerRow?.popUp,
+              }, "rstriq", "short");
+
+              return (
+                <Card className="border-[#162241] bg-[#0a1428]">
+                  <CardHeader className="pb-2 pt-3 px-4">
+                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>
+                      Scouting Report{projectionSourceRow?.combined_used ? "*" : ""}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{report}</p>
+                    {projectionSourceRow?.combined_used && (
+                      <p className="mt-2 text-[10px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"} sample</p>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })()}
 
             {/* Season Stats */}
             {seasonStats.length > 0 && (
@@ -1409,6 +1670,7 @@ export default function PlayerProfile() {
             )}
           </div>
         </div>
+
       </div>
     </DashboardLayout>
   );

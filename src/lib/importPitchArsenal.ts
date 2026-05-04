@@ -26,7 +26,7 @@ function parseNum(v: string | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export async function importPitchArsenalFromCsv(csvText: string, season = 2025): Promise<ImportResult> {
+export async function importPitchArsenalFromCsv(csvText: string, season = 2026): Promise<ImportResult> {
   const result: ImportResult = { pitchesImported: 0, playersProcessed: 0, stuffPlusUpdated: 0, errors: [] };
 
   const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);

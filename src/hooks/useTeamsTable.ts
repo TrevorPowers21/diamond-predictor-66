@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { fetchTeamsTable, type TeamsTableRow } from "@/lib/supabaseQueries";
+import { CURRENT_SEASON } from "@/lib/seasonConstants";
 
 export type TeamRowCompat = {
   id: string;
@@ -14,6 +15,9 @@ export type TeamRowCompat = {
 };
 
 function toCompat(row: TeamsTableRow): TeamRowCompat {
+  // DB column is "Season" (capital S); TS types show lowercase. Read both
+  // so we work whether or not the types ever get regenerated.
+  const seasonVal = (row as any).Season ?? (row as any).season ?? 0;
   return {
     id: row.id,
     name: row.abbreviation || row.full_name,
@@ -23,16 +27,26 @@ function toCompat(row: TeamsTableRow): TeamRowCompat {
     park_factor: null,
     source_team_id: row.source_id,
     abbreviation: row.abbreviation,
-    season: row.season,
+    season: seasonVal,
   };
 }
 
+// `team_id` (Teams Table.id) is per-season — Georgia 2025 and Georgia 2026 have
+// DIFFERENT UUIDs. `source_team_id` (Teams Table.source_id) is the program-level
+// identifier that's stable across seasons. The hook defaults to current-season
+// rows so TeamBuilder, TransferPortal, etc. resolve to the right team_id without
+// any cross-season dedup hack. The current-season value comes from the shared
+// CURRENT_SEASON constant so the next yearly transition is a one-line change.
+
 let _cache: TeamRowCompat[] | null = null;
 let _cachePromise: Promise<TeamRowCompat[]> | null = null;
+let _cacheSeason: number | null = null;
 
-function getCached(season?: number): Promise<TeamRowCompat[]> {
-  if (_cache) return Promise.resolve(_cache);
-  if (_cachePromise) return _cachePromise;
+function getCached(season: number): Promise<TeamRowCompat[]> {
+  if (_cache && _cacheSeason === season) return Promise.resolve(_cache);
+  if (_cachePromise && _cacheSeason === season) return _cachePromise;
+  _cacheSeason = season;
+  _cache = null;
   _cachePromise = fetchTeamsTable(season).then((data) => {
     _cache = data.map(toCompat);
     return _cache;
@@ -40,12 +54,17 @@ function getCached(season?: number): Promise<TeamRowCompat[]> {
   return _cachePromise;
 }
 
-export function useTeamsTable(season?: number) {
-  const [teams, setTeams] = useState<TeamRowCompat[]>(_cache ?? []);
-  const [loading, setLoading] = useState(!_cache);
+export function useTeamsTable(season: number = CURRENT_SEASON) {
+  const cacheHit = _cache && _cacheSeason === season;
+  const [teams, setTeams] = useState<TeamRowCompat[]>(cacheHit ? (_cache as TeamRowCompat[]) : []);
+  const [loading, setLoading] = useState(!cacheHit);
 
   useEffect(() => {
-    if (_cache) { setTeams(_cache); setLoading(false); return; }
+    if (_cache && _cacheSeason === season) {
+      setTeams(_cache);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     getCached(season)

@@ -27,3 +27,7 @@ dist-ssr
 pdf-api/venv/
 pdf-api/.env
 pdf-api/__pycache__/
+
+# Supabase CLI cache (auto-regenerated; not project state)
+supabase/.temp/
+supabase/.branches/

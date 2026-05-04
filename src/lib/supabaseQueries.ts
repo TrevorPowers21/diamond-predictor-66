@@ -54,12 +54,15 @@ export async function fetchConferenceStatsByConferenceId(
 }
 
 // ─── Teams Table ───────────────────────────────────────────────────────
+// NOTE: the underlying column in Postgres is "Season" (capital S). The TS types
+// show lowercase `season` which is stale — casting through `any` so the filter
+// actually applies the correct column name without TypeScript fighting us.
 export async function fetchTeamsTable(season?: number): Promise<TeamsTableRow[]> {
-  let query = supabase.from("Teams Table").select("*");
-  if (season != null) query = query.eq("season", season);
+  let query: any = supabase.from("Teams Table").select("*");
+  if (season != null) query = query.eq("Season", season);
   const { data, error } = await query.order("full_name");
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as TeamsTableRow[];
 }
 
 export async function fetchTeamById(id: string): Promise<TeamsTableRow | null> {

@@ -3,13 +3,13 @@
  *
  * Players with small current-season samples (e.g., injured, transferred mid-year,
  * lost playing time) get noisy projections. This module looks back at prior
- * seasons by source_player_id and PA-weighted blends the raw stats + scouting
+ * seasons by source_player_id and AB/IP-weighted blends the raw stats + scouting
  * metrics until we hit a target sample size, OR run out of seasons.
  *
  * Usage: call from the projection engine BEFORE running power rating math.
  *
  * Decision:
- * - Hitter threshold: 75 PA
+ * - Hitter threshold: 75 AB
  * - Pitcher threshold: 25 IP
  * - Power rating weight bumps from 0.7 → 0.9 for low-sample players
  * - If a player qualifies on their own, no blending happens — current season only
@@ -19,8 +19,10 @@
 
 import { supabase } from "@/integrations/supabase/client";
 
-export const HITTER_PA_THRESHOLD = 75;
+export const HITTER_AB_THRESHOLD = 75;
+export const HITTER_AB_NOISE_FLOOR = 15; // Below this, current season is pure noise — skip entirely
 export const PITCHER_IP_THRESHOLD = 25;
+export const PITCHER_IP_NOISE_FLOOR = 5; // Same concept for pitchers
 
 // All numeric columns we want to blend on the hitter side
 const HITTER_BLEND_COLS = [
@@ -38,7 +40,7 @@ const PITCHER_BLEND_COLS = [
 
 export type CombinedHitterResult = {
   combined: boolean; // true if multi-year blend was applied
-  totalPa: number;
+  totalAb: number;
   seasonsUsed: number[]; // newest first
   // Blended numeric values (or current-season values if no blend)
   values: Record<string, number | null>;
@@ -52,8 +54,33 @@ export type CombinedPitcherResult = {
 };
 
 /**
- * PA-weighted blend across multiple Hitter Master season rows.
- * Each row's contribution = (row.pa / totalPa) * row.value
+ * Thin-sample detection: current-season playing time is below the noise
+ * floor AND no prior-season blend was applied (either no priors existed or
+ * they had no playing time either). Projections for these players should
+ * be shown with an asterisk — the sample is too thin to trust.
+ */
+export function isThinSampleHitter(row: {
+  ab?: number | null;
+  combined_used?: boolean | null;
+} | null | undefined): boolean {
+  if (!row) return false;
+  const ab = Number(row.ab) || 0;
+  return ab < HITTER_AB_NOISE_FLOOR && !row.combined_used;
+}
+
+export function isThinSamplePitcher(row: {
+  IP?: number | null;
+  ip?: number | null;
+  combined_used?: boolean | null;
+} | null | undefined): boolean {
+  if (!row) return false;
+  const ip = Number(row.IP ?? row.ip) || 0;
+  return ip < PITCHER_IP_NOISE_FLOOR && !row.combined_used;
+}
+
+/**
+ * AB-weighted blend across multiple Hitter Master season rows.
+ * Each row's contribution = (row.ab / totalAb) * row.value
  * Null values are dropped from the weighting (column-by-column).
  */
 function blendHitter(rows: Array<Record<string, any>>): Record<string, number | null> {
@@ -63,7 +90,7 @@ function blendHitter(rows: Array<Record<string, any>>): Record<string, number | 
     let sumWeight = 0;
     for (const r of rows) {
       const v = r[col];
-      const w = Number(r.pa) || 0;
+      const w = Number(r.ab) || 0;
       if (v != null && Number.isFinite(Number(v)) && w > 0) {
         sumWeighted += Number(v) * w;
         sumWeight += w;
@@ -93,7 +120,7 @@ function blendPitcher(rows: Array<Record<string, any>>): Record<string, number |
 }
 
 /**
- * Fetch and blend hitter stats for a player who is below the PA threshold.
+ * Fetch and blend hitter stats for a player who is below the AB threshold.
  * Returns the combined stats (or unchanged current-season stats if not below threshold,
  * or no source_player_id, or no prior history available).
  */
@@ -102,10 +129,10 @@ export async function getBlendedHitterStats(
   currentSeason: number,
   currentRow: Record<string, any>,
 ): Promise<CombinedHitterResult> {
-  const currentPa = Number(currentRow?.pa) || 0;
+  const currentAb = Number(currentRow?.ab) || 0;
   const passthrough = (combined: boolean): CombinedHitterResult => ({
     combined,
-    totalPa: currentPa,
+    totalAb: currentAb,
     seasonsUsed: [currentSeason],
     values: HITTER_BLEND_COLS.reduce((acc, col) => {
       acc[col] = currentRow?.[col] ?? null;
@@ -113,14 +140,14 @@ export async function getBlendedHitterStats(
     }, {} as Record<string, number | null>),
   });
 
-  if (!sourcePlayerId || currentPa >= HITTER_PA_THRESHOLD) {
+  if (!sourcePlayerId || currentAb >= HITTER_AB_THRESHOLD) {
     return passthrough(false);
   }
 
   // Look back through prior seasons in descending order
   const { data: priorSeasons, error } = await supabase
     .from("Hitter Master")
-    .select("Season, pa, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb")
+    .select("Season, ab, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb")
     .eq("source_player_id", sourcePlayerId)
     .lt("Season", currentSeason)
     .order("Season", { ascending: false });
@@ -129,26 +156,32 @@ export async function getBlendedHitterStats(
     return passthrough(false);
   }
 
-  // Walk backwards adding seasons until we hit threshold or run out
-  const collected: any[] = [currentRow];
-  let totalPa = currentPa;
+  // If current season is below noise floor, skip it entirely — use prior seasons only
+  const belowNoiseFloor = currentAb < HITTER_AB_NOISE_FLOOR;
+  const collected: any[] = belowNoiseFloor ? [] : [currentRow];
+  let totalAb = belowNoiseFloor ? 0 : currentAb;
+
   for (const ps of priorSeasons) {
-    const pa = Number((ps as any).pa) || 0;
-    if (pa <= 0) continue;
+    const ab = Number((ps as any).ab) || 0;
+    if (ab <= 0) continue;
     collected.push(ps);
-    totalPa += pa;
-    if (totalPa >= HITTER_PA_THRESHOLD) break;
+    totalAb += ab;
+    if (totalAb >= HITTER_AB_THRESHOLD) break;
   }
 
-  if (collected.length === 1) {
-    // No usable prior data found
+  if (collected.length === 0) {
+    return passthrough(false);
+  }
+
+  // If we only have prior seasons (noise floor case), use straight blend of those
+  if (collected.length === 1 && !belowNoiseFloor) {
     return passthrough(false);
   }
 
   const values = blendHitter(collected);
   return {
     combined: true,
-    totalPa,
+    totalAb,
     seasonsUsed: collected.map((c) => Number(c.Season)).sort((a, b) => b - a),
     values,
   };
@@ -179,7 +212,7 @@ export async function getBlendedPitcherStats(
 
   const { data: priorSeasons, error } = await supabase
     .from("Pitching Master")
-    .select(`Season, IP, ERA, FIP, WHIP, K9, BB9, HR9,
+    .select(`Season, IP, Team, TeamID, ERA, FIP, WHIP, K9, BB9, HR9,
              miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct,
              barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct,
              h_pull_pct, la_10_30_pct, stuff_plus, "90th_vel"`)
@@ -191,8 +224,11 @@ export async function getBlendedPitcherStats(
     return passthrough(false);
   }
 
-  const collected: any[] = [currentRow];
-  let totalIp = currentIp;
+  // If current season is below noise floor, skip it entirely — use prior seasons only
+  const belowNoiseFloor = currentIp < PITCHER_IP_NOISE_FLOOR;
+  const collected: any[] = belowNoiseFloor ? [] : [currentRow];
+  let totalIp = belowNoiseFloor ? 0 : currentIp;
+
   for (const ps of priorSeasons) {
     const ip = Number((ps as any).IP) || 0;
     if (ip <= 0) continue;
@@ -201,7 +237,12 @@ export async function getBlendedPitcherStats(
     if (totalIp >= PITCHER_IP_THRESHOLD) break;
   }
 
-  if (collected.length === 1) {
+  if (collected.length === 0) {
+    return passthrough(false);
+  }
+
+  // If we only have prior seasons (noise floor case), use straight blend of those
+  if (collected.length === 1 && !belowNoiseFloor) {
     return passthrough(false);
   }
 

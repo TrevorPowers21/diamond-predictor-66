@@ -10,7 +10,7 @@ type ImportResult = {
  * Update 90th_vel (EV90 - 90th percentile exit velocity against) on Pitching Master
  * from a CSV with playerId and 90thExitVel columns.
  */
-export async function importPitcherEv90FromCsv(csvText: string, season = 2025): Promise<ImportResult> {
+export async function importPitcherEv90FromCsv(csvText: string, season = 2026): Promise<ImportResult> {
   const result: ImportResult = { updated: 0, notFound: 0, errors: [] };
 
   const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);

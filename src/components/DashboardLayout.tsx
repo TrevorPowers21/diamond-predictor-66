@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import TeamSwitcher from "@/components/TeamSwitcher";
 import {
   Activity,
   BarChart3,
@@ -15,6 +16,8 @@ import {
   ShieldCheck,
   ChevronRight,
   Star,
+  Building2,
+  UserCog,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -27,16 +30,32 @@ const navItems = [
   { label: "Compare", href: "/dashboard/compare", icon: GitCompare, description: "Side-by-side analysis" },
 ];
 
-const systemItems = [
+type SystemItem = {
+  label: string;
+  href: string;
+  icon: typeof Settings;
+  requires?: "superadmin" | "team_admin";
+};
+
+const systemItems: SystemItem[] = [
   { label: "Admin", href: "/dashboard/admin", icon: ShieldCheck },
+  { label: "Customer Teams", href: "/dashboard/admin/teams", icon: Building2, requires: "superadmin" },
+  { label: "Team Members", href: "/dashboard/admin/users", icon: UserCog, requires: "team_admin" },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
-  const { user, signOut, roles } = useAuth();
+  const { user, signOut, roles, isSuperadmin, userTeamRole } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const visibleSystemItems = systemItems.filter((item) => {
+    if (!item.requires) return true;
+    if (item.requires === "superadmin") return isSuperadmin;
+    if (item.requires === "team_admin") return isSuperadmin || userTeamRole === "team_admin";
+    return false;
+  });
 
   useEffect(() => {
     setSidebarOpen(false);
@@ -102,7 +121,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           })}
 
           <div className="px-3 pt-4 pb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#4a5568]">System</div>
-          {systemItems.map((item) => {
+          {visibleSystemItems.map((item) => {
             const isActive = location.pathname === item.href;
             return (
               <Link
@@ -162,6 +181,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           <h1 className="text-sm font-semibold text-muted-foreground">
             {[...navItems, ...systemItems].find((i) => i.href === location.pathname)?.label ?? "Dashboard"}
           </h1>
+          <div className="ml-auto">
+            <TeamSwitcher />
+          </div>
         </header>
 
         <main className="flex-1 overflow-auto p-4 lg:p-6">{children}</main>
