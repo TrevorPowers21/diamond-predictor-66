@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Plus, UserPlus, Users } from "lucide-react";
+import { Plus, UserPlus, Users, Palette } from "lucide-react";
 import { inviteUserToTeam } from "@/lib/inviteUser";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
 
@@ -24,23 +24,40 @@ interface SchoolRow {
   conference: string | null;
 }
 
+interface AdminTeamRow {
+  id: string;
+  name: string;
+  school_team_id: string | null;
+  savant_enabled: boolean;
+  active: boolean;
+  created_at: string;
+  logo_url: string | null;
+  display_name: string | null;
+  mascot: string | null;
+  primary_color: string | null;
+  secondary_color: string | null;
+}
+
 const NO_SCHOOL = "__none__";
+const DEFAULT_PRIMARY_COLOR = "#0051BA";
+const DEFAULT_SECONDARY_COLOR = "#E8000D";
 
 export default function AdminTeams() {
   const qc = useQueryClient();
   const { user, impersonateTeam } = useAuth();
   const [createOpen, setCreateOpen] = useState(false);
   const [inviteForTeam, setInviteForTeam] = useState<CustomerTeam | null>(null);
+  const [brandingForTeam, setBrandingForTeam] = useState<AdminTeamRow | null>(null);
 
   const teamsQuery = useQuery({
     queryKey: ["admin-customer-teams"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("customer_teams")
-        .select("id, name, school_team_id, savant_enabled, active, created_at")
+        .select("id, name, school_team_id, savant_enabled, active, created_at, logo_url, display_name, mascot, primary_color, secondary_color")
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as AdminTeamRow[];
     },
   });
 
@@ -171,6 +188,14 @@ export default function AdminTeams() {
                               variant="ghost"
                               size="sm"
                               className="gap-1.5 h-8"
+                              onClick={() => setBrandingForTeam(team)}
+                            >
+                              <Palette className="h-3.5 w-3.5" /> Branding
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="gap-1.5 h-8"
                               onClick={() => setInviteForTeam(team)}
                             >
                               <UserPlus className="h-3.5 w-3.5" /> Invite admin
@@ -213,6 +238,15 @@ export default function AdminTeams() {
         team={inviteForTeam}
         onOpenChange={(open) => !open && setInviteForTeam(null)}
       />
+
+      <BrandingDialog
+        team={brandingForTeam}
+        onOpenChange={(open) => !open && setBrandingForTeam(null)}
+        onSaved={() => {
+          qc.invalidateQueries({ queryKey: ["admin-customer-teams"] });
+          setBrandingForTeam(null);
+        }}
+      />
     </DashboardLayout>
   );
 }
@@ -233,18 +267,31 @@ function CreateTeamDialog({
   const [name, setName] = useState("");
   const [schoolTeamId, setSchoolTeamId] = useState<string>(NO_SCHOOL);
   const [savantEnabled, setSavantEnabled] = useState(false);
+  const [logoUrl, setLogoUrl] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [mascot, setMascot] = useState("");
+  const [primaryColor, setPrimaryColor] = useState(DEFAULT_PRIMARY_COLOR);
+  const [secondaryColor, setSecondaryColor] = useState(DEFAULT_SECONDARY_COLOR);
   const [submitting, setSubmitting] = useState(false);
 
   const reset = () => {
     setName("");
     setSchoolTeamId(NO_SCHOOL);
     setSavantEnabled(false);
+    setLogoUrl("");
+    setDisplayName("");
+    setMascot("");
+    setPrimaryColor(DEFAULT_PRIMARY_COLOR);
+    setSecondaryColor(DEFAULT_SECONDARY_COLOR);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
     setSubmitting(true);
+    const trimmedLogo = logoUrl.trim();
+    const trimmedDisplay = displayName.trim();
+    const trimmedMascot = mascot.trim();
     const { error } = await supabase
       .from("customer_teams")
       .insert({
@@ -253,6 +300,11 @@ function CreateTeamDialog({
         savant_enabled: savantEnabled,
         active: true,
         created_by: createdById,
+        logo_url: trimmedLogo || null,
+        display_name: trimmedDisplay || null,
+        mascot: trimmedMascot || null,
+        primary_color: trimmedDisplay || trimmedMascot ? primaryColor : null,
+        secondary_color: trimmedDisplay || trimmedMascot ? secondaryColor : null,
       });
     setSubmitting(false);
     if (error) {
@@ -314,11 +366,243 @@ function CreateTeamDialog({
             <Switch id="savant-toggle" checked={savantEnabled} onCheckedChange={setSavantEnabled} />
           </div>
 
+          <BrandingFields
+            logoUrl={logoUrl}
+            setLogoUrl={setLogoUrl}
+            displayName={displayName}
+            setDisplayName={setDisplayName}
+            mascot={mascot}
+            setMascot={setMascot}
+            primaryColor={primaryColor}
+            setPrimaryColor={setPrimaryColor}
+            secondaryColor={secondaryColor}
+            setSecondaryColor={setSecondaryColor}
+          />
+
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={submitting || !name.trim()}>
               {submitting ? "Creating…" : "Create team"}
             </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function BrandingFields({
+  logoUrl,
+  setLogoUrl,
+  displayName,
+  setDisplayName,
+  mascot,
+  setMascot,
+  primaryColor,
+  setPrimaryColor,
+  secondaryColor,
+  setSecondaryColor,
+}: {
+  logoUrl: string;
+  setLogoUrl: (v: string) => void;
+  displayName: string;
+  setDisplayName: (v: string) => void;
+  mascot: string;
+  setMascot: (v: string) => void;
+  primaryColor: string;
+  setPrimaryColor: (v: string) => void;
+  secondaryColor: string;
+  setSecondaryColor: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-3 rounded-md border border-border/60 px-3 py-3">
+      <div>
+        <Label className="text-sm">Branding (optional)</Label>
+        <p className="text-xs text-muted-foreground">
+          Drives the styled banner. All five fields are required for the styled layout — leave blank for the default RSTR IQ banner.
+        </p>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="logo-url" className="text-xs">Logo URL</Label>
+        <Input
+          id="logo-url"
+          value={logoUrl}
+          onChange={(e) => setLogoUrl(e.target.value)}
+          placeholder="/Kansas Logo.svg"
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-2">
+          <Label htmlFor="display-name" className="text-xs">Display name</Label>
+          <Input
+            id="display-name"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="KANSAS"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="mascot" className="text-xs">Mascot</Label>
+          <Input
+            id="mascot"
+            value={mascot}
+            onChange={(e) => setMascot(e.target.value)}
+            placeholder="JAYHAWKS"
+          />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-2">
+          <Label htmlFor="primary-color" className="text-xs">Primary color (top line)</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="primary-color"
+              type="color"
+              value={primaryColor}
+              onChange={(e) => setPrimaryColor(e.target.value)}
+              className="h-9 w-14 cursor-pointer p-1"
+            />
+            <Input
+              value={primaryColor}
+              onChange={(e) => setPrimaryColor(e.target.value)}
+              placeholder="#0051BA"
+              className="flex-1"
+            />
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="secondary-color" className="text-xs">Secondary color (mascot line)</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="secondary-color"
+              type="color"
+              value={secondaryColor}
+              onChange={(e) => setSecondaryColor(e.target.value)}
+              className="h-9 w-14 cursor-pointer p-1"
+            />
+            <Input
+              value={secondaryColor}
+              onChange={(e) => setSecondaryColor(e.target.value)}
+              placeholder="#E8000D"
+              className="flex-1"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BrandingDialog({
+  team,
+  onOpenChange,
+  onSaved,
+}: {
+  team: AdminTeamRow | null;
+  onOpenChange: (open: boolean) => void;
+  onSaved: () => void;
+}) {
+  const [logoUrl, setLogoUrl] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [mascot, setMascot] = useState("");
+  const [primaryColor, setPrimaryColor] = useState(DEFAULT_PRIMARY_COLOR);
+  const [secondaryColor, setSecondaryColor] = useState(DEFAULT_SECONDARY_COLOR);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Reset fields whenever a new team is opened so we're never showing the
+  // previous team's values for a fresh edit.
+  const teamId = team?.id ?? null;
+  useEffect(() => {
+    if (!team) return;
+    setLogoUrl(team.logo_url ?? "");
+    setDisplayName(team.display_name ?? "");
+    setMascot(team.mascot ?? "");
+    setPrimaryColor(team.primary_color ?? DEFAULT_PRIMARY_COLOR);
+    setSecondaryColor(team.secondary_color ?? DEFAULT_SECONDARY_COLOR);
+  }, [teamId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!team) return;
+    setSubmitting(true);
+    const trimmedLogo = logoUrl.trim();
+    const trimmedDisplay = displayName.trim();
+    const trimmedMascot = mascot.trim();
+    const { error } = await supabase
+      .from("customer_teams")
+      .update({
+        logo_url: trimmedLogo || null,
+        display_name: trimmedDisplay || null,
+        mascot: trimmedMascot || null,
+        primary_color: trimmedDisplay || trimmedMascot ? primaryColor : null,
+        secondary_color: trimmedDisplay || trimmedMascot ? secondaryColor : null,
+      })
+      .eq("id", team.id);
+    setSubmitting(false);
+    if (error) {
+      toast.error(`Could not update branding: ${error.message}`);
+      return;
+    }
+    toast.success(`Saved branding for ${team.name}`);
+    onSaved();
+  };
+
+  const handleClear = async () => {
+    if (!team) return;
+    setSubmitting(true);
+    const { error } = await supabase
+      .from("customer_teams")
+      .update({
+        logo_url: null,
+        display_name: null,
+        mascot: null,
+        primary_color: null,
+        secondary_color: null,
+      })
+      .eq("id", team.id);
+    setSubmitting(false);
+    if (error) {
+      toast.error(`Could not clear branding: ${error.message}`);
+      return;
+    }
+    toast.success(`Cleared branding for ${team.name}`);
+    onSaved();
+  };
+
+  return (
+    <Dialog open={team !== null} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <DialogHeader>
+            <DialogTitle>Edit branding</DialogTitle>
+            <DialogDescription>
+              {team ? `Customize the styled banner for ${team.name}.` : ""}
+            </DialogDescription>
+          </DialogHeader>
+
+          <BrandingFields
+            logoUrl={logoUrl}
+            setLogoUrl={setLogoUrl}
+            displayName={displayName}
+            setDisplayName={setDisplayName}
+            mascot={mascot}
+            setMascot={setMascot}
+            primaryColor={primaryColor}
+            setPrimaryColor={setPrimaryColor}
+            secondaryColor={secondaryColor}
+            setSecondaryColor={setSecondaryColor}
+          />
+
+          <DialogFooter className="sm:justify-between">
+            <Button type="button" variant="ghost" onClick={handleClear} disabled={submitting}>
+              Clear branding
+            </Button>
+            <div className="flex gap-2">
+              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Saving…" : "Save branding"}
+              </Button>
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>

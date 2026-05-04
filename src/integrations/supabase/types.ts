@@ -382,28 +382,43 @@ export type Database = {
           active: boolean
           created_at: string
           created_by: string | null
+          display_name: string | null
           id: string
+          logo_url: string | null
+          mascot: string | null
           name: string
+          primary_color: string | null
           savant_enabled: boolean
           school_team_id: string | null
+          secondary_color: string | null
         }
         Insert: {
           active?: boolean
           created_at?: string
           created_by?: string | null
+          display_name?: string | null
           id?: string
+          logo_url?: string | null
+          mascot?: string | null
           name: string
+          primary_color?: string | null
           savant_enabled?: boolean
           school_team_id?: string | null
+          secondary_color?: string | null
         }
         Update: {
           active?: boolean
           created_at?: string
           created_by?: string | null
+          display_name?: string | null
           id?: string
+          logo_url?: string | null
+          mascot?: string | null
           name?: string
+          primary_color?: string | null
           savant_enabled?: boolean
           school_team_id?: string | null
+          secondary_color?: string | null
         }
         Relationships: [
           {

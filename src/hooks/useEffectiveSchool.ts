@@ -2,14 +2,10 @@ import { useMemo } from "react";
 import { useAuth } from "./useAuth";
 import { useTeamsTable } from "./useTeamsTable";
 
-// School branding lookup keyed by normalized school name. Drop a logo file
-// in /public and add an entry here when onboarding a new customer team.
-// Long-term this should move to columns on customer_teams; for now this
-// keeps it close to a one-line edit per school.
-//
-// `displayName` + `mascot` drive the two-line styled banner (e.g. KANSAS /
-// JAYHAWKS). `primaryColor` colors the top line; `secondaryColor` colors
-// the larger bottom mascot line.
+// Branding shape exposed to consumers (SchoolBanner). Built from the
+// per-team columns on customer_teams. Returned only when all five fields
+// are populated — partial branding falls back to the global RSTR IQ banner
+// rather than rendering a half-styled layout.
 type SchoolBranding = {
   logoUrl: string;
   displayName: string;
@@ -18,32 +14,25 @@ type SchoolBranding = {
   secondaryColor: string;
 };
 
-const SCHOOL_BRANDING: Record<string, SchoolBranding> = {
-  "kansas jayhawks": {
-    logoUrl: "/Kansas Logo.svg",
-    displayName: "KANSAS",
-    mascot: "JAYHAWKS",
-    primaryColor: "#0051BA",   // KU Blue
-    secondaryColor: "#E8000D", // KU Crimson
-  },
-  "georgia bulldogs": {
-    logoUrl: "/Georgia_Athletics_logo.svg.webp",
-    displayName: "GEORGIA",
-    mascot: "BULLDOGS",
-    primaryColor: "#BA0C2F",   // UGA Red
-    secondaryColor: "#000000", // UGA Black
-  },
-};
-
-const normalizeForLookup = (name: string | null | undefined) =>
-  (name ?? "").toLowerCase().trim().replace(/\s+/g, " ");
-
-const resolveBranding = (...candidates: Array<string | null | undefined>): SchoolBranding | null => {
-  for (const c of candidates) {
-    const key = normalizeForLookup(c);
-    if (key && SCHOOL_BRANDING[key]) return SCHOOL_BRANDING[key];
-  }
-  return null;
+const buildBranding = (
+  source: {
+    logo_url: string | null;
+    display_name: string | null;
+    mascot: string | null;
+    primary_color: string | null;
+    secondary_color: string | null;
+  } | null | undefined,
+): SchoolBranding | null => {
+  if (!source) return null;
+  const { logo_url, display_name, mascot, primary_color, secondary_color } = source;
+  if (!logo_url || !display_name || !mascot || !primary_color || !secondary_color) return null;
+  return {
+    logoUrl: logo_url,
+    displayName: display_name,
+    mascot,
+    primaryColor: primary_color,
+    secondaryColor: secondary_color,
+  };
 };
 
 /**
@@ -54,10 +43,9 @@ const resolveBranding = (...candidates: Array<string | null | undefined>): Schoo
  *
  * Resolution chain:
  *   effectiveTeamId
- *     → customer_teams row (via availableTeams)
+ *     → customer_teams row (via availableTeams) — also carries branding
  *     → school_team_id (Teams Table UUID, current season)
- *     → Teams Table row
- *     → name (abbreviation when present, else full_name)
+ *     → Teams Table row (for canonical name + abbreviation)
  *
  * Returns nulls when nothing is impersonated AND the user has no team —
  * e.g. a fresh superadmin with no impersonation set. Surfaces should treat
@@ -72,9 +60,9 @@ export function useEffectiveSchool() {
     if (!effectiveTeamId) return empty;
     const customerTeam = availableTeams.find((t) => t.id === effectiveTeamId);
     if (!customerTeam) return empty;
+    const branding = buildBranding(customerTeam);
     const schoolTeamId = customerTeam.school_team_id;
     if (!schoolTeamId) {
-      const branding = resolveBranding(customerTeam.name);
       return {
         schoolName: customerTeam.name,
         schoolFullName: customerTeam.name,
@@ -85,7 +73,6 @@ export function useEffectiveSchool() {
     }
     const schoolRow = teams.find((t) => t.id === schoolTeamId);
     if (!schoolRow) {
-      const branding = resolveBranding(customerTeam.name);
       return {
         schoolName: customerTeam.name,
         schoolFullName: customerTeam.name,
@@ -94,7 +81,6 @@ export function useEffectiveSchool() {
         branding,
       };
     }
-    const branding = resolveBranding(schoolRow.fullName, schoolRow.name, customerTeam.name);
     return {
       schoolName: schoolRow.name,
       schoolFullName: schoolRow.fullName,

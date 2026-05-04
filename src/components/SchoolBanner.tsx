@@ -18,8 +18,9 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
   const effectiveTeam = effectiveTeamId
     ? availableTeams.find((t) => t.id === effectiveTeamId) ?? null
     : null;
-  // Pulls logo + branding (split name + colors) from the SCHOOL_BRANDING
-  // lookup based on the impersonated school. Prop overrides logo only.
+  // Pulls logo + branding (split name + colors) from the impersonated team's
+  // customer_teams row. Edit per-team in AdminTeams → Branding. Prop
+  // overrides logo only.
   const { logoUrl: effectiveLogoUrl, branding } = useEffectiveSchool();
   const resolvedSchoolName = schoolName ?? effectiveTeam?.name ?? '';
   const resolvedSchoolLogo = schoolLogoUrl ?? effectiveLogoUrl ?? '';
