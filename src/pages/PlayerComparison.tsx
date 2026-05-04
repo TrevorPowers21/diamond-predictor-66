@@ -116,8 +116,12 @@ const stat = (v: number | null | undefined, d = 3) => (v == null ? "-" : v.toFix
 const whole = (v: number | null | undefined) => (v == null ? "-" : Math.round(v).toString());
 const money = (v: number | null | undefined) => (v == null ? "-" : `$${Math.round(v).toLocaleString("en-US")}`);
 
+// TWP intentionally NOT treated as pitcher — two-way players default to the
+// hitter side per TeamBuilder convention, so they should appear in the hitter
+// dropdown. They appear in the pitcher dropdown via pitchingMasterRows when
+// their IP qualifies them.
 const isPitcherPosition = (pos: string | null | undefined) =>
-  /^(SP|RP|CL|P|LHP|RHP|TWP)/i.test(String(pos || ""));
+  /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
 
 const toPitchingRole = (raw: string | null | undefined): "SP" | "RP" | "SM" | null => {
   const v = String(raw || "").trim().toUpperCase();

@@ -1,12 +1,37 @@
 import * as React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/hooks/useAuth';
+import { useEffectiveSchool } from '@/hooks/useEffectiveSchool';
 
 interface SchoolBannerProps {
   schoolLogoUrl?: string;
   schoolName?: string;
   className?: string;
 }
+
+// The banner background is the dark navy (#070e1f) per CLAUDE.md, so any
+// extracted/saved color whose luminance is too low to read on it gets
+// swapped for white at render time. The DB still holds the actual team
+// color (so we don't lose info if the banner moves to a light surface
+// later) — this is purely a display adjustment for the dark banner.
+const luminance = (hex: string): number => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return 1;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 0xff;
+  const g = (n >> 8) & 0xff;
+  const b = n & 0xff;
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+};
+
+const colorForDarkBg = (hex: string | undefined | null): string => {
+  if (!hex) return '#FFFFFF';
+  // 0.14 catches pure black (0), navy blues (~0.10–0.13), and dark grays
+  // while leaving school reds (~0.17+), team blues (~0.28+), golds, and
+  // oranges untouched. Tuned slightly below 0.17 so the quantized reds
+  // returned by extractLogoColors still pass through.
+  return luminance(hex) < 0.14 ? '#FFFFFF' : hex;
+};
 
 const SchoolBanner: React.FC<SchoolBannerProps> = ({
   schoolLogoUrl,
@@ -17,8 +42,12 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
   const effectiveTeam = effectiveTeamId
     ? availableTeams.find((t) => t.id === effectiveTeamId) ?? null
     : null;
+  // Pulls logo + branding (split name + colors) from the impersonated team's
+  // customer_teams row. Edit per-team in AdminTeams → Branding. Prop
+  // overrides logo only.
+  const { logoUrl: effectiveLogoUrl, branding } = useEffectiveSchool();
   const resolvedSchoolName = schoolName ?? effectiveTeam?.name ?? '';
-  const resolvedSchoolLogo = schoolLogoUrl ?? '';
+  const resolvedSchoolLogo = schoolLogoUrl ?? effectiveLogoUrl ?? '';
   const [showSchool, setShowSchool] = React.useState(false);
   const [hasAnimatedOnce, setHasAnimatedOnce] = React.useState(false);
   const [isHovering, setIsHovering] = React.useState(false);
@@ -163,7 +192,22 @@ const SchoolBanner: React.FC<SchoolBannerProps> = ({
                     <div className="h-20 w-px bg-[#D4AF37]/30" />
                   </>
                 )}
-                {resolvedSchoolName ? (
+                {branding ? (
+                  <div>
+                    <h2
+                      className="text-2xl font-bold tracking-wider leading-none uppercase"
+                      style={{ fontFamily: "'Oswald', sans-serif", color: colorForDarkBg(branding.primaryColor) }}
+                    >
+                      {branding.displayName}
+                    </h2>
+                    <p
+                      className="text-4xl font-bold tracking-wide uppercase mt-0.5"
+                      style={{ fontFamily: "'Oswald', sans-serif", color: colorForDarkBg(branding.secondaryColor) }}
+                    >
+                      {branding.mascot}
+                    </p>
+                  </div>
+                ) : resolvedSchoolName ? (
                   <h2
                     className="text-2xl font-bold tracking-wider leading-none uppercase"
                     style={{ fontFamily: "'Oswald', sans-serif", color: '#D4AF37' }}

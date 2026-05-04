@@ -14,6 +14,14 @@ export interface CustomerTeam {
   school_team_id: string | null;
   savant_enabled: boolean;
   active: boolean;
+  // Branding (optional). When all five are present the SchoolBanner renders
+  // the styled two-line layout (display_name + mascot in team colors).
+  // Set per-team in AdminTeams; replaces the old hardcoded SCHOOL_BRANDING.
+  logo_url: string | null;
+  display_name: string | null;
+  mascot: string | null;
+  primary_color: string | null;
+  secondary_color: string | null;
 }
 
 interface AuthContextType {
@@ -35,6 +43,10 @@ interface AuthContextType {
   userTeamId: string | null;
   userTeamRole: TeamRole | null;
   availableTeams: CustomerTeam[];
+  // Re-pulls availableTeams from Supabase. Call this after any write that
+  // changes a customer_teams row (branding, savant toggle, etc.) so the
+  // banner / school dropdown reflect the change without a hard refresh.
+  refreshTeams: () => Promise<void>;
 
   // Superadmin impersonation
   impersonatedTeamId: string | null;
@@ -103,14 +115,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (isSuper) {
       const { data: allTeams } = await supabase
         .from("customer_teams")
-        .select("id, name, school_team_id, savant_enabled, active")
+        .select("id, name, school_team_id, savant_enabled, active, logo_url, display_name, mascot, primary_color, secondary_color")
         .eq("active", true)
         .order("name");
       setAvailableTeams(allTeams ?? []);
     } else if (accessRow) {
       const { data: oneTeam } = await supabase
         .from("customer_teams")
-        .select("id, name, school_team_id, savant_enabled, active")
+        .select("id, name, school_team_id, savant_enabled, active, logo_url, display_name, mascot, primary_color, secondary_color")
         .eq("id", accessRow.customer_team_id)
         .maybeSingle();
       setAvailableTeams(oneTeam ? [oneTeam] : []);
@@ -197,6 +209,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return false;
   };
 
+  const refreshTeams = async () => {
+    if (!user) return;
+    if (isSuperadmin) {
+      const { data: allTeams } = await supabase
+        .from("customer_teams")
+        .select("id, name, school_team_id, savant_enabled, active, logo_url, display_name, mascot, primary_color, secondary_color")
+        .eq("active", true)
+        .order("name");
+      setAvailableTeams(allTeams ?? []);
+    } else if (userTeamId) {
+      const { data: oneTeam } = await supabase
+        .from("customer_teams")
+        .select("id, name, school_team_id, savant_enabled, active, logo_url, display_name, mascot, primary_color, secondary_color")
+        .eq("id", userTeamId)
+        .maybeSingle();
+      setAvailableTeams(oneTeam ? [oneTeam] : []);
+    }
+  };
+
   const impersonateTeam = (teamId: string | null) => {
     if (!isSuperadmin) return;
     if (teamId) {
@@ -236,6 +267,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         userTeamId,
         userTeamRole,
         availableTeams,
+        refreshTeams,
         impersonatedTeamId,
         impersonateTeam,
         effectiveTeamId,
