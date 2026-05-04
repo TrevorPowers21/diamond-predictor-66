@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,12 +16,16 @@ import { toast } from "sonner";
 import { Plus, UserPlus, Users, Palette } from "lucide-react";
 import { inviteUserToTeam } from "@/lib/inviteUser";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
+import { lookupSchoolColors } from "@/lib/schoolColors";
+import { extractColorsFromFile } from "@/lib/extractLogoColors";
 
 interface SchoolRow {
   id: string;
   full_name: string;
   abbreviation: string | null;
   conference: string | null;
+  source_id: string | null;
+  Mascot: string | null;
 }
 
 interface AdminTeamRow {
@@ -42,9 +46,31 @@ const NO_SCHOOL = "__none__";
 const DEFAULT_PRIMARY_COLOR = "#0051BA";
 const DEFAULT_SECONDARY_COLOR = "#E8000D";
 
+/**
+ * Derives a one-line display banner from the Teams Table full_name. Strips
+ * the trailing mascot (when known) so "Georgia Bulldogs" / "Bulldogs" →
+ * "GEORGIA". Falls back to the first word when no mascot is available.
+ */
+function deriveDisplayName(fullName: string, mascot: string | null): string {
+  if (!fullName) return "";
+  const trimmed = fullName.trim();
+  if (mascot && mascot.trim()) {
+    const mascotLower = mascot.trim().toLowerCase();
+    const lower = trimmed.toLowerCase();
+    if (lower.endsWith(` ${mascotLower}`)) {
+      return trimmed.slice(0, trimmed.length - mascotLower.length).trim().toUpperCase();
+    }
+  }
+  // No mascot to strip — use the leading word(s) before the last space, which
+  // covers most "<School Name> <Mascot>" combos. Single-word names pass through.
+  const lastSpace = trimmed.lastIndexOf(" ");
+  if (lastSpace === -1) return trimmed.toUpperCase();
+  return trimmed.slice(0, lastSpace).toUpperCase();
+}
+
 export default function AdminTeams() {
   const qc = useQueryClient();
-  const { user, impersonateTeam } = useAuth();
+  const { user, impersonateTeam, refreshTeams } = useAuth();
   const [createOpen, setCreateOpen] = useState(false);
   const [inviteForTeam, setInviteForTeam] = useState<CustomerTeam | null>(null);
   const [brandingForTeam, setBrandingForTeam] = useState<AdminTeamRow | null>(null);
@@ -73,7 +99,7 @@ export default function AdminTeams() {
       // to the new season's UUIDs via source_id.
       const { data, error } = await (supabase as any)
         .from("Teams Table")
-        .select("id, full_name, abbreviation, conference")
+        .select("id, full_name, abbreviation, conference, source_id, Mascot")
         .eq("Season", CURRENT_SEASON)
         .order("full_name");
       if (error) throw error;
@@ -230,6 +256,7 @@ export default function AdminTeams() {
         createdById={user?.id ?? null}
         onCreated={() => {
           qc.invalidateQueries({ queryKey: ["admin-customer-teams"] });
+          refreshTeams();
           setCreateOpen(false);
         }}
       />
@@ -244,6 +271,7 @@ export default function AdminTeams() {
         onOpenChange={(open) => !open && setBrandingForTeam(null)}
         onSaved={() => {
           qc.invalidateQueries({ queryKey: ["admin-customer-teams"] });
+          refreshTeams();
           setBrandingForTeam(null);
         }}
       />
@@ -283,6 +311,25 @@ function CreateTeamDialog({
     setMascot("");
     setPrimaryColor(DEFAULT_PRIMARY_COLOR);
     setSecondaryColor(DEFAULT_SECONDARY_COLOR);
+  };
+
+  // When the superadmin links a D1 program, auto-derive as much of the team
+  // as we can from Teams Table + the school colors lookup. The user can
+  // still override anything afterwards. Picking a different program later
+  // re-applies the same derivation so branding stays in sync with the link.
+  const handleSchoolChange = (newSchoolTeamId: string) => {
+    setSchoolTeamId(newSchoolTeamId);
+    if (newSchoolTeamId === NO_SCHOOL) return;
+    const school = schools.find((s) => s.id === newSchoolTeamId);
+    if (!school) return;
+    if (!name.trim()) setName(school.full_name);
+    setDisplayName(deriveDisplayName(school.full_name, school.Mascot));
+    if (school.Mascot) setMascot(school.Mascot.toUpperCase());
+    const colors = lookupSchoolColors(school.full_name);
+    if (colors) {
+      setPrimaryColor(colors.primary);
+      setSecondaryColor(colors.secondary);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -341,7 +388,7 @@ function CreateTeamDialog({
 
           <div className="space-y-2">
             <Label htmlFor="school-select">Linked D1 program (optional)</Label>
-            <Select value={schoolTeamId} onValueChange={setSchoolTeamId}>
+            <Select value={schoolTeamId} onValueChange={handleSchoolChange}>
               <SelectTrigger id="school-select">
                 <SelectValue placeholder="No linked program" />
               </SelectTrigger>
@@ -419,16 +466,18 @@ function BrandingFields({
       <div>
         <Label className="text-sm">Branding (optional)</Label>
         <p className="text-xs text-muted-foreground">
-          Drives the styled banner. All five fields are required for the styled layout — leave blank for the default RSTR IQ banner.
+          Drives the styled banner. Upload a logo and primary + secondary colors auto-detect from the image. All five fields are required for the styled layout — leave blank for the default RSTR IQ banner.
         </p>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="logo-url" className="text-xs">Logo URL</Label>
-        <Input
-          id="logo-url"
-          value={logoUrl}
-          onChange={(e) => setLogoUrl(e.target.value)}
-          placeholder="/Kansas Logo.svg"
+        <Label htmlFor="logo-url" className="text-xs">Logo</Label>
+        <LogoUploader
+          logoUrl={logoUrl}
+          setLogoUrl={setLogoUrl}
+          onColorsExtracted={({ primary, secondary }) => {
+            setPrimaryColor(primary);
+            setSecondaryColor(secondary);
+          }}
         />
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -489,6 +538,109 @@ function BrandingFields({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function LogoUploader({
+  logoUrl,
+  setLogoUrl,
+  onColorsExtracted,
+}: {
+  logoUrl: string;
+  setLogoUrl: (v: string) => void;
+  onColorsExtracted?: (colors: { primary: string; secondary: string }) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleFile = async (file: File) => {
+    setUploading(true);
+    // Run color extraction on the local File in parallel with the upload —
+    // they're independent operations, no reason to serialize them. If
+    // extraction fails (rare), we fall through silently and the user keeps
+    // whatever colors are currently in the form.
+    const extractionPromise = onColorsExtracted ? extractColorsFromFile(file) : Promise.resolve(null);
+    try {
+      // Path = unique filename (timestamp + sanitized original) so a re-upload
+      // doesn't clobber existing logos. We bust the public URL cache with the
+      // path itself, so each upload returns a fresh URL.
+      const ext = file.name.split(".").pop()?.toLowerCase() || "png";
+      const safeBase = file.name.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, "-");
+      const path = `${Date.now()}-${safeBase}.${ext}`;
+      const { error: uploadErr } = await supabase.storage
+        .from("school-logos")
+        .upload(path, file, { cacheControl: "3600", upsert: false });
+      if (uploadErr) throw uploadErr;
+      const { data } = supabase.storage.from("school-logos").getPublicUrl(path);
+      setLogoUrl(data.publicUrl);
+      const extracted = await extractionPromise;
+      if (extracted && onColorsExtracted) {
+        onColorsExtracted(extracted);
+        toast.success("Logo uploaded — colors auto-detected");
+      } else {
+        toast.success("Logo uploaded");
+      }
+    } catch (e: any) {
+      toast.error(`Upload failed: ${e?.message ?? "unknown error"}`);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-3">
+        {logoUrl ? (
+          <img
+            src={logoUrl}
+            alt="Logo preview"
+            className="h-12 w-12 rounded border border-border/60 object-contain bg-background"
+          />
+        ) : (
+          <div className="h-12 w-12 rounded border border-dashed border-border/60 flex items-center justify-center text-muted-foreground text-[10px]">
+            no logo
+          </div>
+        )}
+        <div className="flex-1 space-y-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={uploading}
+            onClick={() => fileInputRef.current?.click()}
+            className="gap-1.5"
+          >
+            {uploading ? "Uploading…" : logoUrl ? "Replace logo" : "Upload logo"}
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleFile(file);
+            }}
+          />
+          {logoUrl && (
+            <button
+              type="button"
+              className="block text-[10px] text-muted-foreground hover:text-foreground"
+              onClick={() => setLogoUrl("")}
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+      <Input
+        value={logoUrl}
+        onChange={(e) => setLogoUrl(e.target.value)}
+        placeholder="/Kansas Logo.svg or pasted URL"
+        className="text-xs"
+      />
     </div>
   );
 }

@@ -43,6 +43,10 @@ interface AuthContextType {
   userTeamId: string | null;
   userTeamRole: TeamRole | null;
   availableTeams: CustomerTeam[];
+  // Re-pulls availableTeams from Supabase. Call this after any write that
+  // changes a customer_teams row (branding, savant toggle, etc.) so the
+  // banner / school dropdown reflect the change without a hard refresh.
+  refreshTeams: () => Promise<void>;
 
   // Superadmin impersonation
   impersonatedTeamId: string | null;
@@ -205,6 +209,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return false;
   };
 
+  const refreshTeams = async () => {
+    if (!user) return;
+    if (isSuperadmin) {
+      const { data: allTeams } = await supabase
+        .from("customer_teams")
+        .select("id, name, school_team_id, savant_enabled, active, logo_url, display_name, mascot, primary_color, secondary_color")
+        .eq("active", true)
+        .order("name");
+      setAvailableTeams(allTeams ?? []);
+    } else if (userTeamId) {
+      const { data: oneTeam } = await supabase
+        .from("customer_teams")
+        .select("id, name, school_team_id, savant_enabled, active, logo_url, display_name, mascot, primary_color, secondary_color")
+        .eq("id", userTeamId)
+        .maybeSingle();
+      setAvailableTeams(oneTeam ? [oneTeam] : []);
+    }
+  };
+
   const impersonateTeam = (teamId: string | null) => {
     if (!isSuperadmin) return;
     if (teamId) {
@@ -244,6 +267,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         userTeamId,
         userTeamRole,
         availableTeams,
+        refreshTeams,
         impersonatedTeamId,
         impersonateTeam,
         effectiveTeamId,
