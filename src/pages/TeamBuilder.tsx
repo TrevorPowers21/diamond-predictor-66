@@ -979,6 +979,12 @@ export default function TeamBuilder() {
   const [fallbackRosterTotalPlayerScore, setFallbackRosterTotalPlayerScore] = useState<number>(DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
   const [depthAssignments, setDepthAssignments] = useState<Record<string, number>>({});
   const [depthPlaceholders, setDepthPlaceholders] = useState<Record<string, "freshman" | "transfer">>({});
+  // Tracks the team the depth chart belongs to. When selectedTeam changes
+  // (and isn't a load/restore), the team-change effect below clears the
+  // depth chart so old indices don't re-bind to whoever happens to land at
+  // that array position in the new team's roster. Restore paths
+  // (loadBuild, draft restore) pre-set this ref to skip the clear.
+  const lastDepthTeamRef = useRef<string | null>(null);
   const [incomingName, setIncomingName] = useState("");
   const [incomingPosition, setIncomingPosition] = useState("");
   const [incomingNil, setIncomingNil] = useState<number>(0);
@@ -1793,8 +1799,23 @@ export default function TeamBuilder() {
     if (!build) return;
     setSelectedBuildId(buildId);
     setBuildName(build.name);
+    // Pre-record the team in the depth-clear ref so the team-change effect
+    // doesn't wipe the depth chart we're about to restore. The effect
+    // compares lastDepthTeamRef.current vs the new selectedTeam; matching
+    // them here makes it a no-op for this load.
+    lastDepthTeamRef.current = build.team || null;
     setSelectedTeam(build.team);
     setTotalBudget(Number(build.total_budget) || 0);
+    const savedDepthAssignments =
+      build.depth_assignments && typeof build.depth_assignments === "object" && !Array.isArray(build.depth_assignments)
+        ? (build.depth_assignments as Record<string, number>)
+        : {};
+    const savedDepthPlaceholders =
+      build.depth_placeholders && typeof build.depth_placeholders === "object" && !Array.isArray(build.depth_placeholders)
+        ? (build.depth_placeholders as Record<string, "freshman" | "transfer">)
+        : {};
+    setDepthAssignments(savedDepthAssignments);
+    setDepthPlaceholders(savedDepthPlaceholders);
 
     const { data: players } = await supabase
       .from("team_build_players")
@@ -2173,7 +2194,7 @@ export default function TeamBuilder() {
   // Reset depth assignments when the selected team changes (after the initial
   // localStorage restore). Without this, old indices silently re-assign to
   // whoever happens to be at that array position in the new team's roster.
-  const lastDepthTeamRef = useRef<string | null>(null);
+  // (lastDepthTeamRef is declared above with the depth state.)
   useEffect(() => {
     const current = selectedTeam || null;
     const last = lastDepthTeamRef.current;
@@ -2208,7 +2229,13 @@ export default function TeamBuilder() {
       let buildId = saveAs ? null : selectedBuildId;
 
       if (buildId) {
-        await supabase.from("team_builds").update({ name: targetName, team: selectedTeam, total_budget: totalBudget }).eq("id", buildId);
+        await supabase.from("team_builds").update({
+          name: targetName,
+          team: selectedTeam,
+          total_budget: totalBudget,
+          depth_assignments: depthAssignments,
+          depth_placeholders: depthPlaceholders,
+        }).eq("id", buildId);
         await supabase.from("team_build_players").delete().eq("build_id", buildId);
       } else {
         const { data, error } = await supabase.from("team_builds").insert({
@@ -2216,6 +2243,8 @@ export default function TeamBuilder() {
           name: targetName,
           team: selectedTeam,
           total_budget: totalBudget,
+          depth_assignments: depthAssignments,
+          depth_placeholders: depthPlaceholders,
         }).select("id").single();
         if (error) throw error;
         buildId = data.id;

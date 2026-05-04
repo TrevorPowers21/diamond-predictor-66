@@ -2384,6 +2384,8 @@ export type Database = {
         Row: {
           created_at: string
           customer_team_id: string | null
+          depth_assignments: Json
+          depth_placeholders: Json
           id: string
           name: string
           notes: string | null
@@ -2396,6 +2398,8 @@ export type Database = {
         Insert: {
           created_at?: string
           customer_team_id?: string | null
+          depth_assignments?: Json
+          depth_placeholders?: Json
           id?: string
           name?: string
           notes?: string | null
@@ -2408,6 +2412,8 @@ export type Database = {
         Update: {
           created_at?: string
           customer_team_id?: string | null
+          depth_assignments?: Json
+          depth_placeholders?: Json
           id?: string
           name?: string
           notes?: string | null
