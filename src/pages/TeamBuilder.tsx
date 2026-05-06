@@ -2744,7 +2744,16 @@ export default function TeamBuilder() {
         if (g > 0 && gs != null) return ((gs / g) < 0.5 ? "RP" : "SP") as "SP" | "RP";
         return null;
       })();
-      const slotRole = normalizePitcherRole(pitcherRoleFromSlot(p.position_slot) || p.player?.position || null);
+      // Role override: targets (not yet slotted) project at their BASE role —
+      // matches TransferPortal's default behavior (no role transition unless
+      // user explicitly changes it). Roster-slotted players (roster_status
+      // 'returner' or any non-'target') use slotRole so role transitions kick
+      // in when coach intentionally puts an SP in an RP slot. Mirrors how dev
+      // aggressiveness only impacts the projection when manually changed.
+      const isTargetOnly = (p.roster_status || "returner") === "target";
+      const slotRole = isTargetOnly
+        ? baseRole
+        : (normalizePitcherRole(pitcherRoleFromSlot(p.position_slot) || p.player?.position || null) || baseRole);
 
       const result = computeTransferPitcherProjection(
         {
