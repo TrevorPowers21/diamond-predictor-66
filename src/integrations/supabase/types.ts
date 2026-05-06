@@ -2310,34 +2310,25 @@ export type Database = {
         Row: {
           added_at: string | null
           customer_team_id: string | null
-          destination_team: string | null
-          destination_team_id: string | null
           id: string
           notes: string | null
           player_id: string
-          transfer_snapshot: Json | null
           user_id: string
         }
         Insert: {
           added_at?: string | null
           customer_team_id?: string | null
-          destination_team?: string | null
-          destination_team_id?: string | null
           id?: string
           notes?: string | null
           player_id: string
-          transfer_snapshot?: Json | null
           user_id: string
         }
         Update: {
           added_at?: string | null
           customer_team_id?: string | null
-          destination_team?: string | null
-          destination_team_id?: string | null
           id?: string
           notes?: string | null
           player_id?: string
-          transfer_snapshot?: Json | null
           user_id?: string
         }
         Relationships: [

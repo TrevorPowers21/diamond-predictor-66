@@ -2348,14 +2348,6 @@ export default function TeamBuilder() {
             if (next.some((rp) => rp.player_id === sb.player_id)) continue;
             const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(sb.position || ""));
             const inferredRole = asPitcherRole(sb.position || null);
-            // Pull the simulated snapshot the coach captured when adding
-            // from TransferPortal. When present, simulateTransferProjection
-            // returns these locked-in values via its snapshotFallback path
-            // — keeping TB's display in sync with what the coach saw.
-            const snap = sb.transfer_snapshot;
-            const snapClass = snap?.class_transition ? String(snap.class_transition).toUpperCase() : "SJ";
-            const validClass = (snapClass === "FS" || snapClass === "SJ" || snapClass === "JS" || snapClass === "GR") ? snapClass : "SJ";
-            const snapDev = typeof snap?.dev_aggressiveness === "number" ? snap.dev_aggressiveness : 0;
             next.push({
               player_id: sb.player_id,
               source: "portal",
@@ -2366,20 +2358,20 @@ export default function TeamBuilder() {
               production_notes: null,
               roster_status: "target",
               depth_role: isPitcherRow ? "high_leverage_reliever" : "utility",
-              class_transition: validClass,
-              dev_aggressiveness: snapDev,
-              transfer_snapshot: snap ?? null,
+              class_transition: "SJ",
+              dev_aggressiveness: 0,
+              transfer_snapshot: null,
               player: {
                 first_name: sb.first_name,
                 last_name: sb.last_name,
                 position: sb.position,
                 team: sb.team,
-                from_team: snap?.from_team ?? sb.team,
+                from_team: sb.team,
                 conference: sb.conference ?? null,
               },
               prediction: null,
-              nilVal: snap?.nil_valuation ?? null,
-              nil_owar: snap?.owar ?? null,
+              nilVal: null,
+              nil_owar: null,
             } as BuildPlayer);
           }
           return next;
@@ -2729,14 +2721,6 @@ export default function TeamBuilder() {
           owar: p.transfer_snapshot.owar ?? null,
         }
       : null;
-    // Prefer the persisted snapshot when one exists. The snapshot is the
-    // exact projection the coach saw in TransferPortal at add-time —
-    // locking it in keeps TB / Dashboard / PDFs visually consistent with
-    // the simulator. Live recompute is the fallback for players added
-    // from non-simulator surfaces (PlayerProfile, Dashboard) that have no
-    // snapshot. Long-term plan (project_eager_transfer_precompute.md)
-    // replaces this with team-scoped pre-computed predictions.
-    if (snapshotFallback) return snapshotFallback;
     if (!selectedTeam) return snapshotFallback;
     if (!p.player) return snapshotFallback;
     const livePlayer = (p.player_id ? liveTargetPlayerById.get(p.player_id) : null) || p.player;
