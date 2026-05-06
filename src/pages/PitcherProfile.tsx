@@ -267,9 +267,14 @@ const projectPitchingRate = ({
     ? (1 - classAdjustment - (devAggressiveness * PITCHING_DEV_FACTOR))
     : (1 + classAdjustment + (devAggressiveness * PITCHING_DEV_FACTOR));
   const projected = blended * mult;
-  const delta = projected - lastStat;
-  const dampFactor = dampFactorForProjected(projected, thresholds, impacts);
-  return lastStat + (delta * dampFactor);
+  // Damping disabled (2026-05-05). The previous implementation applied
+  // dampFactor as the WEIGHT on projected, meaning extreme cases trusted
+  // lastStat MORE — anti-regression. Path B in
+  // project_pitcher_damping_path_b.md captures the future re-introduction
+  // with the correct semantic. Mirror of src/lib/pitcherProjection.ts to
+  // keep returner projections consistent across surfaces.
+  void thresholds; void impacts; void dampFactorForProjected;
+  return projected;
 };
 
 const calcPitchingPlus = (

@@ -279,9 +279,9 @@ const projectPitchingRate = ({
     ? (1 - classAdjustment - (devAggressiveness * PITCHING_DEV_FACTOR))
     : (1 + classAdjustment + (devAggressiveness * PITCHING_DEV_FACTOR));
   const projected = blended * mult;
-  const delta = projected - lastStat;
-  const dampFactor = dampFactorForProjected(projected, thresholds, impacts);
-  return lastStat + (delta * dampFactor);
+  // Damping disabled — see project_pitcher_damping_path_b.md.
+  void thresholds; void impacts; void dampFactorForProjected;
+  return projected;
 };
 
 const calcPitchingPlus = (
