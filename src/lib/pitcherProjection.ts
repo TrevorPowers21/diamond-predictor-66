@@ -165,9 +165,21 @@ const projectPitchingRate = ({
     ? (1 - classAdjustment - (devAggressiveness * PITCHING_DEV_FACTOR))
     : (1 + classAdjustment + (devAggressiveness * PITCHING_DEV_FACTOR));
   const projected = blended * mult;
-  const delta = projected - lastStat;
-  const dampFactor = dampFactorForProjected(projected, thresholds, impacts);
-  return lastStat + (delta * dampFactor);
+  // Damping disabled (2026-05-05). The previous implementation applied the
+  // dampFactor as the WEIGHT on the projected value — meaning extreme
+  // projections trusted lastStat MORE, not less. That preserved outlier
+  // seasons (Flora's 0.78 ERA at UCSB stayed near 1.16 instead of regressing
+  // toward his stuff-implied 1.78). The blend itself already does
+  // regression-to-mean via PITCHING_POWER_RATING_WEIGHT (0.7); the extra
+  // step was anti-regression.
+  //
+  // The thresholds/impacts inputs are kept on the signature so a future
+  // Path B re-introduction (per project_pitcher_damping_path_b.md) can
+  // restore damping with the correct semantic: pull elite projections UP
+  // toward NCAA average, pull weak projections DOWN toward NCAA average —
+  // i.e. damping fights outliers instead of preserving them.
+  void thresholds; void impacts; void dampFactorForProjected;
+  return projected;
 };
 
 const toPitchingRole = (raw: string | null | undefined): "SP" | "RP" | "SM" | null => {
