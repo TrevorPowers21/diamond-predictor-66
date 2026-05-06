@@ -14,8 +14,8 @@ import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
 // Every weight and NCAA constant flows through readPitchingWeights(); this file
 // introduces none of its own weights.
 
-const PITCHING_POWER_RATING_WEIGHT = 0.7;
-const PITCHING_DEV_FACTOR = 0.06;
+export const PITCHING_POWER_RATING_WEIGHT = 0.7;
+export const PITCHING_DEV_FACTOR = 0.06;
 
 export type PitcherProjectionInput = {
   era: number | null;
@@ -115,14 +115,14 @@ const toPitchingClassAdj = (
   return Number.isFinite(pct) ? pct / 100 : 0;
 };
 
-const dampFactorForProjected = (projected: number, thresholds: number[], impacts: number[]) => {
+export const dampFactorForProjected = (projected: number, thresholds: number[], impacts: number[]) => {
   for (let i = 0; i < thresholds.length; i++) {
     if (projected < thresholds[i]) return impacts[i] ?? 1;
   }
   return impacts[thresholds.length] ?? impacts[impacts.length - 1] ?? 1;
 };
 
-const projectPitchingRate = ({
+export const projectPitchingRate = ({
   lastStat,
   prPlus,
   ncaaAvg,
@@ -133,6 +133,7 @@ const projectPitchingRate = ({
   thresholds,
   impacts,
   lowerIsBetter,
+  fallbackToLastStat = false,
 }: {
   lastStat: number | null;
   prPlus: number | null;
@@ -144,18 +145,23 @@ const projectPitchingRate = ({
   thresholds: number[];
   impacts: number[];
   lowerIsBetter: boolean;
+  // When true, returns lastStat instead of null if PR+ inputs are missing
+  // (TeamBuilder's previous behavior — carry the season's actual rate
+  // forward as the projection rather than dropping the row entirely).
+  fallbackToLastStat?: boolean;
 }) => {
+  // Strict guard on lastStat — without a season number, there's nothing to
+  // project even with the fallback flag.
+  if (lastStat == null || !Number.isFinite(lastStat)) return null;
   if (
-    lastStat == null ||
     prPlus == null ||
-    !Number.isFinite(lastStat) ||
     !Number.isFinite(prPlus) ||
     !Number.isFinite(ncaaAvg) ||
     !Number.isFinite(ncaaSd) ||
     !Number.isFinite(prSd) ||
     prSd === 0
   ) {
-    return null;
+    return fallbackToLastStat ? lastStat : null;
   }
 
   const zShift = ((prPlus - 100) / prSd) * ncaaSd;
@@ -165,9 +171,21 @@ const projectPitchingRate = ({
     ? (1 - classAdjustment - (devAggressiveness * PITCHING_DEV_FACTOR))
     : (1 + classAdjustment + (devAggressiveness * PITCHING_DEV_FACTOR));
   const projected = blended * mult;
-  const delta = projected - lastStat;
-  const dampFactor = dampFactorForProjected(projected, thresholds, impacts);
-  return lastStat + (delta * dampFactor);
+  // Damping disabled (2026-05-05). The previous implementation applied the
+  // dampFactor as the WEIGHT on the projected value — meaning extreme
+  // projections trusted lastStat MORE, not less. That preserved outlier
+  // seasons (Flora's 0.78 ERA at UCSB stayed near 1.16 instead of regressing
+  // toward his stuff-implied 1.78). The blend itself already does
+  // regression-to-mean via PITCHING_POWER_RATING_WEIGHT (0.7); the extra
+  // step was anti-regression.
+  //
+  // The thresholds/impacts inputs are kept on the signature so a future
+  // Path B re-introduction (per project_pitcher_damping_path_b.md) can
+  // restore damping with the correct semantic: pull elite projections UP
+  // toward NCAA average, pull weak projections DOWN toward NCAA average —
+  // i.e. damping fights outliers instead of preserving them.
+  void thresholds; void impacts; void dampFactorForProjected;
+  return projected;
 };
 
 const toPitchingRole = (raw: string | null | undefined): "SP" | "RP" | "SM" | null => {
@@ -416,23 +434,14 @@ export function computePitcherProjection(
   const pBb9 = projectPitchingRate({ lastStat: input.bb9, prPlus: prPlus.bb9PrPlus, ncaaAvg: eq.bb9_plus_ncaa_avg, ncaaSd: eq.bb9_plus_ncaa_sd, prSd: eq.bb9_pr_sd, classAdjustment: classBb9Adj, devAggressiveness, thresholds: eq.bb9_damp_thresholds, impacts: eq.bb9_damp_impacts, lowerIsBetter: true });
   const pHr9 = projectPitchingRate({ lastStat: input.hr9, prPlus: prPlus.hr9PrPlus, ncaaAvg: eq.hr9_plus_ncaa_avg, ncaaSd: eq.hr9_plus_ncaa_sd, prSd: eq.hr9_pr_sd, classAdjustment: classHr9Adj, devAggressiveness, thresholds: eq.hr9_damp_thresholds, impacts: eq.hr9_damp_impacts, lowerIsBetter: true });
 
-  // Step 2: park-adjust ERA / WHIP / HR9 (FIP / K9 / BB9 are park-neutral).
-  const teamNameForPark = teamMatch?.name || input.team || null;
-  const fallbackPark = teamMatch?.park_factor ?? null;
-  const avgPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id ?? null, "avg", parkMap, teamNameForPark, fallbackPark));
-  const obpPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id ?? null, "obp", parkMap, teamNameForPark, fallbackPark));
-  const isoPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id ?? null, "iso", parkMap, teamNameForPark, fallbackPark));
-  const eraParkRaw = resolveMetricParkFactor(teamMatch?.id ?? null, "era", parkMap, teamNameForPark);
-  const whipParkRaw = resolveMetricParkFactor(teamMatch?.id ?? null, "whip", parkMap, teamNameForPark);
-  const hr9ParkRaw = resolveMetricParkFactor(teamMatch?.id ?? null, "hr9", parkMap, teamNameForPark);
-  const eraParkFactor = parkToIndex(eraParkRaw ?? avgPark) / 100;
-  const whipParkFactor = parkToIndex(whipParkRaw ?? ((0.7 * avgPark) + (0.3 * obpPark))) / 100;
-  const hr9ParkFactor = parkToIndex(hr9ParkRaw ?? isoPark) / 100;
-  const parkAdjustedEra = pEra == null ? null : pEra * eraParkFactor;
-  const parkAdjustedWhip = pWhip == null ? null : pWhip * whipParkFactor;
-  const parkAdjustedHr9 = pHr9 == null ? null : pHr9 * hr9ParkFactor;
+  // Park factor is intentionally NOT applied to returner projections — the
+  // pitcher's lastStat already reflects their home park, and they're staying
+  // at the same school next season, so park is invariant. Park-adjustment is
+  // applied only on the transfer path (transferPitcherProjection.ts) where
+  // the pitcher moves between parks.
+  void parkMap;
 
-  // Step 3: role-transition adjust all six rates. No-op when baseRole === projectedRole.
+  // Step 2: role-transition adjust all six rates. No-op when baseRole === projectedRole.
   const roleCurve = {
     tier1Max: eq.rp_to_sp_low_better_tier1_max,
     tier2Max: eq.rp_to_sp_low_better_tier2_max,
@@ -441,12 +450,12 @@ export function computePitcherProjection(
     tier2Mult: eq.rp_to_sp_low_better_tier2_mult,
     tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
   };
-  const roleAdjustedEra = applyRoleTransitionAdjustment(parkAdjustedEra, eq.sp_to_rp_reg_era_pct, baseRole, projectedRole, true, roleCurve);
+  const roleAdjustedEra = applyRoleTransitionAdjustment(pEra, eq.sp_to_rp_reg_era_pct, baseRole, projectedRole, true, roleCurve);
   const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, eq.sp_to_rp_reg_fip_pct, baseRole, projectedRole, true, roleCurve);
-  const roleAdjustedWhip = applyRoleTransitionAdjustment(parkAdjustedWhip, eq.sp_to_rp_reg_whip_pct, baseRole, projectedRole, true, roleCurve);
+  const roleAdjustedWhip = applyRoleTransitionAdjustment(pWhip, eq.sp_to_rp_reg_whip_pct, baseRole, projectedRole, true, roleCurve);
   const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, eq.sp_to_rp_reg_k9_pct, baseRole, projectedRole, false, roleCurve);
   const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, eq.sp_to_rp_reg_bb9_pct, baseRole, projectedRole, true, roleCurve);
-  const roleAdjustedHr9 = applyRoleTransitionAdjustment(parkAdjustedHr9, eq.sp_to_rp_reg_hr9_pct, baseRole, projectedRole, true, roleCurve);
+  const roleAdjustedHr9 = applyRoleTransitionAdjustment(pHr9, eq.sp_to_rp_reg_hr9_pct, baseRole, projectedRole, true, roleCurve);
 
   // Step 4: convert role-adjusted rates into per-rate +stats.
   const eraPlus = calcPitchingPlus(roleAdjustedEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale);

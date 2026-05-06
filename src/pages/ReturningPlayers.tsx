@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -18,6 +19,7 @@ import {
   X,
   Target,
   Check,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -30,8 +32,10 @@ import {
   getPositionValueMultiplier,
 } from "@/lib/nilProgramSpecific";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { projectPitchingRate } from "@/lib/pitcherProjection";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { profileRouteFor } from "@/lib/profileRoutes";
+import { canonicalConferenceName } from "@/lib/conferenceMapping";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
@@ -60,6 +64,339 @@ type SortKey =
 type SortDir = "asc" | "desc";
 const FAST_DB_SORT_KEYS: SortKey[] = ["p_avg", "p_obp", "p_slg", "p_ops", "p_iso", "p_wrc_plus", "p_war"];
 
+// Position filter taxonomy for hitter dashboard. Coaches see atomic positions
+// in baseball-card order, plus IF / OF group buckets and a TWP placeholder.
+// IF expands to 1B/2B/3B/SS at query time; OF expands to LF/CF/RF/OF.
+// TWP is a placeholder until the players table tracks two-way status.
+const HITTER_POSITION_TOKENS: string[] = [
+  "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "IF", "OF", "TWP",
+];
+const POSITION_GROUP_INFIELD = ["1B", "2B", "3B", "SS"] as const;
+const POSITION_GROUP_OUTFIELD = ["LF", "CF", "RF", "OF"] as const;
+
+function expandHitterPositions(tokens: Set<string>): { positions: string[]; twpOnly: boolean } {
+  if (tokens.size === 0) return { positions: [], twpOnly: false };
+  const out = new Set<string>();
+  let twpFlag = false;
+  for (const t of tokens) {
+    if (t === "IF") POSITION_GROUP_INFIELD.forEach((p) => out.add(p));
+    else if (t === "OF") POSITION_GROUP_OUTFIELD.forEach((p) => out.add(p));
+    else if (t === "TWP") twpFlag = true;
+    else out.add(t);
+  }
+  // If only TWP is selected (and TWP returns no expanded positions), surface a
+  // sentinel position that matches nothing so the table comes back empty
+  // instead of accidentally returning every player.
+  const twpOnly = twpFlag && out.size === 0;
+  return { positions: Array.from(out), twpOnly };
+}
+
+function hitterPositionMatches(pos: string | null, tokens: Set<string>): boolean {
+  if (tokens.size === 0) return true;
+  const { positions, twpOnly } = expandHitterPositions(tokens);
+  if (twpOnly) return false; // placeholder until TWP support lands
+  return pos != null && positions.includes(pos);
+}
+
+const CLASS_OPTIONS: string[] = ["FR", "SO", "JR", "SR", "GR"];
+const BAT_OPTIONS: { value: string; label: string }[] = [
+  { value: "L", label: "Left" },
+  { value: "R", label: "Right" },
+  { value: "S", label: "Switch" },
+];
+const THROW_OPTIONS: { value: string; label: string }[] = [
+  { value: "L", label: "Left" },
+  { value: "R", label: "Right" },
+];
+const PITCHER_ROLE_OPTIONS: { value: "SP" | "RP" | "SM"; label: string }[] = [
+  { value: "SP", label: "Starters" },
+  { value: "RP", label: "Relievers" },
+  { value: "SM", label: "Swingmen" },
+];
+
+// Conference taxonomy for the dashboard filter. Tiers mirror RSTR IQ's existing
+// NIL tier mapping (`getProgramTierMultiplierByConference`) — Power 4 = SEC,
+// ACC, Big 12, Big Ten; Mid Major = the strong-mids plus the next tier of
+// non-Power-4 baseball conferences; Low Major = the rest. Selecting a tier
+// chip bulk-toggles its member conferences.
+type ConferenceTier = "P4" | "MM" | "LM";
+const CONFERENCE_TIER_LABELS: Record<ConferenceTier, string> = {
+  P4: "Power 4",
+  MM: "Mid Major",
+  LM: "Low Major",
+};
+const CONFERENCE_TIERS: Record<ConferenceTier, string[]> = {
+  P4: ["SEC", "ACC", "Big 12", "Big Ten"],
+  MM: [
+    "American Athletic Conference",
+    "Sun Belt",
+    "Big West",
+    "Mountain West",
+    "Conference USA",
+    "Missouri Valley Conference",
+    "Big East Conference",
+    "West Coast Conference",
+    "Atlantic 10",
+    "Coastal Athletic Association",
+  ],
+  LM: [
+    "Big South Conference",
+    "Atlantic Sun Conference",
+    "Metro Atlantic Athletic Conference",
+    "Mid-American Conference",
+    "Northeast Conference",
+    "Ohio Valley Conference",
+    "Patriot League",
+    "Southern Conference",
+    "Southland Conference",
+    "Summit League",
+    "American East",
+    "Ivy League",
+    "Horizon League",
+    "Western Athletic Conference",
+    "MEAC",
+    "Southwestern Athletic Conference",
+  ],
+};
+const ALL_CONFERENCES: string[] = [
+  ...CONFERENCE_TIERS.P4,
+  ...CONFERENCE_TIERS.MM,
+  ...CONFERENCE_TIERS.LM,
+];
+const CONFERENCE_TO_TIER: Record<string, ConferenceTier> = (() => {
+  const map: Record<string, ConferenceTier> = {};
+  for (const c of CONFERENCE_TIERS.P4) map[c] = "P4";
+  for (const c of CONFERENCE_TIERS.MM) map[c] = "MM";
+  for (const c of CONFERENCE_TIERS.LM) map[c] = "LM";
+  return map;
+})();
+
+// Reusable multi-select filter dropdown: a labeled trigger that opens a popover
+// of checkbox options. Empty selection means "no filter" — keeps the trigger
+// in its muted state and reads "All" so coaches always know nothing is hidden.
+function MultiSelectFilter<T extends string>({
+  label,
+  options,
+  selected,
+  onToggle,
+  onClear,
+  triggerWidth = "auto",
+  placement = "start",
+}: {
+  label: string;
+  options: { value: T; label: string }[];
+  selected: Set<T>;
+  onToggle: (v: T) => void;
+  onClear: () => void;
+  triggerWidth?: string;
+  placement?: "start" | "end";
+}) {
+  const count = selected.size;
+  const summary = count === 0 ? "All" : count === 1 ? options.find((o) => o.value === Array.from(selected)[0])?.label ?? `${count}` : `${count} selected`;
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          style={{ minWidth: triggerWidth }}
+          className={cn(
+            "h-8 inline-flex items-center justify-between gap-2 rounded-md border px-2.5 text-xs font-medium transition-colors duration-150 cursor-pointer",
+            count > 0
+              ? "border-[#D4AF37]/60 bg-[#D4AF37]/10 text-[#D4AF37] hover:bg-[#D4AF37]/15"
+              : "border-border bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground",
+          )}
+          aria-label={`${label} filter`}
+        >
+          <span className="flex items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-[0.08em] opacity-80">{label}</span>
+            <span className="font-semibold">{summary}</span>
+          </span>
+          <ChevronDown className="h-3 w-3 opacity-60" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align={placement} sideOffset={6} className="w-56 p-2">
+        <div className="flex items-center justify-between mb-1.5 px-1">
+          <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground">{label}</span>
+          {count > 0 && (
+            <button
+              type="button"
+              onClick={onClear}
+              className="text-[10px] uppercase tracking-[0.08em] text-[#D4AF37] hover:text-[#c49e2e] transition-colors cursor-pointer"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <div className="flex flex-col">
+          {options.map((opt) => {
+            const checked = selected.has(opt.value);
+            return (
+              <button
+                type="button"
+                key={String(opt.value)}
+                onClick={() => onToggle(opt.value)}
+                className={cn(
+                  "flex items-center gap-2 px-2 py-1.5 rounded-sm text-xs transition-colors duration-150 cursor-pointer text-left",
+                  checked ? "bg-[#D4AF37]/10 text-foreground" : "text-foreground hover:bg-muted/60",
+                )}
+              >
+                <span
+                  className={cn(
+                    "h-3.5 w-3.5 inline-flex items-center justify-center rounded-sm border",
+                    checked
+                      ? "bg-[#D4AF37] border-[#D4AF37] text-[#040810]"
+                      : "border-border bg-background",
+                  )}
+                >
+                  {checked && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
+                </span>
+                <span className="font-medium">{opt.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// Conference filter dropdown: same chip + popover pattern as MultiSelectFilter,
+// but the popover body is a two-section layout — tier shortcut pills (Power 4,
+// Mid Major, Low Major) on top that bulk-toggle their members, and the full
+// list of individual conferences below grouped under tier headers.
+function ConferenceFilter({
+  selected,
+  onToggleConf,
+  onToggleTier,
+  onClear,
+}: {
+  selected: Set<string>;
+  onToggleConf: (c: string) => void;
+  onToggleTier: (tier: ConferenceTier) => void;
+  onClear: () => void;
+}) {
+  const count = selected.size;
+  const summary = (() => {
+    if (count === 0) return "All";
+    // Compress to tier label when an entire tier is selected exactly.
+    const tiers: ConferenceTier[] = ["P4", "MM", "LM"];
+    const fullTiers = tiers.filter((t) => CONFERENCE_TIERS[t].every((c) => selected.has(c)));
+    const accountedFor = new Set<string>(fullTiers.flatMap((t) => CONFERENCE_TIERS[t]));
+    const extras = Array.from(selected).filter((c) => !accountedFor.has(c));
+    if (fullTiers.length > 0 && extras.length === 0) return fullTiers.map((t) => CONFERENCE_TIER_LABELS[t]).join(" + ");
+    if (count === 1) return Array.from(selected)[0];
+    return `${count} selected`;
+  })();
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "h-8 inline-flex items-center justify-between gap-2 rounded-md border px-2.5 text-xs font-medium transition-colors duration-150 cursor-pointer",
+            count > 0
+              ? "border-[#D4AF37]/60 bg-[#D4AF37]/10 text-[#D4AF37] hover:bg-[#D4AF37]/15"
+              : "border-border bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground",
+          )}
+          aria-label="Conference filter"
+        >
+          <span className="flex items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-[0.08em] opacity-80">Conf</span>
+            <span className="font-semibold truncate max-w-[140px]">{summary}</span>
+          </span>
+          <ChevronDown className="h-3 w-3 opacity-60" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={6} className="w-72 p-2 max-h-[420px] overflow-y-auto">
+        <div className="flex items-center justify-between mb-1.5 px-1">
+          <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground">Conference</span>
+          {count > 0 && (
+            <button
+              type="button"
+              onClick={onClear}
+              className="text-[10px] uppercase tracking-[0.08em] text-[#D4AF37] hover:text-[#c49e2e] transition-colors cursor-pointer"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-1 px-1 mb-2">
+          {(Object.keys(CONFERENCE_TIER_LABELS) as ConferenceTier[]).map((tier) => {
+            const members = CONFERENCE_TIERS[tier];
+            const allOn = members.every((m) => selected.has(m));
+            const someOn = !allOn && members.some((m) => selected.has(m));
+            return (
+              <button
+                key={tier}
+                type="button"
+                onClick={() => onToggleTier(tier)}
+                className={cn(
+                  "px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] rounded transition-colors duration-150 cursor-pointer",
+                  allOn
+                    ? "bg-[#D4AF37] text-[#040810]"
+                    : someOn
+                      ? "bg-[#D4AF37]/20 text-[#D4AF37] ring-1 ring-[#D4AF37]/40"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground",
+                )}
+                title={`Toggle all ${CONFERENCE_TIER_LABELS[tier]} conferences`}
+              >
+                {CONFERENCE_TIER_LABELS[tier]}
+              </button>
+            );
+          })}
+        </div>
+        <div className="border-t border-border/40 pt-1.5 flex flex-col">
+          {(Object.keys(CONFERENCE_TIER_LABELS) as ConferenceTier[]).map((tier) => (
+            <div key={tier} className="mb-1.5 last:mb-0">
+              <div className="px-2 py-0.5 text-[9px] uppercase tracking-[0.12em] text-muted-foreground/80 font-bold">
+                {CONFERENCE_TIER_LABELS[tier]}
+              </div>
+              {CONFERENCE_TIERS[tier].map((conf) => {
+                const checked = selected.has(conf);
+                return (
+                  <button
+                    type="button"
+                    key={conf}
+                    onClick={() => onToggleConf(conf)}
+                    className={cn(
+                      "flex items-center gap-2 px-2 py-1 rounded-sm text-[11px] transition-colors duration-150 cursor-pointer text-left w-full",
+                      checked ? "bg-[#D4AF37]/10 text-foreground" : "text-foreground hover:bg-muted/60",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "h-3.5 w-3.5 inline-flex items-center justify-center rounded-sm border shrink-0",
+                        checked
+                          ? "bg-[#D4AF37] border-[#D4AF37] text-[#040810]"
+                          : "border-border bg-background",
+                      )}
+                    >
+                      {checked && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
+                    </span>
+                    <span className="font-medium truncate">{conf}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+type PitchingSortKey =
+  | "name"
+  | "p_era"
+  | "p_fip"
+  | "p_whip"
+  | "p_k9"
+  | "p_bb9"
+  | "p_hr9"
+  | "p_rv_plus"
+  | "p_war"
+  | "market_value";
+
 interface ReturnerPlayer {
   id: string;
   prediction_id: string;
@@ -69,6 +406,7 @@ interface ReturnerPlayer {
   conference: string | null;
   position: string | null;
   class_year: string | null;
+  bats_hand: string | null;
   transfer_portal?: boolean | null;
   model_type: "returner" | "transfer";
   status: "active" | "departed" | "archived";
@@ -100,6 +438,8 @@ interface PitchingDashboardRow {
   team: string | null;
   conference: string | null;
   handedness: string | null;
+  role: "SP" | "RP" | "SM" | null;
+  class_year: string | null;
   stuff_score: number | null;
   whiff_score: number | null;
   bb_score: number | null;
@@ -197,8 +537,6 @@ const toNum = (v: string | null | undefined) => {
   return Number.isFinite(n) ? n : null;
 };
 
-const PITCHING_POWER_RATING_WEIGHT = 0.7;
-const PITCHING_DEV_FACTOR = 0.06;
 const DEFAULT_PITCHING_CLASS_TRANSITION: "FS" | "SJ" | "JS" | "GR" = "SJ";
 const DEFAULT_PITCHING_DEV_AGGRESSIVENESS = 0;
 const getPitchingPvfForRole = (
@@ -227,61 +565,6 @@ const toPitchingClassAdj = (
 ) => {
   const pct = classTransition === "FS" ? fs : classTransition === "SJ" ? sj : classTransition === "JS" ? js : gr;
   return Number.isFinite(pct) ? pct / 100 : 0;
-};
-
-const dampFactorForProjected = (projected: number, thresholds: number[], impacts: number[]) => {
-  for (let i = 0; i < thresholds.length; i++) {
-    if (projected < thresholds[i]) return impacts[i] ?? 1;
-  }
-  return impacts[thresholds.length] ?? impacts[impacts.length - 1] ?? 1;
-};
-
-const projectPitchingRate = ({
-  lastStat,
-  prPlus,
-  ncaaAvg,
-  ncaaSd,
-  prSd,
-  classAdjustment,
-  devAggressiveness,
-  thresholds,
-  impacts,
-  lowerIsBetter,
-}: {
-  lastStat: number | null;
-  prPlus: number | null;
-  ncaaAvg: number;
-  ncaaSd: number;
-  prSd: number;
-  classAdjustment: number;
-  devAggressiveness: number;
-  thresholds: number[];
-  impacts: number[];
-  lowerIsBetter: boolean;
-}) => {
-  if (
-    lastStat == null ||
-    prPlus == null ||
-    !Number.isFinite(lastStat) ||
-    !Number.isFinite(prPlus) ||
-    !Number.isFinite(ncaaAvg) ||
-    !Number.isFinite(ncaaSd) ||
-    !Number.isFinite(prSd) ||
-    prSd === 0
-  ) {
-    return null;
-  }
-
-  const zShift = ((prPlus - 100) / prSd) * ncaaSd;
-  const powerAdjusted = lowerIsBetter ? (ncaaAvg - zShift) : (ncaaAvg + zShift);
-  const blended = (lastStat * (1 - PITCHING_POWER_RATING_WEIGHT)) + (powerAdjusted * PITCHING_POWER_RATING_WEIGHT);
-  const mult = lowerIsBetter
-    ? (1 - classAdjustment - (devAggressiveness * PITCHING_DEV_FACTOR))
-    : (1 + classAdjustment + (devAggressiveness * PITCHING_DEV_FACTOR));
-  const projected = blended * mult;
-  const delta = projected - lastStat;
-  const dampFactor = dampFactorForProjected(projected, thresholds, impacts);
-  return lastStat + (delta * dampFactor);
 };
 
 const calcPitchingPlus = (
@@ -658,9 +941,97 @@ export default function ReturningPlayers() {
       return next;
     });
   };
-  const positionMatchesFilter = (pos: string | null) => {
-    if (positionFilters.size === 0) return true;
-    return pos != null && positionFilters.has(pos);
+  const expandedHitterPositions = useMemo(() => expandHitterPositions(positionFilters), [positionFilters]);
+  const positionMatchesFilter = (pos: string | null) => hitterPositionMatches(pos, positionFilters);
+
+  // Hitter class + handedness multi-selects. Empty set = no filter.
+  const [classFilters, setClassFilters] = useState<Set<string>>(new Set());
+  const toggleClassFilter = (c: string) => {
+    setClassFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(c)) next.delete(c);
+      else next.add(c);
+      return next;
+    });
+  };
+  const [batsFilters, setBatsFilters] = useState<Set<string>>(new Set());
+  const toggleBatsFilter = (h: string) => {
+    setBatsFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(h)) next.delete(h);
+      else next.add(h);
+      return next;
+    });
+  };
+  // Hitter conference multi-select. Stores canonical conference names; tier
+  // chips bulk-toggle the member conferences underneath.
+  const [confFilters, setConfFilters] = useState<Set<string>>(new Set());
+  const toggleConfFilter = (c: string) => {
+    setConfFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(c)) next.delete(c);
+      else next.add(c);
+      return next;
+    });
+  };
+  const toggleConfTier = (tier: ConferenceTier) => {
+    setConfFilters((prev) => {
+      const members = CONFERENCE_TIERS[tier];
+      const allOn = members.every((m) => prev.has(m));
+      const next = new Set(prev);
+      if (allOn) members.forEach((m) => next.delete(m));
+      else members.forEach((m) => next.add(m));
+      return next;
+    });
+  };
+
+  // Pitcher class + role + throws multi-selects. Empty set = no filter.
+  const [pitcherClassFilters, setPitcherClassFilters] = useState<Set<string>>(new Set());
+  const togglePitcherClassFilter = (c: string) => {
+    setPitcherClassFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(c)) next.delete(c);
+      else next.add(c);
+      return next;
+    });
+  };
+  const [pitcherThrowsFilters, setPitcherThrowsFilters] = useState<Set<string>>(new Set());
+  const togglePitcherThrowsFilter = (h: string) => {
+    setPitcherThrowsFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(h)) next.delete(h);
+      else next.add(h);
+      return next;
+    });
+  };
+  const [pitcherRoleFilters, setPitcherRoleFilters] = useState<Set<"SP" | "RP" | "SM">>(new Set());
+  const togglePitcherRoleFilter = (r: "SP" | "RP" | "SM") => {
+    setPitcherRoleFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(r)) next.delete(r);
+      else next.add(r);
+      return next;
+    });
+  };
+  // Pitcher conference multi-select. Same canonical-name approach as hitters.
+  const [pitcherConfFilters, setPitcherConfFilters] = useState<Set<string>>(new Set());
+  const togglePitcherConfFilter = (c: string) => {
+    setPitcherConfFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(c)) next.delete(c);
+      else next.add(c);
+      return next;
+    });
+  };
+  const togglePitcherConfTier = (tier: ConferenceTier) => {
+    setPitcherConfFilters((prev) => {
+      const members = CONFERENCE_TIERS[tier];
+      const allOn = members.every((m) => prev.has(m));
+      const next = new Set(prev);
+      if (allOn) members.forEach((m) => next.delete(m));
+      else members.forEach((m) => next.add(m));
+      return next;
+    });
   };
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(100);
@@ -670,6 +1041,8 @@ export default function ReturningPlayers() {
   const { addPlayers: addToHighFollow } = useHighFollow();
   const [sortKey, setSortKey] = useState<SortKey>("p_wrc_plus");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [pitchingSortKey, setPitchingSortKey] = useState<PitchingSortKey>("p_rv_plus");
+  const [pitchingSortDir, setPitchingSortDir] = useState<SortDir>("desc");
   const [bulkEditMode, setBulkEditMode] = useState(false);
   const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string | null; position?: string | null }>>({});
   const { overrides: playerOverrideMap } = usePlayerOverrides();
@@ -683,7 +1056,6 @@ export default function ReturningPlayers() {
   const [showMissingOnly, setShowMissingOnly] = useState(false);
   const [selectedSeason, setSelectedSeason] = useState<number>(2026);
   const [dashboardView, setDashboardView] = useState<"hitting" | "pitching">("hitting");
-  const [pitchingRoleFilter, setPitchingRoleFilter] = useState<"all" | "SP" | "RP">("all");
   const [pitchingSearch, setPitchingSearch] = useState("");
   const [pitchingPage, setPitchingPage] = useState(1);
   const [pitchingPageSize, setPitchingPageSize] = useState<number>(100);
@@ -746,6 +1118,10 @@ export default function ReturningPlayers() {
       const parsed = JSON.parse(raw) as {
         search?: string;
         positionFilter?: string;
+        positionFilters?: string[];
+        classFilters?: string[];
+        batsFilters?: string[];
+        confFilters?: string[];
         page?: number;
         pageSize?: number;
         sortKey?: SortKey;
@@ -756,10 +1132,31 @@ export default function ReturningPlayers() {
         pitchingSearch?: string;
         pitchingPage?: number;
         pitchingPageSize?: number;
+        pitchingSortKey?: PitchingSortKey;
+        pitchingSortDir?: SortDir;
+        pitcherRoleFilters?: ("SP" | "RP" | "SM")[];
+        pitcherClassFilters?: string[];
+        pitcherThrowsFilters?: string[];
+        pitcherConfFilters?: string[];
         scrollY?: number;
       };
       if (typeof parsed.search === "string") setSearch(parsed.search);
-      if (typeof parsed.positionFilter === "string") setPositionFilter(parsed.positionFilter);
+      // Multi-select Sets first (full restoration); fall back to legacy
+      // positionFilter single-string for older snapshots.
+      if (Array.isArray(parsed.positionFilters)) {
+        setPositionFilters(new Set(parsed.positionFilters.filter((v) => typeof v === "string")));
+      } else if (typeof parsed.positionFilter === "string") {
+        setPositionFilter(parsed.positionFilter);
+      }
+      if (Array.isArray(parsed.classFilters)) {
+        setClassFilters(new Set(parsed.classFilters.filter((v) => typeof v === "string")));
+      }
+      if (Array.isArray(parsed.batsFilters)) {
+        setBatsFilters(new Set(parsed.batsFilters.filter((v) => typeof v === "string")));
+      }
+      if (Array.isArray(parsed.confFilters)) {
+        setConfFilters(new Set(parsed.confFilters.filter((v) => typeof v === "string")));
+      }
       if (Number.isFinite(parsed.page) && Number(parsed.page) >= 1) setPage(Number(parsed.page));
       if (Number.isFinite(parsed.pageSize) && Number(parsed.pageSize) > 0) setPageSize(Number(parsed.pageSize));
       if (parsed.sortKey) setSortKey(parsed.sortKey);
@@ -770,6 +1167,20 @@ export default function ReturningPlayers() {
       if (typeof parsed.pitchingSearch === "string") setPitchingSearch(parsed.pitchingSearch);
       if (Number.isFinite(parsed.pitchingPage) && Number(parsed.pitchingPage) >= 1) setPitchingPage(Number(parsed.pitchingPage));
       if (Number.isFinite(parsed.pitchingPageSize) && Number(parsed.pitchingPageSize) > 0) setPitchingPageSize(Number(parsed.pitchingPageSize));
+      if (parsed.pitchingSortKey) setPitchingSortKey(parsed.pitchingSortKey);
+      if (parsed.pitchingSortDir) setPitchingSortDir(parsed.pitchingSortDir);
+      if (Array.isArray(parsed.pitcherRoleFilters)) {
+        setPitcherRoleFilters(new Set(parsed.pitcherRoleFilters.filter((v): v is "SP" | "RP" | "SM" => v === "SP" || v === "RP" || v === "SM")));
+      }
+      if (Array.isArray(parsed.pitcherClassFilters)) {
+        setPitcherClassFilters(new Set(parsed.pitcherClassFilters.filter((v) => typeof v === "string")));
+      }
+      if (Array.isArray(parsed.pitcherThrowsFilters)) {
+        setPitcherThrowsFilters(new Set(parsed.pitcherThrowsFilters.filter((v) => typeof v === "string")));
+      }
+      if (Array.isArray(parsed.pitcherConfFilters)) {
+        setPitcherConfFilters(new Set(parsed.pitcherConfFilters.filter((v) => typeof v === "string")));
+      }
       skipNextHittingPageResetRef.current = true;
       skipNextPitchingPageResetRef.current = true;
       const y = Number(parsed.scrollY);
@@ -787,7 +1198,13 @@ export default function ReturningPlayers() {
         RETURNING_VIEW_SNAPSHOT_KEY,
         JSON.stringify({
           search,
-          positionFilter,
+          // Persist the full multi-select Sets as arrays so coaches return to
+          // the exact filter combination they had set, not just the first
+          // pill (which was the limitation under positionFilter alone).
+          positionFilters: Array.from(positionFilters),
+          classFilters: Array.from(classFilters),
+          batsFilters: Array.from(batsFilters),
+          confFilters: Array.from(confFilters),
           page,
           pageSize,
           sortKey,
@@ -798,6 +1215,12 @@ export default function ReturningPlayers() {
           pitchingSearch,
           pitchingPage,
           pitchingPageSize,
+          pitchingSortKey,
+          pitchingSortDir,
+          pitcherRoleFilters: Array.from(pitcherRoleFilters),
+          pitcherClassFilters: Array.from(pitcherClassFilters),
+          pitcherThrowsFilters: Array.from(pitcherThrowsFilters),
+          pitcherConfFilters: Array.from(pitcherConfFilters),
           scrollY: window.scrollY,
         }),
       );
@@ -812,7 +1235,16 @@ export default function ReturningPlayers() {
     pitchingPage,
     pitchingPageSize,
     pitchingSearch,
-    positionFilter,
+    pitchingSortKey,
+    pitchingSortDir,
+    pitcherRoleFilters,
+    pitcherClassFilters,
+    pitcherThrowsFilters,
+    pitcherConfFilters,
+    positionFilters,
+    classFilters,
+    batsFilters,
+    confFilters,
     search,
     showMissingOnly,
     sortDir,
@@ -895,6 +1327,10 @@ export default function ReturningPlayers() {
         page: sortKey === "name" || FAST_DB_SORT_KEYS.includes(sortKey) ? page : null,
         pageSize: sortKey === "name" || FAST_DB_SORT_KEYS.includes(sortKey) ? pageSize : null,
         positionFilter,
+        positionTokens: Array.from(positionFilters).sort(),
+        classTokens: Array.from(classFilters).sort(),
+        batsTokens: Array.from(batsFilters).sort(),
+        confTokens: Array.from(confFilters).sort(),
         showMissingOnly,
         sortKey,
         sortDir,
@@ -979,6 +1415,7 @@ export default function ReturningPlayers() {
           conference: player.conference,
           position: player.position,
           class_year: player.class_year,
+          bats_hand: player.bats_hand ?? null,
           transfer_portal: player.transfer_portal,
           portal_status: (player as any).portal_status || "NOT IN PORTAL",
           model_type: row.model_type,
@@ -1008,9 +1445,15 @@ export default function ReturningPlayers() {
 
       // Fast path: server-side paging for sortable prediction columns when no extra filters are active.
       // This keeps the player dashboard responsive without loading the entire dataset.
+      // Bail out to the slow path whenever any of the new multi-select filters are
+      // engaged so we can apply them server-side via the standard players query
+      // (or, for conference, post-fetch client-side over the full dataset).
       if (
         FAST_DB_SORT_KEYS.includes(sortKey) &&
         positionFilter === "all" &&
+        classFilters.size === 0 &&
+        batsFilters.size === 0 &&
+        confFilters.size === 0 &&
         !showMissingOnly
       ) {
         const orderColumn =
@@ -1021,7 +1464,7 @@ export default function ReturningPlayers() {
         const to = from + pageSize - 1;
         const { data: pageData, error: pageErr, count } = await supabase
           .from("player_predictions")
-          .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal, portal_status, pa, ip)", { count: "exact" })
+          .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, bats_hand, transfer_portal, portal_status, pa, ip)", { count: "exact" })
           .in("model_type", ["returner", "transfer"])
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
@@ -1066,7 +1509,7 @@ export default function ReturningPlayers() {
         while (true) {
           const { data, error } = await supabase
             .from("player_predictions")
-            .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, transfer_portal, portal_status, pa, ip)")
+            .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, bats_hand, transfer_portal, portal_status, pa, ip)")
             .in("model_type", ["returner", "transfer"])
             .eq("variant", "regular")
             .in("status", ["active", "departed"])
@@ -1147,6 +1590,14 @@ export default function ReturningPlayers() {
 
         let allRows = dedupedRows.map((row: any) => toReturnerRow(row, row.players, nilByPlayer));
         if (positionFilters.size > 0) allRows = allRows.filter((p) => positionMatchesFilter(p.position));
+        if (classFilters.size > 0) allRows = allRows.filter((p) => p.class_year != null && classFilters.has(p.class_year));
+        if (batsFilters.size > 0) allRows = allRows.filter((p) => p.bats_hand != null && batsFilters.has(p.bats_hand));
+        if (confFilters.size > 0) {
+          allRows = allRows.filter((p) => {
+            const canon = canonicalConferenceName(p.conference);
+            return canon != null && confFilters.has(canon);
+          });
+        }
         if (showMissingOnly) allRows = allRows.filter((p) => !p.team);
 
         const metricFor = (p: ReturnerPlayer): number => {
@@ -1171,18 +1622,62 @@ export default function ReturningPlayers() {
 
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
-      let playersQuery = supabase
-        .from("players")
-        .select("id, first_name, last_name, team, conference, position, class_year, transfer_portal, pa, ip", { count: "exact" } as any)
-        .not("position", "in", "(SP,RP,CL,P,LHP,RHP)")
-        .gte("pa", 75)
-        .order("last_name", { ascending: true })
-        .order("first_name", { ascending: true })
-        .range(from, to);
-      if (positionFilters.size === 1) playersQuery = playersQuery.eq("position", Array.from(positionFilters)[0]);
-      else if (positionFilters.size > 1) playersQuery = playersQuery.in("position", Array.from(positionFilters));
-      if (showMissingOnly) playersQuery = playersQuery.is("team", null);
-      const { data: playerRows, error: playersErr, count } = await playersQuery;
+      // When the conference filter is engaged, we can't trust server-side
+      // pagination (canonicalization spans aliases the DB doesn't store
+      // uniformly), so fall back to "fetch everything matching the other
+      // filters, then JS-filter + JS-paginate" for correctness.
+      const confFilterActive = confFilters.size > 0;
+      const buildBaseQuery = () => {
+        let q = supabase
+          .from("players")
+          .select("id, first_name, last_name, team, conference, position, class_year, bats_hand, transfer_portal, pa, ip", { count: "exact" } as any)
+          .not("position", "in", "(SP,RP,CL,P,LHP,RHP)")
+          .gte("pa", 75)
+          .order("last_name", { ascending: true })
+          .order("first_name", { ascending: true });
+        // Position group expansion: IF→1B/2B/3B/SS, OF→LF/CF/RF/OF.
+        // TWP-only selection has no DB-level position match yet, so we short-circuit
+        // to an empty result by filtering on a sentinel that cannot match.
+        if (expandedHitterPositions.twpOnly) {
+          q = q.eq("position", "__TWP_PLACEHOLDER__");
+        } else if (expandedHitterPositions.positions.length === 1) {
+          q = q.eq("position", expandedHitterPositions.positions[0]);
+        } else if (expandedHitterPositions.positions.length > 1) {
+          q = q.in("position", expandedHitterPositions.positions);
+        }
+        if (classFilters.size > 0) q = q.in("class_year", Array.from(classFilters));
+        if (batsFilters.size > 0) q = q.in("bats_hand", Array.from(batsFilters));
+        if (showMissingOnly) q = q.is("team", null);
+        return q;
+      };
+      let playerRows: any[] = [];
+      let count: number | null = 0;
+      if (confFilterActive) {
+        // Loop in 1000-row pages until we've pulled everything matching the
+        // other filters; then canonicalize + filter conference in JS below.
+        const PAGE = 1000;
+        let pf = 0;
+        while (true) {
+          const { data, error } = await buildBaseQuery().range(pf, pf + PAGE - 1);
+          if (error) throw error;
+          playerRows.push(...((data as any[]) || []));
+          if (!data || data.length < PAGE) break;
+          pf += PAGE;
+        }
+        // Canonicalize-filter on conference, then re-paginate in JS.
+        playerRows = playerRows.filter((p: any) => {
+          const canon = canonicalConferenceName(p.conference);
+          return canon != null && confFilters.has(canon);
+        });
+        count = playerRows.length;
+        playerRows = playerRows.slice(from, to + 1);
+      } else {
+        const res = await buildBaseQuery().range(from, to);
+        if (res.error) throw res.error;
+        playerRows = (res.data as any[]) || [];
+        count = res.count ?? 0;
+      }
+      const playersErr = null as any;
       if (playersErr) throw playersErr;
 
       const playerIds = (playerRows || []).map((r: any) => r.id).filter(Boolean);
@@ -1467,11 +1962,6 @@ export default function ReturningPlayers() {
     }));
   };
 
-  const positions = useMemo(() => {
-    const set = new Set(players.map((p) => p.position).filter(Boolean) as string[]);
-    return Array.from(set).sort();
-  }, [players]);
-
   const sortedRows = players;
 
   useEffect(() => {
@@ -1480,7 +1970,7 @@ export default function ReturningPlayers() {
       return;
     }
     setPage(1);
-  }, [search, positionFilter, showMissingOnly, sortKey, sortDir, pageSize]);
+  }, [search, positionFilter, classFilters, batsFilters, confFilters, showMissingOnly, sortKey, sortDir, pageSize]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -1550,13 +2040,14 @@ export default function ReturningPlayers() {
         p_hr9: number | null;
         p_rv_plus: number | null;
         pitcher_role: string | null;
+        class_year: string | null;
       }>();
       let from = 0;
       const PAGE = 1000;
       while (true) {
         const { data, error } = await supabase
           .from("player_predictions")
-          .select("p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, players!inner(source_player_id)")
+          .select("p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, players!inner(source_player_id, class_year)")
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
           .not("p_era", "is", null)
@@ -1574,8 +2065,35 @@ export default function ReturningPlayers() {
               p_hr9: r.p_hr9,
               p_rv_plus: r.p_rv_plus,
               pitcher_role: r.pitcher_role,
+              class_year: r.players?.class_year ?? null,
             });
           }
+        }
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+      }
+      return map;
+    },
+    staleTime: 30 * 60 * 1000,
+  });
+
+  // Fallback: pull class_year directly from `players` so pitchers without a
+  // prediction row still resolve their class for the dashboard's class filter.
+  const { data: pitcherClassBySourceId } = useQuery({
+    queryKey: ["returning-pitcher-class-by-source-id"],
+    queryFn: async () => {
+      const map = new Map<string, string | null>();
+      let from = 0;
+      const PAGE = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("players")
+          .select("source_player_id, class_year")
+          .not("source_player_id", "is", null)
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        for (const r of (data || []) as any[]) {
+          if (r.source_player_id) map.set(r.source_player_id, r.class_year ?? null);
         }
         if (!data || data.length < PAGE) break;
         from += PAGE;
@@ -1654,13 +2172,17 @@ export default function ReturningPlayers() {
             hr9PrPlus: null as number | null,
             bb9PrPlus: null as number | null,
           };
+          // Prefer stored PM PR+ (canonical, written by Compute Scores). Live
+          // recompute is fallback when PM hasn't been computed yet. Matches
+          // predictionEngine.ts:1207 + pitcherProjection.ts:412 selection logic
+          // so dashboard, profile, and pipeline all agree on the same number.
           const recomputed = computePitchingPrPlusFromScores(scoreObj, powerEq);
-          scoreObj.eraPrPlus = recomputed.eraPrPlus ?? null;
-          scoreObj.fipPrPlus = recomputed.fipPrPlus ?? null;
-          scoreObj.whipPrPlus = recomputed.whipPrPlus ?? null;
-          scoreObj.k9PrPlus = recomputed.k9PrPlus ?? null;
-          scoreObj.hr9PrPlus = recomputed.hr9PrPlus ?? null;
-          scoreObj.bb9PrPlus = recomputed.bb9PrPlus ?? null;
+          scoreObj.eraPrPlus = r.era_pr_plus ?? recomputed.eraPrPlus ?? null;
+          scoreObj.fipPrPlus = r.fip_pr_plus ?? recomputed.fipPrPlus ?? null;
+          scoreObj.whipPrPlus = r.whip_pr_plus ?? recomputed.whipPrPlus ?? null;
+          scoreObj.k9PrPlus = r.k9_pr_plus ?? recomputed.k9PrPlus ?? null;
+          scoreObj.hr9PrPlus = r.hr9_pr_plus ?? recomputed.hr9PrPlus ?? null;
+          scoreObj.bb9PrPlus = r.bb9_pr_plus ?? recomputed.bb9PrPlus ?? null;
 
           const classTransition = DEFAULT_PITCHING_CLASS_TRANSITION;
           const devAggressiveness = DEFAULT_PITCHING_DEV_AGGRESSIVENESS;
@@ -1679,20 +2201,13 @@ export default function ReturningPlayers() {
           const pBb9 = projectPitchingRate({ lastStat: bb9, prPlus: scoreObj.bb9PrPlus, ncaaAvg: eq.bb9_plus_ncaa_avg, ncaaSd: eq.bb9_plus_ncaa_sd, prSd: eq.bb9_pr_sd, classAdjustment: classBb9Adj, devAggressiveness, thresholds: eq.bb9_damp_thresholds, impacts: eq.bb9_damp_impacts, lowerIsBetter: true });
           const pHr9 = projectPitchingRate({ lastStat: hr9, prPlus: scoreObj.hr9PrPlus, ncaaAvg: eq.hr9_plus_ncaa_avg, ncaaSd: eq.hr9_plus_ncaa_sd, prSd: eq.hr9_pr_sd, classAdjustment: classHr9Adj, devAggressiveness, thresholds: eq.hr9_damp_thresholds, impacts: eq.hr9_damp_impacts, lowerIsBetter: true });
 
-          const teamNameForPark = teamMatch?.name || normalizedTeam || null;
-          const fallbackPark = teamMatch?.park_factor ?? null;
-          const avgPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "avg", teamParkComponents, teamNameForPark, fallbackPark));
-          const obpPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "obp", teamParkComponents, teamNameForPark, fallbackPark));
-          const isoPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "iso", teamParkComponents, teamNameForPark, fallbackPark));
-          const eraParkRaw = resolveMetricParkFactor(teamMatch?.id, "era", teamParkComponents, teamNameForPark);
-          const whipParkRaw = resolveMetricParkFactor(teamMatch?.id, "whip", teamParkComponents, teamNameForPark);
-          const hr9ParkRaw = resolveMetricParkFactor(teamMatch?.id, "hr9", teamParkComponents, teamNameForPark);
-          const eraParkFactor = parkToIndex(eraParkRaw ?? avgPark) / 100;
-          const whipParkFactor = parkToIndex(whipParkRaw ?? ((0.7 * avgPark) + (0.3 * obpPark))) / 100;
-          const hr9ParkFactor = parkToIndex(hr9ParkRaw ?? isoPark) / 100;
-          const parkAdjustedEra = pEra == null ? null : pEra * eraParkFactor;
-          const parkAdjustedWhip = pWhip == null ? null : pWhip * whipParkFactor;
-          const parkAdjustedHr9 = pHr9 == null ? null : pHr9 * hr9ParkFactor;
+          // Park factor intentionally NOT applied to returner projections —
+          // the pitcher's lastStat already reflects their home park. Mirrors
+          // the lib edit in pitcherProjection.ts and PitcherProfile.
+          const parkAdjustedEra = pEra;
+          const parkAdjustedWhip = pWhip;
+          const parkAdjustedHr9 = pHr9;
+          void teamParkComponents;
 
           const pRvPlus = scoreObj.eraPrPlus;
           const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);
@@ -1726,12 +2241,23 @@ export default function ReturningPlayers() {
             return dbPWar * eq.market_dollars_per_war * dbPtm * dbPvm;
           })();
 
+          // Class for this pitcher: prefer the value attached to their
+          // prediction (canonical, came from the recalc engine's player join);
+          // fall back to the players-table direct read for pitchers who don't
+          // yet have a prediction row.
+          const pitcherClassYear: string | null = (
+            (dbPred?.class_year as string | null | undefined) ??
+            (r.source_player_id ? pitcherClassBySourceId?.get(r.source_player_id) ?? null : null) ??
+            null
+          );
           return {
             id: r.id || `pitching-master-${idx}`,
             playerName,
             team: normalizedTeam || null,
             conference: teamMatch?.conference ?? r.conference ?? null,
             handedness: (r.throwHand || "").trim() || null,
+            role: effectiveRole,
+            class_year: pitcherClassYear,
             class_transition: classTransition,
             dev_aggressiveness: devAggressiveness,
             stuff_score: scoreObj.stuff,
@@ -1760,14 +2286,26 @@ export default function ReturningPlayers() {
         .filter((r) => !!r.playerName);
     }
     return [] as PitchingDashboardRow[];
-  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq, pitcherPredBySourceId]);
+  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq, pitcherPredBySourceId, pitcherClassBySourceId]);
   const filteredPitchingRows = useMemo(() => {
     // Qualification threshold: pitchers need at least 25 IP to show in the table
     // (parallel to hitters needing 75 PA). Profile pages are still searchable/accessible
     // for everyone — this only affects the table listing.
     let rows = pitchingRows.filter((r) => (Number(r.ip) || 0) >= 25);
-    if (pitchingRoleFilter !== "all") {
-      rows = rows.filter((r) => r.role === pitchingRoleFilter);
+    if (pitcherRoleFilters.size > 0) {
+      rows = rows.filter((r) => r.role != null && pitcherRoleFilters.has(r.role));
+    }
+    if (pitcherClassFilters.size > 0) {
+      rows = rows.filter((r) => r.class_year != null && pitcherClassFilters.has(r.class_year));
+    }
+    if (pitcherThrowsFilters.size > 0) {
+      rows = rows.filter((r) => r.handedness != null && pitcherThrowsFilters.has(r.handedness));
+    }
+    if (pitcherConfFilters.size > 0) {
+      rows = rows.filter((r) => {
+        const canon = canonicalConferenceName(r.conference);
+        return canon != null && pitcherConfFilters.has(canon);
+      });
     }
     const q = pitchingSearch.trim().toLowerCase();
     if (!q) return rows;
@@ -1779,29 +2317,57 @@ export default function ReturningPlayers() {
         (r.handedness || "").toLowerCase().includes(q)
       );
     });
-  }, [pitchingRows, pitchingSearch, pitchingRoleFilter]);
+  }, [pitchingRows, pitchingSearch, pitcherRoleFilters, pitcherClassFilters, pitcherThrowsFilters, pitcherConfFilters]);
   useEffect(() => {
     if (skipNextPitchingPageResetRef.current) {
       skipNextPitchingPageResetRef.current = false;
       return;
     }
     setPitchingPage(1);
-  }, [pitchingSearch, pitchingPageSize, pitchingRoleFilter]);
+  }, [pitchingSearch, pitchingPageSize, pitcherRoleFilters, pitcherClassFilters, pitcherThrowsFilters, pitcherConfFilters]);
   const pitchingTotal = filteredPitchingRows.length;
   const pitchingTotalPages = Math.max(1, Math.ceil(pitchingTotal / pitchingPageSize));
   const pitchingCurrentPage = Math.min(pitchingPage, pitchingTotalPages);
   const sortedPitchingRows = useMemo(() => {
-    return [...filteredPitchingRows].sort((a, b) => {
-      // Sort by pRV+ descending (best pitchers first), then pERA ascending
-      if (a.p_rv_plus != null && b.p_rv_plus != null) return b.p_rv_plus - a.p_rv_plus;
-      if (a.p_rv_plus != null) return -1;
-      if (b.p_rv_plus != null) return 1;
-      if (a.p_era != null && b.p_era != null) return a.p_era - b.p_era;
-      if (a.p_era != null) return -1;
-      if (b.p_era != null) return 1;
-      return 0;
+    const lowerIsBetter = new Set<PitchingSortKey>(["p_era", "p_fip", "p_whip", "p_bb9", "p_hr9"]);
+    const desc = pitchingSortDir === "desc";
+    const rows = [...filteredPitchingRows];
+    if (pitchingSortKey === "name") {
+      rows.sort((a, b) => {
+        const cmp = String(a.playerName ?? "").toLowerCase()
+          .localeCompare(String(b.playerName ?? "").toLowerCase());
+        return desc ? -cmp : cmp;
+      });
+      return rows;
+    }
+    rows.sort((a, b) => {
+      const aRaw = (a as any)[pitchingSortKey];
+      const bRaw = (b as any)[pitchingSortKey];
+      const aNum = aRaw == null || !Number.isFinite(Number(aRaw)) ? null : Number(aRaw);
+      const bNum = bRaw == null || !Number.isFinite(Number(bRaw)) ? null : Number(bRaw);
+      // Nulls always sink to the bottom.
+      if (aNum == null && bNum == null) return 0;
+      if (aNum == null) return 1;
+      if (bNum == null) return -1;
+      // "desc" = best at top. For lower-is-better stats (ERA, FIP), best = lowest.
+      // For higher-is-better (K9, pRV+, pWAR, market_value), best = highest.
+      if (lowerIsBetter.has(pitchingSortKey)) {
+        return desc ? aNum - bNum : bNum - aNum;
+      }
+      return desc ? bNum - aNum : aNum - bNum;
     });
-  }, [filteredPitchingRows]);
+    return rows;
+  }, [filteredPitchingRows, pitchingSortKey, pitchingSortDir]);
+
+  const togglePitchingSort = (key: PitchingSortKey) => {
+    if (pitchingSortKey === key) {
+      setPitchingSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setPitchingSortKey(key);
+      setPitchingSortDir("desc");
+    }
+    setPitchingCurrentPage(1);
+  };
   const pagedPitchingRows = useMemo(() => {
     const from = (pitchingCurrentPage - 1) * pitchingPageSize;
     const to = from + pitchingPageSize;
@@ -1867,6 +2433,18 @@ export default function ReturningPlayers() {
       size="sm"
       className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground -ml-1"
       onClick={() => toggleSort(sortKeyVal)}
+    >
+      {label}
+      <ArrowUpDown className="ml-1 h-3 w-3" />
+    </Button>
+  );
+
+  const PitchingSortButton = ({ label, sortKeyVal }: { label: string; sortKeyVal: PitchingSortKey }) => (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground -ml-1"
+      onClick={() => togglePitchingSort(sortKeyVal)}
     >
       {label}
       <ArrowUpDown className="ml-1 h-3 w-3" />
@@ -1960,30 +2538,77 @@ export default function ReturningPlayers() {
             <button
               onClick={() => setPositionFilters(new Set())}
               className={cn(
-                "px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer",
+                "px-2.5 py-1 text-xs font-medium rounded-md transition-colors duration-150 cursor-pointer",
                 positionFilters.size === 0
-                  ? "bg-primary/15 text-primary ring-1 ring-primary/30"
+                  ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/40"
                   : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
               )}
+              title="Show all positions"
             >
               All
             </button>
-            {positions.map((pos) => (
+            {HITTER_POSITION_TOKENS.map((pos) => {
+              const active = positionFilters.has(pos);
+              const isGroup = pos === "IF" || pos === "OF" || pos === "TWP";
+              return (
+                <button
+                  key={pos}
+                  onClick={() => togglePosition(pos)}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-medium rounded-md transition-colors duration-150 cursor-pointer",
+                    isGroup && "border border-dashed border-border/70",
+                    active
+                      ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/40"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                  )}
+                  title={
+                    pos === "IF"
+                      ? "Infield: 1B, 2B, 3B, SS"
+                      : pos === "OF"
+                        ? "Outfield: LF, CF, RF, OF"
+                        : pos === "TWP"
+                          ? "Two-way players (placeholder — coming soon)"
+                          : pos
+                  }
+                >
+                  {pos}
+                </button>
+              );
+            })}
+            <div className="h-5 w-px bg-border/60 mx-1" aria-hidden />
+            <MultiSelectFilter
+              label="Class"
+              options={CLASS_OPTIONS.map((c) => ({ value: c, label: c }))}
+              selected={classFilters}
+              onToggle={toggleClassFilter}
+              onClear={() => setClassFilters(new Set())}
+            />
+            <MultiSelectFilter
+              label="Bats"
+              options={BAT_OPTIONS}
+              selected={batsFilters}
+              onToggle={toggleBatsFilter}
+              onClear={() => setBatsFilters(new Set())}
+            />
+            <ConferenceFilter
+              selected={confFilters}
+              onToggleConf={toggleConfFilter}
+              onToggleTier={toggleConfTier}
+              onClear={() => setConfFilters(new Set())}
+            />
+            {(classFilters.size + batsFilters.size + positionFilters.size + confFilters.size) > 0 && (
               <button
-                key={pos}
-                onClick={() => togglePosition(pos)}
-                className={cn(
-                  "px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer",
-                  positionFilters.has(pos)
-                    ? "bg-primary/15 text-primary ring-1 ring-primary/30"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
-                )}
+                onClick={() => {
+                  setPositionFilters(new Set());
+                  setClassFilters(new Set());
+                  setBatsFilters(new Set());
+                  setConfFilters(new Set());
+                }}
+                className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground hover:text-foreground transition-colors cursor-pointer ml-1"
+                title="Reset all filters"
               >
-                {pos}
+                Reset
               </button>
-            ))}
-            {positionFilters.size > 1 && (
-              <span className="text-[10px] text-muted-foreground ml-1">{positionFilters.size} selected</span>
             )}
           </div>
         </div>
@@ -2287,21 +2912,71 @@ export default function ReturningPlayers() {
               </div>
             )}
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {(["all", "SP", "RP"] as const).map((role) => (
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <button
+              onClick={() => setPitcherRoleFilters(new Set())}
+              className={cn(
+                "px-2.5 py-1 text-xs font-medium rounded-md transition-colors duration-150 cursor-pointer",
+                pitcherRoleFilters.size === 0
+                  ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/40"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+              )}
+              title="Show all pitchers"
+            >
+              All
+            </button>
+            {PITCHER_ROLE_OPTIONS.map((opt) => {
+              const active = pitcherRoleFilters.has(opt.value);
+              return (
+                <button
+                  key={opt.value}
+                  onClick={() => togglePitcherRoleFilter(opt.value)}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-medium rounded-md transition-colors duration-150 cursor-pointer",
+                    active
+                      ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/40"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                  )}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+            <div className="h-5 w-px bg-border/60 mx-1" aria-hidden />
+            <MultiSelectFilter
+              label="Class"
+              options={CLASS_OPTIONS.map((c) => ({ value: c, label: c }))}
+              selected={pitcherClassFilters}
+              onToggle={togglePitcherClassFilter}
+              onClear={() => setPitcherClassFilters(new Set())}
+            />
+            <MultiSelectFilter
+              label="Throws"
+              options={THROW_OPTIONS}
+              selected={pitcherThrowsFilters}
+              onToggle={togglePitcherThrowsFilter}
+              onClear={() => setPitcherThrowsFilters(new Set())}
+            />
+            <ConferenceFilter
+              selected={pitcherConfFilters}
+              onToggleConf={togglePitcherConfFilter}
+              onToggleTier={togglePitcherConfTier}
+              onClear={() => setPitcherConfFilters(new Set())}
+            />
+            {(pitcherRoleFilters.size + pitcherClassFilters.size + pitcherThrowsFilters.size + pitcherConfFilters.size) > 0 && (
               <button
-                key={role}
-                onClick={() => setPitchingRoleFilter(role)}
-                className={cn(
-                  "px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer",
-                  pitchingRoleFilter === role
-                    ? "bg-primary/15 text-primary ring-1 ring-primary/30"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
-                )}
+                onClick={() => {
+                  setPitcherRoleFilters(new Set());
+                  setPitcherClassFilters(new Set());
+                  setPitcherThrowsFilters(new Set());
+                  setPitcherConfFilters(new Set());
+                }}
+                className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground hover:text-foreground transition-colors cursor-pointer ml-1"
+                title="Reset pitcher filters"
               >
-                {role === "all" ? "All Pitchers" : role === "SP" ? "Starters" : "Relievers"}
+                Reset
               </button>
-            ))}
+            )}
           </div>
         </div>
 
@@ -2348,17 +3023,17 @@ export default function ReturningPlayers() {
                         <TableRow>
                           <TableHead className="w-[32px] p-1"></TableHead>
                           <TableHead className="min-w-[160px] sticky left-0 z-30 bg-background">
-                            <span className="font-medium text-muted-foreground">Player</span>
+                            <PitchingSortButton label="Player" sortKeyVal="name" />
                           </TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pERA</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pFIP</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pWHIP</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pK/9</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pBB/9</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pHR/9</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pRV+</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pWAR</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">Market Value</span></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pERA" sortKeyVal="p_era" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pFIP" sortKeyVal="p_fip" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pWHIP" sortKeyVal="p_whip" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pK/9" sortKeyVal="p_k9" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pBB/9" sortKeyVal="p_bb9" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pHR/9" sortKeyVal="p_hr9" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pRV+" sortKeyVal="p_rv_plus" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pWAR" sortKeyVal="p_war" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="Market Value" sortKeyVal="market_value" /></TableHead>
                           <TableHead className="text-center min-w-[180px]"><span className="font-medium text-muted-foreground">Scouting</span></TableHead>
                           <TableHead className="w-[36px] text-center p-0"><Target className="h-3.5 w-3.5 mx-auto text-muted-foreground" /></TableHead>
                         </TableRow>
@@ -2522,7 +3197,7 @@ function ScoutMiniBox({ label, value }: { label: string; value: number }) {
   );
 }
 
-const CLASS_OPTIONS = [
+const CLASS_TRANSITION_OPTIONS = [
   { value: "FS", label: "FR→SO" },
   { value: "SJ", label: "SO→JR" },
   { value: "JS", label: "JR→SR" },
@@ -2536,7 +3211,7 @@ function ClassAdjustmentSelector({ value, onChange }: { value: string; onChange:
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {CLASS_OPTIONS.map((opt) => (
+        {CLASS_TRANSITION_OPTIONS.map((opt) => (
           <SelectItem key={opt.value} value={opt.value} className="text-xs">
             {opt.label}
           </SelectItem>

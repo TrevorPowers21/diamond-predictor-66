@@ -23,19 +23,26 @@ export interface TargetBoardRow {
   portal_status: PortalStatus;
 }
 
-const QUERY_KEY = ["target-board"];
-
+/**
+ * Per-team recruiting watchlist. Scoped on (user, customer_team_id) so
+ * impersonating a different team flips to that team's separate list.
+ *
+ * No team in scope (superadmin not impersonating) → returns an empty
+ * board. Surfaces should prompt the user to pick a team rather than
+ * mixing legacy unscoped rows back in.
+ */
 export function useTargetBoard() {
-  const { user } = useAuth();
+  const { user, effectiveTeamId } = useAuth();
   const qc = useQueryClient();
 
   const { data: board = [], isLoading } = useQuery({
-    queryKey: QUERY_KEY,
-    enabled: !!user?.id,
+    queryKey: ["target-board", effectiveTeamId ?? null],
+    enabled: !!user?.id && !!effectiveTeamId,
     queryFn: async () => {
       const { data, error } = await tb()
         .select("id, player_id, notes, added_at, players!inner(first_name, last_name, team, conference, position, class_year, portal_status)")
         .eq("user_id", user!.id)
+        .eq("customer_team_id", effectiveTeamId!)
         .order("added_at", { ascending: false });
 
       if (error) throw error;
@@ -61,12 +68,17 @@ export function useTargetBoard() {
   const addPlayer = useMutation({
     mutationFn: async ({ playerId }: { playerId: string }) => {
       if (!user?.id) throw new Error("Not logged in");
+      if (!effectiveTeamId) throw new Error("No team in scope — impersonate or join a team first");
       const { error } = await tb()
-        .insert({ user_id: user.id, player_id: playerId });
+        .insert({
+          user_id: user.id,
+          player_id: playerId,
+          customer_team_id: effectiveTeamId,
+        });
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: QUERY_KEY });
+      qc.invalidateQueries({ queryKey: ["target-board", effectiveTeamId ?? null] });
       toast.success("Added to Target Board");
     },
     onError: (e: any) => {
@@ -81,14 +93,16 @@ export function useTargetBoard() {
   const removePlayer = useMutation({
     mutationFn: async (playerId: string) => {
       if (!user?.id) throw new Error("Not logged in");
+      if (!effectiveTeamId) throw new Error("No team in scope");
       const { error } = await tb()
         .delete()
         .eq("user_id", user.id)
+        .eq("customer_team_id", effectiveTeamId)
         .eq("player_id", playerId);
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: QUERY_KEY });
+      qc.invalidateQueries({ queryKey: ["target-board", effectiveTeamId ?? null] });
       toast.success("Removed from Target Board");
     },
     onError: (e: any) => toast.error(`Failed to remove: ${e.message}`),

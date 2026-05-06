@@ -915,7 +915,17 @@ export default function PlayerComparison() {
       const fipPr = hr9Pr != null && bb9Pr != null && k9Pr != null
         ? (hr9Pr * EQ.p_fip_hr9_power_rating_plus_weight) + (bb9Pr * EQ.p_fip_bb9_power_rating_plus_weight) + (k9Pr * EQ.p_fip_k9_power_rating_plus_weight)
         : null;
-      const snapshot: PitchingPowerSnapshot = { eraPrPlus: eraPr, fipPrPlus: fipPr, whipPrPlus: whipPr, k9PrPlus: k9Pr, hr9PrPlus: hr9Pr, bb9PrPlus: bb9Pr };
+      // Prefer stored PM PR+ over live recompute. Matches predictionEngine.ts:1207
+      // and pitcherProjection.ts:412 selection order so Compare view aligns
+      // with PitcherProfile and dashboard.
+      const snapshot: PitchingPowerSnapshot = {
+        eraPrPlus: pr.era_pr_plus ?? eraPr,
+        fipPrPlus: pr.fip_pr_plus ?? fipPr,
+        whipPrPlus: pr.whip_pr_plus ?? whipPr,
+        k9PrPlus: pr.k9_pr_plus ?? k9Pr,
+        hr9PrPlus: pr.hr9_pr_plus ?? hr9Pr,
+        bb9PrPlus: pr.bb9_pr_plus ?? bb9Pr,
+      };
       const nameKey = normalizeKey(name);
       const teamKey = normalizeKey(team);
       if (nameKey && !byName.has(nameKey)) byName.set(nameKey, snapshot);

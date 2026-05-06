@@ -772,56 +772,10 @@ const toPitchingClassAdj = (
   const pct = classTransition === "FS" ? fs : classTransition === "SJ" ? sj : classTransition === "JS" ? js : gr;
   return Number.isFinite(pct) ? pct / 100 : 0;
 };
-const dampFactorForProjected = (projected: number, thresholds: number[], impacts: number[]) => {
-  for (let i = 0; i < thresholds.length; i++) {
-    if (projected < thresholds[i]) return impacts[i] ?? 1;
-  }
-  return impacts[thresholds.length] ?? impacts[impacts.length - 1] ?? 1;
-};
-const projectPitchingRate = ({
-  lastStat,
-  prPlus,
-  ncaaAvg,
-  ncaaSd,
-  prSd,
-  classAdjustment,
-  devAggressiveness,
-  thresholds,
-  impacts,
-  lowerIsBetter,
-}: {
-  lastStat: number | null;
-  prPlus: number | null;
-  ncaaAvg: number;
-  ncaaSd: number;
-  prSd: number;
-  classAdjustment: number;
-  devAggressiveness: number;
-  thresholds: number[];
-  impacts: number[];
-  lowerIsBetter: boolean;
-}) => {
-  if (lastStat == null || !Number.isFinite(lastStat)) return null;
-  // If power rating is missing, carry forward last season stat as projection
-  if (
-    prPlus == null ||
-    !Number.isFinite(prPlus) ||
-    !Number.isFinite(ncaaAvg) ||
-    !Number.isFinite(ncaaSd) ||
-    !Number.isFinite(prSd) ||
-    prSd === 0
-  ) return lastStat;
-  const zShift = ((prPlus - 100) / prSd) * ncaaSd;
-  const powerAdjusted = lowerIsBetter ? (ncaaAvg - zShift) : (ncaaAvg + zShift);
-  const blended = (lastStat * (1 - 0.7)) + (powerAdjusted * 0.7);
-  const mult = lowerIsBetter
-    ? (1 - classAdjustment - (devAggressiveness * 0.06))
-    : (1 + classAdjustment + (devAggressiveness * 0.06));
-  const projected = blended * mult;
-  const delta = projected - lastStat;
-  const dampFactor = dampFactorForProjected(projected, thresholds, impacts);
-  return lastStat + (delta * dampFactor);
-};
+// projectPitchingRate is imported from @/lib/pitcherProjection (consolidated
+// 2026-05-05). TB calls it with fallbackToLastStat=true to preserve the
+// previous behavior of carrying the season's actual rate forward when PR+
+// inputs are missing rather than dropping the row.
 const calcPitchingPlus = (
   value: number | null,
   ncaaAvg: number,
@@ -952,18 +906,21 @@ export default function TeamBuilder() {
       const wrcPlus = cs.wrc_plus ?? 100;
       const overallPowerRating = cs.overall_power_rating ?? 100;
       const hitterTalentPlus = overallPowerRating + (1.25 * (stuffPlus - 100)) + (0.75 * (100 - wrcPlus));
-      const key = normConf(cs.conference);
-      if (key) {
-        map.set(key, {
-          conference: cs.conference,
-          era_plus: Math.round(eraPlus),
-          fip_plus: Math.round(fipPlus),
-          whip_plus: Math.round(whipPlus),
-          k9_plus: Math.round(k9Plus),
-          bb9_plus: Math.round(bb9Plus),
-          hr9_plus: Math.round(hr9Plus),
-          hitter_talent_plus: Math.round(hitterTalentPlus * 10) / 10,
-        });
+      const entry = {
+        conference: cs.conference,
+        era_plus: Math.round(eraPlus),
+        fip_plus: Math.round(fipPlus),
+        whip_plus: Math.round(whipPlus),
+        k9_plus: Math.round(k9Plus),
+        bb9_plus: Math.round(bb9Plus),
+        hr9_plus: Math.round(hr9Plus),
+        hitter_talent_plus: Math.round(hitterTalentPlus * 10) / 10,
+      };
+      // Register under every alias so lookup hits regardless of which form
+      // the team's `conference` string is stored in (e.g. SEC vs Southeastern
+      // Conference). Mirrors how TransferPortal's pitchingConfByKey indexes.
+      for (const alias of getConferenceAliases(cs.conference)) {
+        if (alias && !map.has(alias)) map.set(alias, entry);
       }
     }
     return map;
@@ -2013,7 +1970,11 @@ export default function TeamBuilder() {
             team_power_plus: meta.power,
           };
           } catch (err) {
-            console.warn("[TeamBuilder] Failed to process roster player:", err, bp);
+            // Per-row data-quality warning — noisy in prod when a saved build
+            // has any malformed players. Keep visible in dev to flag bad rows.
+            if (import.meta.env.DEV) {
+              console.warn("[TeamBuilder] Failed to process roster player:", err, bp);
+            }
             return null;
           }
         }).filter(Boolean) as any[]);
@@ -2774,9 +2735,23 @@ export default function TeamBuilder() {
       const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
       if (!toTeamRow) return snapshotFallback;
       const toConf = toTeamRow.conference || null;
-      const normConf = (c: string | null) => (c || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-      const fromPC = fromConf ? pitchingConfLookup.get(normConf(fromConf)) : null;
-      const toPC = toConf ? pitchingConfLookup.get(normConf(toConf)) : null;
+      // Multi-alias lookup mirrors TransferPortal's resolvePitchingConferenceStats:
+      // if Teams Table stores "Southeastern Conference" but Conference Stats keys
+      // by "SEC" (or vice versa), the simple direct lookup misses. Fall through
+      // every alias from getConferenceAliases until one hits. This was the root
+      // of the TB ↔ portal pitcher transfer mismatch — TB lookup was returning
+      // null for from/to conferences in many cases, leaving the lib to compute
+      // with null deltas instead of real conference shifts.
+      const lookupConfPC = (conf: string | null) => {
+        if (!conf) return null;
+        for (const alias of getConferenceAliases(conf)) {
+          const hit = pitchingConfLookup.get(alias);
+          if (hit) return hit;
+        }
+        return null;
+      };
+      const fromPC = lookupConfPC(fromConf);
+      const toPC = lookupConfPC(toConf);
 
       const baseRole = (() => {
         const r = pStats.role || null;
@@ -2786,7 +2761,16 @@ export default function TeamBuilder() {
         if (g > 0 && gs != null) return ((gs / g) < 0.5 ? "RP" : "SP") as "SP" | "RP";
         return null;
       })();
-      const slotRole = normalizePitcherRole(pitcherRoleFromSlot(p.position_slot) || p.player?.position || null);
+      // Role override: targets (not yet slotted) project at their BASE role —
+      // matches TransferPortal's default behavior (no role transition unless
+      // user explicitly changes it). Roster-slotted players (roster_status
+      // 'returner' or any non-'target') use slotRole so role transitions kick
+      // in when coach intentionally puts an SP in an RP slot. Mirrors how dev
+      // aggressiveness only impacts the projection when manually changed.
+      const isTargetOnly = (p.roster_status || "returner") === "target";
+      const slotRole = isTargetOnly
+        ? baseRole
+        : (normalizePitcherRole(pitcherRoleFromSlot(p.position_slot) || p.player?.position || null) || baseRole);
 
       const result = computeTransferPitcherProjection(
         {
@@ -2838,18 +2822,61 @@ export default function TeamBuilder() {
         return snapshotFallback;
       }
 
+      // Apply class transition + dev aggressiveness on top of base transfer
+      // projection. Mirrors TransferPortal exactly so values match across
+      // surfaces (was missing here — pitcher TB ↔ portal divergence).
+      const pitcherClassKey = String(p.class_transition || livePred.class_transition || "SJ").toUpperCase();
+      const pitcherClassTransition: "FS" | "SJ" | "JS" | "GR" =
+        pitcherClassKey === "FS" || pitcherClassKey === "SJ" || pitcherClassKey === "JS" || pitcherClassKey === "GR"
+          ? pitcherClassKey
+          : "SJ";
+      const pitcherDevAgg = Number.isFinite(Number(p.dev_aggressiveness ?? livePred.dev_aggressiveness))
+        ? Number(p.dev_aggressiveness ?? livePred.dev_aggressiveness)
+        : 0;
+      const classEraAdj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_era_fs, pitchingEq.class_era_sj, pitchingEq.class_era_js, pitchingEq.class_era_gr);
+      const classFipAdj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_fip_fs, pitchingEq.class_fip_sj, pitchingEq.class_fip_js, pitchingEq.class_fip_gr);
+      const classWhipAdj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_whip_fs, pitchingEq.class_whip_sj, pitchingEq.class_whip_js, pitchingEq.class_whip_gr);
+      const classK9Adj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_k9_fs, pitchingEq.class_k9_sj, pitchingEq.class_k9_js, pitchingEq.class_k9_gr);
+      const classBb9Adj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_bb9_fs, pitchingEq.class_bb9_sj, pitchingEq.class_bb9_js, pitchingEq.class_bb9_gr);
+      const classHr9Adj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_hr9_fs, pitchingEq.class_hr9_sj, pitchingEq.class_hr9_js, pitchingEq.class_hr9_gr);
+      const pitcherLowMult = (adj: number) => 1 - adj - (pitcherDevAgg * 0.06);
+      const pitcherHighMult = (adj: number) => 1 + adj + (pitcherDevAgg * 0.06);
+
+      const adjEra = result.p_era == null ? null : result.p_era * pitcherLowMult(classEraAdj);
+      const adjFip = result.p_fip == null ? null : result.p_fip * pitcherLowMult(classFipAdj);
+      const adjWhip = result.p_whip == null ? null : result.p_whip * pitcherLowMult(classWhipAdj);
+      const adjK9 = result.p_k9 == null ? null : result.p_k9 * pitcherHighMult(classK9Adj);
+      const adjBb9 = result.p_bb9 == null ? null : result.p_bb9 * pitcherLowMult(classBb9Adj);
+      const adjHr9 = result.p_hr9 == null ? null : result.p_hr9 * pitcherLowMult(classHr9Adj);
+
+      const eraPlusAdj = calcPitchingPlus(adjEra, pitchingEq.era_plus_ncaa_avg, pitchingEq.era_plus_ncaa_sd, pitchingEq.era_plus_scale, false);
+      const fipPlusAdj = calcPitchingPlus(adjFip, pitchingEq.fip_plus_ncaa_avg, pitchingEq.fip_plus_ncaa_sd, pitchingEq.fip_plus_scale, false);
+      const whipPlusAdj = calcPitchingPlus(adjWhip, pitchingEq.whip_plus_ncaa_avg, pitchingEq.whip_plus_ncaa_sd, pitchingEq.whip_plus_scale, false);
+      const k9PlusAdj = calcPitchingPlus(adjK9, pitchingEq.k9_plus_ncaa_avg, pitchingEq.k9_plus_ncaa_sd, pitchingEq.k9_plus_scale, true);
+      const bb9PlusAdj = calcPitchingPlus(adjBb9, pitchingEq.bb9_plus_ncaa_avg, pitchingEq.bb9_plus_ncaa_sd, pitchingEq.bb9_plus_scale, false);
+      const hr9PlusAdj = calcPitchingPlus(adjHr9, pitchingEq.hr9_plus_ncaa_avg, pitchingEq.hr9_plus_ncaa_sd, pitchingEq.hr9_plus_scale, false);
+
+      const pRvPlusAdj = [eraPlusAdj, fipPlusAdj, whipPlusAdj, k9PlusAdj, bb9PlusAdj, hr9PlusAdj].every((v) => v != null)
+        ? (Number(eraPlusAdj) * pitchingEq.era_plus_weight) +
+          (Number(fipPlusAdj) * pitchingEq.fip_plus_weight) +
+          (Number(whipPlusAdj) * pitchingEq.whip_plus_weight) +
+          (Number(k9PlusAdj) * pitchingEq.k9_plus_weight) +
+          (Number(bb9PlusAdj) * pitchingEq.bb9_plus_weight) +
+          (Number(hr9PlusAdj) * pitchingEq.hr9_plus_weight)
+        : result.p_rv_plus;
+
       return {
         p_avg: null,
         p_obp: null,
         p_slg: null,
-        p_wrc_plus: result.p_rv_plus,
-        p_era: result.p_era,
-        p_fip: result.p_fip,
-        p_whip: result.p_whip,
-        p_k9: result.p_k9,
-        p_bb9: result.p_bb9,
-        p_hr9: result.p_hr9,
-        p_rv_plus: result.p_rv_plus,
+        p_wrc_plus: pRvPlusAdj,
+        p_era: adjEra,
+        p_fip: adjFip,
+        p_whip: adjWhip,
+        p_k9: adjK9,
+        p_bb9: adjBb9,
+        p_hr9: adjHr9,
+        p_rv_plus: pRvPlusAdj,
         p_war: result.p_war,
         nil_valuation: result.market_value,
         owar: result.p_war,
@@ -4305,12 +4332,24 @@ export default function TeamBuilder() {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
       let source: any = sourceBase;
       if ((p.roster_status || "returner") === "target" && sourceBase) {
-        const classTransitionRaw = String(p.class_transition || "SJ").toUpperCase();
+        // Match the hitter side (line ~3010): when the BuildPlayer doesn't
+        // carry a class_transition / dev_aggressiveness (the sync hardcodes
+        // "SJ" / 0 for newly seeded portal targets), fall back to the
+        // player's stored prediction values so projections agree with the
+        // TransferPortal simulator. Without this, every pitcher target
+        // gets sophomore-to-junior adjustment regardless of actual class.
+        const livePred = p.player_id ? liveTargetPredictionByPlayerId.get(p.player_id) : null;
+        const classTransitionRaw = String(p.class_transition || livePred?.class_transition || "SJ").toUpperCase();
         const classTransition: "FS" | "SJ" | "JS" | "GR" =
           classTransitionRaw === "FS" || classTransitionRaw === "SJ" || classTransitionRaw === "JS" || classTransitionRaw === "GR"
             ? classTransitionRaw
             : "SJ";
-        const devAgg = Number.isFinite(Number(p.dev_aggressiveness)) ? Number(p.dev_aggressiveness) : 0;
+        const devAggCandidate = Number.isFinite(Number(p.dev_aggressiveness))
+          ? Number(p.dev_aggressiveness)
+          : Number.isFinite(Number(livePred?.dev_aggressiveness))
+            ? Number(livePred?.dev_aggressiveness)
+            : 0;
+        const devAgg = devAggCandidate;
         const classEraAdj = toPitchingClassAdj(classTransition, pitchingEq.class_era_fs, pitchingEq.class_era_sj, pitchingEq.class_era_js, pitchingEq.class_era_gr);
         const classFipAdj = toPitchingClassAdj(classTransition, pitchingEq.class_fip_fs, pitchingEq.class_fip_sj, pitchingEq.class_fip_js, pitchingEq.class_fip_gr);
         const classWhipAdj = toPitchingClassAdj(classTransition, pitchingEq.class_whip_fs, pitchingEq.class_whip_sj, pitchingEq.class_whip_js, pitchingEq.class_whip_gr);
@@ -4378,7 +4417,7 @@ export default function TeamBuilder() {
     const baseOwar = computeOWarFromWrcPlus(shownWrc) ?? p.nil_owar ?? 0;
     const owar = baseOwar * depthRoleMultiplier(p.depth_role);
     return { sim, shown, shownWrc, owar, pwar: null };
-  }, [computePitcherPwar, computeReturnerPitchingProjection, simulateTransferProjection, pitchingEq, eqNum]);
+  }, [computePitcherPwar, computeReturnerPitchingProjection, simulateTransferProjection, pitchingEq, eqNum, liveTargetPredictionByPlayerId]);
 
   const projectedPlayerScore = useCallback((p: BuildPlayer) => {
     const { owar } = playerProjection(p);

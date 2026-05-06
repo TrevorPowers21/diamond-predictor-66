@@ -130,6 +130,16 @@ const classTransitionToYear: Record<string, string> = {
   GR: "Gr",
 };
 
+// Inverse: maps a class_transition to the player's CURRENT class (the source
+// side of the arrow). Used when a coach picks a transition in the form to
+// keep player.class_year aligned with what the player is THIS season.
+const classTransitionToCurrentYear: Record<string, string> = {
+  FS: "FR",
+  SJ: "SO",
+  JS: "JR",
+  GR: "GR",
+};
+
 function ScoutGrade({ label, value, fullLabel }: { label: string; value: number | null; fullLabel: string }) {
   if (value == null) return null;
   const tier =
@@ -557,9 +567,10 @@ export default function PlayerProfile() {
       class_transition: predForm.class_transition || null,
       dev_aggressiveness: predForm.dev_aggressiveness !== "" ? Number(predForm.dev_aggressiveness) : null,
     };
-    // Also update the player's class_year to match the transition target
-    if (predForm.class_transition && classTransitionToYear[predForm.class_transition]) {
-      supabase.from("players").update({ class_year: classTransitionToYear[predForm.class_transition] }).eq("id", id!).then(() => {
+    // Keep players.class_year aligned with the source side of the transition
+    // (the player's CURRENT class this season — not the post-transition target).
+    if (predForm.class_transition && classTransitionToCurrentYear[predForm.class_transition]) {
+      supabase.from("players").update({ class_year: classTransitionToCurrentYear[predForm.class_transition] }).eq("id", id!).then(() => {
         queryClient.invalidateQueries({ queryKey: ["player-profile", id] });
       });
     }
@@ -1272,7 +1283,7 @@ export default function PlayerProfile() {
                     ["Team", displayTeamCurrent || "—"],
                     ["Conference", resolvedConference || "—"],
                     ["Position", effectivePosition || "—"],
-                    ["Class", (isReturner && regularPred?.class_transition ? classTransitionToYear[regularPred.class_transition] : null) || player.class_year || "—"],
+                    ["Class", player.class_year || "—"],
                     ["Bats", (player as any).bats_hand === "R" ? "Right" : (player as any).bats_hand === "L" ? "Left" : (player as any).bats_hand === "S" ? "Switch" : (player as any).bats_hand || "—"],
                     ["Throws", (player as any).throws_hand === "R" ? "Right" : (player as any).throws_hand === "L" ? "Left" : (player as any).throws_hand || "—"],
                   ].map(([label, val]) => (

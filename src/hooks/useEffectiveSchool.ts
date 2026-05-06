@@ -73,9 +73,17 @@ export function useEffectiveSchool() {
     }
     const schoolRow = teams.find((t) => t.id === schoolTeamId);
     if (!schoolRow) {
+      // The customer team IS linked to a Teams Table row, but useTeamsTable
+      // hasn't loaded the row yet (initial mount race). Return null name
+      // rather than falling back to customer_teams.name — that fallback
+      // has a different shape ("Georgia Bulldogs" vs the abbreviation
+      // "Georgia"), which breaks downstream Teams Table lookups in the
+      // TransferPortal simulator and any other surface that resolves the
+      // school name back to a Teams Table row. Caller should wait for the
+      // hook to resolve to a real schoolRow.
       return {
-        schoolName: customerTeam.name,
-        schoolFullName: customerTeam.name,
+        schoolName: null,
+        schoolFullName: null,
         schoolTeamId,
         logoUrl: branding?.logoUrl ?? null,
         branding,
