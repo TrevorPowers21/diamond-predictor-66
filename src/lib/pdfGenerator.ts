@@ -635,8 +635,15 @@ function tierLabelForPercentile(p: number | null | undefined): string {
 // we don't currently have data for; condensing avoids dashes everywhere.
 function drawBioRowPitcher(doc: jsPDF, player: ReportPlayer, y: number): number {
   const H = 40;
+  const roleLabel = (() => {
+    const r = String(player.pitcher_role || "").toUpperCase();
+    if (r === "SP") return "Starter (SP)";
+    if (r === "RP") return "Reliever (RP)";
+    if (r === "SM") return "Swingman (SM)";
+    return player.position || "—";
+  })();
   const cells = [
-    { label: "ROLE", value: player.position || "—" },
+    { label: "ROLE", value: roleLabel },
     { label: "CLASS", value: (player.class_year ? String(player.class_year).toUpperCase() : "—") },
     { label: "CONFERENCE", value: player.conference || "—" },
     { label: "THROWS", value: player.bats_throws || "—" },

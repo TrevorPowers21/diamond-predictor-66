@@ -1542,6 +1542,7 @@ export default function PitcherProfile() {
                     const rp: ReportPlayer = {
                       id: player.id,
                       player_type: "pitcher",
+                      pitcher_role: effectiveRoleDisplay || null,
                       name: `${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName,
                       school: displayTeam,
                       position: hand,
@@ -1648,6 +1649,7 @@ export default function PitcherProfile() {
                     const rp: ReportPlayer = {
                       id: player.id,
                       player_type: "pitcher",
+                      pitcher_role: effectiveRoleDisplay || null,
                       name: `${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName,
                       school: displayTeam,
                       position: hand,
