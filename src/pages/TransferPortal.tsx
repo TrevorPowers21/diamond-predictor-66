@@ -784,13 +784,19 @@ export default function TransferPortal() {
       const fipPr = hr9Pr != null && bb9Pr != null && k9Pr != null
         ? (hr9Pr * EQ.p_fip_hr9_power_rating_plus_weight) + (bb9Pr * EQ.p_fip_bb9_power_rating_plus_weight) + (k9Pr * EQ.p_fip_k9_power_rating_plus_weight)
         : null;
+      // Prefer pre-computed PR+ values written by the projection pipeline
+      // (Pitching Master.era_pr_plus etc.) — this is what TB reads via
+      // pitchingPrByNameTeam (the #9 fix). Live-recomputed values above are
+      // a fallback for rows the pipeline hasn't filled yet, but they use
+      // hardcoded equation weights from a previous calibration era and will
+      // diverge from TB whenever the pipeline runs with newer weights.
       const snapshot: PitchingPowerSnapshot = {
-        eraPrPlus: eraPr,
-        fipPrPlus: fipPr,
-        whipPrPlus: whipPr,
-        k9PrPlus: k9Pr,
-        hr9PrPlus: hr9Pr,
-        bb9PrPlus: bb9Pr,
+        eraPrPlus: pr.era_pr_plus ?? eraPr,
+        fipPrPlus: pr.fip_pr_plus ?? fipPr,
+        whipPrPlus: pr.whip_pr_plus ?? whipPr,
+        k9PrPlus: pr.k9_pr_plus ?? k9Pr,
+        hr9PrPlus: pr.hr9_pr_plus ?? hr9Pr,
+        bb9PrPlus: pr.bb9_pr_plus ?? bb9Pr,
       };
       // ID-first: index by source_player_id
       if (pr.source_player_id) bySourceId.set(pr.source_player_id, snapshot);
