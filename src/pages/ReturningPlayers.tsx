@@ -35,6 +35,7 @@ import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { projectPitchingRate } from "@/lib/pitcherProjection";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { profileRouteFor } from "@/lib/profileRoutes";
+import { canonicalConferenceName } from "@/lib/conferenceMapping";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
@@ -112,6 +113,63 @@ const PITCHER_ROLE_OPTIONS: { value: "SP" | "RP" | "SM"; label: string }[] = [
   { value: "RP", label: "Relievers" },
   { value: "SM", label: "Swingmen" },
 ];
+
+// Conference taxonomy for the dashboard filter. Tiers mirror RSTR IQ's existing
+// NIL tier mapping (`getProgramTierMultiplierByConference`) — Power 4 = SEC,
+// ACC, Big 12, Big Ten; Mid Major = the strong-mids plus the next tier of
+// non-Power-4 baseball conferences; Low Major = the rest. Selecting a tier
+// chip bulk-toggles its member conferences.
+type ConferenceTier = "P4" | "MM" | "LM";
+const CONFERENCE_TIER_LABELS: Record<ConferenceTier, string> = {
+  P4: "Power 4",
+  MM: "Mid Major",
+  LM: "Low Major",
+};
+const CONFERENCE_TIERS: Record<ConferenceTier, string[]> = {
+  P4: ["SEC", "ACC", "Big 12", "Big Ten"],
+  MM: [
+    "American Athletic Conference",
+    "Sun Belt",
+    "Big West",
+    "Mountain West",
+    "Conference USA",
+    "Missouri Valley Conference",
+    "Big East Conference",
+    "West Coast Conference",
+    "Atlantic 10",
+    "Coastal Athletic Association",
+  ],
+  LM: [
+    "Big South Conference",
+    "Atlantic Sun Conference",
+    "Metro Atlantic Athletic Conference",
+    "Mid-American Conference",
+    "Northeast Conference",
+    "Ohio Valley Conference",
+    "Patriot League",
+    "Southern Conference",
+    "Southland Conference",
+    "Summit League",
+    "American East",
+    "Ivy League",
+    "Horizon League",
+    "Western Athletic Conference",
+    "MEAC",
+    "Southwestern Athletic Conference",
+  ],
+};
+const ALL_CONFERENCES: string[] = [
+  ...CONFERENCE_TIERS.P4,
+  ...CONFERENCE_TIERS.MM,
+  ...CONFERENCE_TIERS.LM,
+];
+const CONFERENCE_TO_TIER: Record<string, ConferenceTier> = (() => {
+  const map: Record<string, ConferenceTier> = {};
+  for (const c of CONFERENCE_TIERS.P4) map[c] = "P4";
+  for (const c of CONFERENCE_TIERS.MM) map[c] = "MM";
+  for (const c of CONFERENCE_TIERS.LM) map[c] = "LM";
+  return map;
+})();
 
 // Reusable multi-select filter dropdown: a labeled trigger that opens a popover
 // of checkbox options. Empty selection means "no filter" — keeps the trigger
@@ -196,6 +254,131 @@ function MultiSelectFilter<T extends string>({
               </button>
             );
           })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// Conference filter dropdown: same chip + popover pattern as MultiSelectFilter,
+// but the popover body is a two-section layout — tier shortcut pills (Power 4,
+// Mid Major, Low Major) on top that bulk-toggle their members, and the full
+// list of individual conferences below grouped under tier headers.
+function ConferenceFilter({
+  selected,
+  onToggleConf,
+  onToggleTier,
+  onClear,
+}: {
+  selected: Set<string>;
+  onToggleConf: (c: string) => void;
+  onToggleTier: (tier: ConferenceTier) => void;
+  onClear: () => void;
+}) {
+  const count = selected.size;
+  const summary = (() => {
+    if (count === 0) return "All";
+    // Compress to tier label when an entire tier is selected exactly.
+    const tiers: ConferenceTier[] = ["P4", "MM", "LM"];
+    const fullTiers = tiers.filter((t) => CONFERENCE_TIERS[t].every((c) => selected.has(c)));
+    const accountedFor = new Set<string>(fullTiers.flatMap((t) => CONFERENCE_TIERS[t]));
+    const extras = Array.from(selected).filter((c) => !accountedFor.has(c));
+    if (fullTiers.length > 0 && extras.length === 0) return fullTiers.map((t) => CONFERENCE_TIER_LABELS[t]).join(" + ");
+    if (count === 1) return Array.from(selected)[0];
+    return `${count} selected`;
+  })();
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "h-8 inline-flex items-center justify-between gap-2 rounded-md border px-2.5 text-xs font-medium transition-colors duration-150 cursor-pointer",
+            count > 0
+              ? "border-[#D4AF37]/60 bg-[#D4AF37]/10 text-[#D4AF37] hover:bg-[#D4AF37]/15"
+              : "border-border bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground",
+          )}
+          aria-label="Conference filter"
+        >
+          <span className="flex items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-[0.08em] opacity-80">Conf</span>
+            <span className="font-semibold truncate max-w-[140px]">{summary}</span>
+          </span>
+          <ChevronDown className="h-3 w-3 opacity-60" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={6} className="w-72 p-2 max-h-[420px] overflow-y-auto">
+        <div className="flex items-center justify-between mb-1.5 px-1">
+          <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground">Conference</span>
+          {count > 0 && (
+            <button
+              type="button"
+              onClick={onClear}
+              className="text-[10px] uppercase tracking-[0.08em] text-[#D4AF37] hover:text-[#c49e2e] transition-colors cursor-pointer"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-1 px-1 mb-2">
+          {(Object.keys(CONFERENCE_TIER_LABELS) as ConferenceTier[]).map((tier) => {
+            const members = CONFERENCE_TIERS[tier];
+            const allOn = members.every((m) => selected.has(m));
+            const someOn = !allOn && members.some((m) => selected.has(m));
+            return (
+              <button
+                key={tier}
+                type="button"
+                onClick={() => onToggleTier(tier)}
+                className={cn(
+                  "px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] rounded transition-colors duration-150 cursor-pointer",
+                  allOn
+                    ? "bg-[#D4AF37] text-[#040810]"
+                    : someOn
+                      ? "bg-[#D4AF37]/20 text-[#D4AF37] ring-1 ring-[#D4AF37]/40"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground",
+                )}
+                title={`Toggle all ${CONFERENCE_TIER_LABELS[tier]} conferences`}
+              >
+                {CONFERENCE_TIER_LABELS[tier]}
+              </button>
+            );
+          })}
+        </div>
+        <div className="border-t border-border/40 pt-1.5 flex flex-col">
+          {(Object.keys(CONFERENCE_TIER_LABELS) as ConferenceTier[]).map((tier) => (
+            <div key={tier} className="mb-1.5 last:mb-0">
+              <div className="px-2 py-0.5 text-[9px] uppercase tracking-[0.12em] text-muted-foreground/80 font-bold">
+                {CONFERENCE_TIER_LABELS[tier]}
+              </div>
+              {CONFERENCE_TIERS[tier].map((conf) => {
+                const checked = selected.has(conf);
+                return (
+                  <button
+                    type="button"
+                    key={conf}
+                    onClick={() => onToggleConf(conf)}
+                    className={cn(
+                      "flex items-center gap-2 px-2 py-1 rounded-sm text-[11px] transition-colors duration-150 cursor-pointer text-left w-full",
+                      checked ? "bg-[#D4AF37]/10 text-foreground" : "text-foreground hover:bg-muted/60",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "h-3.5 w-3.5 inline-flex items-center justify-center rounded-sm border shrink-0",
+                        checked
+                          ? "bg-[#D4AF37] border-[#D4AF37] text-[#040810]"
+                          : "border-border bg-background",
+                      )}
+                    >
+                      {checked && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
+                    </span>
+                    <span className="font-medium truncate">{conf}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </PopoverContent>
     </Popover>
@@ -780,6 +963,27 @@ export default function ReturningPlayers() {
       return next;
     });
   };
+  // Hitter conference multi-select. Stores canonical conference names; tier
+  // chips bulk-toggle the member conferences underneath.
+  const [confFilters, setConfFilters] = useState<Set<string>>(new Set());
+  const toggleConfFilter = (c: string) => {
+    setConfFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(c)) next.delete(c);
+      else next.add(c);
+      return next;
+    });
+  };
+  const toggleConfTier = (tier: ConferenceTier) => {
+    setConfFilters((prev) => {
+      const members = CONFERENCE_TIERS[tier];
+      const allOn = members.every((m) => prev.has(m));
+      const next = new Set(prev);
+      if (allOn) members.forEach((m) => next.delete(m));
+      else members.forEach((m) => next.add(m));
+      return next;
+    });
+  };
 
   // Pitcher class + role + throws multi-selects. Empty set = no filter.
   const [pitcherClassFilters, setPitcherClassFilters] = useState<Set<string>>(new Set());
@@ -806,6 +1010,26 @@ export default function ReturningPlayers() {
       const next = new Set(prev);
       if (next.has(r)) next.delete(r);
       else next.add(r);
+      return next;
+    });
+  };
+  // Pitcher conference multi-select. Same canonical-name approach as hitters.
+  const [pitcherConfFilters, setPitcherConfFilters] = useState<Set<string>>(new Set());
+  const togglePitcherConfFilter = (c: string) => {
+    setPitcherConfFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(c)) next.delete(c);
+      else next.add(c);
+      return next;
+    });
+  };
+  const togglePitcherConfTier = (tier: ConferenceTier) => {
+    setPitcherConfFilters((prev) => {
+      const members = CONFERENCE_TIERS[tier];
+      const allOn = members.every((m) => prev.has(m));
+      const next = new Set(prev);
+      if (allOn) members.forEach((m) => next.delete(m));
+      else members.forEach((m) => next.add(m));
       return next;
     });
   };
@@ -1046,6 +1270,7 @@ export default function ReturningPlayers() {
         positionTokens: Array.from(positionFilters).sort(),
         classTokens: Array.from(classFilters).sort(),
         batsTokens: Array.from(batsFilters).sort(),
+        confTokens: Array.from(confFilters).sort(),
         showMissingOnly,
         sortKey,
         sortDir,
@@ -1161,12 +1386,14 @@ export default function ReturningPlayers() {
       // Fast path: server-side paging for sortable prediction columns when no extra filters are active.
       // This keeps the player dashboard responsive without loading the entire dataset.
       // Bail out to the slow path whenever any of the new multi-select filters are
-      // engaged so we can apply them server-side via the standard players query.
+      // engaged so we can apply them server-side via the standard players query
+      // (or, for conference, post-fetch client-side over the full dataset).
       if (
         FAST_DB_SORT_KEYS.includes(sortKey) &&
         positionFilter === "all" &&
         classFilters.size === 0 &&
         batsFilters.size === 0 &&
+        confFilters.size === 0 &&
         !showMissingOnly
       ) {
         const orderColumn =
@@ -1305,6 +1532,12 @@ export default function ReturningPlayers() {
         if (positionFilters.size > 0) allRows = allRows.filter((p) => positionMatchesFilter(p.position));
         if (classFilters.size > 0) allRows = allRows.filter((p) => p.class_year != null && classFilters.has(p.class_year));
         if (batsFilters.size > 0) allRows = allRows.filter((p) => p.bats_hand != null && batsFilters.has(p.bats_hand));
+        if (confFilters.size > 0) {
+          allRows = allRows.filter((p) => {
+            const canon = canonicalConferenceName(p.conference);
+            return canon != null && confFilters.has(canon);
+          });
+        }
         if (showMissingOnly) allRows = allRows.filter((p) => !p.team);
 
         const metricFor = (p: ReturnerPlayer): number => {
@@ -1329,28 +1562,62 @@ export default function ReturningPlayers() {
 
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
-      let playersQuery = supabase
-        .from("players")
-        .select("id, first_name, last_name, team, conference, position, class_year, bats_hand, transfer_portal, pa, ip", { count: "exact" } as any)
-        .not("position", "in", "(SP,RP,CL,P,LHP,RHP)")
-        .gte("pa", 75)
-        .order("last_name", { ascending: true })
-        .order("first_name", { ascending: true })
-        .range(from, to);
-      // Position group expansion: IF→1B/2B/3B/SS, OF→LF/CF/RF/OF.
-      // TWP-only selection has no DB-level position match yet, so we short-circuit
-      // to an empty result by filtering on a sentinel that cannot match.
-      if (expandedHitterPositions.twpOnly) {
-        playersQuery = playersQuery.eq("position", "__TWP_PLACEHOLDER__");
-      } else if (expandedHitterPositions.positions.length === 1) {
-        playersQuery = playersQuery.eq("position", expandedHitterPositions.positions[0]);
-      } else if (expandedHitterPositions.positions.length > 1) {
-        playersQuery = playersQuery.in("position", expandedHitterPositions.positions);
+      // When the conference filter is engaged, we can't trust server-side
+      // pagination (canonicalization spans aliases the DB doesn't store
+      // uniformly), so fall back to "fetch everything matching the other
+      // filters, then JS-filter + JS-paginate" for correctness.
+      const confFilterActive = confFilters.size > 0;
+      const buildBaseQuery = () => {
+        let q = supabase
+          .from("players")
+          .select("id, first_name, last_name, team, conference, position, class_year, bats_hand, transfer_portal, pa, ip", { count: "exact" } as any)
+          .not("position", "in", "(SP,RP,CL,P,LHP,RHP)")
+          .gte("pa", 75)
+          .order("last_name", { ascending: true })
+          .order("first_name", { ascending: true });
+        // Position group expansion: IF→1B/2B/3B/SS, OF→LF/CF/RF/OF.
+        // TWP-only selection has no DB-level position match yet, so we short-circuit
+        // to an empty result by filtering on a sentinel that cannot match.
+        if (expandedHitterPositions.twpOnly) {
+          q = q.eq("position", "__TWP_PLACEHOLDER__");
+        } else if (expandedHitterPositions.positions.length === 1) {
+          q = q.eq("position", expandedHitterPositions.positions[0]);
+        } else if (expandedHitterPositions.positions.length > 1) {
+          q = q.in("position", expandedHitterPositions.positions);
+        }
+        if (classFilters.size > 0) q = q.in("class_year", Array.from(classFilters));
+        if (batsFilters.size > 0) q = q.in("bats_hand", Array.from(batsFilters));
+        if (showMissingOnly) q = q.is("team", null);
+        return q;
+      };
+      let playerRows: any[] = [];
+      let count: number | null = 0;
+      if (confFilterActive) {
+        // Loop in 1000-row pages until we've pulled everything matching the
+        // other filters; then canonicalize + filter conference in JS below.
+        const PAGE = 1000;
+        let pf = 0;
+        while (true) {
+          const { data, error } = await buildBaseQuery().range(pf, pf + PAGE - 1);
+          if (error) throw error;
+          playerRows.push(...((data as any[]) || []));
+          if (!data || data.length < PAGE) break;
+          pf += PAGE;
+        }
+        // Canonicalize-filter on conference, then re-paginate in JS.
+        playerRows = playerRows.filter((p: any) => {
+          const canon = canonicalConferenceName(p.conference);
+          return canon != null && confFilters.has(canon);
+        });
+        count = playerRows.length;
+        playerRows = playerRows.slice(from, to + 1);
+      } else {
+        const res = await buildBaseQuery().range(from, to);
+        if (res.error) throw res.error;
+        playerRows = (res.data as any[]) || [];
+        count = res.count ?? 0;
       }
-      if (classFilters.size > 0) playersQuery = playersQuery.in("class_year", Array.from(classFilters));
-      if (batsFilters.size > 0) playersQuery = playersQuery.in("bats_hand", Array.from(batsFilters));
-      if (showMissingOnly) playersQuery = playersQuery.is("team", null);
-      const { data: playerRows, error: playersErr, count } = await playersQuery;
+      const playersErr = null as any;
       if (playersErr) throw playersErr;
 
       const playerIds = (playerRows || []).map((r: any) => r.id).filter(Boolean);
@@ -1643,7 +1910,7 @@ export default function ReturningPlayers() {
       return;
     }
     setPage(1);
-  }, [search, positionFilter, classFilters, batsFilters, showMissingOnly, sortKey, sortDir, pageSize]);
+  }, [search, positionFilter, classFilters, batsFilters, confFilters, showMissingOnly, sortKey, sortDir, pageSize]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -1974,6 +2241,12 @@ export default function ReturningPlayers() {
     if (pitcherThrowsFilters.size > 0) {
       rows = rows.filter((r) => r.handedness != null && pitcherThrowsFilters.has(r.handedness));
     }
+    if (pitcherConfFilters.size > 0) {
+      rows = rows.filter((r) => {
+        const canon = canonicalConferenceName(r.conference);
+        return canon != null && pitcherConfFilters.has(canon);
+      });
+    }
     const q = pitchingSearch.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((r) => {
@@ -1984,14 +2257,14 @@ export default function ReturningPlayers() {
         (r.handedness || "").toLowerCase().includes(q)
       );
     });
-  }, [pitchingRows, pitchingSearch, pitcherRoleFilters, pitcherClassFilters, pitcherThrowsFilters]);
+  }, [pitchingRows, pitchingSearch, pitcherRoleFilters, pitcherClassFilters, pitcherThrowsFilters, pitcherConfFilters]);
   useEffect(() => {
     if (skipNextPitchingPageResetRef.current) {
       skipNextPitchingPageResetRef.current = false;
       return;
     }
     setPitchingPage(1);
-  }, [pitchingSearch, pitchingPageSize, pitcherRoleFilters, pitcherClassFilters, pitcherThrowsFilters]);
+  }, [pitchingSearch, pitchingPageSize, pitcherRoleFilters, pitcherClassFilters, pitcherThrowsFilters, pitcherConfFilters]);
   const pitchingTotal = filteredPitchingRows.length;
   const pitchingTotalPages = Math.max(1, Math.ceil(pitchingTotal / pitchingPageSize));
   const pitchingCurrentPage = Math.min(pitchingPage, pitchingTotalPages);
@@ -2257,12 +2530,19 @@ export default function ReturningPlayers() {
               onToggle={toggleBatsFilter}
               onClear={() => setBatsFilters(new Set())}
             />
-            {(classFilters.size + batsFilters.size + positionFilters.size) > 0 && (
+            <ConferenceFilter
+              selected={confFilters}
+              onToggleConf={toggleConfFilter}
+              onToggleTier={toggleConfTier}
+              onClear={() => setConfFilters(new Set())}
+            />
+            {(classFilters.size + batsFilters.size + positionFilters.size + confFilters.size) > 0 && (
               <button
                 onClick={() => {
                   setPositionFilters(new Set());
                   setClassFilters(new Set());
                   setBatsFilters(new Set());
+                  setConfFilters(new Set());
                 }}
                 className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground hover:text-foreground transition-colors cursor-pointer ml-1"
                 title="Reset all filters"
@@ -2617,12 +2897,19 @@ export default function ReturningPlayers() {
               onToggle={togglePitcherThrowsFilter}
               onClear={() => setPitcherThrowsFilters(new Set())}
             />
-            {(pitcherRoleFilters.size + pitcherClassFilters.size + pitcherThrowsFilters.size) > 0 && (
+            <ConferenceFilter
+              selected={pitcherConfFilters}
+              onToggleConf={togglePitcherConfFilter}
+              onToggleTier={togglePitcherConfTier}
+              onClear={() => setPitcherConfFilters(new Set())}
+            />
+            {(pitcherRoleFilters.size + pitcherClassFilters.size + pitcherThrowsFilters.size + pitcherConfFilters.size) > 0 && (
               <button
                 onClick={() => {
                   setPitcherRoleFilters(new Set());
                   setPitcherClassFilters(new Set());
                   setPitcherThrowsFilters(new Set());
+                  setPitcherConfFilters(new Set());
                 }}
                 className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground hover:text-foreground transition-colors cursor-pointer ml-1"
                 title="Reset pitcher filters"
