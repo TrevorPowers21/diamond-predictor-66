@@ -1628,7 +1628,40 @@ export default function TransferPortal() {
     const playerId = selectedPlayer.player_id;
     const playerName = `${selectedPlayer.first_name} ${selectedPlayer.last_name}`;
     if (playerId && !isOnSupabaseBoard(playerId)) {
-      addToSupabaseBoard({ playerId });
+      // Persist a snapshot of the simulated projection so TB / Dashboard /
+      // PDFs show the same numbers the coach saw here, instead of
+      // recomputing live with hardcoded SJ / dev=0 defaults.
+      const snapshot = simulation && !simulation.blocked
+        ? {
+            p_avg: simulation.pAvg ?? null,
+            p_obp: simulation.pObp ?? null,
+            p_slg: simulation.pSlg ?? null,
+            p_wrc_plus: simulation.pWrcPlus ?? null,
+            p_era: null,
+            p_fip: null,
+            p_whip: null,
+            p_k9: null,
+            p_bb9: null,
+            p_hr9: null,
+            p_rv_plus: null,
+            p_war: null,
+            owar: simulation.owar ?? null,
+            nil_valuation: simulation.nilValuation ?? null,
+            from_team: fromTeam,
+            from_team_id: fromTeamRow?.id ?? null,
+            destination_team: toTeamRow?.name ?? selectedDestinationTeam,
+            destination_team_id: toTeamRow?.id ?? null,
+            class_transition: selectedPlayer.class_transition ?? null,
+            dev_aggressiveness: selectedPlayer.dev_aggressiveness ?? null,
+            captured_at: new Date().toISOString(),
+          }
+        : null;
+      addToSupabaseBoard({
+        playerId,
+        snapshot,
+        destinationTeam: toTeamRow?.name ?? selectedDestinationTeam,
+        destinationTeamId: toTeamRow?.id ?? null,
+      });
     }
     toast({
       title: "Added to Target Board",
@@ -1640,7 +1673,40 @@ export default function TransferPortal() {
     if (!selectedPitcher || !selectedDestinationTeam || pitchingSimulation?.blocked) return;
     const playerId = selectedPitcher.id;
     if (playerId && !isOnSupabaseBoard(playerId)) {
-      addToSupabaseBoard({ playerId });
+      // Same persistence pattern as the hitter version — lock in the
+      // simulated rates so downstream surfaces don't drift.
+      const sim = pitchingSimulation;
+      const snapshot = sim && !sim.blocked
+        ? {
+            p_avg: null,
+            p_obp: null,
+            p_slg: null,
+            p_wrc_plus: null,
+            p_era: sim.pEra ?? null,
+            p_fip: sim.pFip ?? null,
+            p_whip: sim.pWhip ?? null,
+            p_k9: sim.pK9 ?? null,
+            p_bb9: sim.pBb9 ?? null,
+            p_hr9: sim.pHr9 ?? null,
+            p_rv_plus: sim.pRvPlus ?? null,
+            p_war: sim.pWar ?? null,
+            owar: null,
+            nil_valuation: sim.marketValue ?? null,
+            from_team: (selectedPitcher as any).team ?? null,
+            from_team_id: (selectedPitcher as any).team_id ?? null,
+            destination_team: toTeamRow?.name ?? selectedDestinationTeam,
+            destination_team_id: toTeamRow?.id ?? null,
+            class_transition: (selectedPitcher as any).class_transition ?? null,
+            dev_aggressiveness: (selectedPitcher as any).dev_aggressiveness ?? null,
+            captured_at: new Date().toISOString(),
+          }
+        : null;
+      addToSupabaseBoard({
+        playerId,
+        snapshot,
+        destinationTeam: toTeamRow?.name ?? selectedDestinationTeam,
+        destinationTeamId: toTeamRow?.id ?? null,
+      });
     }
     toast({
       title: "Added to Target Board",
