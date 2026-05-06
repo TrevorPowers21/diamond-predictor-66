@@ -637,8 +637,9 @@ function drawBioRowPitcher(doc: jsPDF, player: ReportPlayer, y: number): number 
   const H = 40;
   const cells = [
     { label: "ROLE", value: player.position || "—" },
+    { label: "CLASS", value: (player.class_year ? String(player.class_year).toUpperCase() : "—") },
     { label: "CONFERENCE", value: player.conference || "—" },
-    { label: "BATS / THROWS", value: player.bats_throws || "—" },
+    { label: "THROWS", value: player.bats_throws || "—" },
   ];
   const cellW = CONTENT_W / cells.length;
 
@@ -1130,6 +1131,7 @@ function drawBioRowHitter(doc: jsPDF, player: ReportPlayer, y: number): number {
   const H = 40;
   const cells = [
     { label: "POSITION", value: player.position || "—" },
+    { label: "CLASS", value: (player.class_year ? String(player.class_year).toUpperCase() : "—") },
     { label: "CONFERENCE", value: player.conference || "—" },
     { label: "BATS / THROWS", value: player.bats_throws || "—" },
   ];
