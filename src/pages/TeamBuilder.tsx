@@ -2796,18 +2796,61 @@ export default function TeamBuilder() {
         return snapshotFallback;
       }
 
+      // Apply class transition + dev aggressiveness on top of base transfer
+      // projection. Mirrors TransferPortal exactly so values match across
+      // surfaces (was missing here — pitcher TB ↔ portal divergence).
+      const pitcherClassKey = String(p.class_transition || livePred.class_transition || "SJ").toUpperCase();
+      const pitcherClassTransition: "FS" | "SJ" | "JS" | "GR" =
+        pitcherClassKey === "FS" || pitcherClassKey === "SJ" || pitcherClassKey === "JS" || pitcherClassKey === "GR"
+          ? pitcherClassKey
+          : "SJ";
+      const pitcherDevAgg = Number.isFinite(Number(p.dev_aggressiveness ?? livePred.dev_aggressiveness))
+        ? Number(p.dev_aggressiveness ?? livePred.dev_aggressiveness)
+        : 0;
+      const classEraAdj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_era_fs, pitchingEq.class_era_sj, pitchingEq.class_era_js, pitchingEq.class_era_gr);
+      const classFipAdj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_fip_fs, pitchingEq.class_fip_sj, pitchingEq.class_fip_js, pitchingEq.class_fip_gr);
+      const classWhipAdj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_whip_fs, pitchingEq.class_whip_sj, pitchingEq.class_whip_js, pitchingEq.class_whip_gr);
+      const classK9Adj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_k9_fs, pitchingEq.class_k9_sj, pitchingEq.class_k9_js, pitchingEq.class_k9_gr);
+      const classBb9Adj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_bb9_fs, pitchingEq.class_bb9_sj, pitchingEq.class_bb9_js, pitchingEq.class_bb9_gr);
+      const classHr9Adj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_hr9_fs, pitchingEq.class_hr9_sj, pitchingEq.class_hr9_js, pitchingEq.class_hr9_gr);
+      const pitcherLowMult = (adj: number) => 1 - adj - (pitcherDevAgg * 0.06);
+      const pitcherHighMult = (adj: number) => 1 + adj + (pitcherDevAgg * 0.06);
+
+      const adjEra = result.p_era == null ? null : result.p_era * pitcherLowMult(classEraAdj);
+      const adjFip = result.p_fip == null ? null : result.p_fip * pitcherLowMult(classFipAdj);
+      const adjWhip = result.p_whip == null ? null : result.p_whip * pitcherLowMult(classWhipAdj);
+      const adjK9 = result.p_k9 == null ? null : result.p_k9 * pitcherHighMult(classK9Adj);
+      const adjBb9 = result.p_bb9 == null ? null : result.p_bb9 * pitcherLowMult(classBb9Adj);
+      const adjHr9 = result.p_hr9 == null ? null : result.p_hr9 * pitcherLowMult(classHr9Adj);
+
+      const eraPlusAdj = calcPitchingPlus(adjEra, pitchingEq.era_plus_ncaa_avg, pitchingEq.era_plus_ncaa_sd, pitchingEq.era_plus_scale, false);
+      const fipPlusAdj = calcPitchingPlus(adjFip, pitchingEq.fip_plus_ncaa_avg, pitchingEq.fip_plus_ncaa_sd, pitchingEq.fip_plus_scale, false);
+      const whipPlusAdj = calcPitchingPlus(adjWhip, pitchingEq.whip_plus_ncaa_avg, pitchingEq.whip_plus_ncaa_sd, pitchingEq.whip_plus_scale, false);
+      const k9PlusAdj = calcPitchingPlus(adjK9, pitchingEq.k9_plus_ncaa_avg, pitchingEq.k9_plus_ncaa_sd, pitchingEq.k9_plus_scale, true);
+      const bb9PlusAdj = calcPitchingPlus(adjBb9, pitchingEq.bb9_plus_ncaa_avg, pitchingEq.bb9_plus_ncaa_sd, pitchingEq.bb9_plus_scale, false);
+      const hr9PlusAdj = calcPitchingPlus(adjHr9, pitchingEq.hr9_plus_ncaa_avg, pitchingEq.hr9_plus_ncaa_sd, pitchingEq.hr9_plus_scale, false);
+
+      const pRvPlusAdj = [eraPlusAdj, fipPlusAdj, whipPlusAdj, k9PlusAdj, bb9PlusAdj, hr9PlusAdj].every((v) => v != null)
+        ? (Number(eraPlusAdj) * pitchingEq.era_plus_weight) +
+          (Number(fipPlusAdj) * pitchingEq.fip_plus_weight) +
+          (Number(whipPlusAdj) * pitchingEq.whip_plus_weight) +
+          (Number(k9PlusAdj) * pitchingEq.k9_plus_weight) +
+          (Number(bb9PlusAdj) * pitchingEq.bb9_plus_weight) +
+          (Number(hr9PlusAdj) * pitchingEq.hr9_plus_weight)
+        : result.p_rv_plus;
+
       return {
         p_avg: null,
         p_obp: null,
         p_slg: null,
-        p_wrc_plus: result.p_rv_plus,
-        p_era: result.p_era,
-        p_fip: result.p_fip,
-        p_whip: result.p_whip,
-        p_k9: result.p_k9,
-        p_bb9: result.p_bb9,
-        p_hr9: result.p_hr9,
-        p_rv_plus: result.p_rv_plus,
+        p_wrc_plus: pRvPlusAdj,
+        p_era: adjEra,
+        p_fip: adjFip,
+        p_whip: adjWhip,
+        p_k9: adjK9,
+        p_bb9: adjBb9,
+        p_hr9: adjHr9,
+        p_rv_plus: pRvPlusAdj,
         p_war: result.p_war,
         nil_valuation: result.market_value,
         owar: result.p_war,
