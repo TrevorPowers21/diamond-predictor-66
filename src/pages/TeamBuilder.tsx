@@ -4309,12 +4309,24 @@ export default function TeamBuilder() {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
       let source: any = sourceBase;
       if ((p.roster_status || "returner") === "target" && sourceBase) {
-        const classTransitionRaw = String(p.class_transition || "SJ").toUpperCase();
+        // Match the hitter side (line ~3010): when the BuildPlayer doesn't
+        // carry a class_transition / dev_aggressiveness (the sync hardcodes
+        // "SJ" / 0 for newly seeded portal targets), fall back to the
+        // player's stored prediction values so projections agree with the
+        // TransferPortal simulator. Without this, every pitcher target
+        // gets sophomore-to-junior adjustment regardless of actual class.
+        const livePred = p.player_id ? liveTargetPredictionByPlayerId.get(p.player_id) : null;
+        const classTransitionRaw = String(p.class_transition || livePred?.class_transition || "SJ").toUpperCase();
         const classTransition: "FS" | "SJ" | "JS" | "GR" =
           classTransitionRaw === "FS" || classTransitionRaw === "SJ" || classTransitionRaw === "JS" || classTransitionRaw === "GR"
             ? classTransitionRaw
             : "SJ";
-        const devAgg = Number.isFinite(Number(p.dev_aggressiveness)) ? Number(p.dev_aggressiveness) : 0;
+        const devAggCandidate = Number.isFinite(Number(p.dev_aggressiveness))
+          ? Number(p.dev_aggressiveness)
+          : Number.isFinite(Number(livePred?.dev_aggressiveness))
+            ? Number(livePred?.dev_aggressiveness)
+            : 0;
+        const devAgg = devAggCandidate;
         const classEraAdj = toPitchingClassAdj(classTransition, pitchingEq.class_era_fs, pitchingEq.class_era_sj, pitchingEq.class_era_js, pitchingEq.class_era_gr);
         const classFipAdj = toPitchingClassAdj(classTransition, pitchingEq.class_fip_fs, pitchingEq.class_fip_sj, pitchingEq.class_fip_js, pitchingEq.class_fip_gr);
         const classWhipAdj = toPitchingClassAdj(classTransition, pitchingEq.class_whip_fs, pitchingEq.class_whip_sj, pitchingEq.class_whip_js, pitchingEq.class_whip_gr);
@@ -4382,7 +4394,7 @@ export default function TeamBuilder() {
     const baseOwar = computeOWarFromWrcPlus(shownWrc) ?? p.nil_owar ?? 0;
     const owar = baseOwar * depthRoleMultiplier(p.depth_role);
     return { sim, shown, shownWrc, owar, pwar: null };
-  }, [computePitcherPwar, computeReturnerPitchingProjection, simulateTransferProjection, pitchingEq, eqNum]);
+  }, [computePitcherPwar, computeReturnerPitchingProjection, simulateTransferProjection, pitchingEq, eqNum, liveTargetPredictionByPlayerId]);
 
   const projectedPlayerScore = useCallback((p: BuildPlayer) => {
     const { owar } = playerProjection(p);
