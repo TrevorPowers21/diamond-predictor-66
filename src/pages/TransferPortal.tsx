@@ -1280,7 +1280,11 @@ export default function TransferPortal() {
     const lastIso = lastSlg - lastAvg;
     const isoRatingZ = isoStdPower > 0 ? (isoPR - 100) / isoStdPower : 0;
     const isoScaled = ncaaAvgISO + (isoRatingZ * isoStdNcaa);
-    const isoBlended = (lastIso * (1 - 0.3)) + (isoScaled * 0.3);
+    // Power-heavy blend (0.7) — matches the canonical lib in transferProjection.ts
+    // and BA/OBP weights. Was hardcoded 0.3 (inverted), made the "Show Work"
+    // section display a different ISO than the projected.pIso shown elsewhere
+    // on the page. Fixed 2026-05-06.
+    const isoBlended = (lastIso * 0.3) + (isoScaled * 0.7);
     const isoConfTerm = isoConferenceWeight * ((toIsoPlus - fromIsoPlus) / 100);
     const isoPitchTerm = isoPitchingWeight * ((toStuff - fromStuff) / 100);
     const isoParkTerm = isoParkWeight * ((toIsoPark - fromIsoPark) / 100);

@@ -110,6 +110,42 @@ function ImportPaAbButton() {
   );
 }
 
+function ImportClassDataButton() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ rowsParsed: number; playersUpdated: number; predictionsUpdated: number; notFound: number; noChange: number; errors: string[] } | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  return (
+    <>
+      <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setLoading(true);
+        setResult(null);
+        try {
+          const text = await file.text();
+          const { importClassDataFromCsv } = await import("@/lib/importClassData");
+          const r = await importClassDataFromCsv(text);
+          setResult(r);
+        } catch (err: any) {
+          setResult({ rowsParsed: 0, playersUpdated: 0, predictionsUpdated: 0, notFound: 0, noChange: 0, errors: [err.message] });
+        }
+        setLoading(false);
+        if (fileRef.current) fileRef.current.value = "";
+      }} />
+      <Button onClick={() => fileRef.current?.click()} disabled={loading} variant="outline" className="gap-2">
+        {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+        {loading ? "Importing Class Data…" : "Import Class & Hand CSV"}
+      </Button>
+      {result && (
+        <p className="text-sm text-muted-foreground">
+          Parsed {result.rowsParsed} rows. Updated {result.playersUpdated} players, {result.predictionsUpdated} predictions. {result.notFound} not found. {result.noChange > 0 ? `${result.noChange} skipped (no fields).` : ""}
+          {result.errors.length > 0 && ` Errors: ${result.errors.slice(0, 3).join("; ")}${result.errors.length > 3 ? `... +${result.errors.length - 3} more` : ""}`}
+        </p>
+      )}
+    </>
+  );
+}
+
 function ImportHistoricalHittersButton() {
   const [loading, setLoading] = useState(false);
   const season = 2026;
@@ -3807,6 +3843,13 @@ function QuickActionsTab() {
             </p>
           </div>
           <ImportPaAbButton />
+          <div className="border-t pt-4">
+            <p className="font-medium">Import Class & Hand Data</p>
+            <p className="text-sm text-muted-foreground">
+              Upload a TruMedia roster CSV with playerId, ClassYear, batsHand, throwsHand. Updates the players table by source_player_id. Use this to backfill accurate class info before filtering.
+            </p>
+          </div>
+          <ImportClassDataButton />
           <div className="border-t pt-4">
             <p className="font-medium">Import Pitch Arsenal (Stuff+ & Whiff%)</p>
             <p className="text-sm text-muted-foreground">

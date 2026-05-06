@@ -42,6 +42,13 @@ export type TransferProjectionInputs = {
   isoParkWeight: number;
   isoStdPower: number;
   isoStdNcaa: number;
+  // ISO power weight — matches baPowerWeight / obpPowerWeight semantics:
+  // weight on the PR+-derived (scaled) value. Default 0.7 matches the
+  // returner blend in predictionEngine.ts:recalcReturner so transfer ISO
+  // produces the same baseline as returner ISO before context multipliers.
+  // (Was hardcoded to 0.3 — the inverted weight gave 70% lastIso / 30% scaled,
+  // inflating elite hitters' transfer ISO. Fixed 2026-05-06.)
+  isoPowerWeight?: number;
   wObp: number;
   wSlg: number;
   wAvg: number;
@@ -92,7 +99,12 @@ export function computeTransferProjection(input: TransferProjectionInputs): Tran
   const lastIso = input.lastSlg - input.lastAvg;
   const ratingZ = input.isoStdPower > 0 ? (input.isoPR - 100) / input.isoStdPower : 0;
   const scaledIso = input.ncaaAvgISO + (ratingZ * input.isoStdNcaa);
-  const isoBlended = (lastIso * (1 - 0.3)) + (scaledIso * 0.3);
+  // Power-heavy blend (default 0.7) matches BA/OBP and the returner formula.
+  // Old hardcoded 0.3 was inverted — it trusted lastIso 70% which double-counted
+  // outlier seasons and made transfer pIso always higher than returner pIso for
+  // the same player. Now: returner pIso × isoMultiplier ≈ transfer pIso.
+  const isoPowerWeight = input.isoPowerWeight ?? 0.7;
+  const isoBlended = (lastIso * (1 - isoPowerWeight)) + (scaledIso * isoPowerWeight);
   const isoMultiplier =
     1 +
     (input.isoConferenceWeight * ((input.toIsoPlus - input.fromIsoPlus) / 100)) -

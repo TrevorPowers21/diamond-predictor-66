@@ -434,23 +434,14 @@ export function computePitcherProjection(
   const pBb9 = projectPitchingRate({ lastStat: input.bb9, prPlus: prPlus.bb9PrPlus, ncaaAvg: eq.bb9_plus_ncaa_avg, ncaaSd: eq.bb9_plus_ncaa_sd, prSd: eq.bb9_pr_sd, classAdjustment: classBb9Adj, devAggressiveness, thresholds: eq.bb9_damp_thresholds, impacts: eq.bb9_damp_impacts, lowerIsBetter: true });
   const pHr9 = projectPitchingRate({ lastStat: input.hr9, prPlus: prPlus.hr9PrPlus, ncaaAvg: eq.hr9_plus_ncaa_avg, ncaaSd: eq.hr9_plus_ncaa_sd, prSd: eq.hr9_pr_sd, classAdjustment: classHr9Adj, devAggressiveness, thresholds: eq.hr9_damp_thresholds, impacts: eq.hr9_damp_impacts, lowerIsBetter: true });
 
-  // Step 2: park-adjust ERA / WHIP / HR9 (FIP / K9 / BB9 are park-neutral).
-  const teamNameForPark = teamMatch?.name || input.team || null;
-  const fallbackPark = teamMatch?.park_factor ?? null;
-  const avgPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id ?? null, "avg", parkMap, teamNameForPark, fallbackPark));
-  const obpPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id ?? null, "obp", parkMap, teamNameForPark, fallbackPark));
-  const isoPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id ?? null, "iso", parkMap, teamNameForPark, fallbackPark));
-  const eraParkRaw = resolveMetricParkFactor(teamMatch?.id ?? null, "era", parkMap, teamNameForPark);
-  const whipParkRaw = resolveMetricParkFactor(teamMatch?.id ?? null, "whip", parkMap, teamNameForPark);
-  const hr9ParkRaw = resolveMetricParkFactor(teamMatch?.id ?? null, "hr9", parkMap, teamNameForPark);
-  const eraParkFactor = parkToIndex(eraParkRaw ?? avgPark) / 100;
-  const whipParkFactor = parkToIndex(whipParkRaw ?? ((0.7 * avgPark) + (0.3 * obpPark))) / 100;
-  const hr9ParkFactor = parkToIndex(hr9ParkRaw ?? isoPark) / 100;
-  const parkAdjustedEra = pEra == null ? null : pEra * eraParkFactor;
-  const parkAdjustedWhip = pWhip == null ? null : pWhip * whipParkFactor;
-  const parkAdjustedHr9 = pHr9 == null ? null : pHr9 * hr9ParkFactor;
+  // Park factor is intentionally NOT applied to returner projections — the
+  // pitcher's lastStat already reflects their home park, and they're staying
+  // at the same school next season, so park is invariant. Park-adjustment is
+  // applied only on the transfer path (transferPitcherProjection.ts) where
+  // the pitcher moves between parks.
+  void parkMap;
 
-  // Step 3: role-transition adjust all six rates. No-op when baseRole === projectedRole.
+  // Step 2: role-transition adjust all six rates. No-op when baseRole === projectedRole.
   const roleCurve = {
     tier1Max: eq.rp_to_sp_low_better_tier1_max,
     tier2Max: eq.rp_to_sp_low_better_tier2_max,
@@ -459,12 +450,12 @@ export function computePitcherProjection(
     tier2Mult: eq.rp_to_sp_low_better_tier2_mult,
     tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
   };
-  const roleAdjustedEra = applyRoleTransitionAdjustment(parkAdjustedEra, eq.sp_to_rp_reg_era_pct, baseRole, projectedRole, true, roleCurve);
+  const roleAdjustedEra = applyRoleTransitionAdjustment(pEra, eq.sp_to_rp_reg_era_pct, baseRole, projectedRole, true, roleCurve);
   const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, eq.sp_to_rp_reg_fip_pct, baseRole, projectedRole, true, roleCurve);
-  const roleAdjustedWhip = applyRoleTransitionAdjustment(parkAdjustedWhip, eq.sp_to_rp_reg_whip_pct, baseRole, projectedRole, true, roleCurve);
+  const roleAdjustedWhip = applyRoleTransitionAdjustment(pWhip, eq.sp_to_rp_reg_whip_pct, baseRole, projectedRole, true, roleCurve);
   const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, eq.sp_to_rp_reg_k9_pct, baseRole, projectedRole, false, roleCurve);
   const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, eq.sp_to_rp_reg_bb9_pct, baseRole, projectedRole, true, roleCurve);
-  const roleAdjustedHr9 = applyRoleTransitionAdjustment(parkAdjustedHr9, eq.sp_to_rp_reg_hr9_pct, baseRole, projectedRole, true, roleCurve);
+  const roleAdjustedHr9 = applyRoleTransitionAdjustment(pHr9, eq.sp_to_rp_reg_hr9_pct, baseRole, projectedRole, true, roleCurve);
 
   // Step 4: convert role-adjusted rates into per-rate +stats.
   const eraPlus = calcPitchingPlus(roleAdjustedEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale);

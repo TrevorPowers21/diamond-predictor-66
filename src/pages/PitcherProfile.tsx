@@ -1228,21 +1228,11 @@ export default function PitcherProfile() {
       impacts: eq.hr9_damp_impacts,
       lowerIsBetter: true,
     });
-    const teamMatch = teamByName.get(normalize(displayTeam));
-    const teamNameForPark = teamMatch?.name || displayTeam || null;
-    const fallbackPark = teamMatch?.park_factor ?? null;
-    const avgPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "avg", teamParkComponents, teamNameForPark, fallbackPark));
-    const obpPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "obp", teamParkComponents, teamNameForPark, fallbackPark));
-    const isoPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "iso", teamParkComponents, teamNameForPark, fallbackPark));
-    const eraParkRaw = resolveMetricParkFactor(teamMatch?.id, "era", teamParkComponents, teamNameForPark);
-    const whipParkRaw = resolveMetricParkFactor(teamMatch?.id, "whip", teamParkComponents, teamNameForPark);
-    const hr9ParkRaw = resolveMetricParkFactor(teamMatch?.id, "hr9", teamParkComponents, teamNameForPark);
-    const eraParkFactor = (parkToIndex(eraParkRaw ?? avgPark)) / 100;
-    const whipParkFactor = (parkToIndex(whipParkRaw ?? ((0.7 * avgPark) + (0.3 * obpPark)))) / 100;
-    const hr9ParkFactor = (parkToIndex(hr9ParkRaw ?? isoPark)) / 100;
-    const parkAdjustedEra = pEra == null ? null : pEra * eraParkFactor;
-    const parkAdjustedWhip = pWhip == null ? null : pWhip * whipParkFactor;
-    const parkAdjustedHr9 = pHr9 == null ? null : pHr9 * hr9ParkFactor;
+    // Park factor intentionally NOT applied to returner projections — the
+    // pitcher's lastStat already reflects their home park (they stayed at the
+    // same school next season, park is invariant). Mirrors the lib edit in
+    // pitcherProjection.ts. Park-adjustment lives only on the transfer path.
+    void teamByName; void teamParkComponents;
     const roleCurve = {
       tier1Max: eq.rp_to_sp_low_better_tier1_max,
       tier2Max: eq.rp_to_sp_low_better_tier2_max,
@@ -1251,12 +1241,12 @@ export default function PitcherProfile() {
       tier2Mult: eq.rp_to_sp_low_better_tier2_mult,
       tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
     };
-    const roleAdjustedEra = applyRoleTransitionAdjustment(parkAdjustedEra, eq.sp_to_rp_reg_era_pct, derivedRole, projectedRole, true, roleCurve);
+    const roleAdjustedEra = applyRoleTransitionAdjustment(pEra, eq.sp_to_rp_reg_era_pct, derivedRole, projectedRole, true, roleCurve);
     const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, eq.sp_to_rp_reg_fip_pct, derivedRole, projectedRole, true, roleCurve);
-    const roleAdjustedWhip = applyRoleTransitionAdjustment(parkAdjustedWhip, eq.sp_to_rp_reg_whip_pct, derivedRole, projectedRole, true, roleCurve);
+    const roleAdjustedWhip = applyRoleTransitionAdjustment(pWhip, eq.sp_to_rp_reg_whip_pct, derivedRole, projectedRole, true, roleCurve);
     const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, eq.sp_to_rp_reg_k9_pct, derivedRole, projectedRole, false, roleCurve);
     const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, eq.sp_to_rp_reg_bb9_pct, derivedRole, projectedRole, true, roleCurve);
-    const roleAdjustedHr9 = applyRoleTransitionAdjustment(parkAdjustedHr9, eq.sp_to_rp_reg_hr9_pct, derivedRole, projectedRole, true, roleCurve);
+    const roleAdjustedHr9 = applyRoleTransitionAdjustment(pHr9, eq.sp_to_rp_reg_hr9_pct, derivedRole, projectedRole, true, roleCurve);
 
     const eraPlus = calcPitchingPlus(roleAdjustedEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale);
     const fipPlus = calcPitchingPlus(roleAdjustedFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale);

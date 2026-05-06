@@ -23,6 +23,22 @@ function classFromSpan(span: number): InferredClass {
   return "GR";
 }
 
+// Maps a player's CURRENT class_year (the source side of the transition)
+// to the class_transition code. CSV import is the authoritative source for
+// class_year, so when set this overrides the season-span heuristic.
+function classFromClassYear(classYear: string | null | undefined): InferredClass | null {
+  if (!classYear) return null;
+  let x = String(classYear).trim().toUpperCase();
+  // Strip redshirt prefixes (R-, RS-, R ).
+  x = x.replace(/^(RS?-?\s*)+/, "").trim();
+  if (x === "FR" || x === "FRESHMAN" || x === "FRESH") return "FS";
+  if (x === "SO" || x === "SOPHOMORE" || x === "SOPH") return "SJ";
+  if (x === "JR" || x === "JUNIOR") return "JS";
+  if (x === "SR" || x === "SENIOR") return "GR";
+  if (x === "GR" || x === "GRADUATE" || x === "GRAD" || x === "GS") return "GR";
+  return null;
+}
+
 async function fetchAllSeasons(table: "Hitter Master" | "Pitching Master") {
   const out: Array<{ source_player_id: string; Season: number }> = [];
   let from = 0;
@@ -84,7 +100,7 @@ export async function inferAllClassTransitions(season = 2026): Promise<InferResu
   while (true) {
     const { data: rows, error } = await supabase
       .from("player_predictions")
-      .select("id, class_transition, class_transition_overridden, players!inner(source_player_id)")
+      .select("id, class_transition, class_transition_overridden, players!inner(source_player_id, class_year)")
       .eq("model_type", "returner")
       .eq("variant", "regular")
       .eq("season", season)
@@ -99,15 +115,20 @@ export async function inferAllClassTransitions(season = 2026): Promise<InferResu
   console.log(`[inferClass] ${allRows.length} predictions to evaluate`);
 
   // 3) Build the update plan in memory (no DB calls).
+  // Priority: players.class_year (CSV-authoritative) → season-span fallback.
   const updates: Array<{ id: string; cls: InferredClass }> = [];
   for (const row of allRows as any[]) {
     if (row.class_transition_overridden) { result.skipped++; continue; }
-    const sourceId = row.players?.source_player_id;
-    if (!sourceId) { result.skipped++; continue; }
-    const earliest = earliestBySourceId.get(sourceId);
-    if (earliest == null) { result.skipped++; continue; }
-    const span = season - earliest + 1;
-    const cls = classFromSpan(span);
+    const classYearCls = classFromClassYear(row.players?.class_year);
+    let cls: InferredClass | null = classYearCls;
+    if (!cls) {
+      const sourceId = row.players?.source_player_id;
+      if (!sourceId) { result.skipped++; continue; }
+      const earliest = earliestBySourceId.get(sourceId);
+      if (earliest == null) { result.skipped++; continue; }
+      const span = season - earliest + 1;
+      cls = classFromSpan(span);
+    }
     if (cls === row.class_transition) { result.skipped++; continue; }
     updates.push({ id: row.id, cls });
   }

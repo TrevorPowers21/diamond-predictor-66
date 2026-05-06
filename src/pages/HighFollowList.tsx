@@ -178,9 +178,9 @@ export default function HighFollowList() {
             era: (r as any).era_pr_plus ?? null,
             fip: (r as any).fip_pr_plus ?? null,
             whip: (r as any).whip_pr_plus ?? null,
-            k9: null,
-            bb9: null,
-            hr9: null,
+            k9: (r as any).k9_pr_plus ?? null,
+            bb9: (r as any).bb9_pr_plus ?? null,
+            hr9: (r as any).hr9_pr_plus ?? null,
           },
         },
       );

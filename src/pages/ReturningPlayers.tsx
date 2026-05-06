@@ -1598,13 +1598,17 @@ export default function ReturningPlayers() {
             hr9PrPlus: null as number | null,
             bb9PrPlus: null as number | null,
           };
+          // Prefer stored PM PR+ (canonical, written by Compute Scores). Live
+          // recompute is fallback when PM hasn't been computed yet. Matches
+          // predictionEngine.ts:1207 + pitcherProjection.ts:412 selection logic
+          // so dashboard, profile, and pipeline all agree on the same number.
           const recomputed = computePitchingPrPlusFromScores(scoreObj, powerEq);
-          scoreObj.eraPrPlus = recomputed.eraPrPlus ?? null;
-          scoreObj.fipPrPlus = recomputed.fipPrPlus ?? null;
-          scoreObj.whipPrPlus = recomputed.whipPrPlus ?? null;
-          scoreObj.k9PrPlus = recomputed.k9PrPlus ?? null;
-          scoreObj.hr9PrPlus = recomputed.hr9PrPlus ?? null;
-          scoreObj.bb9PrPlus = recomputed.bb9PrPlus ?? null;
+          scoreObj.eraPrPlus = r.era_pr_plus ?? recomputed.eraPrPlus ?? null;
+          scoreObj.fipPrPlus = r.fip_pr_plus ?? recomputed.fipPrPlus ?? null;
+          scoreObj.whipPrPlus = r.whip_pr_plus ?? recomputed.whipPrPlus ?? null;
+          scoreObj.k9PrPlus = r.k9_pr_plus ?? recomputed.k9PrPlus ?? null;
+          scoreObj.hr9PrPlus = r.hr9_pr_plus ?? recomputed.hr9PrPlus ?? null;
+          scoreObj.bb9PrPlus = r.bb9_pr_plus ?? recomputed.bb9PrPlus ?? null;
 
           const classTransition = DEFAULT_PITCHING_CLASS_TRANSITION;
           const devAggressiveness = DEFAULT_PITCHING_DEV_AGGRESSIVENESS;
@@ -1623,20 +1627,13 @@ export default function ReturningPlayers() {
           const pBb9 = projectPitchingRate({ lastStat: bb9, prPlus: scoreObj.bb9PrPlus, ncaaAvg: eq.bb9_plus_ncaa_avg, ncaaSd: eq.bb9_plus_ncaa_sd, prSd: eq.bb9_pr_sd, classAdjustment: classBb9Adj, devAggressiveness, thresholds: eq.bb9_damp_thresholds, impacts: eq.bb9_damp_impacts, lowerIsBetter: true });
           const pHr9 = projectPitchingRate({ lastStat: hr9, prPlus: scoreObj.hr9PrPlus, ncaaAvg: eq.hr9_plus_ncaa_avg, ncaaSd: eq.hr9_plus_ncaa_sd, prSd: eq.hr9_pr_sd, classAdjustment: classHr9Adj, devAggressiveness, thresholds: eq.hr9_damp_thresholds, impacts: eq.hr9_damp_impacts, lowerIsBetter: true });
 
-          const teamNameForPark = teamMatch?.name || normalizedTeam || null;
-          const fallbackPark = teamMatch?.park_factor ?? null;
-          const avgPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "avg", teamParkComponents, teamNameForPark, fallbackPark));
-          const obpPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "obp", teamParkComponents, teamNameForPark, fallbackPark));
-          const isoPark = parkToIndex(resolveMetricParkFactor(teamMatch?.id, "iso", teamParkComponents, teamNameForPark, fallbackPark));
-          const eraParkRaw = resolveMetricParkFactor(teamMatch?.id, "era", teamParkComponents, teamNameForPark);
-          const whipParkRaw = resolveMetricParkFactor(teamMatch?.id, "whip", teamParkComponents, teamNameForPark);
-          const hr9ParkRaw = resolveMetricParkFactor(teamMatch?.id, "hr9", teamParkComponents, teamNameForPark);
-          const eraParkFactor = parkToIndex(eraParkRaw ?? avgPark) / 100;
-          const whipParkFactor = parkToIndex(whipParkRaw ?? ((0.7 * avgPark) + (0.3 * obpPark))) / 100;
-          const hr9ParkFactor = parkToIndex(hr9ParkRaw ?? isoPark) / 100;
-          const parkAdjustedEra = pEra == null ? null : pEra * eraParkFactor;
-          const parkAdjustedWhip = pWhip == null ? null : pWhip * whipParkFactor;
-          const parkAdjustedHr9 = pHr9 == null ? null : pHr9 * hr9ParkFactor;
+          // Park factor intentionally NOT applied to returner projections —
+          // the pitcher's lastStat already reflects their home park. Mirrors
+          // the lib edit in pitcherProjection.ts and PitcherProfile.
+          const parkAdjustedEra = pEra;
+          const parkAdjustedWhip = pWhip;
+          const parkAdjustedHr9 = pHr9;
+          void teamParkComponents;
 
           const pRvPlus = scoreObj.eraPrPlus;
           const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);

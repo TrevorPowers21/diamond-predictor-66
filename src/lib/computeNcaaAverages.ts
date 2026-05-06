@@ -43,15 +43,28 @@ const PITCHER_METRICS: Array<{ ncaa: string; col: string }> = [
   { ncaa: "pitcher_line_drive_pct", col: "line_pct" },
 ];
 
-function calcWeightedStats(
+// Mean = PA/IP-weighted across the full population (every plate appearance
+// or inning contributes proportionally — this is the standard baseball
+// "league average per PA" / "league average per IP" convention).
+function calcWeightedMean(
   rows: Array<{ value: number; weight: number }>,
-): { mean: number; sd: number } | null {
+): number | null {
   if (rows.length === 0) return null;
   const totalW = rows.reduce((s, r) => s + r.weight, 0);
   if (totalW === 0) return null;
-  const mean = rows.reduce((s, r) => s + r.value * r.weight, 0) / totalW;
-  const variance = rows.reduce((s, r) => s + r.weight * (r.value - mean) ** 2, 0) / totalW;
-  return { mean, sd: Math.sqrt(variance) };
+  return rows.reduce((s, r) => s + r.value * r.weight, 0) / totalW;
+}
+
+// SD = unweighted across QUALIFIED players only (AB ≥ 75 hitters, IP ≥ 25
+// pitchers). Removes small-sample noise — a 5-AB player going 1-for-5 with
+// 100% barrel% has nothing to do with talent variance, and including them
+// inflates the SD. Sample variance (Bessel's correction: divide by n-1).
+function calcQualifiedSd(values: number[]): number | null {
+  if (values.length < 2) return null;
+  const n = values.length;
+  const mean = values.reduce((s, v) => s + v, 0) / n;
+  const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / (n - 1);
+  return Math.sqrt(variance);
 }
 
 async function fetchAllRows(
@@ -96,37 +109,46 @@ export async function computeAndStoreNcaaAverages(season: number): Promise<{
 
   console.time("[NcaaAvg] 2. compute hitter stats");
   const updates: Record<string, number | null> = { season };
+  // Hybrid approach: PA-weighted means (true league avg per PA) + qualified-only
+  // SDs (true talent variance, no small-sample noise). AB ≥ 75 = qualified.
+  const QUALIFIED_AB = 75;
   for (const m of HITTER_METRICS) {
-    const rows: Array<{ value: number; weight: number }> = [];
+    const weightedRows: Array<{ value: number; weight: number }> = [];
+    const qualifiedValues: number[] = [];
     for (const r of hitters) {
       const v = (r as any)[m.col];
+      if (v == null || !Number.isFinite(Number(v))) continue;
+      const value = Number(v);
       const pa = Number((r as any).pa);
       const ab = Number((r as any).ab);
       const w = Number.isFinite(pa) && pa > 0 ? pa : Number.isFinite(ab) && ab > 0 ? ab : 0;
-      if (v != null && Number.isFinite(Number(v)) && w > 0) {
-        rows.push({ value: Number(v), weight: w });
-      }
+      if (w > 0) weightedRows.push({ value, weight: w });
+      if (Number.isFinite(ab) && ab >= QUALIFIED_AB) qualifiedValues.push(value);
     }
-    const stats = calcWeightedStats(rows);
-    updates[m.ncaa] = stats ? Math.round(stats.mean * 10000) / 10000 : null;
-    updates[`${m.ncaa}_sd`] = stats ? Math.round(stats.sd * 100000) / 100000 : null;
+    const mean = calcWeightedMean(weightedRows);
+    const sd = calcQualifiedSd(qualifiedValues);
+    updates[m.ncaa] = mean != null ? Math.round(mean * 10000) / 10000 : null;
+    updates[`${m.ncaa}_sd`] = sd != null ? Math.round(sd * 100000) / 100000 : null;
   }
 
-  // OPS — derived per-row as OBP + SLG, then weighted-aggregated
-  const opsRows: Array<{ value: number; weight: number }> = [];
+  // OPS — derived per-row as OBP + SLG. PA-weighted mean, qualified-only SD.
+  const opsWeighted: Array<{ value: number; weight: number }> = [];
+  const opsQualified: number[] = [];
   for (const r of hitters) {
     const obp = Number((r as any).OBP);
     const slg = Number((r as any).SLG);
+    if (!Number.isFinite(obp) || !Number.isFinite(slg)) continue;
+    const value = obp + slg;
     const pa = Number((r as any).pa);
     const ab = Number((r as any).ab);
     const w = Number.isFinite(pa) && pa > 0 ? pa : Number.isFinite(ab) && ab > 0 ? ab : 0;
-    if (Number.isFinite(obp) && Number.isFinite(slg) && w > 0) {
-      opsRows.push({ value: obp + slg, weight: w });
-    }
+    if (w > 0) opsWeighted.push({ value, weight: w });
+    if (Number.isFinite(ab) && ab >= QUALIFIED_AB) opsQualified.push(value);
   }
-  const opsStats = calcWeightedStats(opsRows);
-  updates["ops"] = opsStats ? Math.round(opsStats.mean * 10000) / 10000 : null;
-  updates["ops_sd"] = opsStats ? Math.round(opsStats.sd * 100000) / 100000 : null;
+  const opsMean = calcWeightedMean(opsWeighted);
+  const opsSd = calcQualifiedSd(opsQualified);
+  updates["ops"] = opsMean != null ? Math.round(opsMean * 10000) / 10000 : null;
+  updates["ops_sd"] = opsSd != null ? Math.round(opsSd * 100000) / 100000 : null;
   console.timeEnd("[NcaaAvg] 2. compute hitter stats");
 
   // ─── Pitchers ─────────────────────────────────────────────────────────
@@ -137,18 +159,22 @@ export async function computeAndStoreNcaaAverages(season: number): Promise<{
   console.log(`[NcaaAvg] ${pitchers.length} pitcher rows for ${season}`);
 
   console.time("[NcaaAvg] 4. compute pitcher stats");
+  const QUALIFIED_IP = 25;
   for (const m of PITCHER_METRICS) {
-    const rows: Array<{ value: number; weight: number }> = [];
+    const weightedRows: Array<{ value: number; weight: number }> = [];
+    const qualifiedValues: number[] = [];
     for (const r of pitchers) {
       const v = (r as any)[m.col];
+      if (v == null || !Number.isFinite(Number(v))) continue;
+      const value = Number(v);
       const ip = Number((r as any).IP);
-      if (v != null && Number.isFinite(Number(v)) && Number.isFinite(ip) && ip > 0) {
-        rows.push({ value: Number(v), weight: ip });
-      }
+      if (Number.isFinite(ip) && ip > 0) weightedRows.push({ value, weight: ip });
+      if (Number.isFinite(ip) && ip >= QUALIFIED_IP) qualifiedValues.push(value);
     }
-    const stats = calcWeightedStats(rows);
-    updates[m.ncaa] = stats ? Math.round(stats.mean * 10000) / 10000 : null;
-    updates[`${m.ncaa}_sd`] = stats ? Math.round(stats.sd * 100000) / 100000 : null;
+    const mean = calcWeightedMean(weightedRows);
+    const sd = calcQualifiedSd(qualifiedValues);
+    updates[m.ncaa] = mean != null ? Math.round(mean * 10000) / 10000 : null;
+    updates[`${m.ncaa}_sd`] = sd != null ? Math.round(sd * 100000) / 100000 : null;
   }
   console.timeEnd("[NcaaAvg] 4. compute pitcher stats");
 
@@ -170,18 +196,23 @@ export async function computeAndStoreNcaaAverages(season: number): Promise<{
     if (!sid || !Number.isFinite(p) || p <= 0) continue;
     pitchesByPitcher.set(sid, (pitchesByPitcher.get(sid) ?? 0) + p);
   }
-  const stuffRows: Array<{ value: number; weight: number }> = [];
+  const stuffWeighted: Array<{ value: number; weight: number }> = [];
+  const stuffQualified: number[] = [];
   for (const r of pitchers) {
     const sid = (r as any).source_player_id;
     const v = (r as any).stuff_plus;
     if (v == null || !Number.isFinite(Number(v))) continue;
+    const value = Number(v);
     const w = sid ? (pitchesByPitcher.get(sid) ?? 0) : 0;
-    if (w > 0) stuffRows.push({ value: Number(v), weight: w });
+    const ip = Number((r as any).IP);
+    if (w > 0) stuffWeighted.push({ value, weight: w });
+    if (Number.isFinite(ip) && ip >= QUALIFIED_IP) stuffQualified.push(value);
   }
-  const stuffStats = calcWeightedStats(stuffRows);
-  updates["stuff_plus"] = stuffStats ? Math.round(stuffStats.mean * 10000) / 10000 : null;
-  updates["stuff_plus_sd"] = stuffStats ? Math.round(stuffStats.sd * 100000) / 100000 : null;
-  console.log(`[NcaaAvg] stuff+: ${stuffRows.length} pitchers, totalPitches=${[...pitchesByPitcher.values()].reduce((s, v) => s + v, 0)}`);
+  const stuffMean = calcWeightedMean(stuffWeighted);
+  const stuffSd = calcQualifiedSd(stuffQualified);
+  updates["stuff_plus"] = stuffMean != null ? Math.round(stuffMean * 10000) / 10000 : null;
+  updates["stuff_plus_sd"] = stuffSd != null ? Math.round(stuffSd * 100000) / 100000 : null;
+  console.log(`[NcaaAvg] stuff+: ${stuffWeighted.length} weighted / ${stuffQualified.length} qualified pitchers, totalPitches=${[...pitchesByPitcher.values()].reduce((s, v) => s + v, 0)}`);
   console.timeEnd("[NcaaAvg] 4b. stuff+ weighted by pitches");
 
   // ─── Upsert ───────────────────────────────────────────────────────────
