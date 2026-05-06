@@ -1636,10 +1636,30 @@ export default function TransferPortal() {
     });
   };
 
-  const addPitcherToTargetBoard = () => {
+  const addPitcherToTargetBoard = async () => {
     if (!selectedPitcher || !selectedDestinationTeam || pitchingSimulation?.blocked) return;
-    const playerId = selectedPitcher.id;
-    if (playerId && !isOnSupabaseBoard(playerId)) {
+    // selectedPitcher.id is the source_player_id (numeric, e.g. "1254299136")
+    // — comes straight from Pitching Master via usePitchingSeedData. The
+    // target_board.player_id column is a UUID FK to players.id, so we have
+    // to resolve source_player_id → players.id before inserting. Hitter
+    // path doesn't need this because its data already carries players.id.
+    const sourcePlayerId = selectedPitcher.id;
+    if (!sourcePlayerId) return;
+    const { data: playerRow, error: lookupErr } = await supabase
+      .from("players")
+      .select("id")
+      .eq("source_player_id", sourcePlayerId)
+      .maybeSingle();
+    if (lookupErr || !playerRow?.id) {
+      toast({
+        title: "Failed to add",
+        description: "Could not resolve pitcher to a players row. The pitcher may not be synced yet.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const playerId = playerRow.id;
+    if (!isOnSupabaseBoard(playerId)) {
       addToSupabaseBoard({ playerId });
     }
     toast({
