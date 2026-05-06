@@ -906,18 +906,21 @@ export default function TeamBuilder() {
       const wrcPlus = cs.wrc_plus ?? 100;
       const overallPowerRating = cs.overall_power_rating ?? 100;
       const hitterTalentPlus = overallPowerRating + (1.25 * (stuffPlus - 100)) + (0.75 * (100 - wrcPlus));
-      const key = normConf(cs.conference);
-      if (key) {
-        map.set(key, {
-          conference: cs.conference,
-          era_plus: Math.round(eraPlus),
-          fip_plus: Math.round(fipPlus),
-          whip_plus: Math.round(whipPlus),
-          k9_plus: Math.round(k9Plus),
-          bb9_plus: Math.round(bb9Plus),
-          hr9_plus: Math.round(hr9Plus),
-          hitter_talent_plus: Math.round(hitterTalentPlus * 10) / 10,
-        });
+      const entry = {
+        conference: cs.conference,
+        era_plus: Math.round(eraPlus),
+        fip_plus: Math.round(fipPlus),
+        whip_plus: Math.round(whipPlus),
+        k9_plus: Math.round(k9Plus),
+        bb9_plus: Math.round(bb9Plus),
+        hr9_plus: Math.round(hr9Plus),
+        hitter_talent_plus: Math.round(hitterTalentPlus * 10) / 10,
+      };
+      // Register under every alias so lookup hits regardless of which form
+      // the team's `conference` string is stored in (e.g. SEC vs Southeastern
+      // Conference). Mirrors how TransferPortal's pitchingConfByKey indexes.
+      for (const alias of getConferenceAliases(cs.conference)) {
+        if (alias && !map.has(alias)) map.set(alias, entry);
       }
     }
     return map;
@@ -2732,9 +2735,23 @@ export default function TeamBuilder() {
       const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
       if (!toTeamRow) return snapshotFallback;
       const toConf = toTeamRow.conference || null;
-      const normConf = (c: string | null) => (c || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-      const fromPC = fromConf ? pitchingConfLookup.get(normConf(fromConf)) : null;
-      const toPC = toConf ? pitchingConfLookup.get(normConf(toConf)) : null;
+      // Multi-alias lookup mirrors TransferPortal's resolvePitchingConferenceStats:
+      // if Teams Table stores "Southeastern Conference" but Conference Stats keys
+      // by "SEC" (or vice versa), the simple direct lookup misses. Fall through
+      // every alias from getConferenceAliases until one hits. This was the root
+      // of the TB ↔ portal pitcher transfer mismatch — TB lookup was returning
+      // null for from/to conferences in many cases, leaving the lib to compute
+      // with null deltas instead of real conference shifts.
+      const lookupConfPC = (conf: string | null) => {
+        if (!conf) return null;
+        for (const alias of getConferenceAliases(conf)) {
+          const hit = pitchingConfLookup.get(alias);
+          if (hit) return hit;
+        }
+        return null;
+      };
+      const fromPC = lookupConfPC(fromConf);
+      const toPC = lookupConfPC(toConf);
 
       const baseRole = (() => {
         const r = pStats.role || null;
