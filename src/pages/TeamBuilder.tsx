@@ -2013,7 +2013,11 @@ export default function TeamBuilder() {
             team_power_plus: meta.power,
           };
           } catch (err) {
-            console.warn("[TeamBuilder] Failed to process roster player:", err, bp);
+            // Per-row data-quality warning — noisy in prod when a saved build
+            // has any malformed players. Keep visible in dev to flag bad rows.
+            if (import.meta.env.DEV) {
+              console.warn("[TeamBuilder] Failed to process roster player:", err, bp);
+            }
             return null;
           }
         }).filter(Boolean) as any[]);
