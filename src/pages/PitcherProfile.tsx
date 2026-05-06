@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { projectPitchingRate } from "@/lib/pitcherProjection";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
@@ -140,8 +141,6 @@ const PITCH_TYPE_LABELS: Record<string, string> = {
 
 const PITCH_DISPLAY_ORDER = ["4S", "4S FB", "SI", "SINKER", "Sinker", "CT", "CUTTER", "Cutter", "GYRO SLIDER", "Gyro Slider", "SL", "SLIDER", "Slider", "SWP", "SWEEPER", "Sweeper", "CB", "CURVEBALL", "Curveball", "CH", "CHANGE-UP", "Change-up", "SP", "SPLITTER", "Splitter"] as const;
 
-const PITCHING_POWER_RATING_WEIGHT = 0.7;
-const PITCHING_DEV_FACTOR = 0.06;
 const PITCHER_PROFILE_STORAGE_OVERRIDE_KEY = "pitcher_profile_projection_overrides_v1";
 const getPitchingPvfForRole = (
   role: "SP" | "RP" | "SM",
@@ -216,65 +215,6 @@ const toPitchingClassAdj = (
 ) => {
   const pct = classTransition === "FS" ? fs : classTransition === "SJ" ? sj : classTransition === "JS" ? js : gr;
   return Number.isFinite(pct) ? pct / 100 : 0;
-};
-
-const dampFactorForProjected = (projected: number, thresholds: number[], impacts: number[]) => {
-  for (let i = 0; i < thresholds.length; i++) {
-    if (projected < thresholds[i]) return impacts[i] ?? 1;
-  }
-  return impacts[thresholds.length] ?? impacts[impacts.length - 1] ?? 1;
-};
-
-const projectPitchingRate = ({
-  lastStat,
-  prPlus,
-  ncaaAvg,
-  ncaaSd,
-  prSd,
-  classAdjustment,
-  devAggressiveness,
-  thresholds,
-  impacts,
-  lowerIsBetter,
-}: {
-  lastStat: number | null;
-  prPlus: number | null;
-  ncaaAvg: number;
-  ncaaSd: number;
-  prSd: number;
-  classAdjustment: number;
-  devAggressiveness: number;
-  thresholds: number[];
-  impacts: number[];
-  lowerIsBetter: boolean;
-}) => {
-  if (
-    lastStat == null ||
-    prPlus == null ||
-    !Number.isFinite(lastStat) ||
-    !Number.isFinite(prPlus) ||
-    !Number.isFinite(ncaaAvg) ||
-    !Number.isFinite(ncaaSd) ||
-    !Number.isFinite(prSd) ||
-    prSd === 0
-  ) {
-    return null;
-  }
-  const zShift = ((prPlus - 100) / prSd) * ncaaSd;
-  const powerAdjusted = lowerIsBetter ? (ncaaAvg - zShift) : (ncaaAvg + zShift);
-  const blended = (lastStat * (1 - PITCHING_POWER_RATING_WEIGHT)) + (powerAdjusted * PITCHING_POWER_RATING_WEIGHT);
-  const mult = lowerIsBetter
-    ? (1 - classAdjustment - (devAggressiveness * PITCHING_DEV_FACTOR))
-    : (1 + classAdjustment + (devAggressiveness * PITCHING_DEV_FACTOR));
-  const projected = blended * mult;
-  // Damping disabled (2026-05-05). The previous implementation applied
-  // dampFactor as the WEIGHT on projected, meaning extreme cases trusted
-  // lastStat MORE — anti-regression. Path B in
-  // project_pitcher_damping_path_b.md captures the future re-introduction
-  // with the correct semantic. Mirror of src/lib/pitcherProjection.ts to
-  // keep returner projections consistent across surfaces.
-  void thresholds; void impacts; void dampFactorForProjected;
-  return projected;
 };
 
 const calcPitchingPlus = (

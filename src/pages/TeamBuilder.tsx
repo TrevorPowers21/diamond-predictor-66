@@ -772,56 +772,10 @@ const toPitchingClassAdj = (
   const pct = classTransition === "FS" ? fs : classTransition === "SJ" ? sj : classTransition === "JS" ? js : gr;
   return Number.isFinite(pct) ? pct / 100 : 0;
 };
-const dampFactorForProjected = (projected: number, thresholds: number[], impacts: number[]) => {
-  for (let i = 0; i < thresholds.length; i++) {
-    if (projected < thresholds[i]) return impacts[i] ?? 1;
-  }
-  return impacts[thresholds.length] ?? impacts[impacts.length - 1] ?? 1;
-};
-const projectPitchingRate = ({
-  lastStat,
-  prPlus,
-  ncaaAvg,
-  ncaaSd,
-  prSd,
-  classAdjustment,
-  devAggressiveness,
-  thresholds,
-  impacts,
-  lowerIsBetter,
-}: {
-  lastStat: number | null;
-  prPlus: number | null;
-  ncaaAvg: number;
-  ncaaSd: number;
-  prSd: number;
-  classAdjustment: number;
-  devAggressiveness: number;
-  thresholds: number[];
-  impacts: number[];
-  lowerIsBetter: boolean;
-}) => {
-  if (lastStat == null || !Number.isFinite(lastStat)) return null;
-  // If power rating is missing, carry forward last season stat as projection
-  if (
-    prPlus == null ||
-    !Number.isFinite(prPlus) ||
-    !Number.isFinite(ncaaAvg) ||
-    !Number.isFinite(ncaaSd) ||
-    !Number.isFinite(prSd) ||
-    prSd === 0
-  ) return lastStat;
-  const zShift = ((prPlus - 100) / prSd) * ncaaSd;
-  const powerAdjusted = lowerIsBetter ? (ncaaAvg - zShift) : (ncaaAvg + zShift);
-  const blended = (lastStat * (1 - 0.7)) + (powerAdjusted * 0.7);
-  const mult = lowerIsBetter
-    ? (1 - classAdjustment - (devAggressiveness * 0.06))
-    : (1 + classAdjustment + (devAggressiveness * 0.06));
-  const projected = blended * mult;
-  // Damping disabled — see project_pitcher_damping_path_b.md.
-  void thresholds; void impacts; void dampFactorForProjected;
-  return projected;
-};
+// projectPitchingRate is imported from @/lib/pitcherProjection (consolidated
+// 2026-05-05). TB calls it with fallbackToLastStat=true to preserve the
+// previous behavior of carrying the season's actual rate forward when PR+
+// inputs are missing rather than dropping the row.
 const calcPitchingPlus = (
   value: number | null,
   ncaaAvg: number,

@@ -14,8 +14,8 @@ import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
 // Every weight and NCAA constant flows through readPitchingWeights(); this file
 // introduces none of its own weights.
 
-const PITCHING_POWER_RATING_WEIGHT = 0.7;
-const PITCHING_DEV_FACTOR = 0.06;
+export const PITCHING_POWER_RATING_WEIGHT = 0.7;
+export const PITCHING_DEV_FACTOR = 0.06;
 
 export type PitcherProjectionInput = {
   era: number | null;
@@ -115,14 +115,14 @@ const toPitchingClassAdj = (
   return Number.isFinite(pct) ? pct / 100 : 0;
 };
 
-const dampFactorForProjected = (projected: number, thresholds: number[], impacts: number[]) => {
+export const dampFactorForProjected = (projected: number, thresholds: number[], impacts: number[]) => {
   for (let i = 0; i < thresholds.length; i++) {
     if (projected < thresholds[i]) return impacts[i] ?? 1;
   }
   return impacts[thresholds.length] ?? impacts[impacts.length - 1] ?? 1;
 };
 
-const projectPitchingRate = ({
+export const projectPitchingRate = ({
   lastStat,
   prPlus,
   ncaaAvg,
@@ -133,6 +133,7 @@ const projectPitchingRate = ({
   thresholds,
   impacts,
   lowerIsBetter,
+  fallbackToLastStat = false,
 }: {
   lastStat: number | null;
   prPlus: number | null;
@@ -144,18 +145,23 @@ const projectPitchingRate = ({
   thresholds: number[];
   impacts: number[];
   lowerIsBetter: boolean;
+  // When true, returns lastStat instead of null if PR+ inputs are missing
+  // (TeamBuilder's previous behavior — carry the season's actual rate
+  // forward as the projection rather than dropping the row entirely).
+  fallbackToLastStat?: boolean;
 }) => {
+  // Strict guard on lastStat — without a season number, there's nothing to
+  // project even with the fallback flag.
+  if (lastStat == null || !Number.isFinite(lastStat)) return null;
   if (
-    lastStat == null ||
     prPlus == null ||
-    !Number.isFinite(lastStat) ||
     !Number.isFinite(prPlus) ||
     !Number.isFinite(ncaaAvg) ||
     !Number.isFinite(ncaaSd) ||
     !Number.isFinite(prSd) ||
     prSd === 0
   ) {
-    return null;
+    return fallbackToLastStat ? lastStat : null;
   }
 
   const zShift = ((prPlus - 100) / prSd) * ncaaSd;
