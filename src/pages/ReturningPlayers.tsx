@@ -1118,6 +1118,10 @@ export default function ReturningPlayers() {
       const parsed = JSON.parse(raw) as {
         search?: string;
         positionFilter?: string;
+        positionFilters?: string[];
+        classFilters?: string[];
+        batsFilters?: string[];
+        confFilters?: string[];
         page?: number;
         pageSize?: number;
         sortKey?: SortKey;
@@ -1128,10 +1132,31 @@ export default function ReturningPlayers() {
         pitchingSearch?: string;
         pitchingPage?: number;
         pitchingPageSize?: number;
+        pitchingSortKey?: PitchingSortKey;
+        pitchingSortDir?: SortDir;
+        pitcherRoleFilters?: ("SP" | "RP" | "SM")[];
+        pitcherClassFilters?: string[];
+        pitcherThrowsFilters?: string[];
+        pitcherConfFilters?: string[];
         scrollY?: number;
       };
       if (typeof parsed.search === "string") setSearch(parsed.search);
-      if (typeof parsed.positionFilter === "string") setPositionFilter(parsed.positionFilter);
+      // Multi-select Sets first (full restoration); fall back to legacy
+      // positionFilter single-string for older snapshots.
+      if (Array.isArray(parsed.positionFilters)) {
+        setPositionFilters(new Set(parsed.positionFilters.filter((v) => typeof v === "string")));
+      } else if (typeof parsed.positionFilter === "string") {
+        setPositionFilter(parsed.positionFilter);
+      }
+      if (Array.isArray(parsed.classFilters)) {
+        setClassFilters(new Set(parsed.classFilters.filter((v) => typeof v === "string")));
+      }
+      if (Array.isArray(parsed.batsFilters)) {
+        setBatsFilters(new Set(parsed.batsFilters.filter((v) => typeof v === "string")));
+      }
+      if (Array.isArray(parsed.confFilters)) {
+        setConfFilters(new Set(parsed.confFilters.filter((v) => typeof v === "string")));
+      }
       if (Number.isFinite(parsed.page) && Number(parsed.page) >= 1) setPage(Number(parsed.page));
       if (Number.isFinite(parsed.pageSize) && Number(parsed.pageSize) > 0) setPageSize(Number(parsed.pageSize));
       if (parsed.sortKey) setSortKey(parsed.sortKey);
@@ -1142,6 +1167,20 @@ export default function ReturningPlayers() {
       if (typeof parsed.pitchingSearch === "string") setPitchingSearch(parsed.pitchingSearch);
       if (Number.isFinite(parsed.pitchingPage) && Number(parsed.pitchingPage) >= 1) setPitchingPage(Number(parsed.pitchingPage));
       if (Number.isFinite(parsed.pitchingPageSize) && Number(parsed.pitchingPageSize) > 0) setPitchingPageSize(Number(parsed.pitchingPageSize));
+      if (parsed.pitchingSortKey) setPitchingSortKey(parsed.pitchingSortKey);
+      if (parsed.pitchingSortDir) setPitchingSortDir(parsed.pitchingSortDir);
+      if (Array.isArray(parsed.pitcherRoleFilters)) {
+        setPitcherRoleFilters(new Set(parsed.pitcherRoleFilters.filter((v): v is "SP" | "RP" | "SM" => v === "SP" || v === "RP" || v === "SM")));
+      }
+      if (Array.isArray(parsed.pitcherClassFilters)) {
+        setPitcherClassFilters(new Set(parsed.pitcherClassFilters.filter((v) => typeof v === "string")));
+      }
+      if (Array.isArray(parsed.pitcherThrowsFilters)) {
+        setPitcherThrowsFilters(new Set(parsed.pitcherThrowsFilters.filter((v) => typeof v === "string")));
+      }
+      if (Array.isArray(parsed.pitcherConfFilters)) {
+        setPitcherConfFilters(new Set(parsed.pitcherConfFilters.filter((v) => typeof v === "string")));
+      }
       skipNextHittingPageResetRef.current = true;
       skipNextPitchingPageResetRef.current = true;
       const y = Number(parsed.scrollY);
@@ -1159,7 +1198,13 @@ export default function ReturningPlayers() {
         RETURNING_VIEW_SNAPSHOT_KEY,
         JSON.stringify({
           search,
-          positionFilter,
+          // Persist the full multi-select Sets as arrays so coaches return to
+          // the exact filter combination they had set, not just the first
+          // pill (which was the limitation under positionFilter alone).
+          positionFilters: Array.from(positionFilters),
+          classFilters: Array.from(classFilters),
+          batsFilters: Array.from(batsFilters),
+          confFilters: Array.from(confFilters),
           page,
           pageSize,
           sortKey,
@@ -1170,6 +1215,12 @@ export default function ReturningPlayers() {
           pitchingSearch,
           pitchingPage,
           pitchingPageSize,
+          pitchingSortKey,
+          pitchingSortDir,
+          pitcherRoleFilters: Array.from(pitcherRoleFilters),
+          pitcherClassFilters: Array.from(pitcherClassFilters),
+          pitcherThrowsFilters: Array.from(pitcherThrowsFilters),
+          pitcherConfFilters: Array.from(pitcherConfFilters),
           scrollY: window.scrollY,
         }),
       );
@@ -1184,7 +1235,16 @@ export default function ReturningPlayers() {
     pitchingPage,
     pitchingPageSize,
     pitchingSearch,
-    positionFilter,
+    pitchingSortKey,
+    pitchingSortDir,
+    pitcherRoleFilters,
+    pitcherClassFilters,
+    pitcherThrowsFilters,
+    pitcherConfFilters,
+    positionFilters,
+    classFilters,
+    batsFilters,
+    confFilters,
     search,
     showMissingOnly,
     sortDir,
