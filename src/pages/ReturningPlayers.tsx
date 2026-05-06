@@ -61,6 +61,18 @@ type SortKey =
 type SortDir = "asc" | "desc";
 const FAST_DB_SORT_KEYS: SortKey[] = ["p_avg", "p_obp", "p_slg", "p_ops", "p_iso", "p_wrc_plus", "p_war"];
 
+type PitchingSortKey =
+  | "name"
+  | "p_era"
+  | "p_fip"
+  | "p_whip"
+  | "p_k9"
+  | "p_bb9"
+  | "p_hr9"
+  | "p_rv_plus"
+  | "p_war"
+  | "market_value";
+
 interface ReturnerPlayer {
   id: string;
   prediction_id: string;
@@ -614,6 +626,8 @@ export default function ReturningPlayers() {
   const { addPlayers: addToHighFollow } = useHighFollow();
   const [sortKey, setSortKey] = useState<SortKey>("p_wrc_plus");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [pitchingSortKey, setPitchingSortKey] = useState<PitchingSortKey>("p_rv_plus");
+  const [pitchingSortDir, setPitchingSortDir] = useState<SortDir>("desc");
   const [bulkEditMode, setBulkEditMode] = useState(false);
   const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string | null; position?: string | null }>>({});
   const { overrides: playerOverrideMap } = usePlayerOverrides();
@@ -1732,17 +1746,45 @@ export default function ReturningPlayers() {
   const pitchingTotalPages = Math.max(1, Math.ceil(pitchingTotal / pitchingPageSize));
   const pitchingCurrentPage = Math.min(pitchingPage, pitchingTotalPages);
   const sortedPitchingRows = useMemo(() => {
-    return [...filteredPitchingRows].sort((a, b) => {
-      // Sort by pRV+ descending (best pitchers first), then pERA ascending
-      if (a.p_rv_plus != null && b.p_rv_plus != null) return b.p_rv_plus - a.p_rv_plus;
-      if (a.p_rv_plus != null) return -1;
-      if (b.p_rv_plus != null) return 1;
-      if (a.p_era != null && b.p_era != null) return a.p_era - b.p_era;
-      if (a.p_era != null) return -1;
-      if (b.p_era != null) return 1;
-      return 0;
+    const lowerIsBetter = new Set<PitchingSortKey>(["p_era", "p_fip", "p_whip", "p_bb9", "p_hr9"]);
+    const desc = pitchingSortDir === "desc";
+    const rows = [...filteredPitchingRows];
+    if (pitchingSortKey === "name") {
+      rows.sort((a, b) => {
+        const cmp = String(a.playerName ?? "").toLowerCase()
+          .localeCompare(String(b.playerName ?? "").toLowerCase());
+        return desc ? -cmp : cmp;
+      });
+      return rows;
+    }
+    rows.sort((a, b) => {
+      const aRaw = (a as any)[pitchingSortKey];
+      const bRaw = (b as any)[pitchingSortKey];
+      const aNum = aRaw == null || !Number.isFinite(Number(aRaw)) ? null : Number(aRaw);
+      const bNum = bRaw == null || !Number.isFinite(Number(bRaw)) ? null : Number(bRaw);
+      // Nulls always sink to the bottom.
+      if (aNum == null && bNum == null) return 0;
+      if (aNum == null) return 1;
+      if (bNum == null) return -1;
+      // "desc" = best at top. For lower-is-better stats (ERA, FIP), best = lowest.
+      // For higher-is-better (K9, pRV+, pWAR, market_value), best = highest.
+      if (lowerIsBetter.has(pitchingSortKey)) {
+        return desc ? aNum - bNum : bNum - aNum;
+      }
+      return desc ? bNum - aNum : aNum - bNum;
     });
-  }, [filteredPitchingRows]);
+    return rows;
+  }, [filteredPitchingRows, pitchingSortKey, pitchingSortDir]);
+
+  const togglePitchingSort = (key: PitchingSortKey) => {
+    if (pitchingSortKey === key) {
+      setPitchingSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setPitchingSortKey(key);
+      setPitchingSortDir("desc");
+    }
+    setPitchingCurrentPage(1);
+  };
   const pagedPitchingRows = useMemo(() => {
     const from = (pitchingCurrentPage - 1) * pitchingPageSize;
     const to = from + pitchingPageSize;
@@ -1808,6 +1850,18 @@ export default function ReturningPlayers() {
       size="sm"
       className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground -ml-1"
       onClick={() => toggleSort(sortKeyVal)}
+    >
+      {label}
+      <ArrowUpDown className="ml-1 h-3 w-3" />
+    </Button>
+  );
+
+  const PitchingSortButton = ({ label, sortKeyVal }: { label: string; sortKeyVal: PitchingSortKey }) => (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground -ml-1"
+      onClick={() => togglePitchingSort(sortKeyVal)}
     >
       {label}
       <ArrowUpDown className="ml-1 h-3 w-3" />
@@ -2289,17 +2343,17 @@ export default function ReturningPlayers() {
                         <TableRow>
                           <TableHead className="w-[32px] p-1"></TableHead>
                           <TableHead className="min-w-[160px] sticky left-0 z-30 bg-background">
-                            <span className="font-medium text-muted-foreground">Player</span>
+                            <PitchingSortButton label="Player" sortKeyVal="name" />
                           </TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pERA</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pFIP</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pWHIP</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pK/9</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pBB/9</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pHR/9</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pRV+</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">pWAR</span></TableHead>
-                          <TableHead className="text-right"><span className="font-medium text-muted-foreground">Market Value</span></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pERA" sortKeyVal="p_era" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pFIP" sortKeyVal="p_fip" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pWHIP" sortKeyVal="p_whip" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pK/9" sortKeyVal="p_k9" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pBB/9" sortKeyVal="p_bb9" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pHR/9" sortKeyVal="p_hr9" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pRV+" sortKeyVal="p_rv_plus" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="pWAR" sortKeyVal="p_war" /></TableHead>
+                          <TableHead className="text-right"><PitchingSortButton label="Market Value" sortKeyVal="market_value" /></TableHead>
                           <TableHead className="text-center min-w-[180px]"><span className="font-medium text-muted-foreground">Scouting</span></TableHead>
                           <TableHead className="w-[36px] text-center p-0"><Target className="h-3.5 w-3.5 mx-auto text-muted-foreground" /></TableHead>
                         </TableRow>
