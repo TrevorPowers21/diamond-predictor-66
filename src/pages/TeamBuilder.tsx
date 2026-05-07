@@ -862,7 +862,7 @@ function readLocalNum(key: string, fallback: number, remoteValues?: Record<strin
 }
 
 export default function TeamBuilder() {
-  const { user, hasRole } = useAuth();
+  const { user, hasRole, effectiveTeamId } = useAuth();
   const { getRole: getSupabaseRole, setRole: setSupabaseRole } = usePitcherRoleOverrides();
   const { toast } = useToast();
   const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
@@ -1575,11 +1575,13 @@ export default function TeamBuilder() {
 
   // Fetch existing builds
   const { data: builds = [] } = useQuery({
-    queryKey: ["team-builds"],
+    queryKey: ["team-builds", effectiveTeamId ?? null],
+    enabled: !!effectiveTeamId,
     queryFn: async () => {
       const { data } = await supabase
         .from("team_builds")
         .select("*")
+        .eq("customer_team_id", effectiveTeamId!)
         .order("updated_at", { ascending: false });
       return data ?? [];
     },
@@ -2063,7 +2065,14 @@ export default function TeamBuilder() {
     }).filter(Boolean) as BuildPlayer[];
 
     if (roster.length > 0 || autoSeededTeamRef.current !== seedKey) {
-      setRosterPlayers(roster);
+      // Preserve any non-returner rows (especially "target" rows synced from
+      // the Supabase target board) so the returners load doesn't wipe a player
+      // the user just added from the player profile page. Returners are
+      // re-seeded from this effect; targets/portal/manual entries are kept.
+      setRosterPlayers((prev) => {
+        const preserved = prev.filter((p) => (p.roster_status || "returner") !== "returner");
+        return [...roster, ...preserved];
+      });
       autoSeededTeamRef.current = seedKey;
     }
   }, [returners, returnersUpdatedAt, selectedTeam, selectedBuildId, playerOverrides, seasonUsage]);
@@ -2199,8 +2208,10 @@ export default function TeamBuilder() {
         }).eq("id", buildId);
         await supabase.from("team_build_players").delete().eq("build_id", buildId);
       } else {
+        if (!effectiveTeamId) throw new Error("No team in scope — pick a team before saving a build");
         const { data, error } = await supabase.from("team_builds").insert({
           user_id: user.id,
+          customer_team_id: effectiveTeamId,
           name: targetName,
           team: selectedTeam,
           total_budget: totalBudget,

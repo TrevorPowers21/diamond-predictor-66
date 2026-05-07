@@ -20,16 +20,17 @@ const cn = () => supabase.from("coach_notes");
 export function useCoachNotes(playerId: string | null | undefined) {
   const { user, effectiveTeamId } = useAuth();
   const qc = useQueryClient();
-  const queryKey = ["coach-notes", playerId];
+  const queryKey = ["coach-notes", playerId, effectiveTeamId ?? null];
 
   const { data: notes = [], isLoading } = useQuery({
     queryKey,
-    enabled: !!playerId && !!user?.id,
+    enabled: !!playerId && !!user?.id && !!effectiveTeamId,
     queryFn: async () => {
-      if (!playerId) return [];
+      if (!playerId || !effectiveTeamId) return [];
       const { data, error } = await cn()
         .select("*")
         .eq("player_id", playerId)
+        .eq("customer_team_id", effectiveTeamId)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return (data || []) as CoachNote[];
