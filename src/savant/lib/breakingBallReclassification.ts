@@ -204,8 +204,12 @@ function applyFilters(
 // Priority order per spec: Gyro Slider → Curveball → Sweeper → Slider
 
 function reclassifyRHP(ivb: number, hb: number): string | null {
-  // Priority 1 — Gyro Slider: near-zero movement in both directions
-  if (ivb >= -2 && hb >= -7) return "Gyro Slider";
+  // Priority 1 — Gyro Slider: near-zero movement in both directions.
+  // IVB threshold relaxed from -2 to -3 (2026-05-07): elite gyros like
+  // Cole Gibler measured IVB=-2.14 with HB≈0 in 2026 and were getting
+  // mis-bucketed as Slider despite textbook gyro shape. Healthy 5-inch
+  // gap remains between gyro-loose (-3) and curveball (-8).
+  if (ivb >= -3 && hb >= -7) return "Gyro Slider";
 
   // Priority 2 — Curveball: depth wins. IVB-only, regardless of HB.
   if (ivb <= -8) return "Curveball";
@@ -220,8 +224,9 @@ function reclassifyRHP(ivb: number, hb: number): string | null {
 function reclassifyLHP(ivb: number, hb: number): string | null {
   // Mirror HorzBrk signs, IVB thresholds identical
 
-  // Priority 1 — Gyro Slider: near-zero movement
-  if (ivb >= -2 && hb <= 7) return "Gyro Slider";
+  // Priority 1 — Gyro Slider: near-zero movement (see RHP comment for
+  // 2026-05-07 IVB-threshold relaxation rationale).
+  if (ivb >= -3 && hb <= 7) return "Gyro Slider";
 
   // Priority 2 — Curveball: depth wins. IVB-only.
   if (ivb <= -8) return "Curveball";
