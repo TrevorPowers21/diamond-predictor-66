@@ -243,10 +243,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     : userTeamId;
 
   const enableDevBypass = () => {
-    if (!isDevBypassAllowed) {
-      console.warn("[useAuth] Dev bypass is only available in development builds.");
-      return;
-    }
+    // Silently no-op in production. The UI that triggers this is gated by
+    // isDevBypassAllowed, but defense-in-depth here keeps prod consoles clean
+    // if any code path slips through.
+    if (!isDevBypassAllowed) return;
     setDevBypassed(true);
   };
 

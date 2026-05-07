@@ -14,12 +14,28 @@ export type PitchingMasterSeedRow = {
   ip: number | null;
   g: number | null;
   gs: number | null;
+  // era/fip/whip/k9/bb9/hr9 are the "use this value" rates: when the pipeline
+  // flagged this pitcher as a small-sample pullback (combined_used = true),
+  // these resolve to the blended (current + prior season) values; otherwise
+  // they're the raw current-season values. Centralizing the blend here so TB,
+  // ReturningPlayers, and PlayerComparison all match PitcherProfile's display
+  // and projection inputs without per-callsite branching.
   era: number | null;
   fip: number | null;
   whip: number | null;
   k9: number | null;
   bb9: number | null;
   hr9: number | null;
+  // Pullback flag + raw blended values, preserved so downstream consumers
+  // can render a "*combined" footnote or distinguish raw current-season
+  // from the blended fallback.
+  combined_used: boolean;
+  blended_era: number | null;
+  blended_fip: number | null;
+  blended_whip: number | null;
+  blended_k9: number | null;
+  blended_bb9: number | null;
+  blended_hr9: number | null;
   miss_pct: number | null;
   bb_pct: number | null;
   hard_hit_pct: number | null;
@@ -79,7 +95,9 @@ export function usePitchingSeedData(season = 2026) {
     refetchOnWindowFocus: false,
   });
 
-  const pitchers: PitchingMasterSeedRow[] = dbRows.map((r: any) => ({
+  const pitchers: PitchingMasterSeedRow[] = dbRows.map((r: any) => {
+    const combinedUsed = !!r.combined_used;
+    return ({
     id: r.source_player_id || `pm-${r.playerFullName}-${r.Team ?? ""}`,
     source_player_id: r.source_player_id ?? null,
     playerName: r.playerFullName,
@@ -92,12 +110,21 @@ export function usePitchingSeedData(season = 2026) {
     ip: r.IP ?? null,
     g: r.G ?? null,
     gs: r.GS ?? null,
-    era: r.ERA ?? null,
-    fip: r.FIP ?? null,
-    whip: r.WHIP ?? null,
-    k9: r.K9 ?? null,
-    bb9: r.BB9 ?? null,
-    hr9: r.HR9 ?? null,
+    // Blended-when-pullback resolution mirrors PitcherProfile.tsx:694-699 so
+    // the "current rate" surfaced here matches whatever PitcherProfile shows.
+    era: combinedUsed ? (r.blended_era ?? r.ERA) ?? null : (r.ERA ?? null),
+    fip: combinedUsed ? (r.blended_fip ?? r.FIP) ?? null : (r.FIP ?? null),
+    whip: combinedUsed ? (r.blended_whip ?? r.WHIP) ?? null : (r.WHIP ?? null),
+    k9: combinedUsed ? (r.blended_k9 ?? r.K9) ?? null : (r.K9 ?? null),
+    bb9: combinedUsed ? (r.blended_bb9 ?? r.BB9) ?? null : (r.BB9 ?? null),
+    hr9: combinedUsed ? (r.blended_hr9 ?? r.HR9) ?? null : (r.HR9 ?? null),
+    combined_used: combinedUsed,
+    blended_era: r.blended_era ?? null,
+    blended_fip: r.blended_fip ?? null,
+    blended_whip: r.blended_whip ?? null,
+    blended_k9: r.blended_k9 ?? null,
+    blended_bb9: r.blended_bb9 ?? null,
+    blended_hr9: r.blended_hr9 ?? null,
     miss_pct: r.miss_pct ?? null,
     bb_pct: r.bb_pct ?? null,
     hard_hit_pct: r.hard_hit_pct ?? null,
@@ -119,7 +146,8 @@ export function usePitchingSeedData(season = 2026) {
     bb9_pr_plus: r.bb9_pr_plus ?? null,
     hr9_pr_plus: r.hr9_pr_plus ?? null,
     overall_pr_plus: r.overall_pr_plus ?? null,
-  }));
+  });
+  });
 
   return { pitchers, loading: isLoading };
 }

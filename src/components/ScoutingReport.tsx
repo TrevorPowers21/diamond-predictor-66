@@ -88,6 +88,10 @@ export interface ReportPlayer {
   stuff_score?: number | null;
   whiff_score?: number | null;
   bb_score?: number | null;
+  // Pitcher role for the bio strip — "SP" / "RP" / "SM" rendered as
+  // "Starter (SP)" / "Reliever (RP)" / "Swingman (SM)". Falls back to
+  // `position` (RHP/LHP) when null.
+  pitcher_role?: "SP" | "RP" | "SM" | string | null;
   // Scouting grades (20-80 scale for PDF)
   grade_hit?: number | null;
   grade_power?: number | null;

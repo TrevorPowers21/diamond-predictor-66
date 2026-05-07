@@ -502,6 +502,7 @@ export type Database = {
       high_follow: {
         Row: {
           added_at: string | null
+          customer_team_id: string | null
           id: string
           notes: string | null
           player_id: string
@@ -510,6 +511,7 @@ export type Database = {
         }
         Insert: {
           added_at?: string | null
+          customer_team_id?: string | null
           id?: string
           notes?: string | null
           player_id: string
@@ -518,6 +520,7 @@ export type Database = {
         }
         Update: {
           added_at?: string | null
+          customer_team_id?: string | null
           id?: string
           notes?: string | null
           player_id?: string
@@ -525,6 +528,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "high_follow_customer_team_id_fkey"
+            columns: ["customer_team_id"]
+            isOneToOne: false
+            referencedRelation: "customer_teams"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "high_follow_player_id_fkey"
             columns: ["player_id"]

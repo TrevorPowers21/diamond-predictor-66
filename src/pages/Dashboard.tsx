@@ -120,55 +120,56 @@ export default function Dashboard() {
     queryKey: ["overview-top-pitchers"],
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
-      // Load top pitchers from Pitching Master (overall_pr_plus is the pRV+ equivalent)
-      const { data: pmRows, error: pmErr } = await supabase
-        .from("Pitching Master")
-        .select("source_player_id, playerFullName, Team, Conference, Role, IP, ERA, FIP, K9, overall_pr_plus")
-        .eq("Season", CURRENT_SEASON)
-        .gte("IP", 20)
-        .not("overall_pr_plus", "is", null)
-        .order("overall_pr_plus", { ascending: false })
-        .limit(25);
-      if (pmErr) throw pmErr;
-      const pitchers = pmRows || [];
-      if (pitchers.length === 0) return [];
-
-      // Resolve players.id for each source_player_id so profile links work
-      const sourceIds = pitchers.map((p: any) => p.source_player_id).filter(Boolean);
-      const playerMap = new Map<string, { id: string; team: string | null; position: string | null }>();
-      if (sourceIds.length > 0) {
-        const { data: plRows } = await supabase
-          .from("players")
-          .select("id, source_player_id, team, position")
-          .in("source_player_id", sourceIds);
-        for (const pl of (plRows || []) as any[]) {
-          if (pl.source_player_id) playerMap.set(pl.source_player_id, { id: pl.id, team: pl.team, position: pl.position });
+      // Mirror topHitters: read PROJECTIONS from player_predictions, not raw
+      // 2026 stats from Pitching Master. Sort by p_rv_plus (pitcher composite),
+      // take the player's best variant (returner vs transfer) per player_id.
+      const all: any[] = [];
+      let from = 0;
+      const PAGE = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("player_predictions")
+          .select(
+            "id, player_id, model_type, variant, status, p_rv_plus, p_era, p_fip, p_k9, players!inner(first_name, last_name, team, from_team, conference, position, ip)",
+          )
+          .eq("variant", "regular")
+          .in("status", ["active", "departed"])
+          .in("model_type", ["returner", "transfer"])
+          .in("players.position", ["SP", "RP", "CL", "P", "LHP", "RHP"])
+          .gte("players.ip", 20)
+          .not("p_rv_plus", "is", null)
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const rows = data || [];
+        all.push(...rows);
+        if (rows.length < PAGE) break;
+        from += PAGE;
+      }
+      const byPlayer = new Map<string, any>();
+      for (const row of all) {
+        const existing = byPlayer.get(row.player_id);
+        if (!existing || (row.p_rv_plus ?? -Infinity) > (existing.p_rv_plus ?? -Infinity)) {
+          byPlayer.set(row.player_id, row);
         }
       }
-
-      const out: PitcherRow[] = [];
-      for (const r of pitchers as any[]) {
-        const pl = playerMap.get(r.source_player_id);
-        if (!pl) continue; // skip pitchers not yet linked to a player record
-        const fullName = (r.playerFullName || "").trim();
-        const [first, ...rest] = fullName.split(" ");
-        out.push({
-          player_id: pl.id,
-          first_name: first || "",
-          last_name: rest.join(" ") || "",
-          team: r.Team ?? pl.team,
-          from_team: null,
-          conference: r.Conference ?? null,
-          position: r.Role ?? pl.position,
-          model_type: "returner",
-          p_rv_plus: Number(r.overall_pr_plus),
-          p_era: r.ERA,
-          p_fip: r.FIP,
-          p_k9: r.K9,
-        });
-        if (out.length >= 5) break;
-      }
-      return out;
+      const rows: PitcherRow[] = Array.from(byPlayer.values())
+        .map((r) => ({
+          player_id: r.player_id,
+          first_name: r.players.first_name,
+          last_name: r.players.last_name,
+          team: r.players.team ?? null,
+          from_team: r.players.from_team ?? null,
+          conference: r.players.conference ?? null,
+          position: r.players.position ?? null,
+          model_type: r.model_type,
+          p_rv_plus: Number(r.p_rv_plus),
+          p_era: r.p_era,
+          p_fip: r.p_fip,
+          p_k9: r.p_k9,
+        }))
+        .sort((a, b) => b.p_rv_plus - a.p_rv_plus)
+        .slice(0, 5);
+      return rows;
     },
   });
 

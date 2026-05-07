@@ -7,13 +7,18 @@ import { toast } from "sonner";
  * High Follow List — coach watchlist separate from Team Builder's target board.
  *
  * Supabase table: `high_follow`
- *   id           uuid PK default gen_random_uuid()
- *   user_id      uuid NOT NULL references auth.users(id)
- *   player_id    uuid NOT NULL references players(id)
- *   player_type  text NOT NULL default 'hitter'  -- 'hitter' | 'pitcher'
- *   notes        text
- *   added_at     timestamptz default now()
- *   UNIQUE(user_id, player_id)
+ *   id                uuid PK default gen_random_uuid()
+ *   user_id           uuid NOT NULL references auth.users(id)
+ *   customer_team_id  uuid references customer_teams(id)
+ *   player_id         uuid NOT NULL references players(id)
+ *   player_type       text NOT NULL default 'hitter'  -- 'hitter' | 'pitcher'
+ *   notes             text
+ *   added_at          timestamptz default now()
+ *   UNIQUE(user_id, customer_team_id, player_id)
+ *
+ * Per-team scoped: each team gets its own list. Switching impersonation
+ * via useAuth.effectiveTeamId flips the visible list. Mirrors the pattern
+ * in useTargetBoard.
  *
  * RLS: users can only read/write their own rows.
  */
@@ -36,21 +41,20 @@ export interface HighFollowRow {
   source_player_id: string | null;
 }
 
-const QUERY_KEY = ["high-follow"];
-
 export function useHighFollow() {
-  const { user } = useAuth();
+  const { user, effectiveTeamId } = useAuth();
   const qc = useQueryClient();
 
   const { data: list = [], isLoading } = useQuery({
-    queryKey: QUERY_KEY,
-    enabled: !!user?.id,
+    queryKey: ["high-follow", effectiveTeamId ?? null],
+    enabled: !!user?.id && !!effectiveTeamId,
     queryFn: async () => {
       const { data, error } = await hf()
         .select(
           "id, player_id, player_type, notes, added_at, players!inner(first_name, last_name, team, conference, position, class_year, source_player_id)"
         )
         .eq("user_id", user!.id)
+        .eq("customer_team_id", effectiveTeamId!)
         .order("added_at", { ascending: false });
 
       if (error) throw error;
@@ -83,15 +87,17 @@ export function useHighFollow() {
       playerType?: "hitter" | "pitcher";
     }) => {
       if (!user?.id) throw new Error("Not logged in");
+      if (!effectiveTeamId) throw new Error("No team in scope — impersonate or join a team first");
       const { error } = await hf().insert({
         user_id: user.id,
+        customer_team_id: effectiveTeamId,
         player_id: playerId,
         player_type: playerType,
       });
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: QUERY_KEY });
+      qc.invalidateQueries({ queryKey: ["high-follow", effectiveTeamId ?? null] });
       toast.success("Added to High Follow list");
     },
     onError: (e: any) => {
@@ -108,19 +114,21 @@ export function useHighFollow() {
       players: { playerId: string; playerType?: "hitter" | "pitcher" }[]
     ) => {
       if (!user?.id) throw new Error("Not logged in");
+      if (!effectiveTeamId) throw new Error("No team in scope — impersonate or join a team first");
       const rows = players.map((p) => ({
         user_id: user.id,
+        customer_team_id: effectiveTeamId,
         player_id: p.playerId,
         player_type: p.playerType || "hitter",
       }));
       const { error } = await hf().upsert(rows, {
-        onConflict: "user_id,player_id",
+        onConflict: "user_id,customer_team_id,player_id",
         ignoreDuplicates: true,
       });
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: QUERY_KEY });
+      qc.invalidateQueries({ queryKey: ["high-follow", effectiveTeamId ?? null] });
       toast.success("Added to High Follow list");
     },
     onError: (e: any) => toast.error(`Failed to add: ${e.message}`),
@@ -129,14 +137,16 @@ export function useHighFollow() {
   const removePlayer = useMutation({
     mutationFn: async (playerId: string) => {
       if (!user?.id) throw new Error("Not logged in");
+      if (!effectiveTeamId) throw new Error("No team in scope");
       const { error } = await hf()
         .delete()
         .eq("user_id", user.id)
+        .eq("customer_team_id", effectiveTeamId)
         .eq("player_id", playerId);
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: QUERY_KEY });
+      qc.invalidateQueries({ queryKey: ["high-follow", effectiveTeamId ?? null] });
       toast.success("Removed from High Follow list");
     },
     onError: (e: any) => toast.error(`Failed to remove: ${e.message}`),
@@ -151,14 +161,16 @@ export function useHighFollow() {
       notes: string;
     }) => {
       if (!user?.id) throw new Error("Not logged in");
+      if (!effectiveTeamId) throw new Error("No team in scope");
       const { error } = await hf()
         .update({ notes })
         .eq("user_id", user.id)
+        .eq("customer_team_id", effectiveTeamId)
         .eq("player_id", playerId);
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: QUERY_KEY });
+      qc.invalidateQueries({ queryKey: ["high-follow", effectiveTeamId ?? null] });
     },
     onError: (e: any) => toast.error(`Failed to update notes: ${e.message}`),
   });

@@ -784,13 +784,19 @@ export default function TransferPortal() {
       const fipPr = hr9Pr != null && bb9Pr != null && k9Pr != null
         ? (hr9Pr * EQ.p_fip_hr9_power_rating_plus_weight) + (bb9Pr * EQ.p_fip_bb9_power_rating_plus_weight) + (k9Pr * EQ.p_fip_k9_power_rating_plus_weight)
         : null;
+      // Prefer pre-computed PR+ values written by the projection pipeline
+      // (Pitching Master.era_pr_plus etc.) — this is what TB reads via
+      // pitchingPrByNameTeam (the #9 fix). Live-recomputed values above are
+      // a fallback for rows the pipeline hasn't filled yet, but they use
+      // hardcoded equation weights from a previous calibration era and will
+      // diverge from TB whenever the pipeline runs with newer weights.
       const snapshot: PitchingPowerSnapshot = {
-        eraPrPlus: eraPr,
-        fipPrPlus: fipPr,
-        whipPrPlus: whipPr,
-        k9PrPlus: k9Pr,
-        hr9PrPlus: hr9Pr,
-        bb9PrPlus: bb9Pr,
+        eraPrPlus: pr.era_pr_plus ?? eraPr,
+        fipPrPlus: pr.fip_pr_plus ?? fipPr,
+        whipPrPlus: pr.whip_pr_plus ?? whipPr,
+        k9PrPlus: pr.k9_pr_plus ?? k9Pr,
+        hr9PrPlus: pr.hr9_pr_plus ?? hr9Pr,
+        bb9PrPlus: pr.bb9_pr_plus ?? bb9Pr,
       };
       // ID-first: index by source_player_id
       if (pr.source_player_id) bySourceId.set(pr.source_player_id, snapshot);
@@ -1274,7 +1280,11 @@ export default function TransferPortal() {
     const lastIso = lastSlg - lastAvg;
     const isoRatingZ = isoStdPower > 0 ? (isoPR - 100) / isoStdPower : 0;
     const isoScaled = ncaaAvgISO + (isoRatingZ * isoStdNcaa);
-    const isoBlended = (lastIso * (1 - 0.3)) + (isoScaled * 0.3);
+    // Power-heavy blend (0.7) — matches the canonical lib in transferProjection.ts
+    // and BA/OBP weights. Was hardcoded 0.3 (inverted), made the "Show Work"
+    // section display a different ISO than the projected.pIso shown elsewhere
+    // on the page. Fixed 2026-05-06.
+    const isoBlended = (lastIso * 0.3) + (isoScaled * 0.7);
     const isoConfTerm = isoConferenceWeight * ((toIsoPlus - fromIsoPlus) / 100);
     const isoPitchTerm = isoPitchingWeight * ((toStuff - fromStuff) / 100);
     const isoParkTerm = isoParkWeight * ((toIsoPark - fromIsoPark) / 100);
@@ -1636,10 +1646,30 @@ export default function TransferPortal() {
     });
   };
 
-  const addPitcherToTargetBoard = () => {
+  const addPitcherToTargetBoard = async () => {
     if (!selectedPitcher || !selectedDestinationTeam || pitchingSimulation?.blocked) return;
-    const playerId = selectedPitcher.id;
-    if (playerId && !isOnSupabaseBoard(playerId)) {
+    // selectedPitcher.id is the source_player_id (numeric, e.g. "1254299136")
+    // — comes straight from Pitching Master via usePitchingSeedData. The
+    // target_board.player_id column is a UUID FK to players.id, so we have
+    // to resolve source_player_id → players.id before inserting. Hitter
+    // path doesn't need this because its data already carries players.id.
+    const sourcePlayerId = selectedPitcher.id;
+    if (!sourcePlayerId) return;
+    const { data: playerRow, error: lookupErr } = await supabase
+      .from("players")
+      .select("id")
+      .eq("source_player_id", sourcePlayerId)
+      .maybeSingle();
+    if (lookupErr || !playerRow?.id) {
+      toast({
+        title: "Failed to add",
+        description: "Could not resolve pitcher to a players row. The pitcher may not be synced yet.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const playerId = playerRow.id;
+    if (!isOnSupabaseBoard(playerId)) {
       addToSupabaseBoard({ playerId });
     }
     toast({

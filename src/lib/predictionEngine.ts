@@ -395,6 +395,17 @@ function recalcReturner(
     return config.obpDampTier4Impact;
   };
 
+  // Hitter damping disabled — the original formula
+  //   final = fromStat + (delta × dampFactor)
+  // applied dampFactor as a weight on the delta. For extreme actual seasons
+  // (high fromAvg with regressed projected) it pulled the result BACK toward
+  // the outlier season — anti-regression. For unrealistic projections it did
+  // partially correct, but the blend (POWER_RATING_WEIGHT) plus tightened
+  // PR+ SDs already do enough regression-to-mean. Predates SD calibration.
+  // Kept tier-damp helpers on the signature for a future Path B (pull
+  // extreme PROJECTED values toward NCAA mean regardless of delta direction).
+  void avgProjectedTierDamp; void obpProjectedTierDamp;
+
   const pAvg = baPlus == null
     ? null
     : (() => {
@@ -402,9 +413,7 @@ function recalcReturner(
       const scaledBa = config.ncaaAvg + (((baPlus - config.ncaaPR) / safeBaStdPower) * config.baStdNcaa);
       const baBlended = (fromAvg * (1 - effectivePowerWeight)) + (scaledBa * effectivePowerWeight);
       const baProjected = baBlended * (1 + bases.avg + (devAgg * config.devCoeffs.avg));
-      const baDelta = baProjected - fromAvg;
-      const result = round3(normalizeProjectedRate(fromAvg + (baDelta * avgProjectedTierDamp(baProjected))));
-      return result;
+      return round3(normalizeProjectedRate(baProjected));
     })();
 
   const pObp = obpPlus == null
@@ -414,8 +423,7 @@ function recalcReturner(
       const scaledObp = config.ncaaObp + (((obpPlus - config.ncaaPR) / safeObpStdPower) * config.obpStdNcaa);
       const obpBlended = (fromObp * (1 - effectivePowerWeight)) + (scaledObp * effectivePowerWeight);
       const obpProjected = obpBlended * (1 + bases.obp + (devAgg * config.devCoeffs.obp));
-      const obpDelta = obpProjected - fromObp;
-      return round3(normalizeProjectedRate(fromObp + (obpDelta * obpProjectedTierDamp(obpProjected))));
+      return round3(normalizeProjectedRate(obpProjected));
     })();
 
   const pIso = isoPlus == null
