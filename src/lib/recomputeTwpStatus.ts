@@ -43,7 +43,7 @@ interface PlayerRow {
 interface HitterRow {
   source_player_id: string | null;
   playerFullName: string | null;
-  PA: number | null;
+  pa: number | null;
   Pos: string | null;
 }
 
@@ -79,7 +79,7 @@ async function fetchAllHitterMaster(season: number): Promise<HitterRow[]> {
   while (true) {
     const { data, error } = await (supabase as any)
       .from("Hitter Master")
-      .select("source_player_id, playerFullName, PA, Pos")
+      .select("source_player_id, playerFullName, pa, Pos")
       .eq("Season", season)
       .not("source_player_id", "is", null)
       .range(offset, offset + PAGE - 1);
@@ -156,7 +156,7 @@ export async function recomputeTwpStatus(
 
     const hitter = hitterBySid.get(player.source_player_id);
     const pitcher = pitcherBySid.get(player.source_player_id);
-    const pa = Number(hitter?.PA) || 0;
+    const pa = Number(hitter?.pa) || 0;
     const ip = Number(pitcher?.IP) || 0;
     const currentPos = player.position;
     const name = `${player.first_name ?? ""} ${player.last_name ?? ""}`.trim() || player.source_player_id;
