@@ -824,16 +824,26 @@ async function fetchPitcherContext(
     if (roleRow) coachRoleOverride = normalizeRole((roleRow as any).role);
   }
 
-  // Merge stored PR+ sources: Pitching Master first (matches PitcherProfile's
-  // primary source), internals second (sparse), live compute third (inside lib).
+  // Stored PR+ sources: Pitching Master is the canonical source for all six rates.
+  //
+  // ⚠️ Do NOT fall back to `internalsPr` — that object holds the RAW
+  // `*_power_rating` values from `player_prediction_internals` (per the
+  // table schema). Those are NOT PR+ — they're the unnormalized power
+  // ratings BEFORE division by the NCAA average. For ERA/FIP/WHIP they
+  // happen to equal PR+ because their `*_ncaa_avg_power_rating` constants
+  // are 100; for K9/BB9/HR9 they DON'T (e.g. NCAA avg K9 power rating
+  // ≈ 138.86), so passing the raw value into projectPitchingRate as
+  // `prPlus` produces a silently wrong projection. See
+  // `feedback_pr_plus_vs_power_rating_trap.md` in memory for context.
   const storedPrPlus: StoredPitcherPrPlus = {
-    era: scouting?.era_pr_plus ?? internalsPr?.era ?? null,
-    fip: scouting?.fip_pr_plus ?? internalsPr?.fip ?? null,
-    whip: scouting?.whip_pr_plus ?? internalsPr?.whip ?? null,
-    k9: internalsPr?.k9 ?? null,
-    bb9: internalsPr?.bb9 ?? null,
-    hr9: internalsPr?.hr9 ?? null,
+    era: scouting?.era_pr_plus ?? null,
+    fip: scouting?.fip_pr_plus ?? null,
+    whip: scouting?.whip_pr_plus ?? null,
+    k9: scouting?.k9_pr_plus ?? null,
+    bb9: scouting?.bb9_pr_plus ?? null,
+    hr9: scouting?.hr9_pr_plus ?? null,
   };
+  void internalsPr;
 
   return { eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride };
 }
@@ -1179,24 +1189,6 @@ export async function bulkRecalculatePredictionsLocal(season = 2026) {
     const PITCHER_BATCH = 25;
     for (let i = 0; i < pitcherPreds.length; i += PITCHER_BATCH) {
       const batch = pitcherPreds.slice(i, i + PITCHER_BATCH);
-      const batchIds = batch.map((p) => p.id);
-
-      // Preload stored PR+ from internals for this batch.
-      const { data: pitcherInternals } = await supabase
-        .from("player_prediction_internals")
-        .select("prediction_id, era_power_rating, fip_power_rating, whip_power_rating, k9_power_rating, bb9_power_rating, hr9_power_rating")
-        .in("prediction_id", batchIds);
-      const storedByPredId = new Map<string, StoredPitcherPrPlus>();
-      for (const row of (pitcherInternals || []) as any[]) {
-        storedByPredId.set(row.prediction_id, {
-          era: row.era_power_rating ?? null,
-          fip: row.fip_power_rating ?? null,
-          whip: row.whip_power_rating ?? null,
-          k9: row.k9_power_rating ?? null,
-          bb9: row.bb9_power_rating ?? null,
-          hr9: row.hr9_power_rating ?? null,
-        });
-      }
 
       await Promise.all(
         batch.map(async (pred) => {
@@ -1208,16 +1200,19 @@ export async function bulkRecalculatePredictionsLocal(season = 2026) {
               teamId: ctx?.teamId ?? null,
               conference: ctx?.conference ?? null,
             };
-            const internalsPr = storedByPredId.get(pred.id) ?? null;
-            // Pitching Master's precomputed PR+ takes precedence over internals
-            // (matches PitcherProfile). internals is sparse; PM is dense.
+            // Pitching Master is the canonical source for all six rate PR+
+            // values. Do NOT fall back to internals — see the comment in
+            // fetchPitcherContext for why: internals stores raw
+            // `*_power_rating`, which equals PR+ only for ERA/FIP/WHIP
+            // (NCAA avg = 100); for K9/BB9/HR9 it's a different scale and
+            // using it as `prPlus` produces silently wrong projections.
             const storedPrPlus: StoredPitcherPrPlus = {
-              era: scouting?.era_pr_plus ?? internalsPr?.era ?? null,
-              fip: scouting?.fip_pr_plus ?? internalsPr?.fip ?? null,
-              whip: scouting?.whip_pr_plus ?? internalsPr?.whip ?? null,
-              k9: internalsPr?.k9 ?? null,
-              bb9: internalsPr?.bb9 ?? null,
-              hr9: internalsPr?.hr9 ?? null,
+              era: scouting?.era_pr_plus ?? null,
+              fip: scouting?.fip_pr_plus ?? null,
+              whip: scouting?.whip_pr_plus ?? null,
+              k9: scouting?.k9_pr_plus ?? null,
+              bb9: scouting?.bb9_pr_plus ?? null,
+              hr9: scouting?.hr9_pr_plus ?? null,
             };
             const coachRoleOverride = pred.player_id ? coachRoleByPlayerId.get(pred.player_id) ?? null : null;
             const { predictionUpdate, internalsUpdate } = recalcPitcher(pred, pitchingEq, pitchingPowerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride);
