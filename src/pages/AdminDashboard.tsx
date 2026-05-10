@@ -158,11 +158,13 @@ function RecomputeTwpButton() {
     unchangedTwps: number;
     demotedToHitter: number;
     demotedToPitcher: number;
+    clearedToNull: number;
     leftAlone: number;
     errors: number;
     sampleNew: Array<{ name: string; pa: number; ip: number }>;
     sampleDemoteHitter: Array<{ name: string; newPos: string }>;
     sampleDemotePitcher: Array<{ name: string }>;
+    sampleCleared: Array<{ name: string; reason: string }>;
   } | null>(null);
   return (
     <div className="flex flex-col gap-3">
@@ -205,17 +207,19 @@ function RecomputeTwpButton() {
                 unchangedTwps: r.unchangedTwps,
                 demotedToHitter: r.demotedToHitter.length,
                 demotedToPitcher: r.demotedToPitcher.length,
+                clearedToNull: r.clearedToNull.length,
                 leftAlone: r.leftAlone,
                 errors: r.errors.length,
                 sampleNew: r.newTwps.slice(0, 10).map((x) => ({ name: x.name, pa: x.pa, ip: x.ip })),
                 sampleDemoteHitter: r.demotedToHitter.slice(0, 5).map((x) => ({ name: x.name, newPos: x.newPos })),
                 sampleDemotePitcher: r.demotedToPitcher.slice(0, 5).map((x) => ({ name: x.name })),
+                sampleCleared: r.clearedToNull.slice(0, 5).map((x) => ({ name: x.name, reason: x.reason })),
               });
             } catch (err: any) {
               setResult({
                 scanned: 0, paThreshold, ipThreshold, newTwps: 0, unchangedTwps: 0,
-                demotedToHitter: 0, demotedToPitcher: 0, leftAlone: 0, errors: 1,
-                sampleNew: [], sampleDemoteHitter: [], sampleDemotePitcher: [],
+                demotedToHitter: 0, demotedToPitcher: 0, clearedToNull: 0, leftAlone: 0, errors: 1,
+                sampleNew: [], sampleDemoteHitter: [], sampleDemotePitcher: [], sampleCleared: [],
               });
               alert(`Recompute failed: ${err.message}`);
             }
@@ -237,6 +241,7 @@ function RecomputeTwpButton() {
             <span className="text-foreground font-medium">{result.unchangedTwps}</span> unchanged,{" "}
             <span className="text-foreground font-medium">{result.demotedToHitter}</span> demoted to hitter,{" "}
             <span className="text-foreground font-medium">{result.demotedToPitcher}</span> demoted to pitcher,{" "}
+            <span className="text-foreground font-medium">{result.clearedToNull}</span> cleared to NULL,{" "}
             {result.leftAlone > 0 && <>{result.leftAlone} left alone, </>}
             {result.errors > 0 && <span className="text-red-500">{result.errors} errors</span>}
           </p>
@@ -256,6 +261,12 @@ function RecomputeTwpButton() {
             <p className="text-xs">
               <span className="font-medium">Demoted → pitcher (first 5):</span>{" "}
               {result.sampleDemotePitcher.map((x) => x.name).join("; ")}
+            </p>
+          )}
+          {result.sampleCleared.length > 0 && (
+            <p className="text-xs">
+              <span className="font-medium">Cleared to NULL (first 5):</span>{" "}
+              {result.sampleCleared.map((x) => `${x.name} (${x.reason})`).join("; ")}
             </p>
           )}
         </div>

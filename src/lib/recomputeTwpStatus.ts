@@ -3,14 +3,30 @@ import { supabase } from "@/integrations/supabase/client";
 /**
  * Recompute Two-Way Player (TWP) Status
  *
- * Scans Hitter Master + Pitching Master for the given season, and updates
- * `players.position` based on PA + IP thresholds:
+ * Scans Hitter Master + Pitching Master for the given season and updates
+ * `players.position` so the TWP flag accurately reflects current-season
+ * two-way activity.
  *
+ * Promotion rule:
  *   - PA ≥ paThreshold AND IP ≥ ipThreshold  →  position = 'TWP'
- *   - Currently TWP but doesn't meet:
- *       · PA ≥ paThreshold (but IP < ipThreshold)  →  revert to Hitter Master Pos
- *       · IP ≥ ipThreshold (but PA < paThreshold)  →  set to 'P'
- *       · neither  →  leave alone (rare edge case)
+ *
+ * Demotion rules for players currently flagged TWP who don't meet the
+ * promotion threshold (in priority order):
+ *
+ *   1. PA ≥ paThreshold AND hitter Pos is valid (not null, not 'TWP')
+ *        →  revert to hitter Pos (e.g. SS, C, RF)
+ *   2. IP ≥ ipThreshold
+ *        →  set to 'P'
+ *   3. Hitting only (PA > 0 AND IP == 0):
+ *        a) hitter Pos valid → hitter Pos
+ *        b) hitter Pos missing or 'TWP' → NULL  (can't infer; clear flag)
+ *   4. Pitching only (IP > 0 AND PA == 0)
+ *        →  'P'  (any pitching activity, even below threshold)
+ *   5. Mixed tiny activity (both > 0 but neither meets threshold)
+ *      AND hitter Pos invalid:
+ *        →  leave alone  (true ambiguity; manual data fix needed)
+ *   6. No 2026 data at all (PA == 0 AND IP == 0)
+ *        →  NULL  (alumni — went pro / graduated / not in 2026 master)
  *
  * Defaults match the 2026-05-01 one-time SQL flagging convention:
  *   PA ≥ 30 AND IP ≥ 5.
@@ -28,6 +44,7 @@ export interface TwpRecomputeReport {
   unchangedTwps: number;
   demotedToHitter: Array<{ source_player_id: string; name: string; newPos: string; pa: number; ip: number }>;
   demotedToPitcher: Array<{ source_player_id: string; name: string; pa: number; ip: number }>;
+  clearedToNull: Array<{ source_player_id: string; name: string; reason: string }>;
   leftAlone: number;
   errors: string[];
 }
@@ -126,6 +143,7 @@ export async function recomputeTwpStatus(
     unchangedTwps: 0,
     demotedToHitter: [],
     demotedToPitcher: [],
+    clearedToNull: [],
     leftAlone: 0,
     errors: [],
   };
@@ -147,7 +165,26 @@ export async function recomputeTwpStatus(
   for (const p of pitchers) if (p.source_player_id) pitcherBySid.set(p.source_player_id, p);
 
   // Compute desired position for each player
-  const updates: Array<{ id: string; sid: string; name: string; newPos: string; oldPos: string | null; pa: number; ip: number; kind: "newTwp" | "demoteToHitter" | "demoteToPitcher" }> = [];
+  type UpdateKind = "newTwp" | "demoteToHitter" | "demoteToPitcher" | "clearToNull";
+  const updates: Array<{
+    id: string;
+    sid: string;
+    name: string;
+    newPos: string | null;
+    oldPos: string | null;
+    pa: number;
+    ip: number;
+    kind: UpdateKind;
+    reason?: string;
+  }> = [];
+
+  const validHitterPos = (pos: string | null | undefined): string | null => {
+    if (!pos) return null;
+    const trimmed = pos.trim();
+    if (!trimmed) return null;
+    if (trimmed.toUpperCase() === "TWP") return null; // Hitter Master itself flagged TWP — can't help
+    return trimmed;
+  };
 
   console.time("[TWPRecompute] 2. compute desired positions");
   for (const player of players) {
@@ -159,6 +196,7 @@ export async function recomputeTwpStatus(
     const pa = Number(hitter?.pa) || 0;
     const ip = Number(pitcher?.IP) || 0;
     const currentPos = player.position;
+    const hPos = validHitterPos(hitter?.Pos);
     const name = `${player.first_name ?? ""} ${player.last_name ?? ""}`.trim() || player.source_player_id;
 
     const meetsTwp = pa >= paThreshold && ip >= ipThreshold;
@@ -173,21 +211,45 @@ export async function recomputeTwpStatus(
       continue;
     }
 
-    // Not a TWP. If currently flagged, revert.
-    if (isCurrentlyTwp) {
-      // Prefer Hitter Master Pos if they have hitter activity above threshold
-      if (pa >= paThreshold && hitter?.Pos) {
-        updates.push({ id: player.id, sid: player.source_player_id, name, newPos: hitter.Pos, oldPos: currentPos, pa, ip, kind: "demoteToHitter" });
-      } else if (ip >= ipThreshold) {
-        updates.push({ id: player.id, sid: player.source_player_id, name, newPos: "P", oldPos: currentPos, pa, ip, kind: "demoteToPitcher" });
-      } else {
-        // Neither side meets threshold but currently TWP — leave alone.
-        // This is rare; a previous TWP flag without supporting data shouldn't
-        // be silently demoted to nothing useful.
-        report.leftAlone += 1;
-      }
+    // Not a TWP. If currently flagged, demote per the ladder.
+    if (!isCurrentlyTwp) continue;
+
+    // Rule 6: no 2026 data at all → clear flag (alumni)
+    if (pa === 0 && ip === 0) {
+      updates.push({ id: player.id, sid: player.source_player_id, name, newPos: null, oldPos: currentPos, pa, ip, kind: "clearToNull", reason: "no 2026 data" });
+      continue;
     }
-    // Not TWP and not flagged — nothing to do.
+
+    // Rule 4: pitching only, any amount → 'P'
+    if (pa === 0 && ip > 0) {
+      updates.push({ id: player.id, sid: player.source_player_id, name, newPos: "P", oldPos: currentPos, pa, ip, kind: "demoteToPitcher" });
+      continue;
+    }
+
+    // Rule 3: hitting only
+    if (pa > 0 && ip === 0) {
+      if (hPos) {
+        updates.push({ id: player.id, sid: player.source_player_id, name, newPos: hPos, oldPos: currentPos, pa, ip, kind: "demoteToHitter" });
+      } else {
+        updates.push({ id: player.id, sid: player.source_player_id, name, newPos: null, oldPos: currentPos, pa, ip, kind: "clearToNull", reason: "hitter only but Hitter Master Pos invalid" });
+      }
+      continue;
+    }
+
+    // Both pa > 0 and ip > 0 but doesn't meet TWP threshold.
+    // Rule 1: hitter side meets threshold and has valid Pos
+    if (pa >= paThreshold && hPos) {
+      updates.push({ id: player.id, sid: player.source_player_id, name, newPos: hPos, oldPos: currentPos, pa, ip, kind: "demoteToHitter" });
+      continue;
+    }
+    // Rule 2: pitcher side meets threshold
+    if (ip >= ipThreshold) {
+      updates.push({ id: player.id, sid: player.source_player_id, name, newPos: "P", oldPos: currentPos, pa, ip, kind: "demoteToPitcher" });
+      continue;
+    }
+
+    // Rule 5: mixed tiny activity, hitter Pos invalid → leave alone (data quality issue)
+    report.leftAlone += 1;
   }
   console.timeEnd("[TWPRecompute] 2. compute desired positions");
   console.log(`[TWPRecompute] ${updates.length} updates to apply`);
@@ -207,14 +269,15 @@ export async function recomputeTwpStatus(
         return;
       }
       if (u.kind === "newTwp") report.newTwps.push({ source_player_id: u.sid, name: u.name, pa: u.pa, ip: u.ip });
-      else if (u.kind === "demoteToHitter") report.demotedToHitter.push({ source_player_id: u.sid, name: u.name, newPos: u.newPos, pa: u.pa, ip: u.ip });
+      else if (u.kind === "demoteToHitter") report.demotedToHitter.push({ source_player_id: u.sid, name: u.name, newPos: u.newPos ?? "", pa: u.pa, ip: u.ip });
       else if (u.kind === "demoteToPitcher") report.demotedToPitcher.push({ source_player_id: u.sid, name: u.name, pa: u.pa, ip: u.ip });
+      else if (u.kind === "clearToNull") report.clearedToNull.push({ source_player_id: u.sid, name: u.name, reason: u.reason ?? "" });
     }));
   }
   console.timeEnd("[TWPRecompute] 3. apply position updates");
 
   console.timeEnd("[TWPRecompute] TOTAL");
-  console.log(`[TWPRecompute] ${report.newTwps.length} new TWPs, ${report.unchangedTwps} unchanged, ${report.demotedToHitter.length} → hitter, ${report.demotedToPitcher.length} → pitcher, ${report.leftAlone} left alone`);
+  console.log(`[TWPRecompute] ${report.newTwps.length} new TWPs, ${report.unchangedTwps} unchanged, ${report.demotedToHitter.length} → hitter, ${report.demotedToPitcher.length} → pitcher, ${report.clearedToNull.length} cleared to NULL, ${report.leftAlone} left alone`);
 
   return report;
 }
