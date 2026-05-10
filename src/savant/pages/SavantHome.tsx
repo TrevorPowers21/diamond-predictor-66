@@ -6,6 +6,7 @@ import ReclassificationRunner from "@/savant/components/ReclassificationRunner";
 import NonBreakingBallPopRunner from "@/savant/components/NonBreakingBallPopRunner";
 import VeloDiffRunner from "@/savant/components/VeloDiffRunner";
 import StuffPlusRunner from "@/savant/components/StuffPlusRunner";
+import StuffPlusRollupRunner from "@/savant/components/StuffPlusRollupRunner";
 import ConferenceStuffPlusRunner from "@/savant/components/ConferenceStuffPlusRunner";
 import ConferenceStuffPlusV2Runner from "@/savant/components/ConferenceStuffPlusV2Runner";
 import ConferenceScoutingRunner from "@/savant/components/ConferenceScoutingRunner";
@@ -117,6 +118,7 @@ export default function SavantHome() {
           <NonBreakingBallPopRunner />
           <VeloDiffRunner />
           <StuffPlusRunner />
+          <StuffPlusRollupRunner />
           <ConferenceStuffPlusRunner />
           <ConferenceStuffPlusV2Runner />
           <ConferenceScoutingRunner />
