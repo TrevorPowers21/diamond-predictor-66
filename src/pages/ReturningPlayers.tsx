@@ -65,9 +65,10 @@ type SortDir = "asc" | "desc";
 const FAST_DB_SORT_KEYS: SortKey[] = ["p_avg", "p_obp", "p_slg", "p_ops", "p_iso", "p_wrc_plus", "p_war"];
 
 // Position filter taxonomy for hitter dashboard. Coaches see atomic positions
-// in baseball-card order, plus IF / OF group buckets and a TWP placeholder.
+// in baseball-card order, plus IF / OF group buckets and TWP.
 // IF expands to 1B/2B/3B/SS at query time; OF expands to LF/CF/RF/OF.
-// TWP is a placeholder until the players table tracks two-way status.
+// TWP filters `players.position = 'TWP'` (set by the Recompute TWP Status
+// admin button based on PA + IP thresholds).
 const HITTER_POSITION_TOKENS: string[] = [
   "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "IF", "OF", "TWP",
 ];
@@ -77,24 +78,20 @@ const POSITION_GROUP_OUTFIELD = ["LF", "CF", "RF", "OF"] as const;
 function expandHitterPositions(tokens: Set<string>): { positions: string[]; twpOnly: boolean } {
   if (tokens.size === 0) return { positions: [], twpOnly: false };
   const out = new Set<string>();
-  let twpFlag = false;
   for (const t of tokens) {
     if (t === "IF") POSITION_GROUP_INFIELD.forEach((p) => out.add(p));
     else if (t === "OF") POSITION_GROUP_OUTFIELD.forEach((p) => out.add(p));
-    else if (t === "TWP") twpFlag = true;
+    else if (t === "TWP") out.add("TWP");
     else out.add(t);
   }
-  // If only TWP is selected (and TWP returns no expanded positions), surface a
-  // sentinel position that matches nothing so the table comes back empty
-  // instead of accidentally returning every player.
-  const twpOnly = twpFlag && out.size === 0;
-  return { positions: Array.from(out), twpOnly };
+  // twpOnly retained on the return signature for backward compatibility with
+  // callers; always false now that TWP is a real DB-level position value.
+  return { positions: Array.from(out), twpOnly: false };
 }
 
 function hitterPositionMatches(pos: string | null, tokens: Set<string>): boolean {
   if (tokens.size === 0) return true;
-  const { positions, twpOnly } = expandHitterPositions(tokens);
-  if (twpOnly) return false; // placeholder until TWP support lands
+  const { positions } = expandHitterPositions(tokens);
   return pos != null && positions.includes(pos);
 }
 
@@ -1635,12 +1632,8 @@ export default function ReturningPlayers() {
           .gte("pa", 75)
           .order("last_name", { ascending: true })
           .order("first_name", { ascending: true });
-        // Position group expansion: IF→1B/2B/3B/SS, OF→LF/CF/RF/OF.
-        // TWP-only selection has no DB-level position match yet, so we short-circuit
-        // to an empty result by filtering on a sentinel that cannot match.
-        if (expandedHitterPositions.twpOnly) {
-          q = q.eq("position", "__TWP_PLACEHOLDER__");
-        } else if (expandedHitterPositions.positions.length === 1) {
+        // Position group expansion: IF→1B/2B/3B/SS, OF→LF/CF/RF/OF, TWP→TWP.
+        if (expandedHitterPositions.positions.length === 1) {
           q = q.eq("position", expandedHitterPositions.positions[0]);
         } else if (expandedHitterPositions.positions.length > 1) {
           q = q.in("position", expandedHitterPositions.positions);
@@ -2567,7 +2560,7 @@ export default function ReturningPlayers() {
                       : pos === "OF"
                         ? "Outfield: LF, CF, RF, OF"
                         : pos === "TWP"
-                          ? "Two-way players (placeholder — coming soon)"
+                          ? "Two-way players (meets PA + IP thresholds; run Recompute TWP Status on admin to refresh)"
                           : pos
                   }
                 >

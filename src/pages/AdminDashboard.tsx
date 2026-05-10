@@ -146,6 +146,124 @@ function ImportClassDataButton() {
   );
 }
 
+function RecomputeTwpButton() {
+  const [loading, setLoading] = useState(false);
+  const [paThreshold, setPaThreshold] = useState(30);
+  const [ipThreshold, setIpThreshold] = useState(5);
+  const [result, setResult] = useState<{
+    scanned: number;
+    paThreshold: number;
+    ipThreshold: number;
+    newTwps: number;
+    unchangedTwps: number;
+    demotedToHitter: number;
+    demotedToPitcher: number;
+    leftAlone: number;
+    errors: number;
+    sampleNew: Array<{ name: string; pa: number; ip: number }>;
+    sampleDemoteHitter: Array<{ name: string; newPos: string }>;
+    sampleDemotePitcher: Array<{ name: string }>;
+  } | null>(null);
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-muted-foreground">PA ≥</label>
+          <input
+            type="number"
+            min={0}
+            value={paThreshold}
+            onChange={(e) => setPaThreshold(Math.max(0, Number(e.target.value) || 0))}
+            disabled={loading}
+            className="h-9 w-16 rounded-md border border-input bg-background px-2 text-sm"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-muted-foreground">IP ≥</label>
+          <input
+            type="number"
+            min={0}
+            value={ipThreshold}
+            onChange={(e) => setIpThreshold(Math.max(0, Number(e.target.value) || 0))}
+            disabled={loading}
+            className="h-9 w-16 rounded-md border border-input bg-background px-2 text-sm"
+          />
+        </div>
+        <Button
+          onClick={async () => {
+            if (!confirm(`Recompute TWP status for 2026 with PA ≥ ${paThreshold} AND IP ≥ ${ipThreshold}? This updates the players.position column for matching players.`)) return;
+            setLoading(true);
+            setResult(null);
+            try {
+              const { recomputeTwpStatus } = await import("@/lib/recomputeTwpStatus");
+              const r = await recomputeTwpStatus(2026, paThreshold, ipThreshold);
+              setResult({
+                scanned: r.scanned,
+                paThreshold: r.paThreshold,
+                ipThreshold: r.ipThreshold,
+                newTwps: r.newTwps.length,
+                unchangedTwps: r.unchangedTwps,
+                demotedToHitter: r.demotedToHitter.length,
+                demotedToPitcher: r.demotedToPitcher.length,
+                leftAlone: r.leftAlone,
+                errors: r.errors.length,
+                sampleNew: r.newTwps.slice(0, 10).map((x) => ({ name: x.name, pa: x.pa, ip: x.ip })),
+                sampleDemoteHitter: r.demotedToHitter.slice(0, 5).map((x) => ({ name: x.name, newPos: x.newPos })),
+                sampleDemotePitcher: r.demotedToPitcher.slice(0, 5).map((x) => ({ name: x.name })),
+              });
+            } catch (err: any) {
+              setResult({
+                scanned: 0, paThreshold, ipThreshold, newTwps: 0, unchangedTwps: 0,
+                demotedToHitter: 0, demotedToPitcher: 0, leftAlone: 0, errors: 1,
+                sampleNew: [], sampleDemoteHitter: [], sampleDemotePitcher: [],
+              });
+              alert(`Recompute failed: ${err.message}`);
+            }
+            setLoading(false);
+          }}
+          disabled={loading}
+          variant="outline"
+          className="gap-2"
+        >
+          {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          {loading ? "Recomputing TWP…" : "Recompute TWP Status"}
+        </Button>
+      </div>
+      {result && (
+        <div className="text-sm text-muted-foreground space-y-1">
+          <p>
+            Scanned {result.scanned.toLocaleString()} players with thresholds PA ≥ {result.paThreshold} AND IP ≥ {result.ipThreshold}.{" "}
+            <span className="text-foreground font-medium">{result.newTwps}</span> new TWPs,{" "}
+            <span className="text-foreground font-medium">{result.unchangedTwps}</span> unchanged,{" "}
+            <span className="text-foreground font-medium">{result.demotedToHitter}</span> demoted to hitter,{" "}
+            <span className="text-foreground font-medium">{result.demotedToPitcher}</span> demoted to pitcher,{" "}
+            {result.leftAlone > 0 && <>{result.leftAlone} left alone, </>}
+            {result.errors > 0 && <span className="text-red-500">{result.errors} errors</span>}
+          </p>
+          {result.sampleNew.length > 0 && (
+            <p className="text-xs">
+              <span className="font-medium">New TWPs (first 10):</span>{" "}
+              {result.sampleNew.map((x) => `${x.name} (PA ${x.pa}, IP ${x.ip})`).join("; ")}
+            </p>
+          )}
+          {result.sampleDemoteHitter.length > 0 && (
+            <p className="text-xs">
+              <span className="font-medium">Demoted → hitter (first 5):</span>{" "}
+              {result.sampleDemoteHitter.map((x) => `${x.name} → ${x.newPos}`).join("; ")}
+            </p>
+          )}
+          {result.sampleDemotePitcher.length > 0 && (
+            <p className="text-xs">
+              <span className="font-medium">Demoted → pitcher (first 5):</span>{" "}
+              {result.sampleDemotePitcher.map((x) => x.name).join("; ")}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ImportHistoricalHittersButton() {
   const [loading, setLoading] = useState(false);
   const season = 2026;
@@ -3850,6 +3968,13 @@ function QuickActionsTab() {
             </p>
           </div>
           <ImportClassDataButton />
+          <div className="border-t pt-4">
+            <p className="font-medium">Recompute Two-Way Player (TWP) Status</p>
+            <p className="text-sm text-muted-foreground">
+              Scans 2026 Hitter Master + Pitching Master and flags players who meet both thresholds as <code>TWP</code> on the players table. Players currently flagged TWP who fall below thresholds revert to their hitter position (if PA still ≥ threshold) or to <code>P</code> (if IP still ≥ threshold). Defaults match the 2026-05-01 SQL flagging convention (PA ≥ 30 + IP ≥ 5).
+            </p>
+          </div>
+          <RecomputeTwpButton />
           <div className="border-t pt-4">
             <p className="font-medium">Import Pitch Arsenal (Stuff+ & Whiff%)</p>
             <p className="text-sm text-muted-foreground">
