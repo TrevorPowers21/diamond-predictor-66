@@ -67,8 +67,8 @@ const FAST_DB_SORT_KEYS: SortKey[] = ["p_avg", "p_obp", "p_slg", "p_ops", "p_iso
 // Position filter taxonomy for hitter dashboard. Coaches see atomic positions
 // in baseball-card order, plus IF / OF group buckets and TWP.
 // IF expands to 1B/2B/3B/SS at query time; OF expands to LF/CF/RF/OF.
-// TWP filters `players.position = 'TWP'` (set by the Recompute TWP Status
-// admin button based on PA + IP thresholds).
+// TWP is a separate dimension — filters on `players.is_twp = true` (set by
+// the Recompute TWP Status admin button) regardless of primary position.
 const HITTER_POSITION_TOKENS: string[] = [
   "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "IF", "OF", "TWP",
 ];
@@ -77,20 +77,23 @@ const POSITION_GROUP_OUTFIELD = ["LF", "CF", "RF", "OF"] as const;
 
 function expandHitterPositions(tokens: Set<string>): { positions: string[]; twpOnly: boolean } {
   if (tokens.size === 0) return { positions: [], twpOnly: false };
+  // TWP-only filter: ignore position constraints and just match is_twp=true.
+  if (tokens.size === 1 && tokens.has("TWP")) return { positions: [], twpOnly: true };
   const out = new Set<string>();
   for (const t of tokens) {
+    if (t === "TWP") continue; // TWP handled via is_twp boolean, not position match
     if (t === "IF") POSITION_GROUP_INFIELD.forEach((p) => out.add(p));
     else if (t === "OF") POSITION_GROUP_OUTFIELD.forEach((p) => out.add(p));
-    else if (t === "TWP") out.add("TWP");
     else out.add(t);
   }
-  // twpOnly retained on the return signature for backward compatibility with
-  // callers; always false now that TWP is a real DB-level position value.
   return { positions: Array.from(out), twpOnly: false };
 }
 
-function hitterPositionMatches(pos: string | null, tokens: Set<string>): boolean {
+function hitterPositionMatches(pos: string | null, isTwp: boolean | null | undefined, tokens: Set<string>): boolean {
   if (tokens.size === 0) return true;
+  // If TWP is one of the selected tokens, an is_twp=true row satisfies that token
+  // regardless of primary position. Other tokens still match by primary position.
+  if (tokens.has("TWP") && isTwp) return true;
   const { positions } = expandHitterPositions(tokens);
   return pos != null && positions.includes(pos);
 }
@@ -382,6 +385,37 @@ function ConferenceFilter({
   );
 }
 
+// Display helper for the position cell of any player surface (hitter table,
+// pitcher table, search result, target board). For two-way players, render
+// the primary position dominantly and tack on a small muted gold "TWP" badge.
+// The user wants this to read "more SS than TWP" — primary first, large; TWP
+// second, tiny — so coaches scan positions normally and only notice the TWP
+// chip when they care about it.
+function PositionWithTwp({
+  position,
+  isTwp,
+  className,
+}: {
+  position: string | null | undefined;
+  isTwp?: boolean | null;
+  className?: string;
+}) {
+  const pos = (position || "").trim() || "—";
+  return (
+    <span className={cn("inline-flex items-center gap-1.5", className)}>
+      <span>{pos}</span>
+      {isTwp ? (
+        <span
+          className="px-1 py-[1px] rounded-sm text-[9px] uppercase tracking-[0.08em] font-semibold bg-[#D4AF37]/15 text-[#D4AF37]/90 ring-1 ring-[#D4AF37]/30"
+          title="Two-way player"
+        >
+          TWP
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 type PitchingSortKey =
   | "name"
   | "p_era"
@@ -402,6 +436,7 @@ interface ReturnerPlayer {
   team: string | null;
   conference: string | null;
   position: string | null;
+  is_twp: boolean | null;
   class_year: string | null;
   bats_hand: string | null;
   transfer_portal?: boolean | null;
@@ -437,6 +472,7 @@ interface PitchingDashboardRow {
   handedness: string | null;
   role: "SP" | "RP" | "SM" | null;
   class_year: string | null;
+  is_twp: boolean;
   stuff_score: number | null;
   whiff_score: number | null;
   bb_score: number | null;
@@ -924,7 +960,7 @@ export default function ReturningPlayers() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [searchResults, setSearchResults] = useState<Array<{ id: string; first_name: string; last_name: string; team: string | null; position: string | null }>>([]);
+  const [searchResults, setSearchResults] = useState<Array<{ id: string; first_name: string; last_name: string; team: string | null; position: string | null; is_twp: boolean | null }>>([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const [positionFilters, setPositionFilters] = useState<Set<string>>(new Set());
@@ -939,7 +975,7 @@ export default function ReturningPlayers() {
     });
   };
   const expandedHitterPositions = useMemo(() => expandHitterPositions(positionFilters), [positionFilters]);
-  const positionMatchesFilter = (pos: string | null) => hitterPositionMatches(pos, positionFilters);
+  const positionMatchesFilter = (pos: string | null, isTwp: boolean | null | undefined) => hitterPositionMatches(pos, isTwp, positionFilters);
 
   // Hitter class + handedness multi-selects. Empty set = no filter.
   const [classFilters, setClassFilters] = useState<Set<string>>(new Set());
@@ -1080,7 +1116,7 @@ export default function ReturningPlayers() {
     // Otherwise fall back to single-term OR across first_name/last_name/team.
     const baseQuery = supabase
       .from("players")
-      .select("id, first_name, last_name, team, position");
+      .select("id, first_name, last_name, team, position, is_twp");
     const withFilter = parts.length >= 2
       ? baseQuery
           .or(`first_name.ilike.%${parts[0]}%,last_name.ilike.%${parts[0]}%,team.ilike.%${parts[0]}%`)
@@ -1411,6 +1447,7 @@ export default function ReturningPlayers() {
           team: resolvedTeam2025,
           conference: player.conference,
           position: player.position,
+          is_twp: (player as any).is_twp ?? null,
           class_year: player.class_year,
           bats_hand: player.bats_hand ?? null,
           transfer_portal: player.transfer_portal,
@@ -1461,11 +1498,15 @@ export default function ReturningPlayers() {
         const to = from + pageSize - 1;
         const { data: pageData, error: pageErr, count } = await supabase
           .from("player_predictions")
-          .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, bats_hand, transfer_portal, portal_status, pa, ip)", { count: "exact" })
+          .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip)", { count: "exact" })
           .in("model_type", ["returner", "transfer"])
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
-          .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
+          // Hitter pool = non-pitcher primary OR flagged two-way. The is_twp
+          // branch surfaces pitcher-primary TWPs (position='P') in the hitter
+          // dashboard, matching the new architecture where TWPs appear in BOTH
+          // pools regardless of primary side.
+          .or("position.not.in.(SP,RP,CL,P,LHP,RHP),is_twp.eq.true", { referencedTable: "players" })
           .gte("players.pa", 75)
           .order(orderColumn, { ascending: sortDir === "asc", nullsFirst: false })
           .range(from, to);
@@ -1506,11 +1547,11 @@ export default function ReturningPlayers() {
         while (true) {
           const { data, error } = await supabase
             .from("player_predictions")
-            .select("*, players!inner(id, first_name, last_name, team, conference, position, class_year, bats_hand, transfer_portal, portal_status, pa, ip)")
+            .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip)")
             .in("model_type", ["returner", "transfer"])
             .eq("variant", "regular")
             .in("status", ["active", "departed"])
-            .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
+            .or("position.not.in.(SP,RP,CL,P,LHP,RHP),is_twp.eq.true", { referencedTable: "players" })
             .gte("players.pa", 75)
             .range(predFrom, predFrom + PRED_PAGE_SIZE - 1);
           if (error) throw error;
@@ -1586,7 +1627,7 @@ export default function ReturningPlayers() {
         }
 
         let allRows = dedupedRows.map((row: any) => toReturnerRow(row, row.players, nilByPlayer));
-        if (positionFilters.size > 0) allRows = allRows.filter((p) => positionMatchesFilter(p.position));
+        if (positionFilters.size > 0) allRows = allRows.filter((p) => positionMatchesFilter(p.position, p.is_twp));
         if (classFilters.size > 0) allRows = allRows.filter((p) => p.class_year != null && classFilters.has(p.class_year));
         if (batsFilters.size > 0) allRows = allRows.filter((p) => p.bats_hand != null && batsFilters.has(p.bats_hand));
         if (confFilters.size > 0) {
@@ -1624,19 +1665,31 @@ export default function ReturningPlayers() {
       // uniformly), so fall back to "fetch everything matching the other
       // filters, then JS-filter + JS-paginate" for correctness.
       const confFilterActive = confFilters.size > 0;
+      const twpTokenSelected = positionFilters.has("TWP");
       const buildBaseQuery = () => {
         let q = supabase
           .from("players")
-          .select("id, first_name, last_name, team, conference, position, class_year, bats_hand, transfer_portal, pa, ip", { count: "exact" } as any)
-          .not("position", "in", "(SP,RP,CL,P,LHP,RHP)")
-          .gte("pa", 75)
+          .select("id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, pa, ip", { count: "exact" } as any)
           .order("last_name", { ascending: true })
           .order("first_name", { ascending: true });
-        // Position group expansion: IF→1B/2B/3B/SS, OF→LF/CF/RF/OF, TWP→TWP.
-        if (expandedHitterPositions.positions.length === 1) {
-          q = q.eq("position", expandedHitterPositions.positions[0]);
-        } else if (expandedHitterPositions.positions.length > 1) {
-          q = q.in("position", expandedHitterPositions.positions);
+        if (expandedHitterPositions.twpOnly) {
+          // TWP-only filter: scan two-way players regardless of primary position
+          // and skip the PA gate so pitcher-primary TWPs (lower PA) surface too.
+          q = q.eq("is_twp", true);
+        } else if (twpTokenSelected && expandedHitterPositions.positions.length > 0) {
+          // TWP + atomic positions both selected. Match either branch.
+          const posList = expandedHitterPositions.positions.join(",");
+          q = q.or(`is_twp.eq.true,position.in.(${posList})`).gte("pa", 75);
+        } else {
+          // Default hitter pool: non-pitcher primary OR flagged two-way.
+          q = q
+            .or("position.not.in.(SP,RP,CL,P,LHP,RHP),is_twp.eq.true")
+            .gte("pa", 75);
+          if (expandedHitterPositions.positions.length === 1) {
+            q = q.eq("position", expandedHitterPositions.positions[0]);
+          } else if (expandedHitterPositions.positions.length > 1) {
+            q = q.in("position", expandedHitterPositions.positions);
+          }
         }
         if (classFilters.size > 0) q = q.in("class_year", Array.from(classFilters));
         if (batsFilters.size > 0) q = q.in("bats_hand", Array.from(batsFilters));
@@ -2070,23 +2123,29 @@ export default function ReturningPlayers() {
     staleTime: 30 * 60 * 1000,
   });
 
-  // Fallback: pull class_year directly from `players` so pitchers without a
-  // prediction row still resolve their class for the dashboard's class filter.
-  const { data: pitcherClassBySourceId } = useQuery({
-    queryKey: ["returning-pitcher-class-by-source-id"],
+  // Fallback: pull class_year + is_twp directly from `players` so pitchers
+  // without a prediction row still resolve their class (for the filter) and
+  // surface the TWP badge in the pitcher table.
+  const { data: pitcherMetaBySourceId } = useQuery({
+    queryKey: ["returning-pitcher-meta-by-source-id"],
     queryFn: async () => {
-      const map = new Map<string, string | null>();
+      const map = new Map<string, { class_year: string | null; is_twp: boolean }>();
       let from = 0;
       const PAGE = 1000;
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("source_player_id, class_year")
+          .select("source_player_id, class_year, is_twp")
           .not("source_player_id", "is", null)
           .range(from, from + PAGE - 1);
         if (error) throw error;
         for (const r of (data || []) as any[]) {
-          if (r.source_player_id) map.set(r.source_player_id, r.class_year ?? null);
+          if (r.source_player_id) {
+            map.set(r.source_player_id, {
+              class_year: r.class_year ?? null,
+              is_twp: !!r.is_twp,
+            });
+          }
         }
         if (!data || data.length < PAGE) break;
         from += PAGE;
@@ -2238,11 +2297,13 @@ export default function ReturningPlayers() {
           // prediction (canonical, came from the recalc engine's player join);
           // fall back to the players-table direct read for pitchers who don't
           // yet have a prediction row.
+          const pitcherMeta = r.source_player_id ? pitcherMetaBySourceId?.get(r.source_player_id) : undefined;
           const pitcherClassYear: string | null = (
             (dbPred?.class_year as string | null | undefined) ??
-            (r.source_player_id ? pitcherClassBySourceId?.get(r.source_player_id) ?? null : null) ??
+            pitcherMeta?.class_year ??
             null
           );
+          const pitcherIsTwp = !!pitcherMeta?.is_twp;
           return {
             id: r.id || `pitching-master-${idx}`,
             playerName,
@@ -2251,6 +2312,7 @@ export default function ReturningPlayers() {
             handedness: (r.throwHand || "").trim() || null,
             role: effectiveRole,
             class_year: pitcherClassYear,
+            is_twp: pitcherIsTwp,
             class_transition: classTransition,
             dev_aggressiveness: devAggressiveness,
             stuff_score: scoreObj.stuff,
@@ -2279,7 +2341,7 @@ export default function ReturningPlayers() {
         .filter((r) => !!r.playerName);
     }
     return [] as PitchingDashboardRow[];
-  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq, pitcherPredBySourceId, pitcherClassBySourceId]);
+  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq, pitcherPredBySourceId, pitcherMetaBySourceId]);
   const filteredPitchingRows = useMemo(() => {
     // Qualification threshold: pitchers need at least 25 IP to show in the table
     // (parallel to hitters needing 75 PA). Profile pages are still searchable/accessible
@@ -2521,7 +2583,11 @@ export default function ReturningPlayers() {
                     }}
                   >
                     <span className="font-medium">{p.first_name} {p.last_name}</span>
-                    <span className="text-xs text-muted-foreground">{p.position || ""} · {p.team || ""}</span>
+                    <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+                      <PositionWithTwp position={p.position} isTwp={(p as any).is_twp} />
+                      <span>·</span>
+                      <span>{p.team || ""}</span>
+                    </span>
                   </button>
                 ))}
               </div>
@@ -2756,8 +2822,9 @@ export default function ReturningPlayers() {
                                   />
                                 </div>
                               ) : (
-                                <div className="text-xs text-muted-foreground">
-                                  {[effectivePosition, p.team].filter(Boolean).join(" · ") || "—"}
+                                <div className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+                                  <PositionWithTwp position={effectivePosition} isTwp={p.is_twp} />
+                                  {p.team ? <><span>·</span><span>{p.team}</span></> : null}
                                 </div>
                               )}
                             </TableCell>
@@ -2899,7 +2966,11 @@ export default function ReturningPlayers() {
                     }}
                   >
                     <span className="font-medium">{p.first_name} {p.last_name}</span>
-                    <span className="text-xs text-muted-foreground">{p.position || ""} · {p.team || ""}</span>
+                    <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+                      <PositionWithTwp position={p.position} isTwp={(p as any).is_twp} />
+                      <span>·</span>
+                      <span>{p.team || ""}</span>
+                    </span>
                   </button>
                 ))}
               </div>
@@ -3057,10 +3128,16 @@ export default function ReturningPlayers() {
                               >
                                 {r.playerName}
                               </Link>
-                              <div className="text-xs text-muted-foreground">
+                              <div className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
                                 {(() => {
                                   const hand = r.handedness === "R" ? "RHP" : r.handedness === "L" ? "LHP" : null;
-                                  return [hand, r.team].filter(Boolean).join(" · ") || "—";
+                                  if (!hand && !r.team && !r.is_twp) return <span>—</span>;
+                                  return (
+                                    <>
+                                      <PositionWithTwp position={hand ?? "P"} isTwp={r.is_twp} />
+                                      {r.team ? <><span>·</span><span>{r.team}</span></> : null}
+                                    </>
+                                  );
                                 })()}
                               </div>
                             </TableCell>

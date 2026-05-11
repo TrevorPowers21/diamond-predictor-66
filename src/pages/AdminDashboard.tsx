@@ -155,13 +155,14 @@ function RecomputeTwpButton() {
     paThreshold: number;
     ipThreshold: number;
     newTwps: number;
+    legacyMigrated: number;
     unchangedTwps: number;
     demotedToHitter: number;
     demotedToPitcher: number;
     clearedToNull: number;
     leftAlone: number;
     errors: number;
-    sampleNew: Array<{ name: string; pa: number; ip: number }>;
+    sampleNew: Array<{ name: string; primaryPos: string; pa: number; ip: number }>;
     sampleDemoteHitter: Array<{ name: string; newPos: string }>;
     sampleDemotePitcher: Array<{ name: string }>;
     sampleCleared: Array<{ name: string; reason: string }>;
@@ -193,7 +194,7 @@ function RecomputeTwpButton() {
         </div>
         <Button
           onClick={async () => {
-            if (!confirm(`Recompute TWP status for 2026 with PA ≥ ${paThreshold} AND IP ≥ ${ipThreshold}? This updates the players.position column for matching players.`)) return;
+            if (!confirm(`Recompute TWP status for 2026 with PA ≥ ${paThreshold} AND IP ≥ ${ipThreshold}? Sets the is_twp flag and restores the primary position (hitter Pos or 'P') for matching players.`)) return;
             setLoading(true);
             setResult(null);
             try {
@@ -204,20 +205,21 @@ function RecomputeTwpButton() {
                 paThreshold: r.paThreshold,
                 ipThreshold: r.ipThreshold,
                 newTwps: r.newTwps.length,
+                legacyMigrated: r.legacyMigrated,
                 unchangedTwps: r.unchangedTwps,
                 demotedToHitter: r.demotedToHitter.length,
                 demotedToPitcher: r.demotedToPitcher.length,
                 clearedToNull: r.clearedToNull.length,
                 leftAlone: r.leftAlone,
                 errors: r.errors.length,
-                sampleNew: r.newTwps.slice(0, 10).map((x) => ({ name: x.name, pa: x.pa, ip: x.ip })),
+                sampleNew: r.newTwps.slice(0, 10).map((x) => ({ name: x.name, primaryPos: x.primaryPos, pa: x.pa, ip: x.ip })),
                 sampleDemoteHitter: r.demotedToHitter.slice(0, 5).map((x) => ({ name: x.name, newPos: x.newPos })),
                 sampleDemotePitcher: r.demotedToPitcher.slice(0, 5).map((x) => ({ name: x.name })),
                 sampleCleared: r.clearedToNull.slice(0, 5).map((x) => ({ name: x.name, reason: x.reason })),
               });
             } catch (err: any) {
               setResult({
-                scanned: 0, paThreshold, ipThreshold, newTwps: 0, unchangedTwps: 0,
+                scanned: 0, paThreshold, ipThreshold, newTwps: 0, legacyMigrated: 0, unchangedTwps: 0,
                 demotedToHitter: 0, demotedToPitcher: 0, clearedToNull: 0, leftAlone: 0, errors: 1,
                 sampleNew: [], sampleDemoteHitter: [], sampleDemotePitcher: [], sampleCleared: [],
               });
@@ -238,6 +240,7 @@ function RecomputeTwpButton() {
           <p>
             Scanned {result.scanned.toLocaleString()} players with thresholds PA ≥ {result.paThreshold} AND IP ≥ {result.ipThreshold}.{" "}
             <span className="text-foreground font-medium">{result.newTwps}</span> new TWPs,{" "}
+            {result.legacyMigrated > 0 && <><span className="text-foreground font-medium">{result.legacyMigrated}</span> legacy-migrated, </>}
             <span className="text-foreground font-medium">{result.unchangedTwps}</span> unchanged,{" "}
             <span className="text-foreground font-medium">{result.demotedToHitter}</span> demoted to hitter,{" "}
             <span className="text-foreground font-medium">{result.demotedToPitcher}</span> demoted to pitcher,{" "}
@@ -248,7 +251,7 @@ function RecomputeTwpButton() {
           {result.sampleNew.length > 0 && (
             <p className="text-xs">
               <span className="font-medium">New TWPs (first 10):</span>{" "}
-              {result.sampleNew.map((x) => `${x.name} (PA ${x.pa}, IP ${x.ip})`).join("; ")}
+              {result.sampleNew.map((x) => `${x.name} → ${x.primaryPos || "?"} (PA ${x.pa}, IP ${x.ip})`).join("; ")}
             </p>
           )}
           {result.sampleDemoteHitter.length > 0 && (

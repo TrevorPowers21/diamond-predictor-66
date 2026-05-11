@@ -1493,6 +1493,15 @@ export default function PitcherProfile() {
               <Badge variant="outline">{displayTeam}</Badge>
               <Badge variant="outline" className="text-muted-foreground">{displayConference}</Badge>
               <Badge variant="secondary">{displayHandedness === "R" ? "RHP" : displayHandedness === "L" ? "LHP" : displayHandedness}</Badge>
+              {player && (player as any).is_twp && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] font-semibold uppercase tracking-wider border-[#D4AF37]/40 bg-[#D4AF37]/10 text-[#D4AF37]"
+                  title="Two-way player — also appears in the hitter pool"
+                >
+                  TWP
+                </Badge>
+              )}
               {player && (() => {
                 const ps = (player as any).portal_status || "NOT IN PORTAL";
                 const cfg: Record<string, { bg: string; text: string; label: string }> = {
