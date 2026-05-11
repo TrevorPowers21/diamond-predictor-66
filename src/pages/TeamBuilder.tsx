@@ -47,7 +47,13 @@ const POSITION_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"] as 
 const PITCHER_SLOTS = ["SP1", "SP2", "SP3", "SP4", "SP5", "RP1", "RP2", "RP3", "RP4", "CL"] as const;
 const MAX_DEPTH = 3;
 const DEV_AGGRESSIVENESS_OPTIONS = [0, 0.5, 1] as const;
-const TEAM_BUILDER_DRAFT_KEY = "team_builder_draft_v3";
+// Per-team scoped draft key. Previously a single global key leaked one team's
+// roster into other teams whenever a superadmin switched impersonation or a
+// user logged in as a different customer (the restore effect ran with the
+// previous team's payload). Each customer team now persists its own draft.
+const TEAM_BUILDER_DRAFT_KEY_PREFIX = "team_builder_draft_v3";
+const getDraftKey = (teamId: string | null | undefined): string | null =>
+  teamId ? `${TEAM_BUILDER_DRAFT_KEY_PREFIX}::${teamId}` : null;
 const LEGACY_PITCHING_ROLE_OVERRIDE_KEY = "pitching_role_overrides_v1";
 
 type TransferSnapshot = {
@@ -964,6 +970,15 @@ export default function TeamBuilder() {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const skipAutoSeedOnceRef = useRef(false);
   const autoSeededTeamRef = useRef<string>("");
+  // Tracks which effectiveTeamId the current in-memory Team Builder state
+  // represents. Used to detect customer-team changes (impersonation switch,
+  // sign-in as a different customer) and to suppress draft persistence
+  // during the transition before the restore effect catches up.
+  const stateTeamRef = useRef<string | null>(null);
+  // Set true by the draft restore so the latest-build auto-load effect knows
+  // to back off (an in-progress unsaved draft should win over the saved
+  // build for the same team).
+  const restoredFromDraftRef = useRef(false);
   const { overrides: playerOverrideMap, updateOverride: updatePlayerOverrideFn } = usePlayerOverrides();
   const playerOverrides = useMemo(() => {
     const obj: Record<string, { position?: string | null }> = {};
@@ -2077,49 +2092,101 @@ export default function TeamBuilder() {
     }
   }, [returners, returnersUpdatedAt, selectedTeam, selectedBuildId, playerOverrides, seasonUsage]);
 
-  // Restore unsaved Team Builder draft when coming back from another page.
+  // Restore unsaved Team Builder draft on mount or whenever the active
+  // customer team changes (login, sign-out, or superadmin impersonation
+  // switch). Per-team scoped key so one team's draft never leaks into
+  // another team's view.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(TEAM_BUILDER_DRAFT_KEY);
-      if (!raw) return;
-      const draft = JSON.parse(raw) as {
-        selectedBuildId: string | null;
-        buildName: string;
-        selectedTeam: string;
-        totalBudget: number;
-        rosterPlayers: BuildPlayer[];
-        programTierMultiplier: number;
-        programTierConference: string;
-        fallbackRosterTotalPlayerScore: number;
-        dirty: boolean;
-        depthAssignments?: Record<string, number>;
-        depthPlaceholders?: Record<string, "freshman" | "transfer">;
-      };
-      if (!draft) return;
+    if (!effectiveTeamId) {
+      stateTeamRef.current = null;
+      restoredFromDraftRef.current = false;
+      return;
+    }
+    if (stateTeamRef.current === effectiveTeamId) return;
 
-      setSelectedBuildId(draft.selectedBuildId ?? null);
-      setBuildName(draft.buildName ?? "My Team Build");
-      setSelectedTeam(draft.selectedTeam ?? "");
-      setTotalBudget(Number(draft.totalBudget) || 0);
-      setRosterPlayers(Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers : []);
-      setProgramTierMultiplier(Number(draft.programTierMultiplier) || 1.2);
-      setProgramTierConference(draft.programTierConference ?? "");
-      setFallbackRosterTotalPlayerScore(Number(draft.fallbackRosterTotalPlayerScore) || DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
-      setDirty(Boolean(draft.dirty));
-      if (draft.depthAssignments) setDepthAssignments(draft.depthAssignments);
-      if (draft.depthPlaceholders) setDepthPlaceholders(draft.depthPlaceholders);
-      skipAutoSeedOnceRef.current = true;
-      // Mark the team as already seeded so auto-seed doesn't overwrite the restored roster
-      if (draft.selectedTeam) {
-        autoSeededTeamRef.current = normalizeName(draft.selectedTeam);
+    // Team changed (or first mount with a team). Clear in-memory state so
+    // the previous team's roster/build never lingers, then attempt to
+    // restore this team's draft.
+    setSelectedBuildId(null);
+    setBuildName("My Team Build");
+    setSelectedTeam("");
+    setRosterPlayers([]);
+    setDirty(false);
+    setDepthAssignments({});
+    setDepthPlaceholders({});
+    autoSeededTeamRef.current = "";
+    restoredFromDraftRef.current = false;
+
+    try {
+      const draftKey = getDraftKey(effectiveTeamId);
+      const raw = draftKey ? localStorage.getItem(draftKey) : null;
+      if (raw) {
+        const draft = JSON.parse(raw) as {
+          selectedBuildId: string | null;
+          buildName: string;
+          selectedTeam: string;
+          totalBudget: number;
+          rosterPlayers: BuildPlayer[];
+          programTierMultiplier: number;
+          programTierConference: string;
+          fallbackRosterTotalPlayerScore: number;
+          dirty: boolean;
+          depthAssignments?: Record<string, number>;
+          depthPlaceholders?: Record<string, "freshman" | "transfer">;
+        };
+        if (draft) {
+          setSelectedBuildId(draft.selectedBuildId ?? null);
+          setBuildName(draft.buildName ?? "My Team Build");
+          setSelectedTeam(draft.selectedTeam ?? "");
+          setTotalBudget(Number(draft.totalBudget) || 0);
+          setRosterPlayers(Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers : []);
+          setProgramTierMultiplier(Number(draft.programTierMultiplier) || 1.2);
+          setProgramTierConference(draft.programTierConference ?? "");
+          setFallbackRosterTotalPlayerScore(Number(draft.fallbackRosterTotalPlayerScore) || DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
+          setDirty(Boolean(draft.dirty));
+          if (draft.depthAssignments) setDepthAssignments(draft.depthAssignments);
+          if (draft.depthPlaceholders) setDepthPlaceholders(draft.depthPlaceholders);
+          skipAutoSeedOnceRef.current = true;
+          if (draft.selectedTeam) {
+            autoSeededTeamRef.current = normalizeName(draft.selectedTeam);
+          }
+          restoredFromDraftRef.current = true;
+        }
       }
     } catch {
       // ignore invalid draft payloads
     }
-  }, []);
+
+    stateTeamRef.current = effectiveTeamId;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveTeamId]);
+
+  // Default to most-recent saved build for the current team when no draft
+  // was restored. Trevor's ask: "default to last build specific to that
+  // team if they have one." Only runs after the restore effect (gated by
+  // stateTeamRef catching up) and only when there's no draft to honor.
+  useEffect(() => {
+    if (!effectiveTeamId) return;
+    if (stateTeamRef.current !== effectiveTeamId) return;
+    if (restoredFromDraftRef.current) return;
+    if (selectedBuildId) return;
+    if (builds.length === 0) return;
+    const latest = builds[0] as { id: string };
+    loadBuild(latest.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveTeamId, selectedBuildId, builds.length]);
 
   // Persist Team Builder draft so browser back returns to the same state.
+  // Two guards prevent cross-team leakage:
+  //   1) Scoped key (per effectiveTeamId) so each team has its own draft slot
+  //   2) stateTeamRef must match effectiveTeamId — otherwise the restore
+  //      effect hasn't reset state for the new team yet and we'd write the
+  //      previous team's data into the new team's key.
   useEffect(() => {
+    if (!effectiveTeamId) return;
+    if (stateTeamRef.current !== effectiveTeamId) return;
+    const draftKey = getDraftKey(effectiveTeamId);
+    if (!draftKey) return;
     try {
       const payload = {
         selectedBuildId,
@@ -2134,11 +2201,12 @@ export default function TeamBuilder() {
         depthAssignments,
         depthPlaceholders,
       };
-      localStorage.setItem(TEAM_BUILDER_DRAFT_KEY, JSON.stringify(payload));
+      localStorage.setItem(draftKey, JSON.stringify(payload));
     } catch {
       // ignore storage quota/access errors
     }
   }, [
+    effectiveTeamId,
     selectedBuildId,
     buildName,
     selectedTeam,
