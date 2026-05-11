@@ -51,16 +51,27 @@ const buildBranding = (
  * e.g. a fresh superadmin with no impersonation set. Surfaces should treat
  * a null `schoolName` as "no auto-default; let the user pick."
  */
+// Customer teams that can pick any team from the in-app team dropdowns
+// (Transfer Portal Destination, Team Builder Team, Compare To-Team, etc.).
+// Used by RST All Americans, our internal test/demo account that needs to
+// validate functionality across every team. Every other customer is locked
+// to their own school via useEffectiveSchool().allowAllTeams = false.
+// If this list grows beyond a handful, move it to a column on customer_teams.
+const UNRESTRICTED_CUSTOMER_TEAM_NAMES = new Set<string>([
+  "RST All Americans",
+]);
+
 export function useEffectiveSchool() {
   const { effectiveTeamId, availableTeams } = useAuth();
   const { teams } = useTeamsTable();
 
   return useMemo(() => {
-    const empty = { schoolName: null, schoolFullName: null, schoolTeamId: null, logoUrl: null, branding: null as SchoolBranding | null };
+    const empty = { schoolName: null, schoolFullName: null, schoolTeamId: null, logoUrl: null, branding: null as SchoolBranding | null, allowAllTeams: false };
     if (!effectiveTeamId) return empty;
     const customerTeam = availableTeams.find((t) => t.id === effectiveTeamId);
     if (!customerTeam) return empty;
     const branding = buildBranding(customerTeam);
+    const allowAllTeams = UNRESTRICTED_CUSTOMER_TEAM_NAMES.has(customerTeam.name);
     const schoolTeamId = customerTeam.school_team_id;
     if (!schoolTeamId) {
       return {
@@ -69,6 +80,7 @@ export function useEffectiveSchool() {
         schoolTeamId: null,
         logoUrl: branding?.logoUrl ?? null,
         branding,
+        allowAllTeams,
       };
     }
     const schoolRow = teams.find((t) => t.id === schoolTeamId);
@@ -87,6 +99,7 @@ export function useEffectiveSchool() {
         schoolTeamId,
         logoUrl: branding?.logoUrl ?? null,
         branding,
+        allowAllTeams,
       };
     }
     return {
@@ -95,6 +108,7 @@ export function useEffectiveSchool() {
       schoolTeamId,
       logoUrl: branding?.logoUrl ?? null,
       branding,
+      allowAllTeams,
     };
   }, [effectiveTeamId, availableTeams, teams]);
 }

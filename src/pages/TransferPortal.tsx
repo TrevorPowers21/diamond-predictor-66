@@ -502,7 +502,7 @@ export default function TransferPortal() {
   // Pre-fill the destination team with the impersonated school. Coaches
   // demoing as their program shouldn't have to retype "Kansas Jayhawks"
   // every time they open the simulator. Replaces the old DEMO_SCHOOL default.
-  const { schoolName: effectiveSchoolName } = useEffectiveSchool();
+  const { schoolName: effectiveSchoolName, allowAllTeams } = useEffectiveSchool();
   useEffect(() => {
     if (!effectiveSchoolName) return;
     if (selectedDestinationTeam) return;
@@ -1739,15 +1739,21 @@ export default function TransferPortal() {
                   {/* Destination team */}
                   <div className="relative flex-1 min-w-[200px]">
                     <Label className="text-xs mb-1 block">Destination</Label>
-                    <Input placeholder="Search team..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamDropdownOpen(true); }} onFocus={() => setTeamDropdownOpen(true)} onBlur={() => setTimeout(() => setTeamDropdownOpen(false), 150)} />
-                    {teamDropdownOpen && filteredTeams.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
-                        {filteredTeams.map((t) => (
-                          <div key={t.name} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => { setSelectedDestinationTeam(t.name); setTeamSearch(t.name); setTeamDropdownOpen(false); }}>
-                            {t.name} <span className="text-muted-foreground text-xs">{t.conference || ""}</span>
+                    {allowAllTeams ? (
+                      <>
+                        <Input placeholder="Search team..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamDropdownOpen(true); }} onFocus={() => setTeamDropdownOpen(true)} onBlur={() => setTimeout(() => setTeamDropdownOpen(false), 150)} />
+                        {teamDropdownOpen && filteredTeams.length > 0 && (
+                          <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
+                            {filteredTeams.map((t) => (
+                              <div key={t.name} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => { setSelectedDestinationTeam(t.name); setTeamSearch(t.name); setTeamDropdownOpen(false); }}>
+                                {t.name} <span className="text-muted-foreground text-xs">{t.conference || ""}</span>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                        )}
+                      </>
+                    ) : (
+                      <Input value={effectiveSchoolName ?? ""} disabled readOnly className="opacity-100 cursor-not-allowed" />
                     )}
                   </div>
                   <div className="flex gap-2">
@@ -1897,15 +1903,21 @@ export default function TransferPortal() {
                   </div>
                   <div className="relative flex-1 min-w-[180px]">
                     <Label className="text-xs mb-1 block">Destination</Label>
-                    <Input placeholder="Search team..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamDropdownOpen(true); }} onFocus={() => setTeamDropdownOpen(true)} onBlur={() => setTimeout(() => setTeamDropdownOpen(false), 150)} />
-                    {teamDropdownOpen && filteredTeams.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
-                        {filteredTeams.map((t) => (
-                          <div key={t.name} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => { setSelectedDestinationTeam(t.name); setTeamSearch(t.name); setTeamDropdownOpen(false); }}>
-                            {t.name} <span className="text-muted-foreground text-xs">{t.conference || ""}</span>
+                    {allowAllTeams ? (
+                      <>
+                        <Input placeholder="Search team..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamDropdownOpen(true); }} onFocus={() => setTeamDropdownOpen(true)} onBlur={() => setTimeout(() => setTeamDropdownOpen(false), 150)} />
+                        {teamDropdownOpen && filteredTeams.length > 0 && (
+                          <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
+                            {filteredTeams.map((t) => (
+                              <div key={t.name} className="px-3 py-2 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => { setSelectedDestinationTeam(t.name); setTeamSearch(t.name); setTeamDropdownOpen(false); }}>
+                                {t.name} <span className="text-muted-foreground text-xs">{t.conference || ""}</span>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                        )}
+                      </>
+                    ) : (
+                      <Input value={effectiveSchoolName ?? ""} disabled readOnly className="opacity-100 cursor-not-allowed" />
                     )}
                   </div>
                   <div className="w-[110px]">
