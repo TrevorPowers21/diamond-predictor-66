@@ -152,6 +152,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    // Supabase invite links land with `#type=invite` in the URL fragment.
+    // Supabase fires SIGNED_IN (not PASSWORD_RECOVERY) for invites, so the
+    // event-only check below would miss them and the user would slip into
+    // /dashboard without ever setting a password. Detect at mount so the
+    // recovery form takes over before any redirect logic runs.
+    if (typeof window !== "undefined" && window.location.hash.includes("type=invite")) {
+      setIsRecoveringPassword(true);
+    }
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
         setSession(newSession);
