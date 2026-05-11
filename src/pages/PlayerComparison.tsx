@@ -756,7 +756,7 @@ export default function PlayerComparison() {
   // Pre-fill both compare panels' destination team with the impersonated
   // school. Coaches comparing two transfers usually want to see what each
   // would do at THEIR school. Replaces the old DEMO_SCHOOL default.
-  const { schoolName: effectiveSchoolName } = useEffectiveSchool();
+  const { schoolName: effectiveSchoolName, allowAllTeams } = useEffectiveSchool();
   useEffect(() => {
     if (!effectiveSchoolName) return;
     if (!aDestTeam) {
@@ -1091,15 +1091,21 @@ export default function PlayerComparison() {
           </div>
           <div className="relative">
             <Label className="text-xs mb-1 block">To Team</Label>
-            <Input className="h-8 text-sm" placeholder="Destination..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamOpen(true); }} onFocus={() => setTeamOpen(true)} onBlur={() => setTimeout(() => setTeamOpen(false), 150)} />
-            {teamOpen && filterTeams(teamSearch).length > 0 && (
-              <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-64 overflow-auto">
-                {filterTeams(teamSearch).map((t) => (
-                  <div key={t.name} className="px-3 py-1.5 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => onPickTeam(t)}>
-                    {t.name} <span className="text-muted-foreground text-[11px]">{t.conference || ""}</span>
+            {allowAllTeams ? (
+              <>
+                <Input className="h-8 text-sm" placeholder="Destination..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamOpen(true); }} onFocus={() => setTeamOpen(true)} onBlur={() => setTimeout(() => setTeamOpen(false), 150)} />
+                {teamOpen && filterTeams(teamSearch).length > 0 && (
+                  <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-64 overflow-auto">
+                    {filterTeams(teamSearch).map((t) => (
+                      <div key={t.name} className="px-3 py-1.5 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => onPickTeam(t)}>
+                        {t.name} <span className="text-muted-foreground text-[11px]">{t.conference || ""}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                )}
+              </>
+            ) : (
+              <Input className="h-8 text-sm opacity-100 cursor-not-allowed" value={effectiveSchoolName ?? ""} disabled readOnly />
             )}
           </div>
         </div>
@@ -1185,15 +1191,21 @@ export default function PlayerComparison() {
           </div>
           <div className="relative col-span-2">
             <Label className="text-xs mb-1 block">To Team</Label>
-            <Input className="h-8 text-sm" placeholder="Destination..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamOpen(true); }} onFocus={() => setTeamOpen(true)} onBlur={() => setTimeout(() => setTeamOpen(false), 150)} />
-            {teamOpen && filterTeams(teamSearch).length > 0 && (
-              <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-64 overflow-auto">
-                {filterTeams(teamSearch).map((t) => (
-                  <div key={t.name} className="px-3 py-1.5 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => onPickTeam(t)}>
-                    {t.name} <span className="text-muted-foreground text-[11px]">{t.conference || ""}</span>
+            {allowAllTeams ? (
+              <>
+                <Input className="h-8 text-sm" placeholder="Destination..." value={teamSearch} onChange={(e) => { setTeamSearch(e.target.value); setTeamOpen(true); }} onFocus={() => setTeamOpen(true)} onBlur={() => setTimeout(() => setTeamOpen(false), 150)} />
+                {teamOpen && filterTeams(teamSearch).length > 0 && (
+                  <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-64 overflow-auto">
+                    {filterTeams(teamSearch).map((t) => (
+                      <div key={t.name} className="px-3 py-1.5 text-sm cursor-pointer hover:bg-accent" onMouseDown={() => onPickTeam(t)}>
+                        {t.name} <span className="text-muted-foreground text-[11px]">{t.conference || ""}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                )}
+              </>
+            ) : (
+              <Input className="h-8 text-sm opacity-100 cursor-not-allowed" value={effectiveSchoolName ?? ""} disabled readOnly />
             )}
           </div>
           <div>

@@ -984,7 +984,7 @@ export default function TeamBuilder() {
   // auto-fill the team picker with that school. Replaces the old
   // DEMO_SCHOOL.name default. Only fires when no team is currently picked
   // and no build is loaded — never overrides an active selection.
-  const { schoolName: effectiveSchoolName } = useEffectiveSchool();
+  const { schoolName: effectiveSchoolName, allowAllTeams } = useEffectiveSchool();
   useEffect(() => {
     if (!effectiveSchoolName) return;
     if (selectedBuildId) return;
@@ -5415,43 +5415,49 @@ export default function TeamBuilder() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="relative">
             <Label className="text-xs mb-1 block">Team</Label>
-            <Input
-              placeholder="Search team…"
-              value={teamSearchQuery}
-              onChange={(e) => {
-                const next = e.target.value;
-                setTeamSearchQuery(next);
-                setTeamSearchOpen(true);
-                if (!next.trim() && selectedTeam) {
-                  setSelectedTeam("");
-                  setSelectedBuildId(null);
-                  setDirty(true);
-                }
-              }}
-              onFocus={() => {
-                setTeamSearchOpen(true);
-              }}
-              onBlur={() => setTimeout(() => setTeamSearchOpen(false), 150)}
-              className="w-full"
-            />
-            {teamSearchOpen && filteredTeamOptions.length > 0 && (
-              <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-60 overflow-auto">
-                {filteredTeamOptions.map((t) => (
-                  <div
-                    key={t.name}
-                    className="px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground"
-                    onMouseDown={() => {
-                      setSelectedTeam(t.name);
-                      setTeamSearchQuery("");
-                      setTeamSearchOpen(false);
+            {allowAllTeams ? (
+              <>
+                <Input
+                  placeholder="Search team…"
+                  value={teamSearchQuery}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setTeamSearchQuery(next);
+                    setTeamSearchOpen(true);
+                    if (!next.trim() && selectedTeam) {
+                      setSelectedTeam("");
                       setSelectedBuildId(null);
                       setDirty(true);
-                    }}
-                  >
-                    {t.name}
+                    }
+                  }}
+                  onFocus={() => {
+                    setTeamSearchOpen(true);
+                  }}
+                  onBlur={() => setTimeout(() => setTeamSearchOpen(false), 150)}
+                  className="w-full"
+                />
+                {teamSearchOpen && filteredTeamOptions.length > 0 && (
+                  <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-60 overflow-auto">
+                    {filteredTeamOptions.map((t) => (
+                      <div
+                        key={t.name}
+                        className="px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground"
+                        onMouseDown={() => {
+                          setSelectedTeam(t.name);
+                          setTeamSearchQuery("");
+                          setTeamSearchOpen(false);
+                          setSelectedBuildId(null);
+                          setDirty(true);
+                        }}
+                      >
+                        {t.name}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                )}
+              </>
+            ) : (
+              <Input value={effectiveSchoolName ?? ""} disabled readOnly className="w-full opacity-100 cursor-not-allowed" />
             )}
           </div>
           <div>
