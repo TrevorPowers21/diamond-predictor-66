@@ -415,8 +415,11 @@ export async function syncMasterToPlayers(season = 2026): Promise<SyncResult> {
   }
 
   // ─── Two-way player detection ────────────────────────────────────────
-  // Tag as TWP when the player has meaningful PA on the hitter side (>=10 AB)
-  // AND meaningful IP on the pitcher side (>=5 IP) in the preferred season.
+  // Set the is_twp boolean when a player has meaningful activity on BOTH
+  // sides in the preferred season (>=10 AB hitter, >=5 IP pitcher). Keep
+  // `position` as the primary side (hitter Pos already set above). The
+  // recomputeTwpStatus admin tool re-runs this with the canonical
+  // PA >= 30 / IP >= 5 thresholds against the live Hitter/Pitching Masters.
   const twoWayHitters = new Set<string>();
   const twoWayPitchers = new Set<string>();
   for (const h of hitterRows) {
@@ -431,7 +434,7 @@ export async function syncMasterToPlayers(season = 2026): Promise<SyncResult> {
   }
   for (const [sid, rec] of byId.entries()) {
     if (twoWayHitters.has(sid) && twoWayPitchers.has(sid)) {
-      rec.position = "TWP";
+      (rec as any).is_twp = true;
     }
   }
 
@@ -443,6 +446,7 @@ export async function syncMasterToPlayers(season = 2026): Promise<SyncResult> {
     team: r.team,
     conference: r.conference,
     position: r.position,
+    is_twp: (r as any).is_twp === true,
     bats_hand: r.bats_hand,
     throws_hand: r.throws_hand,
     source_player_id: r.source_player_id,

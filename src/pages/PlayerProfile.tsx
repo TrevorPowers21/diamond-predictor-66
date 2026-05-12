@@ -840,6 +840,15 @@ export default function PlayerProfile() {
               </h2>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 {effectivePosition && <Badge variant="secondary">{effectivePosition}</Badge>}
+                {(player as any).is_twp && (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] font-semibold uppercase tracking-wider border-[#D4AF37]/40 bg-[#D4AF37]/10 text-[#D4AF37]"
+                    title="Two-way player — also appears in the pitcher pool"
+                  >
+                    TWP
+                  </Badge>
+                )}
                 {(activeMasterRow as any)?.Team && <Badge variant="outline">{(activeMasterRow as any).Team}</Badge>}
               </div>
             </div>
@@ -878,6 +887,15 @@ export default function PlayerProfile() {
             )}
               <div className="flex items-center gap-2 mt-1 flex-wrap">
               {effectivePosition && <Badge variant="secondary">{effectivePosition}</Badge>}
+              {(player as any).is_twp && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] font-semibold uppercase tracking-wider border-[#D4AF37]/40 bg-[#D4AF37]/10 text-[#D4AF37]"
+                  title="Two-way player — also appears in the pitcher pool"
+                >
+                  TWP
+                </Badge>
+              )}
               {displayTeamCurrent && <Badge variant="outline">{displayTeamCurrent}</Badge>}
               {(() => {
                 const norm = (v: string) => (v || "").trim().toLowerCase().replace(/\b(university|college|of)\b/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();

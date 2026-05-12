@@ -26,6 +26,7 @@ import {
 } from "@/lib/nilProgramSpecific";
 import { computeTransferProjection } from "@/lib/transferProjection";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
+import { classTransitionFromYearOrDefault } from "@/lib/classTransitionUtils";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
@@ -95,6 +96,9 @@ type BuildPlayer = {
     first_name: string;
     last_name: string;
     position: string | null;
+    is_twp?: boolean | null;
+    class_year?: string | null;
+    throws_hand?: string | null;
     team: string | null;
     from_team: string | null;
     conference: string | null;
@@ -666,6 +670,28 @@ const asPitcherRole = (raw: string | null | undefined): "SP" | "RP" | null => {
   return null;
 };
 
+// Resolve a pitcher role for the pitcher-pool render / pWAR compute. For
+// traditional pitchers, this returns the explicit slot role (SP/RP). For TWPs
+// whose `position_slot` is the hitter primary (e.g. "SS"), the slot does NOT
+// disambiguate — so we fall back to the Pitching Master role (already derived
+// from GS/G ratio in `pitchingMasterRows`) before defaulting to RP. Without
+// this, a TWP-SS in the pitcher pool computes pWAR with the swingman IP
+// projection, which is wrong for a player whose actual pitching profile is
+// clearly a starter.
+const effectivePitcherRoleForBuild = (
+  p: BuildPlayer,
+  pitchingMasterRole: string | null | undefined,
+): "SP" | "RP" => {
+  const slotRole = asPitcherRole(p.position_slot);
+  if (slotRole) return slotRole;
+  if (p.player?.is_twp) {
+    const pmRole = asPitcherRole(pitchingMasterRole);
+    if (pmRole) return pmRole;
+    return "RP";
+  }
+  return asPitcherRole(p.player?.position ?? null) || asPitcherRole(pitchingMasterRole) || "RP";
+};
+
 const normalizePitcherDepthRole = (
   role: BuildPlayer["depth_role"],
   pitcherRole: "SP" | "RP",
@@ -876,11 +902,30 @@ export default function TeamBuilder() {
   const { board: supabaseTargetBoard, removePlayer: removeFromSupabaseBoard, addPlayer: addToSupabaseBoard, isOnBoard: isOnSupabaseBoard } = useTargetBoard();
   const queryClient = useQueryClient();
   const isAdmin = hasRole("admin");
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
-  const validTabs = new Set(["roster", "target-board", "compare", "depth"]);
+  const validTabs = new Set(["roster", "target-board", "compare", "depth", "analytics"]);
   const requestedTab = (searchParams.get("tab") || "").trim().toLowerCase();
   const initialTab = validTabs.has(requestedTab) ? requestedTab : "roster";
+  // Controlled tab state mirrored to ?tab= so refresh/hard-refresh keeps the
+  // user on the same view (and the URL becomes shareable). Without this the
+  // Tabs component is uncontrolled and tab changes never reach the URL.
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
+  const onTabChange = useCallback(
+    (next: string) => {
+      setActiveTab(next);
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next === "roster") params.delete("tab");
+          else params.set("tab", next);
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   const [selectedBuildId, setSelectedBuildId] = useState<string | null>(null);
   const [nilEquationOpen, setNilEquationOpen] = useState(false);
@@ -1045,7 +1090,7 @@ export default function TeamBuilder() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, team, from_team, conference, transfer_portal, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at), nil_valuations(estimated_value, component_breakdown)")
+          .select("id, first_name, last_name, position, is_twp, class_year, throws_hand, team, from_team, conference, transfer_portal, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at), nil_valuations(estimated_value, component_breakdown)")
           .range(from, from + PAGE - 1);
         if (error) throw error;
         all = all.concat(data || []);
@@ -1441,6 +1486,8 @@ export default function TeamBuilder() {
             first_name: hit.first_name || "",
             last_name: hit.last_name || "",
             position: hit.position || null,
+            is_twp: (hit as any).is_twp ?? false,
+            throws_hand: (hit as any).throws_hand ?? null,
             team: hit.team || null,
             from_team: hit.from_team || null,
             conference: hit.conference || null,
@@ -1613,7 +1660,7 @@ export default function TeamBuilder() {
       for (const r of hitterStats) { if (r.player_id) active2025Ids.add(r.player_id); }
       for (const r of pitchingMasterRows) { if (r.source_player_id) active2025Ids.add(r.source_player_id); }
       // Try team_id UUID first, fall back to team name match
-      const selectCols = "id, first_name, last_name, position, team, from_team, conference, transfer_portal, source_player_id, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at)";
+      const selectCols = "id, first_name, last_name, position, is_twp, class_year, throws_hand, team, from_team, conference, transfer_portal, source_player_id, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at)";
       let query = supabase.from("players").select(selectCols).eq("transfer_portal", false);
       if (selectedTeamId) {
         query = query.eq("team_id", selectedTeamId);
@@ -1653,7 +1700,7 @@ export default function TeamBuilder() {
           results.push({
             ...(best || {}),
             player_id: player.id,
-            players: { id: player.id, first_name: player.first_name, last_name: player.last_name, position: player.position, team: player.team, from_team: player.from_team, conference: player.conference, transfer_portal: player.transfer_portal },
+            players: { id: player.id, first_name: player.first_name, last_name: player.last_name, position: player.position, is_twp: (player as any).is_twp ?? false, class_year: (player as any).class_year ?? null, throws_hand: (player as any).throws_hand ?? null, team: player.team, from_team: player.from_team, conference: player.conference, transfer_portal: player.transfer_portal },
           });
         }
         return results;
@@ -1807,7 +1854,7 @@ export default function TeamBuilder() {
         const { data: pData, error: pErr } = await supabase
           .from("players")
           .select(`
-            id, first_name, last_name, position, team, from_team, conference,
+            id, first_name, last_name, position, is_twp, class_year, throws_hand, team, from_team, conference,
             player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at),
             nil_valuations(estimated_value, component_breakdown)
           `)
@@ -1978,7 +2025,17 @@ export default function TeamBuilder() {
             dev_aggressiveness_overridden: meta.devAggressivenessOverridden,
             transfer_snapshot: meta.transferSnapshot ?? null,
             player: pd
-              ? { first_name: pd.first_name, last_name: pd.last_name, position: pd.position, team: pd.team, from_team: pd.from_team, conference: pd.conference ?? null }
+              ? {
+                  first_name: pd.first_name,
+                  last_name: pd.last_name,
+                  position: pd.position,
+                  is_twp: (pd as any).is_twp ?? false,
+                  class_year: (pd as any).class_year ?? null,
+                  throws_hand: (pd as any).throws_hand ?? null,
+                  team: pd.team,
+                  from_team: pd.from_team,
+                  conference: pd.conference ?? null,
+                }
               : (resolvedLocalPlayer || null),
             prediction: activePred ?? null,
             nilVal: pd?.nil_valuations?.[0]?.estimated_value ?? null,
@@ -2066,6 +2123,9 @@ export default function TeamBuilder() {
           first_name: player.first_name,
           last_name: player.last_name,
           position: player.position,
+          is_twp: (player as any).is_twp ?? false,
+          class_year: (player as any).class_year ?? null,
+          throws_hand: (player as any).throws_hand ?? null,
           team: player.team,
           from_team: player.from_team,
           conference: player.conference ?? null,
@@ -2394,13 +2454,14 @@ export default function TeamBuilder() {
               production_notes: null,
               roster_status: "target",
               depth_role: isPitcherRow ? "high_leverage_reliever" : "utility",
-              class_transition: "SJ",
+              class_transition: classTransitionFromYearOrDefault(sb.class_year),
               dev_aggressiveness: 0,
               transfer_snapshot: null,
               player: {
                 first_name: sb.first_name,
                 last_name: sb.last_name,
                 position: sb.position,
+                class_year: sb.class_year ?? null,
                 team: sb.team,
                 from_team: sb.team,
                 conference: sb.conference ?? null,
@@ -2738,7 +2799,8 @@ export default function TeamBuilder() {
     return best;
   }, [confByKey]);
 
-  const simulateTransferProjection = useCallback((p: BuildPlayer) => {
+  const simulateTransferProjection = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
+    const treatAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
     const snapshotFallback = p.transfer_snapshot
       ? {
           p_avg: p.transfer_snapshot.p_avg,
@@ -2769,7 +2831,7 @@ export default function TeamBuilder() {
     // Live-recompute via shared transferPitcherProjection lib. Mirrors
     // the hitter live-recompute below so target board pitcher stats
     // stay fresh as conference stats / scouting / inputs update.
-    if (isPitcher(p)) {
+    if (treatAsPitcher) {
       const pName = `${livePlayer.first_name} ${livePlayer.last_name}`;
       const pSrcId = (livePlayer as any)?.source_player_id || null;
       const pNameKey = `${normalizeName(pName)}|${normalizeName(livePlayer.team || "")}`;
@@ -3447,7 +3509,7 @@ export default function TeamBuilder() {
         production_notes: null,
         roster_status: "target",
         depth_role: "utility",
-        class_transition: "SJ",
+        class_transition: classTransitionFromYearOrDefault(row.class_year),
         dev_aggressiveness: 0,
         class_transition_overridden: false,
         dev_aggressiveness_overridden: false,
@@ -3465,6 +3527,7 @@ export default function TeamBuilder() {
           first_name: row.first_name || "",
           last_name: row.last_name || "",
           position: row.position || null,
+          class_year: row.class_year ?? null,
           team: row.team || null,
           from_team: row.team || null,
           conference: row.conference || null,
@@ -3641,7 +3704,7 @@ export default function TeamBuilder() {
         production_notes: null,
         roster_status: "target",
         depth_role: inferredRole === "SP" ? "weekend_starter" : "high_leverage_reliever",
-        class_transition: "SJ",
+        class_transition: classTransitionFromYearOrDefault(row.class_year),
         dev_aggressiveness: 0,
         class_transition_overridden: false,
         dev_aggressiveness_overridden: false,
@@ -3650,6 +3713,7 @@ export default function TeamBuilder() {
           first_name: row.first_name || "",
           last_name: row.last_name || "",
           position: inferredRole,
+          class_year: row.class_year ?? null,
           team: row.team || null,
           from_team: row.from_team || row.team || null,
           conference: row.conference || null,
@@ -4218,13 +4282,18 @@ export default function TeamBuilder() {
     URL.revokeObjectURL(url);
   };
 
-  // Split into position players and pitchers. TWP (two-way) appears in
-  // their primary side only — coaches can click into the player profile
-  // and use the View Hitting/Pitching toggle to see the other half.
+  // Split into position players and pitchers. Two-way players (is_twp=true)
+  // appear in BOTH pools — one BuildPlayer row, rendered in both lists. The
+  // hitter list shows their hitter projections (oWAR), the pitcher list shows
+  // their pitcher projections (pWAR). Coaches see them in their primary
+  // position depth chart AND in the rotation/bullpen depth chart.
   const isPitcher = (p: BuildPlayer) => {
     const pos = p.position_slot || p.player?.position || "";
     return /^(SP|RP|CL|P|LHP|RHP)/i.test(pos);
   };
+  const isTwp = (p: BuildPlayer) => !!p.player?.is_twp;
+  const hitterEligible = (p: BuildPlayer) => !isPitcher(p) || isTwp(p);
+  const pitcherEligible = (p: BuildPlayer) => isPitcher(p) || isTwp(p);
 
   const hitterDepthRank = (role: BuildPlayer["depth_role"]) =>
     role === "starter" ? 0 : role === "utility" ? 1 : 2;
@@ -4235,7 +4304,7 @@ export default function TeamBuilder() {
     role === "low_impact_reliever" ? 3 :
     4;
   const positionPlayers = rosterPlayers
-    .filter((p) => !isPitcher(p))
+    .filter(hitterEligible)
     .map((p, i) => ({ p, i }))
     .sort((a, b) => {
       const ra = hitterDepthRank(a.p.depth_role);
@@ -4245,7 +4314,7 @@ export default function TeamBuilder() {
     })
     .map((x) => x.p);
   const pitchers = rosterPlayers
-    .filter((p) => isPitcher(p))
+    .filter(pitcherEligible)
     .map((p, i) => ({ p, i }))
     .sort((a, b) => {
       const ra = pitcherDepthRank(a.p.depth_role);
@@ -4255,8 +4324,8 @@ export default function TeamBuilder() {
     })
     .map((x) => x.p);
   const targetPlayers = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target");
-  const targetPositionPlayers = targetPlayers.filter((p) => !isPitcher(p));
-  const targetPitchers = targetPlayers.filter((p) => isPitcher(p));
+  const targetPositionPlayers = targetPlayers.filter(hitterEligible);
+  const targetPitchers = targetPlayers.filter(pitcherEligible);
 
   const pitchingTierMultipliers = useMemo(
     () => ({
@@ -4275,9 +4344,9 @@ export default function TeamBuilder() {
     const pRvPlusRaw = source?.p_rv_plus ?? source?.p_wrc_plus ?? p.transfer_snapshot?.p_rv_plus ?? p.transfer_snapshot?.p_wrc_plus ?? null;
     const pRvPlus = Number(pRvPlusRaw);
     if (!Number.isFinite(pRvPlus) || pitchingEq.pwar_runs_per_win === 0) return null;
-    const currentPitcherRole = normalizePitcherRole(
-      pitcherRoleFromSlot(p.position_slot) || p.player?.position || null,
-    );
+    const sourceId = (p.player as any)?.source_player_id ?? null;
+    const pmRole = sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId)?.role : null;
+    const currentPitcherRole = effectivePitcherRoleForBuild(p, pmRole);
     const pitcherDepthRole = normalizePitcherDepthRole(p.depth_role, currentPitcherRole);
     const ipByRole = currentPitcherRole === "SP"
       ? (pitcherDepthRole === "weekday_starter" ? pitchingEq.pwar_ip_sm : pitchingEq.pwar_ip_sp)
@@ -4288,7 +4357,7 @@ export default function TeamBuilder() {
       ((ipByRole / 9) * pitchingEq.pwar_replacement_runs_per_9)
     ) / pitchingEq.pwar_runs_per_win;
     return basePwar * depthRoleMultiplier(p.depth_role);
-  }, [pitchingEq]);
+  }, [pitchingEq, pitchingStatsByNameTeam]);
   const computeReturnerPitchingProjection = useCallback((p: BuildPlayer) => {
     const fullName = p.player
       ? `${p.player.first_name} ${p.player.last_name}`.trim()
@@ -4320,9 +4389,7 @@ export default function TeamBuilder() {
       })();
     if (!stats) return null;
 
-    const currentPitcherRole = normalizePitcherRole(
-      pitcherRoleFromSlot(p.position_slot) || p.player?.position || stats.role || null,
-    );
+    const currentPitcherRole = effectivePitcherRoleForBuild(p, stats.role);
     const classTransitionRaw = String(p.class_transition || "SJ").toUpperCase();
     const classTransition: "FS" | "SJ" | "JS" | "GR" =
       classTransitionRaw === "FS" || classTransitionRaw === "SJ" || classTransitionRaw === "JS" || classTransitionRaw === "GR"
@@ -4402,12 +4469,16 @@ export default function TeamBuilder() {
     };
   }, [pitchingEq, pitchingPowerEq, pitchingPrByNameTeam, pitchingStatsByNameTeam, selectedTeam, teamByKey, teamParkComponents]);
 
-  const playerProjection = useCallback((p: BuildPlayer) => {
-    const sim = p.roster_status === "target" ? simulateTransferProjection(p) : null;
+  // `side` lets the caller request the hitter-pool or pitcher-pool projection
+  // for a TWP. Default behavior (no side) matches the original isPitcher path,
+  // so non-TWP callers keep their existing semantics.
+  const playerProjection = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
+    const treatAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
+    const sim = p.roster_status === "target" ? simulateTransferProjection(p, side) : null;
     const shown = (p.roster_status === "target")
       ? (sim ?? p.transfer_snapshot ?? null)
-      : (isPitcher(p) ? (computeReturnerPitchingProjection(p) ?? p.prediction) : p.prediction);
-    if (isPitcher(p)) {
+      : (treatAsPitcher ? (computeReturnerPitchingProjection(p) ?? p.prediction) : p.prediction);
+    if (treatAsPitcher) {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
       let source: any = sourceBase;
       if ((p.roster_status || "returner") === "target" && sourceBase) {
@@ -4508,19 +4579,25 @@ export default function TeamBuilder() {
   }, [playerProjection, programTierMultiplier]);
 
   const nilBasePerOWar = eqNum("nil_base_per_owar", 25000);
-  const projectedNilForPlayer = useCallback((p: BuildPlayer) => {
+  // Side-aware NIL/market value. For non-TWPs, side is inferred from position.
+  // For TWPs (who appear in BOTH pools), the caller passes "hitter" or
+  // "pitcher" to compute the value for that pool — the team total intentionally
+  // sums both sides so a TWP counts as SS NIL + SP/RP market value, not a
+  // single blended TWP figure.
+  const projectedNilForPlayer = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
     if (!isProjectedStatus(p)) return 0;
-    if (isPitcher(p)) {
-      const projection = playerProjection(p);
+    const renderAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
+    if (renderAsPitcher) {
+      const projection = playerProjection(p, "pitcher");
       const source: any = projection.shown ?? projection.sim ?? p.transfer_snapshot ?? p.prediction ?? null;
       const direct = Number(source?.nil_valuation);
       // Ignore zero/blank seeded values so pitcher NIL is computed from pWAR inputs.
       if (Number.isFinite(direct) && direct > 0) return direct;
       const pwar = projection.pwar;
       if (!Number.isFinite(Number(pwar))) return 0;
-      const currentPitcherRole = normalizePitcherRole(
-        pitcherRoleFromSlot(p.position_slot) || p.player?.position || null,
-      );
+      const sourceId = (p.player as any)?.source_player_id ?? null;
+      const pmRole = sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId)?.role : null;
+      const currentPitcherRole = effectivePitcherRoleForBuild(p, pmRole);
       const conference = selectedTeam
         ? (teamByKey.get(normalizeKey(selectedTeam))?.conference ?? p.player?.conference ?? null)
         : (p.player?.conference ?? null);
@@ -4529,12 +4606,18 @@ export default function TeamBuilder() {
       return Number(pwar) * pitchingEq.market_dollars_per_war * ptm * pvm;
     }
     return projectedPlayerScore(p) * nilBasePerOWar;
-  }, [nilBasePerOWar, pitchingEq.market_dollars_per_war, pitchingPvfForRole, pitchingTierMultipliers, projectedPlayerScore, playerProjection, selectedTeam, teamByKey]);
-  const effectiveNilForPlayer = useCallback((p: BuildPlayer) => {
+  }, [nilBasePerOWar, pitchingEq.market_dollars_per_war, pitchingPvfForRole, pitchingTierMultipliers, projectedPlayerScore, playerProjection, selectedTeam, teamByKey, pitchingStatsByNameTeam]);
+  const effectiveNilForPlayer = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
     if (!isProjectedStatus(p)) return 0;
-    const actualNil = Number(p.nil_value) || 0;
-    if (actualNil > 0) return actualNil;
-    return projectedNilForPlayer(p);
+    // Manual NIL override only applies to a player's primary side. TWP's
+    // secondary side always uses the projected value so the SS + SP/RP
+    // double-count math comes from real per-pool projections.
+    const onPrimarySide = side == null || (side === "pitcher" ? isPitcher(p) : !isPitcher(p));
+    if (onPrimarySide) {
+      const actualNil = Number(p.nil_value) || 0;
+      if (actualNil > 0) return actualNil;
+    }
+    return projectedNilForPlayer(p, side);
   }, [projectedNilForPlayer]);
 
   const isProjectedStatus = (p: BuildPlayer) => (p.roster_status || "returner") !== "leaving";
@@ -4544,10 +4627,13 @@ export default function TeamBuilder() {
     return sum + projectedPlayerScore(p);
   }, 0);
   const totalEffectiveNil = rosterPlayers.reduce((sum, p) => {
-    return sum + effectiveNilForPlayer(p);
+    let v = 0;
+    if (hitterEligible(p)) v += effectiveNilForPlayer(p, "hitter");
+    if (pitcherEligible(p)) v += effectiveNilForPlayer(p, "pitcher");
+    return sum + v;
   }, 0);
   const budgetRemaining = totalBudget - totalEffectiveNil;
-  const calcTotals = useCallback((rows: BuildPlayer[]) => {
+  const calcTotals = useCallback((rows: BuildPlayer[], forSide?: "hitter" | "pitcher") => {
     let sumAvg = 0;
     let sumObp = 0;
     let sumSlg = 0;
@@ -4591,11 +4677,14 @@ export default function TeamBuilder() {
         sumWrc += shown.p_wrc_plus * mult;
         weightWrc += mult;
       }
-      if (isPitcher(p)) {
-        const source: any = shown ?? ((p.roster_status === "target") ? p.transfer_snapshot : p.prediction) ?? null;
-        const role = normalizePitcherRole(
-          pitcherRoleFromSlot(p.position_slot) || p.player?.position || null,
-        );
+      if (pitcherEligible(p)) {
+        // Re-derive pitcher projection on the pitcher side for TWPs (whose
+        // primary playerProjection() returned hitter stats above).
+        const pitcherProj = isPitcher(p) ? { shown, owar } : playerProjection(p, "pitcher");
+        const source: any = pitcherProj.shown ?? ((p.roster_status === "target") ? p.transfer_snapshot : p.prediction) ?? null;
+        const sourceId = (p.player as any)?.source_player_id ?? null;
+        const pmRole = sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId)?.role : null;
+        const role = effectivePitcherRoleForBuild(p, pmRole);
         const depthRole = normalizePitcherDepthRole(p.depth_role, role);
         const ipWeight = role === "SP"
           ? (depthRole === "weekday_starter" ? pitchingEq.pwar_ip_sm : pitchingEq.pwar_ip_sp)
@@ -4627,8 +4716,8 @@ export default function TeamBuilder() {
         }
       }
       totalOWar += owar ?? 0;
-      totalActualNil += effectiveNilForPlayer(p);
-      totalProjectedNil += projectedNilForPlayer(p);
+      totalActualNil += effectiveNilForPlayer(p, forSide);
+      totalProjectedNil += projectedNilForPlayer(p, forSide);
       totalPlayerScore += projectedPlayerScore(p);
     }
 
@@ -4649,10 +4738,10 @@ export default function TeamBuilder() {
     };
   }, [isProjectedStatus, playerProjection, effectiveNilForPlayer, projectedNilForPlayer, pitchingEq]);
   const rosterTableTotals = useMemo(() => calcTotals(rosterPlayers), [calcTotals, rosterPlayers]);
-  const positionTableTotals = useMemo(() => calcTotals(positionPlayers), [calcTotals, positionPlayers]);
-  const pitcherTableTotals = useMemo(() => calcTotals(pitchers), [calcTotals, pitchers]);
-  const targetPositionTableTotals = useMemo(() => calcTotals(targetPositionPlayers), [calcTotals, targetPositionPlayers]);
-  const targetPitcherTableTotals = useMemo(() => calcTotals(targetPitchers), [calcTotals, targetPitchers]);
+  const positionTableTotals = useMemo(() => calcTotals(positionPlayers, "hitter"), [calcTotals, positionPlayers]);
+  const pitcherTableTotals = useMemo(() => calcTotals(pitchers, "pitcher"), [calcTotals, pitchers]);
+  const targetPositionTableTotals = useMemo(() => calcTotals(targetPositionPlayers, "hitter"), [calcTotals, targetPositionPlayers]);
+  const targetPitcherTableTotals = useMemo(() => calcTotals(targetPitchers, "pitcher"), [calcTotals, targetPitchers]);
 
   const projectedBudgetValue = useCallback((p: BuildPlayer) => {
     if (!isProjectedStatus(p) || totalBudget <= 0) return null;
@@ -5030,6 +5119,9 @@ export default function TeamBuilder() {
           first_name: player.first_name,
           last_name: player.last_name,
           position: player.position,
+          is_twp: (player as any).is_twp ?? false,
+          class_year: (player as any).class_year ?? null,
+          throws_hand: (player as any).throws_hand ?? null,
           team: player.team,
           from_team: player.from_team,
           conference: player.conference ?? null,
@@ -5046,10 +5138,14 @@ export default function TeamBuilder() {
     autoSeededTeamRef.current = normalizeName(selectedTeam);
   };
 
-  const renderPlayerRow = (p: BuildPlayer, idx: number, globalIdx: number) => {
-    const projection = playerProjection(p);
+  const renderPlayerRow = (p: BuildPlayer, idx: number, globalIdx: number, pool?: "hitter" | "pitcher") => {
+    // `pool` lets the caller force pitcher-side semantics for a TWP rendered
+    // in the pitcher table even though its position_slot is the hitter primary
+    // (e.g. SS). When undefined, fall back to the player's intrinsic side.
+    const side: "hitter" | "pitcher" = pool ?? (isPitcher(p) ? "pitcher" : "hitter");
+    const projection = playerProjection(p, side);
     const isTarget = (p.roster_status || "returner") === "target";
-    const isPitcherRow = isPitcher(p);
+    const isPitcherRow = side === "pitcher";
     const linkedPlayerId = (() => {
       // Use player_id directly if available — don't wait for allPlayersForSearch to load
       if (p.player_id) return p.player_id;
@@ -5063,19 +5159,23 @@ export default function TeamBuilder() {
       );
       return match?.id ?? null;
     })();
-    const currentPitcherRole = normalizePitcherRole(
-      pitcherRoleFromSlot(p.position_slot) || p.player?.position || null,
-    );
+    // For TWPs in the pitcher pool the position_slot is a hitter slot (e.g.
+    // SS), so fall back to the Pitching Master role; effectivePitcherRoleForBuild
+    // handles the same logic used by pWAR + NIL math so the displayed role,
+    // the projection, and the market value all agree.
+    const sourceId = (p.player as any)?.source_player_id ?? null;
+    const pmRole = sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId)?.role : null;
+    const currentPitcherRole = effectivePitcherRoleForBuild(p, pmRole);
     const pitcherDepthRole = normalizePitcherDepthRole(p.depth_role, currentPitcherRole);
-    const sim = isTarget ? simulateTransferProjection(p) : null;
+    const sim = isTarget ? simulateTransferProjection(p, side) : null;
     // For target players, show raw projected oWAR/NIL (no depth role multiplier) to match Transfer Portal
     const projectedOwar = isTarget ? (sim?.owar ?? null) : (projection.owar ?? null);
     const projectedPwar = isPitcherRow ? projection.pwar : null;
     const projectedNilRaw = isPitcherRow
-      ? projectedNilForPlayer(p)
+      ? projectedNilForPlayer(p, "pitcher")
       : (isTarget
-          ? (sim?.nil_valuation ?? p.transfer_snapshot?.nil_valuation ?? projectedNilForPlayer(p))
-          : projectedNilForPlayer(p));
+          ? (sim?.nil_valuation ?? p.transfer_snapshot?.nil_valuation ?? projectedNilForPlayer(p, "hitter"))
+          : projectedNilForPlayer(p, "hitter"));
     const projectedNil = (() => {
       const n = Number(projectedNilRaw);
       if (Number.isFinite(n)) return n;
@@ -5195,6 +5295,18 @@ export default function TeamBuilder() {
             </span>
           );
         })()
+      ) : isPitcherRow ? (
+        // Pitcher pool context: show RHP / LHP based on throws_hand so the
+        // cell doesn't display the TWP's hitter primary (e.g. "RF" for Kenny).
+        // Falls back to "P" when throws_hand is missing. The specific role
+        // (SP / RP) is conveyed by the role dropdown immediately to the right.
+        (() => {
+          const hand = String(p.player?.throws_hand || "").trim().toUpperCase();
+          if (hand === "R") return "RHP";
+          if (hand === "L") return "LHP";
+          if (hand === "S") return "SHP";
+          return "P";
+        })()
       ) : (() => {
         const dbPos = p.player?.position || "";
         if (dbPos === "OF" || !dbPos) {
@@ -5217,14 +5329,19 @@ export default function TeamBuilder() {
             value={currentPitcherRole}
             onValueChange={(v) => {
               const nextRole = v as "SP" | "RP";
+              const isTwpRow = !!p.player?.is_twp;
+              // For TWPs the position_slot holds the hitter primary (e.g. SS).
+              // Don't overwrite it with the pitcher role — that would erase the
+              // hitter slot the row uses on the hitter side. Persist the
+              // pitcher role override only.
               updatePlayer(globalIdx, {
-                position_slot: nextRole,
+                ...(isTwpRow ? {} : { position_slot: nextRole }),
                 depth_role: normalizePitcherDepthRole(p.depth_role, nextRole),
               });
               if (p.player_id) {
-                updatePlayerOverrideFn(p.player_id, { position: nextRole });
+                if (!isTwpRow) updatePlayerOverrideFn(p.player_id, { position: nextRole });
                 writeLegacyPitchingRoleOverride(getPlayerName(p), p.player?.team || null, nextRole);
-                if (p.player_id) setSupabaseRole(p.player_id, nextRole);
+                setSupabaseRole(p.player_id, nextRole);
               }
             }}
           >
@@ -5264,20 +5381,22 @@ export default function TeamBuilder() {
         )}
       </TableCell>
       <TableCell>
-        <Select
-          value={p.class_transition || "SJ"}
-          onValueChange={(v) => updatePlayerWithRecalc(globalIdx, { class_transition: v, class_transition_overridden: true })}
-        >
-          <SelectTrigger className="w-[90px] h-8">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="FS">FR→SO</SelectItem>
-            <SelectItem value="SJ">SO→JR</SelectItem>
-            <SelectItem value="JS">JR→SR</SelectItem>
-            <SelectItem value="GR">GR</SelectItem>
-          </SelectContent>
-        </Select>
+        {/* Class transition is auto-derived from each player's class_year
+            (TruMedia is the source of truth) and persisted on the prediction
+            row. Coaches override on the player profile page for unusual
+            development arcs; not editable from TB anymore. */}
+        {(() => {
+          const ct = p.class_transition || classTransitionFromYearOrDefault((p.player as any)?.class_year);
+          const label: Record<string, string> = { FS: "FR→SO", SJ: "SO→JR", JS: "JR→SR", GR: "GR" };
+          return (
+            <span
+              className="inline-flex items-center justify-center w-[90px] h-8 rounded-md border border-border bg-muted/40 text-xs font-medium text-foreground/80 tabular-nums"
+              title="Auto-derived from class_year. Override on the player profile page."
+            >
+              {label[ct] || ct || "—"}
+            </span>
+          );
+        })()}
       </TableCell>
       <TableCell>
         <Select
@@ -5345,7 +5464,11 @@ export default function TeamBuilder() {
       </TableCell>
       <TableCell className="text-center">
         {(() => {
-          const isPitcherRow = isPitcher(p);
+          // Use the outer pool-aware isPitcherRow (side === "pitcher").
+          // Shadowing this with isPitcher(p) was the bug that made TWPs in the
+          // hitter table render with pitcher stats — for a TWP-pitcher-primary
+          // (position='P'), isPitcher(p)=true so the pitcher branch fired even
+          // when the row was inside the hitter pool's table.
           const shown: any = projection.shown ?? null;
           const thin = p.player_id ? thinSampleMap.get(p.player_id) === true : false;
           const thinCls = thin ? " opacity-60" : "";
@@ -5572,7 +5695,7 @@ export default function TeamBuilder() {
           </div>
         </div>
 
-        <Tabs defaultValue={initialTab}>
+        <Tabs value={activeTab} onValueChange={onTabChange}>
           <div className="flex items-center justify-between gap-2">
             <TabsList>
               <TabsTrigger value="roster">Roster</TabsTrigger>
@@ -5675,7 +5798,7 @@ export default function TeamBuilder() {
                     ) : (
                       positionPlayers.map((p, i) => {
                         const globalIdx = rosterPlayers.indexOf(p);
-                        return renderPlayerRow(p, i, globalIdx);
+                        return renderPlayerRow(p, i, globalIdx, "hitter");
                       })
                     )}
                     <TableRow className="bg-muted/40 font-medium">
@@ -5738,7 +5861,7 @@ export default function TeamBuilder() {
                     ) : (
                       pitchers.map((p, i) => {
                         const globalIdx = rosterPlayers.indexOf(p);
-                        return renderPlayerRow(p, i, globalIdx);
+                        return renderPlayerRow(p, i, globalIdx, "pitcher");
                       })
                     )}
                     <TableRow className="bg-muted/40 font-medium">
@@ -5898,7 +6021,7 @@ export default function TeamBuilder() {
                     ) : (
                       targetPositionPlayers.map((p, i) => {
                         const globalIdx = rosterPlayers.indexOf(p);
-                        return renderPlayerRow(p, i, globalIdx);
+                        return renderPlayerRow(p, i, globalIdx, "hitter");
                       })
                     )}
                     <TableRow className="bg-muted/40 font-medium">
@@ -5958,7 +6081,7 @@ export default function TeamBuilder() {
                     ) : (
                       targetPitchers.map((p, i) => {
                         const globalIdx = rosterPlayers.indexOf(p);
-                        return renderPlayerRow(p, i, globalIdx);
+                        return renderPlayerRow(p, i, globalIdx, "pitcher");
                       })
                     )}
                     <TableRow className="bg-muted/40 font-medium">
