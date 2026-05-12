@@ -26,6 +26,7 @@ import {
 } from "@/lib/nilProgramSpecific";
 import { computeTransferProjection } from "@/lib/transferProjection";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
+import { classTransitionFromYearOrDefault } from "@/lib/classTransitionUtils";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
@@ -90,6 +91,7 @@ type BuildPlayer = {
     last_name: string;
     position: string | null;
     is_twp?: boolean | null;
+    class_year?: string | null;
     team: string | null;
     from_team: string | null;
     conference: string | null;
@@ -893,11 +895,30 @@ export default function TeamBuilder() {
   const { board: supabaseTargetBoard, removePlayer: removeFromSupabaseBoard, addPlayer: addToSupabaseBoard, isOnBoard: isOnSupabaseBoard } = useTargetBoard();
   const queryClient = useQueryClient();
   const isAdmin = hasRole("admin");
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
-  const validTabs = new Set(["roster", "target-board", "compare", "depth"]);
+  const validTabs = new Set(["roster", "target-board", "compare", "depth", "analytics"]);
   const requestedTab = (searchParams.get("tab") || "").trim().toLowerCase();
   const initialTab = validTabs.has(requestedTab) ? requestedTab : "roster";
+  // Controlled tab state mirrored to ?tab= so refresh/hard-refresh keeps the
+  // user on the same view (and the URL becomes shareable). Without this the
+  // Tabs component is uncontrolled and tab changes never reach the URL.
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
+  const onTabChange = useCallback(
+    (next: string) => {
+      setActiveTab(next);
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next === "roster") params.delete("tab");
+          else params.set("tab", next);
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   const [selectedBuildId, setSelectedBuildId] = useState<string | null>(null);
   const [nilEquationOpen, setNilEquationOpen] = useState(false);
@@ -1053,7 +1074,7 @@ export default function TeamBuilder() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, is_twp, team, from_team, conference, transfer_portal, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at), nil_valuations(estimated_value, component_breakdown)")
+          .select("id, first_name, last_name, position, is_twp, class_year, team, from_team, conference, transfer_portal, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at), nil_valuations(estimated_value, component_breakdown)")
           .range(from, from + PAGE - 1);
         if (error) throw error;
         all = all.concat(data || []);
@@ -1622,7 +1643,7 @@ export default function TeamBuilder() {
       for (const r of hitterStats) { if (r.player_id) active2025Ids.add(r.player_id); }
       for (const r of pitchingMasterRows) { if (r.source_player_id) active2025Ids.add(r.source_player_id); }
       // Try team_id UUID first, fall back to team name match
-      const selectCols = "id, first_name, last_name, position, is_twp, team, from_team, conference, transfer_portal, source_player_id, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at)";
+      const selectCols = "id, first_name, last_name, position, is_twp, class_year, team, from_team, conference, transfer_portal, source_player_id, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at)";
       let query = supabase.from("players").select(selectCols).eq("transfer_portal", false);
       if (selectedTeamId) {
         query = query.eq("team_id", selectedTeamId);
@@ -1662,7 +1683,7 @@ export default function TeamBuilder() {
           results.push({
             ...(best || {}),
             player_id: player.id,
-            players: { id: player.id, first_name: player.first_name, last_name: player.last_name, position: player.position, is_twp: (player as any).is_twp ?? false, team: player.team, from_team: player.from_team, conference: player.conference, transfer_portal: player.transfer_portal },
+            players: { id: player.id, first_name: player.first_name, last_name: player.last_name, position: player.position, is_twp: (player as any).is_twp ?? false, class_year: (player as any).class_year ?? null, team: player.team, from_team: player.from_team, conference: player.conference, transfer_portal: player.transfer_portal },
           });
         }
         return results;
@@ -1987,7 +2008,16 @@ export default function TeamBuilder() {
             dev_aggressiveness_overridden: meta.devAggressivenessOverridden,
             transfer_snapshot: meta.transferSnapshot ?? null,
             player: pd
-              ? { first_name: pd.first_name, last_name: pd.last_name, position: pd.position, team: pd.team, from_team: pd.from_team, conference: pd.conference ?? null }
+              ? {
+                  first_name: pd.first_name,
+                  last_name: pd.last_name,
+                  position: pd.position,
+                  is_twp: (pd as any).is_twp ?? false,
+                  class_year: (pd as any).class_year ?? null,
+                  team: pd.team,
+                  from_team: pd.from_team,
+                  conference: pd.conference ?? null,
+                }
               : (resolvedLocalPlayer || null),
             prediction: activePred ?? null,
             nilVal: pd?.nil_valuations?.[0]?.estimated_value ?? null,
@@ -2076,6 +2106,7 @@ export default function TeamBuilder() {
           last_name: player.last_name,
           position: player.position,
           is_twp: (player as any).is_twp ?? false,
+          class_year: (player as any).class_year ?? null,
           team: player.team,
           from_team: player.from_team,
           conference: player.conference ?? null,
@@ -2351,13 +2382,14 @@ export default function TeamBuilder() {
               production_notes: null,
               roster_status: "target",
               depth_role: isPitcherRow ? "high_leverage_reliever" : "utility",
-              class_transition: "SJ",
+              class_transition: classTransitionFromYearOrDefault(sb.class_year),
               dev_aggressiveness: 0,
               transfer_snapshot: null,
               player: {
                 first_name: sb.first_name,
                 last_name: sb.last_name,
                 position: sb.position,
+                class_year: sb.class_year ?? null,
                 team: sb.team,
                 from_team: sb.team,
                 conference: sb.conference ?? null,
@@ -3405,7 +3437,7 @@ export default function TeamBuilder() {
         production_notes: null,
         roster_status: "target",
         depth_role: "utility",
-        class_transition: "SJ",
+        class_transition: classTransitionFromYearOrDefault(row.class_year),
         dev_aggressiveness: 0,
         class_transition_overridden: false,
         dev_aggressiveness_overridden: false,
@@ -3423,6 +3455,7 @@ export default function TeamBuilder() {
           first_name: row.first_name || "",
           last_name: row.last_name || "",
           position: row.position || null,
+          class_year: row.class_year ?? null,
           team: row.team || null,
           from_team: row.team || null,
           conference: row.conference || null,
@@ -3599,7 +3632,7 @@ export default function TeamBuilder() {
         production_notes: null,
         roster_status: "target",
         depth_role: inferredRole === "SP" ? "weekend_starter" : "high_leverage_reliever",
-        class_transition: "SJ",
+        class_transition: classTransitionFromYearOrDefault(row.class_year),
         dev_aggressiveness: 0,
         class_transition_overridden: false,
         dev_aggressiveness_overridden: false,
@@ -3608,6 +3641,7 @@ export default function TeamBuilder() {
           first_name: row.first_name || "",
           last_name: row.last_name || "",
           position: inferredRole,
+          class_year: row.class_year ?? null,
           team: row.team || null,
           from_team: row.from_team || row.team || null,
           conference: row.conference || null,
@@ -5014,6 +5048,7 @@ export default function TeamBuilder() {
           last_name: player.last_name,
           position: player.position,
           is_twp: (player as any).is_twp ?? false,
+          class_year: (player as any).class_year ?? null,
           team: player.team,
           from_team: player.from_team,
           conference: player.conference ?? null,
@@ -5261,20 +5296,22 @@ export default function TeamBuilder() {
         )}
       </TableCell>
       <TableCell>
-        <Select
-          value={p.class_transition || "SJ"}
-          onValueChange={(v) => updatePlayerWithRecalc(globalIdx, { class_transition: v, class_transition_overridden: true })}
-        >
-          <SelectTrigger className="w-[90px] h-8">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="FS">FR→SO</SelectItem>
-            <SelectItem value="SJ">SO→JR</SelectItem>
-            <SelectItem value="JS">JR→SR</SelectItem>
-            <SelectItem value="GR">GR</SelectItem>
-          </SelectContent>
-        </Select>
+        {/* Class transition is auto-derived from each player's class_year
+            (TruMedia is the source of truth) and persisted on the prediction
+            row. Coaches override on the player profile page for unusual
+            development arcs; not editable from TB anymore. */}
+        {(() => {
+          const ct = p.class_transition || classTransitionFromYearOrDefault((p.player as any)?.class_year);
+          const label: Record<string, string> = { FS: "FR→SO", SJ: "SO→JR", JS: "JR→SR", GR: "GR" };
+          return (
+            <span
+              className="inline-flex items-center justify-center w-[90px] h-8 rounded-md border border-border bg-muted/40 text-xs font-medium text-foreground/80 tabular-nums"
+              title="Auto-derived from class_year. Override on the player profile page."
+            >
+              {label[ct] || ct || "—"}
+            </span>
+          );
+        })()}
       </TableCell>
       <TableCell>
         <Select
@@ -5342,7 +5379,11 @@ export default function TeamBuilder() {
       </TableCell>
       <TableCell className="text-center">
         {(() => {
-          const isPitcherRow = isPitcher(p);
+          // Use the outer pool-aware isPitcherRow (side === "pitcher").
+          // Shadowing this with isPitcher(p) was the bug that made TWPs in the
+          // hitter table render with pitcher stats — for a TWP-pitcher-primary
+          // (position='P'), isPitcher(p)=true so the pitcher branch fired even
+          // when the row was inside the hitter pool's table.
           const shown: any = projection.shown ?? null;
           const thin = p.player_id ? thinSampleMap.get(p.player_id) === true : false;
           const thinCls = thin ? " opacity-60" : "";
@@ -5563,7 +5604,7 @@ export default function TeamBuilder() {
           </div>
         </div>
 
-        <Tabs defaultValue={initialTab}>
+        <Tabs value={activeTab} onValueChange={onTabChange}>
           <div className="flex items-center justify-between gap-2">
             <TabsList>
               <TabsTrigger value="roster">Roster</TabsTrigger>

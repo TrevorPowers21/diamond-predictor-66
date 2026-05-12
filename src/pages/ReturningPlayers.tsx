@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -108,10 +108,9 @@ const THROW_OPTIONS: { value: string; label: string }[] = [
   { value: "L", label: "Left" },
   { value: "R", label: "Right" },
 ];
-const PITCHER_ROLE_OPTIONS: { value: "SP" | "RP" | "SM"; label: string }[] = [
+const PITCHER_ROLE_OPTIONS: { value: "SP" | "RP"; label: string }[] = [
   { value: "SP", label: "Starters" },
   { value: "RP", label: "Relievers" },
-  { value: "SM", label: "Swingmen" },
 ];
 
 // Conference taxonomy for the dashboard filter. Tiers mirror RSTR IQ's existing
@@ -1037,8 +1036,8 @@ export default function ReturningPlayers() {
       return next;
     });
   };
-  const [pitcherRoleFilters, setPitcherRoleFilters] = useState<Set<"SP" | "RP" | "SM">>(new Set());
-  const togglePitcherRoleFilter = (r: "SP" | "RP" | "SM") => {
+  const [pitcherRoleFilters, setPitcherRoleFilters] = useState<Set<"SP" | "RP">>(new Set());
+  const togglePitcherRoleFilter = (r: "SP" | "RP") => {
     setPitcherRoleFilters((prev) => {
       const next = new Set(prev);
       if (next.has(r)) next.delete(r);
@@ -1088,7 +1087,29 @@ export default function ReturningPlayers() {
   }, [playerOverrideMap]);
   const [showMissingOnly, setShowMissingOnly] = useState(false);
   const [selectedSeason, setSelectedSeason] = useState<number>(2026);
-  const [dashboardView, setDashboardView] = useState<"hitting" | "pitching">("hitting");
+  // Subtab state is mirrored to `?tab=hitting|pitching` so refresh / hard
+  // refresh keeps the user on the same dashboard view (and the URL becomes
+  // shareable). Reading the URL on init is what makes refresh work — the
+  // sessionStorage snapshot below is one-shot and only fires on back-nav.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialDashboardView: "hitting" | "pitching" =
+    searchParams.get("tab") === "pitching" ? "pitching" : "hitting";
+  const [dashboardView, setDashboardViewState] = useState<"hitting" | "pitching">(initialDashboardView);
+  const setDashboardView = useCallback(
+    (next: "hitting" | "pitching") => {
+      setDashboardViewState(next);
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next === "hitting") params.delete("tab");
+          else params.set("tab", next);
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
   const [pitchingSearch, setPitchingSearch] = useState("");
   const [pitchingPage, setPitchingPage] = useState(1);
   const [pitchingPageSize, setPitchingPageSize] = useState<number>(100);
@@ -1167,7 +1188,7 @@ export default function ReturningPlayers() {
         pitchingPageSize?: number;
         pitchingSortKey?: PitchingSortKey;
         pitchingSortDir?: SortDir;
-        pitcherRoleFilters?: ("SP" | "RP" | "SM")[];
+        pitcherRoleFilters?: ("SP" | "RP")[];
         pitcherClassFilters?: string[];
         pitcherThrowsFilters?: string[];
         pitcherConfFilters?: string[];
@@ -1203,7 +1224,7 @@ export default function ReturningPlayers() {
       if (parsed.pitchingSortKey) setPitchingSortKey(parsed.pitchingSortKey);
       if (parsed.pitchingSortDir) setPitchingSortDir(parsed.pitchingSortDir);
       if (Array.isArray(parsed.pitcherRoleFilters)) {
-        setPitcherRoleFilters(new Set(parsed.pitcherRoleFilters.filter((v): v is "SP" | "RP" | "SM" => v === "SP" || v === "RP" || v === "SM")));
+        setPitcherRoleFilters(new Set(parsed.pitcherRoleFilters.filter((v): v is "SP" | "RP" => v === "SP" || v === "RP")));
       }
       if (Array.isArray(parsed.pitcherClassFilters)) {
         setPitcherClassFilters(new Set(parsed.pitcherClassFilters.filter((v) => typeof v === "string")));
@@ -2579,15 +2600,23 @@ export default function ReturningPlayers() {
                     onClick={() => {
                       setShowSearchDropdown(false);
                       setSearch("");
-                      navigate(profileRouteFor(p.id, p.position));
+                      // Hitter dashboard context: TWPs always go to the hitter
+                      // profile from here, even when their primary position is
+                      // 'P'. Symmetric override happens in the pitcher
+                      // dashboard's search dropdown below.
+                      navigate((p as any).is_twp ? `/dashboard/player/${p.id}` : profileRouteFor(p.id, p.position));
                     }}
                   >
                     <span className="font-medium">{p.first_name} {p.last_name}</span>
-                    <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
-                      <PositionWithTwp position={p.position} isTwp={(p as any).is_twp} />
-                      <span>·</span>
-                      <span>{p.team || ""}</span>
-                    </span>
+                    {(p as any).is_twp ? (
+                      <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+                        <PositionWithTwp position={p.position} isTwp={(p as any).is_twp} />
+                        <span>·</span>
+                        <span>{p.team || ""}</span>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">{p.position || ""} · {p.team || ""}</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -2792,41 +2821,52 @@ export default function ReturningPlayers() {
                               } satisfies ReportPlayer} />
                             </TableCell>
                             <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
-                              <Link
-                                to={profileRouteFor(p.id, effectivePosition)}
-                                state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}
-                                onClick={saveViewSnapshot}
-                                className="hover:text-primary hover:underline transition-colors"
-                              >
-                                {p.first_name} {p.last_name}
-                              </Link>
-                              {bulkEditMode ? (
-                                <div className="mt-1 flex items-center gap-1">
-                                  <Input
-                                    className="h-6 w-[72px] text-[10px]"
-                                    defaultValue={editedPlayers[p.id]?.position ?? p.position ?? ""}
-                                    placeholder="Pos"
-                                    onBlur={(e) => {
-                                      const val = e.target.value.trim();
-                                      if (val !== (p.position ?? "")) handleEditField(p.id, "position", val);
-                                    }}
-                                  />
-                                  <Input
-                                    className="h-6 w-[130px] text-[10px]"
-                                    defaultValue={editedPlayers[p.id]?.team ?? p.team ?? ""}
-                                    placeholder="Team"
-                                    onBlur={(e) => {
-                                      const val = e.target.value.trim();
-                                      if (val !== (p.team ?? "")) handleEditField(p.id, "team", val);
-                                    }}
-                                  />
+                              <div className={p.is_twp ? "flex items-center gap-2" : undefined}>
+                                <div className="min-w-0">
+                                  <Link
+                                    to={p.is_twp ? `/dashboard/player/${p.id}` : profileRouteFor(p.id, effectivePosition)}
+                                    state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}
+                                    onClick={saveViewSnapshot}
+                                    className="hover:text-primary hover:underline transition-colors"
+                                  >
+                                    {p.first_name} {p.last_name}
+                                  </Link>
+                                  {bulkEditMode ? (
+                                    <div className="mt-1 flex items-center gap-1">
+                                      <Input
+                                        className="h-6 w-[72px] text-[10px]"
+                                        defaultValue={editedPlayers[p.id]?.position ?? p.position ?? ""}
+                                        placeholder="Pos"
+                                        onBlur={(e) => {
+                                          const val = e.target.value.trim();
+                                          if (val !== (p.position ?? "")) handleEditField(p.id, "position", val);
+                                        }}
+                                      />
+                                      <Input
+                                        className="h-6 w-[130px] text-[10px]"
+                                        defaultValue={editedPlayers[p.id]?.team ?? p.team ?? ""}
+                                        placeholder="Team"
+                                        onBlur={(e) => {
+                                          const val = e.target.value.trim();
+                                          if (val !== (p.team ?? "")) handleEditField(p.id, "team", val);
+                                        }}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="text-xs text-muted-foreground">
+                                      {[effectivePosition, p.team].filter(Boolean).join(" · ") || "—"}
+                                    </div>
+                                  )}
                                 </div>
-                              ) : (
-                                <div className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
-                                  <PositionWithTwp position={effectivePosition} isTwp={p.is_twp} />
-                                  {p.team ? <><span>·</span><span>{p.team}</span></> : null}
-                                </div>
-                              )}
+                                {p.is_twp ? (
+                                  <span
+                                    className="shrink-0 px-1.5 py-[2px] rounded-sm text-[9px] uppercase tracking-[0.08em] font-semibold bg-[#D4AF37]/15 text-[#D4AF37]/90 ring-1 ring-[#D4AF37]/30"
+                                    title="Two-way player"
+                                  >
+                                    TWP
+                                  </span>
+                                ) : null}
+                              </div>
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">{statFormat(pred.p_avg)}</TableCell>
                             <TableCell className="text-right text-sm tabular-nums">{statFormat(pred.p_obp)}</TableCell>
@@ -2962,15 +3002,22 @@ export default function ReturningPlayers() {
                     onClick={() => {
                       setShowSearchDropdown(false);
                       setSearch("");
-                      navigate(profileRouteFor(p.id, p.position));
+                      // Pitcher dashboard context: TWPs always go to the
+                      // pitcher profile from here, mirror of the hitter
+                      // override above.
+                      navigate((p as any).is_twp ? `/dashboard/pitcher/${p.id}` : profileRouteFor(p.id, p.position));
                     }}
                   >
                     <span className="font-medium">{p.first_name} {p.last_name}</span>
-                    <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
-                      <PositionWithTwp position={p.position} isTwp={(p as any).is_twp} />
-                      <span>·</span>
-                      <span>{p.team || ""}</span>
-                    </span>
+                    {(p as any).is_twp ? (
+                      <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+                        <PositionWithTwp position={p.position} isTwp={(p as any).is_twp} />
+                        <span>·</span>
+                        <span>{p.team || ""}</span>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">{p.position || ""} · {p.team || ""}</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -3121,24 +3168,30 @@ export default function ReturningPlayers() {
                               } satisfies ReportPlayer} />
                             </TableCell>
                             <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
-                              <Link
-                                to={`/dashboard/pitcher/storage__${encodeURIComponent(r.playerName)}__${encodeURIComponent(r.team || "")}`}
-                                onClick={saveViewSnapshot}
-                                className="hover:text-primary hover:underline transition-colors"
-                              >
-                                {r.playerName}
-                              </Link>
-                              <div className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
-                                {(() => {
-                                  const hand = r.handedness === "R" ? "RHP" : r.handedness === "L" ? "LHP" : null;
-                                  if (!hand && !r.team && !r.is_twp) return <span>—</span>;
-                                  return (
-                                    <>
-                                      <PositionWithTwp position={hand ?? "P"} isTwp={r.is_twp} />
-                                      {r.team ? <><span>·</span><span>{r.team}</span></> : null}
-                                    </>
-                                  );
-                                })()}
+                              <div className={r.is_twp ? "flex items-center gap-2" : undefined}>
+                                <div className="min-w-0">
+                                  <Link
+                                    to={`/dashboard/pitcher/storage__${encodeURIComponent(r.playerName)}__${encodeURIComponent(r.team || "")}`}
+                                    onClick={saveViewSnapshot}
+                                    className="hover:text-primary hover:underline transition-colors"
+                                  >
+                                    {r.playerName}
+                                  </Link>
+                                  <div className="text-xs text-muted-foreground">
+                                    {(() => {
+                                      const hand = r.handedness === "R" ? "RHP" : r.handedness === "L" ? "LHP" : null;
+                                      return [hand, r.team].filter(Boolean).join(" · ") || "—";
+                                    })()}
+                                  </div>
+                                </div>
+                                {r.is_twp ? (
+                                  <span
+                                    className="shrink-0 px-1.5 py-[2px] rounded-sm text-[9px] uppercase tracking-[0.08em] font-semibold bg-[#D4AF37]/15 text-[#D4AF37]/90 ring-1 ring-[#D4AF37]/30"
+                                    title="Two-way player"
+                                  >
+                                    TWP
+                                  </span>
+                                ) : null}
                               </div>
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">{statFormat(r.p_era, 2)}</TableCell>

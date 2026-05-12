@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { fetchParkFactorsMap, resolveMetricParkFactor } from "@/lib/parkFactors";
+import { classTransitionFromYearOrDefault } from "@/lib/classTransitionUtils";
 
 const CHUNK = 200;
 
@@ -25,7 +26,7 @@ export async function createPredictionsFromMaster(season = 2026): Promise<Result
   while (true) {
     const { data, error } = await supabase
       .from("players")
-      .select("id, source_player_id, first_name, last_name, team, team_id, from_team, position")
+      .select("id, source_player_id, first_name, last_name, team, team_id, from_team, position, class_year")
       .range(from, from + 999);
     if (error) { result.errors.push(`Load players: ${error.message}`); return result; }
     allPlayers.push(...(data || []));
@@ -276,6 +277,7 @@ export async function createPredictionsFromMaster(season = 2026): Promise<Result
         predsToUpdate.push({ id: existing.id, patch });
       }
       internalsByPredId.set(existing.id, {
+        ...(internalsByPredId.get(existing.id) ?? {}),
         avg_power_rating: baPlus,
         obp_power_rating: obpPlus,
         slg_power_rating: isoPlus,
@@ -290,7 +292,7 @@ export async function createPredictionsFromMaster(season = 2026): Promise<Result
         season,
         status: "active",
         locked: false,
-        class_transition: "SJ",
+        class_transition: classTransitionFromYearOrDefault((player as any).class_year),
         dev_aggressiveness: 0.0,
         from_avg: useBlended ? ((hitter as any).blended_avg ?? hitter.AVG) : hitter.AVG,
         from_obp: useBlended ? ((hitter as any).blended_obp ?? hitter.OBP) : hitter.OBP,
@@ -378,6 +380,7 @@ export async function createPredictionsFromMaster(season = 2026): Promise<Result
         predsToUpdate.push({ id: existing.id, patch });
       }
       internalsByPredId.set(existing.id, {
+        ...(internalsByPredId.get(existing.id) ?? {}),
         era_power_rating: eraPrPlus,
         fip_power_rating: fipPrPlus,
         whip_power_rating: whipPrPlus,
@@ -413,7 +416,7 @@ export async function createPredictionsFromMaster(season = 2026): Promise<Result
         season,
         status: "active",
         locked: false,
-        class_transition: "SJ",
+        class_transition: classTransitionFromYearOrDefault((player as any).class_year),
         dev_aggressiveness: 0.0,
         ...pitcherFields,
         power_rating_plus: overallPrPlus != null ? Math.round(overallPrPlus) : null,
@@ -462,23 +465,25 @@ export async function createPredictionsFromMaster(season = 2026): Promise<Result
     if (pitcher) playerIdToPitcher.set(player.id, pitcher);
   }
   for (const pred of insertedPreds) {
+    // Build one merged partial so two-way players get BOTH hitter and pitcher
+    // power-rating columns on the same internals row. Either-or earlier (with
+    // a `continue` after the hitter case) silently left TWPs with no
+    // pitcher-side internals on insert — the mirror of the Map-overwrite bug
+    // above on the update path.
+    const partial: any = {};
     const hitter = playerIdToHitter.get(pred.player_id);
     if (hitter) {
-      internalsByPredId.set(pred.id, {
-        avg_power_rating: (hitter as any).ba_plus ?? null,
-        obp_power_rating: (hitter as any).obp_plus ?? null,
-        slg_power_rating: (hitter as any).iso_plus ?? null,
-      });
-      continue;
+      partial.avg_power_rating = (hitter as any).ba_plus ?? null;
+      partial.obp_power_rating = (hitter as any).obp_plus ?? null;
+      partial.slg_power_rating = (hitter as any).iso_plus ?? null;
     }
     const pitcher = playerIdToPitcher.get(pred.player_id);
     if (pitcher) {
-      internalsByPredId.set(pred.id, {
-        era_power_rating: (pitcher as any).era_pr_plus ?? null,
-        fip_power_rating: (pitcher as any).fip_pr_plus ?? null,
-        whip_power_rating: (pitcher as any).whip_pr_plus ?? null,
-      } as any);
+      partial.era_power_rating = (pitcher as any).era_pr_plus ?? null;
+      partial.fip_power_rating = (pitcher as any).fip_pr_plus ?? null;
+      partial.whip_power_rating = (pitcher as any).whip_pr_plus ?? null;
     }
+    if (hitter || pitcher) internalsByPredId.set(pred.id, partial);
   }
 
   console.timeEnd("[CreatePreds] 7. INSERT new predictions");
