@@ -885,8 +885,97 @@ export async function recalculatePredictionById(predictionId: string, updates: U
 
   const merged = { ...(pred as PredictionRow), ...updates };
 
-  // ─── Pitcher path ───────────────────────────────────────────────────
-  if (isPitcherPred(merged)) {
+  // Detect two-way players. For is_twp=true players we run BOTH the hitter
+  // path AND the pitcher path and merge into a single row so dashboards on
+  // both sides can read canonical projections from one prediction row.
+  let isTwp = false;
+  if (merged.player_id) {
+    const { data: playerRow } = await supabase
+      .from("players")
+      .select("is_twp")
+      .eq("id", merged.player_id)
+      .maybeSingle();
+    isTwp = !!(playerRow as any)?.is_twp;
+  }
+
+  // Detect each side from the stat columns (engine still keys off
+  // from_avg / from_era to know what data is available).
+  const hasPitcherStats = isPitcherPred(merged);
+  const hasHitterStats = merged.from_avg != null || merged.from_obp != null || merged.from_slg != null;
+
+  // ─── TWP path: run both sides and merge ─────────────────────────────
+  if (isTwp && hasPitcherStats && hasHitterStats) {
+    const config = await loadEngineConfig();
+
+    // Pitcher half
+    const { eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride } = await fetchPitcherContext(predictionId, merged);
+    const { predictionUpdate: pitcherUpdate, internalsUpdate } = recalcPitcher(merged, eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride, updates);
+
+    // Hitter half
+    let powerContext: ReturnerPowerContext | undefined;
+    let combinedUsed = false;
+    if (merged.model_type === "returner") {
+      const { data: internal } = await supabase
+        .from("player_prediction_internals")
+        .select("avg_power_rating, obp_power_rating, slg_power_rating")
+        .eq("prediction_id", predictionId)
+        .maybeSingle();
+      const manual = MANUAL_INTERNAL_OVERRIDES[predictionId];
+      powerContext = {
+        baPlus: readSpecificPlus(internal?.avg_power_rating) ?? manual?.baPlus ?? null,
+        obpPlus: readSpecificPlus(internal?.obp_power_rating) ?? manual?.obpPlus ?? null,
+        isoPlus: readSpecificPlus(internal?.slg_power_rating) ?? manual?.isoPlus ?? null,
+      };
+      if (merged.player_id) {
+        const { data: playerRow2 } = await supabase
+          .from("players")
+          .select("source_player_id")
+          .eq("id", merged.player_id)
+          .maybeSingle();
+        const sourceId = (playerRow2 as any)?.source_player_id;
+        if (sourceId) {
+          const { data: hm } = await supabase
+            .from("Hitter Master")
+            .select("combined_used")
+            .eq("source_player_id", sourceId)
+            .eq("Season", PRIOR_SEASON)
+            .maybeSingle();
+          combinedUsed = !!(hm as any)?.combined_used;
+        }
+      }
+    }
+    const hitterResult = merged.model_type === "returner"
+      ? recalcReturner(merged, config.returner, powerContext, updates, combinedUsed)
+      : recalcTransfer(merged, config.transfer);
+
+    const { error: unlockErr } = await supabase
+      .from("player_predictions")
+      .update({ locked: false })
+      .eq("id", predictionId);
+    if (unlockErr) throw unlockErr;
+
+    const extraFields: Record<string, any> = {};
+    if (updates.class_transition !== undefined) {
+      extraFields.class_transition_overridden = true;
+    }
+    // Merge hitter result first, then pitcher fields — they target disjoint
+    // columns (p_avg/p_obp/... vs p_era/p_fip/...) so neither stomps the other.
+    const { error: updateErr } = await supabase
+      .from("player_predictions")
+      .update({ ...updates, ...hitterResult, ...pitcherUpdate, ...extraFields, locked: true })
+      .eq("id", predictionId);
+    if (updateErr) throw updateErr;
+
+    const { error: internalsErr } = await supabase
+      .from("player_prediction_internals")
+      .upsert({ prediction_id: predictionId, ...internalsUpdate }, { onConflict: "prediction_id" });
+    if (internalsErr) console.warn("[recalcTwp] internals upsert failed:", internalsErr.message);
+
+    return { success: true, prediction: { ...hitterResult, ...pitcherUpdate } };
+  }
+
+  // ─── Pitcher path (non-TWP or TWP missing hitter data) ──────────────
+  if (hasPitcherStats) {
     const { eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride } = await fetchPitcherContext(predictionId, merged);
     const { predictionUpdate, internalsUpdate } = recalcPitcher(merged, eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride, updates);
 
@@ -983,7 +1072,14 @@ export async function recalculatePredictionById(predictionId: string, updates: U
 export async function bulkRecalculatePredictionsLocal(season = 2026) {
   const config = await loadEngineConfig();
   const allPreds = await fetchAllPredictionsForReturnerMode(season);
-  const hitterPreds = allPreds.filter((p) => !isPitcherPred(p));
+  // A prediction row qualifies for the hitter pass when it has any hitter
+  // from_* stat populated, and for the pitcher pass when it has from_era.
+  // Two-way players (rows with BOTH) appear in both passes; the hitter loop
+  // writes the hitter-side columns and the pitcher loop writes the pitcher-side
+  // columns, so each half lands on the same row without stomping the other.
+  const hasHitterStats = (p: PredictionRow) =>
+    p.from_avg != null || p.from_obp != null || p.from_slg != null;
+  const hitterPreds = allPreds.filter(hasHitterStats);
   const pitcherPreds = allPreds.filter((p) => isPitcherPred(p));
   const preds = hitterPreds; // keep original var name for the existing hitter loop below
 
