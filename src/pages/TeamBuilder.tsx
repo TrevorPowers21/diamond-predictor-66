@@ -98,6 +98,7 @@ type BuildPlayer = {
     position: string | null;
     is_twp?: boolean | null;
     class_year?: string | null;
+    throws_hand?: string | null;
     team: string | null;
     from_team: string | null;
     conference: string | null;
@@ -1089,7 +1090,7 @@ export default function TeamBuilder() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, is_twp, class_year, team, from_team, conference, transfer_portal, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at), nil_valuations(estimated_value, component_breakdown)")
+          .select("id, first_name, last_name, position, is_twp, class_year, throws_hand, team, from_team, conference, transfer_portal, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at), nil_valuations(estimated_value, component_breakdown)")
           .range(from, from + PAGE - 1);
         if (error) throw error;
         all = all.concat(data || []);
@@ -1486,6 +1487,7 @@ export default function TeamBuilder() {
             last_name: hit.last_name || "",
             position: hit.position || null,
             is_twp: (hit as any).is_twp ?? false,
+            throws_hand: (hit as any).throws_hand ?? null,
             team: hit.team || null,
             from_team: hit.from_team || null,
             conference: hit.conference || null,
@@ -1658,7 +1660,7 @@ export default function TeamBuilder() {
       for (const r of hitterStats) { if (r.player_id) active2025Ids.add(r.player_id); }
       for (const r of pitchingMasterRows) { if (r.source_player_id) active2025Ids.add(r.source_player_id); }
       // Try team_id UUID first, fall back to team name match
-      const selectCols = "id, first_name, last_name, position, is_twp, class_year, team, from_team, conference, transfer_portal, source_player_id, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at)";
+      const selectCols = "id, first_name, last_name, position, is_twp, class_year, throws_hand, team, from_team, conference, transfer_portal, source_player_id, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at)";
       let query = supabase.from("players").select(selectCols).eq("transfer_portal", false);
       if (selectedTeamId) {
         query = query.eq("team_id", selectedTeamId);
@@ -1698,7 +1700,7 @@ export default function TeamBuilder() {
           results.push({
             ...(best || {}),
             player_id: player.id,
-            players: { id: player.id, first_name: player.first_name, last_name: player.last_name, position: player.position, is_twp: (player as any).is_twp ?? false, class_year: (player as any).class_year ?? null, team: player.team, from_team: player.from_team, conference: player.conference, transfer_portal: player.transfer_portal },
+            players: { id: player.id, first_name: player.first_name, last_name: player.last_name, position: player.position, is_twp: (player as any).is_twp ?? false, class_year: (player as any).class_year ?? null, throws_hand: (player as any).throws_hand ?? null, team: player.team, from_team: player.from_team, conference: player.conference, transfer_portal: player.transfer_portal },
           });
         }
         return results;
@@ -1852,7 +1854,7 @@ export default function TeamBuilder() {
         const { data: pData, error: pErr } = await supabase
           .from("players")
           .select(`
-            id, first_name, last_name, position, team, from_team, conference,
+            id, first_name, last_name, position, is_twp, class_year, throws_hand, team, from_team, conference,
             player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at),
             nil_valuations(estimated_value, component_breakdown)
           `)
@@ -2029,6 +2031,7 @@ export default function TeamBuilder() {
                   position: pd.position,
                   is_twp: (pd as any).is_twp ?? false,
                   class_year: (pd as any).class_year ?? null,
+                  throws_hand: (pd as any).throws_hand ?? null,
                   team: pd.team,
                   from_team: pd.from_team,
                   conference: pd.conference ?? null,
@@ -2122,6 +2125,7 @@ export default function TeamBuilder() {
           position: player.position,
           is_twp: (player as any).is_twp ?? false,
           class_year: (player as any).class_year ?? null,
+          throws_hand: (player as any).throws_hand ?? null,
           team: player.team,
           from_team: player.from_team,
           conference: player.conference ?? null,
@@ -5117,6 +5121,7 @@ export default function TeamBuilder() {
           position: player.position,
           is_twp: (player as any).is_twp ?? false,
           class_year: (player as any).class_year ?? null,
+          throws_hand: (player as any).throws_hand ?? null,
           team: player.team,
           from_team: player.from_team,
           conference: player.conference ?? null,
@@ -5289,6 +5294,18 @@ export default function TeamBuilder() {
               {risk.grade}
             </span>
           );
+        })()
+      ) : isPitcherRow ? (
+        // Pitcher pool context: show RHP / LHP based on throws_hand so the
+        // cell doesn't display the TWP's hitter primary (e.g. "RF" for Kenny).
+        // Falls back to "P" when throws_hand is missing. The specific role
+        // (SP / RP) is conveyed by the role dropdown immediately to the right.
+        (() => {
+          const hand = String(p.player?.throws_hand || "").trim().toUpperCase();
+          if (hand === "R") return "RHP";
+          if (hand === "L") return "LHP";
+          if (hand === "S") return "SHP";
+          return "P";
         })()
       ) : (() => {
         const dbPos = p.player?.position || "";
