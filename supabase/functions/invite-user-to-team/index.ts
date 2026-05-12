@@ -123,10 +123,19 @@ Deno.serve(async (req) => {
     return json({ error: "Customer team is inactive" }, 400);
   }
 
-  // Try the magic-link invite first.
+  // Try the magic-link invite first. redirectTo sends the user to /auth
+  // (rather than the bare site URL) so the URL fragment `#type=invite`
+  // arrives where the password-setup form looks for it. Origin is read
+  // from the caller's request so dev (localhost:5173) and prod (rstriq.com)
+  // both work without env config.
+  const origin = req.headers.get("origin") || "https://rstriq.com";
+  const redirectTo = `${origin}/auth`;
+
   let invitedUserId: string;
   let isExisting = false;
-  const { data: invited, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(email);
+  const { data: invited, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(email, {
+    redirectTo,
+  });
 
   if (inviteErr) {
     if (!isAlreadyRegisteredError(inviteErr)) {

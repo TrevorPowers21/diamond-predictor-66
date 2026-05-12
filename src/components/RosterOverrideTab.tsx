@@ -9,10 +9,11 @@
  *  - If no `players` row exists, creates one from Pitching/Hitter Master history
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
+import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +39,7 @@ interface PlayerResult {
 export default function RosterOverrideTab() {
   const queryClient = useQueryClient();
   const { teams } = useTeamsTable();
+  const { schoolTeamId: effectiveSchoolTeamId, allowAllTeams } = useEffectiveSchool();
   const [search, setSearch] = useState("");
   const [searchById, setSearchById] = useState("");
   const [results, setResults] = useState<PlayerResult[]>([]);
@@ -45,6 +47,15 @@ export default function RosterOverrideTab() {
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerResult | null>(null);
   const [targetTeam, setTargetTeam] = useState("");
   const [overrideNotes, setOverrideNotes] = useState("");
+
+  // Lock target team to the customer's school for non-test accounts. RST All
+  // Americans (allowAllTeams=true) keeps the full dropdown so internal QA can
+  // reassign players across any team.
+  useEffect(() => {
+    if (!allowAllTeams && effectiveSchoolTeamId && targetTeam !== effectiveSchoolTeamId) {
+      setTargetTeam(effectiveSchoolTeamId);
+    }
+  }, [allowAllTeams, effectiveSchoolTeamId, targetTeam]);
 
   // Search by name
   const handleSearch = async () => {
@@ -280,18 +291,30 @@ export default function RosterOverrideTab() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Target Team</Label>
-                <Select value={targetTeam} onValueChange={setTargetTeam}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select team..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sortedTeams.map((t) => (
-                      <SelectItem key={t.id} value={t.id}>
-                        {t.abbreviation || t.fullName} {t.conference ? `(${t.conference})` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {allowAllTeams ? (
+                  <Select value={targetTeam} onValueChange={setTargetTeam}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Select team..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sortedTeams.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.abbreviation || t.fullName} {t.conference ? `(${t.conference})` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    className="mt-1 opacity-100 cursor-not-allowed"
+                    value={(() => {
+                      const t = teams.find((x) => x.id === effectiveSchoolTeamId);
+                      return t ? `${t.abbreviation || t.fullName}${t.conference ? ` (${t.conference})` : ""}` : "";
+                    })()}
+                    disabled
+                    readOnly
+                  />
+                )}
               </div>
               <div>
                 <Label className="text-xs">Notes (optional)</Label>

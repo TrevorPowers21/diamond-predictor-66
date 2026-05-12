@@ -13,15 +13,26 @@ type Mode = "signin" | "forgot" | "recovery";
 
 function detectInitialMode(): Mode {
   if (typeof window === "undefined") return "signin";
-  // Supabase recovery links land with #type=recovery in the URL fragment.
-  if (window.location.hash.includes("type=recovery")) return "recovery";
+  // Forgot-password links land with #type=recovery, invite links land with
+  // #type=invite. Both flows need the password-setting form.
+  const hash = window.location.hash;
+  if (hash.includes("type=recovery") || hash.includes("type=invite")) return "recovery";
   return "signin";
+}
+
+// Distinguishes a first-time invite (no password yet) from a forgot-password
+// reset (existing user). Only differs in the form's title/CTA copy — the
+// underlying call is supabase.auth.updateUser({ password }) for both.
+function detectIsInvite(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.location.hash.includes("type=invite");
 }
 
 export default function Auth() {
   const { session, loading, devBypassed, disableDevBypass, enableDevBypass, isDevBypassAllowed, isRecoveringPassword } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>(detectInitialMode);
+  const [isInvite] = useState<boolean>(detectIsInvite);
 
   // Sync mode with the global recovery flag so any path that lands the user
   // here with a recovery session (including landing on / or /dashboard
@@ -91,9 +102,15 @@ export default function Auth() {
             )}
             {mode === "recovery" && (
               <>
-                <CardTitle className="text-lg">Set a new password</CardTitle>
-                <CardDescription>Enter a new password for your account.</CardDescription>
-                <SetNewPasswordForm onDone={() => navigate("/dashboard")} />
+                <CardTitle className="text-lg">
+                  {isInvite ? "Welcome to RSTR IQ" : "Set a new password"}
+                </CardTitle>
+                <CardDescription>
+                  {isInvite
+                    ? "Set a password to finish creating your account."
+                    : "Enter a new password for your account."}
+                </CardDescription>
+                <SetNewPasswordForm isInvite={isInvite} onDone={() => navigate("/dashboard")} />
               </>
             )}
           </CardHeader>
@@ -230,7 +247,7 @@ function ForgotPasswordForm({ onBack }: { onBack: () => void }) {
   );
 }
 
-function SetNewPasswordForm({ onDone }: { onDone: () => void }) {
+function SetNewPasswordForm({ isInvite = false, onDone }: { isInvite?: boolean; onDone: () => void }) {
   const { toast } = useToast();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -254,7 +271,10 @@ function SetNewPasswordForm({ onDone }: { onDone: () => void }) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
       return;
     }
-    toast({ title: "Password updated", description: "You're all set." });
+    toast({
+      title: isInvite ? "Welcome aboard" : "Password updated",
+      description: isInvite ? "Your account is ready." : "You're all set.",
+    });
     onDone();
   };
 
@@ -295,7 +315,7 @@ function SetNewPasswordForm({ onDone }: { onDone: () => void }) {
         />
       </div>
       <Button type="submit" className="w-full" disabled={loading}>
-        {loading ? "Updating..." : "Update password"}
+        {loading ? (isInvite ? "Creating account..." : "Updating...") : isInvite ? "Create account" : "Update password"}
       </Button>
     </form>
   );
