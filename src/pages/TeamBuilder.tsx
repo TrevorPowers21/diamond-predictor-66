@@ -4975,6 +4975,32 @@ export default function TeamBuilder() {
       };
       for (const slot of POSITION_SLOTS) {
         fillByRole(slot, 1, "starter");
+        // Fallback: when no starter is tagged at this position, promote the
+        // best utility-tagged player whose position matches the slot. Their
+        // depth_role stays "utility" — they just occupy the d1 chart slot so
+        // both the depth chart UI and the WAR-by-Position analytics show them
+        // as the de-facto starter. Tiebreak: highest projected oWAR.
+        if (next[depthKey(slot, 1)] == null) {
+          const candidates = rosterPlayers
+            .map((p, idx) => ({ p, idx }))
+            .filter(({ p, idx }) =>
+              !usedIdxs.has(idx) &&
+              (p.roster_status || "returner") !== "leaving" &&
+              !isPitcher(p) &&
+              p.depth_role === "utility" &&
+              matchAtSlot(p, slot),
+            );
+          if (candidates.length > 0) {
+            candidates.sort((a, b) => {
+              const aWar = playerProjection(a.p, "hitter").owar ?? 0;
+              const bWar = playerProjection(b.p, "hitter").owar ?? 0;
+              return bWar - aWar;
+            });
+            const top = candidates[0];
+            next[depthKey(slot, 1)] = top.idx;
+            usedIdxs.add(top.idx);
+          }
+        }
         fillByRole(slot, 2, "utility");
         fillByRole(slot, 3, "bench");
       }
@@ -5047,7 +5073,7 @@ export default function TeamBuilder() {
 
       return next;
     });
-  }, [rosterPlayers, slotMatchesPosition]);
+  }, [rosterPlayers, slotMatchesPosition, playerProjection]);
 
   const getPlayerName = (p: BuildPlayer) =>
     p.player ? `${p.player.first_name} ${p.player.last_name}` : p.custom_name || "TBD";
