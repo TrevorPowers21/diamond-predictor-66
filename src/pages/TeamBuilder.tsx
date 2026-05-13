@@ -35,6 +35,7 @@ import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 import { useParkFactors } from "@/hooks/useParkFactors";
+import { useTeamWarSnapshot, useWarBenchmarks, type TeamWarSnapshot } from "@/hooks/useTeamWarSnapshots";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { computePitcherProjection } from "@/lib/pitcherProjection";
 import { computeTransferPitcherProjection } from "@/lib/transferPitcherProjection";
@@ -86,7 +87,7 @@ type BuildPlayer = {
   nil_value: number;
   production_notes: string | null;
   roster_status?: "returner" | "leaving" | "target";
-  depth_role?: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "high_leverage_reliever" | "low_impact_reliever";
+  depth_role?: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever";
   class_transition?: string | null;
   dev_aggressiveness?: number | null;
   class_transition_overridden?: boolean;
@@ -459,7 +460,7 @@ const parseBuildPlayerMeta = (raw: string | null | undefined): {
   metrics: TeamMetricInputs | null;
   power: TeamPowerPlus | null;
   rosterStatus: "returner" | "leaving" | "target" | null;
-  depthRole: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "high_leverage_reliever" | "low_impact_reliever" | null;
+  depthRole: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever" | null;
   classTransition: string | null;
   devAggressiveness: number | null;
   classTransitionOverridden: boolean;
@@ -485,8 +486,12 @@ const parseBuildPlayerMeta = (raw: string | null | undefined): {
           obj.depthRole === "bench" ||
           obj.depthRole === "weekend_starter" ||
           obj.depthRole === "weekday_starter" ||
+          obj.depthRole === "swing_starter" ||
+          obj.depthRole === "workhorse_reliever" ||
           obj.depthRole === "high_leverage_reliever" ||
-          obj.depthRole === "low_impact_reliever"
+          obj.depthRole === "mid_leverage_reliever" ||
+          obj.depthRole === "low_impact_reliever" ||
+          obj.depthRole === "specialist_reliever"
             ? obj.depthRole
             : null,
         classTransition: typeof obj.classTransition === "string" ? obj.classTransition : null,
@@ -518,7 +523,7 @@ const serializeBuildPlayerMeta = (
   metrics: TeamMetricInputs | null,
   power: TeamPowerPlus | null,
   rosterStatus: "returner" | "leaving" | "target" | null | undefined,
-  depthRole: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "high_leverage_reliever" | "low_impact_reliever" | null | undefined,
+  depthRole: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever" | null | undefined,
   classTransition: string | null | undefined,
   devAggressiveness: number | null | undefined,
   classTransitionOverridden: boolean | null | undefined,
@@ -641,14 +646,65 @@ const projectedNilTierClass = (
   return "text-destructive";
 };
 
+// Position-role multipliers stay (starter/utility/bench scale hitter oWAR).
+// For pitcher roles, the multiplier is always 1.0 — the IP granularity is
+// baked into pitcherExpectedIp() instead, so the engine differentiates a
+// 50 IP workhorse closer from a 6 IP specialist via real IP, not a multiplier.
 const depthRoleMultiplier = (role: BuildPlayer["depth_role"]) => {
-  if (role === "low_impact_reliever") return 0.3;
-  if (role === "high_leverage_reliever") return 0.6;
-  if (role === "weekday_starter") return 0.8;
-  if (role === "weekend_starter") return 1.0;
   if (role === "bench") return 0.3;
   if (role === "utility") return 0.6;
+  // starter and all pitcher roles → 1.0 (pitcher granularity handled in IP)
   return 1.0;
+};
+
+// Infer default depth_role tier from a pitcher's prior-year IP. Used at
+// build-seeding time so newly added players land in the tier that matches
+// what they actually did last year (coach can override). Thresholds tuned
+// to D1 norms:
+//   SP: 65+ IP weekend, 35-65 weekday, <35 swing
+//   RP: 40+ workhorse, 25-40 high lev, 15-25 mid lev, 8-15 low impact, <8 specialist
+// Falls back to role-based default if IP is missing/zero.
+const defaultPitcherDepthRoleFromIp = (
+  ip: number | null | undefined,
+  role: "SP" | "RP",
+): "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever" => {
+  const ipNum = Number(ip);
+  if (!Number.isFinite(ipNum) || ipNum <= 0) {
+    return role === "SP" ? "weekend_starter" : "high_leverage_reliever";
+  }
+  if (role === "SP") {
+    if (ipNum >= 65) return "weekend_starter";
+    if (ipNum >= 35) return "weekday_starter";
+    return "swing_starter";
+  }
+  if (ipNum >= 40) return "workhorse_reliever";
+  if (ipNum >= 25) return "high_leverage_reliever";
+  if (ipNum >= 15) return "mid_leverage_reliever";
+  if (ipNum >= 8) return "low_impact_reliever";
+  return "specialist_reliever";
+};
+
+// Per-tier expected IP for pitchers — replaces the old binary
+// (pwar_ip_sp vs pwar_ip_sm vs pwar_ip_rp) lookup. Tuned to typical D1
+// usage. Coaches can be more precise by picking the tier that matches
+// the role's actual workload, not just SP/RP.
+const pitcherExpectedIp = (
+  depthRole: BuildPlayer["depth_role"],
+  pitchingEq: { pwar_ip_sp: number; pwar_ip_sm: number; pwar_ip_rp: number },
+): number => {
+  switch (depthRole) {
+    // Starters
+    case "weekend_starter":     return pitchingEq.pwar_ip_sp;  // ~80 IP — Fri/Sat/Sun rotation
+    case "weekday_starter":     return pitchingEq.pwar_ip_sm;  // ~50 IP — midweek SP
+    case "swing_starter":       return 30;                     // long relief / spot start
+    // Relievers — graduated by leverage + workload
+    case "workhorse_reliever":  return 50;                     // closer/setup workhorse
+    case "high_leverage_reliever": return 33;                  // primary setup
+    case "mid_leverage_reliever":  return 20;                  // middle relief
+    case "low_impact_reliever":    return 12;                  // mop-up
+    case "specialist_reliever":    return 6;                   // LOOGY/situational
+    default:                    return pitchingEq.pwar_ip_rp;  // fallback
+  }
 };
 
 const pitcherRoleFromSlot = (slot: string | null | undefined): "SP" | "RP" | "SM" | null => {
@@ -692,14 +748,29 @@ const effectivePitcherRoleForBuild = (
   return asPitcherRole(p.player?.position ?? null) || asPitcherRole(pitchingMasterRole) || "RP";
 };
 
+type PitcherDepthRole =
+  | "weekend_starter"
+  | "weekday_starter"
+  | "swing_starter"
+  | "workhorse_reliever"
+  | "high_leverage_reliever"
+  | "mid_leverage_reliever"
+  | "low_impact_reliever"
+  | "specialist_reliever";
+
+const isPitcherDepthRole = (role: BuildPlayer["depth_role"]): role is PitcherDepthRole =>
+  role === "weekend_starter" || role === "weekday_starter" || role === "swing_starter" ||
+  role === "workhorse_reliever" || role === "high_leverage_reliever" || role === "mid_leverage_reliever" ||
+  role === "low_impact_reliever" || role === "specialist_reliever";
+
 const normalizePitcherDepthRole = (
   role: BuildPlayer["depth_role"],
   pitcherRole: "SP" | "RP",
-): "weekend_starter" | "weekday_starter" | "high_leverage_reliever" | "low_impact_reliever" => {
-  if (role === "weekend_starter" || role === "weekday_starter" || role === "high_leverage_reliever" || role === "low_impact_reliever") return role;
-  if (role === "starter") return "weekend_starter";
-  if (role === "utility") return pitcherRole === "SP" ? "weekday_starter" : "high_leverage_reliever";
-  if (role === "bench") return "low_impact_reliever";
+): PitcherDepthRole => {
+  if (isPitcherDepthRole(role)) return role;
+  if (role === "starter") return pitcherRole === "SP" ? "weekend_starter" : "high_leverage_reliever";
+  if (role === "utility") return pitcherRole === "SP" ? "weekday_starter" : "mid_leverage_reliever";
+  if (role === "bench") return pitcherRole === "SP" ? "swing_starter" : "low_impact_reliever";
   return pitcherRole === "SP" ? "weekend_starter" : "high_leverage_reliever";
 };
 
@@ -1038,7 +1109,7 @@ export default function TeamBuilder() {
   }, [selectedTeam]);
 
   // Fetch teams from Teams Table
-  const { teams } = useTeamsTable();
+  const { teams, teamsByName } = useTeamsTable();
 
   // When the user is impersonating a customer team (or has a default team),
   // auto-fill the team picker with that school. Replaces the old
@@ -1718,7 +1789,10 @@ export default function TeamBuilder() {
       nil_value: 0,
       production_notes: null,
       roster_status: "returner",
-      depth_role: lp.role === "SP" ? "weekend_starter" : "high_leverage_reliever",
+      depth_role: defaultPitcherDepthRoleFromIp(
+        pitchingStatsByNameTeam.byKey.get(`${normalizeName(`${lp.first_name} ${lp.last_name}`.trim())}|${normalizeName(lp.team || "")}`)?.ip ?? null,
+        lp.role === "SP" ? "SP" : "RP",
+      ),
       class_transition: "SJ",
       dev_aggressiveness: 0,
       class_transition_overridden: false,
@@ -2018,7 +2092,12 @@ export default function TeamBuilder() {
             nil_value: Number(bp.nil_value) || 0,
             production_notes: meta.notes,
             roster_status: meta.rosterStatus ?? ((bp.source as string) === "portal" ? "target" : "returner"),
-            depth_role: meta.depthRole ?? (isPitcherRow ? ((inferredRole === "SP") ? "weekend_starter" : "high_leverage_reliever") : "starter"),
+            depth_role: meta.depthRole ?? (isPitcherRow
+              ? defaultPitcherDepthRoleFromIp(
+                  (pd?.source_player_id ? pitchingStatsByNameTeam.bySourceId.get(pd.source_player_id)?.ip : null) ?? null,
+                  (inferredRole === "SP") ? "SP" : "RP",
+                )
+              : "starter"),
             class_transition: meta.classTransitionOverridden ? (meta.classTransition ?? "SJ") : (activePred?.class_transition ?? "SJ"),
             dev_aggressiveness: meta.devAggressivenessOverridden ? (meta.devAggressiveness ?? 0) : (activePred?.dev_aggressiveness ?? 0),
             class_transition_overridden: meta.classTransitionOverridden,
@@ -2112,7 +2191,7 @@ export default function TeamBuilder() {
         production_notes: null,
         roster_status: "returner" as const,
         depth_role: isPitcherRow
-          ? ((inferredRole === "SP") ? "weekend_starter" : "high_leverage_reliever")
+          ? defaultPitcherDepthRoleFromIp(pmRec?.ip ?? null, (inferredRole === "SP") ? "SP" : "RP")
           : seedHitterDepth,
         class_transition: r.class_transition ?? "SJ",
         dev_aggressiveness: r.dev_aggressiveness ?? 0,
@@ -2453,7 +2532,12 @@ export default function TeamBuilder() {
               nil_value: 0,
               production_notes: null,
               roster_status: "target",
-              depth_role: isPitcherRow ? "high_leverage_reliever" : "utility",
+              depth_role: isPitcherRow
+                ? defaultPitcherDepthRoleFromIp(
+                    ((sb as any).source_player_id ? pitchingStatsByNameTeam.bySourceId.get((sb as any).source_player_id)?.ip : null) ?? null,
+                    (inferredRole === "SP") ? "SP" : "RP",
+                  )
+                : "utility",
               class_transition: classTransitionFromYearOrDefault(sb.class_year),
               dev_aggressiveness: 0,
               transfer_snapshot: null,
@@ -2505,6 +2589,56 @@ export default function TeamBuilder() {
     };
   }, [teams]);
   const { parkMap: teamParkComponents } = useParkFactors();
+
+  // Source team id + conference for the customer team. Used by the Analytics
+  // tab to fetch (a) the team's prior-year snapshot for year-over-year compare
+  // and (b) the team's conference champion(s) for the championship benchmark.
+  // Uses teamsByName which indexes by abbreviation, full name, id, AND
+  // source_team_id so any reasonable string we have for selectedTeam resolves.
+  const { selectedTeamSourceId, selectedTeamConference, selectedTeamFullName } = useMemo(() => {
+    if (!selectedTeam) return { selectedTeamSourceId: null, selectedTeamConference: null, selectedTeamFullName: null };
+    const key = selectedTeam.toLowerCase().trim();
+    const row =
+      teamsByName?.get(key) ??
+      // Fallback: scan with normalizeKey in case stored selectedTeam has different
+      // punctuation/casing than the indexed abbreviation/fullName
+      (teams as TeamRow[]).find(
+        (t) =>
+          normalizeKey((t as any).name) === normalizeKey(selectedTeam) ||
+          normalizeKey((t as any).fullName) === normalizeKey(selectedTeam),
+      );
+    return {
+      selectedTeamSourceId: row?.source_team_id ?? null,
+      selectedTeamConference: (row as any)?.conference ?? null,
+      selectedTeamFullName: (row as any)?.fullName ?? (row as any)?.name ?? selectedTeam,
+    };
+  }, [selectedTeam, teams, teamsByName]);
+
+  // Customer team's PRIOR_SEASON actual WAR (year-over-year compare baseline).
+  // Pass source_team_id plus EVERY name variant we know about — the hook
+  // tries source_team_id first, then case-insensitive name match against
+  // any of the candidates. This handles the common case where the team's
+  // Teams Table row has a stale source_team_id (e.g. Georgia: "226" in
+  // teams, UUID in Hitter Master) but the team_name is consistent.
+  // Season auto-rolls forward when CURRENT_SEASON bumps.
+  const { data: priorYearSnapshot } = useTeamWarSnapshot(
+    selectedTeamSourceId,
+    PRIOR_SEASON,
+    [selectedTeam, selectedTeamFullName],
+  );
+
+  // Prior-season champion benchmarks — auto-derive national + customer-conference champ(s)
+  const { data: warBenchmarks = [] } = useWarBenchmarks(PRIOR_SEASON);
+  const nationalChampBenchmark = useMemo(
+    () => warBenchmarks.find((b) => b.is_national_champ) ?? null,
+    [warBenchmarks],
+  );
+  const conferenceChampBenchmarks = useMemo(() => {
+    if (!selectedTeamConference) return [];
+    return warBenchmarks.filter(
+      (b) => b.is_conference_champ && b.conference === selectedTeamConference,
+    );
+  }, [warBenchmarks, selectedTeamConference]);
   const pitchingStatsByNameTeam = useMemo(() => {
     type PStatRec = { team: string | null; role: "SP" | "RP" | "SM" | null; era: number | null; fip: number | null; whip: number | null; k9: number | null; bb9: number | null; hr9: number | null; g: number | null; gs: number | null; ip: number | null };
     const byKey = new Map<string, PStatRec>();
@@ -3703,7 +3837,11 @@ export default function TeamBuilder() {
         nil_value: 0,
         production_notes: null,
         roster_status: "target",
-        depth_role: inferredRole === "SP" ? "weekend_starter" : "high_leverage_reliever",
+        depth_role: defaultPitcherDepthRoleFromIp(
+          (row.source_player_id ? pitchingStatsByNameTeam.bySourceId.get(row.source_player_id)?.ip : null)
+            ?? row.__pitching?.ip ?? null,
+          (inferredRole === "SP") ? "SP" : "RP",
+        ),
         class_transition: classTransitionFromYearOrDefault(row.class_year),
         dev_aggressiveness: 0,
         class_transition_overridden: false,
@@ -4048,7 +4186,10 @@ export default function TeamBuilder() {
       production_notes: null,
       roster_status: "target",
       depth_role: isPitcherRow
-        ? ((inferredRole === "SP") ? "weekend_starter" : "high_leverage_reliever")
+        ? defaultPitcherDepthRoleFromIp(
+            (row.source_player_id ? pitchingStatsByNameTeam.bySourceId.get(row.source_player_id)?.ip : null) ?? null,
+            (inferredRole === "SP") ? "SP" : "RP",
+          )
         : "utility",
       class_transition: chosenPred?.class_transition ?? "SJ",
       dev_aggressiveness: chosenPred?.dev_aggressiveness ?? 0,
@@ -4300,9 +4441,13 @@ export default function TeamBuilder() {
   const pitcherDepthRank = (role: BuildPlayer["depth_role"]) =>
     role === "weekend_starter" ? 0 :
     role === "weekday_starter" ? 1 :
-    role === "high_leverage_reliever" ? 2 :
-    role === "low_impact_reliever" ? 3 :
-    4;
+    role === "swing_starter" ? 2 :
+    role === "workhorse_reliever" ? 3 :
+    role === "high_leverage_reliever" ? 4 :
+    role === "mid_leverage_reliever" ? 5 :
+    role === "low_impact_reliever" ? 6 :
+    role === "specialist_reliever" ? 7 :
+    8;
   const positionPlayers = rosterPlayers
     .filter(hitterEligible)
     .map((p, i) => ({ p, i }))
@@ -4348,9 +4493,12 @@ export default function TeamBuilder() {
     const pmRole = sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId)?.role : null;
     const currentPitcherRole = effectivePitcherRoleForBuild(p, pmRole);
     const pitcherDepthRole = normalizePitcherDepthRole(p.depth_role, currentPitcherRole);
-    const ipByRole = currentPitcherRole === "SP"
-      ? (pitcherDepthRole === "weekday_starter" ? pitchingEq.pwar_ip_sm : pitchingEq.pwar_ip_sp)
-      : pitchingEq.pwar_ip_rp;
+    // Per-tier IP estimate. Granular tiers (workhorse / specialist / etc.)
+    // differentiate a 50 IP closer from a 6 IP situational reliever — both
+    // used to collapse to pwar_ip_rp × multiplier with only 2 reliever
+    // distinctions. depthRoleMultiplier returns 1.0 for all pitcher roles
+    // now since IP captures the granularity.
+    const ipByRole = pitcherExpectedIp(pitcherDepthRole, pitchingEq);
     const pitcherValue = (pRvPlus - 100) / 100;
     const basePwar = (
       (pitcherValue * (ipByRole / 9) * pitchingEq.pwar_r_per_9) +
@@ -4643,6 +4791,7 @@ export default function TeamBuilder() {
     let weightSlg = 0;
     let weightWrc = 0;
     let totalOWar = 0;
+    let totalPWar = 0;
     let totalActualNil = 0;
     let totalProjectedNil = 0;
     let totalPlayerScore = 0;
@@ -4660,7 +4809,7 @@ export default function TeamBuilder() {
     for (const p of rows) {
       if (!isProjectedStatus(p)) continue;
       const mult = depthRoleMultiplier(p.depth_role);
-      const { shown, owar } = playerProjection(p);
+      const { shown } = playerProjection(p);
       if (shown?.p_avg != null) {
         sumAvg += shown.p_avg * mult;
         weightAvg += mult;
@@ -4680,7 +4829,7 @@ export default function TeamBuilder() {
       if (pitcherEligible(p)) {
         // Re-derive pitcher projection on the pitcher side for TWPs (whose
         // primary playerProjection() returned hitter stats above).
-        const pitcherProj = isPitcher(p) ? { shown, owar } : playerProjection(p, "pitcher");
+        const pitcherProj = isPitcher(p) ? { shown } : playerProjection(p, "pitcher");
         const source: any = pitcherProj.shown ?? ((p.roster_status === "target") ? p.transfer_snapshot : p.prediction) ?? null;
         const sourceId = (p.player as any)?.source_player_id ?? null;
         const pmRole = sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId)?.role : null;
@@ -4715,7 +4864,22 @@ export default function TeamBuilder() {
           weightPRvPlus += ipWeight;
         }
       }
-      totalOWar += owar ?? 0;
+      // Side-aware WAR accumulation. For TWPs (eligible on both pools), the
+      // roster-level aggregate (forSide undefined) sums both contributions so
+      // a TWP's hitter oWAR + pitcher pWAR both count toward team total. The
+      // hitter-pool and pitcher-pool tables show their respective sides only.
+      if (forSide === "hitter") {
+        totalOWar += playerProjection(p, "hitter").owar ?? 0;
+      } else if (forSide === "pitcher") {
+        totalPWar += playerProjection(p, "pitcher").pwar ?? 0;
+      } else {
+        if (hitterEligible(p)) {
+          totalOWar += playerProjection(p, "hitter").owar ?? 0;
+        }
+        if (pitcherEligible(p)) {
+          totalPWar += playerProjection(p, "pitcher").pwar ?? 0;
+        }
+      }
       totalActualNil += effectiveNilForPlayer(p, forSide);
       totalProjectedNil += projectedNilForPlayer(p, forSide);
       totalPlayerScore += projectedPlayerScore(p);
@@ -4732,6 +4896,8 @@ export default function TeamBuilder() {
       pBb9Avg: weightPBb9 > 0 ? sumPBb9 / weightPBb9 : null,
       pRvPlusAvg: weightPRvPlus > 0 ? sumPRvPlus / weightPRvPlus : null,
       totalOWar,
+      totalPWar,
+      totalWar: totalOWar + totalPWar,
       totalActualNil,
       totalProjectedNil,
       totalPlayerScore,
@@ -4782,98 +4948,101 @@ export default function TeamBuilder() {
         if (next[k] == null) next[k] = idx;
       });
 
-      // Auto-assign position players: starters at depth 1, utility/bench at depth 2
+      // Auto-assign position players. Position resolution: position_slot
+      // (build's current change) wins over player.position (original/raw).
+      // Depth ordering at each slot: starter → utility → bench.
       const usedIdxs = new Set(Object.values(next));
+      // Effective position for slot matching — honors build's position change.
+      const effectivePos = (p: BuildPlayer) => p.position_slot ?? p.player?.position ?? null;
+      const matchAtSlot = (p: BuildPlayer, slot: string) => slotMatchesPosition(effectivePos(p), slot);
+
+      // Strict hierarchy at every position: d1 = starter only, d2 = utility
+      // only, d3 = bench only. No cross-tier fallback — if a position has no
+      // starter tagged, depth 1 stays empty until the coach assigns one. This
+      // guarantees the player shown at the top of every position is the
+      // actual starter, not a misplaced utility/bench.
+      const fillByRole = (slot: string, depth: number, role: BuildPlayer["depth_role"]) => {
+        if (next[depthKey(slot, depth)] != null) return;
+        const idx = rosterPlayers.findIndex(
+          (p, i) =>
+            !usedIdxs.has(i) &&
+            (p.roster_status || "returner") !== "leaving" &&
+            !isPitcher(p) &&
+            p.depth_role === role &&
+            matchAtSlot(p, slot),
+        );
+        if (idx >= 0) { next[depthKey(slot, depth)] = idx; usedIdxs.add(idx); }
+      };
       for (const slot of POSITION_SLOTS) {
-        // Depth 1: starters first
-        if (next[depthKey(slot, 1)] == null) {
-          const starterIdx = rosterPlayers.findIndex(
-            (p, idx) =>
-              !usedIdxs.has(idx) &&
-              (p.roster_status || "returner") !== "leaving" &&
-              !isPitcher(p) &&
-              p.depth_role === "starter" &&
-              slotMatchesPosition(p.player?.position || null, slot),
-          );
-          if (starterIdx >= 0) { next[depthKey(slot, 1)] = starterIdx; usedIdxs.add(starterIdx); }
-        }
-        // Fallback: any matching player for depth 1
-        if (next[depthKey(slot, 1)] == null) {
-          const anyIdx = rosterPlayers.findIndex(
-            (p, idx) =>
-              !usedIdxs.has(idx) &&
-              (p.roster_status || "returner") !== "leaving" &&
-              !isPitcher(p) &&
-              slotMatchesPosition(p.player?.position || null, slot),
-          );
-          if (anyIdx >= 0) { next[depthKey(slot, 1)] = anyIdx; usedIdxs.add(anyIdx); }
-        }
-        // Depth 2: utility or bench players
-        if (next[depthKey(slot, 2)] == null) {
-          const backupIdx = rosterPlayers.findIndex(
-            (p, idx) =>
-              !usedIdxs.has(idx) &&
-              (p.roster_status || "returner") !== "leaving" &&
-              !isPitcher(p) &&
-              (p.depth_role === "utility" || p.depth_role === "bench") &&
-              slotMatchesPosition(p.player?.position || null, slot),
-          );
-          if (backupIdx >= 0) { next[depthKey(slot, 2)] = backupIdx; usedIdxs.add(backupIdx); }
-        }
+        fillByRole(slot, 1, "starter");
+        fillByRole(slot, 2, "utility");
+        fillByRole(slot, 3, "bench");
       }
 
-      // Auto-assign pitchers: weekend starters → SP slots, relievers → RP slots.
-      // Sort so weekend_starters get SP1→SP3 before weekday_starters fill SP4→SP5,
-      // and high_leverage_relievers get RP1→RP4 before low_impact fill RP5→RP8.
-      const spRank = (p: BuildPlayer) => p.depth_role === "weekend_starter" ? 0 : 1;
-      const rpRank = (p: BuildPlayer) => p.depth_role === "high_leverage_reliever" ? 0 : 1;
-      const spPitchers = rosterPlayers
-        .map((p, idx) => ({ p, idx }))
-        .filter(({ p, idx }) => !usedIdxs.has(idx) && (p.roster_status || "returner") !== "leaving" && isPitcher(p) && (p.depth_role === "weekend_starter" || p.depth_role === "weekday_starter"))
-        .sort((a, b) => {
-          const ra = spRank(a.p);
-          const rb = spRank(b.p);
-          if (ra !== rb) return ra - rb;
-          return a.idx - b.idx;
-        });
-      const rpPitchers = rosterPlayers
-        .map((p, idx) => ({ p, idx }))
-        .filter(({ p, idx }) => !usedIdxs.has(idx) && (p.roster_status || "returner") !== "leaving" && isPitcher(p) && (p.depth_role === "high_leverage_reliever" || p.depth_role === "low_impact_reliever"))
-        .sort((a, b) => {
-          const ra = rpRank(a.p);
-          const rb = rpRank(b.p);
-          if (ra !== rb) return ra - rb;
-          return a.idx - b.idx;
-        });
-      // Fallback: any unassigned pitchers
-      const remainingPitchers = rosterPlayers
-        .map((p, idx) => ({ p, idx }))
-        .filter(({ p, idx }) => !usedIdxs.has(idx) && !spPitchers.some(sp => sp.idx === idx) && !rpPitchers.some(rp => rp.idx === idx) && (p.roster_status || "returner") !== "leaving" && isPitcher(p));
+      // IF/OF distribution: players with generic "IF" or "OF" position (no
+      // specific slot) fill across the relevant position group. Same strict
+      // hierarchy — a generic IF starter only fills depth 1, a generic IF
+      // utility only fills depth 2, a generic IF bench only fills depth 3.
+      const IF_SLOTS = ["1B", "2B", "3B", "SS"];
+      const OF_SLOTS = ["LF", "CF", "RF"];
+      const normalizePos = (raw: string | null | undefined) =>
+        (raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const ROLE_TO_DEPTH: Record<string, number> = { starter: 1, utility: 2, bench: 3 };
+      const distributeGeneric = (positionTag: "IF" | "OF", slots: string[]) => {
+        const candidates = rosterPlayers
+          .map((p, idx) => ({ p, idx }))
+          .filter(({ p, idx }) =>
+            !usedIdxs.has(idx) &&
+            (p.roster_status || "returner") !== "leaving" &&
+            !isPitcher(p) &&
+            normalizePos(effectivePos(p)) === positionTag &&
+            !!p.depth_role && ROLE_TO_DEPTH[p.depth_role] != null,
+          );
+        for (const { p, idx } of candidates) {
+          const targetDepth = ROLE_TO_DEPTH[p.depth_role!];
+          for (const slot of slots) {
+            if (next[depthKey(slot, targetDepth)] == null) {
+              next[depthKey(slot, targetDepth)] = idx;
+              usedIdxs.add(idx);
+              break;
+            }
+          }
+        }
+      };
+      distributeGeneric("IF", IF_SLOTS);
+      distributeGeneric("OF", OF_SLOTS);
 
-      let spIdx = 0;
-      for (let i = 1; i <= 5; i += 1) {
-        const k = depthKey(`SP${i}`, 1);
-        if (next[k] == null && spPitchers[spIdx]) { next[k] = spPitchers[spIdx].idx; usedIdxs.add(spPitchers[spIdx].idx); spIdx++; }
-      }
-      // Fill remaining SP slots with leftover pitchers
-      for (let i = 1; i <= 5; i += 1) {
-        const k = depthKey(`SP${i}`, 1);
-        if (next[k] == null && remainingPitchers.length > 0) {
-          const rp = remainingPitchers.shift()!;
-          next[k] = rp.idx; usedIdxs.add(rp.idx);
-        }
-      }
-      let rpIdx = 0;
-      for (let i = 1; i <= 8; i += 1) {
-        const k = depthKey(`RP${i}`, 1);
-        if (next[k] == null && rpPitchers[rpIdx]) { next[k] = rpPitchers[rpIdx].idx; usedIdxs.add(rpPitchers[rpIdx].idx); rpIdx++; }
-      }
-      for (let i = 1; i <= 8; i += 1) {
-        const k = depthKey(`RP${i}`, 1);
-        if (next[k] == null && remainingPitchers.length > 0) {
-          const rp = remainingPitchers.shift()!;
-          next[k] = rp.idx; usedIdxs.add(rp.idx);
-        }
+      // Auto-assign pitchers — strict role → slot mapping, no cross-tier
+      // fallback. Same guarantee as hitters: the player in any given slot is
+      // tagged with the right tier or the slot stays empty for the coach to
+      // fill manually. Role priority follows the IP gradient (weekend SP at
+      // the top of the rotation, specialist at the bottom of the pen).
+      const PITCHER_SLOT_ROLES: Array<[string, BuildPlayer["depth_role"]]> = [
+        ["SP1", "weekend_starter"],
+        ["SP2", "weekend_starter"],
+        ["SP3", "weekend_starter"],
+        ["SP4", "weekday_starter"],
+        ["SP5", "swing_starter"],
+        ["RP1", "workhorse_reliever"],
+        ["RP2", "high_leverage_reliever"],
+        ["RP3", "high_leverage_reliever"],
+        ["RP4", "mid_leverage_reliever"],
+        ["RP5", "mid_leverage_reliever"],
+        ["RP6", "low_impact_reliever"],
+        ["RP7", "low_impact_reliever"],
+        ["RP8", "specialist_reliever"],
+      ];
+      for (const [slot, role] of PITCHER_SLOT_ROLES) {
+        const k = depthKey(slot, 1);
+        if (next[k] != null) continue;
+        const idx = rosterPlayers.findIndex(
+          (p, i) =>
+            !usedIdxs.has(i) &&
+            (p.roster_status || "returner") !== "leaving" &&
+            isPitcher(p) &&
+            p.depth_role === role,
+        );
+        if (idx >= 0) { next[k] = idx; usedIdxs.add(idx); }
       }
 
       return next;
@@ -5108,7 +5277,7 @@ export default function TeamBuilder() {
         production_notes: null,
         roster_status: "returner" as const,
         depth_role: isPitcherRow
-          ? ((inferredRole === "SP") ? "weekend_starter" : "high_leverage_reliever")
+          ? defaultPitcherDepthRoleFromIp(pmRec?.ip ?? null, (inferredRole === "SP") ? "SP" : "RP")
           : seedHitterDepth,
         class_transition: r.class_transition ?? "SJ",
         dev_aggressiveness: r.dev_aggressiveness ?? 0,
@@ -5425,23 +5594,28 @@ export default function TeamBuilder() {
             value={pitcherDepthRole}
             onValueChange={(v) =>
               updatePlayer(globalIdx, {
-                depth_role: v as "weekend_starter" | "weekday_starter" | "high_leverage_reliever" | "low_impact_reliever",
+                depth_role: v as PitcherDepthRole,
               })
             }
           >
-            <SelectTrigger className="w-[170px] h-8">
+            <SelectTrigger className="w-[200px] h-8">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {currentPitcherRole === "SP" ? (
                 <>
-                  <SelectItem value="weekend_starter">Weekend Starter</SelectItem>
-                  <SelectItem value="weekday_starter">Weekday Starter</SelectItem>
+                  <SelectItem value="weekend_starter">Weekend Starter (~80 IP)</SelectItem>
+                  <SelectItem value="weekday_starter">Weekday Starter (~50 IP)</SelectItem>
+                  <SelectItem value="swing_starter">Swing / Long Relief (~30 IP)</SelectItem>
                 </>
               ) : (
                 <>
-                  <SelectItem value="high_leverage_reliever">High Leverage Reliever</SelectItem>
-                  <SelectItem value="low_impact_reliever">Low Leverage Reliever</SelectItem>
+                  <SelectItem value="workhorse_reliever">Workhorse RP (~50 IP)</SelectItem>
+                  <SelectItem value="high_leverage_reliever">High Leverage (~33 IP)</SelectItem>
+                  <SelectItem value="swing_starter">Swing / Long Relief (~30 IP)</SelectItem>
+                  <SelectItem value="mid_leverage_reliever">Mid Leverage (~20 IP)</SelectItem>
+                  <SelectItem value="low_impact_reliever">Low Impact (~12 IP)</SelectItem>
+                  <SelectItem value="specialist_reliever">Specialist (~6 IP)</SelectItem>
                 </>
               )}
             </SelectContent>
@@ -5683,7 +5857,7 @@ export default function TeamBuilder() {
         <div className="grid grid-cols-3 gap-3">
           <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4 text-center">
             <div className="text-muted-foreground text-xs uppercase tracking-wide">Total WAR</div>
-            <div className="text-2xl font-bold tracking-tight mt-1">{rosterTableTotals.totalOWar.toFixed(2)}</div>
+            <div className="text-2xl font-bold tracking-tight mt-1">{rosterTableTotals.totalWar.toFixed(2)}</div>
           </div>
           <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4 text-center">
             <div className="text-muted-foreground text-xs uppercase tracking-wide">Budget Used</div>
@@ -5884,7 +6058,7 @@ export default function TeamBuilder() {
                         ${Math.round(pitcherTableTotals.totalActualNil).toLocaleString()}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        {pitcherTableTotals.totalOWar.toFixed(2)}
+                        {pitcherTableTotals.totalPWar.toFixed(2)}
                       </TableCell>
                       <TableCell className="py-2"></TableCell>
                     </TableRow>
@@ -6104,7 +6278,7 @@ export default function TeamBuilder() {
                         ${Math.round(targetPitcherTableTotals.totalActualNil).toLocaleString()}
                       </TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2">
-                        {targetPitcherTableTotals.totalOWar.toFixed(2)}
+                        {targetPitcherTableTotals.totalPWar.toFixed(2)}
                       </TableCell>
                       <TableCell className="py-2"></TableCell>
                     </TableRow>
@@ -6426,139 +6600,851 @@ export default function TeamBuilder() {
           <TabsContent value="analytics" className="space-y-6">
             {(() => {
               const posGroups: Record<string, { count: number; nilTotal: number; warTotal: number }> = {};
+              // Per-exact-position aggregation for hitter side (so we can show
+              // C / SS / CF separately under the Premium tier instead of one
+              // lumped bar). Utility + Bench stay aggregated since position is
+              // less relevant for those roles.
+              type PosRow = { count: number; warTotal: number };
+              const hitterByExactPos: Record<string, PosRow> = {};
+              const pitcherByExactPos: Record<string, PosRow> = {};
+              let utilityAgg: PosRow = { count: 0, warTotal: 0 };
+              let benchAgg: PosRow = { count: 0, warTotal: 0 };
+
+              // Tier metadata — drives ordering, labels, and per-position grouping.
+              // Labels are user-facing; keys are internal stable ids. 1B/DH used to be
+              // labeled "Low" but reads better as "Power" (they're the bat-first / power
+              // positions, not "low-value" — defensive value is the only thing that's low).
+              const HITTER_TIERS = [
+                { key: "premium", label: "Premium", positions: ["C", "SS", "CF"], blurb: "" },
+                { key: "skill",   label: "Skill",   positions: ["2B", "3B", "LF", "RF", "OF"], blurb: "" },
+                { key: "power",   label: "Power",   positions: ["1B", "DH"], blurb: "" },
+              ] as const;
+              const POS_TO_TIER: Record<string, "premium" | "skill" | "power"> = {};
+              for (const t of HITTER_TIERS) for (const p of t.positions) POS_TO_TIER[p] = t.key;
+
               for (const p of rosterPlayers) {
                 if ((p.roster_status || "returner") === "leaving") continue;
-                const pos = (p.position || "").toUpperCase().trim();
-                // Group by positional value factor categories
+                const pos = (p.position_slot || p.player?.position || "")
+                  .toString().toUpperCase().trim();
+                const isBench = p.depth_role === "bench";
+                const isUtility = p.depth_role === "utility";
+
+                // Group labels match the HITTER_TIERS naming with a position breakdown
+                // in parens so coaches see at a glance which positions roll up into
+                // each tier. Utility + Bench depth_roles both classify as "Bench" —
+                // non-starters share a single grouping regardless of nominal position.
                 const group =
                   /^(SP)/.test(pos) ? "Starting Pitchers" :
-                  /^(RP|CL|LHP|RHP|TWP|P$)/.test(pos) ? "Relievers" :
-                  /^(C)$/.test(pos) ? "Catcher" :
-                  /^(SS|2B)/.test(pos) ? "Up the Middle" :
-                  /^(1B|3B)/.test(pos) ? "Corner Infield" :
-                  /^(CF)/.test(pos) ? "Center Field" :
-                  /^(LF|RF|OF|DH)/.test(pos) ? "Corner Outfield" :
-                  /^(IF)/.test(pos) ? "Up the Middle" :
-                  /^(UTL)/.test(pos) ? "Utility" :
-                  "Other";
+                  /^(RP|CL|LHP|RHP|P$)/.test(pos) ? "Relievers" :
+                  (isBench || isUtility) ? "Bench" :
+                  /^(C|SS|CF)$/.test(pos) ? "Premium (C/SS/CF)" :
+                  /^(2B|3B|LF|RF|OF)$/.test(pos) ? "Skill (2B/3B/Corner OF)" :
+                  /^(1B|DH)$/.test(pos) ? "Power (1B/DH)" :
+                  /^(UTL|IF)$/.test(pos) ? "Bench" :
+                  /^(TWP)/.test(pos) ? "Premium (C/SS/CF)" :
+                  "Bench";
                 if (!posGroups[group]) posGroups[group] = { count: 0, nilTotal: 0, warTotal: 0 };
                 posGroups[group].count++;
                 posGroups[group].nilTotal += (p.nil_value || 0);
-                const war = p.projected_war ?? 0;
+                let war = 0;
+                if (hitterEligible(p)) war += playerProjection(p, "hitter").owar ?? 0;
+                if (pitcherEligible(p)) war += playerProjection(p, "pitcher").pwar ?? 0;
                 posGroups[group].warTotal += war;
+
+                // Per-exact-position accumulation (drives the per-position rows
+                // under each tier header in the new UI).
+                if (group === "Starting Pitchers" || group === "Relievers") {
+                  const roleKey = group === "Starting Pitchers" ? "SP" : "RP";
+                  if (!pitcherByExactPos[roleKey]) pitcherByExactPos[roleKey] = { count: 0, warTotal: 0 };
+                  pitcherByExactPos[roleKey].count++;
+                  pitcherByExactPos[roleKey].warTotal += war;
+                } else if (isBench) {
+                  benchAgg.count++;
+                  benchAgg.warTotal += war;
+                } else if (isUtility) {
+                  utilityAgg.count++;
+                  utilityAgg.warTotal += war;
+                } else if (POS_TO_TIER[pos]) {
+                  if (!hitterByExactPos[pos]) hitterByExactPos[pos] = { count: 0, warTotal: 0 };
+                  hitterByExactPos[pos].count++;
+                  hitterByExactPos[pos].warTotal += war;
+                }
               }
               const activeCount = rosterPlayers.filter(p => (p.roster_status || "returner") !== "leaving").length;
               const leavingCount = rosterPlayers.filter(p => (p.roster_status || "returner") === "leaving").length;
               const groups = Object.entries(posGroups).sort((a, b) => b[1].nilTotal - a[1].nilTotal);
+
+              // Current build positional WAR splits — mirror the snapshot schema
+              // so the year-over-year + benchmark compare cards line up cleanly.
+              const hitterContribs: Array<{ p: BuildPlayer; owar: number }> = [];
+              const pitcherContribs: Array<{ p: BuildPlayer; pwar: number; role: "SP" | "RP" }> = [];
+              for (const p of rosterPlayers) {
+                if ((p.roster_status || "returner") === "leaving") continue;
+                if (hitterEligible(p)) {
+                  const owar = playerProjection(p, "hitter").owar ?? 0;
+                  hitterContribs.push({ p, owar });
+                }
+                if (pitcherEligible(p)) {
+                  const pwar = playerProjection(p, "pitcher").pwar ?? 0;
+                  const sourceId = (p.player as any)?.source_player_id ?? null;
+                  const pmRole = sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId)?.role : null;
+                  const role = effectivePitcherRoleForBuild(p, pmRole);
+                  pitcherContribs.push({ p, pwar, role: role === "SP" ? "SP" : "RP" });
+                }
+              }
+              const buildLineupOwar = [...hitterContribs]
+                .sort((a, b) => b.owar - a.owar)
+                .slice(0, 9)
+                .reduce((s, x) => s + x.owar, 0);
+              const buildRotationPwar = pitcherContribs
+                .filter((x) => x.role === "SP")
+                .reduce((s, x) => s + x.pwar, 0);
+              const buildBullpenPwar = pitcherContribs
+                .filter((x) => x.role === "RP")
+                .reduce((s, x) => s + x.pwar, 0);
+              const buildTotalWar = rosterTableTotals.totalWar;
+
+              // Delta rendering helper — green if ahead, red if behind, neutral if ±0.1
+              const renderDelta = (build: number, bench: number) => {
+                const diff = build - bench;
+                const abs = Math.abs(diff);
+                const color = abs < 0.1 ? "text-muted-foreground" : diff > 0 ? "text-[hsl(var(--success))]" : "text-destructive";
+                const sign = diff > 0 ? "+" : "";
+                return <div className={`text-xs font-semibold ${color}`}>{sign}{diff.toFixed(2)}</div>;
+              };
+              const benchTeam = priorYearSnapshot;
+
+              // (renderBenchmarkCard removed — comparison cards consolidated into
+              //  a single WAR Comparison table to eliminate redundant big numbers.)
+
+              // Split position groups into hitting vs pitching so the visual cleanly
+              // separates oWAR contributors from pWAR contributors. Ordered by positional
+              // value (highest → lowest). Always emit all rows even when empty so the
+              // coach sees zero-filled tiers ("Power 0 players — $0") as roster gaps
+              // rather than silently disappearing slots.
+              const hittingOrder = ["Premium (C/SS/CF)", "Skill (2B/3B/Corner OF)", "Power (1B/DH)", "Bench"];
+              const pitchingOrder = ["Starting Pitchers", "Relievers"];
+              const emptyGroup = { count: 0, nilTotal: 0, warTotal: 0 };
+              const groupByKey: Record<string, [string, { count: number; nilTotal: number; warTotal: number }]> = {};
+              for (const g of groups) groupByKey[g[0]] = g;
+              const hittingGroups: Array<[string, { count: number; nilTotal: number; warTotal: number }]> =
+                hittingOrder.map((k) => groupByKey[k] ?? [k, emptyGroup]);
+              const pitchingGroups: Array<[string, { count: number; nilTotal: number; warTotal: number }]> =
+                pitchingOrder.map((k) => groupByKey[k] ?? [k, emptyGroup]);
               return (
                 <>
+                  {/* Top stats row — RSTR IQ stat-tile pattern: 3px gold left accent,
+                      Oswald big number, small uppercase tracking label, left-aligned. */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div className="rounded-lg border p-4 text-center">
-                      <div className="text-muted-foreground text-xs uppercase tracking-wide">Active Roster</div>
-                      <div className="text-3xl font-bold mt-1">{activeCount}</div>
+                    <div className="rounded-md border border-border/40 border-l-[3px] border-l-[#D4AF37] bg-card/40 px-5 py-4">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Active Roster</div>
+                      <div className="text-3xl font-bold tabular-nums mt-1.5" style={{ fontFamily: "'Oswald', sans-serif" }}>{activeCount}</div>
                     </div>
-                    <div className="rounded-lg border p-4 text-center">
-                      <div className="text-muted-foreground text-xs uppercase tracking-wide">Leaving</div>
-                      <div className="text-3xl font-bold mt-1">{leavingCount}</div>
+                    <div className="rounded-md border border-border/40 border-l-[3px] border-l-[#D4AF37] bg-card/40 px-5 py-4">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Leaving</div>
+                      <div className="text-3xl font-bold tabular-nums mt-1.5" style={{ fontFamily: "'Oswald', sans-serif" }}>{leavingCount}</div>
                     </div>
-                    <div className="rounded-lg border p-4 text-center">
-                      <div className="text-muted-foreground text-xs uppercase tracking-wide">Avg NIL / Player</div>
-                      <div className="text-2xl font-bold mt-1">{activeCount > 0 ? `$${Math.round(totalEffectiveNil / activeCount).toLocaleString()}` : "—"}</div>
+                    <div className="rounded-md border border-border/40 border-l-[3px] border-l-[#D4AF37] bg-card/40 px-5 py-4">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Avg NIL / Player</div>
+                      <div className="text-2xl font-bold tabular-nums mt-1.5" style={{ fontFamily: "'Oswald', sans-serif" }}>{activeCount > 0 ? `$${Math.round(totalEffectiveNil / activeCount).toLocaleString()}` : "—"}</div>
                     </div>
-                    <div className="rounded-lg border p-4 text-center">
-                      <div className="text-muted-foreground text-xs uppercase tracking-wide">Avg WAR / Player</div>
-                      <div className="text-2xl font-bold mt-1">{activeCount > 0 ? (rosterTableTotals.totalOWar / activeCount).toFixed(2) : "—"}</div>
+                    <div className="rounded-md border border-border/40 border-l-[3px] border-l-[#D4AF37] bg-card/40 px-5 py-4">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Avg WAR / Player</div>
+                      <div className="text-2xl font-bold tabular-nums mt-1.5" style={{ fontFamily: "'Oswald', sans-serif" }}>{activeCount > 0 ? (rosterTableTotals.totalWar / activeCount).toFixed(2) : "—"}</div>
                     </div>
                   </div>
 
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Spending by Position Group</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        {groups.map(([group, data]) => {
-                          const pct = totalEffectiveNil > 0 ? (data.nilTotal / totalEffectiveNil) * 100 : 0;
-                          return (
-                            <div key={group}>
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-sm font-medium">{group}</span>
-                                <div className="flex items-center gap-3 text-sm">
-                                  <span className="text-muted-foreground">{data.count} players</span>
-                                  <span className="font-semibold">${Math.round(data.nilTotal).toLocaleString()}</span>
-                                  <span className="text-muted-foreground text-xs w-12 text-right">{pct.toFixed(1)}%</span>
-                                </div>
-                              </div>
-                              <div className="h-2 rounded-full bg-muted overflow-hidden">
-                                <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.min(pct, 100)}%` }} />
+                  {/* Consolidated WAR Comparison: your build (once) + each benchmark as a delta row.
+                      Replaces the old 3-card stack where the same big numbers were repeated. */}
+                  {(() => {
+                    const benchRows: Array<{ label: string; sublabel?: string; bench: TeamWarSnapshot }> = [];
+                    if (benchTeam) {
+                      benchRows.push({
+                        label: `${PRIOR_SEASON} Actual — ${benchTeam.team_name}`,
+                        sublabel: `${benchTeam.games_played_est ?? "?"} games · factor ${benchTeam.proration_factor?.toFixed(2) ?? "—"}`,
+                        bench: benchTeam,
+                      });
+                    }
+                    if (nationalChampBenchmark) {
+                      benchRows.push({
+                        label: `${PRIOR_SEASON} National Champion — ${nationalChampBenchmark.team_name}`,
+                        bench: nationalChampBenchmark,
+                      });
+                    }
+                    for (const c of conferenceChampBenchmarks) {
+                      benchRows.push({
+                        label: `${PRIOR_SEASON} ${c.conference} Champion — ${c.team_name}`,
+                        sublabel: conferenceChampBenchmarks.length > 1 ? "split regular-season champ" : undefined,
+                        bench: c,
+                      });
+                    }
+
+                    const deltaText = (build: number, bench: number) => {
+                      const diff = build - bench;
+                      const abs = Math.abs(diff);
+                      const color = abs < 0.05 ? "text-muted-foreground" : diff > 0 ? "text-[hsl(var(--success))]" : "text-destructive";
+                      const sign = diff > 0 ? "+" : diff < 0 ? "−" : "";
+                      return <span className={`tabular-nums font-semibold ${color}`}>{sign}{abs.toFixed(2)}</span>;
+                    };
+
+                    // V1 hero — Total WAR with year-over-year delta vs prior-season actual.
+                    // Matches the Hitter/Pitcher hero strip pattern (same "+X.XX vs 2025" framing).
+                    const priorYearTeamTotal = benchTeam
+                      ? Number(benchTeam.prorated_total_owar) + Number(benchTeam.prorated_total_pwar)
+                      : null;
+                    const priorYearTotalDelta = priorYearTeamTotal != null
+                      ? buildTotalWar - priorYearTeamTotal
+                      : null;
+
+                    return (
+                      <Card className="border-l-[3px] border-l-[#D4AF37]">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>
+                            WAR Comparison — {selectedTeam || "Select a team"} {CURRENT_SEASON} Build
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          {/* V1 hero — Total WAR with year-over-year delta */}
+                          <div className="mb-5 px-4 py-3 rounded-md bg-card/40 border-l-[3px] border-l-[#D4AF37]">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Total WAR</div>
+                            <div className="flex items-baseline gap-3 mt-1 flex-wrap">
+                              <span className="text-4xl font-bold tabular-nums text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>{buildTotalWar.toFixed(2)}</span>
+                              {priorYearTotalDelta != null && (
+                                <span className={`text-sm font-semibold tabular-nums ${Math.abs(priorYearTotalDelta) < 0.05 ? "text-muted-foreground" : priorYearTotalDelta > 0 ? "text-[hsl(var(--success))]" : "text-destructive"}`}>
+                                  {priorYearTotalDelta > 0 ? "+" : priorYearTotalDelta < 0 ? "−" : ""}{Math.abs(priorYearTotalDelta).toFixed(2)} vs {PRIOR_SEASON}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Supporting build metrics — Total WAR moved to hero, so 3-tile secondary row */}
+                          <div className="grid grid-cols-3 gap-3 mb-5">
+                            <div className="rounded-md border border-border/40 border-l-[3px] border-l-[#D4AF37]/60 bg-card/40 px-4 py-3">
+                              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Lineup oWAR</div>
+                              <div className="text-2xl font-bold tabular-nums mt-1" style={{ fontFamily: "'Oswald', sans-serif" }}>{buildLineupOwar.toFixed(2)}</div>
+                            </div>
+                            <div className="rounded-md border border-border/40 border-l-[3px] border-l-[#D4AF37]/60 bg-card/40 px-4 py-3">
+                              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Rotation pWAR</div>
+                              <div className="text-2xl font-bold tabular-nums mt-1" style={{ fontFamily: "'Oswald', sans-serif" }}>{buildRotationPwar.toFixed(2)}</div>
+                            </div>
+                            <div className="rounded-md border border-border/40 border-l-[3px] border-l-[#D4AF37]/60 bg-card/40 px-4 py-3">
+                              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Bullpen pWAR</div>
+                              <div className="text-2xl font-bold tabular-nums mt-1" style={{ fontFamily: "'Oswald', sans-serif" }}>{buildBullpenPwar.toFixed(2)}</div>
+                            </div>
+                          </div>
+
+                          {/* Benchmark comparison table — deltas only, no repeated big numbers */}
+                          {!selectedTeam ? (
+                            <div className="text-sm text-muted-foreground">Select a team to load benchmarks.</div>
+                          ) : benchRows.length === 0 ? (
+                            <div className="text-sm text-muted-foreground space-y-1">
+                              <div>No benchmarks on file for <span className="font-semibold text-foreground">{selectedTeam}</span>.</div>
+                              <div className="text-xs">
+                                Looked up by source_team_id <span className="font-mono">{selectedTeamSourceId ?? "(none)"}</span>
+                                {selectedTeamFullName && selectedTeamFullName !== selectedTeam ? <> and name fallback <span className="font-mono">{selectedTeamFullName}</span></> : null}.
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </CardContent>
-                  </Card>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="border-b text-[10px] uppercase tracking-wider text-muted-foreground">
+                                    <th className="text-left py-2 pr-4">Compare vs</th>
+                                    <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Goal Total</th>
+                                    <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Δ Total</th>
+                                    <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Δ Lineup</th>
+                                    <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Δ Rotation</th>
+                                    <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Δ Bullpen</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {benchRows.map((row, i) => {
+                                    const benchTotal = Number(row.bench.prorated_total_owar) + Number(row.bench.prorated_total_pwar);
+                                    return (
+                                      <tr key={i} className="border-b last:border-0">
+                                        <td className="py-2 pr-4">
+                                          <div className="font-medium">{row.label}</div>
+                                          {row.sublabel && <div className="text-[10px] text-muted-foreground italic">{row.sublabel}</div>}
+                                        </td>
+                                        <td className="text-center py-2 px-4 font-mono tabular-nums text-muted-foreground">{benchTotal.toFixed(2)}</td>
+                                        <td className="text-center py-2 px-4 font-mono">{deltaText(buildTotalWar, benchTotal)}</td>
+                                        <td className="text-center py-2 px-4 font-mono">{deltaText(buildLineupOwar, Number(row.bench.prorated_starting_lineup_owar))}</td>
+                                        <td className="text-center py-2 px-4 font-mono">{deltaText(buildRotationPwar, Number(row.bench.prorated_rotation_pwar))}</td>
+                                        <td className="text-center py-2 px-4 font-mono">{deltaText(buildBullpenPwar, Number(row.bench.prorated_bullpen_pwar))}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                              <div className="text-[10px] text-muted-foreground mt-2 italic">Prorated to 56 games.</div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })()}
 
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>WAR by Position Group</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        {groups.map(([group, data]) => {
-                          const totalWar = rosterTableTotals.totalOWar || 1;
-                          const pct = (data.warTotal / totalWar) * 100;
-                          return (
-                            <div key={group}>
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-sm font-medium">{group}</span>
-                                <div className="flex items-center gap-3 text-sm">
-                                  <span className="text-muted-foreground">{data.count} players</span>
-                                  <span className="font-semibold">{data.warTotal.toFixed(2)} WAR</span>
-                                  <span className="text-muted-foreground text-xs w-12 text-right">{pct.toFixed(1)}%</span>
-                                </div>
+                  {(() => {
+                    // Per-position WAR breakdown — one row per position slot showing
+                    // the starter(s). Platoon (≥2 players with depth_role === "starter"
+                    // at the same position_slot) renders as a split-color bar with
+                    // combined WAR total. Bench aggregates non-starters into one row.
+                    // Pitchers: rotation shown individually, top 5 RPs by pWAR.
+                    // Empirical thresholds from 2025 D1 starters (PA >= 150).
+                    // Source: supabase/queries/owar_thresholds_by_position_2025.sql
+                    // Starter threshold = p50 (median actual D1 starter at position)
+                    // Elite threshold   = p90 (top 10% of starters at position)
+                    // DH inherits 1B values — no DH-specific sample in the query.
+                    const POS_STARTER_OWAR: Record<string, number> = {
+                      C: 0.91, SS: 0.94, CF: 1.08,
+                      "2B": 0.98, "3B": 0.99, LF: 1.06, RF: 1.09, OF: 0.86,
+                      "1B": 1.13, DH: 1.13,
+                    };
+                    const POS_ELITE_OWAR: Record<string, number> = {
+                      C: 1.67, SS: 1.70, CF: 1.93,
+                      "2B": 1.75, "3B": 1.88, LF: 1.79, RF: 1.82, OF: 1.40,
+                      "1B": 1.95, DH: 1.95,
+                    };
+                    const DEFAULT_STARTER = 1.00;
+                    const DEFAULT_ELITE = 1.80;
+
+                    // Two-pass classification: roster build (depth_role) is the
+                    // primary source. Depth chart (depthAssignments) is the fallback
+                    // for slots/roles that the build hasn't tagged yet.
+                    type StarterEntry = { name: string; war: number };
+                    const ROTATION_ROLES = new Set(["weekend_starter", "weekday_starter", "swing_starter"]);
+                    const RELIEVER_ROLES = new Set(["workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever", "low_impact_reliever", "specialist_reliever"]);
+                    type PitcherRow = { name: string; war: number; role: string; isLefty: boolean };
+
+                    // Pass 1: index hitter starters and pitcher role assignments from
+                    // the roster build's depth_role tags.
+                    const hitterStarterPosByIdx = new Map<number, string>();
+                    const rotationIdxs = new Set<number>();
+                    const bullpenIdxs = new Set<number>();
+                    rosterPlayers.forEach((p, idx) => {
+                      if ((p.roster_status || "returner") === "leaving") return;
+                      if (hitterEligible(p) && p.depth_role === "starter") {
+                        const pos = (p.position_slot || p.player?.position || "")
+                          .toString().toUpperCase().trim();
+                        if (POS_TO_TIER[pos]) hitterStarterPosByIdx.set(idx, pos);
+                      }
+                      if (pitcherEligible(p)) {
+                        const role = p.depth_role || "";
+                        if (ROTATION_ROLES.has(role)) rotationIdxs.add(idx);
+                        else if (RELIEVER_ROLES.has(role)) bullpenIdxs.add(idx);
+                      }
+                    });
+
+                    // Pass 2: fill remaining positional/role gaps from the depth chart.
+                    // Hitter side — promote depth_order=1 players from the depth chart,
+                    // but honor the build's current position_slot if it's been changed.
+                    // The build's position change wins over where the chart originally
+                    // slotted them — e.g., player at SS:1 in chart but position_slot now
+                    // "2B" → treat them as a 2B starter, not SS.
+                    const positionsWithStarter = new Set(Array.from(hitterStarterPosByIdx.values()));
+                    for (const key in depthAssignments) {
+                      const [chartSlot, depthStr] = key.split(":");
+                      if (depthStr !== "1") continue;
+                      if (!POS_TO_TIER[chartSlot]) continue;
+                      const idx = depthAssignments[key];
+                      if (idx == null) continue;
+                      if (hitterStarterPosByIdx.has(idx)) continue;
+                      const p = rosterPlayers[idx];
+                      if (!p) continue;
+                      if ((p.roster_status || "returner") === "leaving") continue;
+                      if (!hitterEligible(p)) continue;
+                      const currentPos = (p.position_slot || p.player?.position || "")
+                        .toString().toUpperCase().trim();
+                      const effectivePos = POS_TO_TIER[currentPos] ? currentPos : chartSlot;
+                      if (positionsWithStarter.has(effectivePos)) continue;
+                      hitterStarterPosByIdx.set(idx, effectivePos);
+                      positionsWithStarter.add(effectivePos);
+                    }
+                    // Pitcher side — promote SP1-SP5 / RP1-RP8 depth-chart picks that
+                    // aren't already covered by depth_role tags.
+                    [1, 2, 3, 4, 5].forEach((n) => {
+                      const idx = depthAssignments[depthKey(`SP${n}`, 1)];
+                      if (idx == null) return;
+                      const p = rosterPlayers[idx];
+                      if (!p) return;
+                      if ((p.roster_status || "returner") === "leaving") return;
+                      if (!pitcherEligible(p)) return;
+                      if (rotationIdxs.has(idx) || bullpenIdxs.has(idx)) return;
+                      rotationIdxs.add(idx);
+                    });
+                    [1, 2, 3, 4, 5, 6, 7, 8].forEach((n) => {
+                      const idx = depthAssignments[depthKey(`RP${n}`, 1)];
+                      if (idx == null) return;
+                      const p = rosterPlayers[idx];
+                      if (!p) return;
+                      if ((p.roster_status || "returner") === "leaving") return;
+                      if (!pitcherEligible(p)) return;
+                      if (rotationIdxs.has(idx) || bullpenIdxs.has(idx)) return;
+                      bullpenIdxs.add(idx);
+                    });
+
+                    // Pass 3: bucket every active hitter/pitcher into the final groups.
+                    const startersByPos: Record<string, StarterEntry[]> = {};
+                    const benchEntries: Array<{ name: string; war: number }> = [];
+                    let hittingWarTotal = 0;
+                    const rotation: PitcherRow[] = [];
+                    const bullpen: PitcherRow[] = [];
+                    let pitchingWarTotal = 0;
+                    rosterPlayers.forEach((p, idx) => {
+                      if ((p.roster_status || "returner") === "leaving") return;
+                      if (hitterEligible(p)) {
+                        const owar = playerProjection(p, "hitter").owar ?? 0;
+                        hittingWarTotal += owar;
+                        const starterPos = hitterStarterPosByIdx.get(idx);
+                        if (starterPos) {
+                          if (!startersByPos[starterPos]) startersByPos[starterPos] = [];
+                          startersByPos[starterPos].push({ name: getPlayerName(p), war: owar });
+                        } else {
+                          benchEntries.push({ name: getPlayerName(p), war: owar });
+                        }
+                      }
+                      if (pitcherEligible(p)) {
+                        const pwar = playerProjection(p, "pitcher").pwar ?? 0;
+                        pitchingWarTotal += pwar;
+                        const isLefty = (p.player?.throws_hand || "").toUpperCase() === "L";
+                        const role = p.depth_role || "";
+                        const row: PitcherRow = { name: getPlayerName(p), war: pwar, role, isLefty };
+                        if (rotationIdxs.has(idx)) rotation.push(row);
+                        else if (bullpenIdxs.has(idx)) bullpen.push(row);
+                      }
+                    });
+                    const rotationOrder = ["weekend_starter", "weekday_starter", "swing_starter"];
+                    rotation.sort((a, b) => {
+                      const ra = rotationOrder.indexOf(a.role);
+                      const rb = rotationOrder.indexOf(b.role);
+                      if (ra !== rb) return ra - rb;
+                      return b.war - a.war;
+                    });
+                    const bullpenWarTotal = bullpen.reduce((s, x) => s + x.war, 0);
+                    const topBullpen = [...bullpen].sort((a, b) => b.war - a.war).slice(0, 7);
+
+                    const verdictFor = (war: number, starter: number, elite: number): string => {
+                      if (war >= elite) return "Elite";
+                      if (war >= starter) return "Starter";
+                      if (war >= starter * 0.5) return "Below";
+                      return "Drag";
+                    };
+                    const verdictColor = (v: string) =>
+                      v === "Elite" ? "text-emerald-600" :
+                      v === "Starter" ? "text-yellow-600" :
+                      v === "Below" ? "text-orange-600" : "text-red-600";
+
+                    // Platoon segments use gold + darker gold from RSTR IQ design system
+                    const segmentColors = ["bg-[#D4AF37]", "bg-[#A08820]", "bg-amber-700"];
+
+                    const renderPosSlot = (pos: string, starters: StarterEntry[]) => {
+                      const elite = POS_ELITE_OWAR[pos] ?? DEFAULT_ELITE;
+                      const starterT = POS_STARTER_OWAR[pos] ?? DEFAULT_STARTER;
+                      const totalWar = starters.reduce((s, x) => s + x.war, 0);
+                      const v = verdictFor(totalWar, starterT, elite);
+                      const isPlatoon = starters.length >= 2;
+                      const rawSegments = starters.map((x) => Math.max(0, (x.war / elite) * 100));
+                      const segTotal = rawSegments.reduce((s, x) => s + x, 0);
+                      const scale = segTotal > 100 ? 100 / segTotal : 1;
+                      const segments = rawSegments.map((s) => s * scale);
+                      return (
+                        <div key={pos} className="ml-2">
+                          <div className="flex items-center justify-between mb-1 gap-3">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span className="inline-flex items-center justify-center min-w-[28px] h-5 px-1.5 rounded-sm text-[10px] font-bold tracking-wider bg-muted text-foreground/80">{pos}</span>
+                              <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                {starters.length === 0 ? (
+                                  <span className="text-sm italic text-muted-foreground">Unfilled</span>
+                                ) : starters.map((s, i) => (
+                                  <span key={i} className="text-sm font-medium flex items-center gap-1.5">
+                                    {isPlatoon && <span className={`inline-block w-2 h-2 rounded-sm ${segmentColors[i] ?? "bg-amber-600"}`} />}
+                                    {s.name}
+                                    {isPlatoon && <span className="text-[10px] text-muted-foreground tabular-nums">({s.war.toFixed(2)})</span>}
+                                  </span>
+                                ))}
                               </div>
-                              <div className="h-2 rounded-full bg-muted overflow-hidden">
-                                <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${Math.min(Math.max(pct, 0), 100)}%` }} />
+                              {starters.length > 0 && (
+                                <span className={`text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap ${verdictColor(v)}`}>{v}</span>
+                              )}
+                            </div>
+                            {starters.length > 0 && (
+                              <div className="flex items-center gap-3 text-sm shrink-0">
+                                <span className="font-semibold tabular-nums w-16 text-right">{totalWar.toFixed(2)} WAR</span>
+                              </div>
+                            )}
+                          </div>
+                          {starters.length > 0 ? (
+                            <div className="h-2 rounded-full bg-muted overflow-hidden relative flex">
+                              {segments.map((w, i) => (
+                                <div key={i} className={`h-full ${segmentColors[i] ?? "bg-amber-600"} transition-all`} style={{ width: `${w}%` }} />
+                              ))}
+                              <div className="absolute top-0 h-full w-px bg-foreground/40" style={{ left: `${Math.min(100, (starterT / elite) * 100)}%` }} title={`Starter benchmark: ${starterT.toFixed(1)} WAR`} />
+                            </div>
+                          ) : (
+                            <div className="h-2 rounded-full bg-muted/40 border border-dashed border-muted-foreground/20" />
+                          )}
+                        </div>
+                      );
+                    };
+
+                    const ROLE_LABEL: Record<string, string> = {
+                      weekend_starter: "Weekend SP",
+                      weekday_starter: "Weekday SP",
+                      swing_starter: "Swing",
+                      workhorse_reliever: "Workhorse",
+                      high_leverage_reliever: "High Lev",
+                      mid_leverage_reliever: "Mid Lev",
+                      low_impact_reliever: "Low Impact",
+                      specialist_reliever: "Specialist",
+                    };
+                    const renderPitcherRow = (p: PitcherRow, isSp: boolean) => {
+                      // Empirical thresholds from 2025 D1.
+                      // SP rows compared against SP_rotation tier (p50/p90 = 2.27/3.89).
+                      // RP rows compared against RP_primary tier (p50/p90 = 0.99/2.03)
+                      // — top 7 bullpen by pWAR are realistically primary-tier targets.
+                      const elite = isSp ? 3.89 : 2.03;
+                      const starterT = isSp ? 2.27 : 0.99;
+                      const v = verdictFor(p.war, starterT, elite);
+                      const pct = Math.min(100, (p.war / elite) * 100);
+                      return (
+                        <div key={`${p.name}-${p.role}`} className="ml-2">
+                          <div className="flex items-center justify-between mb-1 gap-3">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span className={`inline-flex items-center justify-center w-5 h-5 rounded-sm text-[10px] font-bold ${p.isLefty ? "bg-blue-500/15 text-blue-700" : "bg-muted text-foreground/80"}`}>{p.isLefty ? "L" : "R"}</span>
+                              <div className="min-w-0 flex-1">
+                                <span className="text-sm font-medium">{p.name}</span>
+                                <span className="text-[10px] text-muted-foreground ml-2 uppercase tracking-wider">{ROLE_LABEL[p.role] ?? p.role}</span>
+                              </div>
+                              <span className={`text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap ${verdictColor(v)}`}>{v}</span>
+                            </div>
+                            <div className="flex items-center gap-3 text-sm shrink-0">
+                              <span className="font-semibold tabular-nums w-16 text-right">{p.war.toFixed(2)} WAR</span>
+                            </div>
+                          </div>
+                          <div className="h-2 rounded-full bg-muted overflow-hidden relative">
+                            <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${pct}%` }} />
+                            <div className="absolute top-0 h-full w-px bg-foreground/40" style={{ left: `${Math.min(100, (starterT / elite) * 100)}%` }} title={`Starter benchmark: ${starterT.toFixed(1)} WAR`} />
+                          </div>
+                        </div>
+                      );
+                    };
+
+                    const benchWarTotal = benchEntries.reduce((s, x) => s + x.war, 0);
+
+                    // Showcase metrics (V1 hero / V2 per-tier / V3 footer treatments):
+                    // - starterTotalOwar = sum across position-1 starters (the "nine")
+                    // - eliteCap = sum of POS_ELITE_OWAR for the 9 starting slots
+                    // - priorYearLineupDelta = vs prior-season actual lineup oWAR
+                    const STARTING_LINEUP_SLOTS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"];
+                    const starterTotalOwar = Object.values(startersByPos)
+                      .reduce((s, arr) => s + arr.reduce((ss, e) => ss + e.war, 0), 0);
+                    const eliteCap = STARTING_LINEUP_SLOTS.reduce(
+                      (s, pos) => s + (POS_ELITE_OWAR[pos] ?? DEFAULT_ELITE),
+                      0,
+                    );
+                    const eliteCapPct = eliteCap > 0 ? (starterTotalOwar / eliteCap) * 100 : 0;
+                    const priorYearLineupOwar = priorYearSnapshot
+                      ? Number(priorYearSnapshot.prorated_starting_lineup_owar)
+                      : null;
+                    const priorYearLineupDelta = priorYearLineupOwar != null
+                      ? starterTotalOwar - priorYearLineupOwar
+                      : null;
+
+                    // Pitcher showcase metrics — mirror the hitter card, with empirical
+                    // thresholds from 2025 D1 (pwar_thresholds_by_role_2025.sql).
+                    //   SP_rotation p90 = 3.89  (top 3 IP per team)
+                    //   RP_primary  p90 = 2.03  (ranks 4-7 per team, weekday SP + setup/closer)
+                    //   RP_depth    p90 = 0.83  (rank 8+, middle relief, mop-up, specialist)
+                    // Cap maps depth-chart slots to empirical buckets:
+                    //   SP1-SP3   → rotation (3 slots)
+                    //   SP4-SP5 + RP1-RP4 → primary (6 slots)
+                    //   RP5-RP7   → depth (3 slots)
+                    // Hero number uses pitchingWarTotal (all pitchers) so it matches the
+                    // WAR Comparison card's Rotation+Bullpen aggregate.
+                    const SP_ROTATION_ELITE_PWAR = 3.89;
+                    const RP_PRIMARY_ELITE_PWAR = 2.03;
+                    const RP_DEPTH_ELITE_PWAR = 0.83;
+                    const pitcherEliteCap =
+                      3 * SP_ROTATION_ELITE_PWAR +   // SP1-3 (weekend rotation)
+                      6 * RP_PRIMARY_ELITE_PWAR +    // SP4-5 + RP1-4 (weekday/swing + setup/closer)
+                      3 * RP_DEPTH_ELITE_PWAR;       // RP5-7 (low-leverage)
+                    const pitcherEliteCapPct = pitcherEliteCap > 0 ? (pitchingWarTotal / pitcherEliteCap) * 100 : 0;
+                    const priorYearStaffPwar = priorYearSnapshot
+                      ? Number(priorYearSnapshot.prorated_rotation_pwar) + Number(priorYearSnapshot.prorated_bullpen_pwar)
+                      : null;
+                    const priorYearStaffDelta = priorYearStaffPwar != null
+                      ? pitchingWarTotal - priorYearStaffPwar
+                      : null;
+                    const rotationWarTotal = rotation.reduce((s, x) => s + x.war, 0);
+
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Hitter side — one row per position, platoon-aware */}
+                        <Card>
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>
+                              Hitter WAR by Position
+                            </CardTitle>
+                            <div className="text-xs text-muted-foreground">
+                              Total oWAR (all hitters): <span className="font-semibold text-foreground tabular-nums">{hittingWarTotal.toFixed(2)}</span>
+                            </div>
+                          </CardHeader>
+                          <CardContent>
+                            {/* V1 — Hero strip: starting lineup oWAR up top */}
+                            <div className="mb-5 px-4 py-3 rounded-md bg-card/40 border-l-[3px] border-l-[#D4AF37]">
+                              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Starting Lineup oWAR</div>
+                              <div className="flex items-baseline gap-3 mt-1 flex-wrap">
+                                <span className="text-4xl font-bold tabular-nums text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>{starterTotalOwar.toFixed(2)}</span>
+                                {priorYearLineupDelta != null && (
+                                  <span className={`text-sm font-semibold tabular-nums ${Math.abs(priorYearLineupDelta) < 0.05 ? "text-muted-foreground" : priorYearLineupDelta > 0 ? "text-[hsl(var(--success))]" : "text-destructive"}`}>
+                                    {priorYearLineupDelta > 0 ? "+" : priorYearLineupDelta < 0 ? "−" : ""}{Math.abs(priorYearLineupDelta).toFixed(2)} vs {PRIOR_SEASON}
+                                  </span>
+                                )}
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </CardContent>
-                  </Card>
 
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Cost Efficiency</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b">
-                            <th className="text-left py-2 text-xs text-muted-foreground font-medium">Group</th>
-                            <th className="text-right py-2 text-xs text-muted-foreground font-medium">Players</th>
-                            <th className="text-right py-2 text-xs text-muted-foreground font-medium">Total NIL</th>
-                            <th className="text-right py-2 text-xs text-muted-foreground font-medium">Total WAR</th>
-                            <th className="text-right py-2 text-xs text-muted-foreground font-medium">$/WAR</th>
-                            <th className="text-right py-2 text-xs text-muted-foreground font-medium">NIL/Player</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {groups.map(([group, data]) => (
-                            <tr key={group} className="border-b last:border-0">
-                              <td className="py-2 font-medium">{group}</td>
-                              <td className="py-2 text-right text-muted-foreground">{data.count}</td>
-                              <td className="py-2 text-right tabular-nums">${Math.round(data.nilTotal).toLocaleString()}</td>
-                              <td className="py-2 text-right tabular-nums">{data.warTotal.toFixed(2)}</td>
-                              <td className="py-2 text-right tabular-nums">{data.warTotal > 0 ? `$${Math.round(data.nilTotal / data.warTotal).toLocaleString()}` : "—"}</td>
-                              <td className="py-2 text-right tabular-nums">{data.count > 0 ? `$${Math.round(data.nilTotal / data.count).toLocaleString()}` : "—"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </CardContent>
-                  </Card>
+                            <div className="space-y-4">
+                              {HITTER_TIERS.map((tier) => {
+                                const tierEntries = tier.positions.map((pos) => ({ pos, starters: startersByPos[pos] ?? [] }));
+                                const tierSubtotal = tierEntries.reduce((s, x) => s + x.starters.reduce((ss, e) => ss + e.war, 0), 0);
+                                return (
+                                  <div key={tier.key} className="space-y-2">
+                                    {/* V2 — Per-tier mini-total: bigger gold number anchoring each tier */}
+                                    <div className="flex items-baseline justify-between border-b pb-1.5">
+                                      <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-foreground">{tier.label}</span>
+                                      <div className="flex items-baseline gap-1.5">
+                                        <span className="text-xl font-bold tabular-nums text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>{tierSubtotal.toFixed(2)}</span>
+                                        <span className="text-[9px] uppercase tracking-wider text-muted-foreground">WAR</span>
+                                      </div>
+                                    </div>
+                                    {tierEntries.map(({ pos, starters }) => renderPosSlot(pos, starters))}
+                                  </div>
+                                );
+                              })}
+                              {benchEntries.length > 0 && (
+                                <div className="space-y-2">
+                                  <div className="flex items-baseline justify-between border-b pb-1.5">
+                                    <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-foreground">Bench</span>
+                                    <div className="flex items-baseline gap-1.5">
+                                      <span className="text-xl font-bold tabular-nums text-muted-foreground" style={{ fontFamily: "'Oswald', sans-serif" }}>{benchWarTotal.toFixed(2)}</span>
+                                      <span className="text-[9px] uppercase tracking-wider text-muted-foreground">WAR</span>
+                                    </div>
+                                  </div>
+                                  <div className="ml-2">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="text-sm text-muted-foreground">{benchEntries.length} {benchEntries.length === 1 ? "player" : "players"}</span>
+                                      <span className="font-semibold tabular-nums w-16 text-right">{benchWarTotal.toFixed(2)} WAR</span>
+                                    </div>
+                                    <div className="h-2 rounded-full bg-muted overflow-hidden">
+                                      <div className="h-full bg-muted-foreground/40" style={{ width: `${Math.min(100, (benchWarTotal / 4.0) * 100)}%` }} />
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                              {Object.keys(startersByPos).length === 0 && benchEntries.length === 0 && (
+                                <div className="text-sm text-muted-foreground">No hitter contributions yet.</div>
+                              )}
+
+                              {/* V3 — Footer bar: starter WAR vs elite cap (room-to-grow gauge) */}
+                              {Object.keys(startersByPos).length > 0 && (
+                                <div className="pt-3 mt-2 border-t border-border/40">
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Proximity to Elite</span>
+                                    <span className="text-xs tabular-nums">
+                                      <span className="font-semibold text-foreground">{starterTotalOwar.toFixed(2)}</span>
+                                      <span className="text-muted-foreground"> / {eliteCap.toFixed(1)}</span>
+                                      <span className="ml-2 font-semibold text-[#D4AF37]">{eliteCapPct.toFixed(0)}%</span>
+                                    </span>
+                                  </div>
+                                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                                    <div className="h-full bg-[#D4AF37] transition-all" style={{ width: `${Math.min(100, eliteCapPct)}%` }} />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+
+                        {/* Pitcher side — rotation individually, top 7 bullpen by pWAR.
+                            Same showcase layering as the Hitter card, but accents in blue
+                            (#3B82F6) for position-side consistency — hitters are gold, pitchers
+                            are blue across hero strip, mini-totals, and footer cap bar. */}
+                        <Card>
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>
+                              Pitcher WAR by Role
+                            </CardTitle>
+                            <div className="text-xs text-muted-foreground">
+                              Total pWAR (all pitchers): <span className="font-semibold text-foreground tabular-nums">{pitchingWarTotal.toFixed(2)}</span>
+                            </div>
+                          </CardHeader>
+                          <CardContent>
+                            {/* V1 — Hero strip: staff pWAR up top (gold accent border; big number stays blue for position coding) */}
+                            <div className="mb-5 px-4 py-3 rounded-md bg-card/40 border-l-[3px] border-l-[#D4AF37]">
+                              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Staff pWAR</div>
+                              <div className="flex items-baseline gap-3 mt-1 flex-wrap">
+                                <span className="text-4xl font-bold tabular-nums text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>{pitchingWarTotal.toFixed(2)}</span>
+                                {priorYearStaffDelta != null && (
+                                  <span className={`text-sm font-semibold tabular-nums ${Math.abs(priorYearStaffDelta) < 0.05 ? "text-muted-foreground" : priorYearStaffDelta > 0 ? "text-[hsl(var(--success))]" : "text-destructive"}`}>
+                                    {priorYearStaffDelta > 0 ? "+" : priorYearStaffDelta < 0 ? "−" : ""}{Math.abs(priorYearStaffDelta).toFixed(2)} vs {PRIOR_SEASON}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="space-y-4">
+                              <div className="space-y-2">
+                                {/* V2 — Per-section mini-total: bigger blue rotation subtotal */}
+                                <div className="flex items-baseline justify-between border-b pb-1.5">
+                                  <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-foreground">Starting Rotation</span>
+                                  <div className="flex items-baseline gap-1.5">
+                                    <span className="text-xl font-bold tabular-nums text-blue-500" style={{ fontFamily: "'Oswald', sans-serif" }}>{rotationWarTotal.toFixed(2)}</span>
+                                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground">WAR</span>
+                                  </div>
+                                </div>
+                                {rotation.length === 0 ? (
+                                  <div className="ml-2 text-sm italic text-muted-foreground">No starters assigned</div>
+                                ) : (
+                                  rotation.map((p) => renderPitcherRow(p, true))
+                                )}
+                              </div>
+                              <div className="space-y-2">
+                                {/* V2 — Per-section mini-total: bigger blue bullpen subtotal (full pen) */}
+                                <div className="flex items-baseline justify-between border-b pb-1.5">
+                                  <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-foreground">
+                                    Bullpen
+                                    {bullpen.length > topBullpen.length && (
+                                      <span className="ml-2 text-[10px] font-medium normal-case tracking-normal text-muted-foreground">(top {topBullpen.length} of {bullpen.length} shown)</span>
+                                    )}
+                                  </span>
+                                  <div className="flex items-baseline gap-1.5">
+                                    <span className="text-xl font-bold tabular-nums text-blue-500" style={{ fontFamily: "'Oswald', sans-serif" }}>{bullpenWarTotal.toFixed(2)}</span>
+                                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground">WAR</span>
+                                  </div>
+                                </div>
+                                {topBullpen.length === 0 ? (
+                                  <div className="ml-2 text-sm italic text-muted-foreground">No relievers assigned</div>
+                                ) : (
+                                  topBullpen.map((p) => renderPitcherRow(p, false))
+                                )}
+                              </div>
+
+                              {/* V3 — Footer bar: staff pWAR vs elite cap (blue fill) */}
+                              {(rotation.length > 0 || bullpen.length > 0) && (
+                                <div className="pt-3 mt-2 border-t border-border/40">
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Proximity to Elite</span>
+                                    <span className="text-xs tabular-nums">
+                                      <span className="font-semibold text-foreground">{pitchingWarTotal.toFixed(2)}</span>
+                                      <span className="text-muted-foreground"> / {pitcherEliteCap.toFixed(1)}</span>
+                                      <span className="ml-2 font-semibold text-blue-500">{pitcherEliteCapPct.toFixed(0)}%</span>
+                                    </span>
+                                  </div>
+                                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                                    <div className="h-full bg-blue-500 transition-all" style={{ width: `${Math.min(100, pitcherEliteCapPct)}%` }} />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+                    );
+                  })()}
+
+                  {(() => {
+                    // Spending by Position Group — hitters first, then a Pitchers
+                    // section divider, then pitchers. Matches the WAR-by-Position card
+                    // labels: Premium / Skill / Power / Bench / [Pitchers] / SP / RP.
+                    const renderSpendRow = ([group, data]: [string, { count: number; nilTotal: number; warTotal: number }]) => {
+                      const pct = totalEffectiveNil > 0 ? (data.nilTotal / totalEffectiveNil) * 100 : 0;
+                      return (
+                        <div key={group}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-sm font-medium">{group}</span>
+                            <div className="flex items-center gap-3 text-sm">
+                              <span className="text-muted-foreground">{data.count} players</span>
+                              <span className="font-semibold">${Math.round(data.nilTotal).toLocaleString()}</span>
+                              <span className="text-muted-foreground text-xs w-12 text-right">{pct.toFixed(1)}%</span>
+                            </div>
+                          </div>
+                          <div className="h-2 rounded-full bg-muted overflow-hidden">
+                            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.min(pct, 100)}%` }} />
+                          </div>
+                        </div>
+                      );
+                    };
+                    return (
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Spending by Position Group</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-3">
+                            {hittingGroups.map(renderSpendRow)}
+                            {pitchingGroups.length > 0 && (
+                              <div className="flex items-center gap-3 pt-2 mt-2">
+                                <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Pitchers</span>
+                                <div className="flex-1 h-px bg-[#D4AF37]/30" />
+                              </div>
+                            )}
+                            {pitchingGroups.map(renderSpendRow)}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })()}
+
+                  {(() => {
+                    // Cost Efficiency — same hitters/pitchers split as Spending card.
+                    // Hitter rows first, then a Pitchers section divider row spanning
+                    // all columns, then pitcher rows.
+                    const renderEffRow = ([group, data]: [string, { count: number; nilTotal: number; warTotal: number }]) => (
+                      <tr key={group} className="border-b last:border-0">
+                        <td className="py-2 font-medium">{group}</td>
+                        <td className="py-2 text-right text-muted-foreground">{data.count}</td>
+                        <td className="py-2 text-right tabular-nums">${Math.round(data.nilTotal).toLocaleString()}</td>
+                        <td className="py-2 text-right tabular-nums">{data.warTotal.toFixed(2)}</td>
+                        <td className="py-2 text-right tabular-nums">{data.warTotal > 0 ? `$${Math.round(data.nilTotal / data.warTotal).toLocaleString()}` : "—"}</td>
+                        <td className="py-2 text-right tabular-nums">{data.count > 0 ? `$${Math.round(data.nilTotal / data.count).toLocaleString()}` : "—"}</td>
+                      </tr>
+                    );
+                    return (
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Cost Efficiency</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b">
+                                <th className="text-left py-2 text-xs text-muted-foreground font-medium">Group</th>
+                                <th className="text-right py-2 text-xs text-muted-foreground font-medium">Players</th>
+                                <th className="text-right py-2 text-xs text-muted-foreground font-medium">Total NIL</th>
+                                <th className="text-right py-2 text-xs text-muted-foreground font-medium">Total WAR</th>
+                                <th className="text-right py-2 text-xs text-muted-foreground font-medium">$/WAR</th>
+                                <th className="text-right py-2 text-xs text-muted-foreground font-medium">NIL/Player</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {hittingGroups.map(renderEffRow)}
+                              {pitchingGroups.length > 0 && (
+                                <tr>
+                                  <td colSpan={6} className="pt-3 pb-1">
+                                    <div className="flex items-center gap-3">
+                                      <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Pitchers</span>
+                                      <div className="flex-1 h-px bg-[#D4AF37]/30" />
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                              {pitchingGroups.map(renderEffRow)}
+                            </tbody>
+                          </table>
+                        </CardContent>
+                      </Card>
+                    );
+                  })()}
                 </>
               );
             })()}
