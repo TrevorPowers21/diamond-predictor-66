@@ -31,3 +31,8 @@ pdf-api/__pycache__/
 # Supabase CLI cache (auto-regenerated; not project state)
 supabase/.temp/
 supabase/.branches/
+
+# Schema dumps from pg_dump (operational artifacts, not project state)
+prod-schema.sql
+staging-schema.sql
+*.dump.sql

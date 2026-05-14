@@ -87,7 +87,7 @@ type BuildPlayer = {
   nil_value: number;
   production_notes: string | null;
   roster_status?: "returner" | "leaving" | "target";
-  depth_role?: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever";
+  depth_role?: "cornerstone" | "everyday_starter" | "platoon_starter" | "utility" | "bench" | "starter" | "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever";
   class_transition?: string | null;
   dev_aggressiveness?: number | null;
   class_transition_overridden?: boolean;
@@ -460,7 +460,7 @@ const parseBuildPlayerMeta = (raw: string | null | undefined): {
   metrics: TeamMetricInputs | null;
   power: TeamPowerPlus | null;
   rosterStatus: "returner" | "leaving" | "target" | null;
-  depthRole: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever" | null;
+  depthRole: "cornerstone" | "everyday_starter" | "platoon_starter" | "utility" | "bench" | "starter" | "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever" | null;
   classTransition: string | null;
   devAggressiveness: number | null;
   classTransitionOverridden: boolean;
@@ -481,6 +481,9 @@ const parseBuildPlayerMeta = (raw: string | null | undefined): {
             ? obj.rosterStatus
             : null,
         depthRole:
+          obj.depthRole === "cornerstone" ||
+          obj.depthRole === "everyday_starter" ||
+          obj.depthRole === "platoon_starter" ||
           obj.depthRole === "starter" ||
           obj.depthRole === "utility" ||
           obj.depthRole === "bench" ||
@@ -523,7 +526,7 @@ const serializeBuildPlayerMeta = (
   metrics: TeamMetricInputs | null,
   power: TeamPowerPlus | null,
   rosterStatus: "returner" | "leaving" | "target" | null | undefined,
-  depthRole: "starter" | "utility" | "bench" | "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever" | null | undefined,
+  depthRole: "cornerstone" | "everyday_starter" | "platoon_starter" | "utility" | "bench" | "starter" | "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever" | null | undefined,
   classTransition: string | null | undefined,
   devAggressiveness: number | null | undefined,
   classTransitionOverridden: boolean | null | undefined,
@@ -646,15 +649,48 @@ const projectedNilTierClass = (
   return "text-destructive";
 };
 
-// Position-role multipliers stay (starter/utility/bench scale hitter oWAR).
-// For pitcher roles, the multiplier is always 1.0 — the IP granularity is
-// baked into pitcherExpectedIp() instead, so the engine differentiates a
-// 50 IP workhorse closer from a 6 IP specialist via real IP, not a multiplier.
+// Hitter depth-role multipliers scale oWAR off the 260-PA everyday-starter
+// baseline. Five tiers (quality-anchored — cornerstone gate uses overall_plus,
+// the rest are pure PA volume buckets):
+//   cornerstone        1.15  (3-4-5 hitter — overall_plus ≥ 115 AND PA ≥ 100)
+//   everyday_starter   1.00  (PA ≥ 150 — baseline regular)
+//   platoon_starter    0.70  (PA 50–149 — strong-side platoon)
+//   utility            0.40  (PA 15–49 — multi-position sub)
+//   bench              0.15  (PA < 15 — end-of-bench / development)
+// Legacy "starter" maps to everyday_starter (1.0) for back-compat with old
+// localStorage drafts before the 5-tier model existed.
+// All pitcher roles → 1.0; pitcher granularity is baked into pitcherExpectedIp().
 const depthRoleMultiplier = (role: BuildPlayer["depth_role"]) => {
-  if (role === "bench") return 0.3;
-  if (role === "utility") return 0.6;
-  // starter and all pitcher roles → 1.0 (pitcher granularity handled in IP)
+  if (role === "cornerstone") return 1.15;
+  if (role === "everyday_starter") return 1.0;
+  if (role === "platoon_starter") return 0.7;
+  if (role === "utility") return 0.4;
+  if (role === "bench") return 0.15;
+  // starter (legacy) + all pitcher roles → 1.0
   return 1.0;
+};
+
+// Infer default hitter depth tier from current-season PA. Pure playing-time
+// buckets — quality is captured downstream in wRC+ inside the WAR formula, so
+// the tier just sets the playing-time slice that scales projected oWAR off
+// the 260-PA baseline. Calibrated against 2026 regular-season PAs (WAR is
+// prorated regular-season-only); a true iron-man D1 hitter accrues ~245 PAs
+// across ~55 regular-season games.
+//   cornerstone:       PA ≥ 220   (~2 per team — plays nearly every game)
+//   everyday_starter:  PA ≥ 130   (~6 per team — regular contributor)
+//   platoon_starter:   PA 50–129  (~5 per team — strong-side platoon)
+//   utility:           PA 15–49   (~3 per team — multi-position sub)
+//   bench:             PA < 15    (~2 per team — end-of-bench, development)
+const defaultHitterDepthRoleFromPa = (
+  pa: number | null | undefined,
+): "cornerstone" | "everyday_starter" | "platoon_starter" | "utility" | "bench" => {
+  const paNum = Number(pa);
+  const safePa = Number.isFinite(paNum) ? paNum : 0;
+  if (safePa >= 220) return "cornerstone";
+  if (safePa >= 130) return "everyday_starter";
+  if (safePa >= 50) return "platoon_starter";
+  if (safePa >= 15) return "utility";
+  return "bench";
 };
 
 // Infer default depth_role tier from a pitcher's prior-year IP. Used at
@@ -768,7 +804,15 @@ const normalizePitcherDepthRole = (
   pitcherRole: "SP" | "RP",
 ): PitcherDepthRole => {
   if (isPitcherDepthRole(role)) return role;
-  if (role === "starter") return pitcherRole === "SP" ? "weekend_starter" : "high_leverage_reliever";
+  // Hitter-tier → pitcher-tier conversion for TWPs whose primary side is the
+  // pitcher. Map by usage band: cornerstone/everyday → top SP/RP, platoon →
+  // mid, utility/bench → bottom.
+  if (role === "cornerstone" || role === "everyday_starter" || role === "starter") {
+    return pitcherRole === "SP" ? "weekend_starter" : "high_leverage_reliever";
+  }
+  if (role === "platoon_starter") {
+    return pitcherRole === "SP" ? "weekday_starter" : "mid_leverage_reliever";
+  }
   if (role === "utility") return pitcherRole === "SP" ? "weekday_starter" : "mid_leverage_reliever";
   if (role === "bench") return pitcherRole === "SP" ? "swing_starter" : "low_impact_reliever";
   return pitcherRole === "SP" ? "weekend_starter" : "high_leverage_reliever";
@@ -1339,13 +1383,13 @@ export default function TeamBuilder() {
         fetchAllPaged<any>(() =>
           (supabase as any)
             .from("Hitter Master")
-            .select("source_player_id, pa, ab, combined_used, Season, playerFullName, Team")
+            .select("source_player_id, pa, ab, regular_season_pa, combined_used, Season, playerFullName, Team")
             .eq("Season", CURRENT_SEASON),
         ),
         fetchAllPaged<any>(() =>
           (supabase as any)
             .from("Pitching Master")
-            .select("source_player_id, IP, GS, G, combined_used")
+            .select("source_player_id, IP, GS, G, regular_season_ip, combined_used")
             .eq("Season", CURRENT_SEASON),
         ),
         fetchAllPaged<any>(() =>
@@ -1355,9 +1399,11 @@ export default function TeamBuilder() {
       const hitterBySource = new Map<string, { ab: number; thin: boolean }>();
       const pitcherBySource = new Map<string, { gs: number; g: number; thin: boolean }>();
       for (const r of (hmRows || [])) {
-        // 2026 PA (current season). Returners with low 2026 PA are correctly
-        // flagged as bench/utility regardless of their prior-season totals.
-        const playingTime = Number(r.pa ?? r.ab) || 0;
+        // 2026 PA (current season). Prefer regular_season_pa if locked — that
+        // snapshot keeps tier classification stable across postseason additions,
+        // so playoff-team players don't get inflated tier counts. Falls through
+        // to live pa / ab when no lock exists (during regular season).
+        const playingTime = Number(r.regular_season_pa ?? r.pa ?? r.ab) || 0;
         if (r.source_player_id) {
           const existing = hitterBySource.get(r.source_player_id);
           if (!existing || playingTime > existing.ab) {
@@ -1374,7 +1420,9 @@ export default function TeamBuilder() {
       }
       for (const r of (pmRows || [])) {
         if (!r.source_player_id) continue;
-        const ip = Number(r.IP) || 0;
+        // Same regular_season_ip preference as the hitter loop — keeps the
+        // thin-sample flag stable across postseason additions.
+        const ip = Number(r.regular_season_ip ?? r.IP) || 0;
         const gs = Number(r.GS) || 0;
         const g = Number(r.G) || 0;
         pitcherBySource.set(r.source_player_id, { gs, g, thin: ip < 5 && !r.combined_used });
@@ -1846,7 +1894,7 @@ export default function TeamBuilder() {
         nil_value: 0,
         production_notes: null,
         roster_status: "returner" as const,
-        depth_role: "starter" as const,
+        depth_role: "everyday_starter" as const,
         class_transition: "SJ",
         dev_aggressiveness: 0,
         class_transition_overridden: false,
@@ -2097,7 +2145,7 @@ export default function TeamBuilder() {
                   (pd?.source_player_id ? pitchingStatsByNameTeam.bySourceId.get(pd.source_player_id)?.ip : null) ?? null,
                   (inferredRole === "SP") ? "SP" : "RP",
                 )
-              : "starter"),
+              : "everyday_starter"),
             class_transition: meta.classTransitionOverridden ? (meta.classTransition ?? "SJ") : (activePred?.class_transition ?? "SJ"),
             dev_aggressiveness: meta.devAggressivenessOverridden ? (meta.devAggressiveness ?? 0) : (activePred?.dev_aggressiveness ?? 0),
             class_transition_overridden: meta.classTransitionOverridden,
@@ -2174,13 +2222,11 @@ export default function TeamBuilder() {
       const seedPitcherG = seasonUsage.pitcherG.get(player.id) ?? pmRec?.g ?? 0;
       const seedIsStarter = seedPitcherGs >= 5 && seedPitcherG > 0 && (seedPitcherGs / seedPitcherG) >= 0.5;
       const inferredRole: "SP" | "RP" | "SM" = overrideRole || (seedPitcherG > 0 ? (seedIsStarter ? "SP" : "RP") : (pmRole || asPitcherRole(player.position || null) || "RP"));
-      // Hitter role seed: tier by PA (coach can override in the UI).
-      // Starter 150+, Utility 60-149, Bench <60. Falls back to name+team
-      // when the player.source_player_id doesn't reconcile with master ingestion.
+      // Hitter role seed: 5-tier pure-PA model (defaultHitterDepthRoleFromPa).
+      // Falls back to name+team lookup when source_player_id doesn't reconcile.
       const _hNameKey = `${normalizeName(`${player.first_name || ""} ${player.last_name || ""}`.trim())}|${normalizeName(player.team || "")}`;
       const seedHitterAb = seasonUsage.hitterAb?.get(player.id) ?? seasonUsage.hitterAbByNameTeam?.get(_hNameKey) ?? 0;
-      const seedHitterDepth: "starter" | "utility" | "bench" =
-        seedHitterAb >= 150 ? "starter" : seedHitterAb >= 60 ? "utility" : "bench";
+      const seedHitterDepth = defaultHitterDepthRoleFromPa(seedHitterAb);
       return {
         player_id: player.id,
         source: "returner" as const,
@@ -4437,7 +4483,11 @@ export default function TeamBuilder() {
   const pitcherEligible = (p: BuildPlayer) => isPitcher(p) || isTwp(p);
 
   const hitterDepthRank = (role: BuildPlayer["depth_role"]) =>
-    role === "starter" ? 0 : role === "utility" ? 1 : 2;
+    role === "cornerstone" ? 0 :
+    role === "everyday_starter" ? 1 :
+    role === "starter" ? 1 : // legacy alias
+    role === "platoon_starter" ? 2 :
+    role === "utility" ? 3 : 4;
   const pitcherDepthRank = (role: BuildPlayer["depth_role"]) =>
     role === "weekend_starter" ? 0 :
     role === "weekday_starter" ? 1 :
@@ -4956,30 +5006,35 @@ export default function TeamBuilder() {
       const effectivePos = (p: BuildPlayer) => p.position_slot ?? p.player?.position ?? null;
       const matchAtSlot = (p: BuildPlayer, slot: string) => slotMatchesPosition(effectivePos(p), slot);
 
-      // Strict hierarchy at every position: d1 = starter only, d2 = utility
-      // only, d3 = bench only. No cross-tier fallback — if a position has no
-      // starter tagged, depth 1 stays empty until the coach assigns one. This
-      // guarantees the player shown at the top of every position is the
-      // actual starter, not a misplaced utility/bench.
-      const fillByRole = (slot: string, depth: number, role: BuildPlayer["depth_role"]) => {
+      // Depth chart tier mapping for the 5-tier hitter model:
+      //   d1 = cornerstone | everyday_starter (legacy "starter")
+      //   d2 = platoon_starter | utility
+      //   d3 = bench
+      // No cross-tier fallback within a slot — if a position has nobody in
+      // the d1-eligible set, depth 1 stays empty until the coach assigns one,
+      // EXCEPT for the explicit promotion path below (promote best d2 to d1
+      // when no d1 candidate exists).
+      const fillByRoleGroup = (slot: string, depth: number, roles: Array<NonNullable<BuildPlayer["depth_role"]>>) => {
         if (next[depthKey(slot, depth)] != null) return;
-        const idx = rosterPlayers.findIndex(
-          (p, i) =>
-            !usedIdxs.has(i) &&
-            (p.roster_status || "returner") !== "leaving" &&
-            !isPitcher(p) &&
-            p.depth_role === role &&
-            matchAtSlot(p, slot),
-        );
-        if (idx >= 0) { next[depthKey(slot, depth)] = idx; usedIdxs.add(idx); }
+        for (const role of roles) {
+          const idx = rosterPlayers.findIndex(
+            (p, i) =>
+              !usedIdxs.has(i) &&
+              (p.roster_status || "returner") !== "leaving" &&
+              !isPitcher(p) &&
+              p.depth_role === role &&
+              matchAtSlot(p, slot),
+          );
+          if (idx >= 0) { next[depthKey(slot, depth)] = idx; usedIdxs.add(idx); return; }
+        }
       };
       for (const slot of POSITION_SLOTS) {
-        fillByRole(slot, 1, "starter");
-        // Fallback: when no starter is tagged at this position, promote the
-        // best utility-tagged player whose position matches the slot. Their
-        // depth_role stays "utility" — they just occupy the d1 chart slot so
-        // both the depth chart UI and the WAR-by-Position analytics show them
-        // as the de-facto starter. Tiebreak: highest projected oWAR.
+        fillByRoleGroup(slot, 1, ["cornerstone", "everyday_starter", "starter"]);
+        // Fallback: when no d1-eligible starter is tagged at this position,
+        // promote the best d2-tier player (platoon or utility) whose position
+        // matches the slot. Their depth_role stays the same — they just occupy
+        // the d1 chart slot so depth-chart UI + WAR-by-Position analytics show
+        // them as the de-facto starter. Tiebreak: highest projected oWAR.
         if (next[depthKey(slot, 1)] == null) {
           const candidates = rosterPlayers
             .map((p, idx) => ({ p, idx }))
@@ -4987,7 +5042,7 @@ export default function TeamBuilder() {
               !usedIdxs.has(idx) &&
               (p.roster_status || "returner") !== "leaving" &&
               !isPitcher(p) &&
-              p.depth_role === "utility" &&
+              (p.depth_role === "platoon_starter" || p.depth_role === "utility") &&
               matchAtSlot(p, slot),
             );
           if (candidates.length > 0) {
@@ -5001,8 +5056,8 @@ export default function TeamBuilder() {
             usedIdxs.add(top.idx);
           }
         }
-        fillByRole(slot, 2, "utility");
-        fillByRole(slot, 3, "bench");
+        fillByRoleGroup(slot, 2, ["platoon_starter", "utility"]);
+        fillByRoleGroup(slot, 3, ["bench"]);
       }
 
       // IF/OF distribution: players with generic "IF" or "OF" position (no
@@ -5286,13 +5341,11 @@ export default function TeamBuilder() {
       const seedPitcherG = seasonUsage.pitcherG.get(player.id) ?? pmRec?.g ?? 0;
       const seedIsStarter = seedPitcherGs >= 5 && seedPitcherG > 0 && (seedPitcherGs / seedPitcherG) >= 0.5;
       const inferredRole: "SP" | "RP" | "SM" = overrideRole || (seedPitcherG > 0 ? (seedIsStarter ? "SP" : "RP") : (pmRole || asPitcherRole(player.position || null) || "RP"));
-      // Hitter role seed: tier by PA (coach can override in the UI).
-      // Starter 150+, Utility 60-149, Bench <60. Falls back to name+team
-      // when the player.source_player_id doesn't reconcile with master ingestion.
+      // Hitter role seed: 5-tier pure-PA model (defaultHitterDepthRoleFromPa).
+      // Falls back to name+team lookup when source_player_id doesn't reconcile.
       const _hNameKey = `${normalizeName(`${player.first_name || ""} ${player.last_name || ""}`.trim())}|${normalizeName(player.team || "")}`;
       const seedHitterAb = seasonUsage.hitterAb?.get(player.id) ?? seasonUsage.hitterAbByNameTeam?.get(_hNameKey) ?? 0;
-      const seedHitterDepth: "starter" | "utility" | "bench" =
-        seedHitterAb >= 150 ? "starter" : seedHitterAb >= 60 ? "utility" : "bench";
+      const seedHitterDepth = defaultHitterDepthRoleFromPa(seedHitterAb);
       return {
         player_id: player.id,
         source: "returner" as const,
@@ -5648,16 +5701,18 @@ export default function TeamBuilder() {
           </Select>
         ) : (
           <Select
-            value={p.depth_role || "starter"}
-            onValueChange={(v) => updatePlayer(globalIdx, { depth_role: v as "starter" | "utility" | "bench" })}
+            value={p.depth_role === "starter" ? "everyday_starter" : (p.depth_role || "everyday_starter")}
+            onValueChange={(v) => updatePlayer(globalIdx, { depth_role: v as "cornerstone" | "everyday_starter" | "platoon_starter" | "utility" | "bench" })}
           >
-            <SelectTrigger className="w-[96px] h-8">
+            <SelectTrigger className="w-[140px] h-8">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="starter">Starter</SelectItem>
-              <SelectItem value="utility">Utility</SelectItem>
-              <SelectItem value="bench">Bench</SelectItem>
+              <SelectItem value="cornerstone">Cornerstone (1.15x)</SelectItem>
+              <SelectItem value="everyday_starter">Everyday (1.0x)</SelectItem>
+              <SelectItem value="platoon_starter">Platoon (0.7x)</SelectItem>
+              <SelectItem value="utility">Utility (0.4x)</SelectItem>
+              <SelectItem value="bench">Bench (0.15x)</SelectItem>
             </SelectContent>
           </Select>
         )}
@@ -6949,7 +7004,11 @@ export default function TeamBuilder() {
                     const bullpenIdxs = new Set<number>();
                     rosterPlayers.forEach((p, idx) => {
                       if ((p.roster_status || "returner") === "leaving") return;
-                      if (hitterEligible(p) && p.depth_role === "starter") {
+                      const role = p.depth_role || "";
+                      // d1-eligible hitter tiers: cornerstone, everyday_starter,
+                      // and legacy "starter" (pre-5-tier drafts).
+                      const isHitterStarter = role === "cornerstone" || role === "everyday_starter" || role === "starter";
+                      if (hitterEligible(p) && isHitterStarter) {
                         const pos = (p.position_slot || p.player?.position || "")
                           .toString().toUpperCase().trim();
                         if (POS_TO_TIER[pos]) hitterStarterPosByIdx.set(idx, pos);

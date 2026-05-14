@@ -107,7 +107,11 @@ export function usePitchingSeedData(season = 2026) {
     conferenceId: r.conference_id ?? null,
     throwHand: r.ThrowHand ?? null,
     role: r.Role ?? null,
-    ip: r.IP ?? null,
+    // Prefer regular_season_ip when the season has been locked — keeps tier
+    // classification (workhorse / high-lev / etc.) frozen at regular-season
+    // volume so playoff-team pitchers don't get tier-inflated by postseason
+    // innings. Falls through to live IP during the regular season.
+    ip: r.regular_season_ip ?? r.IP ?? null,
     g: r.G ?? null,
     gs: r.GS ?? null,
     // Blended-when-pullback resolution mirrors PitcherProfile.tsx:694-699 so
