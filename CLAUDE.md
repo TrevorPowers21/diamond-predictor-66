@@ -114,19 +114,44 @@ Track when players enter the transfer portal and commit to new schools:
 
 ---
 
-## Team Builder — Championship WAR Benchmarks
+## Team Builder — Program Analytics + WAR Benchmarks (shipped 2026-05-12)
 
-Calculate total team WAR and player scores from previous national champions (CWS winners) to establish target benchmarks:
+The Team Builder Analytics tab includes:
 
-- Research and compile total oWAR + pWAR for recent CWS champions (2019-2024)
-- Calculate average total WAR needed to win a national championship
-- Break down by positional groups: starting lineup oWAR, rotation pWAR, bullpen pWAR
-- Display as a **target WAR goal** on the Team Builder page — a horizontal bar or gauge showing:
-  - Current roster projected total WAR vs championship benchmark
-  - Color-coded: red (below contender), gold (competitive), green (championship caliber)
-- Show the gap: "You need X more WAR to reach championship level"
-- Allow coaches to see which positional group is the weakest relative to champion benchmarks
-- Data source: manually compiled from historical data, stored in Supabase reference table
+### Year-Over-Year Compare card
+- Compares current 2026 build to the customer team's prior-year (2025) actual WAR
+- 4 cells: Total WAR, Lineup oWAR (top 9 hitters), Rotation pWAR, Bullpen pWAR
+- Delta shown per cell with green (ahead) / red (behind) / gray (±0.1)
+- Auto-populates from `team_war_snapshots` keyed by `(source_team_id, season)`
+
+### Championship Benchmark Compare card
+- Dropdown to pick any 2025 champion (National + Conference, split-champs included)
+- Same 4-cell comparison as Year-Over-Year
+- Benchmarks grouped in dropdown: National Champion first, then conferences alphabetical
+
+### Data layer
+- **Table:** `team_war_snapshots` (one row per team per season)
+- **Seed source:** `supabase/queries/seed_team_war_snapshots_2025.sql` — runs the canonical aggregation in `supabase/queries/team_war_2025_aggregation.sql` and upserts all D1 teams + champion flags
+- **Annual refresh:** re-run the seed SQL after each season ends; idempotent
+- **Hooks:** `useTeamWarSnapshot(sourceTeamId, season)` for single team; `useWarBenchmarks(season)` for champion list
+
+### Formulas (mirror src/savant/lib/war.ts)
+```
+wRC+ = ((0.45·OBP + 0.30·SLG + 0.15·AVG + 0.10·ISO) / 0.364) · 100
+oWAR = ((((wRC+ − 100) / 100) · PA · 0.13) + (PA / 600 · 25)) / 10
+pRV+ = 0.30·FIP⁺ + 0.25·ERA⁺ + 0.15·WHIP⁺ + 0.15·K9⁺ + 0.10·BB9⁺ + 0.05·HR9⁺
+pWAR = (((pRV+ − 100) / 100) · (IP/9) · 5.5 + (IP/9 · 2.5)) / 10
+```
+
+### 56-game proration
+- `games_played_est` ≈ team total IP / 9
+- `proration_factor` = 56 / games_played_est, capped 0.7–1.5
+- All prorated columns scale raw totals by this factor for cross-conference fairness
+
+### 2025 champions captured 2026-05-12
+- National: Louisiana State
+- 39 conference champion rows across 29 conferences (10 had split regular-season champs)
+- Full list in `memory/project_war_benchmarks.md`
 
 ---
 
