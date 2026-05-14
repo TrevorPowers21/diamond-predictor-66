@@ -14,29 +14,48 @@ import { parseHeader } from "./csv.ts";
 
 const SP_GS_RATIO_THRESHOLD = 0.5; // GS / G >= 0.5 → SP; below → RP
 
-type ClassYearPair = { sourcePlayerId: string; classYear: "FR" | "SO" | "JR" | "SR" | "GR" };
+type NormalizedClass = "FR" | "SO" | "JR" | "SR" | "GR" | "R-FR" | "R-SO" | "R-JR" | "R-SR" | "R-GR";
+type ClassYearPair = { sourcePlayerId: string; classYear: NormalizedClass };
 
 /**
- * Normalize a raw ClassYear value to one of FR/SO/JR/SR/GR. Strips redshirt
- * prefixes ("R-JR" → "JR"), trailing punctuation ("FR." → "FR"), maps full
- * words ("GRADUATE", "SOPHOMORE"), and rejects anything not in the 5-value
- * set (single letters like "L"/"R" that bleed in from the hand columns).
+ * Normalize a raw ClassYear value to one of 10 canonical forms: FR/SO/JR/SR/GR
+ * for non-redshirt years and R-FR/R-SO/R-JR/R-SR/R-GR for redshirts. Redshirt
+ * status is meaningful (especially with NCAA roster cap rule changes) and
+ * is preserved as the R- prefix.
+ *
+ * Accepts variants: "R-FR", "RS-FR", "R FR", "FR.", "FRESHMAN", "GRAD", etc.
+ * Rejects anything not normalizable to those 10 values (single letters like
+ * "L"/"R" that bleed in from hand columns when ClassYear is blank).
+ *
+ * Note: downstream projection math (class_transition inference, etc.) still
+ * needs to treat "R-FR" as "FR" for the year-over-year math. Strip the R-
+ * prefix at the read-side, not the write-side.
  */
-function normalizeClassYear(raw: string | undefined): "FR" | "SO" | "JR" | "SR" | "GR" | null {
+function normalizeClassYear(raw: string | undefined): NormalizedClass | null {
   if (!raw) return null;
   let x = raw.trim().toUpperCase();
   if (!x) return null;
   // Strip trailing punctuation/whitespace (e.g. "FR.", "JR ", "SO,")
   x = x.replace(/[.\s,;]+$/, "");
-  // Strip redshirt prefixes: "R-JR", "RS-JR", "R JR" → "JR"
-  x = x.replace(/^R-?S?[-\s]+/i, "").trim();
-  if (x === "FR" || x === "SO" || x === "JR" || x === "SR" || x === "GR") return x;
-  if (x === "FRESHMAN" || x === "FRESH") return "FR";
-  if (x === "SOPHOMORE" || x === "SOPH") return "SO";
-  if (x === "JUNIOR") return "JR";
-  if (x === "SENIOR") return "SR";
-  if (x === "GRADUATE" || x === "GRAD" || x === "GS") return "GR";
-  return null;
+
+  // Detect redshirt prefix: "R-FR", "RS-FR", "R FR" → split into (R-, FR)
+  let redshirt = false;
+  const m = x.match(/^RS?[-\s]+(.+)$/);
+  if (m) {
+    redshirt = true;
+    x = m[1].trim();
+  }
+
+  let base: "FR" | "SO" | "JR" | "SR" | "GR" | null = null;
+  if (x === "FR" || x === "SO" || x === "JR" || x === "SR" || x === "GR") base = x;
+  else if (x === "FRESHMAN" || x === "FRESH") base = "FR";
+  else if (x === "SOPHOMORE" || x === "SOPH") base = "SO";
+  else if (x === "JUNIOR") base = "JR";
+  else if (x === "SENIOR") base = "SR";
+  else if (x === "GRADUATE" || x === "GRAD" || x === "GS") base = "GR";
+
+  if (!base) return null;
+  return redshirt ? (`R-${base}` as NormalizedClass) : base;
 }
 
 function extractClassYears(csvText: string): ClassYearPair[] {
