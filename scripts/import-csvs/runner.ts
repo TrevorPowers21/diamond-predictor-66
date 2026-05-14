@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { importHistoricalHittersCsv } from "@/lib/importHistoricalHitters";
 import { importHistoricalPitchersCsv } from "@/lib/importHistoricalPitchers";
-import { syncMasterToPlayers, addMissingPlayers } from "@/lib/syncMasterToPlayers";
+import { addMissingPlayers } from "@/lib/syncMasterToPlayers";
 import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
 import { computeAndStoreNcaaAverages } from "@/lib/computeNcaaAverages";
 import { computeAndStoreAllScores } from "@/lib/computeAndStoreScores";
@@ -270,7 +270,8 @@ export async function runImports(results: DetectionResult[], season: number): Pr
     }
   }
 
-  // Post-import enhancements
+  // Post-import enhancement: derive Role from G/GS. Writes to Pitching Master
+  // rows (not players), so this can run before the player-touching cascade.
   if (pitcherImported) {
     step(`Derive Role from G/GS (threshold: GS/G >= ${SP_GS_RATIO_THRESHOLD} → SP)`);
     const startMs = Date.now();
@@ -283,18 +284,6 @@ export async function runImports(results: DetectionResult[], season: number): Pr
     }
   }
 
-  if (classYearPairs.length > 0) {
-    step(`Fill blank players.class_year from ClassYear column (${classYearPairs.length} pairs collected)`);
-    const startMs = Date.now();
-    try {
-      const res = await updatePlayersClassYears(classYearPairs);
-      ok(`${res.updated} blank class_years filled, ${res.errors.length} errors (${timeMs(startMs)})`);
-      for (const e of res.errors.slice(0, 3)) err(e);
-    } catch (e) {
-      err(`ClassYear update threw: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-
   // Cascade
   if (!hitterImported && !pitcherImported) {
     console.log("\nNo master imports — skipping cascade.");
@@ -303,16 +292,15 @@ export async function runImports(results: DetectionResult[], season: number): Pr
 
   console.log(`\n${COLOR.bold}=== Pipeline cascade ===${COLOR.reset}`);
 
-  step("syncMasterToPlayers");
-  try {
-    const start = Date.now();
-    const res = await syncMasterToPlayers(season);
-    ok(`hittersInserted=${res.hittersInserted}, pitchersInserted=${res.pitchersInserted}, errors=${res.errors.length} (${timeMs(start)})`);
-    for (const e of res.errors.slice(0, 3)) err(e);
-  } catch (e) {
-    err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
-  }
-
+  // Skip syncMasterToPlayers in the routine CLI cascade. It DELETEs every row
+  // in the players table and re-inserts with fresh UUIDs, which cascade-deletes
+  // every player_predictions row (including coach-curated target-board entries
+  // and portal-sim transfer projections). addMissingPlayers below is non-
+  // destructive — it only inserts source_player_ids that aren't already in
+  // the players table — so player UUIDs stay stable across imports and
+  // predictions/target_board/high_follow FKs remain valid. The full sync
+  // (metadata refresh, team reassignment, TWP redetection) is still available
+  // via the AdminDashboard "Sync Master" button for when it's actually needed.
   step("addMissingPlayers");
   try {
     const start = Date.now();
@@ -362,6 +350,22 @@ export async function runImports(results: DetectionResult[], season: number): Pr
     ok(`done (${timeMs(start)})`);
   } catch (e) {
     err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // ClassYear blank-fill runs LAST so the writes survive any player-touching
+  // step in the cascade above (the previous order had it before addMissingPlayers
+  // and syncMasterToPlayers, so the writes got wiped immediately by syncMaster's
+  // table-clear).
+  if (classYearPairs.length > 0) {
+    step(`Fill blank players.class_year from ClassYear column (${classYearPairs.length} pairs collected)`);
+    const startMs = Date.now();
+    try {
+      const res = await updatePlayersClassYears(classYearPairs);
+      ok(`${res.updated} blank class_years filled, ${res.errors.length} errors (${timeMs(startMs)})`);
+      for (const e of res.errors.slice(0, 3)) err(e);
+    } catch (e) {
+      err(`ClassYear update threw: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   console.log(`\n${COLOR.bold}=== Done ===${COLOR.reset}`);
