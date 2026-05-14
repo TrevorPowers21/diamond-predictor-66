@@ -7,6 +7,7 @@ import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
 import { computeAndStoreNcaaAverages } from "@/lib/computeNcaaAverages";
 import { computeAndStoreAllScores } from "@/lib/computeAndStoreScores";
 import { bulkRecalculatePredictionsLocal } from "@/lib/predictionEngine";
+import { rollupStuffPlusToMaster } from "@/savant/lib/rollupStuffPlusToMaster";
 import { supabase } from "@/integrations/supabase/client";
 
 import type { DetectionResult } from "./detector.ts";
@@ -267,6 +268,29 @@ export async function runImports(results: DetectionResult[], season: number): Pr
         step(`${r.probe.fileName} → ${r.match.label}`);
         warn(`Importer for ${r.match.label} not yet wired (Phase D).`);
       }
+    }
+  }
+
+  // Post-import enhancement: restore Pitching Master.stuff_plus from the
+  // pitcher_stuff_plus_inputs table. The TruMedia master CSV doesn't carry
+  // stuff_plus, so importHistoricalPitchersCsv wipes the column on every
+  // delete-and-insert. The per-pitch stuff_plus values in
+  // pitcher_stuff_plus_inputs are written by the separate Stuff+ pipeline
+  // (Phase C) and survive Pitching Master imports — so re-aggregating them
+  // restores the same stuff_plus values that existed before the import.
+  //
+  // If no Stuff+ Inputs have been imported yet, this is a no-op (sets
+  // everyone's stuff_plus to null, same as the current post-wipe state).
+  if (pitcherImported) {
+    step("Restore Pitching Master.stuff_plus via rollup from pitcher_stuff_plus_inputs");
+    const startMs = Date.now();
+    try {
+      const { report, errors } = await rollupStuffPlusToMaster(season);
+      const updated = (report as any)?.updated ?? (report as any)?.writes ?? (report as any)?.pitchers_updated ?? "?";
+      ok(`${updated} pitchers' stuff_plus restored, ${errors.length} errors (${timeMs(startMs)})`);
+      for (const e of errors.slice(0, 3)) err(e);
+    } catch (e) {
+      err(`Stuff+ rollup threw: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
