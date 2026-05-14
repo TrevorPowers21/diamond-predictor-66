@@ -87,7 +87,7 @@ async function updatePlayersClassYears(pairs: ClassYearPair[]): Promise<{ update
   for (const p of pairs) dedup.set(p.sourcePlayerId, p.classYear);
 
   // Group by class year so we can issue one batched UPDATE per distinct year
-  // instead of one per player (5 years × ~20 chunks ≈ 100 calls vs 10,000).
+  // instead of one per player.
   const byClass = new Map<string, string[]>();
   for (const [sid, cy] of dedup) {
     const arr = byClass.get(cy) ?? [];
@@ -95,6 +95,9 @@ async function updatePlayersClassYears(pairs: ClassYearPair[]): Promise<{ update
     byClass.set(cy, arr);
   }
 
+  // Only fill BLANK class_year values. Mid-season the class doesn't change,
+  // and overwriting on every import would clobber admin corrections. The
+  // annual FR→SO advancement is a separate season-transition workflow.
   const CHUNK = 500;
   for (const [classYear, ids] of byClass) {
     for (let i = 0; i < ids.length; i += CHUNK) {
@@ -102,11 +105,12 @@ async function updatePlayersClassYears(pairs: ClassYearPair[]): Promise<{ update
       const { error, count } = await supabase
         .from("players")
         .update({ class_year: classYear }, { count: "exact" })
-        .in("source_player_id", chunk);
+        .in("source_player_id", chunk)
+        .is("class_year", null);
       if (error) {
         result.errors.push(`class ${classYear} chunk ${i}: ${error.message}`);
       } else {
-        result.updated += count ?? chunk.length;
+        result.updated += count ?? 0;
       }
     }
   }
@@ -280,11 +284,11 @@ export async function runImports(results: DetectionResult[], season: number): Pr
   }
 
   if (classYearPairs.length > 0) {
-    step(`Update players.class_year from ClassYear column (${classYearPairs.length} pairs collected)`);
+    step(`Fill blank players.class_year from ClassYear column (${classYearPairs.length} pairs collected)`);
     const startMs = Date.now();
     try {
       const res = await updatePlayersClassYears(classYearPairs);
-      ok(`${res.updated} players updated, ${res.errors.length} errors (${timeMs(startMs)})`);
+      ok(`${res.updated} blank class_years filled, ${res.errors.length} errors (${timeMs(startMs)})`);
       for (const e of res.errors.slice(0, 3)) err(e);
     } catch (e) {
       err(`ClassYear update threw: ${e instanceof Error ? e.message : String(e)}`);
