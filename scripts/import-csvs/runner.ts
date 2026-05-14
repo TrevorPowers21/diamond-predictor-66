@@ -14,7 +14,30 @@ import { parseHeader } from "./csv.ts";
 
 const SP_GS_RATIO_THRESHOLD = 0.5; // GS / G >= 0.5 → SP; below → RP
 
-type ClassYearPair = { sourcePlayerId: string; classYear: string };
+type ClassYearPair = { sourcePlayerId: string; classYear: "FR" | "SO" | "JR" | "SR" | "GR" };
+
+/**
+ * Normalize a raw ClassYear value to one of FR/SO/JR/SR/GR. Strips redshirt
+ * prefixes ("R-JR" → "JR"), trailing punctuation ("FR." → "FR"), maps full
+ * words ("GRADUATE", "SOPHOMORE"), and rejects anything not in the 5-value
+ * set (single letters like "L"/"R" that bleed in from the hand columns).
+ */
+function normalizeClassYear(raw: string | undefined): "FR" | "SO" | "JR" | "SR" | "GR" | null {
+  if (!raw) return null;
+  let x = raw.trim().toUpperCase();
+  if (!x) return null;
+  // Strip trailing punctuation/whitespace (e.g. "FR.", "JR ", "SO,")
+  x = x.replace(/[.\s,;]+$/, "");
+  // Strip redshirt prefixes: "R-JR", "RS-JR", "R JR" → "JR"
+  x = x.replace(/^R-?S?[-\s]+/i, "").trim();
+  if (x === "FR" || x === "SO" || x === "JR" || x === "SR" || x === "GR") return x;
+  if (x === "FRESHMAN" || x === "FRESH") return "FR";
+  if (x === "SOPHOMORE" || x === "SOPH") return "SO";
+  if (x === "JUNIOR") return "JR";
+  if (x === "SENIOR") return "SR";
+  if (x === "GRADUATE" || x === "GRAD" || x === "GS") return "GR";
+  return null;
+}
 
 function extractClassYears(csvText: string): ClassYearPair[] {
   const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
@@ -28,9 +51,9 @@ function extractClassYears(csvText: string): ClassYearPair[] {
   for (let i = 1; i < lines.length; i++) {
     const cols = parseHeader(lines[i]);
     const sourcePlayerId = cols[idIdx];
-    const classYear = cols[classIdx];
-    if (sourcePlayerId && classYear) {
-      out.push({ sourcePlayerId, classYear: classYear.trim().toUpperCase() });
+    const normalized = normalizeClassYear(cols[classIdx]);
+    if (sourcePlayerId && normalized) {
+      out.push({ sourcePlayerId, classYear: normalized });
     }
   }
   return out;
