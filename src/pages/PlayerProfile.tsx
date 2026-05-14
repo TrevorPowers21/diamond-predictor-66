@@ -569,10 +569,17 @@ export default function PlayerProfile() {
     };
     // Keep players.class_year aligned with the source side of the transition
     // (the player's CURRENT class this season — not the post-transition target).
+    // Preserve an R-/RS- redshirt prefix when the underlying class still matches:
+    // a coach picking FS on a player already stored as "R-FR" should leave R-FR intact.
     if (predForm.class_transition && classTransitionToCurrentYear[predForm.class_transition]) {
-      supabase.from("players").update({ class_year: classTransitionToCurrentYear[predForm.class_transition] }).eq("id", id!).then(() => {
-        queryClient.invalidateQueries({ queryKey: ["player-profile", id] });
-      });
+      const targetPlain = classTransitionToCurrentYear[predForm.class_transition];
+      const currentRaw = (player?.class_year || "").trim().toUpperCase();
+      const currentStripped = currentRaw.replace(/^(RS?-?\s*)+/, "");
+      if (currentStripped !== targetPlain) {
+        supabase.from("players").update({ class_year: targetPlain }).eq("id", id!).then(() => {
+          queryClient.invalidateQueries({ queryKey: ["player-profile", id] });
+        });
+      }
     }
     updatePrediction.mutate({ predictionIds: returnerPreds.map((p) => p.id), updates });
   };
