@@ -17,6 +17,7 @@ type CliArgs = {
   season: number;
   yes: boolean;
   dryRun: boolean;
+  prod: boolean;
 };
 
 function parseArgs(argv: string[]): CliArgs {
@@ -25,6 +26,7 @@ function parseArgs(argv: string[]): CliArgs {
     season: CURRENT_SEASON,
     yes: false,
     dryRun: false,
+    prod: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -36,6 +38,8 @@ function parseArgs(argv: string[]): CliArgs {
       args.yes = true;
     } else if (a === "--dry-run") {
       args.dryRun = true;
+    } else if (a === "--prod") {
+      args.prod = true;
     } else if (a === "--help" || a === "-h") {
       printHelp();
       process.exit(0);
@@ -54,13 +58,19 @@ RSTR IQ CSV importer
 
 Usage:
   npm run import [-- --inbox <path>] [--season <year>] [--yes] [--dry-run]
+  npm run import:prod  (production — requires typed confirmation)
 
 Options:
   --inbox <path>   Folder to scan for CSVs (default: ~/RSTR IQ Data/inbox)
   --season <year>  Season to import into (default: ${CURRENT_SEASON}). Per-file override from filename.
   --dry-run        Show detection + pipeline plan, exit without prompting.
-  --yes, -y        Skip confirmation prompt.
+  --yes, -y        Skip standard confirmation prompt (does NOT bypass --prod guard).
+  --prod           Run against production Supabase. Requires typed "yes-promote-to-prod".
   --help           Show this message.
+
+Environments:
+  npm run import       → reads .env.local (intended for the staging branch)
+  npm run import:prod  → reads .env.production.local (production, with --prod confirmation guard)
 `);
 }
 
@@ -92,6 +102,18 @@ async function confirm(prompt: string): Promise<boolean> {
   try {
     const answer = await rl.question(prompt);
     return /^y(es)?$/i.test(answer.trim());
+  } finally {
+    rl.close();
+  }
+}
+
+const PROD_CONFIRM_PHRASE = "yes-promote-to-prod";
+
+async function confirmExactPhrase(prompt: string, expected: string): Promise<boolean> {
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    const answer = await rl.question(prompt);
+    return answer.trim() === expected;
   } finally {
     rl.close();
   }
@@ -139,7 +161,19 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  if (!args.yes) {
+  if (args.prod) {
+    // Production confirmation guard: explicit typed phrase, --yes does NOT bypass.
+    const url = process.env.SUPABASE_URL || "(unset)";
+    console.log("");
+    console.log("⚠️  PRODUCTION MODE — this will write to your live Supabase.");
+    console.log(`   Target URL: ${url}`);
+    console.log("");
+    const ok = await confirmExactPhrase(`Type "${PROD_CONFIRM_PHRASE}" to proceed (anything else aborts): `, PROD_CONFIRM_PHRASE);
+    if (!ok) {
+      console.log("Aborted — production write not confirmed.");
+      process.exit(0);
+    }
+  } else if (!args.yes) {
     const ok = await confirm("Proceed? [y/N] ");
     if (!ok) {
       console.log("Aborted.");
