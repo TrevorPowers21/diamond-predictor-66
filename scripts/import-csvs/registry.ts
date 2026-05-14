@@ -1,6 +1,7 @@
 export type CsvType =
   | "hitter_master"
   | "pitching_master"
+  | "pitcher_stuff_inputs"
   | "pitch_arsenal"
   | "class_data"
   | "conference_stats"
@@ -26,6 +27,9 @@ export type PipelineStep =
   | "sync_master_to_players"
   | "add_missing_players"
   | "create_predictions"
+  | "velo_diff"
+  | "reclassify"
+  | "stuff_plus_recompute"
   | "rollup_stuff_plus"
   | "ncaa_averages"
   | "compute_scores"
@@ -35,6 +39,9 @@ export const PIPELINE_LABELS: Record<PipelineStep, string> = {
   sync_master_to_players: "Sync master → players",
   add_missing_players: "Add missing players",
   create_predictions: "Create predictions for new players",
+  velo_diff: "Compute FB↔Change-up velo diff",
+  reclassify: "Reclassify breaking balls",
+  stuff_plus_recompute: "Recompute per-pitch Stuff+ scores",
   rollup_stuff_plus: "Rollup Stuff+ → Pitching Master",
   ncaa_averages: "Refresh NCAA averages",
   compute_scores: "Recompute power-rating scores",
@@ -105,8 +112,47 @@ export const REGISTRY: RegistryEntry[] = [
     description: "Full-replace season snapshot of D1 pitcher stats (TruMedia export includes 90thVel + Stuff+).",
   },
   {
+    type: "pitcher_stuff_inputs",
+    label: "Stuff+ Inputs (per-pitch / per-hand)",
+    required: ["playerId", "playerFullName", "Pitch Type"],
+    signature: [
+      "Vel",
+      "IndVertBrk",
+      "HorzBrk",
+      "RelHeight",
+      "RelSide",
+      "Extension",
+      "Spin",
+      "VertApprAngle",
+      "Miss%",
+    ],
+    filenameHints: [
+      /stuff/i,
+      /\brhp\b/i,
+      /\blhp\b/i,
+      /4s\s*fb/i,
+      /sinker/i,
+      /cutter/i,
+      /slider/i,
+      /curveball/i,
+      /change[\-\s]?up/i,
+      /splitter/i,
+      /sweeper/i,
+    ],
+    downstream: [
+      "velo_diff",
+      "reclassify",
+      "stuff_plus_recompute",
+      "rollup_stuff_plus",
+      "ncaa_averages",
+      "compute_scores",
+      "recalculate",
+    ],
+    description: "Raw per-pitch-per-hand inputs (one file per pitch type × hand). Writes pitcher_stuff_plus_inputs, then velo-diff → reclassify → Stuff+ score → rollup → recalc.",
+  },
+  {
     type: "pitch_arsenal",
-    label: "Pitch Arsenal (Stuff+)",
+    label: "Pitch Arsenal (legacy all-in-one)",
     required: ["Player ID", "Player Name"],
     signature: [
       "Total Pitches",
@@ -118,9 +164,9 @@ export const REGISTRY: RegistryEntry[] = [
       "Change-Up RHP",
       "Sweeper RHP",
     ],
-    filenameHints: [/stuff/i, /arsenal/i, /pitch[_\-]?type/i],
+    filenameHints: [/arsenal/i, /pitch[_\-]?type/i],
     downstream: ["rollup_stuff_plus", "compute_scores", "recalculate"],
-    description: "Per-pitch-per-hand Stuff+ inputs. Rolls up to Pitching Master.stuff_plus.",
+    description: "Legacy single-CSV pitch arsenal format. Use Stuff+ Inputs split-file format instead.",
   },
   {
     type: "class_data",

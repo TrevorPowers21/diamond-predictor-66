@@ -100,11 +100,16 @@ export function computePipelinePlan(results: DetectionResult[]): PipelineStep[] 
     if (!r.match) continue;
     for (const step of r.match.downstream) triggered.add(step);
   }
-  // Ordered canonical sequence
+  // Ordered canonical sequence: master imports run first, then Stuff+ chain
+  // (velo_diff → reclassify → stuff_plus_recompute → rollup), then NCAA
+  // averages + scores, then final recalc.
   const order: PipelineStep[] = [
     "sync_master_to_players",
     "add_missing_players",
     "create_predictions",
+    "velo_diff",
+    "reclassify",
+    "stuff_plus_recompute",
     "rollup_stuff_plus",
     "ncaa_averages",
     "compute_scores",
