@@ -44,19 +44,27 @@ async function updatePlayersClassYears(pairs: ClassYearPair[]): Promise<{ update
   const dedup = new Map<string, string>();
   for (const p of pairs) dedup.set(p.sourcePlayerId, p.classYear);
 
-  const BATCH = 200;
-  const entries = [...dedup.entries()];
-  for (let i = 0; i < entries.length; i += BATCH) {
-    const chunk = entries.slice(i, i + BATCH);
-    for (const [sourcePlayerId, classYear] of chunk) {
-      const { error } = await supabase
+  // Group by class year so we can issue one batched UPDATE per distinct year
+  // instead of one per player (5 years × ~20 chunks ≈ 100 calls vs 10,000).
+  const byClass = new Map<string, string[]>();
+  for (const [sid, cy] of dedup) {
+    const arr = byClass.get(cy) ?? [];
+    arr.push(sid);
+    byClass.set(cy, arr);
+  }
+
+  const CHUNK = 500;
+  for (const [classYear, ids] of byClass) {
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const { error, count } = await supabase
         .from("players")
-        .update({ class_year: classYear })
-        .eq("source_player_id", sourcePlayerId);
+        .update({ class_year: classYear }, { count: "exact" })
+        .in("source_player_id", chunk);
       if (error) {
-        result.errors.push(`${sourcePlayerId}: ${error.message}`);
+        result.errors.push(`class ${classYear} chunk ${i}: ${error.message}`);
       } else {
-        result.updated++;
+        result.updated += count ?? chunk.length;
       }
     }
   }
@@ -68,7 +76,8 @@ async function deriveRolesFromGGS(season: number): Promise<{ updated: number; er
 
   let from = 0;
   const pageSize = 1000;
-  const updates: Array<{ sourcePlayerId: string; role: "SP" | "RP" }> = [];
+  const spIds: string[] = [];
+  const rpIds: string[] = [];
 
   while (true) {
     const { data, error } = await supabase
@@ -91,25 +100,34 @@ async function deriveRolesFromGGS(season: number): Promise<{ updated: number; er
       const startRatio = g > 0 ? gs / g : 0;
       const derived: "SP" | "RP" = startRatio >= SP_GS_RATIO_THRESHOLD ? "SP" : "RP";
       if (derived !== currentRole) {
-        updates.push({ sourcePlayerId: sid, role: derived });
+        if (derived === "SP") spIds.push(sid);
+        else rpIds.push(sid);
       }
     }
     if (data.length < pageSize) break;
     from += pageSize;
   }
 
-  for (const u of updates) {
-    const { error } = await supabase
-      .from("Pitching Master")
-      .update({ Role: u.role })
-      .eq("source_player_id", u.sourcePlayerId)
-      .eq("Season", season);
-    if (error) {
-      result.errors.push(`${u.sourcePlayerId}: ${error.message}`);
-    } else {
-      result.updated++;
+  // Two batched UPDATE calls (one per role) instead of one per pitcher.
+  // Chunk via `in()` to stay under PostgREST URL length limits.
+  const CHUNK = 500;
+  const runRoleBatch = async (role: "SP" | "RP", ids: string[]) => {
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const { error, count } = await supabase
+        .from("Pitching Master")
+        .update({ Role: role }, { count: "exact" })
+        .eq("Season", season)
+        .in("source_player_id", chunk);
+      if (error) {
+        result.errors.push(`${role} chunk ${i}: ${error.message}`);
+      } else {
+        result.updated += count ?? chunk.length;
+      }
     }
-  }
+  };
+  await runRoleBatch("SP", spIds);
+  await runRoleBatch("RP", rpIds);
 
   return result;
 }
