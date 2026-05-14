@@ -301,6 +301,13 @@ export async function runImports(results: DetectionResult[], season: number): Pr
   // predictions/target_board/high_follow FKs remain valid. The full sync
   // (metadata refresh, team reassignment, TWP redetection) is still available
   // via the AdminDashboard "Sync Master" button for when it's actually needed.
+  //
+  // Cascade order matters: NCAA averages + Compute Scores must populate
+  // Hitter/Pitching Master's *_plus columns BEFORE createPredictionsFromMaster
+  // reads them (line 64 of createPredictionsFromMaster.ts: "Read
+  // ba_plus/obp_plus/iso_plus directly (already computed by Compute Scores)").
+  // Otherwise internals get null power_ratings → bulkRecalc returns null
+  // p_avg/p_obp/p_slg/p_wrc_plus → hitter projections blank everywhere.
   step("addMissingPlayers");
   try {
     const start = Date.now();
@@ -308,18 +315,6 @@ export async function runImports(results: DetectionResult[], season: number): Pr
     const inserted = res?.inserted ?? res?.created ?? "?";
     const errors = res?.errors?.length ?? 0;
     ok(`inserted=${inserted}, errors=${errors} (${timeMs(start)})`);
-    if (Array.isArray(res?.errors)) for (const e of res.errors.slice(0, 3)) err(e);
-  } catch (e) {
-    err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
-  }
-
-  step("createPredictionsFromMaster");
-  try {
-    const start = Date.now();
-    const res: any = await createPredictionsFromMaster(season);
-    const created = res?.created ?? res?.inserted ?? "?";
-    const errors = res?.errors?.length ?? 0;
-    ok(`created=${created}, errors=${errors} (${timeMs(start)})`);
     if (Array.isArray(res?.errors)) for (const e of res.errors.slice(0, 3)) err(e);
   } catch (e) {
     err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
@@ -339,6 +334,18 @@ export async function runImports(results: DetectionResult[], season: number): Pr
     const start = Date.now();
     await computeAndStoreAllScores(season);
     ok(`done (${timeMs(start)})`);
+  } catch (e) {
+    err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  step("createPredictionsFromMaster");
+  try {
+    const start = Date.now();
+    const res: any = await createPredictionsFromMaster(season);
+    const created = res?.created ?? res?.inserted ?? "?";
+    const errors = res?.errors?.length ?? 0;
+    ok(`created=${created}, errors=${errors} (${timeMs(start)})`);
+    if (Array.isArray(res?.errors)) for (const e of res.errors.slice(0, 3)) err(e);
   } catch (e) {
     err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
   }
