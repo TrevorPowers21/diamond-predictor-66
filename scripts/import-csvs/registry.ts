@@ -1,0 +1,179 @@
+export type CsvType =
+  | "hitter_master"
+  | "pitching_master"
+  | "pitch_arsenal"
+  | "class_data"
+  | "conference_stats"
+  | "park_factors"
+  | "nil";
+
+export type RegistryEntry = {
+  type: CsvType;
+  label: string;
+  /** Columns that MUST be present (case-insensitive). All required for a match. */
+  required: string[];
+  /** Columns that boost confidence when present. */
+  signature: string[];
+  /** Filename regex hints used as tiebreaker. */
+  filenameHints: RegExp[];
+  /** Downstream pipeline steps triggered when this CSV is imported. */
+  downstream: PipelineStep[];
+  /** Short summary of what the importer does (shown in dry-run). */
+  description: string;
+};
+
+export type PipelineStep =
+  | "sync_master_to_players"
+  | "add_missing_players"
+  | "create_predictions"
+  | "rollup_stuff_plus"
+  | "ncaa_averages"
+  | "compute_scores"
+  | "recalculate";
+
+export const PIPELINE_LABELS: Record<PipelineStep, string> = {
+  sync_master_to_players: "Sync master → players",
+  add_missing_players: "Add missing players",
+  create_predictions: "Create predictions for new players",
+  rollup_stuff_plus: "Rollup Stuff+ → Pitching Master",
+  ncaa_averages: "Refresh NCAA averages",
+  compute_scores: "Recompute power-rating scores",
+  recalculate: "Bulk-recalculate predictions",
+};
+
+export const REGISTRY: RegistryEntry[] = [
+  {
+    type: "hitter_master",
+    label: "Hitter Master",
+    required: ["playerId", "playerFullName"],
+    signature: [
+      "PA",
+      "AB",
+      "AVG",
+      "OBP",
+      "SLG",
+      "ISO",
+      "Chase%",
+      "Contact%",
+      "Barrel%",
+      "ExitVel",
+      "90thExitVel",
+      "newestTeamLocation",
+      "BatsHand",
+    ],
+    filenameHints: [/hitter/i, /batter/i, /\bhm[_\-]/i, /hitting/i],
+    downstream: [
+      "sync_master_to_players",
+      "add_missing_players",
+      "create_predictions",
+      "ncaa_averages",
+      "compute_scores",
+      "recalculate",
+    ],
+    description: "Full-replace season snapshot of D1 hitter stats (TruMedia export includes PA/AB).",
+  },
+  {
+    type: "pitching_master",
+    label: "Pitching Master",
+    required: ["playerId", "playerFullName"],
+    signature: [
+      "IP",
+      "ERA",
+      "FIP",
+      "WHIP",
+      "K9",
+      "BB9",
+      "HR9",
+      "Whiff%",
+      "HardHit%",
+      "IZWhiff%",
+      "90thVel",
+      "Stuff+",
+      "Role",
+      "throwsHand",
+    ],
+    filenameHints: [/pitch/i, /pitching/i, /\bpm[_\-]/i],
+    downstream: [
+      "sync_master_to_players",
+      "add_missing_players",
+      "create_predictions",
+      "rollup_stuff_plus",
+      "ncaa_averages",
+      "compute_scores",
+      "recalculate",
+    ],
+    description: "Full-replace season snapshot of D1 pitcher stats (TruMedia export includes 90thVel + Stuff+).",
+  },
+  {
+    type: "pitch_arsenal",
+    label: "Pitch Arsenal (Stuff+)",
+    required: ["Player ID", "Player Name"],
+    signature: [
+      "Total Pitches",
+      "Overall Stuff+",
+      "4S FB RHP",
+      "4S FB LHP",
+      "Slider RHP",
+      "Curveball RHP",
+      "Change-Up RHP",
+      "Sweeper RHP",
+    ],
+    filenameHints: [/stuff/i, /arsenal/i, /pitch[_\-]?type/i],
+    downstream: ["rollup_stuff_plus", "compute_scores", "recalculate"],
+    description: "Per-pitch-per-hand Stuff+ inputs. Rolls up to Pitching Master.stuff_plus.",
+  },
+  {
+    type: "class_data",
+    label: "Class Data",
+    required: ["playerId"],
+    signature: ["classYear", "batsHand", "throwsHand"],
+    filenameHints: [/class/i, /classyear/i, /roster/i],
+    downstream: ["recalculate"],
+    description: "Updates class year + hand on players. Auto-relocks predictions.",
+  },
+  {
+    type: "conference_stats",
+    label: "Conference Stats",
+    required: ["conference"],
+    signature: [
+      "AVG",
+      "OBP",
+      "SLG",
+      "ISO",
+      "ERA",
+      "FIP",
+      "WHIP",
+      "BA+",
+      "OBP+",
+      "ERA+",
+    ],
+    filenameHints: [/conference/i, /\bconf[_\-]/i],
+    downstream: ["ncaa_averages", "compute_scores", "recalculate"],
+    description: "Per-conference aggregate stats. Importer not yet wired (Phase D).",
+  },
+  {
+    type: "park_factors",
+    label: "Park Factors",
+    required: ["team"],
+    signature: [
+      "AVG_factor",
+      "OBP_factor",
+      "ISO_factor",
+      "ERA_factor",
+      "HR9_factor",
+      "WHIP_factor",
+    ],
+    filenameHints: [/park[_\-]?factor/i, /\bpf[_\-]/i],
+    downstream: ["recalculate"],
+    description: "Per-team park adjustment multipliers. Importer not yet wired (Phase D).",
+  },
+  {
+    type: "nil",
+    label: "NIL",
+    required: ["playerId"],
+    signature: ["nil_value", "NIL", "nilValue", "valuation"],
+    filenameHints: [/nil/i, /valuation/i],
+    downstream: [],
+    description: "Per-player NIL valuations. Display only — no recalc. Importer not yet wired (Phase D).",
+  },
+];
