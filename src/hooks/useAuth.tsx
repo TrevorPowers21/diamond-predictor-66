@@ -171,7 +171,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsRecoveringPassword(false);
         }
         if (newSession?.user) {
-          setTimeout(() => fetchUserContext(newSession.user.id), 0);
+          // Defer the fetch one tick (Supabase docs recommend non-blocking
+          // Supabase calls inside onAuthStateChange to avoid auth re-entry),
+          // but still await its completion so `loading` stays true until
+          // userTeamRole is populated. Without the await, RoleGuard renders
+          // with userTeamRole=null on the first paint after refresh and
+          // bounces team_admins to /dashboard.
+          await new Promise<void>((resolve) => {
+            setTimeout(async () => {
+              try { await fetchUserContext(newSession.user.id); }
+              finally { resolve(); }
+            }, 0);
+          });
         } else {
           clearUserContext();
         }
@@ -179,12 +190,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     );
 
+    // Await fetchUserContext before flipping loading=false. Otherwise role
+    // guards (RoleGuard) can fire while `userTeamRole` is still null and
+    // bounce the user back to /dashboard on every page refresh.
     supabase.auth.getSession()
-      .then(({ data: { session: existing } }) => {
+      .then(async ({ data: { session: existing } }) => {
         setSession(existing);
         setUser(existing?.user ?? null);
         if (existing?.user) {
-          fetchUserContext(existing.user.id);
+          await fetchUserContext(existing.user.id);
         }
       })
       .catch(() => {

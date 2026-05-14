@@ -223,6 +223,11 @@ export default function AdminUsers() {
         teamId={scopedTeam.id}
         teamName={scopedTeam.name}
         canInviteAdmins={canInviteAdmins}
+        onInvited={() => {
+          // Refresh the members table immediately — without this, the new row
+          // doesn't appear until the user manually refreshes the page.
+          qc.invalidateQueries({ queryKey: ["admin-team-members", scopedTeam.id] });
+        }}
       />
     </DashboardLayout>
   );
@@ -234,12 +239,14 @@ function InviteMemberDialog({
   teamId,
   teamName,
   canInviteAdmins,
+  onInvited,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   teamId: string;
   teamName: string;
   canInviteAdmins: boolean;
+  onInvited?: () => void;
 }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"team_admin" | "general_user">("general_user");
@@ -263,6 +270,10 @@ function InviteMemberDialog({
       } else {
         toast.success(`Invited ${email.trim()} to ${teamName}`);
       }
+      // Only refetch the members list when an actual membership change happened
+      // (newly invited or existing-user-added). Already-member case is a no-op
+      // but we still call it to be safe — refetching is cheap.
+      onInvited?.();
       setEmail("");
       onOpenChange(false);
     } else if (result.pending) {
