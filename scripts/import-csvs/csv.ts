@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 
 export function parseHeader(line: string): string[] {
   const out: string[] = [];
@@ -32,6 +32,7 @@ export type CsvProbe = {
   rowCountEstimate: number;
   firstRow: string[] | null;
   byteSize: number;
+  mtimeMs: number;
 };
 
 export function probeCsv(filePath: string): CsvProbe {
@@ -42,6 +43,7 @@ export function probeCsv(filePath: string): CsvProbe {
   const header = nonEmpty.length > 0 ? parseHeader(nonEmpty[0]) : [];
   const firstRow = nonEmpty.length > 1 ? parseHeader(nonEmpty[1]) : null;
   const fileName = filePath.split("/").pop() || filePath;
+  const mtimeMs = statSync(filePath).mtimeMs;
   return {
     filePath,
     fileName,
@@ -50,5 +52,6 @@ export function probeCsv(filePath: string): CsvProbe {
     rowCountEstimate: Math.max(0, nonEmpty.length - 1),
     firstRow,
     byteSize,
+    mtimeMs,
   };
 }

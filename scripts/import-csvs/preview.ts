@@ -56,11 +56,24 @@ export function renderPreview({ results, season, inboxPath }: PreviewInput): str
 
   // Per-file lines
   for (const r of results) {
-    const badge = confidenceBadge(r.confidence);
-    const typeLabel = r.match ? r.match.label : `${COLOR.red}Unknown${COLOR.reset}`;
+    const superseded = r.supersededBy !== undefined;
+    const badge = superseded ? `${COLOR.gray}—${COLOR.reset}` : confidenceBadge(r.confidence);
+    const typeLabelRaw = r.match ? r.match.label : "Unknown";
+    const typeLabel = superseded
+      ? `${COLOR.gray}${typeLabelRaw} (superseded)${COLOR.reset}`
+      : r.match
+        ? typeLabelRaw
+        : `${COLOR.red}Unknown${COLOR.reset}`;
     const rowCount = `${fmtRows(r.probe.rowCountEstimate)} rows`;
     const size = fmtBytes(r.probe.byteSize);
-    out.push(`  ${badge}  ${r.probe.fileName.padEnd(50)}  → ${typeLabel.padEnd(28)}  ${COLOR.dim}${rowCount}, ${size}, season ${season}${COLOR.reset}`);
+    const meta = `${rowCount}, ${size}, season ${season}`;
+    const namePad = r.probe.fileName.padEnd(50);
+    if (superseded) {
+      out.push(`  ${badge}  ${COLOR.gray}${namePad}${COLOR.reset}  → ${typeLabel}  ${COLOR.dim}${meta}${COLOR.reset}`);
+      out.push(`     ${COLOR.dim}skipped: newer ${r.supersededBy} will be imported instead${COLOR.reset}`);
+      continue;
+    }
+    out.push(`  ${badge}  ${namePad}  → ${typeLabel.padEnd(28)}  ${COLOR.dim}${meta}${COLOR.reset}`);
     if (r.confidence === "medium" || r.confidence === "low") {
       out.push(`     ${COLOR.dim}${r.reason}${COLOR.reset}`);
     }
@@ -98,6 +111,7 @@ export function computePipelinePlan(results: DetectionResult[]): PipelineStep[] 
   const triggered = new Set<PipelineStep>();
   for (const r of results) {
     if (!r.match) continue;
+    if (r.supersededBy !== undefined) continue;
     for (const step of r.match.downstream) triggered.add(step);
   }
   // Ordered canonical sequence: master imports run first, then Stuff+ chain

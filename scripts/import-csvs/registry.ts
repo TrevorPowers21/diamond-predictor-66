@@ -21,6 +21,13 @@ export type RegistryEntry = {
   downstream: PipelineStep[];
   /** Short summary of what the importer does (shown in dry-run). */
   description: string;
+  /**
+   * If true, multiple files of this type are expected in one batch (e.g.
+   * Stuff+ Inputs has 16 files for 8 pitches × 2 hands). If false/undefined,
+   * only the newest file of this type is imported and older ones are marked
+   * superseded.
+   */
+  multiFile?: boolean;
 };
 
 export type PipelineStep =
@@ -56,17 +63,21 @@ export const REGISTRY: RegistryEntry[] = [
     signature: [
       "PA",
       "AB",
+      "BA",
       "AVG",
       "OBP",
       "SLG",
       "ISO",
+      "BB%",
       "Chase%",
       "Contact%",
       "Barrel%",
       "ExitVel",
       "90thExitVel",
+      "Line%",
+      "Ground%",
       "newestTeamLocation",
-      "BatsHand",
+      "batsHand",
     ],
     filenameHints: [/hitter/i, /batter/i, /\bhm[_\-]/i, /hitting/i],
     downstream: [
@@ -85,18 +96,26 @@ export const REGISTRY: RegistryEntry[] = [
     required: ["playerId", "playerFullName"],
     signature: [
       "IP",
+      "G",
+      "GS",
       "ERA",
       "FIP",
       "WHIP",
-      "K9",
-      "BB9",
-      "HR9",
-      "Whiff%",
+      "K/9",
+      "BB/9",
+      "HR/9",
+      "Miss%",
+      "InZoneWhiff%",
+      "InZone%",
       "HardHit%",
-      "IZWhiff%",
-      "90thVel",
-      "Stuff+",
-      "Role",
+      "Chase%",
+      "Barrel%",
+      "ExitVel",
+      "90thExitVel",
+      "Line%",
+      "Ground%",
+      "HPull%",
+      "LA10-30%",
       "throwsHand",
     ],
     filenameHints: [/pitch/i, /pitching/i, /\bpm[_\-]/i],
@@ -104,12 +123,11 @@ export const REGISTRY: RegistryEntry[] = [
       "sync_master_to_players",
       "add_missing_players",
       "create_predictions",
-      "rollup_stuff_plus",
       "ncaa_averages",
       "compute_scores",
       "recalculate",
     ],
-    description: "Full-replace season snapshot of D1 pitcher stats (TruMedia export includes 90thVel + Stuff+).",
+    description: "Full-replace season snapshot of D1 pitcher stats. Role + Stuff+ are populated by separate pipelines (depth chart for Role, Stuff+ Inputs rollup for stuff_plus).",
   },
   {
     type: "pitcher_stuff_inputs",
@@ -149,6 +167,7 @@ export const REGISTRY: RegistryEntry[] = [
       "recalculate",
     ],
     description: "Raw per-pitch-per-hand inputs (one file per pitch type × hand). Writes pitcher_stuff_plus_inputs, then velo-diff → reclassify → Stuff+ score → rollup → recalc.",
+    multiFile: true,
   },
   {
     type: "pitch_arsenal",

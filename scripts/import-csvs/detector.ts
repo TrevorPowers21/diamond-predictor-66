@@ -7,6 +7,11 @@ export type DetectionResult = {
   confidence: "high" | "medium" | "low" | "none";
   reason: string;
   alternates: Array<{ entry: RegistryEntry; score: number }>;
+  /**
+   * Set when another file of the same single-instance type has a newer
+   * mtime — this file would be overwritten and is excluded from the queue.
+   */
+  supersededBy?: string;
 };
 
 type Scored = { entry: RegistryEntry; required: number; signature: number; filename: boolean };
@@ -93,6 +98,31 @@ export function detect(probe: CsvProbe): DetectionResult {
       .slice(1, 4)
       .map((s) => ({ entry: s.entry, score: compositeScore(s) })),
   };
+}
+
+/**
+ * For each non-multiFile type, keep only the file with the newest mtime;
+ * mark all older files as superseded so the dry-run can flag them and the
+ * import queue can skip them.
+ */
+export function dedupeResults(results: DetectionResult[]): DetectionResult[] {
+  const byType = new Map<string, DetectionResult[]>();
+  for (const r of results) {
+    if (!r.match) continue;
+    if (r.match.multiFile) continue;
+    const arr = byType.get(r.match.type) ?? [];
+    arr.push(r);
+    byType.set(r.match.type, arr);
+  }
+  for (const [, arr] of byType) {
+    if (arr.length < 2) continue;
+    arr.sort((a, b) => b.probe.mtimeMs - a.probe.mtimeMs);
+    const winner = arr[0];
+    for (let i = 1; i < arr.length; i++) {
+      arr[i].supersededBy = winner.probe.fileName;
+    }
+  }
+  return results;
 }
 
 export function inferSeasonFromName(fileName: string, fallback: number): number {

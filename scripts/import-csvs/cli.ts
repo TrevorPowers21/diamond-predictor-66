@@ -6,7 +6,7 @@ import { stdin, stdout } from "node:process";
 import { homedir } from "node:os";
 
 import { probeCsv } from "./csv.ts";
-import { detect, inferSeasonFromName } from "./detector.ts";
+import { detect, dedupeResults, inferSeasonFromName } from "./detector.ts";
 import { renderPreview } from "./preview.ts";
 
 const DEFAULT_INBOX = join(homedir(), "RSTR IQ Data", "inbox");
@@ -100,10 +100,12 @@ async function confirm(prompt: string): Promise<boolean> {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const files = listCsvFiles(args.inbox);
-  const results = files.map((f) => {
-    const probe = probeCsv(f);
-    return detect(probe);
-  });
+  const results = dedupeResults(
+    files.map((f) => {
+      const probe = probeCsv(f);
+      return detect(probe);
+    }),
+  );
 
   // Per-file season inference (filename override beats CLI default)
   const perFileSeasons = new Map<string, number>();
@@ -126,7 +128,7 @@ async function main(): Promise<void> {
     console.log("");
   }
 
-  const importable = results.filter((r) => r.match);
+  const importable = results.filter((r) => r.match && r.supersededBy === undefined);
   if (importable.length === 0) {
     console.log("Nothing to import. Drop CSVs in the inbox and re-run.");
     process.exit(0);
