@@ -148,11 +148,24 @@ async function main(): Promise<void> {
   }
 
   console.log(`\n${importable.length} file${importable.length === 1 ? "" : "s"} queued for import.`);
-  console.log("Phase B will wire the actual imports — for now this is a no-op.\n");
+  const { runImports } = await import("./runner.ts");
+  await runImports(results, args.season);
   process.exit(0);
 }
 
 main().catch((err) => {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes("SUPABASE_URL") || msg.includes("SUPABASE_SERVICE_ROLE_KEY")) {
+    console.error("\n✗ Cannot run import: Supabase credentials missing.");
+    console.error("");
+    console.error("  Create ~/dev-main/diamond-predictor-66/.env.local with:");
+    console.error("    SUPABASE_URL=https://<your-project-ref>.supabase.co");
+    console.error("    SUPABASE_SERVICE_ROLE_KEY=<service_role-secret>");
+    console.error("");
+    console.error("  Get the key from: Supabase dashboard → Project Settings → API → 'service_role'.");
+    console.error("");
+    process.exit(1);
+  }
   console.error("Fatal:", err);
   process.exit(1);
 });
