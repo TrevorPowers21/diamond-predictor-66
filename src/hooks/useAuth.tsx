@@ -171,22 +171,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsRecoveringPassword(false);
         }
         if (newSession?.user) {
-          // Defer the fetch one tick (Supabase docs recommend non-blocking
-          // Supabase calls inside onAuthStateChange to avoid auth re-entry),
-          // but still await its completion so `loading` stays true until
-          // userTeamRole is populated. Without the await, RoleGuard renders
-          // with userTeamRole=null on the first paint after refresh and
-          // bounces team_admins to /dashboard.
-          await new Promise<void>((resolve) => {
-            setTimeout(async () => {
-              try { await fetchUserContext(newSession.user.id); }
-              finally { resolve(); }
-            }, 0);
-          });
+          // Defer the fetch out of the synchronous auth handler scope (Supabase
+          // recommendation — avoids deadlocking the auth subsystem), then flip
+          // loading=false ONLY after fetchUserContext completes. Critical: this
+          // setLoading must run inside the deferred async — if it ran on the
+          // synchronous path below, RoleGuard would render with loading=false
+          // but userTeamRole=null and bounce team_admins to /dashboard.
+          setTimeout(async () => {
+            try { await fetchUserContext(newSession.user.id); }
+            finally { setLoading(false); }
+          }, 0);
         } else {
           clearUserContext();
+          setLoading(false);
         }
-        setLoading(false);
       }
     );
 
