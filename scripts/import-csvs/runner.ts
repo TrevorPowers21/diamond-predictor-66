@@ -268,11 +268,15 @@ export async function runImports(results: DetectionResult[], season: number): Pr
       case "pitcher_stuff_inputs": {
         step(`${r.probe.fileName} → Stuff+ Inputs`);
         try {
-          const res = await importStuffPlusInputsCsv(csvText, season);
+          // Filename is the source of truth for pitch_type + hand.
+          // No "Pitch Type" column needed in the CSV — TruMedia's per-pitch
+          // export doesn't include one, and we used to add it manually.
+          const res = await importStuffPlusInputsCsv(csvText, season, r.probe.fileName);
           if (res.errors.length > 0) {
             for (const e of res.errors.slice(0, 3)) err(e);
             if (res.errors.length > 3) warn(`...and ${res.errors.length - 3} more errors`);
           }
+          for (const w of res.warnings) warn(w);
           if (res.inserted > 0) {
             ok(`${res.pitchType} / ${res.hand}: ${res.deleted} replaced, ${res.inserted} inserted (${timeMs(startMs)})`);
             stuffInputsImports.push({ file: r.probe.fileName, pitchType: res.pitchType, hand: res.hand, inserted: res.inserted, deleted: res.deleted });
