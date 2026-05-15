@@ -2,12 +2,16 @@ import { readFileSync } from "node:fs";
 
 import { importHistoricalHittersCsv } from "@/lib/importHistoricalHitters";
 import { importHistoricalPitchersCsv } from "@/lib/importHistoricalPitchers";
+import { importStuffPlusInputsCsv } from "@/lib/importStuffPlusInputsCsv";
 import { addMissingPlayers } from "@/lib/syncMasterToPlayers";
 import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
 import { computeAndStoreNcaaAverages } from "@/lib/computeNcaaAverages";
 import { computeAndStoreAllScores } from "@/lib/computeAndStoreScores";
 import { bulkRecalculatePredictionsLocal } from "@/lib/predictionEngine";
 import { rollupStuffPlusToMaster } from "@/savant/lib/rollupStuffPlusToMaster";
+import { runVeloDiffPipeline } from "@/savant/lib/veloDiffPipeline";
+import { runBreakingBallReclassification } from "@/savant/lib/breakingBallReclassification";
+import { runStuffPlusPipeline } from "@/savant/lib/stuffPlusEngine";
 import { supabase } from "@/integrations/supabase/client";
 
 import type { DetectionResult } from "./detector.ts";
@@ -220,6 +224,8 @@ export async function runImports(results: DetectionResult[], season: number): Pr
 
   let hitterImported = false;
   let pitcherImported = false;
+  let stuffInputsImported = false;
+  const stuffInputsImports: Array<{ file: string; pitchType: string; hand: string; inserted: number; deleted: number }> = [];
   const classYearPairs: ClassYearPair[] = [];
 
   console.log(`\n${COLOR.bold}=== Imports ===${COLOR.reset}`);
@@ -261,7 +267,20 @@ export async function runImports(results: DetectionResult[], season: number): Pr
       }
       case "pitcher_stuff_inputs": {
         step(`${r.probe.fileName} → Stuff+ Inputs`);
-        warn(`Phase C — Stuff+ Inputs importer not yet wired. Skipping.`);
+        try {
+          const res = await importStuffPlusInputsCsv(csvText, season);
+          if (res.errors.length > 0) {
+            for (const e of res.errors.slice(0, 3)) err(e);
+            if (res.errors.length > 3) warn(`...and ${res.errors.length - 3} more errors`);
+          }
+          if (res.inserted > 0) {
+            ok(`${res.pitchType} / ${res.hand}: ${res.deleted} replaced, ${res.inserted} inserted (${timeMs(startMs)})`);
+            stuffInputsImports.push({ file: r.probe.fileName, pitchType: res.pitchType, hand: res.hand, inserted: res.inserted, deleted: res.deleted });
+            stuffInputsImported = true;
+          }
+        } catch (e) {
+          err(`Stuff+ importer threw: ${e instanceof Error ? e.message : String(e)}`);
+        }
         break;
       }
       default: {
@@ -271,23 +290,72 @@ export async function runImports(results: DetectionResult[], season: number): Pr
     }
   }
 
-  // Post-import enhancement: restore Pitching Master.stuff_plus from the
-  // pitcher_stuff_plus_inputs table. The TruMedia master CSV doesn't carry
-  // stuff_plus, so importHistoricalPitchersCsv wipes the column on every
-  // delete-and-insert. The per-pitch stuff_plus values in
-  // pitcher_stuff_plus_inputs are written by the separate Stuff+ pipeline
-  // (Phase C) and survive Pitching Master imports — so re-aggregating them
-  // restores the same stuff_plus values that existed before the import.
-  //
-  // If no Stuff+ Inputs have been imported yet, this is a no-op (sets
-  // everyone's stuff_plus to null, same as the current post-wipe state).
-  if (pitcherImported) {
-    step("Restore Pitching Master.stuff_plus via rollup from pitcher_stuff_plus_inputs");
+  // Stuff+ pipeline cascade — runs when Stuff+ Inputs were imported this run.
+  // Order matters: imports already happened in the case block above, here we
+  // chain the per-pitch math:
+  //   1. velo-diff (FB-CH gap, used by offspeed/breaking ball equations)
+  //   2. breaking-ball reclassification (assigns rstr_pitch_class on movement)
+  //   3. Stuff+ engine (computes per-pitch stuff_plus scores)
+  //   4. rollup to Pitching Master.stuff_plus (pitch-weighted per-pitcher avg)
+  // If Stuff+ Inputs were NOT touched but Pitching Master WAS, we still want
+  // the rollup at the end to restore Pitching Master.stuff_plus (the master
+  // CSV's delete-and-insert wipes the column; rollup re-aggregates from the
+  // intact pitcher_stuff_plus_inputs).
+  if (stuffInputsImported) {
+    console.log(`\n${COLOR.bold}=== Stuff+ pipeline ===${COLOR.reset}`);
+
+    step(`Compute velo-diff (FB / CH gap per hand)`);
+    {
+      const startMs = Date.now();
+      try {
+        const { report, errors } = await runVeloDiffPipeline(season);
+        const written = (report as any)?.written ?? (report as any)?.rowsWritten ?? "?";
+        ok(`${written} rows updated, ${errors.length} errors (${timeMs(startMs)})`);
+        for (const e of errors.slice(0, 3)) err(e);
+      } catch (e) {
+        err(`Velo-diff threw: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    step(`Reclassify breaking balls (Gyro Slider / Slider / Sweeper / Curveball)`);
+    {
+      const startMs = Date.now();
+      try {
+        const { report, errors } = await runBreakingBallReclassification(season);
+        const rowsAffected = (report as any)?.rowsAffected ?? (report as any)?.written ?? "?";
+        ok(`${rowsAffected} rows updated, ${errors.length} errors (${timeMs(startMs)})`);
+        for (const e of errors.slice(0, 3)) err(e);
+      } catch (e) {
+        err(`Reclassification threw: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    step(`Compute per-pitch Stuff+ scores`);
+    {
+      const startMs = Date.now();
+      try {
+        const { report, errors } = await runStuffPlusPipeline(season);
+        const written = (report as any)?.written ?? (report as any)?.rowsWritten ?? "?";
+        ok(`${written} pitches scored, ${errors.length} errors (${timeMs(startMs)})`);
+        for (const e of errors.slice(0, 3)) err(e);
+      } catch (e) {
+        err(`Stuff+ engine threw: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+
+  // Rollup Pitching Master.stuff_plus — runs whenever either Stuff+ Inputs OR
+  // Pitching Master was imported. After Stuff+ Inputs: rolls up freshly-
+  // computed per-pitch scores. After Pitching Master alone: restores the
+  // column from the unchanged pitcher_stuff_plus_inputs table (master CSV's
+  // delete-and-insert wipes stuff_plus on every import).
+  if (stuffInputsImported || pitcherImported) {
+    step("Rollup Stuff+ to Pitching Master.stuff_plus");
     const startMs = Date.now();
     try {
       const { report, errors } = await rollupStuffPlusToMaster(season);
       const updated = (report as any)?.updated ?? (report as any)?.writes ?? (report as any)?.pitchers_updated ?? "?";
-      ok(`${updated} pitchers' stuff_plus restored, ${errors.length} errors (${timeMs(startMs)})`);
+      ok(`${updated} pitchers' stuff_plus updated, ${errors.length} errors (${timeMs(startMs)})`);
       for (const e of errors.slice(0, 3)) err(e);
     } catch (e) {
       err(`Stuff+ rollup threw: ${e instanceof Error ? e.message : String(e)}`);
@@ -308,9 +376,12 @@ export async function runImports(results: DetectionResult[], season: number): Pr
     }
   }
 
-  // Cascade
-  if (!hitterImported && !pitcherImported) {
-    console.log("\nNo master imports — skipping cascade.");
+  // Cascade — runs whenever any data that feeds projections changed.
+  // Stuff+ Inputs alone justify a recalc (per-pitch stuff_plus → Pitching
+  // Master.stuff_plus → projection equation reads it for transfer/returner
+  // pitcher projections).
+  if (!hitterImported && !pitcherImported && !stuffInputsImported) {
+    console.log("\nNo master or Stuff+ imports — skipping cascade.");
     return;
   }
 

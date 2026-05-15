@@ -173,9 +173,14 @@ function calcCutter(row: PitchRow, pop: PopConstants, hand: string): { score: nu
 function calcGyroSlider(row: PitchRow, pop: PopConstants): { score: number; zs: ZScores } {
   // Velocity: MAX floor — below avg contributes zero
   const zv = zMax(row.velocity, pop.velocity, pop.velocity_sd) ?? 0;
-  // IVB: proximity to zero rewarded — (sd - |0 - ivb|) / sd
-  const zi = (pop.ivb_sd && row.ivb != null) ? (pop.ivb_sd - Math.abs(0 - row.ivb)) / pop.ivb_sd : 0;
-  // HB: proximity to zero rewarded — (sd - |0 - hb|) / sd
+  // IVB: more negative = better — (avg - player) / sd = -(player - avg) / sd.
+  // Same shape as the regular Slider IVB (a true gyro shouldn't ride; the
+  // more depth/drop, the better). Was previously proximity-to-zero, which
+  // penalized true gyros with real drop.
+  const ziRaw = z(row.ivb, pop.ivb, pop.ivb_sd) ?? 0;
+  const zi = -ziRaw;
+  // HB: proximity to zero rewarded — (sd - |0 - hb|) / sd. A true gyro has
+  // minimal lateral movement; this stays the same.
   const zh = (pop.hb_sd && row.hb != null) ? (pop.hb_sd - Math.abs(0 - row.hb)) / pop.hb_sd : 0;
   const zrh = zAbs(row.rel_height, pop.rel_height, pop.rel_height_sd) ?? 0;
   const zrs = zAbs(row.rel_side, pop.rel_side, pop.rel_side_sd) ?? 0;
