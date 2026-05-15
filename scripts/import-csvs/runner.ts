@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
+import { dirname, join, basename } from "node:path";
 
 import { importHistoricalHittersCsv } from "@/lib/importHistoricalHitters";
 import { importHistoricalPitchersCsv } from "@/lib/importHistoricalPitchers";
@@ -215,7 +216,11 @@ function timeMs(start: number): string {
   return `${(dt / 1000).toFixed(1)}s`;
 }
 
-export async function runImports(results: DetectionResult[], season: number): Promise<void> {
+export async function runImports(
+  results: DetectionResult[],
+  season: number,
+  keepFiles: boolean = false,
+): Promise<void> {
   const queue = results.filter((r) => r.match && r.supersededBy === undefined);
   if (queue.length === 0) {
     console.log("Nothing to import.");
@@ -227,6 +232,10 @@ export async function runImports(results: DetectionResult[], season: number): Pr
   let stuffInputsImported = false;
   const stuffInputsImports: Array<{ file: string; pitchType: string; hand: string; inserted: number; deleted: number }> = [];
   const classYearPairs: ClassYearPair[] = [];
+  // Files that imported successfully — archived to imported/<date>/ after the
+  // cascade completes (unless --keep-files was passed). Failed files stay in
+  // the inbox so the next run will pick them up to retry.
+  const importedFilePaths: string[] = [];
 
   console.log(`\n${COLOR.bold}=== Imports ===${COLOR.reset}`);
 
@@ -244,6 +253,7 @@ export async function runImports(results: DetectionResult[], season: number): Pr
           for (const e of res.errors.slice(0, 3)) err(e);
           if (res.errors.length > 3) warn(`...and ${res.errors.length - 3} more errors`);
           hitterImported = true;
+          if (res.inserted > 0) importedFilePaths.push(r.probe.filePath);
         } catch (e) {
           err(`Importer threw: ${e instanceof Error ? e.message : String(e)}`);
         }
@@ -259,6 +269,7 @@ export async function runImports(results: DetectionResult[], season: number): Pr
           for (const e of res.errors.slice(0, 3)) err(e);
           if (res.errors.length > 3) warn(`...and ${res.errors.length - 3} more errors`);
           pitcherImported = true;
+          if (res.inserted > 0) importedFilePaths.push(r.probe.filePath);
         } catch (e) {
           err(`Importer threw: ${e instanceof Error ? e.message : String(e)}`);
         }
@@ -281,6 +292,7 @@ export async function runImports(results: DetectionResult[], season: number): Pr
             ok(`${res.pitchType} / ${res.hand}: ${res.deleted} replaced, ${res.inserted} inserted (${timeMs(startMs)})`);
             stuffInputsImports.push({ file: r.probe.fileName, pitchType: res.pitchType, hand: res.hand, inserted: res.inserted, deleted: res.deleted });
             stuffInputsImported = true;
+            importedFilePaths.push(r.probe.filePath);
           }
         } catch (e) {
           err(`Stuff+ importer threw: ${e instanceof Error ? e.message : String(e)}`);
@@ -472,6 +484,47 @@ export async function runImports(results: DetectionResult[], season: number): Pr
     } catch (e) {
       err(`ClassYear update threw: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  // Archive successfully-imported files out of the inbox so the next run
+  // doesn't re-pick them up. Failed files stay put for retry. Skipped via
+  // --keep-files flag for cases where you want to re-run on the same files
+  // (e.g., testing pipeline changes without re-exporting from TruMedia).
+  if (!keepFiles && importedFilePaths.length > 0) {
+    console.log(`\n${COLOR.bold}=== Archive ===${COLOR.reset}`);
+    const inboxParent = dirname(importedFilePaths[0]);
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const archiveRoot = join(dirname(inboxParent), "imported", today);
+    try {
+      mkdirSync(archiveRoot, { recursive: true });
+    } catch (e) {
+      err(`Could not create archive folder ${archiveRoot}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    let moved = 0;
+    let failed = 0;
+    for (const src of importedFilePaths) {
+      const dest = join(archiveRoot, basename(src));
+      try {
+        // Avoid clobber — if dest already exists (re-run on same day), append a counter.
+        let target = dest;
+        let counter = 1;
+        while (existsSync(target)) {
+          const ext = target.match(/\.[^.]+$/)?.[0] ?? "";
+          const stem = target.slice(0, target.length - ext.length);
+          target = `${stem.replace(/ \(\d+\)$/, "")} (${counter})${ext}`;
+          counter += 1;
+          if (counter > 99) break; // sanity guard
+        }
+        renameSync(src, target);
+        moved += 1;
+      } catch (e) {
+        failed += 1;
+        err(`Could not archive ${basename(src)}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    ok(`${moved} files moved to ${archiveRoot}${failed > 0 ? ` (${failed} failed — left in inbox)` : ""}`);
+  } else if (keepFiles && importedFilePaths.length > 0) {
+    console.log(`\n--keep-files: ${importedFilePaths.length} processed files left in inbox.`);
   }
 
   console.log(`\n${COLOR.bold}=== Done ===${COLOR.reset}`);
