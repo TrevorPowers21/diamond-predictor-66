@@ -338,8 +338,8 @@ export async function runImports(
       const startMs = Date.now();
       try {
         const { report, errors } = await runBreakingBallReclassification(season);
-        const rowsAffected = (report as any)?.rowsAffected ?? (report as any)?.written ?? "?";
-        ok(`${rowsAffected} rows updated, ${errors.length} errors (${timeMs(startMs)})`);
+        const written = report.consolidatedRowsProduced ?? report.totalPulled ?? "?";
+        ok(`${written} rows produced from ${report.totalPulled ?? "?"} pulled, ${errors.length} errors (${timeMs(startMs)})`);
         for (const e of errors.slice(0, 3)) err(e);
       } catch (e) {
         err(`Reclassification threw: ${e instanceof Error ? e.message : String(e)}`);
@@ -370,8 +370,7 @@ export async function runImports(
     const startMs = Date.now();
     try {
       const { report, errors } = await rollupStuffPlusToMaster(season);
-      const updated = (report as any)?.updated ?? (report as any)?.writes ?? (report as any)?.pitchers_updated ?? "?";
-      ok(`${updated} pitchers' stuff_plus updated, ${errors.length} errors (${timeMs(startMs)})`);
+      ok(`${report.pitchersUpdated} pitchers updated (${report.pitchersSkipped} skipped — no Pitching Master row), ${errors.length} errors (${timeMs(startMs)})`);
       for (const e of errors.slice(0, 3)) err(e);
     } catch (e) {
       err(`Stuff+ rollup threw: ${e instanceof Error ? e.message : String(e)}`);
