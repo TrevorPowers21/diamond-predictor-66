@@ -170,17 +170,26 @@ function calcCutter(row: PitchRow, pop: PopConstants, hand: string): { score: nu
   };
 }
 
+// Ideal IVB target for a gyro slider. The point of a gyro is to defy gravity,
+// but pure 0 IVB is unrealistic — gravity always takes a couple inches off.
+// The realistic best-case range is -2 to -3 inches of "drop" (which is really
+// just gravity's effect on a near-spinless rotation). The classifier's IVB
+// floor at -3 means anything more negative falls out of the gyro bucket
+// entirely (becomes Slider/Curveball), so the reward should peak at the
+// midpoint of -2 to -3, not at 0.
+const GYRO_IDEAL_IVB = -2.5;
+
 function calcGyroSlider(row: PitchRow, pop: PopConstants): { score: number; zs: ZScores } {
   // Velocity: MAX floor — below avg contributes zero
   const zv = zMax(row.velocity, pop.velocity, pop.velocity_sd) ?? 0;
-  // IVB: more negative = better — (avg - player) / sd = -(player - avg) / sd.
-  // Same shape as the regular Slider IVB (a true gyro shouldn't ride; the
-  // more depth/drop, the better). Was previously proximity-to-zero, which
-  // penalized true gyros with real drop.
-  const ziRaw = z(row.ivb, pop.ivb, pop.ivb_sd) ?? 0;
-  const zi = -ziRaw;
+  // IVB: proximity to GYRO_IDEAL_IVB (-2.5) rewarded. The further a pitch is
+  // from the gravity-realistic gyro target, the less it scores. Symmetric
+  // around -2.5, so IVB = -2 and IVB = -3 both score very well (the "true
+  // gyro" band), IVB = 0 scores moderately (gravity-defying but rare), and
+  // positive IVB (ride) scores poorly (that's a fastball shape, not a gyro).
+  const zi = (pop.ivb_sd && row.ivb != null) ? (pop.ivb_sd - Math.abs(GYRO_IDEAL_IVB - row.ivb)) / pop.ivb_sd : 0;
   // HB: proximity to zero rewarded — (sd - |0 - hb|) / sd. A true gyro has
-  // minimal lateral movement; this stays the same.
+  // minimal lateral movement.
   const zh = (pop.hb_sd && row.hb != null) ? (pop.hb_sd - Math.abs(0 - row.hb)) / pop.hb_sd : 0;
   const zrh = zAbs(row.rel_height, pop.rel_height, pop.rel_height_sd) ?? 0;
   const zrs = zAbs(row.rel_side, pop.rel_side, pop.rel_side_sd) ?? 0;
