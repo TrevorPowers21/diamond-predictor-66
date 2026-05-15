@@ -16,7 +16,9 @@
     "import:prod": "tsx --env-file-if-exists=.env.production.local scripts/import-csvs/cli.ts --prod",
     "import:prod:dry": "tsx --env-file-if-exists=.env.production.local scripts/import-csvs/cli.ts --prod --dry-run",
     "lock-season": "tsx --env-file-if-exists=.env.local scripts/lock-season-cli.ts",
-    "lock-season:prod": "tsx --env-file-if-exists=.env.production.local scripts/lock-season-cli.ts --prod"
+    "lock-season:prod": "tsx --env-file-if-exists=.env.production.local scripts/lock-season-cli.ts --prod",
+    "recompute-stuff": "tsx --env-file-if-exists=.env.local scripts/recompute-stuff-plus.ts",
+    "recompute-stuff:prod": "tsx --env-file-if-exists=.env.production.local scripts/recompute-stuff-plus.ts --prod"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
