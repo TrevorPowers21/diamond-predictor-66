@@ -128,7 +128,14 @@ export interface ReclassificationReport {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const BREAKING_BALL_TAGS = ["Slider", "Sweeper", "Curveball"];
+// All breaking-ball-class pitch types that should pass through the slot-aware
+// reclassifier. Includes Cutter and Gyro Slider so rows that came in pre-tagged
+// (filename-driven CSV import) or were flipped on a prior reclassifier run
+// still get re-evaluated when rules change. Without these two, recompute-stuff
+// becomes a no-op for any row already labeled Cutter/Gyro Slider — which means
+// Buxton (+7.1 IVB → should be Cutter per slot-aware cap) and same-class
+// duplicates that need consolidation never get fixed.
+const BREAKING_BALL_TAGS = ["Slider", "Sweeper", "Curveball", "Cutter", "Gyro Slider"];
 const AUTO_ABSORB_MINOR_PCT = 0.05;         // < 5% of total P
 const AUTO_ABSORB_DISTANCE = 6.0;           // inches
 const AUTO_CONSOLIDATE_DISTANCE = 4.0;      // inches
