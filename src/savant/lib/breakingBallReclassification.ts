@@ -607,6 +607,118 @@ function calcPopulationAverages(
   return results;
 }
 
+/**
+ * Source-of-truth pop calculator: pulls every row in pitcher_stuff_plus_inputs
+ * for the given season + pitch types, groups by (pitch_type, hand), and
+ * computes weighted-by-pitches mean/SD for each metric.
+ *
+ * Use this AFTER reclassifier writes are committed. It avoids the bug where
+ * computing pop from the in-memory consolidation outputs (~35 rows total)
+ * produces tiny SDs (gyro RHP hb_sd = 0.08 → blown-up z-scores → -1000
+ * stuff_plus values in the rollup). Sourcing from the full table guarantees
+ * the sample is the actual population.
+ */
+async function calcPopulationAveragesFromDb(
+  season: number,
+  pitchTypes: string[],
+): Promise<PopulationAverages[]> {
+  const { data: rows, error } = await fetchAllRows<{
+    pitch_type: string;
+    hand: string;
+    pitches: number | null;
+    velocity: number | null;
+    ivb: number | null;
+    hb: number | null;
+    rel_height: number | null;
+    rel_side: number | null;
+    extension: number | null;
+    spin: number | null;
+    whiff_pct: number | null;
+  }>(
+    "pitcher_stuff_plus_inputs",
+    "pitch_type, hand, pitches, velocity, ivb, hb, rel_height, rel_side, extension, spin, whiff_pct",
+    (q: any) => q.eq("season", season).in("pitch_type", pitchTypes),
+  );
+  if (error || !rows) return [];
+
+  // Group by (pitch_type, hand) — same key shape as the in-memory version.
+  const groups = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const key = `${r.pitch_type}::${r.hand}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(r);
+  }
+
+  const results: PopulationAverages[] = [];
+  for (const [key, group] of groups) {
+    const [pitch_type, hand] = key.split("::");
+    const totalP = group.reduce((s, r) => s + (r.pitches ?? 0), 0);
+
+    const wMean = (getter: (r: typeof rows[number]) => number | null): number | null => {
+      let sumW = 0;
+      let sumVal = 0;
+      for (const r of group) {
+        const v = getter(r);
+        const p = r.pitches ?? 0;
+        if (v == null || p === 0) continue;
+        sumVal += v * p;
+        sumW += p;
+      }
+      return sumW > 0 ? sumVal / sumW : null;
+    };
+
+    const wSd = (getter: (r: typeof rows[number]) => number | null, mean: number | null): number | null => {
+      if (mean == null) return null;
+      let sumW = 0;
+      let sumSq = 0;
+      for (const r of group) {
+        const v = getter(r);
+        const p = r.pitches ?? 0;
+        if (v == null || p === 0) continue;
+        sumSq += p * (v - mean) * (v - mean);
+        sumW += p;
+      }
+      return sumW > 0 ? Math.sqrt(sumSq / sumW) : null;
+    };
+
+    const velMean = wMean((r) => r.velocity);
+    const ivbMean = wMean((r) => r.ivb);
+    const hbMean = wMean((r) => r.hb);
+    const relHMean = wMean((r) => r.rel_height);
+    const relSMean = wMean((r) => r.rel_side);
+    const extMean = wMean((r) => r.extension);
+    const spinMean = wMean((r) => r.spin);
+    const whiffMean = wMean((r) => r.whiff_pct);
+
+    results.push({
+      pitch_type,
+      hand,
+      season,
+      n_pitchers: group.length,
+      pitches: totalP,
+      velocity: round2(velMean),
+      velocity_sd: round2(wSd((r) => r.velocity, velMean)),
+      ivb: round2(ivbMean),
+      ivb_sd: round2(wSd((r) => r.ivb, ivbMean)),
+      hb: round2(hbMean),
+      hb_sd: round2(wSd((r) => r.hb, hbMean)),
+      rel_height: round2(relHMean),
+      rel_height_sd: round2(wSd((r) => r.rel_height, relHMean)),
+      rel_side: round2(relSMean),
+      rel_side_sd: round2(wSd((r) => r.rel_side, relSMean)),
+      extension: round2(extMean),
+      extension_sd: round2(wSd((r) => r.extension, extMean)),
+      spin: round2(spinMean),
+      spin_sd: round2(wSd((r) => r.spin, spinMean)),
+      whiff_pct: round2(whiffMean),
+      whiff_pct_sd: round2(wSd((r) => r.whiff_pct, whiffMean)),
+    });
+  }
+
+  results.sort((a, b) => `${a.hand}${a.pitch_type}`.localeCompare(`${b.hand}${b.pitch_type}`));
+  return results;
+}
+
 // ─── Step 5: Discrepancy Detection ─────────────────────────────────────────
 
 function detectBoundaryCases(row: ProcessedRow): boolean {
@@ -1095,25 +1207,34 @@ export async function runBreakingBallReclassification(
 
   console.timeEnd("[Reclass] 3. filter + reclassify (compute)");
 
-  // ── Step 4: Calculate population averages from final rows ─────────────
-  console.time("[Reclass] 4. population averages + write");
-  const populationAverages = calcPopulationAverages(outputRows, season);
-
-  // Write population averages to Supabase
-  const popWriteResult = await writePopulationAverages(populationAverages);
-  errors.push(...popWriteResult.errors);
-  console.timeEnd("[Reclass] 4. population averages + write");
-
-  // ── Step 5: Discrepancy detection ─────────────────────────────────────
-  console.time("[Reclass] 5. discrepancy detection");
-  const discrepancy = runDiscrepancyDetection(outputRows, populationAverages);
-  console.timeEnd("[Reclass] 5. discrepancy detection");
-
-  // ── Step 6: Write back ─────────────────────────────────────────────────
-  console.time("[Reclass] 6. write back to inputs table");
+  // ── Step 4: Write back classified rows ─────────────────────────────────
+  // Moved BEFORE pop calculation so pop reflects the full table state, not
+  // just the in-memory consolidation outputs (which can be tiny — ~35 rows
+  // across all pitch types — and produce near-zero SDs that explode
+  // downstream z-scores).
+  console.time("[Reclass] 4. write back to inputs table");
   const writeResult = await writeResults(outputRows, season);
   errors.push(...writeResult.errors);
-  console.timeEnd("[Reclass] 6. write back to inputs table");
+  console.timeEnd("[Reclass] 4. write back to inputs table");
+
+  // ── Step 5: Population averages from the full post-write table ────────
+  // Fetch every reclassifier-output pitch type (plus Cutter — it's now an
+  // output bucket but the existing TruMedia-tagged Cutters must contribute
+  // to the pop too). Compute pop from the COMBINED set. Same per-type
+  // grouping and weighted mean/SD as the in-memory path, just sourcing
+  // from the table after the write completes.
+  console.time("[Reclass] 5. population averages + write");
+  const populationAverages = await calcPopulationAveragesFromDb(season, [
+    "Gyro Slider", "Slider", "Sweeper", "Curveball", "Cutter",
+  ]);
+  const popWriteResult = await writePopulationAverages(populationAverages);
+  errors.push(...popWriteResult.errors);
+  console.timeEnd("[Reclass] 5. population averages + write");
+
+  // ── Step 6: Discrepancy detection ─────────────────────────────────────
+  console.time("[Reclass] 6. discrepancy detection");
+  const discrepancy = runDiscrepancyDetection(outputRows, populationAverages);
+  console.timeEnd("[Reclass] 6. discrepancy detection");
 
   // ── Step 7: Build report ───────────────────────────────────────────────
   const report: ReclassificationReport = {
