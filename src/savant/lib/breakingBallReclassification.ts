@@ -200,48 +200,69 @@ function applyFilters(
   return { surviving, filter1Dropped, filter2Dropped, filterPDropped };
 }
 
-// ─── Step 2: Four-Bucket Movement Classification ───────────────────────────
-// Priority order per spec: Gyro Slider → Curveball → Sweeper → Slider
+// ─── Step 2: Five-Bucket Movement Classification ───────────────────────────
+// Priority order: Cutter (slot-aware) → Gyro Slider → Curveball → Sweeper → Slider
 
-function reclassifyRHP(ivb: number, hb: number): string | null {
-  // Priority 1 — Gyro Slider: near-zero movement in both directions.
-  // IVB threshold relaxed from -2 to -3 (2026-05-07): elite gyros like
-  // Cole Gibler measured IVB=-2.14 with HB≈0 in 2026 and were getting
-  // mis-bucketed as Slider despite textbook gyro shape. Healthy 5-inch
-  // gap remains between gyro-loose (-3) and curveball (-8).
-  if (ivb >= -3 && hb >= -7) return "Gyro Slider";
+// rel_height threshold for high-slot pitchers. High-slot deliveries produce
+// natural backspin, so they ride more by default. A high-slot pitcher who
+// gets IVB down to +6 has done WAY more work shutting off their slot's
+// natural ride than a low-slot pitcher hitting the same +6 IVB. Slot-aware
+// classifier widens the gyro band for high-slot pitchers; the equation
+// rewards depth directionally inside the bucket regardless of slot.
+const HIGH_SLOT_THRESHOLD_FT = 6.0;
 
-  // Priority 2 — Curveball: depth wins. IVB-only, regardless of HB.
+function isHighSlot(relHeight: number | null): boolean {
+  return (relHeight ?? 0) >= HIGH_SLOT_THRESHOLD_FT;
+}
+
+function reclassifyRHP(ivb: number, hb: number, relHeight: number | null): string | null {
+  const gyroCap = isHighSlot(relHeight) ? 6 : 3;
+
+  // Priority 1 — Cutter: above the slot-appropriate ride ceiling.
+  // For low slot (cap=3), anything > 3 IVB is too much ride to be a gyro.
+  // For high slot (cap=6), they need > 6 IVB to be classified as Cutter.
+  if (ivb > gyroCap) return "Cutter";
+
+  // Priority 2 — Gyro Slider: IVB inside slot-appropriate band, HB near zero.
+  // IVB lower bound stays -3 for all slots (anything more negative is
+  // Curveball territory regardless of slot).
+  if (ivb >= -3 && hb >= -7 && hb <= 7) return "Gyro Slider";
+
+  // Priority 3 — Curveball: depth wins. IVB-only, regardless of HB.
   if (ivb <= -8) return "Curveball";
 
-  // Priority 3 — Sweeper: dominant horizontal, minimal depth
+  // Priority 4 — Sweeper: dominant horizontal, minimal depth
   if (hb <= -11 && ivb > -4) return "Sweeper";
 
-  // Priority 4 — Slider: default catch for any non-curveball breaking ball
+  // Priority 5 — Slider: default catch for any non-cutter, non-gyro breaking ball
   return "Slider";
 }
 
-function reclassifyLHP(ivb: number, hb: number): string | null {
-  // Mirror HorzBrk signs, IVB thresholds identical
+function reclassifyLHP(ivb: number, hb: number, relHeight: number | null): string | null {
+  const gyroCap = isHighSlot(relHeight) ? 6 : 3;
 
-  // Priority 1 — Gyro Slider: near-zero movement (see RHP comment for
-  // 2026-05-07 IVB-threshold relaxation rationale).
-  if (ivb >= -3 && hb <= 7) return "Gyro Slider";
+  // Priority 1 — Cutter
+  if (ivb > gyroCap) return "Cutter";
 
-  // Priority 2 — Curveball: depth wins. IVB-only.
+  // Priority 2 — Gyro Slider: HB band symmetric (gyros are HB-neutral by nature)
+  if (ivb >= -3 && hb >= -7 && hb <= 7) return "Gyro Slider";
+
+  // Priority 3 — Curveball
   if (ivb <= -8) return "Curveball";
 
-  // Priority 3 — Sweeper: dominant horizontal (positive HB for LHP)
+  // Priority 4 — Sweeper: dominant horizontal (positive HB for LHP)
   if (hb >= 11 && ivb > -4) return "Sweeper";
 
-  // Priority 4 — Slider: default catch for any non-curveball breaking ball
+  // Priority 5 — Slider: default
   return "Slider";
 }
 
 function reclassify(row: RawBreakingBallRow): string | null {
   const ivb = row.ivb!;
   const hb = row.hb!;
-  return row.hand === "L" ? reclassifyLHP(ivb, hb) : reclassifyRHP(ivb, hb);
+  return row.hand === "L"
+    ? reclassifyLHP(ivb, hb, row.rel_height)
+    : reclassifyRHP(ivb, hb, row.rel_height);
 }
 
 // ─── Step 3: Consolidation (4-Tier Rules) ──────────────────────────────────
