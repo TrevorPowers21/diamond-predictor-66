@@ -247,7 +247,7 @@ async function extractAndUpsertPlayers(
     bats_hand: p.bats_hand,
     throws_hand: p.throws_hand,
     division: p.division,
-    portal_status: "NOT_IN_PORTAL",
+    portal_status: "NOT IN PORTAL",
     transfer_portal: false,
   }));
 
