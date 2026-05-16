@@ -173,14 +173,18 @@ function calcCutter(row: PitchRow, pop: PopConstants, hand: string): { score: nu
 function calcGyroSlider(row: PitchRow, pop: PopConstants): { score: number; zs: ZScores } {
   // Velocity: MAX floor — below avg contributes zero
   const zv = zMax(row.velocity, pop.velocity, pop.velocity_sd) ?? 0;
-  // IVB: more negative = better — (avg - player) / sd = -(player - avg) / sd.
-  // Same shape as the regular Slider IVB (a true gyro shouldn't ride; the
-  // more depth/drop, the better). Was previously proximity-to-zero, which
-  // penalized true gyros with real drop.
+  // IVB: directional — more negative = better. Within the slot-aware gyro
+  // bucket (the classifier sets the slot-specific upper cap: +6 for high
+  // slot, +3 for low slot), depth rewards proportionally. A high-slot
+  // pitcher who reaches -2 IVB has shut off way more natural ride than a
+  // low-slot pitcher hitting the same number, and they sit further below
+  // the population mean (which is dominated by high-slot ride-heavy pitches),
+  // so the -z formula naturally weights their achievement higher. Same
+  // formula as the regular Slider IVB.
   const ziRaw = z(row.ivb, pop.ivb, pop.ivb_sd) ?? 0;
   const zi = -ziRaw;
-  // HB: proximity to zero rewarded — (sd - |0 - hb|) / sd. A true gyro has
-  // minimal lateral movement; this stays the same.
+  // HB: proximity to zero rewarded — gyros have minimal lateral movement
+  // regardless of slot.
   const zh = (pop.hb_sd && row.hb != null) ? (pop.hb_sd - Math.abs(0 - row.hb)) / pop.hb_sd : 0;
   const zrh = zAbs(row.rel_height, pop.rel_height, pop.rel_height_sd) ?? 0;
   const zrs = zAbs(row.rel_side, pop.rel_side, pop.rel_side_sd) ?? 0;

@@ -8,6 +8,13 @@ import { supabase } from "@/integrations/supabase/client";
  * hand) before inserting, so re-running with the same CSV produces the same
  * row set, not duplicates.
  *
+ * Pitch type + hand are derived from the FILENAME ("4S FB RHP.csv" pattern),
+ * not from CSV columns. TruMedia's per-pitch-type export doesn't include a
+ * Pitch Type column at all, and adding it manually before each import was
+ * the manual step we're eliminating. The CSV's throwsHand column (if
+ * present) is used only as a sanity check — a mismatch warns but doesn't
+ * abort.
+ *
  * Caller is responsible for chaining the downstream pipeline (velo-diff →
  * reclassify → Stuff+ engine → rollup) once all per-file imports finish.
  */
@@ -18,6 +25,51 @@ export interface StuffPlusInputsImportResult {
   pitchType: string;
   hand: string;
   errors: string[];
+  warnings: string[];
+}
+
+/**
+ * Parse pitch type + hand from a filename like "4S FB RHP.csv" or
+ * "Slider_LHP.csv" or "Gyro Slider RHP.csv". Returns null if either
+ * component can't be determined unambiguously.
+ *
+ * Pitch matching is longest-first: "Gyro Slider" beats "Slider", "4S FB"
+ * beats nothing else, etc. Hand matching is RHP/LHP as a whole token
+ * (won't match "RHP" embedded in a player name fragment because we strip
+ * extension first and look for the literal token).
+ */
+export function parsePitchTypeAndHandFromFilename(
+  filename: string,
+): { pitchType: string; hand: "R" | "L" } | null {
+  // Strip directory + extension, normalize separators to spaces.
+  const base = filename.split(/[/\\]/).pop() ?? filename;
+  const stem = base.replace(/\.[^.]+$/, "");
+  const normalized = stem.replace(/[_\-]+/g, " ").trim();
+
+  // Hand: look for RHP / LHP as a whole word (case-insensitive).
+  let hand: "R" | "L" | null = null;
+  if (/\bRHP\b/i.test(normalized)) hand = "R";
+  else if (/\bLHP\b/i.test(normalized)) hand = "L";
+  if (!hand) return null;
+
+  // Pitch type: ordered longest-first to avoid "Slider" eating "Gyro Slider"
+  // or "Sweeper". Patterns are case-insensitive, allow optional space/dash.
+  const candidates: Array<{ pattern: RegExp; canonical: string }> = [
+    { pattern: /gyro[\s\-_]?slider/i,    canonical: "Gyro Slider" },
+    { pattern: /4[\s\-_]?s[\s\-_]?fb/i,  canonical: "4S FB" },
+    { pattern: /four[\s\-_]?seam/i,      canonical: "4S FB" },
+    { pattern: /change[\s\-_]?up/i,      canonical: "Change-up" },
+    { pattern: /sweeper/i,               canonical: "Sweeper" },
+    { pattern: /splitter/i,              canonical: "Splitter" },
+    { pattern: /curveball/i,             canonical: "Curveball" },
+    { pattern: /cutter/i,                canonical: "Cutter" },
+    { pattern: /sinker/i,                canonical: "Sinker" },
+    { pattern: /slider/i,                canonical: "Slider" },
+  ];
+  for (const { pattern, canonical } of candidates) {
+    if (pattern.test(normalized)) return { pitchType: canonical, hand };
+  }
+  return null;
 }
 
 interface ParsedRow {
@@ -84,6 +136,7 @@ function parseCsvLine(line: string): string[] {
 export async function importStuffPlusInputsCsv(
   csvText: string,
   season: number,
+  fileName?: string,
 ): Promise<StuffPlusInputsImportResult> {
   const result: StuffPlusInputsImportResult = {
     inserted: 0,
@@ -91,6 +144,7 @@ export async function importStuffPlusInputsCsv(
     pitchType: "",
     hand: "",
     errors: [],
+    warnings: [],
   };
 
   const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
@@ -122,18 +176,52 @@ export async function importStuffPlusInputsCsv(
     return result;
   }
 
-  // Detect pitch_type + hand from first data row. The TruMedia per-file pattern
-  // means every row in a single file shares the same (pitch_type, hand).
+  // Resolve pitch_type + hand. Filename is the source of truth (no manual
+  // CSV edits needed); CSV columns are sanity-check fallbacks.
   const firstDataRow = parseCsvLine(lines[1]);
-  const detectedPitchType = iPitchType !== -1 ? (firstDataRow[iPitchType] || "").trim() : "";
-  if (!detectedPitchType) {
-    result.errors.push("Could not detect Pitch Type from first data row.");
-    return result;
+  const csvPitchType = iPitchType !== -1 ? (firstDataRow[iPitchType] || "").trim() : "";
+  const csvHand = iThrowsHand !== -1 ? (firstDataRow[iThrowsHand] || "").trim() : "";
+
+  let detectedPitchType: string | null = null;
+  let detectedHand: string | null = null;
+
+  if (fileName) {
+    const fromFilename = parsePitchTypeAndHandFromFilename(fileName);
+    if (fromFilename) {
+      detectedPitchType = fromFilename.pitchType;
+      detectedHand = fromFilename.hand;
+      // Sanity check: if CSV columns are present, warn on mismatch — most
+      // likely the file got renamed or its data was mixed up.
+      if (csvPitchType && csvPitchType.toLowerCase() !== fromFilename.pitchType.toLowerCase()) {
+        result.warnings.push(
+          `Filename says pitch_type='${fromFilename.pitchType}' but CSV says '${csvPitchType}'. Using filename. Rename or fix CSV if wrong.`,
+        );
+      }
+      if (csvHand) {
+        const csvHandNorm = csvHand.toUpperCase().startsWith("L") ? "L" : "R";
+        if (csvHandNorm !== fromFilename.hand) {
+          result.warnings.push(
+            `Filename says hand='${fromFilename.hand}HP' but CSV throwsHand='${csvHand}'. Using filename. Rename or fix CSV if wrong.`,
+          );
+        }
+      }
+    }
   }
-  const detectedHand = iThrowsHand !== -1 ? (firstDataRow[iThrowsHand] || "").trim() : "";
-  if (!detectedHand) {
-    result.errors.push("Could not detect throwsHand from first data row.");
-    return result;
+
+  // Fallback: if filename didn't yield, use CSV columns (legacy path).
+  if (!detectedPitchType || !detectedHand) {
+    if (csvPitchType && csvHand) {
+      detectedPitchType = csvPitchType;
+      detectedHand = csvHand.toUpperCase().startsWith("L") ? "L" : "R";
+      result.warnings.push(
+        `Filename '${fileName ?? "(none)"}' didn't yield pitch_type + hand. Using CSV columns instead.`,
+      );
+    } else {
+      result.errors.push(
+        `Cannot determine pitch_type + hand. Filename must include both (e.g., "4S FB RHP.csv") OR CSV must include 'Pitch Type' + 'throwsHand' columns. Got filename='${fileName ?? "(none)"}', csvPitchType='${csvPitchType}', csvHand='${csvHand}'.`,
+      );
+      return result;
+    }
   }
 
   result.pitchType = detectedPitchType;
@@ -169,13 +257,13 @@ export async function importStuffPlusInputsCsv(
       conf = teamLookup.get(teamName.toLowerCase().trim())!;
     }
 
-    const rowHand = iThrowsHand !== -1 ? (values[iThrowsHand] || "").trim() : detectedHand;
-
+    // pitch_type + hand are constant per file (resolved above). Don't read
+    // per-row from CSV — filename is canonical.
     rows.push({
       source_player_id: playerId,
       season,
       pitch_type: detectedPitchType,
-      hand: rowHand || detectedHand,
+      hand: detectedHand,
       team: teamName,
       team_id: teamId,
       conference: conf.conference,

@@ -18,6 +18,7 @@ type CliArgs = {
   yes: boolean;
   dryRun: boolean;
   prod: boolean;
+  keepFiles: boolean;
 };
 
 function parseArgs(argv: string[]): CliArgs {
@@ -27,6 +28,7 @@ function parseArgs(argv: string[]): CliArgs {
     yes: false,
     dryRun: false,
     prod: false,
+    keepFiles: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -40,6 +42,8 @@ function parseArgs(argv: string[]): CliArgs {
       args.dryRun = true;
     } else if (a === "--prod") {
       args.prod = true;
+    } else if (a === "--keep-files") {
+      args.keepFiles = true;
     } else if (a === "--help" || a === "-h") {
       printHelp();
       process.exit(0);
@@ -66,6 +70,8 @@ Options:
   --dry-run        Show detection + pipeline plan, exit without prompting.
   --yes, -y        Skip standard confirmation prompt (does NOT bypass --prod guard).
   --prod           Run against production Supabase. Requires typed "yes-promote-to-prod".
+  --keep-files     Don't archive successfully-imported files. Useful for re-running.
+                   Default behavior moves files to ~/RSTR IQ Data/imported/<YYYY-MM-DD>/.
   --help           Show this message.
 
 Environments:
@@ -183,7 +189,7 @@ async function main(): Promise<void> {
 
   console.log(`\n${importable.length} file${importable.length === 1 ? "" : "s"} queued for import.`);
   const { runImports } = await import("./runner.ts");
-  await runImports(results, args.season);
+  await runImports(results, args.season, args.keepFiles);
   process.exit(0);
 }
 

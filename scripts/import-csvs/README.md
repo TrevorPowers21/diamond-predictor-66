@@ -40,10 +40,22 @@ When you create a new Supabase branch:
 ```
 1. Drop CSVs in ~/RSTR IQ Data/inbox/
 2. npm run import           ← runs on staging branch
-3. Spot-check the staging app
-4. npm run import:prod       ← runs on production, type "yes-promote-to-prod"
-5. Done
+3. Successful files auto-archive to ~/RSTR IQ Data/imported/<YYYY-MM-DD>/
+4. Spot-check the staging app
+5. (Optional) re-export the same files into inbox if promoting to prod
+6. npm run import:prod       ← runs on production, type "yes-promote-to-prod"
+7. Done
 ```
+
+**Stuff+ Inputs filenames:** `<Pitch Type> <Hand>.csv` — e.g., `4S FB RHP.csv`,
+`Slider LHP.csv`, `Gyro Slider RHP.csv`. The importer reads pitch type and
+hand from the filename, so no manual CSV-column edits required. CSV
+`throwsHand` column is sanity-checked against the filename — a mismatch
+warns but doesn't abort.
+
+**Failed files stay in inbox** — they'll get picked up on the next run.
+Re-run with `--keep-files` to skip the archive step if you want to leave
+successful files in place (e.g., for re-running with the same data).
 
 ## What gets run (cascade order)
 

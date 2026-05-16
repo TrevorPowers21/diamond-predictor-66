@@ -132,7 +132,11 @@ export const REGISTRY: RegistryEntry[] = [
   {
     type: "pitcher_stuff_inputs",
     label: "Stuff+ Inputs (per-pitch / per-hand)",
-    required: ["playerId", "playerFullName", "Pitch Type"],
+    // pitch_type + hand come from the FILENAME ("4S FB RHP.csv" pattern),
+    // not from CSV columns — TruMedia's per-pitch export doesn't include
+    // a Pitch Type column. The filename hints below + signature columns
+    // are how we detect the file as Stuff+ Inputs.
+    required: ["playerId", "playerFullName"],
     signature: [
       "Vel",
       "IndVertBrk",
