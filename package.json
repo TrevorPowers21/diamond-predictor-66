@@ -18,7 +18,9 @@
     "lock-season": "tsx --env-file-if-exists=.env.local scripts/lock-season-cli.ts",
     "lock-season:prod": "tsx --env-file-if-exists=.env.production.local scripts/lock-season-cli.ts --prod",
     "recompute-stuff": "tsx --env-file-if-exists=.env.local scripts/recompute-stuff-plus.ts",
-    "recompute-stuff:prod": "tsx --env-file-if-exists=.env.production.local scripts/recompute-stuff-plus.ts --prod"
+    "recompute-stuff:prod": "tsx --env-file-if-exists=.env.production.local scripts/recompute-stuff-plus.ts --prod",
+    "import-juco": "tsx --env-file-if-exists=.env.local scripts/import-juco/cli.ts",
+    "import-juco:prod": "tsx --env-file-if-exists=.env.production.local scripts/import-juco/cli.ts --prod"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
