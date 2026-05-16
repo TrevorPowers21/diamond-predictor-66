@@ -1233,14 +1233,18 @@ export async function runBreakingBallReclassification(
   console.timeEnd("[Reclass] 4. write back to inputs table");
 
   // ── Step 5: Population averages from the full post-write table ────────
-  // Fetch every reclassifier-output pitch type (plus Cutter — it's now an
-  // output bucket but the existing TruMedia-tagged Cutters must contribute
-  // to the pop too). Compute pop from the COMBINED set. Same per-type
-  // grouping and weighted mean/SD as the in-memory path, just sourcing
-  // from the table after the write completes.
+  // Compute pop for ALL 9 pitch types — not just breaking balls. Non-BB
+  // pops (4S FB, Sinker, Change-up, Splitter) were missing entirely from
+  // pitcher_stuff_plus_ncaa, which meant the Stuff+ engine dropped every
+  // fastball, sinker, changeup, and splitter row with "No population
+  // constants for X" — making the pitcher-level aggregate breaking-ball-only.
+  // Since FB is the dominant pitch in most arsenals, that's a fundamental
+  // gap. Pop is D1-only via the .eq("division","D1") filter inside
+  // calcPopulationAveragesFromDb.
   console.time("[Reclass] 5. population averages + write");
   const populationAverages = await calcPopulationAveragesFromDb(season, [
-    "Gyro Slider", "Slider", "Sweeper", "Curveball", "Cutter",
+    "4S FB", "Sinker", "Cutter", "Gyro Slider", "Slider", "Sweeper",
+    "Curveball", "Change-up", "Splitter",
   ]);
   const popWriteResult = await writePopulationAverages(populationAverages);
   errors.push(...popWriteResult.errors);
