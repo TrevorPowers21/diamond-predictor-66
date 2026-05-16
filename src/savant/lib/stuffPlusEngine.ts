@@ -341,11 +341,15 @@ export async function runStuffPlusPipeline(
   console.time("[Stuff+] TOTAL");
 
   // ── Pull population constants ──────────────────────────────────────────
+  // Filter to D1 only — JUCO pitches z-score against D1 pop too (locked
+  // by feedback_juco_uses_d1_baselines memory). Without this filter, if
+  // JUCO ever has its own pop row, both divisions would mix incorrectly.
   console.time("[Stuff+] 1. fetch population constants");
   const { data: popData, error: popErr } = await (supabase as any)
     .from("pitcher_stuff_plus_ncaa")
     .select("*")
-    .eq("season", season);
+    .eq("season", season)
+    .eq("division", "D1");
   console.timeEnd("[Stuff+] 1. fetch population constants");
 
   if (popErr || !popData) {

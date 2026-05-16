@@ -57,9 +57,9 @@ export async function runVeloDiffPipeline(
 
   // ── Step 1: Pull all relevant rows ─────────────────────────────────────
   console.time("[VeloDiff] 1. fetch pitch rows");
-  const allRows = await fetchAll<PitchRow>(
+  const allRows = await fetchAll<PitchRow & { division?: string }>(
     "pitcher_stuff_plus_inputs",
-    "id, source_player_id, pitch_type, hand, pitches, velocity",
+    "id, source_player_id, pitch_type, hand, pitches, velocity, division",
     (q: any) => q.eq("season", season).in("pitch_type", ["4S FB", "Sinker", "Change-up"]),
   );
   console.timeEnd("[VeloDiff] 1. fetch pitch rows");
@@ -80,8 +80,10 @@ export async function runVeloDiffPipeline(
   let noFastballFound = 0;
   let negativeVeloDiff = 0;
 
-  // Collect updates: { id, fb_ch_velo_diff, needs_review? }
-  const updates: Array<{ id: string; fb_ch_velo_diff: number | null; hand: string; pitches: number }> = [];
+  // Collect updates: { id, fb_ch_velo_diff, hand, pitches, division }.
+  // division is captured so the NCAA pop write below can filter to D1-only
+  // even though per-pitcher diffs get written for every division.
+  const updates: Array<{ id: string; fb_ch_velo_diff: number | null; hand: string; pitches: number; division: string }> = [];
   const flaggedIds: string[] = [];
 
   for (const [, rows] of playerMap) {
@@ -116,13 +118,13 @@ export async function runVeloDiffPipeline(
       totalChangeupRows++;
 
       if (fbVelo == null || ch.velocity == null) {
-        updates.push({ id: ch.id, fb_ch_velo_diff: null, hand: ch.hand, pitches: ch.pitches ?? 0 });
+        updates.push({ id: ch.id, fb_ch_velo_diff: null, hand: ch.hand, pitches: ch.pitches ?? 0, division: (ch as any).division ?? "D1" });
         if (fbVelo == null) flaggedIds.push(ch.id);
         continue;
       }
 
       const diff = Math.round((fbVelo - ch.velocity) * 100) / 100;
-      updates.push({ id: ch.id, fb_ch_velo_diff: diff, hand: ch.hand, pitches: ch.pitches ?? 0 });
+      updates.push({ id: ch.id, fb_ch_velo_diff: diff, hand: ch.hand, pitches: ch.pitches ?? 0, division: (ch as any).division ?? "D1" });
 
       if (diff < 0) {
         negativeVeloDiff++;
@@ -189,8 +191,13 @@ export async function runVeloDiffPipeline(
   }
 
   const validUpdates = updates.filter((u) => u.fb_ch_velo_diff != null && !flaggedIds.includes(u.id));
-  const rhpData = validUpdates.filter((u) => u.hand === "R").map((u) => ({ diff: u.fb_ch_velo_diff!, p: u.pitches }));
-  const lhpData = validUpdates.filter((u) => u.hand === "L").map((u) => ({ diff: u.fb_ch_velo_diff!, p: u.pitches }));
+  // NCAA pop stats are D1-only — JUCO per-pitcher diffs are still written
+  // above (so JUCO pitchers get their personal fb_ch_velo_diff stored),
+  // but the population mean+sd that lands on pitcher_stuff_plus_ncaa
+  // reflects only the D1 cohort. See feedback_juco_uses_d1_baselines.
+  const d1Updates = validUpdates.filter((u) => u.division === "D1");
+  const rhpData = d1Updates.filter((u) => u.hand === "R").map((u) => ({ diff: u.fb_ch_velo_diff!, p: u.pitches }));
+  const lhpData = d1Updates.filter((u) => u.hand === "L").map((u) => ({ diff: u.fb_ch_velo_diff!, p: u.pitches }));
 
   const rhpStats = calcWeightedStats(rhpData);
   const lhpStats = calcWeightedStats(lhpData);

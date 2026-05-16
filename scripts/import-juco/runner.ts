@@ -533,6 +533,7 @@ async function upsertPerPitchStuffPlus(
         spin: spinFinal,
         vaa: toNum(r["VertApprAngle"]),
         whiff_pct: toNum(r["Miss%"]),
+        division: JUCO_DIVISION,
       });
     }
 

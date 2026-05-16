@@ -629,6 +629,9 @@ async function calcPopulationAveragesFromDb(
   season: number,
   pitchTypes: string[],
 ): Promise<PopulationAverages[]> {
+  // Filter to D1 only so JUCO data doesn't contaminate the baseline pop
+  // constants. JUCO rows still get scored, but against the D1 pop. See
+  // feedback_juco_uses_d1_baselines memory.
   const { data: rows, error } = await fetchAllRows<{
     pitch_type: string;
     hand: string;
@@ -644,7 +647,7 @@ async function calcPopulationAveragesFromDb(
   }>(
     "pitcher_stuff_plus_inputs",
     "pitch_type, hand, pitches, velocity, ivb, hb, rel_height, rel_side, extension, spin, whiff_pct",
-    (q: any) => q.eq("season", season).in("pitch_type", pitchTypes),
+    (q: any) => q.eq("season", season).in("pitch_type", pitchTypes).eq("division", "D1"),
   );
   if (error || !rows) return [];
 
@@ -1015,6 +1018,11 @@ async function writePopulationAverages(
           pitch_type: avg.pitch_type,
           hand: avg.hand,
           season: avg.season,
+          // pop is computed D1-only (see calcPopulationAveragesFromDb). Tag
+          // the row explicitly so future readers can filter division='D1'
+          // and so we never accidentally overwrite a JUCO pop row if one
+          // ever gets written.
+          division: "D1",
           velocity: avg.velocity,
           velocity_sd: avg.velocity_sd,
           ivb: avg.ivb,
