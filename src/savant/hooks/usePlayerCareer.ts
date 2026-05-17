@@ -29,14 +29,14 @@ export interface PlayerCareerRow {
   chase: number | null;
   pop_up: number | null;
   // Internal power ratings (computed by Compute Scores)
-  ba_plus: number | null;
-  obp_plus: number | null;
-  iso_plus: number | null;
-  overall_plus: number | null;
+  ba_power_rating: number | null;
+  obp_power_rating: number | null;
+  iso_power_rating: number | null;
+  overall_power_rating: number | null;
 }
 
 const SELECT_COLS =
-  "Season, Team, Conference, Pos, pa, ab, AVG, OBP, SLG, ISO, avg_exit_velo, ev90, barrel, contact, line_drive, la_10_30, gb, pull, bb, chase, pop_up, ba_plus, obp_plus, iso_plus, overall_plus";
+  "Season, Team, Conference, Pos, pa, ab, AVG, OBP, SLG, ISO, avg_exit_velo, ev90, barrel, contact, line_drive, la_10_30, gb, pull, bb, chase, pop_up, ba_power_rating, obp_power_rating, iso_power_rating, overall_power_rating";
 
 /**
  * Fetches every Hitter Master row for one source_player_id, newest season first.

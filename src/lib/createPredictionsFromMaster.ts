@@ -60,7 +60,7 @@ export async function createPredictionsFromMaster(season = 2026): Promise<Result
 
   // ─── Load Hitter Master with canonical scores by source_player_id ────
   console.time("[CreatePreds] 3. load Hitter Master");
-  // Read ba_plus/obp_plus/iso_plus directly (already computed by Compute Scores)
+  // Read ba_power_rating/obp_power_rating/iso_power_rating directly (already computed by Compute Scores)
   // instead of recomputing here — keeps internals in sync with master.
   const hitterBySourceId = new Map<string, any>();
   const hitterByNameTeam = new Map<string, any>();
@@ -68,7 +68,7 @@ export async function createPredictionsFromMaster(season = 2026): Promise<Result
   while (true) {
     const { data, error } = await supabase
       .from("Hitter Master")
-      .select("source_player_id, playerFullName, Team, TeamID, AVG, OBP, SLG, ba_plus, obp_plus, iso_plus, overall_plus, combined_used, blended_avg, blended_obp, blended_slg, blended_from_team, blended_from_team_id")
+      .select("source_player_id, playerFullName, Team, TeamID, AVG, OBP, SLG, ba_power_rating, obp_power_rating, iso_power_rating, overall_power_rating, combined_used, blended_avg, blended_obp, blended_slg, blended_from_team, blended_from_team_id")
       .eq("Season", season)
       .range(from, from + 999);
     if (error) break;
@@ -124,10 +124,10 @@ export async function createPredictionsFromMaster(season = 2026): Promise<Result
     if (!hitter) continue;
 
     const existing = existingPredByPlayerId.get(player.id);
-    const baPlus = (hitter as any).ba_plus ?? null;
-    const obpPlus = (hitter as any).obp_plus ?? null;
-    const isoPlus = (hitter as any).iso_plus ?? null;
-    const overallPlus = (hitter as any).overall_plus ?? null;
+    const baPlus = (hitter as any).ba_power_rating ?? null;
+    const obpPlus = (hitter as any).obp_power_rating ?? null;
+    const isoPlus = (hitter as any).iso_power_rating ?? null;
+    const overallPlus = (hitter as any).overall_power_rating ?? null;
 
     // If blended_from_team exists and differs from player's current from_team, queue update.
     // Note: blend math runs upstream (combineStats) and writes to blended_avg/blended_era/etc.
@@ -314,9 +314,9 @@ export async function createPredictionsFromMaster(season = 2026): Promise<Result
     const partial: any = {};
     const hitter = playerIdToHitter.get(pred.player_id);
     if (hitter) {
-      partial.avg_power_rating = (hitter as any).ba_plus ?? null;
-      partial.obp_power_rating = (hitter as any).obp_plus ?? null;
-      partial.slg_power_rating = (hitter as any).iso_plus ?? null;
+      partial.avg_power_rating = (hitter as any).ba_power_rating ?? null;
+      partial.obp_power_rating = (hitter as any).obp_power_rating ?? null;
+      partial.slg_power_rating = (hitter as any).iso_power_rating ?? null;
     }
     const pitcher = playerIdToPitcher.get(pred.player_id);
     if (pitcher) {

@@ -115,10 +115,10 @@ export interface ConfScoutingResult {
   pitcher_pull_pct: number | null;
   pitcher_la_10_30_pct: number | null;
 
-  // Power Ratings
-  ba_plus: number | null;
-  obp_plus: number | null;
-  iso_plus: number | null;
+  // Power Ratings (sub-metric derived)
+  ba_power_rating: number | null;
+  obp_power_rating: number | null;
+  iso_power_rating: number | null;
   offensive_power_rating: number | null;
 
   // Hitter scores (0-100 percentiles)
@@ -426,9 +426,9 @@ export async function computeConferenceScoutingAverages(
       pitcher_pull_pct: round2(confPPull),
       pitcher_la_10_30_pct: round2(confPLA),
 
-      ba_plus: round1(baPlus),
-      obp_plus: round1(obpPlus),
-      iso_plus: round1(isoPlus),
+      ba_power_rating: round1(baPlus),
+      obp_power_rating: round1(obpPlus),
+      iso_power_rating: round1(isoPlus),
       offensive_power_rating: round1(offensivePR),
 
       hitter_contact_score: round1(sContact),
@@ -467,10 +467,10 @@ export async function computeConferenceScoutingAverages(
   let written = 0;
   for (const r of results) {
     const payload: Record<string, any> = {
-      // Power Ratings
-      ba_plus: r.ba_plus,
-      obp_plus: r.obp_plus,
-      iso_plus: r.iso_plus,
+      // Power Ratings (sub-metric derived)
+      ba_power_rating: r.ba_power_rating,
+      obp_power_rating: r.obp_power_rating,
+      iso_power_rating: r.iso_power_rating,
       offensive_power_rating: r.offensive_power_rating,
       // Hitter raw rates
       hitter_contact_pct: r.hitter_contact_pct,

@@ -51,9 +51,9 @@ interface ConfRow {
   pitcher_pull_pct: number | null;
   pitcher_la_10_30_pct: number | null;
   // Power Ratings
-  ba_plus: number | null;
-  obp_plus: number | null;
-  iso_plus: number | null;
+  ba_power_rating: number | null;
+  obp_power_rating: number | null;
+  iso_power_rating: number | null;
   offensive_power_rating: number | null;
   Stuff_plus: number | null;
   WRC_plus: number | null;
@@ -148,9 +148,9 @@ function flatten(r: ConfRow, ncaaWrc: number | null, ncaa: any) {
     p_pull: r.pitcher_pull_pct,
     p_la: r.pitcher_la_10_30_pct,
     // Power Ratings
-    ba_plus: r.ba_plus,
-    obp_plus: r.obp_plus,
-    iso_plus: r.iso_plus,
+    ba_power_rating: r.ba_power_rating,
+    obp_power_rating: r.obp_power_rating,
+    iso_power_rating: r.iso_power_rating,
     opr: r.offensive_power_rating,
     stuff_plus: r.Stuff_plus,
     wrc_plus: wrcPlus,
@@ -258,9 +258,9 @@ export default function ConferenceStatsPage() {
       p_ev90: ncaaRow.pitcher_ev90,
       p_pull: ncaaRow.pitcher_pull_pct,
       p_la: ncaaRow.pitcher_la_10_30_pct,
-      ba_plus: 100,
-      obp_plus: 100,
-      iso_plus: 100,
+      ba_power_rating: 100,
+      obp_power_rating: 100,
+      iso_power_rating: 100,
       opr: 100,
       stuff_plus: 100,
       wrc_plus: 100,
@@ -486,9 +486,9 @@ function HittingTable({ rows, ncaaRow, sortKey, sortDir, onSort }: { rows: FlatR
             <SortHeader label="Pull%" field="pull" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="LA10-30%" field="la" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="GB%" field="gb" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="BA+" field="ba_plus" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="OBP+" field="obp_plus" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="ISO+" field="iso_plus" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="BA+" field="ba_power_rating" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="OBP+" field="obp_power_rating" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="ISO+" field="iso_power_rating" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="Overall PR" field="opr" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="Hitter Talent+" field="hitter_talent_plus" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
           </tr>
@@ -508,9 +508,9 @@ function HittingTable({ rows, ncaaRow, sortKey, sortDir, onSort }: { rows: FlatR
               <td className="px-3 py-2 text-right tabular-nums">{fmt1(r.pull)}</td>
               <td className="px-3 py-2 text-right tabular-nums">{fmt1(r.la)}</td>
               <td className="px-3 py-2 text-right tabular-nums">{fmt1(r.gb)}</td>
-              <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: tierColor(r.ba_plus, 100, 8) }}>{fmtInt(r.ba_plus)}</td>
-              <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: tierColor(r.obp_plus, 100, 8) }}>{fmtInt(r.obp_plus)}</td>
-              <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: tierColor(r.iso_plus, 100, 8) }}>{fmtInt(r.iso_plus)}</td>
+              <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: tierColor(r.ba_power_rating, 100, 8) }}>{fmtInt(r.ba_power_rating)}</td>
+              <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: tierColor(r.obp_power_rating, 100, 8) }}>{fmtInt(r.obp_power_rating)}</td>
+              <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: tierColor(r.iso_power_rating, 100, 8) }}>{fmtInt(r.iso_power_rating)}</td>
               <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: tierColor(r.opr, 100, 8) }}>{fmtInt(r.opr)}</td>
               <td className="px-3 py-2 text-right tabular-nums font-bold" style={{ color: tierColor(r.hitter_talent_plus, 100, 8) }}>{fmtInt(r.hitter_talent_plus)}</td>
             </tr>

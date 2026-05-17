@@ -28,11 +28,11 @@ import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
-import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
+import { TRANSFER_WEIGHT_DEFAULTS, transferWeightsForSource } from "@/lib/transferWeightDefaults";
 
 /* ─── shared types ─── */
 type TeamRow = { id?: string; name: string; conference: string | null; conference_id?: string | null; park_factor: number | null; source_team_id?: string | null };
-type HitterConfRow = { conference: string; season: number | null; avg_plus: number | null; obp_plus: number | null; iso_plus: number | null; stuff_plus: number | null };
+type HitterConfRow = { conference: string; conference_id: string | null; season: number | null; avg_plus: number | null; obp_plus: number | null; iso_plus: number | null; stuff_plus: number | null };
 type SeedRow = { playerName: string; team: string | null; avg: number | null; obp: number | null; slg: number | null };
 type PredictionInternal = { prediction_id: string; avg_power_rating: number | null; obp_power_rating: number | null; slg_power_rating: number | null };
 
@@ -44,6 +44,7 @@ type PlayerLite = {
   team: string | null;
   from_team: string | null;
   conference: string | null;
+  division?: string | null;
   transfer_portal?: boolean | null;
   player_predictions: Array<{
     id: string;
@@ -336,6 +337,7 @@ function simulateHitter(args: {
   internals: PredictionInternal | null;
   teamByKey: Map<string, TeamRow>;
   confByKey: Map<string, HitterConfRow>;
+  confById: Map<string, HitterConfRow>;
   seedByPlayerId: Map<string, SeedRow>;
   seedByName: Map<string, SeedRow[]>;
   parkMap: ParkFactorsMap;
@@ -343,7 +345,7 @@ function simulateHitter(args: {
   eqNum: (key: string, fallback: number) => number;
   powerByNameTeam: Map<string, any>;
 }): HitterSimOut | null {
-  const { player, destinationTeam, prediction, internals, teamByKey, confByKey, seedByPlayerId, seedByName, parkMap, teams, eqNum, powerByNameTeam } = args;
+  const { player, destinationTeam, prediction, internals, teamByKey, confByKey, confById, seedByPlayerId, seedByName, parkMap, teams, eqNum, powerByNameTeam } = args;
   let baPR = internals?.avg_power_rating ?? null;
   let obpPR = internals?.obp_power_rating ?? null;
   let isoPR = internals?.slg_power_rating ?? null;
@@ -392,7 +394,13 @@ function simulateHitter(args: {
   const toTeamRow = resolveTeamRowFromCandidates([destinationTeam], teamByKey, teams);
   if (!toTeamRow) return null;
 
-  const resolveConf = (conference: string | null | undefined): HitterConfRow | null => {
+  const resolveConf = (conference: string | null | undefined, conferenceId?: string | null): HitterConfRow | null => {
+    // ID-first lookup — names are display only (see feedback_link_ids_not_names)
+    if (conferenceId) {
+      const byId = confById.get(conferenceId);
+      if (byId) return byId;
+    }
+    // Legacy name fallback for rows missing conference_id linkage
     const aliases = getConferenceAliases(conference);
     let best: HitterConfRow | null = null;
     let bestScore = -1;
@@ -413,8 +421,8 @@ function simulateHitter(args: {
   };
 
   const fromConference = fromTeamRow?.conference || player.conference || null;
-  const fromConfStats = resolveConf(fromConference);
-  const toConfStats = resolveConf(toTeamRow.conference || null);
+  const fromConfStats = resolveConf(fromConference, fromTeamRow?.conference_id ?? (player as any).conference_id ?? null);
+  const toConfStats = resolveConf(toTeamRow.conference || null, toTeamRow.conference_id ?? null);
   const fromParkAvgRaw = resolveParkFactorFromCandidates(fromTeamRow?.id, [fromTeamName, fromTeamRow?.name], "avg", parkMap);
   const toParkAvgRaw = resolveParkFactorFromCandidates(toTeamRow?.id, [destinationTeam, toTeamRow?.name], "avg", parkMap);
   const fromParkObpRaw = resolveParkFactorFromCandidates(fromTeamRow?.id, [fromTeamName, fromTeamRow?.name], "obp", parkMap);
@@ -432,6 +440,7 @@ function simulateHitter(args: {
     fromParkIsoRaw == null || toParkIsoRaw == null
   ) return null;
 
+  const srcWeights = transferWeightsForSource(player.division);
   const wObp = toRate(eqNum("r_w_obp", 0.45));
   const wSlg = toRate(eqNum("r_w_slg", 0.30));
   const wAvg = toRate(eqNum("r_w_avg", 0.15));
@@ -457,15 +466,15 @@ function simulateHitter(args: {
     obpStdNcaa: toRate(eqNum("t_obp_std_ncaa", 0.046781)),
     baPowerWeight: toRate(eqNum("t_ba_power_weight", 0.70)),
     obpPowerWeight: toRate(eqNum("t_obp_power_weight", 0.70)),
-    baConferenceWeight: toWeight(eqNum("t_ba_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight)),
-    obpConferenceWeight: toWeight(eqNum("t_obp_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight)),
-    isoConferenceWeight: toWeight(eqNum("t_iso_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight)),
-    baPitchingWeight: toWeight(eqNum("t_ba_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight)),
-    obpPitchingWeight: toWeight(eqNum("t_obp_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight)),
-    isoPitchingWeight: toWeight(eqNum("t_iso_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight)),
-    baParkWeight: toWeight(eqNum("t_ba_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight)),
-    obpParkWeight: toWeight(eqNum("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight)),
-    isoParkWeight: toWeight(eqNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight)),
+    baConferenceWeight: toWeight(eqNum("t_ba_conference_weight", srcWeights.t_ba_conference_weight)),
+    obpConferenceWeight: toWeight(eqNum("t_obp_conference_weight", srcWeights.t_obp_conference_weight)),
+    isoConferenceWeight: toWeight(eqNum("t_iso_conference_weight", srcWeights.t_iso_conference_weight)),
+    baPitchingWeight: toWeight(eqNum("t_ba_pitching_weight", srcWeights.t_ba_pitching_weight)),
+    obpPitchingWeight: toWeight(eqNum("t_obp_pitching_weight", srcWeights.t_obp_pitching_weight)),
+    isoPitchingWeight: toWeight(eqNum("t_iso_pitching_weight", srcWeights.t_iso_pitching_weight)),
+    baParkWeight: toWeight(eqNum("t_ba_park_weight", srcWeights.t_ba_park_weight)),
+    obpParkWeight: toWeight(eqNum("t_obp_park_weight", srcWeights.t_obp_park_weight)),
+    isoParkWeight: toWeight(eqNum("t_iso_park_weight", srcWeights.t_iso_park_weight)),
     isoStdPower: eqNum("t_iso_std_power", 45.423),
     isoStdNcaa: toRate(eqNum("t_iso_std_ncaa", 0.07849797197)),
     wObp, wSlg, wAvg, wIso,
@@ -777,6 +786,7 @@ export default function PlayerComparison() {
       if (!key) continue;
       const row: HitterConfRow = {
         conference: raw.conference,
+        conference_id: raw.conference_id ?? null,
         season: raw.season,
         avg_plus: raw.avg != null ? Math.round((raw.avg / 0.280) * 100) : null,
         obp_plus: raw.obp != null ? Math.round((raw.obp / 0.385) * 100) : null,
@@ -808,7 +818,7 @@ export default function PlayerComparison() {
       let from = 0;
       const PAGE = 1000;
       while (true) {
-        const { data, error } = await supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, transfer_portal, player_predictions(id, from_avg, from_obp, from_slg, model_type, variant, status, updated_at, class_transition, dev_aggressiveness)").range(from, from + PAGE - 1);
+        const { data, error } = await supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, division, transfer_portal, player_predictions(id, from_avg, from_obp, from_slg, model_type, variant, status, updated_at, class_transition, dev_aggressiveness)").range(from, from + PAGE - 1);
         if (error) throw error;
         all = all.concat(data || []);
         if (!data || data.length < PAGE) break;
@@ -820,6 +830,13 @@ export default function PlayerComparison() {
 
   const teamByKey = useMemo(() => new Map((teams || []).map((t) => [normalizeKey(t.name), t as TeamRow])), [teams]);
   const confByKey = useMemo(() => new Map((conferenceStats || []).map((c) => [normalizeKey(c.conference), c])), [conferenceStats]);
+  const confById = useMemo(() => {
+    const m = new Map<string, HitterConfRow>();
+    for (const c of conferenceStats || []) {
+      if (c.conference_id) m.set(c.conference_id, c);
+    }
+    return m;
+  }, [conferenceStats]);
   const [seedByName, seedByPlayerId] = useMemo(() => {
     const map = new Map<string, SeedRow[]>();
     const byId = new Map<string, SeedRow>();
@@ -1018,12 +1035,12 @@ export default function PlayerComparison() {
   const bPlayer = useMemo(() => allPlayers.find((p) => p.id === bPlayerId) || null, [allPlayers, bPlayerId]);
   const aHitterSim = useMemo(() => {
     if (!aPlayer || !aDestTeam || !aPrediction) return null;
-    return simulateHitter({ player: aPlayer, destinationTeam: aDestTeam, prediction: aPrediction, internals: internalsByPrediction.get(aPrediction.id) || null, teamByKey, confByKey, seedByPlayerId, seedByName, parkMap, teams: teams as TeamRow[], eqNum, powerByNameTeam });
-  }, [aPlayer, aDestTeam, aPrediction, internalsByPrediction, teamByKey, confByKey, seedByPlayerId, seedByName, parkMap, teams, eqNum, powerByNameTeam]);
+    return simulateHitter({ player: aPlayer, destinationTeam: aDestTeam, prediction: aPrediction, internals: internalsByPrediction.get(aPrediction.id) || null, teamByKey, confByKey, confById, seedByPlayerId, seedByName, parkMap, teams: teams as TeamRow[], eqNum, powerByNameTeam });
+  }, [aPlayer, aDestTeam, aPrediction, internalsByPrediction, teamByKey, confByKey, confById, seedByPlayerId, seedByName, parkMap, teams, eqNum, powerByNameTeam]);
   const bHitterSim = useMemo(() => {
     if (!bPlayer || !bDestTeam || !bPrediction) return null;
-    return simulateHitter({ player: bPlayer, destinationTeam: bDestTeam, prediction: bPrediction, internals: internalsByPrediction.get(bPrediction.id) || null, teamByKey, confByKey, seedByPlayerId, seedByName, parkMap, teams: teams as TeamRow[], eqNum, powerByNameTeam });
-  }, [bPlayer, bDestTeam, bPrediction, internalsByPrediction, teamByKey, confByKey, seedByPlayerId, seedByName, parkMap, teams, eqNum, powerByNameTeam]);
+    return simulateHitter({ player: bPlayer, destinationTeam: bDestTeam, prediction: bPrediction, internals: internalsByPrediction.get(bPrediction.id) || null, teamByKey, confByKey, confById, seedByPlayerId, seedByName, parkMap, teams: teams as TeamRow[], eqNum, powerByNameTeam });
+  }, [bPlayer, bDestTeam, bPrediction, internalsByPrediction, teamByKey, confByKey, confById, seedByPlayerId, seedByName, parkMap, teams, eqNum, powerByNameTeam]);
 
   /* ─── pitcher sim results ─── */
   const aPitcher = useMemo(() => pitchingPlayers.find((p) => p.id === aPitcherId) || null, [pitchingPlayers, aPitcherId]);

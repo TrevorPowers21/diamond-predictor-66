@@ -10,32 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.1"
-  }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -109,9 +84,11 @@ export type Database = {
         Row: {
           AVG: number | null
           ba_plus: number | null
+          ba_power_rating: number | null
           BB9: number | null
           "conference abbreviation": string | null
           conference_id: string | null
+          division: string
           ERA: number | null
           FIP: number | null
           hitter_avg_ev: number | null
@@ -139,9 +116,11 @@ export type Database = {
           HR9: number | null
           ISO: number | null
           iso_plus: number | null
+          iso_power_rating: number | null
           K9: number | null
           OBP: number | null
           obp_plus: number | null
+          obp_power_rating: number | null
           offensive_power_rating: number | null
           OPS: number | null
           Overall_Power_Rating: number | null
@@ -173,6 +152,7 @@ export type Database = {
           pitcher_whiff_score: number | null
           season: number | null
           SLG: number | null
+          slg_plus: number | null
           Stuff_plus: number | null
           WHIP: number | null
           WRC_plus: number | null
@@ -180,9 +160,11 @@ export type Database = {
         Insert: {
           AVG?: number | null
           ba_plus?: number | null
+          ba_power_rating?: number | null
           BB9?: number | null
           "conference abbreviation"?: string | null
           conference_id?: string | null
+          division?: string
           ERA?: number | null
           FIP?: number | null
           hitter_avg_ev?: number | null
@@ -210,9 +192,11 @@ export type Database = {
           HR9?: number | null
           ISO?: number | null
           iso_plus?: number | null
+          iso_power_rating?: number | null
           K9?: number | null
           OBP?: number | null
           obp_plus?: number | null
+          obp_power_rating?: number | null
           offensive_power_rating?: number | null
           OPS?: number | null
           Overall_Power_Rating?: number | null
@@ -244,6 +228,7 @@ export type Database = {
           pitcher_whiff_score?: number | null
           season?: number | null
           SLG?: number | null
+          slg_plus?: number | null
           Stuff_plus?: number | null
           WHIP?: number | null
           WRC_plus?: number | null
@@ -251,9 +236,11 @@ export type Database = {
         Update: {
           AVG?: number | null
           ba_plus?: number | null
+          ba_power_rating?: number | null
           BB9?: number | null
           "conference abbreviation"?: string | null
           conference_id?: string | null
+          division?: string
           ERA?: number | null
           FIP?: number | null
           hitter_avg_ev?: number | null
@@ -281,9 +268,11 @@ export type Database = {
           HR9?: number | null
           ISO?: number | null
           iso_plus?: number | null
+          iso_power_rating?: number | null
           K9?: number | null
           OBP?: number | null
           obp_plus?: number | null
+          obp_power_rating?: number | null
           offensive_power_rating?: number | null
           OPS?: number | null
           Overall_Power_Rating?: number | null
@@ -315,6 +304,7 @@ export type Database = {
           pitcher_whiff_score?: number | null
           season?: number | null
           SLG?: number | null
+          slg_plus?: number | null
           Stuff_plus?: number | null
           WHIP?: number | null
           WRC_plus?: number | null
@@ -550,7 +540,7 @@ export type Database = {
           AVG: number | null
           avg_ev_score: number | null
           avg_exit_velo: number | null
-          ba_plus: number | null
+          ba_power_rating: number | null
           barrel: number | null
           barrel_score: number | null
           BatHand: string | null
@@ -582,20 +572,22 @@ export type Database = {
           conference_id: string | null
           contact: number | null
           contact_score: number | null
+          division: string
           ev90: number | null
           ev90_score: number | null
           gb: number | null
           gb_score: number | null
           id: string
           ISO: number | null
-          iso_plus: number | null
+          iso_power_rating: number | null
+          k_pct: number | null
           la_10_30: number | null
           la_score: number | null
           line_drive: number | null
           line_drive_score: number | null
           OBP: number | null
-          obp_plus: number | null
-          overall_plus: number | null
+          obp_power_rating: number | null
+          overall_power_rating: number | null
           pa: number | null
           playerFullName: string | null
           pop_up: number | null
@@ -609,13 +601,14 @@ export type Database = {
           Team: string | null
           TeamID: string | null
           ThrowHand: string | null
+          trackman_pitches: number | null
         }
         Insert: {
           ab?: number | null
           AVG?: number | null
           avg_ev_score?: number | null
           avg_exit_velo?: number | null
-          ba_plus?: number | null
+          ba_power_rating?: number | null
           barrel?: number | null
           barrel_score?: number | null
           BatHand?: string | null
@@ -647,20 +640,22 @@ export type Database = {
           conference_id?: string | null
           contact?: number | null
           contact_score?: number | null
+          division?: string
           ev90?: number | null
           ev90_score?: number | null
           gb?: number | null
           gb_score?: number | null
           id?: string
           ISO?: number | null
-          iso_plus?: number | null
+          iso_power_rating?: number | null
+          k_pct?: number | null
           la_10_30?: number | null
           la_score?: number | null
           line_drive?: number | null
           line_drive_score?: number | null
           OBP?: number | null
-          obp_plus?: number | null
-          overall_plus?: number | null
+          obp_power_rating?: number | null
+          overall_power_rating?: number | null
           pa?: number | null
           playerFullName?: string | null
           pop_up?: number | null
@@ -674,13 +669,14 @@ export type Database = {
           Team?: string | null
           TeamID?: string | null
           ThrowHand?: string | null
+          trackman_pitches?: number | null
         }
         Update: {
           ab?: number | null
           AVG?: number | null
           avg_ev_score?: number | null
           avg_exit_velo?: number | null
-          ba_plus?: number | null
+          ba_power_rating?: number | null
           barrel?: number | null
           barrel_score?: number | null
           BatHand?: string | null
@@ -712,20 +708,22 @@ export type Database = {
           conference_id?: string | null
           contact?: number | null
           contact_score?: number | null
+          division?: string
           ev90?: number | null
           ev90_score?: number | null
           gb?: number | null
           gb_score?: number | null
           id?: string
           ISO?: number | null
-          iso_plus?: number | null
+          iso_power_rating?: number | null
+          k_pct?: number | null
           la_10_30?: number | null
           la_score?: number | null
           line_drive?: number | null
           line_drive_score?: number | null
           OBP?: number | null
-          obp_plus?: number | null
-          overall_plus?: number | null
+          obp_power_rating?: number | null
+          overall_power_rating?: number | null
           pa?: number | null
           playerFullName?: string | null
           pop_up?: number | null
@@ -739,6 +737,7 @@ export type Database = {
           Team?: string | null
           TeamID?: string | null
           ThrowHand?: string | null
+          trackman_pitches?: number | null
         }
         Relationships: []
       }
@@ -1065,6 +1064,7 @@ export type Database = {
           obp_factor: number | null
           rg_factor: number | null
           season: number | null
+          source_team_id: string | null
           team_id: string | null
           team_name: string
           whip_factor: number | null
@@ -1077,6 +1077,7 @@ export type Database = {
           obp_factor?: number | null
           rg_factor?: number | null
           season?: number | null
+          source_team_id?: string | null
           team_id?: string | null
           team_name: string
           whip_factor?: number | null
@@ -1089,6 +1090,7 @@ export type Database = {
           obp_factor?: number | null
           rg_factor?: number | null
           season?: number | null
+          source_team_id?: string | null
           team_id?: string | null
           team_name?: string
           whip_factor?: number | null
@@ -1279,6 +1281,7 @@ export type Database = {
           conference: string | null
           conference_id: string | null
           created_at: string | null
+          division: string
           dropped_sources: Json | null
           extension: number | null
           fb_ch_velo_diff: number | null
@@ -1315,6 +1318,7 @@ export type Database = {
           conference?: string | null
           conference_id?: string | null
           created_at?: string | null
+          division?: string
           dropped_sources?: Json | null
           extension?: number | null
           fb_ch_velo_diff?: number | null
@@ -1351,6 +1355,7 @@ export type Database = {
           conference?: string | null
           conference_id?: string | null
           created_at?: string | null
+          division?: string
           dropped_sources?: Json | null
           extension?: number | null
           fb_ch_velo_diff?: number | null
@@ -1387,6 +1392,7 @@ export type Database = {
       pitcher_stuff_plus_ncaa: {
         Row: {
           created_at: string | null
+          division: string
           extension: number | null
           extension_sd: number | null
           hand: string
@@ -1416,6 +1422,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          division?: string
           extension?: number | null
           extension_sd?: number | null
           hand: string
@@ -1445,6 +1452,7 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          division?: string
           extension?: number | null
           extension_sd?: number | null
           hand?: string
@@ -1483,6 +1491,7 @@ export type Database = {
           bb_score: number | null
           BB9: number | null
           bb9_pr_plus: number | null
+          bf: number | null
           blended_90th_vel: number | null
           blended_barrel_pct: number | null
           blended_bb_pct: number | null
@@ -1512,6 +1521,7 @@ export type Database = {
           combined_used: boolean
           Conference: string | null
           conference_id: string | null
+          division: string
           ERA: number | null
           era_pr_plus: number | null
           ev_score: number | null
@@ -1534,6 +1544,7 @@ export type Database = {
           IP: number | null
           iz_score: number | null
           iz_whiff_score: number | null
+          k_pct: number | null
           K9: number | null
           k9_pr_plus: number | null
           la_10_30_pct: number | null
@@ -1551,6 +1562,7 @@ export type Database = {
           Team: string | null
           TeamID: string | null
           ThrowHand: string | null
+          trackman_pitches: number | null
           whiff_score: number | null
           WHIP: number | null
           whip_pr_plus: number | null
@@ -1563,6 +1575,7 @@ export type Database = {
           bb_score?: number | null
           BB9?: number | null
           bb9_pr_plus?: number | null
+          bf?: number | null
           blended_90th_vel?: number | null
           blended_barrel_pct?: number | null
           blended_bb_pct?: number | null
@@ -1592,6 +1605,7 @@ export type Database = {
           combined_used?: boolean
           Conference?: string | null
           conference_id?: string | null
+          division?: string
           ERA?: number | null
           era_pr_plus?: number | null
           ev_score?: number | null
@@ -1614,6 +1628,7 @@ export type Database = {
           IP?: number | null
           iz_score?: number | null
           iz_whiff_score?: number | null
+          k_pct?: number | null
           K9?: number | null
           k9_pr_plus?: number | null
           la_10_30_pct?: number | null
@@ -1631,6 +1646,7 @@ export type Database = {
           Team?: string | null
           TeamID?: string | null
           ThrowHand?: string | null
+          trackman_pitches?: number | null
           whiff_score?: number | null
           WHIP?: number | null
           whip_pr_plus?: number | null
@@ -1643,6 +1659,7 @@ export type Database = {
           bb_score?: number | null
           BB9?: number | null
           bb9_pr_plus?: number | null
+          bf?: number | null
           blended_90th_vel?: number | null
           blended_barrel_pct?: number | null
           blended_bb_pct?: number | null
@@ -1672,6 +1689,7 @@ export type Database = {
           combined_used?: boolean
           Conference?: string | null
           conference_id?: string | null
+          division?: string
           ERA?: number | null
           era_pr_plus?: number | null
           ev_score?: number | null
@@ -1694,6 +1712,7 @@ export type Database = {
           IP?: number | null
           iz_score?: number | null
           iz_whiff_score?: number | null
+          k_pct?: number | null
           K9?: number | null
           k9_pr_plus?: number | null
           la_10_30_pct?: number | null
@@ -1711,6 +1730,7 @@ export type Database = {
           Team?: string | null
           TeamID?: string | null
           ThrowHand?: string | null
+          trackman_pitches?: number | null
           whiff_score?: number | null
           WHIP?: number | null
           whip_pr_plus?: number | null
@@ -1995,6 +2015,8 @@ export type Database = {
           class_year: string | null
           conference: string | null
           created_at: string
+          data_status: string | null
+          division: string
           first_name: string
           from_team: string | null
           g: number | null
@@ -2006,6 +2028,7 @@ export type Database = {
           home_state: string | null
           id: string
           ip: number | null
+          is_twp: boolean
           last_name: string
           notes: string | null
           pa: number | null
@@ -2028,6 +2051,8 @@ export type Database = {
           class_year?: string | null
           conference?: string | null
           created_at?: string
+          data_status?: string | null
+          division?: string
           first_name: string
           from_team?: string | null
           g?: number | null
@@ -2039,6 +2064,7 @@ export type Database = {
           home_state?: string | null
           id?: string
           ip?: number | null
+          is_twp?: boolean
           last_name: string
           notes?: string | null
           pa?: number | null
@@ -2061,6 +2087,8 @@ export type Database = {
           class_year?: string | null
           conference?: string | null
           created_at?: string
+          data_status?: string | null
+          division?: string
           first_name?: string
           from_team?: string | null
           g?: number | null
@@ -2072,6 +2100,7 @@ export type Database = {
           home_state?: string | null
           id?: string
           ip?: number | null
+          is_twp?: boolean
           last_name?: string
           notes?: string | null
           pa?: number | null
@@ -2310,25 +2339,34 @@ export type Database = {
         Row: {
           added_at: string | null
           customer_team_id: string | null
+          destination_team: string | null
+          destination_team_id: string | null
           id: string
           notes: string | null
           player_id: string
+          transfer_snapshot: Json | null
           user_id: string
         }
         Insert: {
           added_at?: string | null
           customer_team_id?: string | null
+          destination_team?: string | null
+          destination_team_id?: string | null
           id?: string
           notes?: string | null
           player_id: string
+          transfer_snapshot?: Json | null
           user_id: string
         }
         Update: {
           added_at?: string | null
           customer_team_id?: string | null
+          destination_team?: string | null
+          destination_team_id?: string | null
           id?: string
           notes?: string | null
           player_id?: string
+          transfer_snapshot?: Json | null
           user_id?: string
         }
         Relationships: [
@@ -2458,14 +2496,95 @@ export type Database = {
           },
         ]
       }
+      team_war_snapshots: {
+        Row: {
+          computed_at: string
+          conference: string | null
+          games_played_est: number | null
+          id: string
+          is_conference_champ: boolean
+          is_national_champ: boolean
+          n_hitters: number | null
+          n_pitchers: number | null
+          notes: string | null
+          prorated_bullpen_pwar: number
+          prorated_rotation_pwar: number
+          prorated_starting_lineup_owar: number
+          prorated_total_owar: number
+          prorated_total_pwar: number
+          proration_factor: number | null
+          raw_bullpen_pwar: number
+          raw_rotation_pwar: number
+          raw_starting_lineup_owar: number
+          raw_total_owar: number
+          raw_total_pwar: number
+          season: number
+          source_team_id: string
+          team_name: string
+        }
+        Insert: {
+          computed_at?: string
+          conference?: string | null
+          games_played_est?: number | null
+          id?: string
+          is_conference_champ?: boolean
+          is_national_champ?: boolean
+          n_hitters?: number | null
+          n_pitchers?: number | null
+          notes?: string | null
+          prorated_bullpen_pwar?: number
+          prorated_rotation_pwar?: number
+          prorated_starting_lineup_owar?: number
+          prorated_total_owar?: number
+          prorated_total_pwar?: number
+          proration_factor?: number | null
+          raw_bullpen_pwar?: number
+          raw_rotation_pwar?: number
+          raw_starting_lineup_owar?: number
+          raw_total_owar?: number
+          raw_total_pwar?: number
+          season: number
+          source_team_id: string
+          team_name: string
+        }
+        Update: {
+          computed_at?: string
+          conference?: string | null
+          games_played_est?: number | null
+          id?: string
+          is_conference_champ?: boolean
+          is_national_champ?: boolean
+          n_hitters?: number | null
+          n_pitchers?: number | null
+          notes?: string | null
+          prorated_bullpen_pwar?: number
+          prorated_rotation_pwar?: number
+          prorated_starting_lineup_owar?: number
+          prorated_total_owar?: number
+          prorated_total_pwar?: number
+          proration_factor?: number | null
+          raw_bullpen_pwar?: number
+          raw_rotation_pwar?: number
+          raw_starting_lineup_owar?: number
+          raw_total_owar?: number
+          raw_total_pwar?: number
+          season?: number
+          source_team_id?: string
+          team_name?: string
+        }
+        Relationships: []
+      }
       "Teams Table": {
         Row: {
           abbreviation: string | null
           conference: string | null
           conference_id: string | null
+          district: string | null
+          division: string
           full_name: string
           id: string
           Mascot: string | null
+          region: string | null
           Season: number | null
           source_id: string | null
         }
@@ -2473,9 +2592,12 @@ export type Database = {
           abbreviation?: string | null
           conference?: string | null
           conference_id?: string | null
+          district?: string | null
+          division?: string
           full_name: string
           id?: string
           Mascot?: string | null
+          region?: string | null
           Season?: number | null
           source_id?: string | null
         }
@@ -2483,9 +2605,12 @@ export type Database = {
           abbreviation?: string | null
           conference?: string | null
           conference_id?: string | null
+          district?: string | null
+          division?: string
           full_name?: string
           id?: string
           Mascot?: string | null
+          region?: string | null
           Season?: number | null
           source_id?: string | null
         }
@@ -2561,6 +2686,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      find_user_id_by_email: { Args: { _email: string }; Returns: string }
+      get_team_member_emails: {
+        Args: { _team_id: string }
+        Returns: {
+          email: string
+          user_id: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -2700,9 +2833,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       app_role: ["admin", "staff", "scout", "external", "superadmin"],

@@ -20,7 +20,13 @@
     "recompute-stuff": "tsx --env-file-if-exists=.env.local scripts/recompute-stuff-plus.ts",
     "recompute-stuff:prod": "tsx --env-file-if-exists=.env.production.local scripts/recompute-stuff-plus.ts --prod",
     "import-juco": "tsx --env-file-if-exists=.env.local scripts/import-juco/cli.ts",
-    "import-juco:prod": "tsx --env-file-if-exists=.env.production.local scripts/import-juco/cli.ts --prod"
+    "import-juco:prod": "tsx --env-file-if-exists=.env.production.local scripts/import-juco/cli.ts --prod",
+    "sync-ids-from-prod": "tsx --env-file-if-exists=.env.local scripts/sync-d1-ids-from-prod-to-staging.ts",
+    "populate-conf-stats": "tsx --env-file-if-exists=.env.local scripts/populate-conference-stats-env-plus.ts",
+    "wire-juco-conf-ids": "tsx --env-file-if-exists=.env.local scripts/wire-juco-conference-ids.ts",
+    "mirror-auth-user": "tsx --env-file-if-exists=.env.local scripts/mirror-prod-auth-user.ts",
+    "mirror-user-context": "tsx --env-file-if-exists=.env.local scripts/mirror-prod-user-context.ts",
+    "backfill-juco-preds": "tsx --env-file-if-exists=.env.local scripts/backfill-juco-hitter-predictions.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

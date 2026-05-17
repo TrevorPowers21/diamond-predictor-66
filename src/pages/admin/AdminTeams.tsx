@@ -101,6 +101,7 @@ export default function AdminTeams() {
         .from("Teams Table")
         .select("id, full_name, abbreviation, conference, source_id, Mascot")
         .eq("Season", CURRENT_SEASON)
+        .eq("division", "D1")
         .order("full_name");
       if (error) throw error;
       return (data || []) as SchoolRow[];

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 import { Search } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useHitterSeedData } from "@/hooks/useHitterSeedData";
@@ -33,7 +34,7 @@ import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { assessHitterRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
-import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
+import { TRANSFER_WEIGHT_DEFAULTS, transferWeightsForSource } from "@/lib/transferWeightDefaults";
 
 type SimPlayer = {
   prediction_id: string | null;
@@ -45,6 +46,7 @@ type SimPlayer = {
   team: string | null;
   from_team: string | null;
   conference: string | null;
+  division: string | null;
   from_avg: number | null;
   from_obp: number | null;
   from_slg: number | null;
@@ -496,6 +498,7 @@ export default function TransferPortal() {
   const isAdmin = hasRole("admin");
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>("");
   const [playerSearch, setPlayerSearch] = useState<string>("");
+  const [divisionFilter, setDivisionFilter] = useState<"D1" | "JUCO">("D1");
   const [selectedDestinationTeam, setSelectedDestinationTeam] = useState<string>("");
   const [teamSearch, setTeamSearch] = useState<string>("");
 
@@ -525,7 +528,7 @@ export default function TransferPortal() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, team, from_team, conference, transfer_portal")
+          .select("id, first_name, last_name, position, team, from_team, conference, division, transfer_portal")
           .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
         allPlayers = allPlayers.concat(data || []);
@@ -610,6 +613,7 @@ export default function TransferPortal() {
             team: p.team as string | null,
             from_team: p.from_team as string | null,
             conference: p.conference as string | null,
+            division: (p.division as string | null) ?? null,
             from_avg: (row?.from_avg as number | undefined) ?? null,
             from_obp: (row?.from_obp as number | undefined) ?? null,
             from_slg: (row?.from_slg as number | undefined) ?? null,
@@ -683,15 +687,20 @@ export default function TransferPortal() {
     // the hitter dropdown. They show up in the pitcher dropdown via
     // pitchingMasterRows when their IP qualifies them.
     const isPitcher = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
+    const matchesDivision = (d: string | null) => {
+      if (divisionFilter === "JUCO") return d === "NJCAA_D1";
+      // D1 default — exclude JUCO, include null (legacy D1 rows without division)
+      return d !== "NJCAA_D1";
+    };
     const q = normalizeKey(playerSearch);
     const pool = (q
       ? players.filter((p) =>
           normalizeKey(`${p.first_name} ${p.last_name} ${(p.from_team || p.team || "")} ${(p.position || "")}`).includes(q),
         )
       : players
-    ).filter((p) => !isPitcher(p.position));
+    ).filter((p) => !isPitcher(p.position) && matchesDivision(p.division));
     return pool.slice(0, 25);
-  }, [players, playerSearch]);
+  }, [players, playerSearch, divisionFilter]);
 
   const filteredTeams = useMemo(() => {
     const q = normalizeKey(teamSearch);
@@ -1078,9 +1087,13 @@ export default function TransferPortal() {
       }
     }
 
-    if (baPR == null) missingInputs.push("BA Power Rating+");
-    if (obpPR == null) missingInputs.push("OBP Power Rating+");
-    if (isoPR == null) missingInputs.push("ISO Power Rating+");
+    // JUCO source: PRs are not used (power weights = 0), nulls are fine.
+    const isJucoSource = selectedPlayer.division === "NJCAA_D1";
+    if (!isJucoSource) {
+      if (baPR == null) missingInputs.push("BA Power Rating+");
+      if (obpPR == null) missingInputs.push("OBP Power Rating+");
+      if (isoPR == null) missingInputs.push("ISO Power Rating+");
+    }
 
     const fromAvgPlus = fromConfStats?.avg_plus ?? null;
     const toAvgPlus = toConfStats?.avg_plus ?? null;
@@ -1106,12 +1119,15 @@ export default function TransferPortal() {
     if (toIsoPlus == null) missingInputs.push("To ISO+");
     if (fromStuff == null) missingInputs.push("From Stuff+");
     if (toStuff == null) missingInputs.push("To Stuff+");
-    if (fromParkAvgRaw == null) missingInputs.push("From AVG Park Factor");
-    if (toParkAvgRaw == null) missingInputs.push("To AVG Park Factor");
-    if (fromParkObpRaw == null) missingInputs.push("From OBP Park Factor");
-    if (toParkObpRaw == null) missingInputs.push("To OBP Park Factor");
-    if (fromParkIsoRaw == null) missingInputs.push("From ISO Park Factor");
-    if (toParkIsoRaw == null) missingInputs.push("To ISO Park Factor");
+    // JUCO source: park weights = 0, no park data exists. Skip park checks.
+    if (!isJucoSource) {
+      if (fromParkAvgRaw == null) missingInputs.push("From AVG Park Factor");
+      if (toParkAvgRaw == null) missingInputs.push("To AVG Park Factor");
+      if (fromParkObpRaw == null) missingInputs.push("From OBP Park Factor");
+      if (toParkObpRaw == null) missingInputs.push("To OBP Park Factor");
+      if (fromParkIsoRaw == null) missingInputs.push("From ISO Park Factor");
+      if (toParkIsoRaw == null) missingInputs.push("To ISO Park Factor");
+    }
     if (missingInputs.length > 0) {
       return {
         blocked: true as const,
@@ -1161,20 +1177,22 @@ export default function TransferPortal() {
     const obpStdPower = readLocalNum("t_obp_std_pr", 28.889, remoteEquationValues);
     const obpStdNcaa = toRate(readLocalNum("t_obp_std_ncaa", 0.046781, remoteEquationValues));
 
-    const baPowerWeight = toRate(readLocalNum("t_ba_power_weight", 0.70, remoteEquationValues));
-    const obpPowerWeight = toRate(readLocalNum("t_obp_power_weight", 0.70, remoteEquationValues));
+    // Division-aware weight defaults: NJCAA_D1 sources route through
+    // JUCO_TRANSFER_WEIGHTS (park=0, power=0, conf+pitching uplifted).
+    const srcW = transferWeightsForSource(selectedPlayer.division);
+    const baPowerWeight = toRate(readLocalNum("t_ba_power_weight", srcW.t_ba_power_weight, remoteEquationValues));
+    const obpPowerWeight = toRate(readLocalNum("t_obp_power_weight", srcW.t_obp_power_weight, remoteEquationValues));
+    const baConferenceWeight = toWeight(readLocalNum("t_ba_conference_weight", srcW.t_ba_conference_weight, remoteEquationValues));
+    const obpConferenceWeight = toWeight(readLocalNum("t_obp_conference_weight", srcW.t_obp_conference_weight, remoteEquationValues));
+    const isoConferenceWeight = toWeight(readLocalNum("t_iso_conference_weight", srcW.t_iso_conference_weight, remoteEquationValues));
 
-    const baConferenceWeight = toWeight(readLocalNum("t_ba_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight, remoteEquationValues));
-    const obpConferenceWeight = toWeight(readLocalNum("t_obp_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight, remoteEquationValues));
-    const isoConferenceWeight = toWeight(readLocalNum("t_iso_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight, remoteEquationValues));
+    const baPitchingWeight = toWeight(readLocalNum("t_ba_pitching_weight", srcW.t_ba_pitching_weight, remoteEquationValues));
+    const obpPitchingWeight = toWeight(readLocalNum("t_obp_pitching_weight", srcW.t_obp_pitching_weight, remoteEquationValues));
+    const isoPitchingWeight = toWeight(readLocalNum("t_iso_pitching_weight", srcW.t_iso_pitching_weight, remoteEquationValues));
 
-    const baPitchingWeight = toWeight(readLocalNum("t_ba_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight, remoteEquationValues));
-    const obpPitchingWeight = toWeight(readLocalNum("t_obp_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight, remoteEquationValues));
-    const isoPitchingWeight = toWeight(readLocalNum("t_iso_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight, remoteEquationValues));
-
-    const baParkWeight = toWeight(readLocalNum("t_ba_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight, remoteEquationValues));
-    const obpParkWeight = toWeight(readLocalNum("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight, remoteEquationValues));
-    const isoParkWeight = toWeight(readLocalNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight, remoteEquationValues));
+    const baParkWeight = toWeight(readLocalNum("t_ba_park_weight", srcW.t_ba_park_weight, remoteEquationValues));
+    const obpParkWeight = toWeight(readLocalNum("t_obp_park_weight", srcW.t_obp_park_weight, remoteEquationValues));
+    const isoParkWeight = toWeight(readLocalNum("t_iso_park_weight", srcW.t_iso_park_weight, remoteEquationValues));
 
     const isoStdPower = readLocalNum("t_iso_std_power", 45.423, remoteEquationValues);
     const isoStdNcaa = toRate(readLocalNum("t_iso_std_ncaa", 0.07849797197, remoteEquationValues));
@@ -1184,13 +1202,17 @@ export default function TransferPortal() {
     const wAvg = toRate(readLocalNum("r_w_avg", 0.15, remoteEquationValues));
     const wIso = toRate(readLocalNum("r_w_iso", 0.10, remoteEquationValues));
 
+    // JUCO sources: PRs aren't used (power weight=0). Coerce nulls to 100
+    // (NCAA avg) so the math doesn't NaN out — gets multiplied by 0 anyway.
+    // Park nulls already become 100 inside normalizeParkToIndex above.
+    const safePR = (v: number | null) => v ?? 100;
     const projected = computeTransferProjection({
       lastAvg,
       lastObp,
       lastSlg,
-      baPR,
-      obpPR,
-      isoPR,
+      baPR: safePR(baPR),
+      obpPR: safePR(obpPR),
+      isoPR: safePR(isoPR),
       fromAvgPlus,
       toAvgPlus,
       fromObpPlus,
@@ -1234,8 +1256,12 @@ export default function TransferPortal() {
       wIso,
     });
 
+    // JUCO sources use 2026 stats verbatim — no class adjustment.
+    // (Class adj kept for D1→D1 transfers where prior-year stats need
+    // forward-translating to the player's projected age/development.)
+    // isJucoSource declared above with the validation skip.
     const classKey = String(selectedPlayer.class_transition || "SJ").toUpperCase();
-    const classAdj =
+    const classAdj = isJucoSource ? 0 :
       classKey === "FS" ? 0.03 :
       classKey === "SJ" ? 0.02 :
       classKey === "JS" ? 0.015 :
@@ -1372,7 +1398,7 @@ export default function TransferPortal() {
         ncaaAvgISO,
         isoStdPower,
         isoStdNcaa,
-        isoPowerWeight: 0.3,
+        isoPowerWeight: srcW.t_iso_power_weight,
         isoConferenceWeight,
         isoPitchingWeight,
         isoParkWeight,
@@ -1696,21 +1722,39 @@ export default function TransferPortal() {
             </h2>
             <p className="text-muted-foreground text-xs mt-1.5 tracking-wide">Simulate player projections at a new school</p>
           </div>
-          <div className="flex gap-1 rounded-lg border border-border/60 bg-muted/40 p-1">
-            <button
-              className={`px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer ${simType === "hitting" ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30" : "text-muted-foreground hover:text-foreground"}`}
-              style={{ fontFamily: "'Oswald', sans-serif" }}
-              onClick={() => setSimType("hitting")}
-            >
-              Hitting
-            </button>
-            <button
-              className={`px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer ${simType === "pitching" ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30" : "text-muted-foreground hover:text-foreground"}`}
-              style={{ fontFamily: "'Oswald', sans-serif" }}
-              onClick={() => setSimType("pitching")}
-            >
-              Pitching
-            </button>
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex gap-1 rounded-lg border border-border/60 bg-muted/40 p-1">
+              <button
+                className={`px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer ${simType === "hitting" ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30" : "text-muted-foreground hover:text-foreground"}`}
+                style={{ fontFamily: "'Oswald', sans-serif" }}
+                onClick={() => setSimType("hitting")}
+              >
+                Hitting
+              </button>
+              <button
+                className={`px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer ${simType === "pitching" ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30" : "text-muted-foreground hover:text-foreground"}`}
+                style={{ fontFamily: "'Oswald', sans-serif" }}
+                onClick={() => setSimType("pitching")}
+              >
+                Pitching
+              </button>
+            </div>
+            <div className="flex gap-1">
+              <button
+                className={`px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer ${divisionFilter === "D1" ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30" : "text-muted-foreground hover:text-foreground"}`}
+                style={{ fontFamily: "'Oswald', sans-serif" }}
+                onClick={() => { setDivisionFilter("D1"); setSelectedPlayerId(""); setPlayerSearch(""); }}
+              >
+                D1
+              </button>
+              <button
+                className={`px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer ${divisionFilter === "JUCO" ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30" : "text-muted-foreground hover:text-foreground"}`}
+                style={{ fontFamily: "'Oswald', sans-serif" }}
+                onClick={() => { setDivisionFilter("JUCO"); setSelectedPlayerId(""); setPlayerSearch(""); }}
+              >
+                JUCO
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1724,7 +1768,7 @@ export default function TransferPortal() {
                   {/* Player search */}
                   <div className="relative flex-1 min-w-[200px]">
                     <Label className="text-xs mb-1 block">Player</Label>
-                    <Input placeholder={playersLoading ? "Loading..." : "Search hitter..."} value={playerSearch} onChange={(e) => { setPlayerSearch(e.target.value); setPlayerDropdownOpen(true); }} onFocus={() => setPlayerDropdownOpen(true)} onBlur={() => setTimeout(() => setPlayerDropdownOpen(false), 150)} />
+                    <Input placeholder={playersLoading ? "Loading..." : (divisionFilter === "JUCO" ? "Search JUCO hitter..." : "Search hitter...")} value={playerSearch} onChange={(e) => { setPlayerSearch(e.target.value); setPlayerDropdownOpen(true); }} onFocus={() => setPlayerDropdownOpen(true)} onBlur={() => setTimeout(() => setPlayerDropdownOpen(false), 150)} />
                     {playerDropdownOpen && filteredPlayers.length > 0 && (
                       <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
                         {filteredPlayers.map((p) => (

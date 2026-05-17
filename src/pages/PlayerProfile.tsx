@@ -647,10 +647,10 @@ export default function PlayerProfile() {
       ab: row.ab ?? null,
       pa: row.pa ?? null,
       // Stored power ratings — already computed from blended inputs by the pipeline
-      overall_plus: row.overall_plus ?? null,
-      ba_plus: row.ba_plus ?? null,
-      obp_plus: row.obp_plus ?? null,
-      iso_plus: row.iso_plus ?? null,
+      overall_power_rating: row.overall_power_rating ?? null,
+      ba_power_rating: row.ba_power_rating ?? null,
+      obp_power_rating: row.obp_power_rating ?? null,
+      iso_power_rating: row.iso_power_rating ?? null,
       barrel_score: row.barrel_score ?? null,
       avg_ev_score: row.avg_ev_score ?? null,
       contact_score: row.contact_score ?? null,
@@ -790,10 +790,10 @@ export default function PlayerProfile() {
     pullScore: activeSeasonRow.pull_score ?? seedPowerDerived?.pullScore ?? null,
     laScore: activeSeasonRow.la_score ?? seedPowerDerived?.laScore ?? null,
     gbScore: activeSeasonRow.gb_score ?? seedPowerDerived?.gbScore ?? null,
-    baPlus: activeSeasonRow.ba_plus ?? seedPowerDerived?.baPlus ?? null,
-    obpPlus: activeSeasonRow.obp_plus ?? seedPowerDerived?.obpPlus ?? null,
-    isoPlus: activeSeasonRow.iso_plus ?? seedPowerDerived?.isoPlus ?? null,
-    overallPlus: activeSeasonRow.overall_plus ?? seedPowerDerived?.overallPlus ?? null,
+    baPlus: activeSeasonRow.ba_power_rating ?? seedPowerDerived?.baPlus ?? null,
+    obpPlus: activeSeasonRow.obp_power_rating ?? seedPowerDerived?.obpPlus ?? null,
+    isoPlus: activeSeasonRow.iso_power_rating ?? seedPowerDerived?.isoPlus ?? null,
+    overallPlus: activeSeasonRow.overall_power_rating ?? seedPowerDerived?.overallPlus ?? null,
   } : seedPowerDerived;
   // Carry 2025 PA forward as expected 2026 PA so projected WAR scales with
   // actual playing-time history. A fringe starter with 100 PA last year
@@ -973,7 +973,7 @@ export default function PlayerProfile() {
                       p_wrc_plus: projectedWrcPlus,
                       owar: displayOWar,
                       nil_value: displayNilValuation,
-                      power_rating_plus: (projectionSourceRow as any)?.overall_plus ?? seedPowerDerived?.overallPlus,
+                      power_rating_plus: (projectionSourceRow as any)?.overall_power_rating ?? seedPowerDerived?.overallPlus,
                       // Prefer stored Hitter Master scores (match UI scouting grades);
                       // fall back to derived only if the stored value is null.
                       barrel_score: (projectionSourceRow as any)?.barrel_score ?? (seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined),
@@ -1067,7 +1067,7 @@ export default function PlayerProfile() {
                       p_avg: projectedAvg, p_obp: projectedObp, p_slg: projectedSlg,
                       p_wrc_plus: projectedWrcPlus,
                       owar: displayOWar,
-                      power_rating_plus: (projectionSourceRow as any)?.overall_plus ?? seedPowerDerived?.overallPlus,
+                      power_rating_plus: (projectionSourceRow as any)?.overall_power_rating ?? seedPowerDerived?.overallPlus,
                       coach_notes: notes,
                     };
                     const url = generateCoachNotesPdf(rp, notes);
@@ -1120,7 +1120,7 @@ export default function PlayerProfile() {
                     owar: displayOWar,
                     // Valuation
                     nil_value: displayNilValuation,
-                    power_rating_plus: (projectionSourceRow as any)?.overall_plus ?? seedPowerDerived?.overallPlus,
+                    power_rating_plus: (projectionSourceRow as any)?.overall_power_rating ?? seedPowerDerived?.overallPlus,
                     // Scouting scores (for tables)
                     // Prefer stored Hitter Master scores (match UI scouting grades);
                     // fall back to derived only if the stored value is null.
@@ -1460,7 +1460,7 @@ export default function PlayerProfile() {
               </div>
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Power Rating{projectionSourceRow?.combined_used ? "*" : ""}</div>
-                <div className={`text-3xl font-bold tracking-tight mt-1 ${powerTierClass(projectionSourceRow?.overall_plus ?? seedPowerDerived?.overallPlus ?? null)}`}>{pctFormat(projectionSourceRow?.overall_plus ?? seedPowerDerived?.overallPlus ?? null)}</div>
+                <div className={`text-3xl font-bold tracking-tight mt-1 ${powerTierClass(projectionSourceRow?.overall_power_rating ?? seedPowerDerived?.overallPlus ?? null)}`}>{pctFormat(projectionSourceRow?.overall_power_rating ?? seedPowerDerived?.overallPlus ?? null)}</div>
                 {projectionSourceRow?.combined_used && (
                   <div className="mt-1 text-[9px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"}</div>
                 )}
@@ -1819,19 +1819,19 @@ function HistoricalHitterView({
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
                   <div className="rounded-lg border border-border bg-muted/50 p-3">
                     <div className="text-xs font-medium text-muted-foreground">Overall Power Rating</div>
-                    <div className="text-2xl font-bold font-mono mt-1">{row.overall_plus != null ? Math.round(row.overall_plus) : "—"}</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.overall_power_rating != null ? Math.round(row.overall_power_rating) : "—"}</div>
                   </div>
                   <div className="rounded-lg border border-border bg-muted/50 p-3">
                     <div className="text-xs font-medium text-muted-foreground">Batting Average Power Rating</div>
-                    <div className="text-2xl font-bold font-mono mt-1">{row.ba_plus != null ? Math.round(row.ba_plus) : "—"}</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.ba_power_rating != null ? Math.round(row.ba_power_rating) : "—"}</div>
                   </div>
                   <div className="rounded-lg border border-border bg-muted/50 p-3">
                     <div className="text-xs font-medium text-muted-foreground">OBP Power Rating</div>
-                    <div className="text-2xl font-bold font-mono mt-1">{row.obp_plus != null ? Math.round(row.obp_plus) : "—"}</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.obp_power_rating != null ? Math.round(row.obp_power_rating) : "—"}</div>
                   </div>
                   <div className="rounded-lg border border-border bg-muted/50 p-3">
                     <div className="text-xs font-medium text-muted-foreground">ISO Power Rating</div>
-                    <div className="text-2xl font-bold font-mono mt-1">{row.iso_plus != null ? Math.round(row.iso_plus) : "—"}</div>
+                    <div className="text-2xl font-bold font-mono mt-1">{row.iso_power_rating != null ? Math.round(row.iso_power_rating) : "—"}</div>
                   </div>
                 </div>
                 <Separator className="my-4" />
