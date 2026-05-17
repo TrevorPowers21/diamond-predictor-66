@@ -53,10 +53,13 @@ type SimPlayer = {
   power_rating_plus: number | null;
   class_transition: string | null;
   dev_aggressiveness: number | null;
+  team_id: string | null;
+  source_team_id: string | null;
 };
 
 type ConferenceRow = {
   conference: string;
+  conference_id: string | null;
   season?: number | null;
   avg_plus: number | null;
   obp_plus: number | null;
@@ -528,7 +531,7 @@ export default function TransferPortal() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, team, from_team, conference, division, transfer_portal")
+          .select("id, first_name, last_name, position, team, from_team, conference, division, transfer_portal, team_id, source_team_id")
           .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
         allPlayers = allPlayers.concat(data || []);
@@ -614,6 +617,8 @@ export default function TransferPortal() {
             from_team: p.from_team as string | null,
             conference: p.conference as string | null,
             division: (p.division as string | null) ?? null,
+            team_id: (p.team_id as string | null) ?? null,
+            source_team_id: (p.source_team_id as string | null) ?? null,
             from_avg: (row?.from_avg as number | undefined) ?? null,
             from_obp: (row?.from_obp as number | undefined) ?? null,
             from_slg: (row?.from_slg as number | undefined) ?? null,
@@ -638,6 +643,7 @@ export default function TransferPortal() {
       if (!key) continue;
       const row: ConferenceRow = {
         conference: raw.conference,
+        conference_id: (raw as any).conference_id ?? null,
         season: raw.season,
         avg_plus: raw.avg != null ? Math.round((raw.avg / 0.280) * 100) : null,
         obp_plus: raw.obp != null ? Math.round((raw.obp / 0.385) * 100) : null,
@@ -861,7 +867,18 @@ export default function TransferPortal() {
 
   const teamByKey = useMemo(() => {
     const map = new Map<string, TeamRow>();
-    for (const t of teams) map.set(normalizeKey(t.name), t);
+    for (const t of teams) {
+      // Index by every stable identifier so JUCO full names like
+      // "Walters State CC" land the right row instead of fuzzy-matching to
+      // another team. (Prior indexing only used t.name = abbreviation, which
+      // misses on the full-name path and silently routes to a wrong conf.)
+      const ids = [t.name, (t as any).fullName, (t as any).abbreviation, (t as any).source_team_id, t.id];
+      for (const id of ids) {
+        if (!id) continue;
+        const k = normalizeKey(String(id));
+        if (k) map.set(k, t);
+      }
+    }
     return map;
   }, [teams]);
 
@@ -994,13 +1011,40 @@ export default function TransferPortal() {
   }, [selectedPlayer, seedByName]);
 
   const fromTeam = selectedPlayer ? (selectedPlayer.from_team || inferredFromTeam || selectedPlayer.team || null) : null;
-  const fromTeamRow = resolveTeamRowFromCandidates([fromTeam], teamByKey, teams);
+  // ID-first team lookup: players.team_id (UUID) wins. Falls back to
+  // source_team_id, then to name resolution (which is fuzzy and unsafe
+  // for JUCO full names that share words with other teams).
+  const fromTeamRow = (
+    (selectedPlayer?.team_id && teams.find((t) => t.id === selectedPlayer.team_id)) ||
+    (selectedPlayer?.source_team_id && teams.find((t: any) => t.source_team_id === selectedPlayer.source_team_id)) ||
+    resolveTeamRowFromCandidates([fromTeam], teamByKey, teams)
+  ) as TeamRow | null;
   const toTeamRow = resolveTeamRowFromCandidates([selectedDestinationTeam], teamByKey, teams);
 
   const fromConference = fromTeamRow?.conference || selectedPlayer?.conference || null;
   const toConference = toTeamRow?.conference || null;
+  const fromConferenceId = fromTeamRow?.conference_id ?? null;
+  const toConferenceId = toTeamRow?.conference_id ?? null;
 
-  const resolveConferenceStats = (conference: string | null | undefined): ConferenceRow | null => {
+  // ID-first lookup (see feedback_link_ids_not_names). JUCO conferences
+  // are named "NJCAA D1 X District" — won't match the D1-only alias system.
+  // conference_id is the canonical join key, name is display-only fallback.
+  const confByConfId = useMemo(() => {
+    const m = new Map<string, ConferenceRow>();
+    for (const c of conferenceStats || []) {
+      if (c.conference_id) m.set(c.conference_id, c);
+    }
+    return m;
+  }, [conferenceStats]);
+
+  const resolveConferenceStats = (
+    conference: string | null | undefined,
+    conferenceId?: string | null,
+  ): ConferenceRow | null => {
+    if (conferenceId) {
+      const byId = confByConfId.get(conferenceId);
+      if (byId) return byId;
+    }
     const aliases = conferenceKeyAliases(conference);
     let best: ConferenceRow | null = null;
     let bestScore = -1;
@@ -1031,8 +1075,8 @@ export default function TransferPortal() {
     return best;
   };
 
-  const fromConfStats = resolveConferenceStats(fromConference);
-  const toConfStats = resolveConferenceStats(toConference);
+  const fromConfStats = resolveConferenceStats(fromConference, fromConferenceId);
+  const toConfStats = resolveConferenceStats(toConference, toConferenceId);
 
   const resolvePitchingConferenceStats = (conference: string | null | undefined, conferenceId?: string | null) => {
     // UUID lookup first
@@ -1179,20 +1223,24 @@ export default function TransferPortal() {
 
     // Division-aware weight defaults: NJCAA_D1 sources route through
     // JUCO_TRANSFER_WEIGHTS (park=0, power=0, conf+pitching uplifted).
+    // readLocalNum is bypassed for JUCO because TRANSFER_WEIGHT_DEFAULTS
+    // (D1 canonical) outranks the JUCO fallback. We want JUCO source to use
+    // the JUCO set verbatim — no localStorage / model_config override path.
     const srcW = transferWeightsForSource(selectedPlayer.division);
-    const baPowerWeight = toRate(readLocalNum("t_ba_power_weight", srcW.t_ba_power_weight, remoteEquationValues));
-    const obpPowerWeight = toRate(readLocalNum("t_obp_power_weight", srcW.t_obp_power_weight, remoteEquationValues));
-    const baConferenceWeight = toWeight(readLocalNum("t_ba_conference_weight", srcW.t_ba_conference_weight, remoteEquationValues));
-    const obpConferenceWeight = toWeight(readLocalNum("t_obp_conference_weight", srcW.t_obp_conference_weight, remoteEquationValues));
-    const isoConferenceWeight = toWeight(readLocalNum("t_iso_conference_weight", srcW.t_iso_conference_weight, remoteEquationValues));
+    const jucoWeight = (k: keyof typeof srcW, d1: number) => isJucoSource ? srcW[k] : d1;
+    const baPowerWeight = toRate(jucoWeight("t_ba_power_weight", readLocalNum("t_ba_power_weight", 0.70, remoteEquationValues)));
+    const obpPowerWeight = toRate(jucoWeight("t_obp_power_weight", readLocalNum("t_obp_power_weight", 0.70, remoteEquationValues)));
+    const baConferenceWeight = toWeight(jucoWeight("t_ba_conference_weight", readLocalNum("t_ba_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight, remoteEquationValues)));
+    const obpConferenceWeight = toWeight(jucoWeight("t_obp_conference_weight", readLocalNum("t_obp_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight, remoteEquationValues)));
+    const isoConferenceWeight = toWeight(jucoWeight("t_iso_conference_weight", readLocalNum("t_iso_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight, remoteEquationValues)));
 
-    const baPitchingWeight = toWeight(readLocalNum("t_ba_pitching_weight", srcW.t_ba_pitching_weight, remoteEquationValues));
-    const obpPitchingWeight = toWeight(readLocalNum("t_obp_pitching_weight", srcW.t_obp_pitching_weight, remoteEquationValues));
-    const isoPitchingWeight = toWeight(readLocalNum("t_iso_pitching_weight", srcW.t_iso_pitching_weight, remoteEquationValues));
+    const baPitchingWeight = toWeight(jucoWeight("t_ba_pitching_weight", readLocalNum("t_ba_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight, remoteEquationValues)));
+    const obpPitchingWeight = toWeight(jucoWeight("t_obp_pitching_weight", readLocalNum("t_obp_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight, remoteEquationValues)));
+    const isoPitchingWeight = toWeight(jucoWeight("t_iso_pitching_weight", readLocalNum("t_iso_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight, remoteEquationValues)));
 
-    const baParkWeight = toWeight(readLocalNum("t_ba_park_weight", srcW.t_ba_park_weight, remoteEquationValues));
-    const obpParkWeight = toWeight(readLocalNum("t_obp_park_weight", srcW.t_obp_park_weight, remoteEquationValues));
-    const isoParkWeight = toWeight(readLocalNum("t_iso_park_weight", srcW.t_iso_park_weight, remoteEquationValues));
+    const baParkWeight = toWeight(jucoWeight("t_ba_park_weight", readLocalNum("t_ba_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight, remoteEquationValues)));
+    const obpParkWeight = toWeight(jucoWeight("t_obp_park_weight", readLocalNum("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight, remoteEquationValues)));
+    const isoParkWeight = toWeight(jucoWeight("t_iso_park_weight", readLocalNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight, remoteEquationValues)));
 
     const isoStdPower = readLocalNum("t_iso_std_power", 45.423, remoteEquationValues);
     const isoStdNcaa = toRate(readLocalNum("t_iso_std_ncaa", 0.07849797197, remoteEquationValues));
@@ -1398,7 +1446,7 @@ export default function TransferPortal() {
         ncaaAvgISO,
         isoStdPower,
         isoStdNcaa,
-        isoPowerWeight: srcW.t_iso_power_weight,
+        isoPowerWeight: isJucoSource ? srcW.t_iso_power_weight : 0.3,
         isoConferenceWeight,
         isoPitchingWeight,
         isoParkWeight,

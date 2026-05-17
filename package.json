@@ -26,7 +26,8 @@
     "wire-juco-conf-ids": "tsx --env-file-if-exists=.env.local scripts/wire-juco-conference-ids.ts",
     "mirror-auth-user": "tsx --env-file-if-exists=.env.local scripts/mirror-prod-auth-user.ts",
     "mirror-user-context": "tsx --env-file-if-exists=.env.local scripts/mirror-prod-user-context.ts",
-    "backfill-juco-preds": "tsx --env-file-if-exists=.env.local scripts/backfill-juco-hitter-predictions.ts"
+    "backfill-juco-preds": "tsx --env-file-if-exists=.env.local scripts/backfill-juco-hitter-predictions.ts",
+    "fix-juco-tt-conf-ids": "tsx --env-file-if-exists=.env.local scripts/fix-juco-teams-table-conf-ids.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
