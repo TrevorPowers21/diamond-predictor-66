@@ -30,7 +30,8 @@
     "fix-juco-tt-conf-ids": "tsx --env-file-if-exists=.env.local scripts/fix-juco-teams-table-conf-ids.ts",
     "backfill-juco-pitcher-preds": "tsx --env-file-if-exists=.env.local scripts/backfill-juco-pitcher-predictions.ts",
     "import-presto-hitters": "tsx --env-file-if-exists=.env.local scripts/import-juco-presto-hitters.ts",
-    "add-presto-missing": "tsx --env-file-if-exists=.env.local scripts/add-presto-missing-hitters.ts"
+    "add-presto-missing": "tsx --env-file-if-exists=.env.local scripts/add-presto-missing-hitters.ts",
+    "import-presto-pitchers": "tsx --env-file-if-exists=.env.local scripts/import-juco-presto-pitchers.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
