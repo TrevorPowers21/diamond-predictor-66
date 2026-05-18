@@ -88,8 +88,12 @@ async function main() {
   // ── Check existing predictions (skip if already present) ─────────────
   const playerIds = Array.from(idMap.values());
   const existingIds = new Set<string>();
-  for (let i = 0; i < playerIds.length; i += chunkSize) {
-    const chunk = playerIds.slice(i, i + chunkSize);
+  // 100-id chunks to avoid PostgREST URL length limits on .in() queries.
+  // Earlier 500-chunk runs silently missed existing rows, producing
+  // duplicate-key conflicts on re-insert. (Same bug fixed in the pitcher
+  // backfill — chunkSize of 500 hits the URL ceiling.)
+  for (let i = 0; i < playerIds.length; i += 100) {
+    const chunk = playerIds.slice(i, i + 100);
     const { data } = await sb
       .from("player_predictions")
       .select("player_id")
