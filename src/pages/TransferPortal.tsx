@@ -35,6 +35,7 @@ import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { assessHitterRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
 import { TRANSFER_WEIGHT_DEFAULTS, transferWeightsForSource } from "@/lib/transferWeightDefaults";
+import { computeDataReliability } from "@/lib/jucoDataReliability";
 
 type SimPlayer = {
   prediction_id: string | null;
@@ -905,6 +906,40 @@ export default function TransferPortal() {
       for (const p of (playerRows || [])) {
         if (p.source_player_id && sourceIdToPa.has(p.source_player_id)) {
           map.set(p.id, sourceIdToPa.get(p.source_player_id)!);
+        }
+      }
+      return map;
+    },
+    staleTime: 30 * 60 * 1000,
+  });
+
+  // JUCO TrackMan-pitch lookup for the data-reliability badge.
+  // CURRENT_SEASON (not PRIOR) because reliability describes the data
+  // backing THIS season's projection. Keyed by players.id for direct hit.
+  const { data: jucoTrackmanMap = new Map<string, { tm: number; pa: number | null }>() } = useQuery({
+    queryKey: ["transfer-portal-juco-trackman", CURRENT_SEASON],
+    queryFn: async () => {
+      const map = new Map<string, { tm: number; pa: number | null }>();
+      const { data: hmRows } = await (supabase as any)
+        .from("Hitter Master")
+        .select("source_player_id, pa, trackman_pitches")
+        .eq("Season", CURRENT_SEASON)
+        .eq("division", "NJCAA_D1");
+      const bySource = new Map<string, { tm: number; pa: number | null }>();
+      for (const r of (hmRows || [])) {
+        if (!r.source_player_id) continue;
+        bySource.set(r.source_player_id, {
+          tm: Number(r.trackman_pitches ?? 0),
+          pa: r.pa != null ? Number(r.pa) : null,
+        });
+      }
+      const { data: playerRows } = await supabase
+        .from("players")
+        .select("id, source_player_id")
+        .eq("division", "NJCAA_D1");
+      for (const p of (playerRows || [])) {
+        if (p.source_player_id && bySource.has(p.source_player_id)) {
+          map.set(p.id, bySource.get(p.source_player_id)!);
         }
       }
       return map;
@@ -1920,6 +1955,28 @@ export default function TransferPortal() {
                 avgEv: sp?.avgExitVelo, ev90: sp?.ev90,
                 pull: sp?.pull, gb: sp?.gb, bb: sp?.bb,
               });
+
+              // JUCO data-reliability — TrackMan coverage as a peer risk
+              // factor. Tier-aligned risk score (higher = riskier in this
+              // engine): verified=5, partial=40, stats-only=70, none=95.
+              // Only added for JUCO sources; D1 has universal coverage.
+              const isJucoSrc = selectedPlayer?.division === "NJCAA_D1";
+              if (isJucoSrc) {
+                const tm = selectedPlayer.player_id ? jucoTrackmanMap.get(selectedPlayer.player_id) : undefined;
+                const reliability = computeDataReliability(tm?.tm ?? 0, tm?.pa ?? null);
+                const tierToScore: Record<typeof reliability.tier, number> = {
+                  "verified": 5, "partial": 40, "stats-only": 70, "none": 95,
+                };
+                const tierToGrade: Record<typeof reliability.tier, "Low" | "Moderate" | "Elevated" | "High"> = {
+                  "verified": "Low", "partial": "Moderate", "stats-only": "Elevated", "none": "High",
+                };
+                risk.factors.push({
+                  label: "Data Reliability",
+                  score: tierToScore[reliability.tier],
+                  grade: tierToGrade[reliability.tier],
+                  detail: `${reliability.label} — ${reliability.trackmanPitches} TrackMan pitches`,
+                });
+              }
 
               return <RiskAssessmentCardRSTR risk={risk} />;
             })()}
