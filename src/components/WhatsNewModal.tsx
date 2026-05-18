@@ -11,51 +11,41 @@ import { Button } from "@/components/ui/button";
 const CURRENT_RELEASE = "2026-05-18";
 const STORAGE_KEY = "rstr_iq_whats_new_seen";
 
-type Section = {
+type Feature = {
   title: string;
-  items: string[];
+  tagline: string;
+  details: string[];
 };
 
-const SECTIONS: Section[] = [
+const FEATURES: Feature[] = [
   {
-    title: "JUCO support",
-    items: [
-      "JUCO subtab on the Player Dashboard with leaderboards for qualified hitters (PA ≥ 75) and pitchers (IP ≥ 20) — district filter, position chips, target board column.",
-      "Transfer Portal simulator now has a JUCO division toggle, JUCO-specific risk cards, and a 5-factor risk model tailored to JUCO data reliability.",
-      "JUCO player + pitcher profiles show 2026 actuals card and the same scouting grade tiles as D1.",
-      "163 Presto-only JUCO pitchers added so the simulator covers every qualified arm.",
-    ],
-  },
-  {
-    title: "Team Builder",
-    items: [
-      "JUCO portal targets land on the target board with full transfer projections (matches simulator math exactly).",
-      "Bench-everywhere bug fixed — returner tiers now distribute correctly across cornerstone / everyday / platoon / utility / bench.",
-      "Depth chart class colors now read class_year directly (so R-JR colors as JR, R-SO as SO, etc.) instead of inferring from the transition code.",
-      "\"Class Adj\" column removed from returner + portal tables (equation still applies internally).",
+    title: "Full JUCO Player Upload + Transfer Portal",
+    tagline:
+      "Every qualified NJCAA D1 hitter and pitcher is now live in RSTR IQ, fully wired into the Transfer Portal simulator.",
+    details: [
+      "Run JUCO-to-D1 transfer projections for any player, any destination — calibrated weights, district-specific competition, JUCO-specific risk model.",
+      "New JUCO subtab on the Player Dashboard with leaderboards, district filter, and target board.",
+      "Dedicated JUCO player + pitcher profile pages with 2026 actuals and scouting grades.",
     ],
   },
   {
     title: "Program Analytics",
-    items: [
-      "Pitcher tier labels reworked — a 1.8 pWAR SP now reads \"Contributor\" instead of \"Below\". New tiers: Elite / Starter / Contributor / Below.",
-      "Hitter tier rows use the same updated framing.",
+    tagline:
+      "A full Team Builder analytics view that grades your roster position-by-position, tier-by-tier — and benchmarks it against last year's actual WAR and the 2025 national/conference champions.",
+    details: [
+      "Year-over-year compare and championship benchmark cards quantify exactly where the build stands.",
+      "Pitcher and hitter tier labels reworked — a 1.8 pWAR starter now reads \"Contributor,\" not \"Below.\"",
+      "Lineup / rotation / bullpen WAR broken out separately for cleaner gap analysis.",
     ],
   },
-  {
-    title: "Risk assessment",
-    items: [
-      "Stuff+ factor added to both hitter and pitcher risk cards.",
-      "Pitcher Skillset falls back to K/9, BB/9, HR/9 when TrackMan data is missing (instead of marking the whole card as unreliable).",
-      "Stuff+ shows a small bar for elite-but-untracked arms to differentiate from N/A.",
-    ],
-  },
-  {
-    title: "Data",
-    items: [
-      "DOB and class_year columns added to Hitter Master + Pitching Master (JUCO populated; D1 backfill coming with 2026 final stat upload).",
-    ],
-  },
+];
+
+const WHAT_ELSE: string[] = [
+  "Team Builder: bench-everywhere default fixed — tiers now distribute correctly.",
+  "Team Builder: depth-chart class colors read the current class year (R-JR shows as JR, etc.).",
+  "Team Builder: redundant \"Class Adj\" column removed (equation still applies).",
+  "Risk Assessment: Stuff+ added as a factor; pitcher Skillset falls back to K/9 · BB/9 · HR/9 when TrackMan is missing.",
+  "Data: DOB and class year columns added to the master tables (D1 backfill comes with 2026 final stats).",
 ];
 
 export function WhatsNewModal() {
@@ -111,16 +101,27 @@ export function WhatsNewModal() {
         </DialogHeader>
 
         <div className="px-6 py-5 space-y-6">
-          {SECTIONS.map((section) => (
-            <div key={section.title}>
+          {FEATURES.map((feature, fi) => (
+            <div
+              key={feature.title}
+              className="rounded-md border border-white/10 border-l-[3px] border-l-[#D4AF37] bg-white/[0.02] p-4"
+            >
+              <div className="flex items-baseline gap-2 mb-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#D4AF37]">
+                  New · {fi === 0 ? "Headline" : "Feature"}
+                </span>
+              </div>
               <h3
-                className="text-[12px] font-medium uppercase tracking-[0.08em] text-[#D4AF37] mb-2.5"
+                className="text-[18px] font-semibold uppercase tracking-[0.04em] text-white mb-2 leading-[1.25]"
                 style={{ fontFamily: "'Oswald', sans-serif" }}
               >
-                {section.title}
+                {feature.title}
               </h3>
-              <ul className="space-y-2 text-[14px] leading-[1.55] text-slate-200">
-                {section.items.map((item, i) => (
+              <p className="text-[14px] leading-[1.55] text-slate-200 mb-3">
+                {feature.tagline}
+              </p>
+              <ul className="space-y-1.5 text-[13px] leading-[1.55] text-slate-300">
+                {feature.details.map((item, i) => (
                   <li key={i} className="flex gap-2.5">
                     <span className="text-[#D4AF37] mt-[7px] shrink-0 inline-block w-1 h-1 rounded-full bg-[#D4AF37]" />
                     <span>{item}</span>
@@ -129,6 +130,24 @@ export function WhatsNewModal() {
               </ul>
             </div>
           ))}
+
+          {/* "What else" — smaller items, no card chrome, just a compact list */}
+          <div>
+            <h4
+              className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400 mb-2"
+              style={{ fontFamily: "'Oswald', sans-serif" }}
+            >
+              What else
+            </h4>
+            <ul className="space-y-1 text-[12.5px] leading-[1.5] text-slate-400">
+              {WHAT_ELSE.map((item, i) => (
+                <li key={i} className="flex gap-2">
+                  <span className="text-slate-500 shrink-0">·</span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
 
         <DialogFooter className="px-6 pb-5 pt-2 border-t border-white/10">
