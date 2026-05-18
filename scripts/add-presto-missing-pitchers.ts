@@ -129,7 +129,12 @@ async function main() {
 
   const url = process.env.SUPABASE_URL ?? "";
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-  if (!url.includes("slrxowawbijbjrkozqlj")) { err("Expected staging URL"); process.exit(1); }
+  // Allow staging OR prod. Print which DB we're hitting so the operator
+  // can sanity-check before confirming with the typed phrase.
+  const isStaging = url.includes("slrxowawbijbjrkozqlj");
+  const isProd = url.includes("trbvxuoliwrfowibatkm");
+  if (!isStaging && !isProd) { err(`Unknown Supabase URL: ${url}`); process.exit(1); }
+  console.log(`Target DB: ${isProd ? COLOR.red + "PROD" + COLOR.reset : "staging"} (${url})`);
   const sb = createClient(url, key, { auth: { persistSession: false } });
 
   // ── Parse none.csv (just gives us name + team) ─────────────────────

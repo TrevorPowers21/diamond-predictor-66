@@ -36,3 +36,4 @@ supabase/.branches/
 prod-schema.sql
 staging-schema.sql
 *.dump.sql
+tmp/

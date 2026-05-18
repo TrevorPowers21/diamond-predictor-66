@@ -107,7 +107,11 @@ async function main() {
 
   const url = process.env.SUPABASE_URL ?? "";
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-  if (!url.includes("slrxowawbijbjrkozqlj")) { err("Expected staging URL — refusing to run on prod"); process.exit(1); }
+  // Allow staging OR prod. Print which DB so the operator can sanity-check.
+  const isStaging = url.includes("slrxowawbijbjrkozqlj");
+  const isProd = url.includes("trbvxuoliwrfowibatkm");
+  if (!isStaging && !isProd) { err(`Unknown Supabase URL: ${url}`); process.exit(1); }
+  console.log(`Target DB: ${isProd ? COLOR.red + "PROD" + COLOR.reset : "staging"} (${url})`);
   const sb = createClient(url, key, { auth: { persistSession: false } });
 
   // ── Parse CSV ──────────────────────────────────────────────────────
