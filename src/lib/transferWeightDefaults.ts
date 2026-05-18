@@ -132,12 +132,9 @@ export function applyJucoOutlierRegression(
  * just not as aggressively. Pantier pAVG .328 → .336, pSLG .600 → ~.718.
  */
 export const JUCO_REGRESSION_CONFIG = {
-  // Caps tightened again 2026-05-18 (0.10/0.10/0.15 → 0.13/0.13/0.18) after
-  // user feedback that JUCO hitter stats still project a touch high. Modest
-  // shift, only affects extreme outliers (.450+ AVG, .500+ OBP, .300+ ISO).
-  avg: { mean: 0.280, threshold: 0.350, slope: 1.12, maxR: 0.13 },
-  obp: { mean: 0.385, threshold: 0.450, slope: 0.85, maxR: 0.13 },
-  iso: { mean: 0.162, threshold: 0.280, slope: 1.50, maxR: 0.18 },
+  avg: { mean: 0.280, threshold: 0.350, slope: 1.12, maxR: 0.10 },
+  obp: { mean: 0.385, threshold: 0.450, slope: 0.85, maxR: 0.10 },
+  iso: { mean: 0.162, threshold: 0.280, slope: 1.50, maxR: 0.15 },
 } as const;
 
 /**

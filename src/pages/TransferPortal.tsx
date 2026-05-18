@@ -502,10 +502,22 @@ export default function TransferPortal() {
   const { hitterStats, powerRatings } = useHitterSeedData();
   const { addPlayer: addToSupabaseBoard, isOnBoard: isOnSupabaseBoard } = useTargetBoard();
   const isAdmin = hasRole("admin");
-  const [selectedPlayerId, setSelectedPlayerId] = useState<string>("");
+
+  // Persist simulator state across navigation (e.g., clicking a Profile link
+  // and using the back button). React Router unmounts TP on route change,
+  // destroying useState. sessionStorage survives in-tab navigation so the
+  // user lands back on the same player + destination they were inspecting.
+  const SESSION_KEY = "rstr.tp.state.v1";
+  const initialState = (() => {
+    if (typeof window === "undefined") return null;
+    try { return JSON.parse(window.sessionStorage.getItem(SESSION_KEY) || "null"); }
+    catch { return null; }
+  })();
+
+  const [selectedPlayerId, setSelectedPlayerId] = useState<string>(initialState?.selectedPlayerId ?? "");
   const [playerSearch, setPlayerSearch] = useState<string>("");
-  const [divisionFilter, setDivisionFilter] = useState<"D1" | "JUCO">("D1");
-  const [selectedDestinationTeam, setSelectedDestinationTeam] = useState<string>("");
+  const [divisionFilter, setDivisionFilter] = useState<"D1" | "JUCO">(initialState?.divisionFilter ?? "D1");
+  const [selectedDestinationTeam, setSelectedDestinationTeam] = useState<string>(initialState?.selectedDestinationTeam ?? "");
   const [teamSearch, setTeamSearch] = useState<string>("");
 
   // Pre-fill the destination team with the impersonated school. Coaches
@@ -518,10 +530,22 @@ export default function TransferPortal() {
     setSelectedDestinationTeam(effectiveSchoolName);
     setTeamSearch(effectiveSchoolName);
   }, [effectiveSchoolName, selectedDestinationTeam]);
-  const [simType, setSimType] = useState<"hitting" | "pitching">("hitting");
-  const [selectedPitcherId, setSelectedPitcherId] = useState<string>("");
+  const [simType, setSimType] = useState<"hitting" | "pitching">(initialState?.simType ?? "hitting");
+  const [selectedPitcherId, setSelectedPitcherId] = useState<string>(initialState?.selectedPitcherId ?? "");
   const [pitcherSearch, setPitcherSearch] = useState<string>("");
-  const [pitchingRoleOverride, setPitchingRoleOverride] = useState<"SP" | "RP">("RP");
+  const [pitchingRoleOverride, setPitchingRoleOverride] = useState<"SP" | "RP">(initialState?.pitchingRoleOverride ?? "RP");
+
+  // Mirror state to sessionStorage on every change so the back-from-profile
+  // round-trip lands on the same selection.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+        selectedPlayerId, selectedDestinationTeam, divisionFilter,
+        simType, selectedPitcherId, pitchingRoleOverride,
+      }));
+    } catch { /* sessionStorage quota / disabled — ignore */ }
+  }, [selectedPlayerId, selectedDestinationTeam, divisionFilter, simType, selectedPitcherId, pitchingRoleOverride]);
   const pitchingEqForTiers = useMemo(() => readPitchingWeights(), []);
   const { conferenceStats: newConfStats } = useConferenceStats(2026);
 
@@ -2026,23 +2050,11 @@ export default function TransferPortal() {
                 });
               }
 
-              // Stuff+ factor — what quality of pitching produced this hitter's
-              // stats. Lower fromStuff = weaker JUCO/conf pitching = riskier
-              // because the line came against less elite arms. Score is risk
-              // (high = risky) so inverted from Stuff+: ~110 = 5, ~100 = 35,
-              // ~95 = 60, ~90 = 80.
-              const fromStuff = simulation?.fromStuff ?? null;
-              if (fromStuff != null) {
-                const stuffScore = Math.max(0, Math.min(100, Math.round((110 - fromStuff) * 6)));
-                const stuffGrade: "Low" | "Moderate" | "Elevated" | "High" =
-                  fromStuff >= 105 ? "Low" : fromStuff >= 98 ? "Moderate" : fromStuff >= 92 ? "Elevated" : "High";
-                risk.factors.push({
-                  label: "Stuff+",
-                  score: stuffScore,
-                  grade: stuffGrade,
-                  detail: `Source-conf pitching quality: Stuff+ ${fromStuff.toFixed(1)}`,
-                });
-              }
+              // Stuff+ on hitter risk card is redundant — competition quality
+              // is already captured by the Competition factor inside
+              // assessHitterRisk. Stuff+ as a risk signal is a pitcher concept
+              // (does this pitcher's arsenal play up?) — kept ONLY on the
+              // pitcher risk panel below.
 
               return <RiskAssessmentCardRSTR risk={risk} />;
             })()}
