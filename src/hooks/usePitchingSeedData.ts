@@ -143,6 +143,7 @@ export function usePitchingSeedData(season = 2026) {
     h_pull_pct: r.h_pull_pct ?? null,
     la_10_30_pct: r.la_10_30_pct ?? null,
     stuffPlus: r.stuff_plus ?? null,
+    division: r.division ?? null,
     era_pr_plus: r.era_pr_plus ?? null,
     fip_pr_plus: r.fip_pr_plus ?? null,
     whip_pr_plus: r.whip_pr_plus ?? null,

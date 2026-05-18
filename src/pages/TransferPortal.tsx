@@ -34,7 +34,7 @@ import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { assessHitterRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
-import { TRANSFER_WEIGHT_DEFAULTS, transferWeightsForSource } from "@/lib/transferWeightDefaults";
+import { TRANSFER_WEIGHT_DEFAULTS, transferWeightsForSource, JUCO_PITCHING_TRANSFER_WEIGHTS, JUCO_DISTRICT_HTP_OVERRIDE } from "@/lib/transferWeightDefaults";
 import { computeDataReliability } from "@/lib/jucoDataReliability";
 
 type SimPlayer = {
@@ -102,6 +102,8 @@ type PitchingStorageRow = {
   k9: number | null;
   bb9: number | null;
   hr9: number | null;
+  division: string | null;
+  stuffPlus: number | null;
 };
 
 type PitchingPowerSnapshot = {
@@ -742,6 +744,8 @@ export default function TransferPortal() {
         k9: r.k9 != null ? Number(r.k9) : null,
         bb9: r.bb9 != null ? Number(r.bb9) : null,
         hr9: r.hr9 != null ? Number(r.hr9) : null,
+        division: (r as any).division ?? null,
+        stuffPlus: (r as any).stuffPlus ?? null,
       };
     }).filter((r) => !!r.player_name);
   }, [pitchingMasterRows]);
@@ -1505,7 +1509,11 @@ export default function TransferPortal() {
   const pitchingSimulation = useMemo<PitchingSim | null>(() => {
     if (!selectedPitcher) return null;
     if (!selectedDestinationTeam) return null;
-    const eq = readPitchingWeights();
+    // JUCO source pitchers swap in JUCO_PITCHING_TRANSFER_WEIGHTS (power=0,
+    // park=0, conf moderate, competition heavier on Stuff+).
+    const isJucoPitcherSrc = selectedPitcher.division === "NJCAA_D1";
+    const baseEq = readPitchingWeights();
+    const eq = isJucoPitcherSrc ? { ...baseEq, ...JUCO_PITCHING_TRANSFER_WEIGHTS } : baseEq;
     const toPitchTeamRow = resolveTeamRowFromCandidates([selectedDestinationTeam], teamByKey, teams);
     if (!toPitchTeamRow) return null;
     // Resolve from-team by UUID first, then name fallback
@@ -1542,9 +1550,22 @@ export default function TransferPortal() {
     const toBb9Plus = toPitchConfStats?.bb9_plus ?? null;
     const fromHr9Plus = fromPitchConfStats?.hr9_plus ?? null;
     const toHr9Plus = toPitchConfStats?.hr9_plus ?? null;
-    const fromHitterTalent = fromPitchConfStats?.hitter_talent_plus ?? null;
+    // JUCO source: override raw conference hitter_talent_plus (inflated 107-123
+    // because JUCO hitters mash each other in soft envs) with the per-district
+    // override (72-95) that reflects true hitter quality faced. District name
+    // derived from conference string ("NJCAA D1 Appalachian" → "Appalachian").
+    const jucoDistrict = isJucoPitcherSrc
+      ? (fromPitchConference ?? "").replace(/^NJCAA D1 /, "").replace(/ District$/, "")
+      : null;
+    const fromHitterTalent = isJucoPitcherSrc
+      ? (JUCO_DISTRICT_HTP_OVERRIDE[jucoDistrict ?? ""] ?? null)
+      : (fromPitchConfStats?.hitter_talent_plus ?? null);
     const toHitterTalent = toPitchConfStats?.hitter_talent_plus ?? null;
 
+    // env+ values are computed at runtime from raw conf rates via
+    // calcPitchingPlus() in pitchingConfByKey — JUCO districts have ERA/FIP/
+    // WHIP/K9/BB9/HR9 stored, so these should resolve. fromHitterTalent is
+    // overridden per-district for JUCO; toHitterTalent from D1 Conf Stats.
     requireNum("From ERA+", fromEraPlus);
     requireNum("To ERA+", toEraPlus);
     requireNum("From FIP+", fromFipPlus);
@@ -1568,11 +1589,14 @@ export default function TransferPortal() {
     const toWhipParkRaw = resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "whip", teamParkComponents);
     const fromHr9ParkRaw = resolveParkFactorFromCandidates(fromPitchTeamRow?.id, [selectedPitcher.team, fromPitchTeamRow?.name], "hr9", teamParkComponents);
     const toHr9ParkRaw = resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "hr9", teamParkComponents);
-    requireNum("From R/G Park Factor", fromEraParkRaw);
+    // JUCO source: no park data; weights are 0 so the math no-ops.
+    if (!isJucoPitcherSrc) {
+      requireNum("From R/G Park Factor", fromEraParkRaw);
+      requireNum("From WHIP Park Factor", fromWhipParkRaw);
+      requireNum("From HR/9 Park Factor", fromHr9ParkRaw);
+    }
     requireNum("To R/G Park Factor", toEraParkRaw);
-    requireNum("From WHIP Park Factor", fromWhipParkRaw);
     requireNum("To WHIP Park Factor", toWhipParkRaw);
-    requireNum("From HR/9 Park Factor", fromHr9ParkRaw);
     requireNum("To HR/9 Park Factor", toHr9ParkRaw);
 
     if (missing.length > 0) {
@@ -1598,12 +1622,15 @@ export default function TransferPortal() {
     const k9Pr = selectedPitcherPower?.k9PrPlus ?? null;
     const bb9Pr = selectedPitcherPower?.bb9PrPlus ?? null;
     const hr9Pr = selectedPitcherPower?.hr9PrPlus ?? null;
-    requireNum("ERA Power Rating+", eraPr);
-    requireNum("FIP Power Rating+", fipPr);
-    requireNum("WHIP Power Rating+", whipPr);
-    requireNum("K/9 Power Rating+", k9Pr);
-    requireNum("BB/9 Power Rating+", bb9Pr);
-    requireNum("HR/9 Power Rating+", hr9Pr);
+    // JUCO source: PRs aren't used (power weights = 0), nulls fine.
+    if (!isJucoPitcherSrc) {
+      requireNum("ERA Power Rating+", eraPr);
+      requireNum("FIP Power Rating+", fipPr);
+      requireNum("WHIP Power Rating+", whipPr);
+      requireNum("K/9 Power Rating+", k9Pr);
+      requireNum("BB/9 Power Rating+", bb9Pr);
+      requireNum("HR/9 Power Rating+", hr9Pr);
+    }
     if (missing.length > 0) {
       return {
         blocked: true,

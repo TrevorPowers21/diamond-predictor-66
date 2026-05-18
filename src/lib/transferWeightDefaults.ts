@@ -110,38 +110,41 @@ export function transferWeightsForSource(division: string | null | undefined) {
  *     Horizon equivalents per district (72-95). See JUCO_DISTRICT_HTP_OVERRIDE.
  *   - Park weights zeroed (no JUCO park data).
  */
+/**
+ * Override fields for the pitching equation weights object (the same shape
+ * `readPitchingWeights()` returns). Spread into `eq` at TP/TB call sites
+ * when source pitcher is JUCO to swap the relevant weights without touching
+ * the D1 baseline. Keys MUST match PitchingEquationWeights field names so
+ * the spread produces a valid eq.
+ */
 export const JUCO_PITCHING_TRANSFER_WEIGHTS = {
-  // Conference (hitter_talent_plus) weights — moderate. Stuff+ is the heavier
-  // signal for pitchers because it scales cleanly across talent levels.
-  t_era_conference_weight: 0.40,
-  t_fip_conference_weight: 0.40,
-  t_whip_conference_weight: 0.40,
-  t_k9_conference_weight: 0.30,
-  t_bb9_conference_weight: 0.30,
-  t_hr9_conference_weight: 0.35,
-
-  // Stuff+ delta weights — heavier than D1 to reward arms whose individual
-  // Stuff+ travels. Callsite zeroes these for pitchers without individual
-  // Stuff+ data (no district-average fallback per user direction).
-  t_era_stuff_weight: 1.30,
-  t_fip_stuff_weight: 1.40,
-  t_whip_stuff_weight: 1.10,
-  t_k9_stuff_weight: 1.20,
-  t_bb9_stuff_weight: 0.80,
-  t_hr9_stuff_weight: 1.10,
-
+  // Power weights = 0 (use raw 2026 rates verbatim — same as hitter approach)
+  transfer_era_power_weight: 0,
+  transfer_fip_power_weight: 0,
+  transfer_whip_power_weight: 0,
+  transfer_k9_power_weight: 0,
+  transfer_bb9_power_weight: 0,
+  transfer_hr9_power_weight: 0,
+  // Conference weights — moderate; conference env+ delta still meaningful
+  transfer_era_conference_weight: 0.40,
+  transfer_fip_conference_weight: 0.40,
+  transfer_whip_conference_weight: 0.40,
+  transfer_k9_conference_weight: 0.30,
+  transfer_bb9_conference_weight: 0.30,
+  transfer_hr9_conference_weight: 0.35,
+  // Competition (Stuff+ / hitter-talent delta) — heavier on JUCO because
+  // individual Stuff+ is the cleanest cross-context signal for pitchers
+  transfer_era_competition_weight: 1.30,
+  transfer_fip_competition_weight: 1.40,
+  transfer_whip_competition_weight: 1.10,
+  transfer_k9_competition_weight: 1.20,
+  transfer_bb9_competition_weight: 0.80,
+  transfer_hr9_competition_weight: 1.10,
   // Park weights = 0 (JUCO has no park data)
-  t_era_park_weight: 0,
-  t_whip_park_weight: 0,
-  t_hr9_park_weight: 0,
-
-  // Power weights = 0 (use raw 2026 rates verbatim, same as hitter approach)
-  t_era_power_weight: 0,
-  t_fip_power_weight: 0,
-  t_whip_power_weight: 0,
-  t_k9_power_weight: 0,
-  t_bb9_power_weight: 0,
-  t_hr9_power_weight: 0,
+  transfer_era_park_weight: 0,
+  transfer_fip_park_weight: 0,
+  transfer_whip_park_weight: 0,
+  transfer_hr9_park_weight: 0,
 } as const;
 
 /**
@@ -160,15 +163,24 @@ export const JUCO_PITCHING_TRANSFER_WEIGHTS = {
  * NOT calibrated against actual draft per-region data (not in DB).
  * Recalibrate as we see real projections vs gut.
  */
+/**
+ * Calibrated 2026-05-17 against ACTUAL computed D1 HTP values
+ * (formula: OvrPR + 1.25*(Stuff+ - 100) + 0.75*(100 - WRC+)). User
+ * framework: FL JUCO ≈ MWC tier (HTP 94), weakest JUCO ≈ NEC tier (HTP 66).
+ *
+ * D1 anchors for context:
+ *   NEC=65.9 · SWAC=70.3 · MAAC=85.2 · Horizon=89.8 · MWC=94.0 ·
+ *   Big East=96.3 · MAC=99.1 · SBC=103.3 · Big 12=118.6 · SEC=135.8
+ */
 export const JUCO_DISTRICT_HTP_OVERRIDE: Record<string, number> = {
-  "South Atlantic": 95,   // FL — Stuff+ 100.7, mid-major D1 tier
-  "Mid-South": 92,        // TN — Stuff+ 97.9, Big West/CAA tier
-  "Southwest": 88,        // TX/NM — Stuff+ 98.1, Patriot/MAAC tier
-  "Plains": 85,           // KS/NE — Stuff+ 96.8, MAAC tier
-  "Appalachian": 82,      // TN mtns / GA / SC — Stuff+ 95.9, below MAAC
-  "Midwest": 80,          // MI/WI/IL — Stuff+ 95.3, NEC/SWAC range
-  "South": 80,            // LA / AL / MS — Stuff+ 94.8, NEC/SWAC
-  "West": 78,             // AZ / UT / Pacific NW — Stuff+ 94.7, NEC tier
-  "South Central": 75,    // OK / MO / AR — Stuff+ 93.8, below NEC
-  "East": 72,             // NY / NJ / MD — Stuff+ 92.0, weakest (below SWAC)
+  "South Atlantic": 94,   // FL — Stuff+ 100.7, ≈ MWC tier
+  "Mid-South": 88,        // TN — Stuff+ 97.9, ≈ between Horizon and MWC
+  "Southwest": 85,        // TX/NM — Stuff+ 98.1, ≈ MAAC tier
+  "Plains": 82,           // KS/NE — Stuff+ 96.8, between MAAC and SWAC
+  "Appalachian": 78,      // TN mtns / GA / SC — Stuff+ 95.9, above SWAC
+  "Midwest": 75,          // MI/WI/IL — Stuff+ 95.3, above SWAC
+  "South": 73,            // LA / AL / MS — Stuff+ 94.8, above SWAC
+  "West": 71,             // AZ / UT / Pacific NW — Stuff+ 94.7, SWAC tier
+  "South Central": 68,    // OK / MO / AR — Stuff+ 93.8, NEC-SWAC range
+  "East": 65,             // NY / NJ / MD — Stuff+ 92.0, NEC tier
 };
