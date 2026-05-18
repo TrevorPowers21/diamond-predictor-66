@@ -29,7 +29,11 @@ import { createInterface } from "node:readline/promises";
 import { createClient } from "@supabase/supabase-js";
 
 const CONFIRM = "yes-import-presto-pitchers";
-const FIP_CONST = 3.10;
+// FIP constant is COMPUTED from the league below, not hardcoded.
+// Standard FIP formula:
+//   FIP = ((13×HR) + (3×(BB+HBP)) - (2×K)) / IP + FIP_const
+// Constant ensures lgFIP = lgERA so the metric is unitless / comparable:
+//   FIP_const = lgERA − (((13×lgHR) + (3×(lgBB+lgHBP)) − (2×lgK)) / lgIP)
 const COLOR = { reset: "\x1b[0m", bold: "\x1b[1m", green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m", cyan: "\x1b[36m" };
 const ok = (s: string) => console.log(`  ${COLOR.green}✓${COLOR.reset} ${s}`);
 const warn = (s: string) => console.log(`  ${COLOR.yellow}!${COLOR.reset} ${s}`);
@@ -121,40 +125,60 @@ async function main() {
   if (!url.includes("slrxowawbijbjrkozqlj")) { err("Expected staging URL"); process.exit(1); }
   const sb = createClient(url, key, { auth: { persistSession: false } });
 
-  // ── Parse + derive ─────────────────────────────────────────────────
-  step("Parsing CSV + computing derived stats");
+  // ── Parse pass 1: raw rows + league totals ─────────────────────────
+  step("Parsing CSV (pass 1: extract + accumulate league totals)");
   const lines = readFileSync(csvPath, "utf-8").split(/\r?\n/).filter((l) => l.trim().length > 0);
-  type PrestoP = {
+  type PrestoRaw = {
     name: string; team: string;
     era: number; ip: number; h: number; r: number; er: number;
-    bb: number; k: number; hr: number; whip: number; k9: number;
-    bb9: number; hr9: number; fip: number;
+    bb: number; k: number; hr: number; whip: number; k9: number; hbp: number;
     w: number; l: number; app: number; gs: number; sv: number;
   };
-  const presto: PrestoP[] = [];
+  const num = (v: string) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
+  const raws: PrestoRaw[] = [];
+  // League aggregates for FIP constant
+  let lgIP = 0, lgBB = 0, lgHBP = 0, lgK = 0, lgHR = 0, lgER = 0;
   for (let i = 1; i < lines.length; i++) {
     const c = parseCSVRow(lines[i]);
     if (c.length < 21) continue;
-    const num = (v: string) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
     const ip = ipToDecimal(c[9]);
     if (ip <= 0) continue;
     const bb = num(c[13]);
     const k = num(c[14]);
     const hr = num(c[16]);
-    const bb9 = (bb * 9) / ip;
-    const hr9 = (hr * 9) / ip;
-    const fip = ((13 * hr) + (3 * bb) - (2 * k)) / ip + FIP_CONST;
-    presto.push({
+    const er = num(c[12]);
+    const hbp = num(c[20]);  // last column in Presto pitcher export
+    raws.push({
       name: c[1], team: c[2],
       era: num(c[3]), w: num(c[4]), l: num(c[5]), app: num(c[6]), gs: num(c[7]), sv: num(c[8]),
-      ip, h: num(c[10]), r: num(c[11]), er: num(c[12]),
-      bb, k, k9: num(c[15]), hr, whip: num(c[17]),
+      ip, h: num(c[10]), r: num(c[11]), er, bb, k, k9: num(c[15]), hr, whip: num(c[17]), hbp,
+    });
+    lgIP += ip; lgBB += bb; lgHBP += hbp; lgK += k; lgHR += hr; lgER += er;
+  }
+  info(`${raws.length} Presto pitcher rows parsed (IP > 0)`);
+
+  // ── Compute league FIP constant from the parsed cohort ─────────────
+  // Standard formula: FIP_const = lgERA − ((13×lgHR + 3×(lgBB+lgHBP) − 2×lgK) / lgIP)
+  // This makes lgFIP = lgERA by construction.
+  const lgERA = (lgER * 9) / lgIP;
+  const lgKwERA = ((13 * lgHR) + (3 * (lgBB + lgHBP)) - (2 * lgK)) / lgIP;
+  const FIP_CONST = lgERA - lgKwERA;
+  info(`League totals: IP=${lgIP.toFixed(0)}, BB=${lgBB}, HBP=${lgHBP}, K=${lgK}, HR=${lgHR}, ER=${lgER}`);
+  info(`Derived: lgERA=${lgERA.toFixed(3)}, lgKwERA=${lgKwERA.toFixed(3)}, FIP_const=${FIP_CONST.toFixed(3)}`);
+
+  // ── Pass 2: compute per-pitcher derived rates ──────────────────────
+  type PrestoP = PrestoRaw & { bb9: number; hr9: number; fip: number };
+  const presto: PrestoP[] = raws.map((r) => {
+    const bb9 = (r.bb * 9) / r.ip;
+    const hr9 = (r.hr * 9) / r.ip;
+    const fip = ((13 * r.hr) + (3 * (r.bb + r.hbp)) - (2 * r.k)) / r.ip + FIP_CONST;
+    return {
+      ...r,
       bb9: Math.round(bb9 * 100) / 100,
       hr9: Math.round(hr9 * 100) / 100,
       fip: Math.round(fip * 100) / 100,
-    });
-  }
-  info(`${presto.length} Presto pitcher rows parsed (IP > 0)`);
+    };
+  });
 
   // ── Pull existing JUCO 2026 Pitching Master rows ──────────────────
   step("Loading 2026 JUCO Pitching Master rows");
