@@ -87,7 +87,7 @@ function getConfTier(conference: string | null | undefined): number {
 // "How good is this player?" — anchored by projected wRC+ (hitters) or pRV+ (pitchers).
 // Higher projection = lower risk of being a non-contributor.
 
-function assessHitterProjection(pWrcPlus: number | null | undefined): RiskFactor {
+export function assessHitterProjection(pWrcPlus: number | null | undefined): RiskFactor {
   if (pWrcPlus == null || !Number.isFinite(pWrcPlus)) {
     return { label: "Projection", score: null, grade: "Unknown", detail: "Projection unavailable" };
   }
@@ -110,7 +110,7 @@ function assessHitterProjection(pWrcPlus: number | null | undefined): RiskFactor
   };
 }
 
-function assessPitcherProjection(prvPlus: number | null | undefined): RiskFactor {
+export function assessPitcherProjection(prvPlus: number | null | undefined): RiskFactor {
   if (prvPlus == null || !Number.isFinite(prvPlus)) {
     return { label: "Projection", score: null, grade: "Unknown", detail: "Projection unavailable" };
   }
@@ -136,7 +136,7 @@ function assessPitcherProjection(prvPlus: number | null | undefined): RiskFactor
 // ── Factor 2: Skillset Reliability ──────────────────────────────────
 // "How reliable is this player's skillset?" — profile variance driver.
 
-function assessHitterTypeRisk(metrics: {
+export function assessHitterTypeRisk(metrics: {
   chase?: number | null;
   contact?: number | null;
   whiff?: number | null;
@@ -147,7 +147,49 @@ function assessHitterTypeRisk(metrics: {
   pull?: number | null;
   gb?: number | null;
   bb?: number | null;
+  // Peripheral fallback inputs — used when no TrackMan metrics are present.
+  // AVG / ISO / (OBP-AVG) is the slash-line backbone: low AVG = poor contact,
+  // low ISO = no power, narrow OBP-AVG gap = no plate discipline. Mirrors
+  // the K9/BB9/HR9 peripheral fallback on the pitcher side.
+  avg?: number | null;
+  obp?: number | null;
+  iso?: number | null;
 }): RiskFactor {
+  // If every TrackMan input is null, fall back to slash-line peripherals.
+  const trackmanInputs = [metrics.chase, metrics.contact, metrics.whiff, metrics.barrel, metrics.lineDrive, metrics.avgEv, metrics.ev90, metrics.pull, metrics.gb, metrics.bb];
+  const anyTrackman = trackmanInputs.some((v) => v != null && Number.isFinite(Number(v)));
+  if (!anyTrackman) {
+    const avg = metrics.avg;
+    const obp = metrics.obp;
+    const iso = metrics.iso;
+    const anyPeripheral = [avg, obp, iso].some((v) => v != null && Number.isFinite(Number(v)));
+    if (!anyPeripheral) {
+      return { label: "Skillset", score: null, grade: "Unknown", detail: "No skillset metrics available" };
+    }
+    let r = 50; const why: string[] = [];
+    if (avg != null) {
+      if (avg < 0.220)      { r += 18; why.push("very poor contact"); }
+      else if (avg < 0.250) { r += 8; why.push("below-avg contact"); }
+      else if (avg >= 0.340){ r -= 14; why.push("elite contact rate"); }
+      else if (avg >= 0.310){ r -= 8; why.push("plus contact rate"); }
+    }
+    if (iso != null) {
+      if (iso < 0.060)      { r += 12; why.push("no power"); }
+      else if (iso < 0.090) { r += 6; why.push("limited power"); }
+      else if (iso >= 0.220){ r -= 12; why.push("elite power"); }
+      else if (iso >= 0.170){ r -= 6; why.push("plus power"); }
+    }
+    if (avg != null && obp != null) {
+      const walkProxy = obp - avg;
+      if (walkProxy < 0.040)      { r += 10; why.push("poor plate discipline (no walks)"); }
+      else if (walkProxy < 0.060) { r += 4; }
+      else if (walkProxy >= 0.110){ r -= 8; why.push("strong walk rate"); }
+      else if (walkProxy >= 0.090){ r -= 4; }
+    }
+    r = clamp(r);
+    return { label: "Skillset", score: r, grade: toGrade(r), detail: why.length ? why.slice(0, 3).join("; ") : "Average peripheral profile" };
+  }
+
   let risk = 50; // start neutral
   let reasons: string[] = [];
 
@@ -290,7 +332,7 @@ function assessHitterTypeRisk(metrics: {
   return { label: "Skillset", score: risk, grade: toGrade(risk), detail };
 }
 
-function assessPitcherTypeRisk(metrics: {
+export function assessPitcherTypeRisk(metrics: {
   stuffPlus?: number | null;
   whiffPct?: number | null;
   bbPct?: number | null;
@@ -299,6 +341,14 @@ function assessPitcherTypeRisk(metrics: {
   hardHit?: number | null;
   gb?: number | null;
   izWhiff?: number | null;
+  // Peripheral fallback — used when no TrackMan metrics are present.
+  // K/9 + BB/9 + HR/9 is effectively the FIP backbone and is a reasonable
+  // skillset proxy: lots of walks + HRs + no Ks = high-risk skillset; the
+  // inverse is low-risk. Anchors expressed in per-9 units (NCAA averages
+  // ~9.0 K/9, ~4.3 BB/9, ~1.0 HR/9).
+  k9?: number | null;
+  bb9?: number | null;
+  hr9?: number | null;
 }): RiskFactor {
   let risk = 50;
   let reasons: string[] = [];
@@ -311,6 +361,50 @@ function assessPitcherTypeRisk(metrics: {
   const hh = metrics.hardHit;
   const gb = metrics.gb;
   const izWhiff = metrics.izWhiff;
+
+  const anyTrackman = [stuff, whiff, bb, chase, barrel, hh, gb, izWhiff].some((v) => v != null && Number.isFinite(Number(v)));
+
+  if (!anyTrackman) {
+    // ── Peripheral fallback: K/9, BB/9, HR/9 (FIP backbone) ──
+    // The framing: high K's = stuff plays, low BB's = command, low HR's =
+    // contact suppression. Walks weighted hardest because the user flagged
+    // them as the primary skillset reliability tell across levels (Connor
+    // Mitchell case: high K + low HR + high BB = elevated risk because the
+    // walks are what doesn't translate).
+    const k9 = metrics.k9;
+    const bb9 = metrics.bb9;
+    const hr9 = metrics.hr9;
+    const anyPeripheral = [k9, bb9, hr9].some((v) => v != null && Number.isFinite(Number(v)));
+    if (!anyPeripheral) {
+      return { label: "Skillset", score: null, grade: "Unknown", detail: "No skillset metrics available" };
+    }
+
+    if (k9 != null) {
+      if (k9 >= 12)      { risk -= 16; reasons.push("elite K rate"); }
+      else if (k9 >= 10) { risk -= 10; reasons.push("plus K rate"); }
+      else if (k9 >= 8.5){ risk -= 5; }
+      else if (k9 < 6)   { risk += 10; reasons.push("poor K rate"); }
+      else if (k9 < 7.5) { risk += 5; }
+    }
+    if (bb9 != null) {
+      if (bb9 >= 6)      { risk += 20; reasons.push("very poor command — primary skillset risk"); }
+      else if (bb9 >= 5) { risk += 12; reasons.push("below-avg command"); }
+      else if (bb9 >= 4.5){ risk += 6; }
+      else if (bb9 <= 2) { risk -= 14; reasons.push("elite command"); }
+      else if (bb9 <= 3) { risk -= 10; reasons.push("plus command"); }
+      else if (bb9 <= 4) { risk -= 3; }
+    }
+    if (hr9 != null) {
+      if (hr9 >= 1.5)    { risk += 12; reasons.push("HR-prone"); }
+      else if (hr9 >= 1.2){ risk += 6; }
+      else if (hr9 <= 0.6){ risk -= 10; reasons.push("HR suppression"); }
+      else if (hr9 <= 0.9){ risk -= 3; }
+    }
+
+    risk = clamp(risk);
+    const detail = reasons.length > 0 ? reasons.slice(0, 3).join("; ") : "Average peripheral profile";
+    return { label: "Skillset", score: risk, grade: toGrade(risk), detail };
+  }
 
   // ── #1: Stuff+ — dominant anchor. Stuff is stuff regardless of competition. ──
   // NCAA Stuff+ distribution is tight — 108+ is ~99th percentile.
@@ -488,7 +582,7 @@ function buildCompetitionFactor(
  * Calibrated against the realistic D1 range (~92–108).
  * NEC / SWAC at the bottom (~92) land in High (red).
  */
-function assessHitterCompetitionRisk(conference: string | null | undefined, confStuffPlus?: number | null): RiskFactor {
+export function assessHitterCompetitionRisk(conference: string | null | undefined, confStuffPlus?: number | null): RiskFactor {
   return buildCompetitionFactor(conference, confStuffPlus, "Stuff+", (m) => {
     if (m >= 108) return { risk: 5,  gradeText: "elite competition" };
     if (m >= 105) return { risk: 12, gradeText: "top-tier competition" };
@@ -507,7 +601,7 @@ function assessHitterCompetitionRisk(conference: string | null | undefined, conf
  * Wider range than Stuff+ (~70–117) since HT+ aggregates OPR + Stuff+ + wRC+.
  * NCAA average is ~103.
  */
-function assessPitcherCompetitionRisk(conference: string | null | undefined, confHitterTalentPlus?: number | null): RiskFactor {
+export function assessPitcherCompetitionRisk(conference: string | null | undefined, confHitterTalentPlus?: number | null): RiskFactor {
   return buildCompetitionFactor(conference, confHitterTalentPlus, "Hitter Talent+", (m) => {
     if (m >= 115) return { risk: 5,  gradeText: "elite competition" };
     if (m >= 110) return { risk: 12, gradeText: "top-tier competition" };
@@ -805,6 +899,10 @@ export interface PitcherRiskInput {
   hardHit?: number | null;
   gb?: number | null;
   izWhiff?: number | null;
+  // Peripheral fallback inputs — FIP backbone, used by Skillset when no TrackMan
+  k9?: number | null;
+  bb9?: number | null;
+  hr9?: number | null;
 }
 
 export function assessHitterRisk(input: HitterRiskInput): RiskAssessment {
@@ -849,6 +947,7 @@ export function assessPitcherRisk(input: PitcherRiskInput): RiskAssessment {
     stuffPlus: input.stuffPlus, whiffPct: input.whiffPct, bbPct: input.bbPct,
     chase: input.chase, barrel: input.barrel, hardHit: input.hardHit,
     gb: input.gb, izWhiff: input.izWhiff,
+    k9: input.k9, bb9: input.bb9, hr9: input.hr9,
   }));
 
   // 3. Competition — "How reliable is the competition?" (weight: 18%)

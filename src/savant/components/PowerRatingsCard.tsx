@@ -8,10 +8,10 @@ const fmtInt = (v: number | null | undefined) => (v == null ? "—" : `${Math.ro
 
 interface PowerRatingsCardProps {
   player: SavantHitterRow & {
-    ba_plus?: number | null;
-    obp_plus?: number | null;
-    iso_plus?: number | null;
-    overall_plus?: number | null;
+    ba_power_rating?: number | null;
+    obp_power_rating?: number | null;
+    iso_power_rating?: number | null;
+    overall_power_rating?: number | null;
   };
 }
 
@@ -21,10 +21,10 @@ interface PowerRatingsCardProps {
  */
 export default function PowerRatingsCard({ player }: PowerRatingsCardProps) {
   const tiles: Array<{ label: string; value: number | null | undefined }> = [
-    { label: "BA+", value: player.ba_plus },
-    { label: "OBP+", value: player.obp_plus },
-    { label: "ISO+", value: player.iso_plus },
-    { label: "Overall+", value: player.overall_plus },
+    { label: "BA+", value: player.ba_power_rating },
+    { label: "OBP+", value: player.obp_power_rating },
+    { label: "ISO+", value: player.iso_power_rating },
+    { label: "Overall+", value: player.overall_power_rating },
   ];
 
   const hasAny = tiles.some((t) => t.value != null);

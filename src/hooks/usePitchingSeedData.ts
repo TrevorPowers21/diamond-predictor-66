@@ -62,6 +62,10 @@ export type PitchingMasterSeedRow = {
   bb9_pr_plus: number | null;
   hr9_pr_plus: number | null;
   overall_pr_plus: number | null;
+  // JUCO data-reliability inputs (per-pitch TrackMan capture + batters faced).
+  // null = field absent; 0 = explicitly no capture.
+  trackman_pitches: number | null;
+  bf: number | null;
 };
 
 /**
@@ -107,7 +111,11 @@ export function usePitchingSeedData(season = 2026) {
     conferenceId: r.conference_id ?? null,
     throwHand: r.ThrowHand ?? null,
     role: r.Role ?? null,
-    ip: r.IP ?? null,
+    // Prefer regular_season_ip when the season has been locked — keeps tier
+    // classification (workhorse / high-lev / etc.) frozen at regular-season
+    // volume so playoff-team pitchers don't get tier-inflated by postseason
+    // innings. Falls through to live IP during the regular season.
+    ip: r.regular_season_ip ?? r.IP ?? null,
     g: r.G ?? null,
     gs: r.GS ?? null,
     // Blended-when-pullback resolution mirrors PitcherProfile.tsx:694-699 so
@@ -139,6 +147,7 @@ export function usePitchingSeedData(season = 2026) {
     h_pull_pct: r.h_pull_pct ?? null,
     la_10_30_pct: r.la_10_30_pct ?? null,
     stuffPlus: r.stuff_plus ?? null,
+    division: r.division ?? null,
     era_pr_plus: r.era_pr_plus ?? null,
     fip_pr_plus: r.fip_pr_plus ?? null,
     whip_pr_plus: r.whip_pr_plus ?? null,
@@ -146,6 +155,8 @@ export function usePitchingSeedData(season = 2026) {
     bb9_pr_plus: r.bb9_pr_plus ?? null,
     hr9_pr_plus: r.hr9_pr_plus ?? null,
     overall_pr_plus: r.overall_pr_plus ?? null,
+    trackman_pitches: r.trackman_pitches ?? null,
+    bf: r.bf ?? null,
   });
   });
 

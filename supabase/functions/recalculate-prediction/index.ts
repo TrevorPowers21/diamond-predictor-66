@@ -61,13 +61,19 @@ function toRate(v: number): number {
 }
 
 function normalizeClassTransition(raw?: string | null): string {
-  const value = (raw || "").trim().toUpperCase();
+  let value = (raw || "").trim().toUpperCase();
   if (!value) return "SJ";
   if (["FS", "SJ", "JS", "GR"].includes(value)) return value;
-  if (value.includes("FRESHMAN") || value.includes("FS")) return "FS";
-  if (value.includes("SOPHOMORE") || value.includes("SJ")) return "SJ";
-  if (value.includes("JUNIOR") || value.includes("JS")) return "JS";
-  if (value.includes("GRAD") || value.includes("GR")) return "GR";
+  value = value.replace(/^(RS?-?\s*)+/, "").trim();
+  if (value === "FR" || value === "FRESHMAN" || value === "FRESH") return "FS";
+  if (value === "SO" || value === "SOPHOMORE" || value === "SOPH") return "SJ";
+  if (value === "JR" || value === "JUNIOR") return "JS";
+  if (value === "SR" || value === "SENIOR") return "GR";
+  if (value === "GS" || value === "GRAD" || value === "GRADUATE") return "GR";
+  if (value.includes("FRESHMAN")) return "FS";
+  if (value.includes("SOPHOMORE")) return "SJ";
+  if (value.includes("JUNIOR")) return "JS";
+  if (value.includes("SENIOR") || value.includes("GRAD")) return "GR";
   return "SJ";
 }
 

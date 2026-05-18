@@ -50,6 +50,7 @@ import {
   type ReportPlayer,
 } from "@/components/ScoutingReport";
 import { useHighFollow } from "@/hooks/useHighFollow";
+import { JucoPlayerDashboardPanel } from "@/components/JucoPlayerDashboardPanel";
 
 type SortKey =
   | "name"
@@ -1095,6 +1096,28 @@ export default function ReturningPlayers() {
   const initialDashboardView: "hitting" | "pitching" =
     searchParams.get("tab") === "pitching" ? "pitching" : "hitting";
   const [dashboardView, setDashboardViewState] = useState<"hitting" | "pitching">(initialDashboardView);
+  // D1 / JUCO division toggle. JUCO branch renders JucoPlayerDashboardPanel
+  // (2026 actuals from Hitter Master / Pitching Master, qualified-only).
+  // Persisted in the same `tab` URL param family via `division` so deep-links
+  // and back-button navigation keep the same view.
+  const initialDivisionView: "D1" | "JUCO" =
+    searchParams.get("division") === "JUCO" ? "JUCO" : "D1";
+  const [divisionView, setDivisionViewState] = useState<"D1" | "JUCO">(initialDivisionView);
+  const setDivisionView = useCallback(
+    (next: "D1" | "JUCO") => {
+      setDivisionViewState(next);
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next === "D1") params.delete("division");
+          else params.set("division", next);
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
   const setDashboardView = useCallback(
     (next: "hitting" | "pitching") => {
       setDashboardViewState(next);
@@ -2205,6 +2228,11 @@ export default function ReturningPlayers() {
 
     if (pitchingMasterRows.length > 0) {
       return pitchingMasterRows
+        // D1 pitcher dashboard excludes JUCO arms — those have their own JUCO subtab.
+        // Hitter dashboard is fine; the issue was only on the pitcher side because
+        // the pitcher pipeline doesn't join through player_predictions (which has
+        // its own implicit division filtering on the hitter path).
+        .filter((r) => (r as any).division !== "NJCAA_D1")
         .map((r, idx) => {
           const playerName = (r.playerName || "").trim();
           const normalizedTeam = normalizePitchingTeam(r.team);
@@ -2544,7 +2572,9 @@ export default function ReturningPlayers() {
               2025 season · all players including transfers and departed
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          {/* Vertical stack: Hitting/Pitching on top, D1/JUCO underneath
+              (mirrors the Transfer Portal Simulator header layout). */}
+          <div className="flex flex-col items-end gap-2">
             <div className="flex gap-1 rounded-lg border border-border/60 bg-muted/40 p-1">
               <button
                 className={cn(
@@ -2571,10 +2601,40 @@ export default function ReturningPlayers() {
                 Pitching
               </button>
             </div>
+            <div className="flex gap-1">
+              <button
+                className={cn(
+                  "px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer",
+                  divisionView === "D1"
+                    ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+                style={{ fontFamily: "'Oswald', sans-serif" }}
+                onClick={() => setDivisionView("D1")}
+              >
+                D1
+              </button>
+              <button
+                className={cn(
+                  "px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer",
+                  divisionView === "JUCO"
+                    ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+                style={{ fontFamily: "'Oswald', sans-serif" }}
+                onClick={() => setDivisionView("JUCO")}
+              >
+                JUCO
+              </button>
+            </div>
           </div>
         </div>
 
-        {dashboardView === "hitting" ? (
+        {divisionView === "JUCO" ? (
+          // JUCO panel — 2026 actuals, qualified-only. Self-contained query +
+          // table; doesn't go through the D1 player_predictions pipeline.
+          <JucoPlayerDashboardPanel view={dashboardView} />
+        ) : dashboardView === "hitting" ? (
           <>
         <div className="space-y-2">
           <div className="relative w-full max-w-md" ref={searchRef}>

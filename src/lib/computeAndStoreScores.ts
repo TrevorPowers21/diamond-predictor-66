@@ -332,10 +332,10 @@ export async function computeAndStoreHitterScores(season = 2026): Promise<{ upda
         pull_score: round2(ratings.pullScore),
         la_score: round2(ratings.laScore),
         gb_score: round2(ratings.gbScore),
-        ba_plus: round2(ratings.baPlus),
-        obp_plus: round2(ratings.obpPlus),
-        iso_plus: round2(ratings.isoPlus),
-        overall_plus: round2(ratings.overallPlus),
+        ba_power_rating: round2(ratings.baPlus),
+        obp_power_rating: round2(ratings.obpPlus),
+        iso_power_rating: round2(ratings.isoPlus),
+        overall_power_rating: round2(ratings.overallPlus),
         combined_used: blended.combined,
         combined_pa: blended.combined ? blended.totalAb : null,
         combined_seasons: blended.combined ? blended.seasonsUsed.join(",") : null,
@@ -546,7 +546,7 @@ export async function autoComputeUnscoredRows(season = 2026): Promise<void> {
       .from("Hitter Master")
       .select("id", { count: "exact", head: true })
       .eq("Season", season)
-      .is("ba_plus", null);
+      .is("ba_power_rating", null);
 
     if (unscoredHitters && unscoredHitters > 0) {
       console.log(`[autoCompute] Found ${unscoredHitters} unscored hitters for ${season}, computing...`);

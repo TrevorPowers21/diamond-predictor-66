@@ -173,9 +173,18 @@ function calcCutter(row: PitchRow, pop: PopConstants, hand: string): { score: nu
 function calcGyroSlider(row: PitchRow, pop: PopConstants): { score: number; zs: ZScores } {
   // Velocity: MAX floor — below avg contributes zero
   const zv = zMax(row.velocity, pop.velocity, pop.velocity_sd) ?? 0;
-  // IVB: proximity to zero rewarded — (sd - |0 - ivb|) / sd
-  const zi = (pop.ivb_sd && row.ivb != null) ? (pop.ivb_sd - Math.abs(0 - row.ivb)) / pop.ivb_sd : 0;
-  // HB: proximity to zero rewarded — (sd - |0 - hb|) / sd
+  // IVB: directional — more negative = better. Within the slot-aware gyro
+  // bucket (the classifier sets the slot-specific upper cap: +6 for high
+  // slot, +3 for low slot), depth rewards proportionally. A high-slot
+  // pitcher who reaches -2 IVB has shut off way more natural ride than a
+  // low-slot pitcher hitting the same number, and they sit further below
+  // the population mean (which is dominated by high-slot ride-heavy pitches),
+  // so the -z formula naturally weights their achievement higher. Same
+  // formula as the regular Slider IVB.
+  const ziRaw = z(row.ivb, pop.ivb, pop.ivb_sd) ?? 0;
+  const zi = -ziRaw;
+  // HB: proximity to zero rewarded — gyros have minimal lateral movement
+  // regardless of slot.
   const zh = (pop.hb_sd && row.hb != null) ? (pop.hb_sd - Math.abs(0 - row.hb)) / pop.hb_sd : 0;
   const zrh = zAbs(row.rel_height, pop.rel_height, pop.rel_height_sd) ?? 0;
   const zrs = zAbs(row.rel_side, pop.rel_side, pop.rel_side_sd) ?? 0;
@@ -332,11 +341,15 @@ export async function runStuffPlusPipeline(
   console.time("[Stuff+] TOTAL");
 
   // ── Pull population constants ──────────────────────────────────────────
+  // Filter to D1 only — JUCO pitches z-score against D1 pop too (locked
+  // by feedback_juco_uses_d1_baselines memory). Without this filter, if
+  // JUCO ever has its own pop row, both divisions would mix incorrectly.
   console.time("[Stuff+] 1. fetch population constants");
   const { data: popData, error: popErr } = await (supabase as any)
     .from("pitcher_stuff_plus_ncaa")
     .select("*")
-    .eq("season", season);
+    .eq("season", season)
+    .eq("division", "D1");
   console.timeEnd("[Stuff+] 1. fetch population constants");
 
   if (popErr || !popData) {

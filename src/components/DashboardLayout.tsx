@@ -4,6 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import TeamSwitcher from "@/components/TeamSwitcher";
+import { WhatsNewModal } from "@/components/WhatsNewModal";
 import {
   Activity,
   BarChart3,
@@ -188,6 +189,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
         <main className="flex-1 overflow-auto p-4 lg:p-6">{children}</main>
       </div>
+      <WhatsNewModal />
     </div>
   );
 }

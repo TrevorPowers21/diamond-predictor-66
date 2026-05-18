@@ -47,14 +47,14 @@ export default function CareerPowerRatingsTable({ rows }: CareerPowerRatingsTabl
                 style={{ borderColor: NAVY_BORDER }}
               >
                 <td className="px-4 py-2 tabular-nums text-white">{r.Season ?? "—"}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{fmtInt(r.ba_plus)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{fmtInt(r.obp_plus)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{fmtInt(r.iso_plus)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtInt(r.ba_power_rating)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtInt(r.obp_power_rating)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtInt(r.iso_power_rating)}</td>
                 <td
                   className="px-3 py-2 pr-4 text-right tabular-nums font-bold"
                   style={{ color: GOLD }}
                 >
-                  {fmtInt(r.overall_plus)}
+                  {fmtInt(r.overall_power_rating)}
                 </td>
               </tr>
             ))}

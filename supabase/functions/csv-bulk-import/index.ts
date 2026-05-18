@@ -43,10 +43,11 @@ function parseNum(val: string | undefined): number | null {
   return isNaN(n) ? null : n;
 }
 
-/** Derive class transition from class year string */
+/** Derive class transition from class year string. Strips R-/RS- redshirt prefix
+ *  so R-FR maps to FS, R-SO to SJ, etc. */
 function deriveClassTransition(classYear: string | null): string {
   if (!classYear) return "SJ";
-  const cy = classYear.toLowerCase().trim();
+  const cy = classYear.toLowerCase().trim().replace(/^(rs?-?\s*)+/, "");
   if (cy.startsWith("fr")) return "FS";
   if (cy.startsWith("so")) return "SJ";
   if (cy.startsWith("jr") || cy.startsWith("ju")) return "JS";

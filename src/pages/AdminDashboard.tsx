@@ -278,6 +278,92 @@ function RecomputeTwpButton() {
   );
 }
 
+function LockRegularSeasonButton() {
+  const [loading, setLoading] = useState(false);
+  const [season, setSeason] = useState(2026);
+  const [result, setResult] = useState<{
+    season: number;
+    hittersLocked: number;
+    pitchersLocked: number;
+    hittersAlreadyLocked: number;
+    pitchersAlreadyLocked: number;
+    error: string | null;
+  } | null>(null);
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-muted-foreground">Season</label>
+          <input
+            type="number"
+            min={2000}
+            max={2100}
+            value={season}
+            onChange={(e) => setSeason(Math.max(2000, Number(e.target.value) || 2026))}
+            disabled={loading}
+            className="h-9 w-20 rounded-md border border-input bg-background px-2 text-sm"
+          />
+        </div>
+        <Button
+          onClick={async () => {
+            if (!confirm(
+              `Lock regular-season PA + IP totals for ${season}?\n\n` +
+              `This snapshots Hitter Master.pa → regular_season_pa and Pitching Master.IP → regular_season_ip ` +
+              `for every player in season ${season}. After locking, tier classification (TeamBuilder hitter + pitcher depth roles) ` +
+              `reads the snapshot — postseason ABs/innings won't inflate playoff-team players' tiers.\n\n` +
+              `Idempotent: re-running won't overwrite an existing snapshot.`
+            )) return;
+            setLoading(true);
+            setResult(null);
+            try {
+              const { lockRegularSeason } = await import("@/lib/lockRegularSeason");
+              const r = await lockRegularSeason(season);
+              setResult(r);
+              if (r.error) alert(`Lock failed: ${r.error}`);
+            } catch (err: any) {
+              setResult({
+                season,
+                hittersLocked: 0,
+                pitchersLocked: 0,
+                hittersAlreadyLocked: 0,
+                pitchersAlreadyLocked: 0,
+                error: err.message || String(err),
+              });
+              alert(`Lock failed: ${err.message || err}`);
+            }
+            setLoading(false);
+          }}
+          disabled={loading}
+          variant="outline"
+          className="gap-2"
+        >
+          {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          {loading ? "Locking…" : `Lock ${season} Regular Season`}
+        </Button>
+      </div>
+      {result && !result.error && (
+        <div className="text-sm text-muted-foreground space-y-1">
+          <p>
+            <span className="text-foreground font-medium">Hitter Master:</span>{" "}
+            {result.hittersLocked.toLocaleString()} newly locked,{" "}
+            {result.hittersAlreadyLocked.toLocaleString()} already locked.
+          </p>
+          <p>
+            <span className="text-foreground font-medium">Pitching Master:</span>{" "}
+            {result.pitchersLocked.toLocaleString()} newly locked,{" "}
+            {result.pitchersAlreadyLocked.toLocaleString()} already locked.
+          </p>
+          {result.hittersLocked === 0 && result.pitchersLocked === 0 ? (
+            <p className="text-xs">No changes — season {result.season} was already locked.</p>
+          ) : (
+            <p className="text-xs">Tier classification now uses the regular-season snapshot for season {result.season}.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ImportHistoricalHittersButton() {
   const [loading, setLoading] = useState(false);
   const season = 2026;
@@ -3989,6 +4075,13 @@ function QuickActionsTab() {
             </p>
           </div>
           <RecomputeTwpButton />
+          <div className="border-t pt-4">
+            <p className="font-medium">Lock Regular Season (PA + IP Snapshot)</p>
+            <p className="text-sm text-muted-foreground">
+              Run this once after the last regular-season game. Snapshots <code>Hitter Master.pa → regular_season_pa</code> and <code>Pitching Master.IP → regular_season_ip</code> so tier classification (hitter cornerstone/everyday/etc., pitcher workhorse/high-lev/etc.) stays anchored to regular-season volume. Postseason games keep updating live <code>pa</code>/<code>IP</code> but tiers stay frozen — playoff teams don't get inflated tier counts. Idempotent: re-running won't overwrite an existing snapshot.
+            </p>
+          </div>
+          <LockRegularSeasonButton />
           <div className="border-t pt-4">
             <p className="font-medium">Import Pitch Arsenal (Stuff+ & Whiff%)</p>
             <p className="text-sm text-muted-foreground">

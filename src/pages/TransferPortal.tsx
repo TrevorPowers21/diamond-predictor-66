@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 import { Search } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useHitterSeedData } from "@/hooks/useHitterSeedData";
@@ -31,9 +32,12 @@ import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
-import { assessHitterRisk } from "@/lib/playerRisk";
+import { assessHitterRisk, assessPitcherRisk } from "@/lib/playerRisk";
+import type { RiskFactor, RiskAssessment } from "@/lib/playerRisk";
+import { JucoPitcherRiskCard, JucoHitterRiskCard } from "@/components/JucoRiskCards";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
-import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
+import { TRANSFER_WEIGHT_DEFAULTS, transferWeightsForSource, JUCO_PITCHING_TRANSFER_WEIGHTS, JUCO_DISTRICT_HTP_OVERRIDE, applyJucoOutlierRegression, JUCO_REGRESSION_CONFIG } from "@/lib/transferWeightDefaults";
+import { computeDataReliability } from "@/lib/jucoDataReliability";
 
 type SimPlayer = {
   prediction_id: string | null;
@@ -45,16 +49,20 @@ type SimPlayer = {
   team: string | null;
   from_team: string | null;
   conference: string | null;
+  division: string | null;
   from_avg: number | null;
   from_obp: number | null;
   from_slg: number | null;
   power_rating_plus: number | null;
   class_transition: string | null;
   dev_aggressiveness: number | null;
+  team_id: string | null;
+  source_team_id: string | null;
 };
 
 type ConferenceRow = {
   conference: string;
+  conference_id: string | null;
   season?: number | null;
   avg_plus: number | null;
   obp_plus: number | null;
@@ -96,6 +104,18 @@ type PitchingStorageRow = {
   k9: number | null;
   bb9: number | null;
   hr9: number | null;
+  division: string | null;
+  stuffPlus: number | null;
+  // JUCO data-reliability inputs + Skillset metric inputs.
+  trackmanPitches: number | null;
+  bf: number | null;
+  missPct: number | null;
+  bbPct: number | null;
+  hardHitPct: number | null;
+  inZoneWhiffPct: number | null;
+  chasePct: number | null;
+  barrelPct: number | null;
+  groundPct: number | null;
 };
 
 type PitchingPowerSnapshot = {
@@ -487,6 +507,8 @@ function readLocalNum(key: string, fallback: number, remoteValues?: Record<strin
   return fallback;
 }
 
+// JUCO risk cards (pitcher + hitter) live in @/components/JucoRiskCards.
+
 export default function TransferPortal() {
   const location = useLocation();
   const { toast } = useToast();
@@ -494,9 +516,22 @@ export default function TransferPortal() {
   const { hitterStats, powerRatings } = useHitterSeedData();
   const { addPlayer: addToSupabaseBoard, isOnBoard: isOnSupabaseBoard } = useTargetBoard();
   const isAdmin = hasRole("admin");
-  const [selectedPlayerId, setSelectedPlayerId] = useState<string>("");
+
+  // Persist simulator state across navigation (e.g., clicking a Profile link
+  // and using the back button). React Router unmounts TP on route change,
+  // destroying useState. sessionStorage survives in-tab navigation so the
+  // user lands back on the same player + destination they were inspecting.
+  const SESSION_KEY = "rstr.tp.state.v1";
+  const initialState = (() => {
+    if (typeof window === "undefined") return null;
+    try { return JSON.parse(window.sessionStorage.getItem(SESSION_KEY) || "null"); }
+    catch { return null; }
+  })();
+
+  const [selectedPlayerId, setSelectedPlayerId] = useState<string>(initialState?.selectedPlayerId ?? "");
   const [playerSearch, setPlayerSearch] = useState<string>("");
-  const [selectedDestinationTeam, setSelectedDestinationTeam] = useState<string>("");
+  const [divisionFilter, setDivisionFilter] = useState<"D1" | "JUCO">(initialState?.divisionFilter ?? "D1");
+  const [selectedDestinationTeam, setSelectedDestinationTeam] = useState<string>(initialState?.selectedDestinationTeam ?? "");
   const [teamSearch, setTeamSearch] = useState<string>("");
 
   // Pre-fill the destination team with the impersonated school. Coaches
@@ -509,10 +544,22 @@ export default function TransferPortal() {
     setSelectedDestinationTeam(effectiveSchoolName);
     setTeamSearch(effectiveSchoolName);
   }, [effectiveSchoolName, selectedDestinationTeam]);
-  const [simType, setSimType] = useState<"hitting" | "pitching">("hitting");
-  const [selectedPitcherId, setSelectedPitcherId] = useState<string>("");
+  const [simType, setSimType] = useState<"hitting" | "pitching">(initialState?.simType ?? "hitting");
+  const [selectedPitcherId, setSelectedPitcherId] = useState<string>(initialState?.selectedPitcherId ?? "");
   const [pitcherSearch, setPitcherSearch] = useState<string>("");
-  const [pitchingRoleOverride, setPitchingRoleOverride] = useState<"SP" | "RP">("RP");
+  const [pitchingRoleOverride, setPitchingRoleOverride] = useState<"SP" | "RP">(initialState?.pitchingRoleOverride ?? "RP");
+
+  // Mirror state to sessionStorage on every change so the back-from-profile
+  // round-trip lands on the same selection.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+        selectedPlayerId, selectedDestinationTeam, divisionFilter,
+        simType, selectedPitcherId, pitchingRoleOverride,
+      }));
+    } catch { /* sessionStorage quota / disabled — ignore */ }
+  }, [selectedPlayerId, selectedDestinationTeam, divisionFilter, simType, selectedPitcherId, pitchingRoleOverride]);
   const pitchingEqForTiers = useMemo(() => readPitchingWeights(), []);
   const { conferenceStats: newConfStats } = useConferenceStats(2026);
 
@@ -525,7 +572,7 @@ export default function TransferPortal() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, team, from_team, conference, transfer_portal")
+          .select("id, first_name, last_name, position, team, from_team, conference, division, transfer_portal, team_id, source_team_id")
           .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
         allPlayers = allPlayers.concat(data || []);
@@ -610,6 +657,9 @@ export default function TransferPortal() {
             team: p.team as string | null,
             from_team: p.from_team as string | null,
             conference: p.conference as string | null,
+            division: (p.division as string | null) ?? null,
+            team_id: (p.team_id as string | null) ?? null,
+            source_team_id: (p.source_team_id as string | null) ?? null,
             from_avg: (row?.from_avg as number | undefined) ?? null,
             from_obp: (row?.from_obp as number | undefined) ?? null,
             from_slg: (row?.from_slg as number | undefined) ?? null,
@@ -634,6 +684,7 @@ export default function TransferPortal() {
       if (!key) continue;
       const row: ConferenceRow = {
         conference: raw.conference,
+        conference_id: (raw as any).conference_id ?? null,
         season: raw.season,
         avg_plus: raw.avg != null ? Math.round((raw.avg / 0.280) * 100) : null,
         obp_plus: raw.obp != null ? Math.round((raw.obp / 0.385) * 100) : null,
@@ -683,15 +734,20 @@ export default function TransferPortal() {
     // the hitter dropdown. They show up in the pitcher dropdown via
     // pitchingMasterRows when their IP qualifies them.
     const isPitcher = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
+    const matchesDivision = (d: string | null) => {
+      if (divisionFilter === "JUCO") return d === "NJCAA_D1";
+      // D1 default — exclude JUCO, include null (legacy D1 rows without division)
+      return d !== "NJCAA_D1";
+    };
     const q = normalizeKey(playerSearch);
     const pool = (q
       ? players.filter((p) =>
           normalizeKey(`${p.first_name} ${p.last_name} ${(p.from_team || p.team || "")} ${(p.position || "")}`).includes(q),
         )
       : players
-    ).filter((p) => !isPitcher(p.position));
+    ).filter((p) => !isPitcher(p.position) && matchesDivision(p.division));
     return pool.slice(0, 25);
-  }, [players, playerSearch]);
+  }, [players, playerSearch, divisionFilter]);
 
   const filteredTeams = useMemo(() => {
     const q = normalizeKey(teamSearch);
@@ -726,6 +782,17 @@ export default function TransferPortal() {
         k9: r.k9 != null ? Number(r.k9) : null,
         bb9: r.bb9 != null ? Number(r.bb9) : null,
         hr9: r.hr9 != null ? Number(r.hr9) : null,
+        division: (r as any).division ?? null,
+        stuffPlus: (r as any).stuffPlus ?? null,
+        trackmanPitches: (r as any).trackman_pitches != null ? Number((r as any).trackman_pitches) : null,
+        bf: (r as any).bf != null ? Number((r as any).bf) : null,
+        missPct: (r as any).miss_pct != null ? Number((r as any).miss_pct) : null,
+        bbPct: (r as any).bb_pct != null ? Number((r as any).bb_pct) : null,
+        hardHitPct: (r as any).hard_hit_pct != null ? Number((r as any).hard_hit_pct) : null,
+        inZoneWhiffPct: (r as any).in_zone_whiff_pct != null ? Number((r as any).in_zone_whiff_pct) : null,
+        chasePct: (r as any).chase_pct != null ? Number((r as any).chase_pct) : null,
+        barrelPct: (r as any).barrel_pct != null ? Number((r as any).barrel_pct) : null,
+        groundPct: (r as any).ground_pct != null ? Number((r as any).ground_pct) : null,
       };
     }).filter((r) => !!r.player_name);
   }, [pitchingMasterRows]);
@@ -734,6 +801,15 @@ export default function TransferPortal() {
     () => pitchingPlayers.find((p) => p.id === selectedPitcherId) || null,
     [pitchingPlayers, selectedPitcherId],
   );
+
+  useEffect(() => {
+    if (!selectedPitcher) return;
+    const isJuco = selectedPitcher.division === "NJCAA_D1";
+    if ((divisionFilter === "JUCO" && !isJuco) || (divisionFilter === "D1" && isJuco)) {
+      setSelectedPitcherId("");
+      setPitcherSearch("");
+    }
+  }, [divisionFilter, selectedPitcher]);
 
   const pitchingPowerByKey = useMemo(() => {
     const byNameTeam = new Map<string, PitchingPowerSnapshot>();
@@ -829,11 +905,16 @@ export default function TransferPortal() {
 
   const filteredPitchers = useMemo(() => {
     const q = normalizeKey(pitcherSearch);
+    const matchesDivision = (d: string | null) => {
+      if (divisionFilter === "JUCO") return d === "NJCAA_D1";
+      return d !== "NJCAA_D1";
+    };
+    const divPool = pitchingPlayers.filter((p) => matchesDivision(p.division));
     const pool = q
-      ? pitchingPlayers.filter((p) => normalizeKey(`${p.player_name} ${p.team || ""} ${p.handedness || ""}`).includes(q))
-      : pitchingPlayers;
+      ? divPool.filter((p) => normalizeKey(`${p.player_name} ${p.team || ""} ${p.handedness || ""}`).includes(q))
+      : divPool;
     return pool.slice(0, 25);
-  }, [pitchingPlayers, pitcherSearch]);
+  }, [pitchingPlayers, pitcherSearch, divisionFilter]);
 
   const { data: internals } = useQuery({
     queryKey: ["transfer-sim-internals", selectedPlayer?.prediction_id],
@@ -852,7 +933,18 @@ export default function TransferPortal() {
 
   const teamByKey = useMemo(() => {
     const map = new Map<string, TeamRow>();
-    for (const t of teams) map.set(normalizeKey(t.name), t);
+    for (const t of teams) {
+      // Index by every stable identifier so JUCO full names like
+      // "Walters State CC" land the right row instead of fuzzy-matching to
+      // another team. (Prior indexing only used t.name = abbreviation, which
+      // misses on the full-name path and silently routes to a wrong conf.)
+      const ids = [t.name, (t as any).fullName, (t as any).abbreviation, (t as any).source_team_id, t.id];
+      for (const id of ids) {
+        if (!id) continue;
+        const k = normalizeKey(String(id));
+        if (k) map.set(k, t);
+      }
+    }
     return map;
   }, [teams]);
 
@@ -879,6 +971,40 @@ export default function TransferPortal() {
       for (const p of (playerRows || [])) {
         if (p.source_player_id && sourceIdToPa.has(p.source_player_id)) {
           map.set(p.id, sourceIdToPa.get(p.source_player_id)!);
+        }
+      }
+      return map;
+    },
+    staleTime: 30 * 60 * 1000,
+  });
+
+  // JUCO TrackMan-pitch lookup for the data-reliability badge.
+  // CURRENT_SEASON (not PRIOR) because reliability describes the data
+  // backing THIS season's projection. Keyed by players.id for direct hit.
+  const { data: jucoTrackmanMap = new Map<string, { tm: number; pa: number | null }>() } = useQuery({
+    queryKey: ["transfer-portal-juco-trackman", CURRENT_SEASON],
+    queryFn: async () => {
+      const map = new Map<string, { tm: number; pa: number | null }>();
+      const { data: hmRows } = await (supabase as any)
+        .from("Hitter Master")
+        .select("source_player_id, pa, trackman_pitches")
+        .eq("Season", CURRENT_SEASON)
+        .eq("division", "NJCAA_D1");
+      const bySource = new Map<string, { tm: number; pa: number | null }>();
+      for (const r of (hmRows || [])) {
+        if (!r.source_player_id) continue;
+        bySource.set(r.source_player_id, {
+          tm: Number(r.trackman_pitches ?? 0),
+          pa: r.pa != null ? Number(r.pa) : null,
+        });
+      }
+      const { data: playerRows } = await supabase
+        .from("players")
+        .select("id, source_player_id")
+        .eq("division", "NJCAA_D1");
+      for (const p of (playerRows || [])) {
+        if (p.source_player_id && bySource.has(p.source_player_id)) {
+          map.set(p.id, bySource.get(p.source_player_id)!);
         }
       }
       return map;
@@ -985,13 +1111,40 @@ export default function TransferPortal() {
   }, [selectedPlayer, seedByName]);
 
   const fromTeam = selectedPlayer ? (selectedPlayer.from_team || inferredFromTeam || selectedPlayer.team || null) : null;
-  const fromTeamRow = resolveTeamRowFromCandidates([fromTeam], teamByKey, teams);
+  // ID-first team lookup: players.team_id (UUID) wins. Falls back to
+  // source_team_id, then to name resolution (which is fuzzy and unsafe
+  // for JUCO full names that share words with other teams).
+  const fromTeamRow = (
+    (selectedPlayer?.team_id && teams.find((t) => t.id === selectedPlayer.team_id)) ||
+    (selectedPlayer?.source_team_id && teams.find((t: any) => t.source_team_id === selectedPlayer.source_team_id)) ||
+    resolveTeamRowFromCandidates([fromTeam], teamByKey, teams)
+  ) as TeamRow | null;
   const toTeamRow = resolveTeamRowFromCandidates([selectedDestinationTeam], teamByKey, teams);
 
   const fromConference = fromTeamRow?.conference || selectedPlayer?.conference || null;
   const toConference = toTeamRow?.conference || null;
+  const fromConferenceId = fromTeamRow?.conference_id ?? null;
+  const toConferenceId = toTeamRow?.conference_id ?? null;
 
-  const resolveConferenceStats = (conference: string | null | undefined): ConferenceRow | null => {
+  // ID-first lookup (see feedback_link_ids_not_names). JUCO conferences
+  // are named "NJCAA D1 X District" — won't match the D1-only alias system.
+  // conference_id is the canonical join key, name is display-only fallback.
+  const confByConfId = useMemo(() => {
+    const m = new Map<string, ConferenceRow>();
+    for (const c of conferenceStats || []) {
+      if (c.conference_id) m.set(c.conference_id, c);
+    }
+    return m;
+  }, [conferenceStats]);
+
+  const resolveConferenceStats = (
+    conference: string | null | undefined,
+    conferenceId?: string | null,
+  ): ConferenceRow | null => {
+    if (conferenceId) {
+      const byId = confByConfId.get(conferenceId);
+      if (byId) return byId;
+    }
     const aliases = conferenceKeyAliases(conference);
     let best: ConferenceRow | null = null;
     let bestScore = -1;
@@ -1022,8 +1175,8 @@ export default function TransferPortal() {
     return best;
   };
 
-  const fromConfStats = resolveConferenceStats(fromConference);
-  const toConfStats = resolveConferenceStats(toConference);
+  const fromConfStats = resolveConferenceStats(fromConference, fromConferenceId);
+  const toConfStats = resolveConferenceStats(toConference, toConferenceId);
 
   const resolvePitchingConferenceStats = (conference: string | null | undefined, conferenceId?: string | null) => {
     // UUID lookup first
@@ -1048,12 +1201,33 @@ export default function TransferPortal() {
     if (!toTeamRow) return null;
 
     const missingInputs: string[] = [];
-    const lastAvg = selectedPlayer.from_avg;
-    const lastObp = selectedPlayer.from_obp;
-    const lastSlg = selectedPlayer.from_slg;
-    if (lastAvg == null) missingInputs.push("Last AVG");
-    if (lastObp == null) missingInputs.push("Last OBP");
-    if (lastSlg == null) missingInputs.push("Last SLG");
+    const rawLastAvg = selectedPlayer.from_avg;
+    const rawLastObp = selectedPlayer.from_obp;
+    const rawLastSlg = selectedPlayer.from_slg;
+    if (rawLastAvg == null) missingInputs.push("Last AVG");
+    if (rawLastObp == null) missingInputs.push("Last OBP");
+    if (rawLastSlg == null) missingInputs.push("Last SLG");
+
+    // JUCO outlier regression — mirrors D1's natural regression through
+    // the power-rating blend (disabled for JUCO). Only pulls down stats
+    // above the outlier threshold; .300 JUCO regulars unaffected. See
+    // JUCO_REGRESSION_CONFIG for thresholds + max-r values.
+    const isJucoSrcEarly = selectedPlayer.division === "NJCAA_D1";
+    const lastAvg = isJucoSrcEarly && rawLastAvg != null
+      ? applyJucoOutlierRegression(rawLastAvg, JUCO_REGRESSION_CONFIG.avg.mean, JUCO_REGRESSION_CONFIG.avg.threshold, JUCO_REGRESSION_CONFIG.avg.slope, JUCO_REGRESSION_CONFIG.avg.maxR)
+      : rawLastAvg;
+    const lastObp = isJucoSrcEarly && rawLastObp != null
+      ? applyJucoOutlierRegression(rawLastObp, JUCO_REGRESSION_CONFIG.obp.mean, JUCO_REGRESSION_CONFIG.obp.threshold, JUCO_REGRESSION_CONFIG.obp.slope, JUCO_REGRESSION_CONFIG.obp.maxR)
+      : rawLastObp;
+    // Regress ISO separately, then reconstruct SLG = AVG + ISO.
+    // (The lib derives lastIso internally as lastSlg - lastAvg; passing
+    // adjusted SLG preserves that calculation against adjusted ISO.)
+    const lastSlg = (() => {
+      if (!isJucoSrcEarly || rawLastAvg == null || rawLastSlg == null) return rawLastSlg;
+      const rawIso = rawLastSlg - rawLastAvg;
+      const adjIso = applyJucoOutlierRegression(rawIso, JUCO_REGRESSION_CONFIG.iso.mean, JUCO_REGRESSION_CONFIG.iso.threshold, JUCO_REGRESSION_CONFIG.iso.slope, JUCO_REGRESSION_CONFIG.iso.maxR);
+      return (lastAvg ?? rawLastAvg) + adjIso;
+    })();
 
     // Use stat-specific power rating+ from internals first, then compute from seed data
     let baPR = internals?.avg_power_rating ?? null;
@@ -1078,9 +1252,13 @@ export default function TransferPortal() {
       }
     }
 
-    if (baPR == null) missingInputs.push("BA Power Rating+");
-    if (obpPR == null) missingInputs.push("OBP Power Rating+");
-    if (isoPR == null) missingInputs.push("ISO Power Rating+");
+    // JUCO source: PRs are not used (power weights = 0), nulls are fine.
+    const isJucoSource = selectedPlayer.division === "NJCAA_D1";
+    if (!isJucoSource) {
+      if (baPR == null) missingInputs.push("BA Power Rating+");
+      if (obpPR == null) missingInputs.push("OBP Power Rating+");
+      if (isoPR == null) missingInputs.push("ISO Power Rating+");
+    }
 
     const fromAvgPlus = fromConfStats?.avg_plus ?? null;
     const toAvgPlus = toConfStats?.avg_plus ?? null;
@@ -1106,12 +1284,15 @@ export default function TransferPortal() {
     if (toIsoPlus == null) missingInputs.push("To ISO+");
     if (fromStuff == null) missingInputs.push("From Stuff+");
     if (toStuff == null) missingInputs.push("To Stuff+");
-    if (fromParkAvgRaw == null) missingInputs.push("From AVG Park Factor");
-    if (toParkAvgRaw == null) missingInputs.push("To AVG Park Factor");
-    if (fromParkObpRaw == null) missingInputs.push("From OBP Park Factor");
-    if (toParkObpRaw == null) missingInputs.push("To OBP Park Factor");
-    if (fromParkIsoRaw == null) missingInputs.push("From ISO Park Factor");
-    if (toParkIsoRaw == null) missingInputs.push("To ISO Park Factor");
+    // JUCO source: park weights = 0, no park data exists. Skip park checks.
+    if (!isJucoSource) {
+      if (fromParkAvgRaw == null) missingInputs.push("From AVG Park Factor");
+      if (toParkAvgRaw == null) missingInputs.push("To AVG Park Factor");
+      if (fromParkObpRaw == null) missingInputs.push("From OBP Park Factor");
+      if (toParkObpRaw == null) missingInputs.push("To OBP Park Factor");
+      if (fromParkIsoRaw == null) missingInputs.push("From ISO Park Factor");
+      if (toParkIsoRaw == null) missingInputs.push("To ISO Park Factor");
+    }
     if (missingInputs.length > 0) {
       return {
         blocked: true as const,
@@ -1161,20 +1342,26 @@ export default function TransferPortal() {
     const obpStdPower = readLocalNum("t_obp_std_pr", 28.889, remoteEquationValues);
     const obpStdNcaa = toRate(readLocalNum("t_obp_std_ncaa", 0.046781, remoteEquationValues));
 
-    const baPowerWeight = toRate(readLocalNum("t_ba_power_weight", 0.70, remoteEquationValues));
-    const obpPowerWeight = toRate(readLocalNum("t_obp_power_weight", 0.70, remoteEquationValues));
+    // Division-aware weight defaults: NJCAA_D1 sources route through
+    // JUCO_TRANSFER_WEIGHTS (park=0, power=0, conf+pitching uplifted).
+    // readLocalNum is bypassed for JUCO because TRANSFER_WEIGHT_DEFAULTS
+    // (D1 canonical) outranks the JUCO fallback. We want JUCO source to use
+    // the JUCO set verbatim — no localStorage / model_config override path.
+    const srcW = transferWeightsForSource(selectedPlayer.division);
+    const jucoWeight = (k: keyof typeof srcW, d1: number) => isJucoSource ? srcW[k] : d1;
+    const baPowerWeight = toRate(jucoWeight("t_ba_power_weight", readLocalNum("t_ba_power_weight", 0.70, remoteEquationValues)));
+    const obpPowerWeight = toRate(jucoWeight("t_obp_power_weight", readLocalNum("t_obp_power_weight", 0.70, remoteEquationValues)));
+    const baConferenceWeight = toWeight(jucoWeight("t_ba_conference_weight", readLocalNum("t_ba_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight, remoteEquationValues)));
+    const obpConferenceWeight = toWeight(jucoWeight("t_obp_conference_weight", readLocalNum("t_obp_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight, remoteEquationValues)));
+    const isoConferenceWeight = toWeight(jucoWeight("t_iso_conference_weight", readLocalNum("t_iso_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight, remoteEquationValues)));
 
-    const baConferenceWeight = toWeight(readLocalNum("t_ba_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight, remoteEquationValues));
-    const obpConferenceWeight = toWeight(readLocalNum("t_obp_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight, remoteEquationValues));
-    const isoConferenceWeight = toWeight(readLocalNum("t_iso_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight, remoteEquationValues));
+    const baPitchingWeight = toWeight(jucoWeight("t_ba_pitching_weight", readLocalNum("t_ba_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight, remoteEquationValues)));
+    const obpPitchingWeight = toWeight(jucoWeight("t_obp_pitching_weight", readLocalNum("t_obp_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight, remoteEquationValues)));
+    const isoPitchingWeight = toWeight(jucoWeight("t_iso_pitching_weight", readLocalNum("t_iso_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight, remoteEquationValues)));
 
-    const baPitchingWeight = toWeight(readLocalNum("t_ba_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight, remoteEquationValues));
-    const obpPitchingWeight = toWeight(readLocalNum("t_obp_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight, remoteEquationValues));
-    const isoPitchingWeight = toWeight(readLocalNum("t_iso_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight, remoteEquationValues));
-
-    const baParkWeight = toWeight(readLocalNum("t_ba_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight, remoteEquationValues));
-    const obpParkWeight = toWeight(readLocalNum("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight, remoteEquationValues));
-    const isoParkWeight = toWeight(readLocalNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight, remoteEquationValues));
+    const baParkWeight = toWeight(jucoWeight("t_ba_park_weight", readLocalNum("t_ba_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight, remoteEquationValues)));
+    const obpParkWeight = toWeight(jucoWeight("t_obp_park_weight", readLocalNum("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight, remoteEquationValues)));
+    const isoParkWeight = toWeight(jucoWeight("t_iso_park_weight", readLocalNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight, remoteEquationValues)));
 
     const isoStdPower = readLocalNum("t_iso_std_power", 45.423, remoteEquationValues);
     const isoStdNcaa = toRate(readLocalNum("t_iso_std_ncaa", 0.07849797197, remoteEquationValues));
@@ -1184,13 +1371,17 @@ export default function TransferPortal() {
     const wAvg = toRate(readLocalNum("r_w_avg", 0.15, remoteEquationValues));
     const wIso = toRate(readLocalNum("r_w_iso", 0.10, remoteEquationValues));
 
+    // JUCO sources: PRs aren't used (power weight=0). Coerce nulls to 100
+    // (NCAA avg) so the math doesn't NaN out — gets multiplied by 0 anyway.
+    // Park nulls already become 100 inside normalizeParkToIndex above.
+    const safePR = (v: number | null) => v ?? 100;
     const projected = computeTransferProjection({
       lastAvg,
       lastObp,
       lastSlg,
-      baPR,
-      obpPR,
-      isoPR,
+      baPR: safePR(baPR),
+      obpPR: safePR(obpPR),
+      isoPR: safePR(isoPR),
       fromAvgPlus,
       toAvgPlus,
       fromObpPlus,
@@ -1234,8 +1425,12 @@ export default function TransferPortal() {
       wIso,
     });
 
+    // JUCO sources use 2026 stats verbatim — no class adjustment.
+    // (Class adj kept for D1→D1 transfers where prior-year stats need
+    // forward-translating to the player's projected age/development.)
+    // isJucoSource declared above with the validation skip.
     const classKey = String(selectedPlayer.class_transition || "SJ").toUpperCase();
-    const classAdj =
+    const classAdj = isJucoSource ? 0 :
       classKey === "FS" ? 0.03 :
       classKey === "SJ" ? 0.02 :
       classKey === "JS" ? 0.015 :
@@ -1372,7 +1567,7 @@ export default function TransferPortal() {
         ncaaAvgISO,
         isoStdPower,
         isoStdNcaa,
-        isoPowerWeight: 0.3,
+        isoPowerWeight: isJucoSource ? srcW.t_iso_power_weight : 0.3,
         isoConferenceWeight,
         isoPitchingWeight,
         isoParkWeight,
@@ -1396,7 +1591,11 @@ export default function TransferPortal() {
   const pitchingSimulation = useMemo<PitchingSim | null>(() => {
     if (!selectedPitcher) return null;
     if (!selectedDestinationTeam) return null;
-    const eq = readPitchingWeights();
+    // JUCO source pitchers swap in JUCO_PITCHING_TRANSFER_WEIGHTS (power=0,
+    // park=0, conf moderate, competition heavier on Stuff+).
+    const isJucoPitcherSrc = selectedPitcher.division === "NJCAA_D1";
+    const baseEq = readPitchingWeights();
+    const eq = isJucoPitcherSrc ? { ...baseEq, ...JUCO_PITCHING_TRANSFER_WEIGHTS } : baseEq;
     const toPitchTeamRow = resolveTeamRowFromCandidates([selectedDestinationTeam], teamByKey, teams);
     if (!toPitchTeamRow) return null;
     // Resolve from-team by UUID first, then name fallback
@@ -1433,9 +1632,22 @@ export default function TransferPortal() {
     const toBb9Plus = toPitchConfStats?.bb9_plus ?? null;
     const fromHr9Plus = fromPitchConfStats?.hr9_plus ?? null;
     const toHr9Plus = toPitchConfStats?.hr9_plus ?? null;
-    const fromHitterTalent = fromPitchConfStats?.hitter_talent_plus ?? null;
+    // JUCO source: override raw conference hitter_talent_plus (inflated 107-123
+    // because JUCO hitters mash each other in soft envs) with the per-district
+    // override (72-95) that reflects true hitter quality faced. District name
+    // derived from conference string ("NJCAA D1 Appalachian" → "Appalachian").
+    const jucoDistrict = isJucoPitcherSrc
+      ? (fromPitchConference ?? "").replace(/^NJCAA D1 /, "").replace(/ District$/, "")
+      : null;
+    const fromHitterTalent = isJucoPitcherSrc
+      ? (JUCO_DISTRICT_HTP_OVERRIDE[jucoDistrict ?? ""] ?? null)
+      : (fromPitchConfStats?.hitter_talent_plus ?? null);
     const toHitterTalent = toPitchConfStats?.hitter_talent_plus ?? null;
 
+    // env+ values are computed at runtime from raw conf rates via
+    // calcPitchingPlus() in pitchingConfByKey — JUCO districts have ERA/FIP/
+    // WHIP/K9/BB9/HR9 stored, so these should resolve. fromHitterTalent is
+    // overridden per-district for JUCO; toHitterTalent from D1 Conf Stats.
     requireNum("From ERA+", fromEraPlus);
     requireNum("To ERA+", toEraPlus);
     requireNum("From FIP+", fromFipPlus);
@@ -1459,11 +1671,14 @@ export default function TransferPortal() {
     const toWhipParkRaw = resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "whip", teamParkComponents);
     const fromHr9ParkRaw = resolveParkFactorFromCandidates(fromPitchTeamRow?.id, [selectedPitcher.team, fromPitchTeamRow?.name], "hr9", teamParkComponents);
     const toHr9ParkRaw = resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "hr9", teamParkComponents);
-    requireNum("From R/G Park Factor", fromEraParkRaw);
+    // JUCO source: no park data; weights are 0 so the math no-ops.
+    if (!isJucoPitcherSrc) {
+      requireNum("From R/G Park Factor", fromEraParkRaw);
+      requireNum("From WHIP Park Factor", fromWhipParkRaw);
+      requireNum("From HR/9 Park Factor", fromHr9ParkRaw);
+    }
     requireNum("To R/G Park Factor", toEraParkRaw);
-    requireNum("From WHIP Park Factor", fromWhipParkRaw);
     requireNum("To WHIP Park Factor", toWhipParkRaw);
-    requireNum("From HR/9 Park Factor", fromHr9ParkRaw);
     requireNum("To HR/9 Park Factor", toHr9ParkRaw);
 
     if (missing.length > 0) {
@@ -1489,12 +1704,15 @@ export default function TransferPortal() {
     const k9Pr = selectedPitcherPower?.k9PrPlus ?? null;
     const bb9Pr = selectedPitcherPower?.bb9PrPlus ?? null;
     const hr9Pr = selectedPitcherPower?.hr9PrPlus ?? null;
-    requireNum("ERA Power Rating+", eraPr);
-    requireNum("FIP Power Rating+", fipPr);
-    requireNum("WHIP Power Rating+", whipPr);
-    requireNum("K/9 Power Rating+", k9Pr);
-    requireNum("BB/9 Power Rating+", bb9Pr);
-    requireNum("HR/9 Power Rating+", hr9Pr);
+    // JUCO source: PRs aren't used (power weights = 0), nulls fine.
+    if (!isJucoPitcherSrc) {
+      requireNum("ERA Power Rating+", eraPr);
+      requireNum("FIP Power Rating+", fipPr);
+      requireNum("WHIP Power Rating+", whipPr);
+      requireNum("K/9 Power Rating+", k9Pr);
+      requireNum("BB/9 Power Rating+", bb9Pr);
+      requireNum("HR/9 Power Rating+", hr9Pr);
+    }
     if (missing.length > 0) {
       return {
         blocked: true,
@@ -1696,21 +1914,39 @@ export default function TransferPortal() {
             </h2>
             <p className="text-muted-foreground text-xs mt-1.5 tracking-wide">Simulate player projections at a new school</p>
           </div>
-          <div className="flex gap-1 rounded-lg border border-border/60 bg-muted/40 p-1">
-            <button
-              className={`px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer ${simType === "hitting" ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30" : "text-muted-foreground hover:text-foreground"}`}
-              style={{ fontFamily: "'Oswald', sans-serif" }}
-              onClick={() => setSimType("hitting")}
-            >
-              Hitting
-            </button>
-            <button
-              className={`px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer ${simType === "pitching" ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30" : "text-muted-foreground hover:text-foreground"}`}
-              style={{ fontFamily: "'Oswald', sans-serif" }}
-              onClick={() => setSimType("pitching")}
-            >
-              Pitching
-            </button>
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex gap-1 rounded-lg border border-border/60 bg-muted/40 p-1">
+              <button
+                className={`px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer ${simType === "hitting" ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30" : "text-muted-foreground hover:text-foreground"}`}
+                style={{ fontFamily: "'Oswald', sans-serif" }}
+                onClick={() => setSimType("hitting")}
+              >
+                Hitting
+              </button>
+              <button
+                className={`px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer ${simType === "pitching" ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30" : "text-muted-foreground hover:text-foreground"}`}
+                style={{ fontFamily: "'Oswald', sans-serif" }}
+                onClick={() => setSimType("pitching")}
+              >
+                Pitching
+              </button>
+            </div>
+            <div className="flex gap-1">
+              <button
+                className={`px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer ${divisionFilter === "D1" ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30" : "text-muted-foreground hover:text-foreground"}`}
+                style={{ fontFamily: "'Oswald', sans-serif" }}
+                onClick={() => { setDivisionFilter("D1"); setSelectedPlayerId(""); setPlayerSearch(""); }}
+              >
+                D1
+              </button>
+              <button
+                className={`px-5 py-1.5 text-xs font-bold uppercase tracking-[0.1em] rounded-md transition-colors duration-150 cursor-pointer ${divisionFilter === "JUCO" ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/30" : "text-muted-foreground hover:text-foreground"}`}
+                style={{ fontFamily: "'Oswald', sans-serif" }}
+                onClick={() => { setDivisionFilter("JUCO"); setSelectedPlayerId(""); setPlayerSearch(""); }}
+              >
+                JUCO
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1724,7 +1960,7 @@ export default function TransferPortal() {
                   {/* Player search */}
                   <div className="relative flex-1 min-w-[200px]">
                     <Label className="text-xs mb-1 block">Player</Label>
-                    <Input placeholder={playersLoading ? "Loading..." : "Search hitter..."} value={playerSearch} onChange={(e) => { setPlayerSearch(e.target.value); setPlayerDropdownOpen(true); }} onFocus={() => setPlayerDropdownOpen(true)} onBlur={() => setTimeout(() => setPlayerDropdownOpen(false), 150)} />
+                    <Input placeholder={playersLoading ? "Loading..." : (divisionFilter === "JUCO" ? "Search JUCO hitter..." : "Search hitter...")} value={playerSearch} onChange={(e) => { setPlayerSearch(e.target.value); setPlayerDropdownOpen(true); }} onFocus={() => setPlayerDropdownOpen(true)} onBlur={() => setTimeout(() => setPlayerDropdownOpen(false), 150)} />
                     {playerDropdownOpen && filteredPlayers.length > 0 && (
                       <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
                         {filteredPlayers.map((p) => (
@@ -1815,9 +2051,33 @@ export default function TransferPortal() {
               const spKey = `${normalizeKey(fullName)}|${normalizeKey(fromTeam)}`;
               const sp = powerByNameTeam.get(spKey) ?? powerByNameTeam.get(normalizeKey(fullName)) ?? null;
               const toConfRow = toConference ? confByKey.get(toConference.toLowerCase().trim()) ?? null : null;
-
               const resolvedPa = selectedPlayer?.player_id ? (hitterPaMap.get(selectedPlayer.player_id) ?? null) : null;
+              const isJucoSrc = selectedPlayer?.division === "NJCAA_D1";
 
+              if (isJucoSrc) {
+                // JUCO hitter sim — slimmed 4-factor panel mirroring the
+                // pitcher JUCO card philosophy (Projection / Skillset /
+                // Data Reliability / Competition with SOURCE stuff+).
+                const tm = selectedPlayer?.player_id ? jucoTrackmanMap.get(selectedPlayer.player_id) : undefined;
+                const fromAvg = selectedPlayer?.from_avg ?? null;
+                const fromObp = selectedPlayer?.from_obp ?? null;
+                const fromSlg = selectedPlayer?.from_slg ?? null;
+                const iso = fromAvg != null && fromSlg != null ? fromSlg - fromAvg : null;
+                return <JucoHitterRiskCard input={{
+                  projectedWrcPlus: simulation.pWrcPlus,
+                  chase: sp?.chase ?? null, contact: sp?.contact ?? null,
+                  whiff: (sp as any)?.whiff ?? null,
+                  barrel: sp?.barrel ?? null, lineDrive: sp?.lineDrive ?? null,
+                  avgEv: sp?.avgExitVelo ?? null, ev90: sp?.ev90 ?? null,
+                  pull: sp?.pull ?? null, gb: sp?.gb ?? null, bb: sp?.bb ?? null,
+                  avg: fromAvg, obp: fromObp, iso,
+                  trackmanPitches: tm?.tm ?? 0, pa: tm?.pa ?? resolvedPa,
+                  sourceConference: fromConference,
+                  sourceConfStuffPlus: fromConfStats?.stuff_plus ?? null,
+                }} />;
+              }
+
+              // D1 sim — full assessor with destination-conference competition.
               const risk = assessHitterRisk({
                 conference: toConference,
                 projectedWrcPlus: simulation.pWrcPlus,
@@ -1828,7 +2088,6 @@ export default function TransferPortal() {
                 avgEv: sp?.avgExitVelo, ev90: sp?.ev90,
                 pull: sp?.pull, gb: sp?.gb, bb: sp?.bb,
               });
-
               return <RiskAssessmentCardRSTR risk={risk} />;
             })()}
 
@@ -1889,7 +2148,7 @@ export default function TransferPortal() {
                 <div className="flex flex-wrap items-end gap-3">
                   <div className="relative flex-1 min-w-[180px]">
                     <Label className="text-xs mb-1 block">Pitcher</Label>
-                    <Input placeholder="Search pitcher..." value={pitcherSearch} onChange={(e) => { setPitcherSearch(e.target.value); setPitcherDropdownOpen(true); }} onFocus={() => setPitcherDropdownOpen(true)} onBlur={() => setTimeout(() => setPitcherDropdownOpen(false), 150)} />
+                    <Input placeholder={divisionFilter === "JUCO" ? "Search JUCO pitcher..." : "Search pitcher..."} value={pitcherSearch} onChange={(e) => { setPitcherSearch(e.target.value); setPitcherDropdownOpen(true); }} onFocus={() => setPitcherDropdownOpen(true)} onBlur={() => setTimeout(() => setPitcherDropdownOpen(false), 150)} />
                     {pitcherDropdownOpen && filteredPitchers.length > 0 && (
                       <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
                         {filteredPitchers.map((p) => (
@@ -1943,7 +2202,7 @@ export default function TransferPortal() {
                   <div className="mt-3 text-xs text-muted-foreground border-t pt-2 flex items-center gap-4">
                     <span className="font-medium text-foreground">{selectedPitcher.player_name}</span>
                     <span>{selectedPitcher.handedness === "R" ? "RHP" : selectedPitcher.handedness === "L" ? "LHP" : selectedPitcher.handedness || "-"} · {selectedPitcher.team || "-"} · {selectedPitcher.role || "-"}</span>
-                    <span className="font-mono tabular-nums">2025: {stat(selectedPitcher.era, 2)} ERA · {stat(selectedPitcher.fip, 2)} FIP · {stat(selectedPitcher.whip, 2)} WHIP · {stat(selectedPitcher.k9, 1)} K/9</span>
+                    <span className="font-mono tabular-nums">2025: {stat(selectedPitcher.era, 2)} ERA · {stat(selectedPitcher.fip, 2)} FIP · {stat(selectedPitcher.whip, 2)} WHIP · {stat(selectedPitcher.k9, 1)} K/9 · {stat(selectedPitcher.bb9, 2)} BB/9 · {stat(selectedPitcher.hr9, 2)} HR/9</span>
                   </div>
                 )}
               </CardContent>
@@ -1981,6 +2240,55 @@ export default function TransferPortal() {
                 </div>
               ))}
             </div>
+
+            {/* ─── Pitcher Risk Assessment ─── */}
+            {pitchingSimulation && !pitchingSimulation.blocked && selectedPitcher && (() => {
+              const isJucoSrc = selectedPitcher.division === "NJCAA_D1";
+
+              if (isJucoSrc) {
+                // JUCO sim — slimmed 5-factor panel (Projection / Skillset /
+                // Data Reliability / Competition with SOURCE HTP / Stuff+).
+                // Trajectory / Sample Size / Workload / Durability dropped.
+                return <JucoPitcherRiskCard input={{
+                  projectedPrvPlus: pitchingSimulation.pRvPlus,
+                  stuffPlus: selectedPitcher.stuffPlus,
+                  missPct: selectedPitcher.missPct,
+                  bbPct: selectedPitcher.bbPct,
+                  chasePct: selectedPitcher.chasePct,
+                  barrelPct: selectedPitcher.barrelPct,
+                  hardHitPct: selectedPitcher.hardHitPct,
+                  groundPct: selectedPitcher.groundPct,
+                  inZoneWhiffPct: selectedPitcher.inZoneWhiffPct,
+                  k9: selectedPitcher.k9,
+                  bb9: selectedPitcher.bb9,
+                  hr9: selectedPitcher.hr9,
+                  trackmanPitches: selectedPitcher.trackmanPitches,
+                  bf: selectedPitcher.bf,
+                  sourceConference: pitchingSimulation.fromConference ?? null,
+                  sourceHitterTalentPlus: pitchingSimulation.fromHitterTalent,
+                }} />;
+              }
+
+              // D1 sim — keep the full assessor.
+              const risk = assessPitcherRisk({
+                conference: pitchingSimulation.toConference ?? null,
+                projectedPrvPlus: pitchingSimulation.pRvPlus,
+                confHitterTalentPlus: pitchingSimulation.toHitterTalent,
+                ip: (selectedPitcher as any).ip ?? null,
+                stuffPlus: selectedPitcher.stuffPlus,
+                whiffPct: selectedPitcher.missPct,
+                bbPct: selectedPitcher.bbPct,
+                chase: selectedPitcher.chasePct,
+                barrel: selectedPitcher.barrelPct,
+                hardHit: selectedPitcher.hardHitPct,
+                gb: selectedPitcher.groundPct,
+                izWhiff: selectedPitcher.inZoneWhiffPct,
+                k9: selectedPitcher.k9,
+                bb9: selectedPitcher.bb9,
+                hr9: selectedPitcher.hr9,
+              });
+              return <RiskAssessmentCardRSTR risk={risk} />;
+            })()}
 
             {/* ─── Context (collapsible) ─── */}
             <details className="rounded-lg border p-3">

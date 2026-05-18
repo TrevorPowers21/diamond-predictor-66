@@ -141,14 +141,14 @@ export default function ConferenceScoutingRunner() {
                       <td className="py-1 pr-3 text-right tabular-nums font-semibold" style={{ color: plusColor(r.offensive_power_rating) }}>
                         {r.offensive_power_rating ?? "—"}
                       </td>
-                      <td className="py-1 pr-3 text-right tabular-nums" style={{ color: plusColor(r.ba_plus) }}>
-                        {r.ba_plus ?? "—"}
+                      <td className="py-1 pr-3 text-right tabular-nums" style={{ color: plusColor(r.ba_power_rating) }}>
+                        {r.ba_power_rating ?? "—"}
                       </td>
-                      <td className="py-1 pr-3 text-right tabular-nums" style={{ color: plusColor(r.obp_plus) }}>
-                        {r.obp_plus ?? "—"}
+                      <td className="py-1 pr-3 text-right tabular-nums" style={{ color: plusColor(r.obp_power_rating) }}>
+                        {r.obp_power_rating ?? "—"}
                       </td>
-                      <td className="py-1 pr-3 text-right tabular-nums" style={{ color: plusColor(r.iso_plus) }}>
-                        {r.iso_plus ?? "—"}
+                      <td className="py-1 pr-3 text-right tabular-nums" style={{ color: plusColor(r.iso_power_rating) }}>
+                        {r.iso_power_rating ?? "—"}
                       </td>
                       <td className="py-1 pr-3 text-right tabular-nums">{r.hitter_barrel_score ?? "—"}</td>
                       <td className="py-1 pr-3 text-right tabular-nums">{r.hitter_chase_score ?? "—"}</td>

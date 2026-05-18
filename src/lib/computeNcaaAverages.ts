@@ -72,16 +72,22 @@ async function fetchAllRows(
   select: string,
   season: number,
   seasonCol: string = "Season",
+  /**
+   * If the table has a `division` column (Hitter/Pitching Master post-JUCO
+   * scaffold migration), filter to this division. Pass null to disable for
+   * tables that don't have the column (e.g., pitcher_stuff_plus_inputs).
+   * Default 'D1' so NCAA averages stay D1-only after JUCO data lands.
+   */
+  divisionFilter: string | null = "D1",
 ): Promise<any[]> {
   const PAGE = 1000;
   const all: any[] = [];
   let offset = 0;
   while (true) {
-    const { data, error } = await (supabase as any)
-      .from(table)
-      .select(select)
-      .eq(seasonCol, season)
-      .range(offset, offset + PAGE - 1);
+    let q = (supabase as any).from(table).select(select).eq(seasonCol, season);
+    if (divisionFilter) q = q.eq("division", divisionFilter);
+    q = q.range(offset, offset + PAGE - 1);
+    const { data, error } = await q;
     if (error) throw new Error(`${table} fetch failed: ${error.message}`);
     if (!data || data.length === 0) break;
     all.push(...data);
@@ -183,11 +189,16 @@ export async function computeAndStoreNcaaAverages(season: number): Promise<{
   // each pitcher's total pitch count, then use that as the weight on the
   // pitcher-level stuff_plus value in Pitching Master.
   console.time("[NcaaAvg] 4b. stuff+ weighted by pitches");
+  // pitcher_stuff_plus_inputs doesn't have a division column yet (added
+  // separately later). Pass null to skip the division filter; the join via
+  // source_player_id below naturally restricts to D1 pitchers because the
+  // outer `pitchers` set is already D1-filtered.
   const pitchInputs = await fetchAllRows(
     "pitcher_stuff_plus_inputs",
     "source_player_id, pitches",
     season,
     "season",
+    null,
   ).catch(() => [] as any[]);
   const pitchesByPitcher = new Map<string, number>();
   for (const r of pitchInputs) {
