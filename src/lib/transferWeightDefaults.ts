@@ -177,14 +177,18 @@ export const JUCO_PITCHING_TRANSFER_WEIGHTS = {
   transfer_k9_conference_weight: 0.30,
   transfer_bb9_conference_weight: 0.30,
   transfer_hr9_conference_weight: 0.35,
-  // Competition (Stuff+ / hitter-talent delta) — heavier on JUCO because
-  // individual Stuff+ is the cleanest cross-context signal for pitchers
-  transfer_era_competition_weight: 1.30,
-  transfer_fip_competition_weight: 1.40,
-  transfer_whip_competition_weight: 1.10,
-  transfer_k9_competition_weight: 1.20,
-  transfer_bb9_competition_weight: 0.80,
-  transfer_hr9_competition_weight: 1.10,
+  // Competition (hitter-talent delta) — match D1 default 0.50. The JUCO
+  // depth gap is ALREADY captured by JUCO_DISTRICT_HTP_OVERRIDE pushing
+  // fromTalent down to 65-94 (vs D1 conferences at 86-136). Stacking a
+  // heavy compWeight on top of that wide gap (initially shipped 1.10-1.40)
+  // crushed projections: K/9 dropped 70%, FIP to impossible 2.1. The
+  // weight should NOT amplify the override; let the gap do the work.
+  transfer_era_competition_weight: 0.50,
+  transfer_fip_competition_weight: 0.50,
+  transfer_whip_competition_weight: 0.50,
+  transfer_k9_competition_weight: 0.50,
+  transfer_bb9_competition_weight: 0.50,
+  transfer_hr9_competition_weight: 0.50,
   // Park weights = 0 (JUCO has no park data)
   transfer_era_park_weight: 0,
   transfer_fip_park_weight: 0,

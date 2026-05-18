@@ -32,7 +32,7 @@ import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
-import { assessHitterRisk } from "@/lib/playerRisk";
+import { assessHitterRisk, assessPitcherRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
 import { TRANSFER_WEIGHT_DEFAULTS, transferWeightsForSource, JUCO_PITCHING_TRANSFER_WEIGHTS, JUCO_DISTRICT_HTP_OVERRIDE, applyJucoOutlierRegression, JUCO_REGRESSION_CONFIG } from "@/lib/transferWeightDefaults";
 import { computeDataReliability } from "@/lib/jucoDataReliability";
@@ -2026,6 +2026,24 @@ export default function TransferPortal() {
                 });
               }
 
+              // Stuff+ factor — what quality of pitching produced this hitter's
+              // stats. Lower fromStuff = weaker JUCO/conf pitching = riskier
+              // because the line came against less elite arms. Score is risk
+              // (high = risky) so inverted from Stuff+: ~110 = 5, ~100 = 35,
+              // ~95 = 60, ~90 = 80.
+              const fromStuff = simulation?.fromStuff ?? null;
+              if (fromStuff != null) {
+                const stuffScore = Math.max(0, Math.min(100, Math.round((110 - fromStuff) * 6)));
+                const stuffGrade: "Low" | "Moderate" | "Elevated" | "High" =
+                  fromStuff >= 105 ? "Low" : fromStuff >= 98 ? "Moderate" : fromStuff >= 92 ? "Elevated" : "High";
+                risk.factors.push({
+                  label: "Stuff+",
+                  score: stuffScore,
+                  grade: stuffGrade,
+                  detail: `Source-conf pitching quality: Stuff+ ${fromStuff.toFixed(1)}`,
+                });
+              }
+
               return <RiskAssessmentCardRSTR risk={risk} />;
             })()}
 
@@ -2178,6 +2196,42 @@ export default function TransferPortal() {
                 </div>
               ))}
             </div>
+
+            {/* ─── Pitcher Risk Assessment ─── */}
+            {pitchingSimulation && !pitchingSimulation.blocked && selectedPitcher && (() => {
+              const risk = assessPitcherRisk({
+                conference: pitchingSimulation.toConference ?? null,
+                projectedPrvPlus: pitchingSimulation.pRvPlus,
+                confHitterTalentPlus: pitchingSimulation.toHitterTalent,
+                ip: (selectedPitcher as any).ip ?? null,
+                stuffPlus: selectedPitcher.stuffPlus,
+              });
+
+              // Stuff+ factor — individual pitcher arsenal quality. The single
+              // most reliable cross-context signal we have for pitchers. Null
+              // Stuff+ means low data confidence overall (no TrackMan capture).
+              const pStuff = selectedPitcher.stuffPlus;
+              if (pStuff != null) {
+                const stuffScore = Math.max(0, Math.min(100, Math.round((110 - pStuff) * 6)));
+                const stuffGrade: "Low" | "Moderate" | "Elevated" | "High" =
+                  pStuff >= 105 ? "Low" : pStuff >= 98 ? "Moderate" : pStuff >= 92 ? "Elevated" : "High";
+                risk.factors.push({
+                  label: "Stuff+",
+                  score: stuffScore,
+                  grade: stuffGrade,
+                  detail: `Individual arsenal quality: Stuff+ ${pStuff.toFixed(1)}`,
+                });
+              } else {
+                risk.factors.push({
+                  label: "Stuff+",
+                  score: 90,
+                  grade: "High",
+                  detail: "No individual Stuff+ data — projection lacks the most reliable cross-context pitcher signal",
+                });
+              }
+
+              return <RiskAssessmentCardRSTR risk={risk} />;
+            })()}
 
             {/* ─── Context (collapsible) ─── */}
             <details className="rounded-lg border p-3">
