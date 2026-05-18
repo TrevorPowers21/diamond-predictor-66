@@ -31,11 +31,11 @@ const FEATURES: Feature[] = [
   {
     title: "Program Analytics",
     tagline:
-      "A full Team Builder analytics view that grades your roster position-by-position, tier-by-tier — and benchmarks it against last year's actual WAR and the 2025 national/conference champions.",
+      "A full Team Builder analytics view that grades your roster position-by-position, tier-by-tier — broken out by lineup, rotation, and bullpen WAR, with championship benchmarks alongside.",
     details: [
       "Year-over-year compare and championship benchmark cards quantify exactly where the build stands.",
       "Pitcher and hitter tier labels reworked — a 1.8 pWAR starter now reads \"Contributor,\" not \"Below.\"",
-      "Lineup / rotation / bullpen WAR broken out separately for cleaner gap analysis.",
+      "2026 comparison rolling in once the regular season is fully locked and conference champions are confirmed.",
     ],
   },
 ];
