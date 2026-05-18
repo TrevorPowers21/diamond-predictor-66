@@ -31,7 +31,11 @@
     "backfill-juco-pitcher-preds": "tsx --env-file-if-exists=.env.local scripts/backfill-juco-pitcher-predictions.ts",
     "import-presto-hitters": "tsx --env-file-if-exists=.env.local scripts/import-juco-presto-hitters.ts",
     "add-presto-missing": "tsx --env-file-if-exists=.env.local scripts/add-presto-missing-hitters.ts",
-    "import-presto-pitchers": "tsx --env-file-if-exists=.env.local scripts/import-juco-presto-pitchers.ts"
+    "import-presto-pitchers": "tsx --env-file-if-exists=.env.local scripts/import-juco-presto-pitchers.ts",
+    "add-presto-missing-pitchers": "tsx --env-file-if-exists=.env.local scripts/add-presto-missing-pitchers.ts",
+    "import-juco-class-dob": "tsx --env-file-if-exists=.env.local scripts/import-juco-class-dob.ts",
+    "db-migrate": "supabase db query --linked --file",
+    "db-query": "supabase db query --linked --agent=no"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

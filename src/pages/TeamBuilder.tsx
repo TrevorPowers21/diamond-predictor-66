@@ -25,6 +25,7 @@ import {
   DEFAULT_NIL_TIER_MULTIPLIERS,
 } from "@/lib/nilProgramSpecific";
 import { computeTransferProjection } from "@/lib/transferProjection";
+import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { classTransitionFromYearOrDefault } from "@/lib/classTransitionUtils";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
@@ -41,7 +42,7 @@ import { computePitcherProjection } from "@/lib/pitcherProjection";
 import { computeTransferPitcherProjection } from "@/lib/transferPitcherProjection";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
-import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
+import { TRANSFER_WEIGHT_DEFAULTS, transferWeightsForSource, JUCO_PITCHING_TRANSFER_WEIGHTS, JUCO_DISTRICT_HTP_OVERRIDE, JUCO_DISTRICT_CONFERENCE_ID, jucoDistrictNameFromConference, applyJucoOutlierRegression, JUCO_REGRESSION_CONFIG } from "@/lib/transferWeightDefaults";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { assessHitterRisk, type RiskGrade } from "@/lib/playerRisk";
 
@@ -145,6 +146,7 @@ type TeamRow = {
 
 type ConferenceRow = {
   conference: string;
+  conference_id: string | null;
   season?: number | null;
   avg_plus: number | null;
   obp_plus: number | null;
@@ -225,6 +227,8 @@ type LivePlayerRow = {
   team: string | null;
   from_team: string | null;
   conference: string | null;
+  division: string | null;
+  source_player_id: string | null;
 };
 
 const EMPTY_TEAM_METRICS: TeamMetricInputs = {
@@ -1088,6 +1092,9 @@ export default function TeamBuilder() {
       for (const alias of getConferenceAliases(cs.conference)) {
         if (alias && !map.has(alias)) map.set(alias, entry);
       }
+      // Also key by conference_id UUID — canonical join key. JUCO districts
+      // need this since their name normalization doesn't reach the alias map.
+      if (cs.conference_id) map.set(cs.conference_id, entry);
     }
     return map;
   }, [newConfStats, pitchingEq]);
@@ -1358,7 +1365,7 @@ export default function TeamBuilder() {
     pitcherGs: new Map<string, number>(),
     pitcherG: new Map<string, number>(),
   } } = useQuery({
-    queryKey: ["team-builder-season-usage-lookup-v5"],
+    queryKey: ["team-builder-season-usage-lookup-v6"],
     queryFn: async () => {
       const thinSample = new Map<string, boolean>();
       const hitterAb = new Map<string, number>();
@@ -1383,13 +1390,13 @@ export default function TeamBuilder() {
         fetchAllPaged<any>(() =>
           (supabase as any)
             .from("Hitter Master")
-            .select("source_player_id, pa, ab, regular_season_pa, combined_used, Season, playerFullName, Team")
+            .select("source_player_id, pa, ab, combined_used, Season, playerFullName, Team")
             .eq("Season", CURRENT_SEASON),
         ),
         fetchAllPaged<any>(() =>
           (supabase as any)
             .from("Pitching Master")
-            .select("source_player_id, IP, GS, G, regular_season_ip, combined_used")
+            .select("source_player_id, IP, GS, G, combined_used")
             .eq("Season", CURRENT_SEASON),
         ),
         fetchAllPaged<any>(() =>
@@ -1624,6 +1631,7 @@ export default function TeamBuilder() {
       if (!key) continue;
       const row: ConferenceRow = {
         conference: raw.conference,
+        conference_id: raw.conference_id ?? null,
         season: raw.season,
         avg_plus: raw.avg != null ? Math.round((raw.avg / 0.280) * 100) : null,
         obp_plus: raw.obp != null ? Math.round((raw.obp / 0.385) * 100) : null,
@@ -2837,6 +2845,18 @@ export default function TeamBuilder() {
     return map;
   }, [conferenceStats]);
 
+  // UUID-indexed lookup — canonical join key, matches TransferPortal.tsx
+  // resolveConferenceStats path. Required for JUCO districts whose name
+  // doesn't match the D1-only alias system (e.g., player.conference is
+  // "NJCAA D1 Midwest" but Conference Stats stores "NJCAA D1 Midwest District").
+  const confByConfId = useMemo(() => {
+    const map = new Map<string, ConferenceRow>();
+    for (const c of conferenceStats as ConferenceRow[]) {
+      if (c.conference_id) map.set(c.conference_id, c);
+    }
+    return map;
+  }, [conferenceStats]);
+
   const [seedByName, seedByPlayerId] = useMemo(() => {
     const map = new Map<string, SeedRow[]>();
     const byId = new Map<string, SeedRow>();
@@ -2904,7 +2924,7 @@ export default function TeamBuilder() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("players")
-        .select("id, first_name, last_name, position, team, from_team, conference")
+        .select("id, first_name, last_name, position, team, from_team, conference, division, source_player_id")
         .in("id", targetPlayerIds);
       if (error) throw error;
       return (data || []) as LivePlayerRow[];
@@ -2949,7 +2969,17 @@ export default function TeamBuilder() {
     return map;
   }, [predictionInternalsRows]);
 
-  const resolveConferenceStats = useCallback((conference: string | null | undefined): ConferenceRow | null => {
+  const resolveConferenceStats = useCallback((
+    conference: string | null | undefined,
+    conferenceId?: string | null,
+  ): ConferenceRow | null => {
+    // UUID lookup first — canonical join key. Required for JUCO districts
+    // where the player's `conference` string ("NJCAA D1 Midwest") doesn't
+    // line up with the Conference Stats row's name ("NJCAA D1 Midwest District").
+    if (conferenceId) {
+      const byId = confByConfId.get(conferenceId);
+      if (byId) return byId;
+    }
     const aliases = conferenceKeyAliases(conference);
     let best: ConferenceRow | null = null;
     let bestScore = -1;
@@ -2977,7 +3007,7 @@ export default function TeamBuilder() {
       }
     }
     return best;
-  }, [confByKey]);
+  }, [confByKey, confByConfId]);
 
   const simulateTransferProjection = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
     const treatAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
@@ -3012,6 +3042,12 @@ export default function TeamBuilder() {
     // the hitter live-recompute below so target board pitcher stats
     // stay fresh as conference stats / scouting / inputs update.
     if (treatAsPitcher) {
+      // JUCO source pitcher detection — drives weight overrides + hitter talent
+      // district override + skips class adj. Mirrors TransferPortal.tsx.
+      // Belt-and-suspenders: division field is canonical, but the BuildPlayer.player
+      // fallback doesn't carry it, so also detect via conference text "NJCAA D1 *".
+      const isJucoPitcherSrc = (livePlayer as any).division === "NJCAA_D1"
+        || /^NJCAA D1/i.test(String(livePlayer.conference || ""));
       const pName = `${livePlayer.first_name} ${livePlayer.last_name}`;
       const pSrcId = (livePlayer as any)?.source_player_id || null;
       const pNameKey = `${normalizeName(pName)}|${normalizeName(livePlayer.team || "")}`;
@@ -3027,7 +3063,9 @@ export default function TeamBuilder() {
           const bucket = pitchingPrByNameTeam.byName.get(normalizeName(pName)) || [];
           return bucket.length === 1 ? bucket[0] : (bucket[0] || null);
         })();
-      if (!pStats || !pPower) return snapshotFallback;
+      // JUCO source: PR+ (pPower) isn't used (power weights = 0), so null is OK.
+      if (!pStats) return snapshotFallback;
+      if (!pPower && !isJucoPitcherSrc) return snapshotFallback;
 
       // Resolve FROM team row. Use Pitching Master TeamID first (matches
       // TransferPortal's approach exactly), then fall back to livePlayer.team_id
@@ -3063,7 +3101,11 @@ export default function TeamBuilder() {
       // of the TB ↔ portal pitcher transfer mismatch — TB lookup was returning
       // null for from/to conferences in many cases, leaving the lib to compute
       // with null deltas instead of real conference shifts.
-      const lookupConfPC = (conf: string | null) => {
+      const lookupConfPC = (conf: string | null, confId?: string | null) => {
+        if (confId) {
+          const byId = pitchingConfLookup.get(confId);
+          if (byId) return byId;
+        }
         if (!conf) return null;
         for (const alias of getConferenceAliases(conf)) {
           const hit = pitchingConfLookup.get(alias);
@@ -3071,8 +3113,13 @@ export default function TeamBuilder() {
         }
         return null;
       };
-      const fromPC = lookupConfPC(fromConf);
-      const toPC = lookupConfPC(toConf);
+      // JUCO source: resolve via hardcoded district → conference_id map so
+      // we hit the UUID-indexed entry directly, bypassing name fuzzy match.
+      const jucoFromConfId = isJucoPitcherSrc
+        ? (JUCO_DISTRICT_CONFERENCE_ID[jucoDistrictNameFromConference(fromConf) ?? ""] ?? null)
+        : null;
+      const fromPC = lookupConfPC(fromConf, fromTeamRow?.conference_id ?? jucoFromConfId);
+      const toPC = lookupConfPC(toConf, toTeamRow.conference_id ?? null);
 
       const baseRole = (() => {
         const r = pStats.role || null;
@@ -3093,6 +3140,18 @@ export default function TeamBuilder() {
         ? baseRole
         : (normalizePitcherRole(pitcherRoleFromSlot(p.position_slot) || p.player?.position || null) || baseRole);
 
+      // JUCO source: swap in JUCO_PITCHING_TRANSFER_WEIGHTS (power=0, park=0,
+      // conf moderate, competition heavier on Stuff+). Also override raw
+      // hitter_talent_plus with JUCO_DISTRICT_HTP_OVERRIDE (district name
+      // derived from "NJCAA D1 X District" conference string).
+      const effEq = isJucoPitcherSrc ? { ...pitchingEq, ...JUCO_PITCHING_TRANSFER_WEIGHTS } : pitchingEq;
+      const jucoDistrict = isJucoPitcherSrc
+        ? (fromConf ?? "").replace(/^NJCAA D1 /, "").replace(/ District$/, "")
+        : null;
+      const effFromHitterTalent = isJucoPitcherSrc
+        ? (JUCO_DISTRICT_HTP_OVERRIDE[jucoDistrict ?? ""] ?? null)
+        : (fromPC?.hitter_talent_plus ?? null);
+
       const result = computeTransferPitcherProjection(
         {
           era: pStats.era ?? null,
@@ -3102,12 +3161,12 @@ export default function TeamBuilder() {
           bb9: pStats.bb9 ?? null,
           hr9: pStats.hr9 ?? null,
           storedPrPlus: {
-            era: pPower.eraPrPlus ?? null,
-            fip: pPower.fipPrPlus ?? null,
-            whip: pPower.whipPrPlus ?? null,
-            k9: pPower.k9PrPlus ?? null,
-            bb9: pPower.bb9PrPlus ?? null,
-            hr9: pPower.hr9PrPlus ?? null,
+            era: pPower?.eraPrPlus ?? null,
+            fip: pPower?.fipPrPlus ?? null,
+            whip: pPower?.whipPrPlus ?? null,
+            k9: pPower?.k9PrPlus ?? null,
+            bb9: pPower?.bb9PrPlus ?? null,
+            hr9: pPower?.hr9PrPlus ?? null,
           },
           baseRole,
           fromEraPlus: fromPC?.era_plus ?? null,
@@ -3122,7 +3181,7 @@ export default function TeamBuilder() {
           toBb9Plus: toPC?.bb9_plus ?? null,
           fromHr9Plus: fromPC?.hr9_plus ?? null,
           toHr9Plus: toPC?.hr9_plus ?? null,
-          fromHitterTalent: fromPC?.hitter_talent_plus ?? null,
+          fromHitterTalent: effFromHitterTalent,
           toHitterTalent: toPC?.hitter_talent_plus ?? null,
           fromEraParkRaw: resolveTransferParkFactor(fromTeamRow?.id, [livePlayer.team, fromTeamRow?.name], "era", teamParkComponents),
           toEraParkRaw: resolveTransferParkFactor(toTeamRow.id, [selectedTeam, toTeamRow.name], "era", teamParkComponents),
@@ -3133,7 +3192,7 @@ export default function TeamBuilder() {
           toTeam: toTeamRow.name,
           toConference: toConf,
         },
-        { eq: pitchingEq, roleOverride: slotRole },
+        { eq: effEq, roleOverride: slotRole },
       );
 
       // Lib blocked: a required input is genuinely missing (e.g., conference
@@ -3146,20 +3205,24 @@ export default function TeamBuilder() {
       // Apply class transition + dev aggressiveness on top of base transfer
       // projection. Mirrors TransferPortal exactly so values match across
       // surfaces (was missing here — pitcher TB ↔ portal divergence).
+      // JUCO source: 2026 stats used verbatim — no class adj (mirrors TP).
       const pitcherClassKey = String(p.class_transition || livePred.class_transition || "SJ").toUpperCase();
-      const pitcherClassTransition: "FS" | "SJ" | "JS" | "GR" =
-        pitcherClassKey === "FS" || pitcherClassKey === "SJ" || pitcherClassKey === "JS" || pitcherClassKey === "GR"
-          ? pitcherClassKey
-          : "SJ";
-      const pitcherDevAgg = Number.isFinite(Number(p.dev_aggressiveness ?? livePred.dev_aggressiveness))
-        ? Number(p.dev_aggressiveness ?? livePred.dev_aggressiveness)
-        : 0;
-      const classEraAdj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_era_fs, pitchingEq.class_era_sj, pitchingEq.class_era_js, pitchingEq.class_era_gr);
-      const classFipAdj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_fip_fs, pitchingEq.class_fip_sj, pitchingEq.class_fip_js, pitchingEq.class_fip_gr);
-      const classWhipAdj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_whip_fs, pitchingEq.class_whip_sj, pitchingEq.class_whip_js, pitchingEq.class_whip_gr);
-      const classK9Adj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_k9_fs, pitchingEq.class_k9_sj, pitchingEq.class_k9_js, pitchingEq.class_k9_gr);
-      const classBb9Adj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_bb9_fs, pitchingEq.class_bb9_sj, pitchingEq.class_bb9_js, pitchingEq.class_bb9_gr);
-      const classHr9Adj = toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_hr9_fs, pitchingEq.class_hr9_sj, pitchingEq.class_hr9_js, pitchingEq.class_hr9_gr);
+      const pitcherClassTransition: "FS" | "SJ" | "JS" | "GR" = isJucoPitcherSrc
+        ? "SJ"
+        : (pitcherClassKey === "FS" || pitcherClassKey === "SJ" || pitcherClassKey === "JS" || pitcherClassKey === "GR"
+            ? pitcherClassKey
+            : "SJ");
+      const pitcherDevAgg = isJucoPitcherSrc
+        ? 0
+        : (Number.isFinite(Number(p.dev_aggressiveness ?? livePred.dev_aggressiveness))
+            ? Number(p.dev_aggressiveness ?? livePred.dev_aggressiveness)
+            : 0);
+      const classEraAdj = isJucoPitcherSrc ? 0 : toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_era_fs, pitchingEq.class_era_sj, pitchingEq.class_era_js, pitchingEq.class_era_gr);
+      const classFipAdj = isJucoPitcherSrc ? 0 : toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_fip_fs, pitchingEq.class_fip_sj, pitchingEq.class_fip_js, pitchingEq.class_fip_gr);
+      const classWhipAdj = isJucoPitcherSrc ? 0 : toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_whip_fs, pitchingEq.class_whip_sj, pitchingEq.class_whip_js, pitchingEq.class_whip_gr);
+      const classK9Adj = isJucoPitcherSrc ? 0 : toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_k9_fs, pitchingEq.class_k9_sj, pitchingEq.class_k9_js, pitchingEq.class_k9_gr);
+      const classBb9Adj = isJucoPitcherSrc ? 0 : toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_bb9_fs, pitchingEq.class_bb9_sj, pitchingEq.class_bb9_js, pitchingEq.class_bb9_gr);
+      const classHr9Adj = isJucoPitcherSrc ? 0 : toPitchingClassAdj(pitcherClassTransition, pitchingEq.class_hr9_fs, pitchingEq.class_hr9_sj, pitchingEq.class_hr9_js, pitchingEq.class_hr9_gr);
       const pitcherLowMult = (adj: number) => 1 - adj - (pitcherDevAgg * 0.06);
       const pitcherHighMult = (adj: number) => 1 + adj + (pitcherDevAgg * 0.06);
 
@@ -3204,12 +3267,33 @@ export default function TeamBuilder() {
       };
     }
 
-    const lastAvg = livePred.from_avg;
-    const lastObp = livePred.from_obp;
-    const lastSlg = livePred.from_slg;
-    if (lastAvg == null || lastObp == null || lastSlg == null) {
+    const rawLastAvg = livePred.from_avg;
+    const rawLastObp = livePred.from_obp;
+    const rawLastSlg = livePred.from_slg;
+    if (rawLastAvg == null || rawLastObp == null || rawLastSlg == null) {
       return snapshotFallback;
     }
+    // JUCO outlier regression — mirrors D1's natural regression through the
+    // power-rating blend (disabled for JUCO). Only pulls down stats above the
+    // outlier threshold; .300 JUCO regulars unaffected. Identical to the
+    // simulator at TransferPortal.tsx:1216-1230 — must stay in sync.
+    // Belt-and-suspenders detection: division field is the canonical source,
+    // but BuildPlayer.player fallback doesn't carry it, so also detect via
+    // conference text "NJCAA D1 *". Either signal flips the JUCO branch.
+    const isJucoSrc = (livePlayer as any).division === "NJCAA_D1"
+      || /^NJCAA D1/i.test(String(livePlayer.conference || ""));
+    const lastAvg = isJucoSrc
+      ? applyJucoOutlierRegression(rawLastAvg, JUCO_REGRESSION_CONFIG.avg.mean, JUCO_REGRESSION_CONFIG.avg.threshold, JUCO_REGRESSION_CONFIG.avg.slope, JUCO_REGRESSION_CONFIG.avg.maxR)
+      : rawLastAvg;
+    const lastObp = isJucoSrc
+      ? applyJucoOutlierRegression(rawLastObp, JUCO_REGRESSION_CONFIG.obp.mean, JUCO_REGRESSION_CONFIG.obp.threshold, JUCO_REGRESSION_CONFIG.obp.slope, JUCO_REGRESSION_CONFIG.obp.maxR)
+      : rawLastObp;
+    const lastSlg = (() => {
+      if (!isJucoSrc) return rawLastSlg;
+      const rawIso = rawLastSlg - rawLastAvg;
+      const adjIso = applyJucoOutlierRegression(rawIso, JUCO_REGRESSION_CONFIG.iso.mean, JUCO_REGRESSION_CONFIG.iso.threshold, JUCO_REGRESSION_CONFIG.iso.slope, JUCO_REGRESSION_CONFIG.iso.maxR);
+      return lastAvg + adjIso;
+    })();
 
     const fullName = `${livePlayer.first_name} ${livePlayer.last_name}`;
     // Fast path: UUID match
@@ -3234,14 +3318,42 @@ export default function TeamBuilder() {
     }
 
     const fromConference = fromTeamRow?.conference || livePlayer.conference || null;
-    const fromConfStats = resolveConferenceStats(fromConference);
-    const toConfStats = resolveConferenceStats(toTeamRow.conference || null);
+    // JUCO source: derive Conference Stats UUID from district name. Bypasses
+    // the name fuzzy match entirely (JUCO districts are stored as
+    // "NJCAA D1 X District" in Conference Stats but player.conference is
+    // "NJCAA D1 X" — direct alias matching misses).
+    const jucoFromConfId = isJucoSrc
+      ? (JUCO_DISTRICT_CONFERENCE_ID[jucoDistrictNameFromConference(fromConference) ?? ""] ?? null)
+      : null;
+    const fromConfStats = resolveConferenceStats(fromConference, fromTeamRow?.conference_id ?? jucoFromConfId);
+    const toConfStats = resolveConferenceStats(toTeamRow.conference || null, toTeamRow.conference_id ?? null);
 
     const internals = livePred.id ? internalsByPredictionId.get(livePred.id) || null : null;
-    // Use stat-specific power rating+ only (no fallback to overall power_rating_plus).
-    const baPR = internals?.avg_power_rating ?? null;
-    const obpPR = internals?.obp_power_rating ?? null;
-    const isoPR = internals?.slg_power_rating ?? null;
+    // PR+ resolution order (matches TransferPortal.tsx:1233-1252):
+    //   1. Stored internals (D1 pipeline writes these).
+    //   2. Fall back to compute via seed scouting data (JUCO + any D1 player
+    //      where internals haven't been written). Without this fallback the
+    //      lib uses ncaaAvgISO for scaledIso → over-regresses elite ISO bats.
+    //   3. Final fallback for JUCO only: 100 (so power-weighted blend collapses
+    //      to lastStat × 1 if no scouting data present).
+    const isoPRFromSeed = (() => {
+      const sid = (livePlayer as any).source_player_id || (p.player as any)?.source_player_id;
+      const sidKey = sid ? `sid:${sid}` : null;
+      const nameKey = `${normalizeName(`${livePlayer.first_name} ${livePlayer.last_name}`.trim())}|${normalizeName(livePlayer.team || "")}`;
+      const seed = (sidKey ? powerLookup.get(sidKey) : null) || powerLookup.get(nameKey) || null;
+      if (!seed) return null;
+      const computed = computeHitterPowerRatings({
+        contact: seed.contact, lineDrive: seed.lineDrive,
+        avgExitVelo: seed.avgExitVelo, popUp: seed.popUp,
+        bb: seed.bb, chase: seed.chase,
+        barrel: seed.barrel, ev90: seed.ev90,
+        pull: seed.pull, la10_30: seed.la10_30, gb: seed.gb,
+      });
+      return computed;
+    })();
+    const baPR = internals?.avg_power_rating ?? isoPRFromSeed?.baPlus ?? (isJucoSrc ? 100 : null);
+    const obpPR = internals?.obp_power_rating ?? isoPRFromSeed?.obpPlus ?? (isJucoSrc ? 100 : null);
+    const isoPR = internals?.slg_power_rating ?? isoPRFromSeed?.isoPlus ?? (isJucoSrc ? 100 : null);
 
     if (baPR == null || obpPR == null || isoPR == null) {
       return snapshotFallback;
@@ -3264,11 +3376,16 @@ export default function TeamBuilder() {
       fromAvgPlus == null || toAvgPlus == null ||
       fromObpPlus == null || toObpPlus == null ||
       fromIsoPlus == null || toIsoPlus == null ||
-      fromStuff == null || toStuff == null ||
+      fromStuff == null || toStuff == null
+    ) {
+      return snapshotFallback;
+    }
+    // JUCO source: park weights = 0, no JUCO park data. Skip park null check.
+    if (!isJucoSrc && (
       fromParkAvgRaw == null || toParkAvgRaw == null ||
       fromParkObpRaw == null || toParkObpRaw == null ||
       fromParkIsoRaw == null || toParkIsoRaw == null
-    ) {
+    )) {
       return snapshotFallback;
     }
     const fromPark = normalizeParkToIndex(fromParkAvgRaw);
@@ -3286,17 +3403,23 @@ export default function TeamBuilder() {
     const baStdNcaa = toRate(eqNum("t_ba_std_ncaa", 0.043455));
     const obpStdPower = eqNum("t_obp_std_pr", 28.889);
     const obpStdNcaa = toRate(eqNum("t_obp_std_ncaa", 0.046781));
-    const baPowerWeight = toRate(eqNum("t_ba_power_weight", 0.70));
-    const obpPowerWeight = toRate(eqNum("t_obp_power_weight", 0.70));
-    const baConferenceWeight = toWeight(eqNum("t_ba_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight));
-    const obpConferenceWeight = toWeight(eqNum("t_obp_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight));
-    const isoConferenceWeight = toWeight(eqNum("t_iso_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight));
-    const baPitchingWeight = toWeight(eqNum("t_ba_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight));
-    const obpPitchingWeight = toWeight(eqNum("t_obp_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight));
-    const isoPitchingWeight = toWeight(eqNum("t_iso_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight));
-    const baParkWeight = toWeight(eqNum("t_ba_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight));
-    const obpParkWeight = toWeight(eqNum("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight));
-    const isoParkWeight = toWeight(eqNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight));
+    // Division-aware weight defaults: NJCAA_D1 sources route through
+    // JUCO_TRANSFER_WEIGHTS (park=0, power=0, conf+pitching uplifted).
+    // Mirrors TransferPortal.tsx so TB target board projection matches the
+    // simulator output for the same player + destination.
+    const srcW = transferWeightsForSource(isJucoSrc ? "NJCAA_D1" : null);
+    const jW = <K extends keyof typeof srcW>(k: K, d1: number) => isJucoSrc ? srcW[k] : d1;
+    const baPowerWeight = toRate(jW("t_ba_power_weight", eqNum("t_ba_power_weight", 0.70)));
+    const obpPowerWeight = toRate(jW("t_obp_power_weight", eqNum("t_obp_power_weight", 0.70)));
+    const baConferenceWeight = toWeight(jW("t_ba_conference_weight", eqNum("t_ba_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight)));
+    const obpConferenceWeight = toWeight(jW("t_obp_conference_weight", eqNum("t_obp_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight)));
+    const isoConferenceWeight = toWeight(jW("t_iso_conference_weight", eqNum("t_iso_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight)));
+    const baPitchingWeight = toWeight(jW("t_ba_pitching_weight", eqNum("t_ba_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight)));
+    const obpPitchingWeight = toWeight(jW("t_obp_pitching_weight", eqNum("t_obp_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight)));
+    const isoPitchingWeight = toWeight(jW("t_iso_pitching_weight", eqNum("t_iso_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight)));
+    const baParkWeight = toWeight(jW("t_ba_park_weight", eqNum("t_ba_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight)));
+    const obpParkWeight = toWeight(jW("t_obp_park_weight", eqNum("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight)));
+    const isoParkWeight = toWeight(jW("t_iso_park_weight", eqNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight)));
     const isoStdPower = eqNum("t_iso_std_power", 45.423);
     const isoStdNcaa = toRate(eqNum("t_iso_std_ncaa", 0.07849797197));
     const wObp = toRate(eqNum("r_w_obp", 0.45));
@@ -3351,13 +3474,15 @@ export default function TeamBuilder() {
       wAvg,
       wIso,
     });
+    // JUCO source: 2026 stats used verbatim — no class adjustment.
+    // Mirrors TransferPortal.tsx JUCO path.
     const classKey = String(p.class_transition || livePred.class_transition || "SJ").toUpperCase();
-    const classAdj =
+    const classAdj = isJucoSrc ? 0 : (
       classKey === "FS" ? 0.03 :
       classKey === "SJ" ? 0.02 :
       classKey === "JS" ? 0.015 :
-      classKey === "GR" ? 0.01 : 0.02;
-    const devAgg = Number.isFinite(Number(p.dev_aggressiveness)) ? Number(p.dev_aggressiveness) : 0;
+      classKey === "GR" ? 0.01 : 0.02);
+    const devAgg = isJucoSrc ? 0 : (Number.isFinite(Number(p.dev_aggressiveness)) ? Number(p.dev_aggressiveness) : 0);
     const transferMult = 1 + classAdj + (devAgg * 0.06);
     const pAvgAdj = projected.pAvg * transferMult;
     const pObpAdj = projected.pObp * transferMult;
@@ -5068,7 +5193,17 @@ export default function TeamBuilder() {
       const OF_SLOTS = ["LF", "CF", "RF"];
       const normalizePos = (raw: string | null | undefined) =>
         (raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-      const ROLE_TO_DEPTH: Record<string, number> = { starter: 1, utility: 2, bench: 3 };
+      // 5-tier hitter model: cornerstone/everyday_starter are depth 1 (the
+      // "starting nine"), platoon_starter/utility are depth 2 (situational +
+      // backup), bench is depth 3. Legacy "starter" kept for old build drafts.
+      const ROLE_TO_DEPTH: Record<string, number> = {
+        cornerstone: 1,
+        everyday_starter: 1,
+        starter: 1,
+        platoon_starter: 2,
+        utility: 2,
+        bench: 3,
+      };
       const distributeGeneric = (positionTag: "IF" | "OF", slots: string[]) => {
         const candidates = rosterPlayers
           .map((p, idx) => ({ p, idx }))
@@ -5182,14 +5317,35 @@ export default function TeamBuilder() {
     setDirty(true);
   };
 
-  const classColor = (ct: string | null | undefined, isPlaceholder?: boolean) => {
+  // Class color reads the player's CURRENT class_year (FR/SO/JR/SR/GR),
+  // not class_transition. class_transition encodes the year-to-year move
+  // ("SJ" = sophomore-to-junior projection), so a SJ-tagged player is
+  // currently a junior — coloring them green ("SO") was off by one and
+  // didn't match the depth-chart legend or the player profile. Falls back
+  // to deriving the current class from class_transition for legacy rows.
+  const classColor = (cy: string | null | undefined, isPlaceholder?: boolean) => {
     if (isPlaceholder) return "border-blue-500 bg-blue-100 text-blue-900";
-    if (!ct) return "border-slate-300 bg-white text-black";
-    if (ct === "FS") return "border-blue-500 bg-blue-100 text-blue-900";
-    if (ct === "SJ") return "border-green-600 bg-green-200 text-green-900";
-    if (ct === "JS") return "border-yellow-500 bg-yellow-100 text-yellow-900";
-    if (ct === "GR") return "border-red-500 bg-red-100 text-red-900";
+    // Strip redshirt prefix — R-JR colors as JR, R-SO as SO, etc.
+    const c = (cy || "").toUpperCase().replace(/^R-/, "");
+    if (!c) return "border-slate-300 bg-white text-black";
+    if (c === "FR") return "border-blue-500 bg-blue-100 text-blue-900";
+    if (c === "SO") return "border-green-600 bg-green-200 text-green-900";
+    if (c === "JR") return "border-yellow-500 bg-yellow-100 text-yellow-900";
+    if (c === "SR" || c === "GR") return "border-red-500 bg-red-100 text-red-900";
     return "border-slate-300 bg-white text-black";
+  };
+  // Derive the player's current class for color coding. Prefer canonical
+  // class_year; fall back to the second letter of class_transition (SJ → J → JR).
+  const playerCurrentClass = (p: BuildPlayer | null | undefined): string | null => {
+    if (!p) return null;
+    const cy = (p.player?.class_year || "").toUpperCase();
+    if (cy) return cy;
+    const ct = String(p.class_transition || "").toUpperCase();
+    if (ct === "FS") return "SO";
+    if (ct === "SJ") return "JR";
+    if (ct === "JS") return "SR";
+    if (ct === "GR") return "GR";
+    return null;
   };
 
   const renderDepthStack = (
@@ -5205,9 +5361,9 @@ export default function TeamBuilder() {
             const currentIdx = depthAssignments[depthKey(slot, depth)];
             const placeholder = depthPlaceholders[depthKey(slot, depth)] ?? null;
             const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
-            const ct = selectedPlayer?.class_transition;
+            const cy = playerCurrentClass(selectedPlayer);
             const isPlaceholder = placeholder === "freshman" || placeholder === "transfer";
-            const colorCls = currentIdx != null ? classColor(ct) : isPlaceholder ? classColor(null, true) : "border-slate-300 bg-white text-black";
+            const colorCls = currentIdx != null ? classColor(cy) : isPlaceholder ? classColor(null, true) : "border-slate-300 bg-white text-black";
             return (
               <Select key={`${slot}-${depth}`} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, depth, v)}>
                 <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
@@ -5244,7 +5400,7 @@ export default function TeamBuilder() {
             const currentIdx = depthAssignments[depthKey(slot, 1)];
             const placeholder = depthPlaceholders[depthKey(slot, 1)] ?? null;
             const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
-            const colorCls = currentIdx != null ? classColor(selectedPlayer?.class_transition) : "border-slate-300 bg-white text-black";
+            const colorCls = currentIdx != null ? classColor(playerCurrentClass(selectedPlayer)) : "border-slate-300 bg-white text-black";
             return (
               <Select key={slot} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, 1, v)}>
                 <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
@@ -5281,7 +5437,7 @@ export default function TeamBuilder() {
             const currentIdx = depthAssignments[depthKey(slot, 1)];
             const placeholder = depthPlaceholders[depthKey(slot, 1)] ?? null;
             const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
-            const colorCls = currentIdx != null ? classColor(selectedPlayer?.class_transition) : "border-slate-300 bg-white text-black";
+            const colorCls = currentIdx != null ? classColor(playerCurrentClass(selectedPlayer)) : "border-slate-300 bg-white text-black";
             return (
               <Select key={slot} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, 1, v)}>
                 <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
@@ -5628,24 +5784,10 @@ export default function TeamBuilder() {
           </Select>
         )}
       </TableCell>
-      <TableCell>
-        {/* Class transition is auto-derived from each player's class_year
-            (TruMedia is the source of truth) and persisted on the prediction
-            row. Coaches override on the player profile page for unusual
-            development arcs; not editable from TB anymore. */}
-        {(() => {
-          const ct = p.class_transition || classTransitionFromYearOrDefault((p.player as any)?.class_year);
-          const label: Record<string, string> = { FS: "FR→SO", SJ: "SO→JR", JS: "JR→SR", GR: "GR" };
-          return (
-            <span
-              className="inline-flex items-center justify-center w-[90px] h-8 rounded-md border border-border bg-muted/40 text-xs font-medium text-foreground/80 tabular-nums"
-              title="Auto-derived from class_year. Override on the player profile page."
-            >
-              {label[ct] || ct || "—"}
-            </span>
-          );
-        })()}
-      </TableCell>
+      {/* Class Adj column removed per user request 2026-05-18 — the underlying
+          class_transition value still flows into the projection equation
+          (auto-derived from class_year, override-able on the player profile
+          page). Only the read-only display column was dropped. */}
       <TableCell>
         <Select
           value={String(
@@ -6035,7 +6177,6 @@ export default function TeamBuilder() {
                       <TableHead>Status</TableHead>
                       <TableHead>Pos</TableHead>
                       <TableHead>Position Change</TableHead>
-                      <TableHead>Class Adj</TableHead>
                       <TableHead>Dev Agg</TableHead>
                       <TableHead>Depth</TableHead>
                       <TableHead className="text-center min-w-[220px] whitespace-nowrap">pAVG/pOBP/pSLG</TableHead>
@@ -6098,7 +6239,6 @@ export default function TeamBuilder() {
                       <TableHead>Status</TableHead>
                       <TableHead>Pos</TableHead>
                       <TableHead>Role</TableHead>
-                      <TableHead>Class Adj</TableHead>
                       <TableHead>Dev Agg</TableHead>
                       <TableHead>Depth</TableHead>
                       <TableHead className="text-center min-w-[240px] whitespace-nowrap">pERA/pWHIP/pK/9/pBB/9</TableHead>
@@ -6258,7 +6398,6 @@ export default function TeamBuilder() {
                       <TableHead>Status</TableHead>
                       <TableHead className="text-center">Risk</TableHead>
                       <TableHead>Position Change</TableHead>
-                      <TableHead>Class Adj</TableHead>
                       <TableHead>Dev Agg</TableHead>
                       <TableHead>Depth</TableHead>
                       <TableHead className="text-center min-w-[220px] whitespace-nowrap">pAVG/pOBP/pSLG</TableHead>
@@ -6318,7 +6457,6 @@ export default function TeamBuilder() {
                       <TableHead>Status</TableHead>
                       <TableHead>Pos</TableHead>
                       <TableHead>Role</TableHead>
-                      <TableHead>Class Adj</TableHead>
                       <TableHead>Dev Agg</TableHead>
                       <TableHead>Depth</TableHead>
                       <TableHead className="text-center min-w-[240px] whitespace-nowrap">pERA/pWHIP/pK/9/pBB/9</TableHead>
@@ -7108,16 +7246,20 @@ export default function TeamBuilder() {
                     const bullpenWarTotal = bullpen.reduce((s, x) => s + x.war, 0);
                     const topBullpen = [...bullpen].sort((a, b) => b.war - a.war).slice(0, 7);
 
+                    // Tier labels: a p25 SP (~1.5 WAR) is still a valuable rotation
+                    // arm — used to be labeled "Below" which mis-framed it as a
+                    // weakness. "Contributor" reads accurately; the truly weak
+                    // tier (< p25) keeps a sharper label as "Below".
                     const verdictFor = (war: number, starter: number, elite: number): string => {
                       if (war >= elite) return "Elite";
                       if (war >= starter) return "Starter";
-                      if (war >= starter * 0.5) return "Below";
-                      return "Drag";
+                      if (war >= starter * 0.5) return "Contributor";
+                      return "Below";
                     };
                     const verdictColor = (v: string) =>
                       v === "Elite" ? "text-emerald-600" :
                       v === "Starter" ? "text-yellow-600" :
-                      v === "Below" ? "text-orange-600" : "text-red-600";
+                      v === "Contributor" ? "text-orange-600" : "text-red-600";
 
                     // Platoon segments use gold + darker gold from RSTR IQ design system
                     const segmentColors = ["bg-[#D4AF37]", "bg-[#A08820]", "bg-amber-700"];

@@ -33,6 +33,8 @@ import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { assessHitterRisk, assessPitcherRisk } from "@/lib/playerRisk";
+import type { RiskFactor, RiskAssessment } from "@/lib/playerRisk";
+import { JucoPitcherRiskCard, JucoHitterRiskCard } from "@/components/JucoRiskCards";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
 import { TRANSFER_WEIGHT_DEFAULTS, transferWeightsForSource, JUCO_PITCHING_TRANSFER_WEIGHTS, JUCO_DISTRICT_HTP_OVERRIDE, applyJucoOutlierRegression, JUCO_REGRESSION_CONFIG } from "@/lib/transferWeightDefaults";
 import { computeDataReliability } from "@/lib/jucoDataReliability";
@@ -104,6 +106,16 @@ type PitchingStorageRow = {
   hr9: number | null;
   division: string | null;
   stuffPlus: number | null;
+  // JUCO data-reliability inputs + Skillset metric inputs.
+  trackmanPitches: number | null;
+  bf: number | null;
+  missPct: number | null;
+  bbPct: number | null;
+  hardHitPct: number | null;
+  inZoneWhiffPct: number | null;
+  chasePct: number | null;
+  barrelPct: number | null;
+  groundPct: number | null;
 };
 
 type PitchingPowerSnapshot = {
@@ -495,6 +507,8 @@ function readLocalNum(key: string, fallback: number, remoteValues?: Record<strin
   return fallback;
 }
 
+// JUCO risk cards (pitcher + hitter) live in @/components/JucoRiskCards.
+
 export default function TransferPortal() {
   const location = useLocation();
   const { toast } = useToast();
@@ -770,6 +784,15 @@ export default function TransferPortal() {
         hr9: r.hr9 != null ? Number(r.hr9) : null,
         division: (r as any).division ?? null,
         stuffPlus: (r as any).stuffPlus ?? null,
+        trackmanPitches: (r as any).trackman_pitches != null ? Number((r as any).trackman_pitches) : null,
+        bf: (r as any).bf != null ? Number((r as any).bf) : null,
+        missPct: (r as any).miss_pct != null ? Number((r as any).miss_pct) : null,
+        bbPct: (r as any).bb_pct != null ? Number((r as any).bb_pct) : null,
+        hardHitPct: (r as any).hard_hit_pct != null ? Number((r as any).hard_hit_pct) : null,
+        inZoneWhiffPct: (r as any).in_zone_whiff_pct != null ? Number((r as any).in_zone_whiff_pct) : null,
+        chasePct: (r as any).chase_pct != null ? Number((r as any).chase_pct) : null,
+        barrelPct: (r as any).barrel_pct != null ? Number((r as any).barrel_pct) : null,
+        groundPct: (r as any).ground_pct != null ? Number((r as any).ground_pct) : null,
       };
     }).filter((r) => !!r.player_name);
   }, [pitchingMasterRows]);
@@ -778,6 +801,15 @@ export default function TransferPortal() {
     () => pitchingPlayers.find((p) => p.id === selectedPitcherId) || null,
     [pitchingPlayers, selectedPitcherId],
   );
+
+  useEffect(() => {
+    if (!selectedPitcher) return;
+    const isJuco = selectedPitcher.division === "NJCAA_D1";
+    if ((divisionFilter === "JUCO" && !isJuco) || (divisionFilter === "D1" && isJuco)) {
+      setSelectedPitcherId("");
+      setPitcherSearch("");
+    }
+  }, [divisionFilter, selectedPitcher]);
 
   const pitchingPowerByKey = useMemo(() => {
     const byNameTeam = new Map<string, PitchingPowerSnapshot>();
@@ -873,11 +905,16 @@ export default function TransferPortal() {
 
   const filteredPitchers = useMemo(() => {
     const q = normalizeKey(pitcherSearch);
+    const matchesDivision = (d: string | null) => {
+      if (divisionFilter === "JUCO") return d === "NJCAA_D1";
+      return d !== "NJCAA_D1";
+    };
+    const divPool = pitchingPlayers.filter((p) => matchesDivision(p.division));
     const pool = q
-      ? pitchingPlayers.filter((p) => normalizeKey(`${p.player_name} ${p.team || ""} ${p.handedness || ""}`).includes(q))
-      : pitchingPlayers;
+      ? divPool.filter((p) => normalizeKey(`${p.player_name} ${p.team || ""} ${p.handedness || ""}`).includes(q))
+      : divPool;
     return pool.slice(0, 25);
-  }, [pitchingPlayers, pitcherSearch]);
+  }, [pitchingPlayers, pitcherSearch, divisionFilter]);
 
   const { data: internals } = useQuery({
     queryKey: ["transfer-sim-internals", selectedPlayer?.prediction_id],
@@ -2014,9 +2051,33 @@ export default function TransferPortal() {
               const spKey = `${normalizeKey(fullName)}|${normalizeKey(fromTeam)}`;
               const sp = powerByNameTeam.get(spKey) ?? powerByNameTeam.get(normalizeKey(fullName)) ?? null;
               const toConfRow = toConference ? confByKey.get(toConference.toLowerCase().trim()) ?? null : null;
-
               const resolvedPa = selectedPlayer?.player_id ? (hitterPaMap.get(selectedPlayer.player_id) ?? null) : null;
+              const isJucoSrc = selectedPlayer?.division === "NJCAA_D1";
 
+              if (isJucoSrc) {
+                // JUCO hitter sim — slimmed 4-factor panel mirroring the
+                // pitcher JUCO card philosophy (Projection / Skillset /
+                // Data Reliability / Competition with SOURCE stuff+).
+                const tm = selectedPlayer?.player_id ? jucoTrackmanMap.get(selectedPlayer.player_id) : undefined;
+                const fromAvg = selectedPlayer?.from_avg ?? null;
+                const fromObp = selectedPlayer?.from_obp ?? null;
+                const fromSlg = selectedPlayer?.from_slg ?? null;
+                const iso = fromAvg != null && fromSlg != null ? fromSlg - fromAvg : null;
+                return <JucoHitterRiskCard input={{
+                  projectedWrcPlus: simulation.pWrcPlus,
+                  chase: sp?.chase ?? null, contact: sp?.contact ?? null,
+                  whiff: (sp as any)?.whiff ?? null,
+                  barrel: sp?.barrel ?? null, lineDrive: sp?.lineDrive ?? null,
+                  avgEv: sp?.avgExitVelo ?? null, ev90: sp?.ev90 ?? null,
+                  pull: sp?.pull ?? null, gb: sp?.gb ?? null, bb: sp?.bb ?? null,
+                  avg: fromAvg, obp: fromObp, iso,
+                  trackmanPitches: tm?.tm ?? 0, pa: tm?.pa ?? resolvedPa,
+                  sourceConference: fromConference,
+                  sourceConfStuffPlus: fromConfStats?.stuff_plus ?? null,
+                }} />;
+              }
+
+              // D1 sim — full assessor with destination-conference competition.
               const risk = assessHitterRisk({
                 conference: toConference,
                 projectedWrcPlus: simulation.pWrcPlus,
@@ -2027,35 +2088,6 @@ export default function TransferPortal() {
                 avgEv: sp?.avgExitVelo, ev90: sp?.ev90,
                 pull: sp?.pull, gb: sp?.gb, bb: sp?.bb,
               });
-
-              // JUCO data-reliability — TrackMan coverage as a peer risk
-              // factor. Tier-aligned risk score (higher = riskier in this
-              // engine): verified=5, partial=40, stats-only=70, none=95.
-              // Only added for JUCO sources; D1 has universal coverage.
-              const isJucoSrc = selectedPlayer?.division === "NJCAA_D1";
-              if (isJucoSrc) {
-                const tm = selectedPlayer.player_id ? jucoTrackmanMap.get(selectedPlayer.player_id) : undefined;
-                const reliability = computeDataReliability(tm?.tm ?? 0, tm?.pa ?? null);
-                const tierToScore: Record<typeof reliability.tier, number> = {
-                  "verified": 5, "partial": 40, "stats-only": 70, "none": 95,
-                };
-                const tierToGrade: Record<typeof reliability.tier, "Low" | "Moderate" | "Elevated" | "High"> = {
-                  "verified": "Low", "partial": "Moderate", "stats-only": "Elevated", "none": "High",
-                };
-                risk.factors.push({
-                  label: "Data Reliability",
-                  score: tierToScore[reliability.tier],
-                  grade: tierToGrade[reliability.tier],
-                  detail: `${reliability.label} — ${reliability.trackmanPitches} TrackMan pitches`,
-                });
-              }
-
-              // Stuff+ on hitter risk card is redundant — competition quality
-              // is already captured by the Competition factor inside
-              // assessHitterRisk. Stuff+ as a risk signal is a pitcher concept
-              // (does this pitcher's arsenal play up?) — kept ONLY on the
-              // pitcher risk panel below.
-
               return <RiskAssessmentCardRSTR risk={risk} />;
             })()}
 
@@ -2116,7 +2148,7 @@ export default function TransferPortal() {
                 <div className="flex flex-wrap items-end gap-3">
                   <div className="relative flex-1 min-w-[180px]">
                     <Label className="text-xs mb-1 block">Pitcher</Label>
-                    <Input placeholder="Search pitcher..." value={pitcherSearch} onChange={(e) => { setPitcherSearch(e.target.value); setPitcherDropdownOpen(true); }} onFocus={() => setPitcherDropdownOpen(true)} onBlur={() => setTimeout(() => setPitcherDropdownOpen(false), 150)} />
+                    <Input placeholder={divisionFilter === "JUCO" ? "Search JUCO pitcher..." : "Search pitcher..."} value={pitcherSearch} onChange={(e) => { setPitcherSearch(e.target.value); setPitcherDropdownOpen(true); }} onFocus={() => setPitcherDropdownOpen(true)} onBlur={() => setTimeout(() => setPitcherDropdownOpen(false), 150)} />
                     {pitcherDropdownOpen && filteredPitchers.length > 0 && (
                       <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
                         {filteredPitchers.map((p) => (
@@ -2170,7 +2202,7 @@ export default function TransferPortal() {
                   <div className="mt-3 text-xs text-muted-foreground border-t pt-2 flex items-center gap-4">
                     <span className="font-medium text-foreground">{selectedPitcher.player_name}</span>
                     <span>{selectedPitcher.handedness === "R" ? "RHP" : selectedPitcher.handedness === "L" ? "LHP" : selectedPitcher.handedness || "-"} · {selectedPitcher.team || "-"} · {selectedPitcher.role || "-"}</span>
-                    <span className="font-mono tabular-nums">2025: {stat(selectedPitcher.era, 2)} ERA · {stat(selectedPitcher.fip, 2)} FIP · {stat(selectedPitcher.whip, 2)} WHIP · {stat(selectedPitcher.k9, 1)} K/9</span>
+                    <span className="font-mono tabular-nums">2025: {stat(selectedPitcher.era, 2)} ERA · {stat(selectedPitcher.fip, 2)} FIP · {stat(selectedPitcher.whip, 2)} WHIP · {stat(selectedPitcher.k9, 1)} K/9 · {stat(selectedPitcher.bb9, 2)} BB/9 · {stat(selectedPitcher.hr9, 2)} HR/9</span>
                   </div>
                 )}
               </CardContent>
@@ -2211,37 +2243,50 @@ export default function TransferPortal() {
 
             {/* ─── Pitcher Risk Assessment ─── */}
             {pitchingSimulation && !pitchingSimulation.blocked && selectedPitcher && (() => {
+              const isJucoSrc = selectedPitcher.division === "NJCAA_D1";
+
+              if (isJucoSrc) {
+                // JUCO sim — slimmed 5-factor panel (Projection / Skillset /
+                // Data Reliability / Competition with SOURCE HTP / Stuff+).
+                // Trajectory / Sample Size / Workload / Durability dropped.
+                return <JucoPitcherRiskCard input={{
+                  projectedPrvPlus: pitchingSimulation.pRvPlus,
+                  stuffPlus: selectedPitcher.stuffPlus,
+                  missPct: selectedPitcher.missPct,
+                  bbPct: selectedPitcher.bbPct,
+                  chasePct: selectedPitcher.chasePct,
+                  barrelPct: selectedPitcher.barrelPct,
+                  hardHitPct: selectedPitcher.hardHitPct,
+                  groundPct: selectedPitcher.groundPct,
+                  inZoneWhiffPct: selectedPitcher.inZoneWhiffPct,
+                  k9: selectedPitcher.k9,
+                  bb9: selectedPitcher.bb9,
+                  hr9: selectedPitcher.hr9,
+                  trackmanPitches: selectedPitcher.trackmanPitches,
+                  bf: selectedPitcher.bf,
+                  sourceConference: pitchingSimulation.fromConference ?? null,
+                  sourceHitterTalentPlus: pitchingSimulation.fromHitterTalent,
+                }} />;
+              }
+
+              // D1 sim — keep the full assessor.
               const risk = assessPitcherRisk({
                 conference: pitchingSimulation.toConference ?? null,
                 projectedPrvPlus: pitchingSimulation.pRvPlus,
                 confHitterTalentPlus: pitchingSimulation.toHitterTalent,
                 ip: (selectedPitcher as any).ip ?? null,
                 stuffPlus: selectedPitcher.stuffPlus,
+                whiffPct: selectedPitcher.missPct,
+                bbPct: selectedPitcher.bbPct,
+                chase: selectedPitcher.chasePct,
+                barrel: selectedPitcher.barrelPct,
+                hardHit: selectedPitcher.hardHitPct,
+                gb: selectedPitcher.groundPct,
+                izWhiff: selectedPitcher.inZoneWhiffPct,
+                k9: selectedPitcher.k9,
+                bb9: selectedPitcher.bb9,
+                hr9: selectedPitcher.hr9,
               });
-
-              // Stuff+ factor — individual pitcher arsenal quality. The single
-              // most reliable cross-context signal we have for pitchers. Null
-              // Stuff+ means low data confidence overall (no TrackMan capture).
-              const pStuff = selectedPitcher.stuffPlus;
-              if (pStuff != null) {
-                const stuffScore = Math.max(0, Math.min(100, Math.round((110 - pStuff) * 6)));
-                const stuffGrade: "Low" | "Moderate" | "Elevated" | "High" =
-                  pStuff >= 105 ? "Low" : pStuff >= 98 ? "Moderate" : pStuff >= 92 ? "Elevated" : "High";
-                risk.factors.push({
-                  label: "Stuff+",
-                  score: stuffScore,
-                  grade: stuffGrade,
-                  detail: `Individual arsenal quality: Stuff+ ${pStuff.toFixed(1)}`,
-                });
-              } else {
-                risk.factors.push({
-                  label: "Stuff+",
-                  score: 90,
-                  grade: "High",
-                  detail: "No individual Stuff+ data — projection lacks the most reliable cross-context pitcher signal",
-                });
-              }
-
               return <RiskAssessmentCardRSTR risk={risk} />;
             })()}
 

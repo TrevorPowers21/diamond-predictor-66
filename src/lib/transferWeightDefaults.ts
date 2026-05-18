@@ -204,7 +204,13 @@ export const JUCO_PITCHING_TRANSFER_WEIGHTS = {
   transfer_fip_competition_weight: 0.706,
   transfer_whip_competition_weight: 0.706,
   transfer_k9_competition_weight: 0.40,
-  transfer_bb9_competition_weight: 0.706,
+  // BB/9 reduced from 0.706 → 0.45. Walks are primarily a pitcher
+  // command skill; hitter talent influences them modestly (better
+  // hitters work counts, draw more walks) but nowhere near the same
+  // multiplier as contact-quality stats. Sat between K/9 peripheral
+  // (0.40) and the heavy-comp stats. Connor Mitchell (6.31 BB/9
+  // JUCO Midwest → SEC) was projecting +43% at the old 0.706.
+  transfer_bb9_competition_weight: 0.45,
   transfer_hr9_competition_weight: 0.40,
   // Park weights = 0 (JUCO has no park data)
   transfer_era_park_weight: 0,
@@ -238,6 +244,38 @@ export const JUCO_PITCHING_TRANSFER_WEIGHTS = {
  *   NEC=65.9 · SWAC=70.3 · MAAC=85.2 · Horizon=89.8 · MWC=94.0 ·
  *   Big East=96.3 · MAC=99.1 · SBC=103.3 · Big 12=118.6 · SEC=135.8
  */
+/**
+ * Stable Conference Stats UUIDs per JUCO D1 district. Player records store
+ * the conference as "NJCAA D1 <District>" but Conference Stats keys by
+ * "NJCAA D1 <District> District" — direct name lookup misses. The simulator
+ * walks `players → team_id → Teams Table → conference_id`, but JUCO teams
+ * aren't all in Teams Table, so it relies on name fuzzy matching downstream.
+ * For TB target board projections we go straight from player.conference
+ * (district name) to this UUID, then UUID → Conference Stats row.
+ *
+ * Verified against `Conference Stats` 2026-05-18. Updating these rows in DB
+ * shouldn't change the UUIDs.
+ */
+export const JUCO_DISTRICT_CONFERENCE_ID: Record<string, string> = {
+  "Appalachian": "c4e84625-014b-4043-ad18-ef6d633cb7ba",
+  "East": "2981eac4-b979-42a5-abba-9520bd5b34ff",
+  "Mid-South": "9b3228bc-1ebf-4b83-a626-d11b192912b3",
+  "Midwest": "95f8d637-dfc3-4dca-a6c4-dd23ec925fca",
+  "Plains": "53edabac-5a3f-44ef-a877-04d2eb99ef19",
+  "South": "0afebb9f-39a5-48ae-ae04-85a8e5212e7e",
+  "South Atlantic": "0ff9293a-1df2-41b3-ad9c-736b49cdd289",
+  "South Central": "e0e70823-79c5-4362-a33d-a80bfa82b97e",
+  "Southwest": "05f74671-1341-4ec6-aa2a-e7ae0f9c5e3f",
+  "West": "1516195f-ca3d-4e61-af05-354a1fd256a6",
+};
+
+/** Strip "NJCAA D1 " prefix and " District" suffix to get the bare district name. */
+export const jucoDistrictNameFromConference = (conference: string | null | undefined): string | null => {
+  if (!conference) return null;
+  const stripped = conference.replace(/^NJCAA D1 /i, "").replace(/ District$/i, "").trim();
+  return stripped || null;
+};
+
 export const JUCO_DISTRICT_HTP_OVERRIDE: Record<string, number> = {
   "South Atlantic": 94,   // FL — Stuff+ 100.7, ≈ MWC tier
   "Mid-South": 88,        // TN — Stuff+ 97.9, ≈ between Horizon and MWC

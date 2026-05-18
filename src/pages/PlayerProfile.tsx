@@ -32,6 +32,7 @@ import { generateCoachNotesPdf, generateReportPdf } from "@/lib/pdfGenerator";
 import { assessHitterRisk } from "@/lib/playerRisk";
 import { generateHitterReport } from "@/lib/scoutingReportGenerator";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
+import { JucoHitterRiskCard } from "@/components/JucoRiskCards";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { isThinSampleHitter } from "@/lib/combinedStats";
 
@@ -141,7 +142,19 @@ const classTransitionToCurrentYear: Record<string, string> = {
 };
 
 function ScoutGrade({ label, value, fullLabel }: { label: string; value: number | null; fullLabel: string }) {
-  if (value == null) return null;
+  // Treat 0 as missing — percentile scores are 0-100, and a literal 0 is almost
+  // always a missing-data sentinel (e.g., JUCO arms whose pipeline computed
+  // ev_score from an exit_vel that defaulted to 0). Showing "0 / Poor" for
+  // someone we have no data on is more misleading than just rendering N/A.
+  if (value == null || value === 0) {
+    return (
+      <div className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3">
+        <div className="text-xs font-medium text-[#8a94a6]">{fullLabel}</div>
+        <div className="text-2xl font-bold mt-1 text-[#8a94a6]">—</div>
+        <div className="text-xs font-semibold mt-0.5 text-[#5a6478]">N/A</div>
+      </div>
+    );
+  }
   const tier =
     value >= 90 ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]" :
     value >= 75 ? "bg-[hsl(142,71%,45%,0.12)] text-[hsl(142,71%,35%)] border-[hsl(142,71%,45%,0.25)]" :
@@ -266,6 +279,7 @@ export default function PlayerProfile() {
           transfer_portal: false,
           source_player_id: hmRow.source_player_id,
           source_team_id: hmRow.TeamID,
+          division: hmRow.division ?? null,
           age: null, height_inches: null, weight: null, high_school: null, home_state: null,
           headshot_url: null, notes: null, portal_entry_date: null, handedness: null, team_id: hmRow.TeamID,
           created_at: "", updated_at: "",
@@ -1308,7 +1322,9 @@ export default function PlayerProfile() {
                     ["Team", displayTeamCurrent || "—"],
                     ["Conference", resolvedConference || "—"],
                     ["Position", effectivePosition || "—"],
-                    ["Class", player.class_year || "—"],
+                    // Class fallback chain: players.class_year → Hitter Master row's class_year
+                    // (Presto upload writes to master tables; players row may not be synced).
+                    ["Class", player.class_year || (activeSeasonRow as any)?.class_year || "—"],
                     ["Bats", (player as any).bats_hand === "R" ? "Right" : (player as any).bats_hand === "L" ? "Left" : (player as any).bats_hand === "S" ? "Switch" : (player as any).bats_hand || "—"],
                     ["Throws", (player as any).throws_hand === "R" ? "Right" : (player as any).throws_hand === "L" ? "Left" : (player as any).throws_hand || "—"],
                   ].map(([label, val]) => (
@@ -1486,71 +1502,119 @@ export default function PlayerProfile() {
               </div>
             )}
 
-              <Card className="border-[#162241] bg-[#0a1428]">
-                <CardHeader className="pb-2 pt-3 px-4">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2027 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
-                    {editingPrediction && regularPred ? (
-                      <div className="flex items-center gap-1.5">
-                        <Select value={predForm.class_transition || "none"} onValueChange={(v) => setPredForm({ ...predForm, class_transition: v === "none" ? "" : v })}>
-                          <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">—</SelectItem>
-                            <SelectItem value="FS">FS</SelectItem>
-                            <SelectItem value="SJ">SJ</SelectItem>
-                            <SelectItem value="JS">JS</SelectItem>
-                            <SelectItem value="GR">GR</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Select value={predForm.dev_aggressiveness} onValueChange={(v) => setPredForm({ ...predForm, dev_aggressiveness: v })}>
-                          <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="0">0.0</SelectItem>
-                            <SelectItem value="0.5">0.5</SelectItem>
-                            <SelectItem value="1">1.0</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setEditingPrediction(false)}>
-                          <X className="h-3 w-3" />
-                        </Button>
-                        <Button size="sm" className="h-7 text-xs" onClick={savePredEdit} disabled={updatePrediction.isPending}>
-                          <Save className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5">
-                        {regularPred?.class_transition && <span className="text-xs text-[#8a94a6]">{regularPred.class_transition}</span>}
-                        {regularPred?.dev_aggressiveness != null && <span className="text-xs text-[#8a94a6]">· Dev {regularPred.dev_aggressiveness}</span>}
-                        {isReturner && regularPred && (
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={startPredEdit}>
-                            <Pencil className="h-3 w-3" />
-                          </Button>
+              {(() => {
+                const isJucoSrc = (player as any)?.division === "NJCAA_D1";
+                if (isJucoSrc) {
+                  // JUCO hitters: display 2026 actuals only. Returner equation
+                  // assumes D1-average underlying talent for sparse-scouting arms,
+                  // producing inflated projections. Transfer projections live
+                  // in the simulator; team-scoped pre-compute is deferred.
+                  // projectionSourceRow exposes CamelCase (AVG/OBP/SLG) — not
+                  // the lowercase Hitter Master DB names.
+                  const p = projectionSourceRow as any;
+                  const avg = p?.AVG ?? null;
+                  const obp = p?.OBP ?? null;
+                  const slg = p?.SLG ?? null;
+                  const ops = obp != null && slg != null ? obp + slg : null;
+                  const iso = p?.ISO ?? (avg != null && slg != null ? slg - avg : null);
+                  return (
+                    <Card className="border-[#162241] bg-[#0a1428]">
+                      <CardHeader className="pb-2 pt-3 px-4">
+                        <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}>
+                          <TrendingUp className="h-4 w-4" />2026 Season Stats
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4 pb-4">
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            ["AVG", statFormat(avg)],
+                            ["OBP", statFormat(obp)],
+                            ["SLG", statFormat(slg)],
+                            ["OPS", statFormat(ops)],
+                            ["ISO", statFormat(iso)],
+                            ["PA", p?.pa ?? (player as any)?.pa ?? "—"],
+                          ].map(([label, val]) => (
+                            <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3 text-center">
+                              <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
+                              <div className="text-xl font-bold mt-0.5 text-white tabular-nums">{val}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="mt-2 text-[10px] text-[#8a94a6]">2026 actuals. Use the Transfer Portal Simulator for cross-level projections.</p>
+                      </CardContent>
+                    </Card>
+                  );
+                }
+
+                // D1 hitters — keep the existing returner projection card.
+                return (
+                  <Card className="border-[#162241] bg-[#0a1428]">
+                    <CardHeader className="pb-2 pt-3 px-4">
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2027 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
+                        {editingPrediction && regularPred ? (
+                          <div className="flex items-center gap-1.5">
+                            <Select value={predForm.class_transition || "none"} onValueChange={(v) => setPredForm({ ...predForm, class_transition: v === "none" ? "" : v })}>
+                              <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">—</SelectItem>
+                                <SelectItem value="FS">FS</SelectItem>
+                                <SelectItem value="SJ">SJ</SelectItem>
+                                <SelectItem value="JS">JS</SelectItem>
+                                <SelectItem value="GR">GR</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Select value={predForm.dev_aggressiveness} onValueChange={(v) => setPredForm({ ...predForm, dev_aggressiveness: v })}>
+                              <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="0">0.0</SelectItem>
+                                <SelectItem value="0.5">0.5</SelectItem>
+                                <SelectItem value="1">1.0</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setEditingPrediction(false)}>
+                              <X className="h-3 w-3" />
+                            </Button>
+                            <Button size="sm" className="h-7 text-xs" onClick={savePredEdit} disabled={updatePrediction.isPending}>
+                              <Save className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            {regularPred?.class_transition && <span className="text-xs text-[#8a94a6]">{regularPred.class_transition}</span>}
+                            {regularPred?.dev_aggressiveness != null && <span className="text-xs text-[#8a94a6]">· Dev {regularPred.dev_aggressiveness}</span>}
+                            {isReturner && regularPred && (
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={startPredEdit}>
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </div>
                         )}
                       </div>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent className="px-4 pb-4">
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      ["AVG", statFormat(projectedAvg)],
-                      ["OBP", statFormat(projectedObp)],
-                      ["SLG", statFormat(projectedSlg)],
-                      ["OPS", statFormat(projectedDerived.ops)],
-                      ["ISO", statFormat(projectedDerived.iso)],
-                      ["wRC+", pctFormat(projectedWrcPlus)],
-                    ].map(([label, val]) => (
-                      <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3 text-center">
-                        <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
-                        <div className="text-xl font-bold mt-0.5 text-white tabular-nums">{val}</div>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-4">
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          ["AVG", statFormat(projectedAvg)],
+                          ["OBP", statFormat(projectedObp)],
+                          ["SLG", statFormat(projectedSlg)],
+                          ["OPS", statFormat(projectedDerived.ops)],
+                          ["ISO", statFormat(projectedDerived.iso)],
+                          ["wRC+", pctFormat(projectedWrcPlus)],
+                        ].map(([label, val]) => (
+                          <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3 text-center">
+                            <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
+                            <div className="text-xl font-bold mt-0.5 text-white tabular-nums">{val}</div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                  {isThinSample && (
-                    <p className="mt-2 text-[10px] text-[#8a94a6]">*thin sample — fewer than 15 AB with no prior-season data; projection is speculative</p>
-                  )}
-                </CardContent>
-              </Card>
+                      {isThinSample && (
+                        <p className="mt-2 text-[10px] text-[#8a94a6]">*thin sample — fewer than 15 AB with no prior-season data; projection is speculative</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })()}
 
             {/* Scouting Grades */}
             {activeSeasonScoutingGrades && (
@@ -1592,15 +1656,53 @@ export default function PlayerProfile() {
             {(() => {
               const confKey = (resolvedConference || player.conference || "").toLowerCase().trim();
               const confRow = conferenceStatsByKey.get(confKey);
-              // Pull scouting inputs from projectionSourceRow (2025-pinned, blended when
-              // combined_used) so risk anchors on the same sample as projections.
               const p = projectionSourceRow;
+              const pa = p?.pa ?? (player as any).pa ?? seedPowerRow?.pa ?? null;
+              const isJucoSrc = (player as any)?.division === "NJCAA_D1";
+
+              if (isJucoSrc) {
+                // JUCO profile — slimmed 4-factor hitter card (mirrors TP sim).
+                // Trajectory / Sample Size dropped. Skillset uses TrackMan when
+                // available, else falls back to AVG/OBP/SLG peripherals.
+                // projectionSourceRow exposes CamelCase AVG/OBP/SLG/ISO.
+                const avg = (p as any)?.AVG ?? null;
+                const obp = (p as any)?.OBP ?? null;
+                const slg = (p as any)?.SLG ?? null;
+                const iso = (p as any)?.ISO ?? (avg != null && slg != null ? slg - avg : null);
+                return (
+                  <>
+                    <JucoHitterRiskCard input={{
+                      projectedWrcPlus,
+                      chase: p?.chase ?? seedPowerRow?.chase ?? null,
+                      contact: p?.contact ?? seedPowerRow?.contact ?? null,
+                      whiff: seedPowerRow?.whiff ?? null,
+                      barrel: p?.barrel ?? seedPowerRow?.barrel ?? null,
+                      lineDrive: p?.line_drive ?? seedPowerRow?.lineDrive ?? null,
+                      avgEv: p?.avg_exit_velo ?? seedPowerRow?.avgExitVelo ?? null,
+                      ev90: p?.ev90 ?? seedPowerRow?.ev90 ?? null,
+                      pull: p?.pull ?? seedPowerRow?.pull ?? null,
+                      gb: p?.gb ?? seedPowerRow?.gb ?? null,
+                      bb: p?.bb ?? seedPowerRow?.bb ?? null,
+                      avg, obp, iso,
+                      trackmanPitches: (p as any)?.trackman_pitches ?? (player as any)?.trackman_pitches ?? 0,
+                      pa,
+                      sourceConference: resolvedConference || player.conference || null,
+                      sourceConfStuffPlus: confRow?.stuff_plus ?? null,
+                    }} />
+                    {projectionSourceRow?.combined_used && (
+                      <div className="-mt-2 text-[10px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"} sample</div>
+                    )}
+                  </>
+                );
+              }
+
+              // D1 profile — full assessor.
               const risk = assessHitterRisk({
                 conference: resolvedConference || player.conference,
                 projectedWrcPlus: projectedWrcPlus,
                 confStuffPlus: confRow?.stuff_plus,
                 careerSeasons: hitterMasterSeasons as any[],
-                pa: p?.pa ?? (player as any).pa ?? seedPowerRow?.pa ?? null,
+                pa,
                 chase: p?.chase ?? seedPowerRow?.chase,
                 contact: p?.contact ?? seedPowerRow?.contact,
                 whiff: seedPowerRow?.whiff,

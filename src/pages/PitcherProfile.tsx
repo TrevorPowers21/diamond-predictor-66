@@ -27,6 +27,7 @@ import { useCoachNotes } from "@/hooks/useCoachNotes";
 import { generateCoachNotesPdf, generateReportPdf } from "@/lib/pdfGenerator";
 import { assessPitcherRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
+import { JucoPitcherRiskCard } from "@/components/JucoRiskCards";
 import { isThinSamplePitcher } from "@/lib/combinedStats";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { usePitcherRoleOverrides } from "@/hooks/usePitcherRoleOverrides";
@@ -252,7 +253,17 @@ function MetricCard({ title, value, subtitle }: { title: string; value: string; 
 }
 
 function ScoutGrade({ value, fullLabel }: { value: number | null; fullLabel: string }) {
-  if (value == null) return null;
+  // Treat 0 as missing — percentile scores are 0-100 and a literal 0 is almost
+  // always a missing-data sentinel (e.g., JUCO arms with exit_vel = 0).
+  if (value == null || value === 0) {
+    return (
+      <div className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3">
+        <div className="text-xs font-medium text-[#8a94a6]">{fullLabel}</div>
+        <div className="text-2xl font-bold mt-1 text-[#8a94a6]">—</div>
+        <div className="text-xs font-semibold mt-0.5 text-[#5a6478]">N/A</div>
+      </div>
+    );
+  }
   const tier =
     value >= 90 ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]" :
     value >= 75 ? "bg-[hsl(142,71%,45%,0.12)] text-[hsl(142,71%,35%)] border-[hsl(142,71%,45%,0.25)]" :
@@ -676,6 +687,14 @@ export default function PitcherProfile() {
         combined_seasons: fromSeasons.combined_seasons ?? null,
         combined_ip: fromSeasons.combined_ip ?? null,
         stuffPlus: combinedUsed ? (fromSeasons.blended_stuff_plus ?? fromSeasons.stuff_plus ?? null) : (fromSeasons.stuff_plus ?? null),
+        // Division is the key for JUCO-vs-D1 branching downstream (projection
+        // card, risk card). Was missing from the mapping — caused the JUCO
+        // branches to never fire because `masterRow.division` was undefined.
+        division: fromSeasons.division ?? null,
+        trackman_pitches: fromSeasons.trackman_pitches ?? null,
+        bf: fromSeasons.bf ?? null,
+        class_year: fromSeasons.class_year ?? null,
+        dob: fromSeasons.dob ?? null,
       } as any;
     }
     // Fallback: legacy hook lookup (kept so name-only routes still resolve)
@@ -982,6 +1001,11 @@ export default function PitcherProfile() {
   })();
   const displayClass = (() => {
     if (player?.class_year) return player.class_year;
+    // Fall back to Pitching Master row's class_year (Presto upload populates
+    // class_year on the master tables directly; players.class_year may be
+    // empty until a synced backfill writes it).
+    const fromMaster = (masterRow as any)?.class_year ?? null;
+    if (fromMaster) return fromMaster;
     const seasons = (pitcherMasterSeasons as any[]).length;
     if (seasons >= 5) return "Gr";
     if (seasons === 4) return "Sr";
@@ -1843,6 +1867,36 @@ export default function PitcherProfile() {
               </CardContent>
             </Card>
 
+            {(() => {
+              const sp = (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus;
+              const combinedUsedForOverview = !!(masterRow as any)?.combined_used;
+              const wp = combinedUsedForOverview
+                ? (pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null)
+                : ((masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct);
+              const hasArsenal = pitchArsenal.rows.length > 0;
+              const hasAnySignal = sp != null || wp != null || hasArsenal;
+              if (!hasAnySignal) {
+                // No TrackMan capture at all — render a single full-width N/A
+                // card instead of hiding the section entirely. Common for the
+                // ~79% of JUCO arms without per-pitch data.
+                return (
+                  <Card className="border-[#162241] bg-[#0a1428]">
+                    <CardHeader className="pb-1 pt-3 px-4">
+                      <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Stuff+ Overview</CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-4">
+                      <div className="rounded-lg border border-[#162241] bg-[#0d1a30] p-4 text-center">
+                        <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Stuff+</div>
+                        <div className="text-3xl font-bold tracking-tight mt-1 text-[#8a94a6]">N/A</div>
+                        <div className="text-[10px] text-[#5a6478] mt-1">No TrackMan capture for this pitcher</div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              }
+              return null;
+            })()}
+
             {pitchArsenal.rows.length > 0 && (
               <Card className="border-[#162241] bg-[#0a1428]">
                 <CardHeader className="pb-1 pt-3 px-4">
@@ -1860,7 +1914,7 @@ export default function PitcherProfile() {
                       return (
                         <div className="rounded-lg border p-4 text-center" style={{ borderColor: tierStyle.border, backgroundColor: tierStyle.bg }}>
                           <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Stuff+</div>
-                          <div className="text-3xl font-bold tracking-tight mt-1" style={{ color: tierStyle.text }}>{fmtWhole(sp)}</div>
+                          <div className="text-3xl font-bold tracking-tight mt-1" style={{ color: tierStyle.text }}>{sp == null ? "N/A" : Math.round(sp).toString()}</div>
                           <div className="text-[10px] text-[#5a6478] mt-1">Avg: 100</div>
                         </div>
                       );
@@ -2026,60 +2080,104 @@ export default function PitcherProfile() {
               </div>
             </div>
 
-            <Card className="border-[#162241] bg-[#0a1428]">
-              <CardHeader className="pb-2 pt-3 px-4">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2027 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
-                  <div className="flex items-center gap-1.5">
-                    <Select value={projectedRole} onValueChange={(v) => updateProjectedInputs({ pitcher_role: v as "SP" | "RP" | "SM" })}>
-                      <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="SP">SP</SelectItem>
-                        <SelectItem value="RP">RP</SelectItem>
-                        <SelectItem value="SM">SM</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={projectedClassTransition} onValueChange={(v) => updateProjectedInputs({ class_transition: v as "FS" | "SJ" | "JS" | "GR" })}>
-                      <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="FS">FS</SelectItem>
-                        <SelectItem value="SJ">SJ</SelectItem>
-                        <SelectItem value="JS">JS</SelectItem>
-                        <SelectItem value="GR">GR</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={String(projectedDevAggressiveness)} onValueChange={(v) => updateProjectedInputs({ dev_aggressiveness: Number(v) })}>
-                      <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="0">0.0</SelectItem>
-                        <SelectItem value="0.5">0.5</SelectItem>
-                        <SelectItem value="1">1.0</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="px-4 pb-4">
-                <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                  {[
-                    ["ERA", fmt(projectedPitching.pEra, 2)],
-                    ["FIP", fmt(projectedPitching.pFip, 2)],
-                    ["WHIP", fmt(projectedPitching.pWhip, 2)],
-                    ["K/9", fmt(projectedPitching.pK9, 2)],
-                    ["BB/9", fmt(projectedPitching.pBb9, 2)],
-                    ["HR/9", fmt(projectedPitching.pHr9, 2)],
-                  ].map(([label, val]) => (
-                    <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3 text-center">
-                      <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
-                      <div className="text-xl font-bold mt-0.5 text-white tabular-nums">{val}</div>
+            {(() => {
+              const isJucoSrc = (masterRow as any)?.division === "NJCAA_D1";
+              if (isJucoSrc) {
+                // JUCO arms: display 2026 actuals only — no projection equation.
+                // The returner equation regresses missing-scouting arms toward
+                // a default 100 PR+ prior, which produces D1-flavored numbers
+                // that don't reflect the JUCO→D1 jump. Transfer projection
+                // is handled in the simulator (where a destination is picked);
+                // future customer-team users will see team-scoped projections
+                // via eager pre-compute (deferred).
+                const m = masterRow as any;
+                return (
+                  <Card className="border-[#162241] bg-[#0a1428]">
+                    <CardHeader className="pb-2 pt-3 px-4">
+                      <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}>
+                        <TrendingUp className="h-4 w-4" />2026 Season Stats
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-4">
+                      <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                        {[
+                          ["ERA", fmt(m?.era ?? m?.ERA, 2)],
+                          ["FIP", fmt(m?.fip ?? m?.FIP, 2)],
+                          ["WHIP", fmt(m?.whip ?? m?.WHIP, 2)],
+                          ["K/9", fmt(m?.k9 ?? m?.K9, 2)],
+                          ["BB/9", fmt(m?.bb9 ?? m?.BB9, 2)],
+                          ["HR/9", fmt(m?.hr9 ?? m?.HR9, 2)],
+                        ].map(([label, val]) => (
+                          <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3 text-center">
+                            <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
+                            <div className="text-xl font-bold mt-0.5 text-white tabular-nums">{val}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[10px] text-[#8a94a6]">2026 actuals. Use the Transfer Portal Simulator for cross-level projections.</p>
+                    </CardContent>
+                  </Card>
+                );
+              }
+
+              // D1 arms — keep the existing returner projection card.
+              return (
+                <Card className="border-[#162241] bg-[#0a1428]">
+                  <CardHeader className="pb-2 pt-3 px-4">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2027 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
+                      <div className="flex items-center gap-1.5">
+                        <Select value={projectedRole} onValueChange={(v) => updateProjectedInputs({ pitcher_role: v as "SP" | "RP" | "SM" })}>
+                          <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="SP">SP</SelectItem>
+                            <SelectItem value="RP">RP</SelectItem>
+                            <SelectItem value="SM">SM</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select value={projectedClassTransition} onValueChange={(v) => updateProjectedInputs({ class_transition: v as "FS" | "SJ" | "JS" | "GR" })}>
+                          <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="FS">FS</SelectItem>
+                            <SelectItem value="SJ">SJ</SelectItem>
+                            <SelectItem value="JS">JS</SelectItem>
+                            <SelectItem value="GR">GR</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select value={String(projectedDevAggressiveness)} onValueChange={(v) => updateProjectedInputs({ dev_aggressiveness: Number(v) })}>
+                          <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="0">0.0</SelectItem>
+                            <SelectItem value="0.5">0.5</SelectItem>
+                            <SelectItem value="1">1.0</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
-                  ))}
-                </div>
-                {isThinSample && (
-                  <p className="mt-2 text-[10px] text-[#8a94a6]">*thin sample — fewer than 5 IP with no prior-season data; projection is speculative</p>
-                )}
-              </CardContent>
-            </Card>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                      {[
+                        ["ERA", fmt(projectedPitching.pEra, 2)],
+                        ["FIP", fmt(projectedPitching.pFip, 2)],
+                        ["WHIP", fmt(projectedPitching.pWhip, 2)],
+                        ["K/9", fmt(projectedPitching.pK9, 2)],
+                        ["BB/9", fmt(projectedPitching.pBb9, 2)],
+                        ["HR/9", fmt(projectedPitching.pHr9, 2)],
+                      ].map(([label, val]) => (
+                        <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3 text-center">
+                          <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
+                          <div className="text-xl font-bold mt-0.5 text-white tabular-nums">{val}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {isThinSample && (
+                      <p className="mt-2 text-[10px] text-[#8a94a6]">*thin sample — fewer than 5 IP with no prior-season data; projection is speculative</p>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })()}
 
             <Card className="border-[#162241] bg-[#0a1428]">
               <CardHeader className="pb-2 pt-3 px-4">
@@ -2144,7 +2242,7 @@ export default function PitcherProfile() {
                             <td className="py-2 pr-3 font-semibold text-slate-100">{PITCH_TYPE_LABELS[row.pitchType] || row.pitchType}</td>
                             <td className="py-2 px-2 text-right tabular-nums text-[#8a94a6]">{row.usagePct == null ? "—" : `${row.usagePct.toFixed(1)}%`}</td>
                             <td className={`py-2 px-2 text-right tabular-nums font-bold ${whiffColor}`}>{wp == null ? "—" : `${wp.toFixed(1)}%`}</td>
-                            <td className={`py-2 pl-2 text-right tabular-nums font-bold ${stuffColor}`}>{fmtWhole(sp)}</td>
+                            <td className={`py-2 pl-2 text-right tabular-nums font-bold ${stuffColor}`}>{sp == null ? "N/A" : Math.round(sp).toString()}</td>
                           </tr>
                         );
                       })}
@@ -2164,12 +2262,39 @@ export default function PitcherProfile() {
                 (historicalRow as any)?.bb9_pr_plus ?? null,
                 (historicalRow as any)?.hr9_pr_plus ?? null,
               );
+              const confHTP = confStatsRow?.overall_power_rating != null && confStatsRow?.stuff_plus != null && confStatsRow?.wrc_plus != null
+                ? confStatsRow.overall_power_rating + (1.25 * (confStatsRow.stuff_plus - 100)) + (0.75 * (100 - confStatsRow.wrc_plus))
+                : null;
+              const isJucoSrc = (masterRow as any)?.division === "NJCAA_D1";
+
+              if (isJucoSrc) {
+                // JUCO profile — slimmed 5-factor JUCO risk card (same as TP sim).
+                // Trajectory / Sample Size / Workload / Durability dropped; Stuff+
+                // shows arsenal-quality tier (N/A if no TrackMan).
+                return <JucoPitcherRiskCard input={{
+                  projectedPrvPlus: prvForRisk,
+                  stuffPlus: (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
+                  missPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                  bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb ?? null,
+                  chasePct: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase ?? null,
+                  barrelPct: (projectionSourceRow as any)?.barrel_pct ?? internalPowerRatings?.metrics?.barrel ?? null,
+                  hardHitPct: (projectionSourceRow as any)?.hard_hit_pct ?? internalPowerRatings?.metrics?.hh ?? null,
+                  groundPct: (projectionSourceRow as any)?.ground_pct ?? internalPowerRatings?.metrics?.gb ?? null,
+                  inZoneWhiffPct: (projectionSourceRow as any)?.in_zone_whiff_pct ?? internalPowerRatings?.metrics?.izWhiff ?? null,
+                  k9: (masterRow as any)?.k9 ?? (masterRow as any)?.K9 ?? null,
+                  bb9: (masterRow as any)?.bb9 ?? (masterRow as any)?.BB9 ?? null,
+                  hr9: (masterRow as any)?.hr9 ?? (masterRow as any)?.HR9 ?? null,
+                  trackmanPitches: (masterRow as any)?.trackman_pitches ?? 0,
+                  bf: (masterRow as any)?.bf ?? null,
+                  sourceConference: displayConference !== "—" ? displayConference : null,
+                  sourceHitterTalentPlus: confHTP,
+                }} />;
+              }
+
               const risk = assessPitcherRisk({
                 conference: displayConference !== "—" ? displayConference : undefined,
                 projectedPrvPlus: prvForRisk,
-                confHitterTalentPlus: confStatsRow?.overall_power_rating != null && confStatsRow?.stuff_plus != null && confStatsRow?.wrc_plus != null
-                      ? confStatsRow.overall_power_rating + (1.25 * (confStatsRow.stuff_plus - 100)) + (0.75 * (100 - confStatsRow.wrc_plus))
-                      : null,
+                confHitterTalentPlus: confHTP,
                 careerSeasons: pitcherMasterSeasons as any[],
                 ip: (masterRow as any)?.combined_ip ?? (masterRow as any)?.ip ?? (masterRow as any)?.IP ?? null, classYear: displayClass || undefined,
                 stuffPlus: (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
