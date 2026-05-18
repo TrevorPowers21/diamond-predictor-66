@@ -91,3 +91,84 @@ export const JUCO_TRANSFER_WEIGHTS = {
 export function transferWeightsForSource(division: string | null | undefined) {
   return division === "NJCAA_D1" ? JUCO_TRANSFER_WEIGHTS : TRANSFER_WEIGHT_DEFAULTS;
 }
+
+/**
+ * JUCO-specific pitcher transfer overrides.
+ *
+ * Methodology mirrors the hitter approach (2026 stats verbatim, no PR blend,
+ * no park, env-only translation) but the WEIGHTS differ because pitcher math
+ * has a different shape:
+ *
+ *   - Pitcher's own Stuff+ is the dominant cross-context signal (when present).
+ *     For the 38% of JUCO pitchers with individual Stuff+, use heavier
+ *     Stuff+ delta weights. For the 62% without, skip Stuff+ entirely in the
+ *     callsite (set delta to 0) — Data Reliability surfaces this.
+ *   - The conference "hitter_talent_plus" input gets a per-district override:
+ *     raw JUCO Conference Stats BA+ are inflated 107-123 because JUCO hitters
+ *     mash each other in soft environments. For the pitcher math we want
+ *     "what was the REAL quality of hitters faced" — locked at SWAC/NEC/
+ *     Horizon equivalents per district (72-95). See JUCO_DISTRICT_HTP_OVERRIDE.
+ *   - Park weights zeroed (no JUCO park data).
+ */
+export const JUCO_PITCHING_TRANSFER_WEIGHTS = {
+  // Conference (hitter_talent_plus) weights — moderate. Stuff+ is the heavier
+  // signal for pitchers because it scales cleanly across talent levels.
+  t_era_conference_weight: 0.40,
+  t_fip_conference_weight: 0.40,
+  t_whip_conference_weight: 0.40,
+  t_k9_conference_weight: 0.30,
+  t_bb9_conference_weight: 0.30,
+  t_hr9_conference_weight: 0.35,
+
+  // Stuff+ delta weights — heavier than D1 to reward arms whose individual
+  // Stuff+ travels. Callsite zeroes these for pitchers without individual
+  // Stuff+ data (no district-average fallback per user direction).
+  t_era_stuff_weight: 1.30,
+  t_fip_stuff_weight: 1.40,
+  t_whip_stuff_weight: 1.10,
+  t_k9_stuff_weight: 1.20,
+  t_bb9_stuff_weight: 0.80,
+  t_hr9_stuff_weight: 1.10,
+
+  // Park weights = 0 (JUCO has no park data)
+  t_era_park_weight: 0,
+  t_whip_park_weight: 0,
+  t_hr9_park_weight: 0,
+
+  // Power weights = 0 (use raw 2026 rates verbatim, same as hitter approach)
+  t_era_power_weight: 0,
+  t_fip_power_weight: 0,
+  t_whip_power_weight: 0,
+  t_k9_power_weight: 0,
+  t_bb9_power_weight: 0,
+  t_hr9_power_weight: 0,
+} as const;
+
+/**
+ * Per-district JUCO hitter_talent_plus override.
+ *
+ * Replaces the inflated Conference Stats BA+ values (107-123) with values
+ * reflecting the TRUE talent of hitters a JUCO pitcher faced — anchored at
+ * NEC/Horizon/SWAC tier per user framework (2026-05-17). Keyed by the
+ * district name as it appears on Teams Table / wired conference_id.
+ *
+ * Calibration: South Atlantic (FL) at ~95 (ASUN/Big East tier) — Florida
+ * is the JUCO outlier with 49 draftees 2021-2025. East district at 72
+ * (below NEC) — weakest, mostly NY/NJ programs. Everything between scales
+ * by district Stuff+ baseline + 5-yr poll strength.
+ *
+ * NOT calibrated against actual draft per-region data (not in DB).
+ * Recalibrate as we see real projections vs gut.
+ */
+export const JUCO_DISTRICT_HTP_OVERRIDE: Record<string, number> = {
+  "South Atlantic": 95,   // FL — Stuff+ 100.7, mid-major D1 tier
+  "Mid-South": 92,        // TN — Stuff+ 97.9, Big West/CAA tier
+  "Southwest": 88,        // TX/NM — Stuff+ 98.1, Patriot/MAAC tier
+  "Plains": 85,           // KS/NE — Stuff+ 96.8, MAAC tier
+  "Appalachian": 82,      // TN mtns / GA / SC — Stuff+ 95.9, below MAAC
+  "Midwest": 80,          // MI/WI/IL — Stuff+ 95.3, NEC/SWAC range
+  "South": 80,            // LA / AL / MS — Stuff+ 94.8, NEC/SWAC
+  "West": 78,             // AZ / UT / Pacific NW — Stuff+ 94.7, NEC tier
+  "South Central": 75,    // OK / MO / AR — Stuff+ 93.8, below NEC
+  "East": 72,             // NY / NJ / MD — Stuff+ 92.0, weakest (below SWAC)
+};
