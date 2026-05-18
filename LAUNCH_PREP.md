@@ -10,22 +10,30 @@ PR: https://github.com/TrevorPowers21/diamond-predictor-66/pull/14
 
 Both DBs have the same 36 tables. **Prod needs the following schema changes before the new code is deployed**, because the code references column names and tables that only exist on staging.
 
-### 1a. Column RENAMES (prod still uses old names)
+### 1a. Column RENAMES — revised after code-grep verification
 
-| Table             | Old name (prod)          | New name (staging, used by code) |
-|-------------------|--------------------------|----------------------------------|
-| Conference Stats  | `ba_plus`                | `ba_power_rating`                |
-| Conference Stats  | `obp_plus`               | `obp_power_rating`               |
-| Conference Stats  | `iso_plus`               | `iso_power_rating`               |
-| ncaa_averages     | `ba_plus`                | `ba_power_rating`                |
-| ncaa_averages     | `obp_plus`               | `obp_power_rating`               |
-| ncaa_averages     | `iso_plus`               | `iso_power_rating`               |
-| ncaa_averages     | `overall_plus`           | `overall_power_rating`           |
+| Table             | Old (prod)         | New (staging)         | Code reads it? | Required for launch? |
+|-------------------|--------------------|------------------------|----------------|-----------------------|
+| Hitter Master     | `ba_plus`          | `ba_power_rating`     | ✓ yes          | **YES — must rename**  |
+| Hitter Master     | `obp_plus`         | `obp_power_rating`    | ✓ yes          | **YES — must rename**  |
+| Hitter Master     | `iso_plus`         | `iso_power_rating`    | ✓ yes          | **YES — must rename**  |
+| Hitter Master     | `overall_plus`     | `overall_power_rating`| ✓ yes          | **YES — must rename**  |
+| Conference Stats  | `ba_plus`          | `ba_power_rating`     | ✗ no (uses `select *`) | optional — no code break either way |
+| Conference Stats  | `obp_plus`         | `obp_power_rating`    | ✗ no           | optional |
+| Conference Stats  | `iso_plus`         | `iso_power_rating`    | ✗ no           | optional |
+| ncaa_averages     | `ba_plus`          | `ba_power_rating`     | ✓ yes — `select *` + downstream `row.ba_power_rating` access in PlayerProfile, Savant, conferenceScoutingAverages | **YES — must rename** |
+| ncaa_averages     | `obp_plus`         | `obp_power_rating`    | ✓ yes | **YES — must rename** |
+| ncaa_averages     | `iso_plus`         | `iso_power_rating`    | ✓ yes | **YES — must rename** |
+| ncaa_averages     | `overall_plus`     | `overall_power_rating`| ✓ yes | **YES — must rename** |
 
-**Code that breaks on prod without these renames:**
-- `src/savant/components/{PowerRatingsCard,ConferenceScoutingRunner,CareerPowerRatingsTable}.tsx`
-- `src/savant/hooks/useSavantHitters.ts`
-- `src/hooks/useConferenceStats.ts:42` (`row.Overall_Power_Rating` actually reads the DB column with that exact PascalCase — so that's a different field, but still needs to match)
+**User mental model confirmation:** Conference Stats *should* have `ba_power_rating` (used to compute `hitter_talent_plus`). Even though no code references it by name today, renaming on prod is cleaner / future-proof. Staging also has a redundant `ba_plus`/`obp_plus`/`slg_plus`/`iso_plus` set at the END of Conference Stats — separate from the rename. We will NOT propagate those extra columns to prod (likely accidental).
+
+**Code that DOES break on prod without the Hitter Master rename:**
+- `src/lib/createPredictionsFromMaster.ts:71` — selects `ba_power_rating, obp_power_rating, iso_power_rating, overall_power_rating` from Hitter Master
+- `src/lib/createPredictionsFromMaster.ts:127` — reads `(hitter as any).ba_power_rating`
+- `src/lib/createPredictionsFromMaster.ts:317` — same
+- `src/lib/computeAndStoreScores.ts:335,549` — writes/filters on `ba_power_rating`
+- Savant Power Ratings card / Conference Scouting Runner / Career table all read `*.ba_power_rating` etc.
 
 ### 1b. New columns on staging (need to be added to prod)
 
