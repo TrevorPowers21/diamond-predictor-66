@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Sparkles } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
@@ -78,27 +79,50 @@ export function WhatsNewModal() {
     setOpen(false);
   };
 
+  // Format: "MAY 18, 2026" — matches the Stitch design's display formatting
+  // (Oswald uppercase tracked headline). Pulled from CURRENT_RELEASE so the
+  // version bump stays in one place.
+  const displayDate = (() => {
+    const [y, m, d] = CURRENT_RELEASE.split("-");
+    const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+    return `${months[Number(m) - 1]} ${Number(d)}, ${y}`;
+  })();
+
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) dismiss(); }}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-[#D4AF37] text-xl" style={{ fontFamily: "'Oswald', sans-serif" }}>
-            What&apos;s New — {CURRENT_RELEASE}
-          </DialogTitle>
-          <p className="text-sm text-muted-foreground mt-1">
+      <DialogContent
+        className="max-w-[640px] max-h-[80vh] overflow-y-auto p-0 border-l-[3px] border-l-[#D4AF37] bg-[#070e1f] text-slate-100"
+      >
+        <DialogHeader className="px-6 pt-6 pb-4 border-b border-white/10">
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-center w-8 h-8 rounded-md bg-[#D4AF37]/10 border border-[#D4AF37]/30">
+              <Sparkles className="w-4 h-4 text-[#D4AF37]" />
+            </div>
+            <DialogTitle
+              className="text-[#D4AF37] text-[18px] font-semibold uppercase tracking-[0.08em] leading-6"
+              style={{ fontFamily: "'Oswald', sans-serif" }}
+            >
+              What&apos;s New — {displayDate}
+            </DialogTitle>
+          </div>
+          <p className="text-[13px] text-slate-400 mt-2 ml-[42px]">
             Changes since the last beta release.
           </p>
         </DialogHeader>
-        <div className="space-y-5 mt-2">
+
+        <div className="px-6 py-5 space-y-6">
           {SECTIONS.map((section) => (
             <div key={section.title}>
-              <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#D4AF37] mb-2">
+              <h3
+                className="text-[12px] font-medium uppercase tracking-[0.08em] text-[#D4AF37] mb-2.5"
+                style={{ fontFamily: "'Oswald', sans-serif" }}
+              >
                 {section.title}
               </h3>
-              <ul className="space-y-1.5 text-sm">
+              <ul className="space-y-2 text-[14px] leading-[1.55] text-slate-200">
                 {section.items.map((item, i) => (
-                  <li key={i} className="flex gap-2">
-                    <span className="text-[#D4AF37] mt-1.5 shrink-0">·</span>
+                  <li key={i} className="flex gap-2.5">
+                    <span className="text-[#D4AF37] mt-[7px] shrink-0 inline-block w-1 h-1 rounded-full bg-[#D4AF37]" />
                     <span>{item}</span>
                   </li>
                 ))}
@@ -106,8 +130,12 @@ export function WhatsNewModal() {
             </div>
           ))}
         </div>
-        <DialogFooter className="mt-4">
-          <Button onClick={dismiss} className="bg-[#D4AF37] text-black hover:bg-[#A08820]">
+
+        <DialogFooter className="px-6 pb-5 pt-2 border-t border-white/10">
+          <Button
+            onClick={dismiss}
+            className="w-[120px] bg-[#D4AF37] text-black hover:bg-[#A08820] font-medium"
+          >
             Got it
           </Button>
         </DialogFooter>
