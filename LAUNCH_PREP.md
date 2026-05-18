@@ -38,8 +38,7 @@ These renames correct a misnomer: prod's `ba_plus` columns actually hold a deriv
 | Table | Column | Type / default | Notes |
 |---|---|---|---|
 | Hitter Master | `division` | `text NOT NULL DEFAULT 'D1'` | Required for D1/JUCO split everywhere |
-| Conference Stats | `ba_plus`, `obp_plus`, `slg_plus`, `iso_plus` | `numeric` (nullable) | **Environmental rates** — `(conf_rate / ncaa_avg) × 100`. Different concept from `ba_power_rating` (derived talent score used in `hitter_talent_plus`). Both columns are intentional. |
-| Hitter Master | `ba_plus`, `obp_plus`, `slg_plus`, `iso_plus` | `numeric` (nullable) | Mirror of the Conference Stats env-rate concept at player level. Not currently referenced by code; added for future use. |
+| Conference Stats | `ba_plus`, `obp_plus`, `slg_plus`, `iso_plus` | `numeric` (nullable) | **Environmental rates** — `(conf_rate / ncaa_avg) × 100`. Different concept from `ba_power_rating` (derived talent score used in `hitter_talent_plus`). Both columns are intentional. **Must run AFTER the rename above (renames free up the `ba_plus`/etc. names; then these ADDs reuse them for the env-rate concept).** Audit confirmed: staging Hitter Master does NOT have an env-rate column set — only Conference Stats does. |
 | Hitter Master | `dob`, `class_year` | `date`, `text` | **ALREADY MIGRATED on prod tonight** ✓ |
 | Pitching Master | `division` | `text NOT NULL DEFAULT 'D1'` | Required |
 | Pitching Master | `trackman_pitches`, `k_pct`, `bf` | `integer`/`numeric`/`integer` | JUCO data-reliability inputs; code reads via `usePitchingSeedData.ts` |
