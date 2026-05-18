@@ -1,175 +1,172 @@
-# Launch Prep — feature/juco-exploration → main
+# Launch Prep — feature/juco-exploration → main → PROD
 
-Captured 2026-05-18. Source of truth for the coordinated PROD launch.
+**Captured 2026-05-18. Source of truth for the coordinated PROD launch.**
 
 PR: https://github.com/TrevorPowers21/diamond-predictor-66/pull/14
 
----
-
-## 1. Schema delta (STAGING → PROD)
-
-Both DBs have the same 36 tables. **Prod needs the following schema changes before the new code is deployed**, because the code references column names and tables that only exist on staging.
-
-### 1a. Column RENAMES — revised after code-grep verification
-
-| Table             | Old (prod)         | New (staging)         | Code reads it? | Required for launch? |
-|-------------------|--------------------|------------------------|----------------|-----------------------|
-| Hitter Master     | `ba_plus`          | `ba_power_rating`     | ✓ yes          | **YES — must rename**  |
-| Hitter Master     | `obp_plus`         | `obp_power_rating`    | ✓ yes          | **YES — must rename**  |
-| Hitter Master     | `iso_plus`         | `iso_power_rating`    | ✓ yes          | **YES — must rename**  |
-| Hitter Master     | `overall_plus`     | `overall_power_rating`| ✓ yes          | **YES — must rename**  |
-| Conference Stats  | `ba_plus`          | `ba_power_rating`     | ✗ no (uses `select *`) | optional — no code break either way |
-| Conference Stats  | `obp_plus`         | `obp_power_rating`    | ✗ no           | optional |
-| Conference Stats  | `iso_plus`         | `iso_power_rating`    | ✗ no           | optional |
-| ncaa_averages     | `ba_plus`          | `ba_power_rating`     | ✓ yes — `select *` + downstream `row.ba_power_rating` access in PlayerProfile, Savant, conferenceScoutingAverages | **YES — must rename** |
-| ncaa_averages     | `obp_plus`         | `obp_power_rating`    | ✓ yes | **YES — must rename** |
-| ncaa_averages     | `iso_plus`         | `iso_power_rating`    | ✓ yes | **YES — must rename** |
-| ncaa_averages     | `overall_plus`     | `overall_power_rating`| ✓ yes | **YES — must rename** |
-
-**User mental model confirmation:** Conference Stats *should* have `ba_power_rating` (used to compute `hitter_talent_plus`). Even though no code references it by name today, renaming on prod is cleaner / future-proof. Staging also has a redundant `ba_plus`/`obp_plus`/`slg_plus`/`iso_plus` set at the END of Conference Stats — separate from the rename. We will NOT propagate those extra columns to prod (likely accidental).
-
-**Code that DOES break on prod without the Hitter Master rename:**
-- `src/lib/createPredictionsFromMaster.ts:71` — selects `ba_power_rating, obp_power_rating, iso_power_rating, overall_power_rating` from Hitter Master
-- `src/lib/createPredictionsFromMaster.ts:127` — reads `(hitter as any).ba_power_rating`
-- `src/lib/createPredictionsFromMaster.ts:317` — same
-- `src/lib/computeAndStoreScores.ts:335,549` — writes/filters on `ba_power_rating`
-- Savant Power Ratings card / Conference Scouting Runner / Career table all read `*.ba_power_rating` etc.
-
-### 1b. New columns on staging (need to be added to prod)
-
-| Table                        | New column         | Type                    | Notes |
-|------------------------------|--------------------|-------------------------|-------|
-| Hitter Master                | `division`         | `text NOT NULL DEFAULT 'D1'` | Required for D1/JUCO split everywhere |
-| Hitter Master                | `ba_plus`          | `numeric`               | Brand new field (NOT a rename) |
-| Hitter Master                | `obp_plus`         | `numeric`               | "" |
-| Hitter Master                | `slg_plus`         | `numeric`               | "" |
-| Hitter Master                | `iso_plus`         | `numeric`               | "" |
-| Hitter Master                | `dob`              | `date`                  | Already migrated tonight ✓ |
-| Hitter Master                | `class_year`       | `text`                  | Already migrated tonight ✓ |
-| Pitching Master              | `division`         | `text NOT NULL DEFAULT 'D1'` | "" |
-| Pitching Master              | `trackman_pitches` | `integer`               | JUCO data-reliability inputs |
-| Pitching Master              | `k_pct`            | `numeric`               | "" |
-| Pitching Master              | `bf`               | `integer`               | "" |
-| Pitching Master              | `dob`              | `date`                  | Already migrated tonight ✓ |
-| Pitching Master              | `class_year`       | `text`                  | Already migrated tonight ✓ |
-| Teams Table                  | `division`         | `text NOT NULL DEFAULT 'D1'` | "" |
-| Teams Table                  | `region`           | `text`                  | "" |
-| Teams Table                  | `district`         | `text`                  | "" |
-| players                      | `division`         | `text NOT NULL DEFAULT 'D1'` | "" |
-| players                      | `data_status`      | `text` + check constraint `('complete','partial','no_data','outlier')` | "" |
-| pitcher_stuff_plus_inputs    | `division`         | `text NOT NULL DEFAULT 'D1'` | "" |
-| pitcher_stuff_plus_ncaa      | `division`         | `text NOT NULL DEFAULT 'D1'` | "" |
-
-### 1c. New indexes on staging (need to be added to prod)
-
-- `hitter_master_src_player_season_uniq` UNIQUE on `("source_player_id", "Season")` — **REQUIRED** for upsert idempotency in the data migration scripts
-- `pitching_master_src_player_season_uniq` UNIQUE on `("source_player_id", "Season")` — **REQUIRED**
-- `players_src_player_uniq` UNIQUE on `("source_player_id")` — **REQUIRED**
-- `teams_table_src_season_uniq` UNIQUE on `("source_id", "Season")` — **REQUIRED**
-- `idx_hitter_master_division` on `(division)`
-- `idx_pitching_master_division` on `(division)`
-- `idx_players_division` on `(division)`
-- `idx_pitcher_stuff_plus_inputs_division` on `(division)`
-- `idx_pitcher_stuff_plus_ncaa_division` on `(division)`
-- `idx_teams_table_district` on `(district)`
-- `idx_teams_table_region` on `(region)`
+This doc replaces all earlier launch notes. Findings here were verified against actual schema dumps (`tmp/audit/schema-staging.sql` / `schema-prod.sql`) and live row-count + collision audits run against both DBs.
 
 ---
 
-## 2. Data delta (STAGING vs PROD)
+## 1. Schema delta
 
-| Table                       | STAGING    | PROD       | Notes |
-|-----------------------------|-----------:|-----------:|-------|
-| Teams Table — total         | 773        | 616        | +157 on staging = JUCO teams |
-| Teams Table — JUCO          | 157        | 0          | Migrate all 157 |
-| Conference Stats — total    | 160        | 150        | +10 on staging = NJCAA D1 districts |
-| Conference Stats — JUCO     | 10         | 0          | **Migrate WITH original UUIDs preserved** — hardcoded in `JUCO_DISTRICT_CONFERENCE_ID` |
-| players — total             | 15,664     | 26,230     | Prod has 10,566 MORE (historical seasons) — DO NOT overwrite |
-| players — JUCO              | 5,265      | 0          | Migrate JUCO subset only |
-| Hitter Master — total       | 8,307      | 27,113     | Prod has multi-season; staging is 2026-only |
-| Hitter Master — JUCO        | 2,975      | 0          | Migrate JUCO subset only |
-| Pitching Master — total     | 8,098      | 26,533     | "" |
-| Pitching Master — JUCO      | 2,732      | 0          | "" |
-| player_predictions — total  | 13,322     | 10,399     | Staging has +2,923; needs investigation (may be JUCO returner snapshots + recent regenerations) |
-| pitcher_stuff_plus_inputs   | 30,442     | 94,247     | Prod has MORE; staging is per-season subset. Don't migrate. |
-| pitcher_stuff_plus_ncaa     | 18         | 71         | Same pattern. Don't migrate. |
+Both DBs have the same 36 tables, identical RLS / triggers / FKs / sequences. The only structural deltas are columns + indexes.
 
-**Critical interpretation:** prod is the canonical multi-season store. Staging has only 2026 data plus the JUCO additions. **The migration is strictly additive for JUCO** — we never write back staging's narrower D1 subset over prod's full D1 history.
+### 1a. Column RENAMES — verified by code grep
+
+| Table | Old (prod) | New (staging) | Code-required? | Reason |
+|---|---|---|---|---|
+| **Hitter Master** | `ba_plus` | `ba_power_rating` | **YES** | `createPredictionsFromMaster.ts:71,127,317` reads; `computeAndStoreScores.ts:335,549` writes/filters; `PlayerProfile.tsx:664-667` reads; Savant components display |
+| **Hitter Master** | `obp_plus` | `obp_power_rating` | YES | same |
+| **Hitter Master** | `iso_plus` | `iso_power_rating` | YES | same |
+| **Hitter Master** | `overall_plus` | `overall_power_rating` | YES | same |
+| **Conference Stats** | `ba_plus` | `ba_power_rating` | **YES** | `conferenceScoutingAverages.ts:471` WRITES to this column when the Admin → Compute Scores flow runs |
+| **Conference Stats** | `obp_plus` | `obp_power_rating` | YES | same |
+| **Conference Stats** | `iso_plus` | `iso_power_rating` | YES | same |
+
+**Not on the rename list (previously suspected):**
+- `ncaa_averages`: confirmed identical on both DBs. Has no `ba_plus` / `ba_power_rating` columns at all. Code that references `row.ba_power_rating` on ncaa-shaped objects is reading from Hitter Master / Conference Stats, not ncaa_averages.
+
+### 1b. New columns on staging — to be ADDED to prod
+
+| Table | Column | Type / default | Notes |
+|---|---|---|---|
+| Hitter Master | `division` | `text NOT NULL DEFAULT 'D1'` | Required for D1/JUCO split everywhere |
+| Hitter Master | `ba_plus`, `obp_plus`, `slg_plus`, `iso_plus` | `numeric` | Brand-new fields (NOT the renamed ones — those become `ba_power_rating` etc.). Recently added on staging. Not currently referenced by code — safe to add as nullable. |
+| Hitter Master | `dob`, `class_year` | `date`, `text` | **ALREADY MIGRATED on prod tonight** ✓ |
+| Pitching Master | `division` | `text NOT NULL DEFAULT 'D1'` | Required |
+| Pitching Master | `trackman_pitches`, `k_pct`, `bf` | `integer`/`numeric`/`integer` | JUCO data-reliability inputs; code reads via `usePitchingSeedData.ts` |
+| Pitching Master | `dob`, `class_year` | `date`, `text` | **ALREADY MIGRATED on prod tonight** ✓ |
+| Teams Table | `division` | `text NOT NULL DEFAULT 'D1'` | Required |
+| Teams Table | `region`, `district` | `text`, `text` | Future taxonomy; not currently in critical-path code |
+| players | `division` | `text NOT NULL DEFAULT 'D1'` | Required |
+| players | `data_status` | `text` + CHECK (`'complete'`,`'partial'`,`'no_data'`,`'outlier'`) | New status field; nullable |
+| pitcher_stuff_plus_inputs | `division` | `text NOT NULL DEFAULT 'D1'` | Required (D1/JUCO Stuff+ split) |
+| pitcher_stuff_plus_ncaa | `division` | `text NOT NULL DEFAULT 'D1'` | Required |
+
+### 1c. New indexes on staging — to be ADDED to prod
+
+**UNIQUE constraints (required for upsert idempotency in the data scripts):**
+- `hitter_master_src_player_season_uniq` UNIQUE on `("source_player_id", "Season")`
+- `pitching_master_src_player_season_uniq` UNIQUE on `("source_player_id", "Season")`
+- `players_src_player_uniq` UNIQUE on `("source_player_id")`
+- `teams_table_src_season_uniq` UNIQUE on `("source_id", "Season")`
+
+**Verified safe to create:** prod has zero duplicate `(source_player_id, Season)` rows on either master table, zero duplicate `source_player_id` on players, zero null `source_player_id`. All four constraints will create cleanly.
+
+**Lookup indexes (optional but match staging exactly):**
+- `idx_hitter_master_division`, `idx_pitching_master_division`, `idx_players_division`
+- `idx_pitcher_stuff_plus_inputs_division`, `idx_pitcher_stuff_plus_ncaa_division`
+- `idx_teams_table_district`, `idx_teams_table_region`
 
 ---
 
-## 3. Migration ordering (single launch session)
+## 2. Data delta — verified
 
-Each step is idempotent. Each script prints a dry-run summary before requiring a typed-phrase confirmation.
+| Table | STAGING | PROD | Notes |
+|---|---:|---:|---|
+| Teams Table — total | 773 | 616 | +157 staging = JUCO teams |
+| Teams Table — JUCO | 157 | 0 | Migrate all 157. Zero source_id collisions on prod. |
+| Conference Stats — total | 160 | 150 | +10 staging = NJCAA D1 districts |
+| Conference Stats — JUCO | 10 | 0 | Migrate all 10. **`conference_id` MUST be preserved** — hardcoded in `JUCO_DISTRICT_CONFERENCE_ID` |
+| players — total | 15,664 | 26,230 | Prod has 10,566 MORE (multi-season history). **Do NOT overwrite D1 history.** |
+| players — JUCO | 5,265 | 0 | But **124 of the 5,265 already exist as STUB rows on prod** (name + source_player_id populated; team/conf null). These get **enriched in-place** by the upsert (prod UUID preserved). Net new = 5,141. |
+| Hitter Master — total | 8,307 | 27,113 | Prod has multi-season; staging is 2026-only. |
+| Hitter Master — JUCO | 2,975 | 0 | Migrate all 2,975. Zero (source_player_id, Season) collisions on prod. |
+| Pitching Master — total | 8,098 | 26,533 | Same multi-season pattern |
+| Pitching Master — JUCO | 2,732 | 0 | Migrate all 2,732. Zero collisions. |
+| player_predictions — total | 13,322 | 10,399 | Staging delta = +2,923. **Verified: all 2,923 are JUCO** (count of predictions for JUCO players on staging = exactly 2,923). Safe to migrate. |
+| pitcher_stuff_plus_inputs | 30,442 | 94,247 | Prod has MORE (historical seasons). **Do NOT touch.** |
+| pitcher_stuff_plus_ncaa | 18 | 71 | Same pattern. **Do NOT touch.** |
 
-### Step 1: Schema migrations on prod
+**The 124 stub-row collisions** (verified by sampling):
+- All 124 match by `source_player_id` AND by name
+- All 124 prod rows have `team = NULL` and `conference = NULL` — they're placeholder entries from upstream ingest
+- All 124 have prod-assigned UUIDs different from staging UUIDs
+- The migration must update them in place using `source_player_id` as the conflict target (NOT `id`), preserving prod UUIDs so any FK references (target_board, etc.) survive
 
-Create one combined SQL file: `supabase/migrations/20260518150000_align_prod_with_staging.sql`. Contents:
+---
 
-- All `ALTER TABLE … ADD COLUMN IF NOT EXISTS …` for the new columns
-- All `ALTER TABLE … RENAME COLUMN …` for the renames (`ba_plus → ba_power_rating` etc.) — gated on `IF EXISTS` checks via `DO $$ … $$;` block
-- All `CREATE UNIQUE INDEX IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`
+## 3. Migration ordering — single launch session
+
+Every step is idempotent.
+
+### Step 1 — Schema migration on PROD
+
+File to create: `supabase/migrations/20260518150000_align_prod_with_staging.sql`. Single SQL file with these sections (in this order):
+
+1. **Renames** in `DO $$ … $$;` blocks gated on `information_schema.columns` lookup so re-running is a no-op:
+   - Hitter Master: `ba_plus → ba_power_rating` (×4 cols)
+   - Conference Stats: `ba_plus → ba_power_rating` (×3 cols)
+2. **`ALTER TABLE … ADD COLUMN IF NOT EXISTS`** for all new columns in §1b (skip `dob`/`class_year` — already migrated tonight)
+3. **CHECK constraint** on `players.data_status` (add separately, guard with `IF NOT EXISTS` via DO block)
+4. **`CREATE UNIQUE INDEX IF NOT EXISTS`** for the four uniques in §1c
+5. **`CREATE INDEX IF NOT EXISTS`** for the seven lookup indexes
 
 Run: `supabase db query --linked --file supabase/migrations/20260518150000_align_prod_with_staging.sql`
 
-### Step 2: JUCO foundation data migration on prod
+Verify post-run: a smoke query for column existence on each affected table.
 
-Run `scripts/migrate-juco-foundation-to-prod.ts --apply`. Script already written; idempotent UPSERTs. Order:
-1. Teams Table (JUCO) — UPSERT on `id`
-2. Conference Stats (NJCAA D1) — UPSERT on `(conference_id, season)` so the 10 hardcoded UUIDs preserve exactly
-3. players (JUCO) — UPSERT on `id`
-4. Hitter Master (JUCO) — UPSERT on `(source_player_id, Season)`
-5. Pitching Master (JUCO) — UPSERT on `(source_player_id, Season)`
-6. player_predictions (JUCO players) — UPSERT on `id`
+### Step 2 — JUCO foundation data migration on PROD
 
-### Step 3: JUCO Presto pitchers (any beyond the 5,265 baseline)
+Update `scripts/migrate-juco-foundation-to-prod.ts` with the refined logic:
 
-Run `scripts/add-presto-missing-pitchers.ts --apply` (URL guard already updated to accept prod). 51 likely added on staging via this same path; expect 0 net new on prod after step 2 if prod is now in sync with staging.
+1. **Teams Table** (157 rows) — UPSERT on `id` (no collisions)
+2. **Conference Stats** (10 rows) — UPSERT on `(conference_id, season)` so UUIDs preserve exactly
+3. **players** (5,265 rows) — UPSERT on **`source_player_id`** (not `id`). For 124 collisions: prod UUID preserved, other fields enriched. For 5,141 new: inserted with staging UUID.
+4. **Build sid→prod_id map** from the post-upsert state of players (fetch all JUCO players from prod after step 3)
+5. **Hitter Master** (2,975 rows) — UPSERT on `(source_player_id, Season)`. No id translation needed (this table doesn't reference player.id).
+6. **Pitching Master** (2,732 rows) — same as HM
+7. **player_predictions** (2,923 rows) — for each staging row:
+   - Look up `source_player_id` of its `player_id` from staging
+   - Translate to prod's `player_id` via the sid→prod_id map
+   - STRIP the staging `id` field (let prod assign via gen_random_uuid default, OR keep staging id for new players)
+   - UPSERT on `(player_id, model_type, variant, season)` — the existing unique constraint
 
-### Step 4: JUCO DOB / class_year (already in HM/PM after step 2)
+Run: `npx tsx scripts/migrate-juco-foundation-to-prod.ts --apply`
 
-DOB + class_year landed via the JUCO HM/PM rows in step 2. If any later CSV updates exist, run `scripts/import-juco-class-dob.ts --apply` (URL guard already updated). Expect 0 net new.
+### Step 3 — JUCO Presto pitchers (any beyond the 5,265 baseline)
 
-### Step 5: Spot-check prod
+After step 2, prod has the same 5,265 JUCO players as staging. If the Presto CSV identified any pitchers not in that 5,265 set, they're inserted by:
+```
+npx tsx scripts/add-presto-missing-pitchers.ts "/Users/danielleogonowski/RSTR IQ Data/juco-exploration/presto-pitcher-none.csv" --apply
+```
+URL guard already accepts prod. Expect ~0 new on prod after step 2 (since staging already includes them).
 
-```bash
-set -a && source .env.production.local && set +a
-npx tsx -e '
-import { createClient } from "@supabase/supabase-js";
-const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-(async () => {
-  // Yearsley should resolve end-to-end
-  const { data: p } = await sb.from("players").select("id, division").eq("source_player_id", "1585883434").single();
-  console.log("Yearsley on prod:", p);
-  const { data: cs } = await (sb as any).from("Conference Stats").select(`"conference abbreviation", conference_id`).eq("conference_id", "95f8d637-dfc3-4dca-a6c4-dd23ec925fca").single();
-  console.log("Midwest district on prod:", cs);
-  // Confirm 2026 D1 PA still loads (the regression we were worried about)
-  const { count } = await (sb as any).from("Hitter Master").select("*", { count: "exact", head: true }).eq("Season", 2026).eq("division", "D1");
-  console.log("PROD 2026 D1 Hitter Master count:", count);
-})();
-'
+### Step 4 — JUCO DOB / class_year (CSV)
+
+DOB + class_year landed on prod in step 2 via the Hitter Master / Pitching Master rows. Re-running the CSV import is idempotent:
+```
+npx tsx scripts/import-juco-class-dob.ts "/Users/danielleogonowski/RSTR IQ Data/juco-exploration/2026 JUCO Class Year:DOB 051826.csv" --apply
 ```
 
-Expected: Yearsley present + JUCO division, Midwest district resolves by exact UUID, prod 2026 D1 HM count unchanged from pre-migration.
+### Step 5 — Spot-check prod (SQL)
 
-### Step 6: Merge PR + verify Vercel deploy
+Run a verification script that asserts:
+- Yearsley resolves on prod with `division='NJCAA_D1'`
+- Conference Stats has all 10 JUCO districts under their staging UUIDs (esp. `95f8d637-…` for Midwest)
+- Prod 2026 D1 Hitter Master count is **unchanged** from pre-migration baseline (no D1 data was touched)
+- 0 dupes still on Hitter Master / Pitching Master / players
+- Yearsley's prediction reads cleanly: `from_avg = 0.464`, `division='NJCAA_D1'` on player
+
+### Step 6 — Merge PR + Vercel deploy
 
 ```bash
 gh pr merge 14 --merge
 ```
+Watch the Vercel dashboard.
 
-Watch Vercel dashboard for green deploy.
+### Step 7 — Smoke test prod via UI
 
-### Step 7: Smoke test prod via UI
+- Transfer Portal simulator: JUCO toggle, Yearsley → Georgia → `.317/.427/.600`
+- Player Dashboard JUCO subtab: leaderboards populate, district filter works
+- TB target board: add a JUCO player from JUCO subtab → projection lands in TB
+- TB depth chart: class colors match legend, NO all-bench default for any team
+- Program Analytics: 1.8 pWAR SP reads "Contributor"
+- WhatsNewModal: fires once, dismisses, doesn't re-fire on refresh
+- Kenny Ishikawa shows on both hitter + pitcher sides (his prod `is_twp=true` is already correct)
 
-- TransferPortal: JUCO toggle, pick Yearsley + Georgia → `.317/.427/.600`
-- JUCO subtab on Player Dashboard: leaderboards populate
-- TB target board: add JUCO player, projection lands
-- TB depth chart: class colors match legend, no all-bench default
-- Program Analytics: tier labels read "Contributor" for ~1.8 pWAR SPs
-- What's New popup fires once + dismisses
-
-### Step 8: Relink Supabase CLI back to staging
+### Step 8 — Relink CLI back to staging
 
 ```bash
 supabase link --project-ref slrxowawbijbjrkozqlj
@@ -179,26 +176,53 @@ supabase link --project-ref slrxowawbijbjrkozqlj
 
 ## 4. Rollback
 
-- **Schema renames**: re-run inverse `ALTER TABLE … RENAME COLUMN` (irreversible without a separate revert script — write one alongside the forward migration).
-- **New columns**: drop columns (harmless), or leave them in place since they're nullable.
-- **Data inserts**: scoped to `division = 'NJCAA_D1'` so `DELETE` filtered by that division reverts cleanly.
-- **Code**: revert the merge commit + redeploy.
+- **Schema renames:** inverse `ALTER TABLE … RENAME COLUMN`. The migration SQL should include an inverse companion script side-by-side for fast rollback.
+- **New columns:** nullable additions; safe to leave in place or `DROP COLUMN`.
+- **JUCO data inserts:** scoped to `division='NJCAA_D1'`. Reversible by `DELETE … WHERE division='NJCAA_D1'` (cascade rules permitting; FK behavior should be checked).
+- **The 124 enriched stub rows:** before the migration, snapshot their current state (e.g., `SELECT * INTO tmp.players_stub_backup FROM players WHERE source_player_id IN (...)`). Rollback restores from snapshot.
+- **Code:** revert merge commit + redeploy.
 
 ---
 
-## 5. Open risks worth re-checking before tonight goes live
+## 5. Resolved open risks
 
-1. **player_predictions delta of +2,923 on staging**: confirm those are JUCO-only returner snapshots. If any D1 prediction rows exist only on staging (e.g., test data, recent re-runs), migrating wholesale risks overwriting prod returner rows the live pipeline already produced.
-2. **`pitcher_stuff_plus_inputs / ncaa`** scope: confirm these are NOT in the JUCO migration path. They have way more rows on prod (historical seasons). Touching them risks data loss.
-3. **Column rename idempotency**: the migration must succeed whether the column has been renamed or not (DO $$ block with `IF EXISTS` lookup against `information_schema.columns`).
-4. **Vercel build cache**: post-merge, the first prod page load may hit a stale build cache. Hard-refresh once before signing off.
+| Risk | Status |
+|---|---|
+| `player_predictions` +2,923 delta might include D1 drift | **Resolved**: exactly equal to JUCO prediction count. Safe to migrate. |
+| `pitcher_stuff_plus_inputs / ncaa` in JUCO path | **Resolved**: NOT in the migration script. Prod has more rows; we don't touch. |
+| Column rename idempotency | Will be handled by `DO $$ IF EXISTS $$` blocks in the SQL |
+| Vercel build cache | Hard-refresh once after deploy |
+| 124 collision JUCO stub rows on prod | **Resolved**: upsert on `source_player_id` enriches them in place, preserves prod UUIDs |
+| Existing prod dupes blocking unique indexes | **Resolved**: zero dupes on HM/PM/players |
+
+## 6. Remaining open risks for Phase 2
+
+1. **player_predictions `id` collision** — staging predictions have UUIDs. If by chance any UUID coincides with an existing prod prediction's UUID (cosmic-ray probability), the insert would conflict on PK. Mitigation: omit `id` field from upsert payload, let prod generate fresh UUIDs. The natural unique constraint `(player_id, model_type, variant, season)` is what guarantees no duplicate semantic rows.
+2. **Vercel env vars** — confirm prod Vercel uses `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` pointing at `trbvxuoliwrfowibatkm`. Check Vercel dashboard before merging.
+3. **Customer team_id references on the 124 stub rows** — if any of the 124 prod stubs are on a customer team's target_board or build, upsert-enriching them is fine (we preserve their id), and the new JUCO division flag adds context without breaking anything. Verify by counting target_board rows referencing those 124 ids before merging.
 
 ---
 
-## 6. What's NOT in this launch
+## 7. NOT in this launch
 
 - 2026 WAR snapshot refresh (waits for season wrap)
 - D1 DOB / class_year backfill (waits for 2026 final stat upload)
 - Risk card density redesign (Stitch options pending pick)
 - Color audit
 - Savant full grade grid expansion
+- `pitcher_stuff_plus_inputs / ncaa` JUCO subset (defer; prod has different season scope)
+
+---
+
+## 8. Files involved
+
+| Asset | Status |
+|---|---|
+| `LAUNCH_PREP.md` | This doc — source of truth |
+| `supabase/migrations/20260518120000_add_dob_class_year.sql` | Shipped to prod ✓ |
+| `supabase/migrations/20260518150000_align_prod_with_staging.sql` | **TO WRITE** (Phase 2 first task) |
+| `scripts/migrate-juco-foundation-to-prod.ts` | Exists; **needs rewrite** for source_player_id upsert + sid→prod_id translation |
+| `scripts/add-presto-missing-pitchers.ts` | URL guard accepts prod ✓ |
+| `scripts/import-juco-class-dob.ts` | URL guard accepts prod ✓ |
+| `tmp/audit/schema-{staging,prod}.sql` | Diff source (gitignored) |
+| `tmp/audit-*.ts` | Audit verification scripts (gitignored) |
