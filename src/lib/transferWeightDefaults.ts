@@ -71,9 +71,14 @@ export const JUCO_TRANSFER_WEIGHTS = {
   t_ba_conference_weight: 0.42,   // +0.12 (half of lost BA park 0.24)
   t_obp_conference_weight: 0.43,  // +0.13 (half of lost OBP park 0.26)
   t_iso_conference_weight: 0.20,  // +0.05 (half of lost ISO park 0.11)
-  t_ba_pitching_weight: 1.12,     // +0.12
-  t_obp_pitching_weight: 0.98,    // +0.13
-  t_iso_pitching_weight: 0.80,    // +0.05
+  // Pitching weights bumped 2026-05-18 (+15% vs prior 1.12/0.98/0.80)
+  // after Pantier-class smoke tests showed projections "feel a little
+  // high" — reflects JUCO→D1 pitching depth gap. JUCO weekends see 1-2
+  // quality arms; D1 sees a full rotation + bullpen turn. Bigger Stuff+
+  // delta pull-down for moves to elite destinations.
+  t_ba_pitching_weight: 1.30,
+  t_obp_pitching_weight: 1.13,
+  t_iso_pitching_weight: 0.92,
   t_ba_park_weight: 0,            // no JUCO park data
   t_obp_park_weight: 0,
   t_iso_park_weight: 0,
@@ -91,6 +96,46 @@ export const JUCO_TRANSFER_WEIGHTS = {
 export function transferWeightsForSource(division: string | null | undefined) {
   return division === "NJCAA_D1" ? JUCO_TRANSFER_WEIGHTS : TRANSFER_WEIGHT_DEFAULTS;
 }
+
+/**
+ * JUCO outlier regression — nonlinear pull toward NCAA mean for raw rate
+ * stats above an "outlier threshold." Mirrors D1's natural regression
+ * through the power-rating blend (which we explicitly disabled for JUCO),
+ * but instead of a scouting-derived anchor, the population mean serves as
+ * the regression target. Only outlier seasons get pulled — average JUCO
+ * regulars (e.g., .300 AVG) regress naturally through the env multiplier.
+ *
+ * Locked 2026-05-18 thresholds:
+ *   AVG: ramps above .350, slope 1.12, max r = 0.15
+ *   OBP: ramps above .450, slope 0.85, max r = 0.15
+ *   ISO: ramps above .280, slope 1.50, max r = 0.20
+ *
+ * Pantier (.484 raw AVG) hits r=0.15, gets pulled to .453 before env.
+ * A .300 JUCO regular passes through unchanged.
+ */
+export function applyJucoOutlierRegression(
+  rawStat: number,
+  ncaaMean: number,
+  threshold: number,
+  slope: number,
+  maxR: number,
+): number {
+  if (!Number.isFinite(rawStat) || rawStat <= threshold) return rawStat;
+  const r = Math.min(maxR, (rawStat - threshold) * slope);
+  return rawStat * (1 - r) + ncaaMean * r;
+}
+
+/**
+ * Caps tightened 2026-05-18: 0.15/0.15/0.20 → 0.10/0.10/0.15 after
+ * smoke test showed first version was pulling outliers down a touch too
+ * hard. Lighter overall touch — extreme outliers still get regressed,
+ * just not as aggressively. Pantier pAVG .328 → .336, pSLG .600 → ~.718.
+ */
+export const JUCO_REGRESSION_CONFIG = {
+  avg: { mean: 0.280, threshold: 0.350, slope: 1.12, maxR: 0.10 },
+  obp: { mean: 0.385, threshold: 0.450, slope: 0.85, maxR: 0.10 },
+  iso: { mean: 0.162, threshold: 0.280, slope: 1.50, maxR: 0.15 },
+} as const;
 
 /**
  * JUCO-specific pitcher transfer overrides.

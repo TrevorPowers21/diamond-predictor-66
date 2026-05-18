@@ -34,7 +34,7 @@ import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { assessHitterRisk } from "@/lib/playerRisk";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
-import { TRANSFER_WEIGHT_DEFAULTS, transferWeightsForSource, JUCO_PITCHING_TRANSFER_WEIGHTS, JUCO_DISTRICT_HTP_OVERRIDE } from "@/lib/transferWeightDefaults";
+import { TRANSFER_WEIGHT_DEFAULTS, transferWeightsForSource, JUCO_PITCHING_TRANSFER_WEIGHTS, JUCO_DISTRICT_HTP_OVERRIDE, applyJucoOutlierRegression, JUCO_REGRESSION_CONFIG } from "@/lib/transferWeightDefaults";
 import { computeDataReliability } from "@/lib/jucoDataReliability";
 
 type SimPlayer = {
@@ -1140,12 +1140,33 @@ export default function TransferPortal() {
     if (!toTeamRow) return null;
 
     const missingInputs: string[] = [];
-    const lastAvg = selectedPlayer.from_avg;
-    const lastObp = selectedPlayer.from_obp;
-    const lastSlg = selectedPlayer.from_slg;
-    if (lastAvg == null) missingInputs.push("Last AVG");
-    if (lastObp == null) missingInputs.push("Last OBP");
-    if (lastSlg == null) missingInputs.push("Last SLG");
+    const rawLastAvg = selectedPlayer.from_avg;
+    const rawLastObp = selectedPlayer.from_obp;
+    const rawLastSlg = selectedPlayer.from_slg;
+    if (rawLastAvg == null) missingInputs.push("Last AVG");
+    if (rawLastObp == null) missingInputs.push("Last OBP");
+    if (rawLastSlg == null) missingInputs.push("Last SLG");
+
+    // JUCO outlier regression — mirrors D1's natural regression through
+    // the power-rating blend (disabled for JUCO). Only pulls down stats
+    // above the outlier threshold; .300 JUCO regulars unaffected. See
+    // JUCO_REGRESSION_CONFIG for thresholds + max-r values.
+    const isJucoSrcEarly = selectedPlayer.division === "NJCAA_D1";
+    const lastAvg = isJucoSrcEarly && rawLastAvg != null
+      ? applyJucoOutlierRegression(rawLastAvg, JUCO_REGRESSION_CONFIG.avg.mean, JUCO_REGRESSION_CONFIG.avg.threshold, JUCO_REGRESSION_CONFIG.avg.slope, JUCO_REGRESSION_CONFIG.avg.maxR)
+      : rawLastAvg;
+    const lastObp = isJucoSrcEarly && rawLastObp != null
+      ? applyJucoOutlierRegression(rawLastObp, JUCO_REGRESSION_CONFIG.obp.mean, JUCO_REGRESSION_CONFIG.obp.threshold, JUCO_REGRESSION_CONFIG.obp.slope, JUCO_REGRESSION_CONFIG.obp.maxR)
+      : rawLastObp;
+    // Regress ISO separately, then reconstruct SLG = AVG + ISO.
+    // (The lib derives lastIso internally as lastSlg - lastAvg; passing
+    // adjusted SLG preserves that calculation against adjusted ISO.)
+    const lastSlg = (() => {
+      if (!isJucoSrcEarly || rawLastAvg == null || rawLastSlg == null) return rawLastSlg;
+      const rawIso = rawLastSlg - rawLastAvg;
+      const adjIso = applyJucoOutlierRegression(rawIso, JUCO_REGRESSION_CONFIG.iso.mean, JUCO_REGRESSION_CONFIG.iso.threshold, JUCO_REGRESSION_CONFIG.iso.slope, JUCO_REGRESSION_CONFIG.iso.maxR);
+      return (lastAvg ?? rawLastAvg) + adjIso;
+    })();
 
     // Use stat-specific power rating+ from internals first, then compute from seed data
     let baPR = internals?.avg_power_rating ?? null;
