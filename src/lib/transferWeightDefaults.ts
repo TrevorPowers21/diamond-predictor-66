@@ -132,9 +132,12 @@ export function applyJucoOutlierRegression(
  * just not as aggressively. Pantier pAVG .328 → .336, pSLG .600 → ~.718.
  */
 export const JUCO_REGRESSION_CONFIG = {
-  avg: { mean: 0.280, threshold: 0.350, slope: 1.12, maxR: 0.10 },
-  obp: { mean: 0.385, threshold: 0.450, slope: 0.85, maxR: 0.10 },
-  iso: { mean: 0.162, threshold: 0.280, slope: 1.50, maxR: 0.15 },
+  // Caps tightened again 2026-05-18 (0.10/0.10/0.15 → 0.13/0.13/0.18) after
+  // user feedback that JUCO hitter stats still project a touch high. Modest
+  // shift, only affects extreme outliers (.450+ AVG, .500+ OBP, .300+ ISO).
+  avg: { mean: 0.280, threshold: 0.350, slope: 1.12, maxR: 0.13 },
+  obp: { mean: 0.385, threshold: 0.450, slope: 0.85, maxR: 0.13 },
+  iso: { mean: 0.162, threshold: 0.280, slope: 1.50, maxR: 0.18 },
 } as const;
 
 /**
@@ -156,11 +159,30 @@ export const JUCO_REGRESSION_CONFIG = {
  *   - Park weights zeroed (no JUCO park data).
  */
 /**
- * Override fields for the pitching equation weights object (the same shape
- * `readPitchingWeights()` returns). Spread into `eq` at TP/TB call sites
- * when source pitcher is JUCO to swap the relevant weights without touching
- * the D1 baseline. Keys MUST match PitchingEquationWeights field names so
- * the spread produces a valid eq.
+ * JUCO pitcher transfer weights — SD-normalized per stat so each env+
+ * delta contributes uniform impact "per standard deviation" rather than
+ * "per raw point." This prevents stats with naturally wide cross-league
+ * spread (FIP, HR/9) from disproportionately dominating the projection.
+ *
+ * Methodology (locked 2026-05-18):
+ *   conference_weight = 0.025 × D1_SD_for_stat   (≈2.5% impact per 1 SD)
+ *   competition_weight = 0.05 × D1_SD_for_HTP    (≈5% per 1 SD = HTP dominant)
+ *
+ * D1 cross-conference SDs measured from staging 2026:
+ *   era+ 9.4 · fip+ 6.2 · whip+ 5.3 · k9+ 7.9 · bb9+ 8.6 · hr9+ 17.3 · HTP 14.1
+ *
+ * EXCEPTION — K/9 and HR/9 use lower competition_weight (0.40) because
+ * they're peripheral stats more driven by pitcher arsenal than hitter
+ * quality. A pitcher's K rate doesn't drop 30% just because hitters got
+ * better; it drops more like 10-15%. Same for HR rate (park/arsenal heavy).
+ *
+ * Result for typical JUCO Appalachian → SEC pitcher:
+ *   FIP env+ contribution: 5.3% (was 13.6% — was the dominant env+ term)
+ *   ERA env+ contribution: 8.5% (was 12.8%)
+ *   K/9 HTP contribution: 23% (was 29% — gentler peripheral)
+ *   HTP impact on non-peripheral stats: 40.6% (truly dominant)
+ *
+ * D1 simulator math untouched.
  */
 export const JUCO_PITCHING_TRANSFER_WEIGHTS = {
   // Power weights = 0 (use raw 2026 rates verbatim — same as hitter approach)
@@ -170,25 +192,23 @@ export const JUCO_PITCHING_TRANSFER_WEIGHTS = {
   transfer_k9_power_weight: 0,
   transfer_bb9_power_weight: 0,
   transfer_hr9_power_weight: 0,
-  // Conference weights — moderate; conference env+ delta still meaningful
-  transfer_era_conference_weight: 0.40,
-  transfer_fip_conference_weight: 0.40,
-  transfer_whip_conference_weight: 0.40,
-  transfer_k9_conference_weight: 0.30,
-  transfer_bb9_conference_weight: 0.30,
-  transfer_hr9_conference_weight: 0.35,
-  // Competition (hitter-talent delta) — match D1 default 0.50. The JUCO
-  // depth gap is ALREADY captured by JUCO_DISTRICT_HTP_OVERRIDE pushing
-  // fromTalent down to 65-94 (vs D1 conferences at 86-136). Stacking a
-  // heavy compWeight on top of that wide gap (initially shipped 1.10-1.40)
-  // crushed projections: K/9 dropped 70%, FIP to impossible 2.1. The
-  // weight should NOT amplify the override; let the gap do the work.
-  transfer_era_competition_weight: 0.50,
-  transfer_fip_competition_weight: 0.50,
-  transfer_whip_competition_weight: 0.50,
-  transfer_k9_competition_weight: 0.50,
-  transfer_bb9_competition_weight: 0.50,
-  transfer_hr9_competition_weight: 0.50,
+  // Conference weights — SD-normalized (0.025 × D1_SD for that stat).
+  // Caps FIP from being the dominant env+ contributor despite huge gap.
+  transfer_era_conference_weight: 0.235,
+  transfer_fip_conference_weight: 0.155,
+  transfer_whip_conference_weight: 0.133,
+  transfer_k9_conference_weight: 0.198,
+  transfer_bb9_conference_weight: 0.215,
+  transfer_hr9_conference_weight: 0.433,
+  // Competition (hitter-talent delta) — HTP is the dominant factor at
+  // ~5% per SD = 40% impact at typical JUCO→SEC gap. K/9 and HR/9
+  // partially shielded (peripheral, less hitter-quality dependent).
+  transfer_era_competition_weight: 0.706,
+  transfer_fip_competition_weight: 0.706,
+  transfer_whip_competition_weight: 0.706,
+  transfer_k9_competition_weight: 0.40,
+  transfer_bb9_competition_weight: 0.706,
+  transfer_hr9_competition_weight: 0.40,
   // Park weights = 0 (JUCO has no park data)
   transfer_era_park_weight: 0,
   transfer_fip_park_weight: 0,
