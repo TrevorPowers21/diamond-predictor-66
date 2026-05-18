@@ -14,15 +14,21 @@ Both DBs have the same 36 tables, identical RLS / triggers / FKs / sequences. Th
 
 ### 1a. Column RENAMES — verified by code grep
 
+These renames correct a misnomer: prod's `ba_plus` columns actually hold a derived **power rating** (scouting-input-blended talent score), not an environmental rate. The rename frees the `*_plus` name for the actual environmental rate columns added in §1b.
+
 | Table | Old (prod) | New (staging) | Code-required? | Reason |
 |---|---|---|---|---|
 | **Hitter Master** | `ba_plus` | `ba_power_rating` | **YES** | `createPredictionsFromMaster.ts:71,127,317` reads; `computeAndStoreScores.ts:335,549` writes/filters; `PlayerProfile.tsx:664-667` reads; Savant components display |
 | **Hitter Master** | `obp_plus` | `obp_power_rating` | YES | same |
 | **Hitter Master** | `iso_plus` | `iso_power_rating` | YES | same |
 | **Hitter Master** | `overall_plus` | `overall_power_rating` | YES | same |
-| **Conference Stats** | `ba_plus` | `ba_power_rating` | **YES** | `conferenceScoutingAverages.ts:471` WRITES to this column when the Admin → Compute Scores flow runs |
+| **Conference Stats** | `ba_plus` | `ba_power_rating` | **YES** | `conferenceScoutingAverages.ts:471` writes this during Admin → Compute Scores. Feeds `hitter_talent_plus` calc. |
 | **Conference Stats** | `obp_plus` | `obp_power_rating` | YES | same |
 | **Conference Stats** | `iso_plus` | `iso_power_rating` | YES | same |
+
+**Two-concept distinction (kept separately on staging, both intentional):**
+- `ba_power_rating` (and obp/iso/overall): derived talent score from blended scouting inputs. Used in `hitter_talent_plus` calc.
+- `ba_plus` (and obp/slg/iso): environmental rate, `(actual_rate / NCAA_avg) × 100`. Added as nullable in §1b. Currently unpopulated; future workstream populates.
 
 **Not on the rename list (previously suspected):**
 - `ncaa_averages`: confirmed identical on both DBs. Has no `ba_plus` / `ba_power_rating` columns at all. Code that references `row.ba_power_rating` on ncaa-shaped objects is reading from Hitter Master / Conference Stats, not ncaa_averages.
@@ -32,7 +38,8 @@ Both DBs have the same 36 tables, identical RLS / triggers / FKs / sequences. Th
 | Table | Column | Type / default | Notes |
 |---|---|---|---|
 | Hitter Master | `division` | `text NOT NULL DEFAULT 'D1'` | Required for D1/JUCO split everywhere |
-| Hitter Master | `ba_plus`, `obp_plus`, `slg_plus`, `iso_plus` | `numeric` | Brand-new fields (NOT the renamed ones — those become `ba_power_rating` etc.). Recently added on staging. Not currently referenced by code — safe to add as nullable. |
+| Conference Stats | `ba_plus`, `obp_plus`, `slg_plus`, `iso_plus` | `numeric` (nullable) | **Environmental rates** — `(conf_rate / ncaa_avg) × 100`. Different concept from `ba_power_rating` (derived talent score used in `hitter_talent_plus`). Both columns are intentional. |
+| Hitter Master | `ba_plus`, `obp_plus`, `slg_plus`, `iso_plus` | `numeric` (nullable) | Mirror of the Conference Stats env-rate concept at player level. Not currently referenced by code; added for future use. |
 | Hitter Master | `dob`, `class_year` | `date`, `text` | **ALREADY MIGRATED on prod tonight** ✓ |
 | Pitching Master | `division` | `text NOT NULL DEFAULT 'D1'` | Required |
 | Pitching Master | `trackman_pitches`, `k_pct`, `bf` | `integer`/`numeric`/`integer` | JUCO data-reliability inputs; code reads via `usePitchingSeedData.ts` |
