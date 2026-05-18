@@ -260,10 +260,37 @@ async function populateJucoDistricts(staging: SupabaseClient, apply: boolean) {
   if (!apply) { info("(dry-run — not writing)"); return; }
   if (districtRows.length === 0) { warn("No district rows to insert"); return; }
 
-  // Insert
+  // Re-runnable: preserve existing conference_id UUIDs (Hitter Master +
+  // Pitching Master rows reference them), then delete+reinsert. If we
+  // generated fresh UUIDs the district→player linkage would silently
+  // break again — exactly the bug we hit yesterday with placeholder IDs.
+  info("Looking up existing conference_id UUIDs to preserve linkage...");
+  const { data: existing } = await staging
+    .from("Conference Stats")
+    .select(`"conference abbreviation", conference_id`)
+    .ilike("conference abbreviation", "NJCAA D1%")
+    .eq("season", SEASON);
+  const idByAbbr = new Map<string, string>();
+  for (const r of (existing || []) as any[]) {
+    if (r.conference_id) idByAbbr.set(r["conference abbreviation"], r.conference_id);
+  }
+  info(`  Preserved ${idByAbbr.size} conference_id mappings`);
+  for (const r of districtRows) {
+    const cid = idByAbbr.get((r as any)["conference abbreviation"]);
+    if (cid) (r as any).conference_id = cid;
+    else warn(`  No existing conference_id for ${(r as any)["conference abbreviation"]} — will be null`);
+  }
+
+  info("Deleting existing JUCO district rows before re-insert...");
+  const { error: delErr } = await staging
+    .from("Conference Stats")
+    .delete()
+    .ilike("conference abbreviation", "NJCAA D1%")
+    .eq("season", SEASON);
+  if (delErr) { err(`Delete failed: ${delErr.message}`); throw delErr; }
   const { error } = await staging.from("Conference Stats").insert(districtRows);
   if (error) { err(`Insert failed: ${error.message}`); throw error; }
-  ok(`Inserted ${districtRows.length} JUCO district rows`);
+  ok(`Re-inserted ${districtRows.length} JUCO district rows with preserved conference_id`);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────
