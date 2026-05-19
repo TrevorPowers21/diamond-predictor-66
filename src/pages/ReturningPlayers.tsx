@@ -394,13 +394,25 @@ function ConferenceFilter({
 function PositionWithTwp({
   position,
   isTwp,
+  portalStatus,
   className,
 }: {
   position: string | null | undefined;
   isTwp?: boolean | null;
+  portalStatus?: string | null;
   className?: string;
 }) {
   const pos = (position || "").trim() || "—";
+  // Portal indicator — 3-letter chip matching TWP's compact width. Colors
+  // mirror the profile-page badge for consistent visual language.
+  const portalChip = (() => {
+    if (!portalStatus || portalStatus === "NOT IN PORTAL") return null;
+    if (portalStatus === "IN PORTAL")  return { label: "PRT", bg: "bg-emerald-500/15", text: "text-emerald-600", ring: "ring-emerald-500/40", title: "In Portal" };
+    if (portalStatus === "COMMITTED")  return { label: "CMT", bg: "bg-blue-500/15",    text: "text-blue-600",    ring: "ring-blue-500/40",    title: "Committed" };
+    if (portalStatus === "WATCHING")   return { label: "WCH", bg: "bg-[#D4AF37]/15",   text: "text-[#D4AF37]",   ring: "ring-[#D4AF37]/40",   title: "Watching" };
+    if (portalStatus === "WITHDRAWN")  return { label: "WDN", bg: "bg-slate-500/15",   text: "text-slate-500",   ring: "ring-slate-500/40",   title: "Withdrew" };
+    return null;
+  })();
   return (
     <span className={cn("inline-flex items-center gap-1.5", className)}>
       <span>{pos}</span>
@@ -410,6 +422,14 @@ function PositionWithTwp({
           title="Two-way player"
         >
           TWP
+        </span>
+      ) : null}
+      {portalChip ? (
+        <span
+          className={cn("px-1 py-[1px] rounded-sm text-[9px] uppercase tracking-[0.08em] font-semibold ring-1", portalChip.bg, portalChip.text, portalChip.ring)}
+          title={portalChip.title}
+        >
+          {portalChip.label}
         </span>
       ) : null}
     </span>
@@ -987,6 +1007,17 @@ export default function ReturningPlayers() {
       return next;
     });
   };
+  // Portal status filter — empty set = no filter, one or more of: IN PORTAL / COMMITTED
+  const [portalFilters, setPortalFilters] = useState<Set<string>>(new Set());
+  const togglePortalFilter = (v: string) => {
+    setPortalFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(v)) next.delete(v);
+      else next.add(v);
+      return next;
+    });
+  };
+
   const [batsFilters, setBatsFilters] = useState<Set<string>>(new Set());
   const toggleBatsFilter = (h: string) => {
     setBatsFilters((prev) => {
@@ -1199,6 +1230,7 @@ export default function ReturningPlayers() {
         classFilters?: string[];
         batsFilters?: string[];
         confFilters?: string[];
+        portalFilters?: string[];
         page?: number;
         pageSize?: number;
         sortKey?: SortKey;
@@ -1233,6 +1265,9 @@ export default function ReturningPlayers() {
       }
       if (Array.isArray(parsed.confFilters)) {
         setConfFilters(new Set(parsed.confFilters.filter((v) => typeof v === "string")));
+      }
+      if (Array.isArray(parsed.portalFilters)) {
+        setPortalFilters(new Set(parsed.portalFilters.filter((v) => typeof v === "string")));
       }
       if (Number.isFinite(parsed.page) && Number(parsed.page) >= 1) setPage(Number(parsed.page));
       if (Number.isFinite(parsed.pageSize) && Number(parsed.pageSize) > 0) setPageSize(Number(parsed.pageSize));
@@ -1282,6 +1317,7 @@ export default function ReturningPlayers() {
           classFilters: Array.from(classFilters),
           batsFilters: Array.from(batsFilters),
           confFilters: Array.from(confFilters),
+          portalFilters: Array.from(portalFilters),
           page,
           pageSize,
           sortKey,
@@ -1322,6 +1358,7 @@ export default function ReturningPlayers() {
     classFilters,
     batsFilters,
     confFilters,
+    portalFilters,
     search,
     showMissingOnly,
     sortDir,
@@ -1408,6 +1445,7 @@ export default function ReturningPlayers() {
         classTokens: Array.from(classFilters).sort(),
         batsTokens: Array.from(batsFilters).sort(),
         confTokens: Array.from(confFilters).sort(),
+        portalTokens: Array.from(portalFilters).sort(),
         showMissingOnly,
         sortKey,
         sortDir,
@@ -1532,6 +1570,7 @@ export default function ReturningPlayers() {
         classFilters.size === 0 &&
         batsFilters.size === 0 &&
         confFilters.size === 0 &&
+        portalFilters.size === 0 &&
         !showMissingOnly
       ) {
         const orderColumn =
@@ -1674,6 +1713,7 @@ export default function ReturningPlayers() {
         if (positionFilters.size > 0) allRows = allRows.filter((p) => positionMatchesFilter(p.position, p.is_twp));
         if (classFilters.size > 0) allRows = allRows.filter((p) => p.class_year != null && classFilters.has(p.class_year));
         if (batsFilters.size > 0) allRows = allRows.filter((p) => p.bats_hand != null && batsFilters.has(p.bats_hand));
+        if (portalFilters.size > 0) allRows = allRows.filter((p) => (p as any).portal_status != null && portalFilters.has((p as any).portal_status));
         if (confFilters.size > 0) {
           allRows = allRows.filter((p) => {
             const canon = canonicalConferenceName(p.conference);
@@ -1710,10 +1750,13 @@ export default function ReturningPlayers() {
       // filters, then JS-filter + JS-paginate" for correctness.
       const confFilterActive = confFilters.size > 0;
       const twpTokenSelected = positionFilters.has("TWP");
+      // Portal filter bypasses the PA stat-qualification gate — mid-season
+      // portal entries often have <75 PA but are still legitimate targets.
+      const portalFilterActive = portalFilters.size > 0;
       const buildBaseQuery = () => {
         let q = supabase
           .from("players")
-          .select("id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, pa, ip", { count: "exact" } as any)
+          .select("id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip", { count: "exact" } as any)
           .order("last_name", { ascending: true })
           .order("first_name", { ascending: true });
         if (expandedHitterPositions.twpOnly) {
@@ -1723,12 +1766,12 @@ export default function ReturningPlayers() {
         } else if (twpTokenSelected && expandedHitterPositions.positions.length > 0) {
           // TWP + atomic positions both selected. Match either branch.
           const posList = expandedHitterPositions.positions.join(",");
-          q = q.or(`is_twp.eq.true,position.in.(${posList})`).gte("pa", 75);
+          q = q.or(`is_twp.eq.true,position.in.(${posList})`);
+          if (!portalFilterActive) q = q.gte("pa", 75);
         } else {
           // Default hitter pool: non-pitcher primary OR flagged two-way.
-          q = q
-            .or("position.not.in.(SP,RP,CL,P,LHP,RHP),is_twp.eq.true")
-            .gte("pa", 75);
+          q = q.or("position.not.in.(SP,RP,CL,P,LHP,RHP),is_twp.eq.true");
+          if (!portalFilterActive) q = q.gte("pa", 75);
           if (expandedHitterPositions.positions.length === 1) {
             q = q.eq("position", expandedHitterPositions.positions[0]);
           } else if (expandedHitterPositions.positions.length > 1) {
@@ -1737,6 +1780,7 @@ export default function ReturningPlayers() {
         }
         if (classFilters.size > 0) q = q.in("class_year", Array.from(classFilters));
         if (batsFilters.size > 0) q = q.in("bats_hand", Array.from(batsFilters));
+        if (portalFilters.size > 0) q = q.in("portal_status", Array.from(portalFilters));
         if (showMissingOnly) q = q.is("team", null);
         return q;
       };
@@ -2668,15 +2712,11 @@ export default function ReturningPlayers() {
                     }}
                   >
                     <span className="font-medium">{p.first_name} {p.last_name}</span>
-                    {(p as any).is_twp ? (
-                      <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
-                        <PositionWithTwp position={p.position} isTwp={(p as any).is_twp} />
-                        <span>·</span>
-                        <span>{p.team || ""}</span>
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">{p.position || ""} · {p.team || ""}</span>
-                    )}
+                    <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+                      <PositionWithTwp position={p.position} isTwp={(p as any).is_twp} portalStatus={(p as any).portal_status} />
+                      <span>·</span>
+                      <span>{p.team || ""}</span>
+                    </span>
                   </button>
                 ))}
               </div>
@@ -2744,13 +2784,24 @@ export default function ReturningPlayers() {
               onToggleTier={toggleConfTier}
               onClear={() => setConfFilters(new Set())}
             />
-            {(classFilters.size + batsFilters.size + positionFilters.size + confFilters.size) > 0 && (
+            <MultiSelectFilter
+              label="Portal"
+              options={[
+                { value: "IN PORTAL", label: "In Portal" },
+                { value: "COMMITTED", label: "Committed" },
+              ]}
+              selected={portalFilters}
+              onToggle={togglePortalFilter}
+              onClear={() => setPortalFilters(new Set())}
+            />
+            {(classFilters.size + batsFilters.size + positionFilters.size + confFilters.size + portalFilters.size) > 0 && (
               <button
                 onClick={() => {
                   setPositionFilters(new Set());
                   setClassFilters(new Set());
                   setBatsFilters(new Set());
                   setConfFilters(new Set());
+                  setPortalFilters(new Set());
                 }}
                 className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground hover:text-foreground transition-colors cursor-pointer ml-1"
                 title="Reset all filters"
@@ -2881,7 +2932,7 @@ export default function ReturningPlayers() {
                               } satisfies ReportPlayer} />
                             </TableCell>
                             <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
-                              <div className={p.is_twp ? "flex items-center gap-2" : undefined}>
+                              <div className={(p.is_twp || ((p as any).portal_status && (p as any).portal_status !== "NOT IN PORTAL")) ? "flex items-center gap-2" : undefined}>
                                 <div className="min-w-0">
                                   <Link
                                     to={p.is_twp ? `/dashboard/player/${p.id}` : profileRouteFor(p.id, effectivePosition)}
@@ -2926,6 +2977,23 @@ export default function ReturningPlayers() {
                                     TWP
                                   </span>
                                 ) : null}
+                                {(() => {
+                                  const ps = (p as any).portal_status;
+                                  if (!ps || ps === "NOT IN PORTAL") return null;
+                                  if (ps === "IN PORTAL") return (
+                                    <span className="shrink-0 px-1.5 py-[2px] rounded-sm text-[9px] uppercase tracking-[0.08em] font-semibold ring-1 bg-emerald-500/15 text-emerald-600 ring-emerald-500/40" title="In Portal">PRT</span>
+                                  );
+                                  if (ps === "COMMITTED") return (
+                                    <span className="shrink-0 px-1.5 py-[2px] rounded-sm text-[9px] uppercase tracking-[0.08em] font-semibold ring-1 bg-blue-500/15 text-blue-600 ring-blue-500/40" title="Committed">CMT</span>
+                                  );
+                                  if (ps === "WATCHING") return (
+                                    <span className="shrink-0 px-1.5 py-[2px] rounded-sm text-[9px] uppercase tracking-[0.08em] font-semibold ring-1 bg-[#D4AF37]/15 text-[#D4AF37] ring-[#D4AF37]/40" title="Watching">WCH</span>
+                                  );
+                                  if (ps === "WITHDRAWN") return (
+                                    <span className="shrink-0 px-1.5 py-[2px] rounded-sm text-[9px] uppercase tracking-[0.08em] font-semibold ring-1 bg-slate-500/15 text-slate-500 ring-slate-500/40" title="Withdrew">WDN</span>
+                                  );
+                                  return null;
+                                })()}
                               </div>
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">{statFormat(pred.p_avg)}</TableCell>
@@ -3069,15 +3137,11 @@ export default function ReturningPlayers() {
                     }}
                   >
                     <span className="font-medium">{p.first_name} {p.last_name}</span>
-                    {(p as any).is_twp ? (
-                      <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
-                        <PositionWithTwp position={p.position} isTwp={(p as any).is_twp} />
-                        <span>·</span>
-                        <span>{p.team || ""}</span>
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">{p.position || ""} · {p.team || ""}</span>
-                    )}
+                    <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+                      <PositionWithTwp position={p.position} isTwp={(p as any).is_twp} portalStatus={(p as any).portal_status} />
+                      <span>·</span>
+                      <span>{p.team || ""}</span>
+                    </span>
                   </button>
                 ))}
               </div>
@@ -3228,7 +3292,7 @@ export default function ReturningPlayers() {
                               } satisfies ReportPlayer} />
                             </TableCell>
                             <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
-                              <div className={r.is_twp ? "flex items-center gap-2" : undefined}>
+                              <div className={(r.is_twp || ((r as any).portal_status && (r as any).portal_status !== "NOT IN PORTAL")) ? "flex items-center gap-2" : undefined}>
                                 <div className="min-w-0">
                                   <Link
                                     to={`/dashboard/pitcher/storage__${encodeURIComponent(r.playerName)}__${encodeURIComponent(r.team || "")}`}
@@ -3252,6 +3316,15 @@ export default function ReturningPlayers() {
                                     TWP
                                   </span>
                                 ) : null}
+                                {(() => {
+                                  const ps = (r as any).portal_status;
+                                  if (!ps || ps === "NOT IN PORTAL") return null;
+                                  if (ps === "IN PORTAL") return <span className="shrink-0 px-1.5 py-[2px] rounded-sm text-[9px] uppercase tracking-[0.08em] font-semibold ring-1 bg-emerald-500/15 text-emerald-600 ring-emerald-500/40" title="In Portal">PRT</span>;
+                                  if (ps === "COMMITTED") return <span className="shrink-0 px-1.5 py-[2px] rounded-sm text-[9px] uppercase tracking-[0.08em] font-semibold ring-1 bg-blue-500/15 text-blue-600 ring-blue-500/40" title="Committed">CMT</span>;
+                                  if (ps === "WATCHING")  return <span className="shrink-0 px-1.5 py-[2px] rounded-sm text-[9px] uppercase tracking-[0.08em] font-semibold ring-1 bg-[#D4AF37]/15 text-[#D4AF37] ring-[#D4AF37]/40" title="Watching">WCH</span>;
+                                  if (ps === "WITHDRAWN") return <span className="shrink-0 px-1.5 py-[2px] rounded-sm text-[9px] uppercase tracking-[0.08em] font-semibold ring-1 bg-slate-500/15 text-slate-500 ring-slate-500/40" title="Withdrew">WDN</span>;
+                                  return null;
+                                })()}
                               </div>
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">{statFormat(r.p_era, 2)}</TableCell>

@@ -34,6 +34,7 @@ import { usePitcherRoleOverrides } from "@/hooks/usePitcherRoleOverrides";
 import { computePrvPlus } from "@/savant/lib/prvPlus";
 import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
+import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
@@ -1526,33 +1527,16 @@ export default function PitcherProfile() {
                   TWP
                 </Badge>
               )}
-              {player && (() => {
-                const ps = (player as any).portal_status || "NOT IN PORTAL";
-                const cfg: Record<string, { bg: string; text: string; label: string }> = {
-                  "NOT IN PORTAL": { bg: "bg-muted", text: "text-muted-foreground", label: "Not In Portal" },
-                  "WATCHING": { bg: "bg-[#D4AF37]/10", text: "text-[#D4AF37]", label: "Watching" },
-                  "IN PORTAL": { bg: "bg-emerald-500/10", text: "text-emerald-600", label: "In Portal" },
-                  "COMMITTED": { bg: "bg-blue-500/10", text: "text-blue-600", label: "Committed" },
-                };
-                const c = cfg[ps] || cfg["NOT IN PORTAL"];
-                if (isAdmin) {
-                  return (
-                    <Select value={ps} onValueChange={(v) => updatePortalStatus.mutate({ playerId: player.id, value: v })}>
-                      <SelectTrigger className={`h-auto w-auto gap-1 border-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${c.bg} ${c.text} focus:ring-0 focus:ring-offset-0`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent align="start" className="min-w-[140px]">
-                        <SelectItem value="NOT IN PORTAL"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-muted-foreground/40" />Not In Portal</span></SelectItem>
-                        <SelectItem value="WATCHING"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-[#D4AF37]" />Watching</span></SelectItem>
-                        <SelectItem value="IN PORTAL"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-500" />In Portal</span></SelectItem>
-                        <SelectItem value="COMMITTED"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-500" />Committed</span></SelectItem>
-                      </SelectContent>
-                    </Select>
-                  );
-                }
-                if (ps === "NOT IN PORTAL") return null;
-                return <Badge className={`${c.bg} ${c.text} border-0`}>{c.label}</Badge>;
-              })()}
+              {player && (
+                <>
+                  <PortalStatusBadge
+                    player={player as any}
+                    isAdmin={isAdmin}
+                    onChange={(v) => updatePortalStatus.mutate({ playerId: player.id, value: v })}
+                  />
+                  <PortalContactButton player={player as any} />
+                </>
+              )}
               {combinedUsed && (
                 <Badge
                   variant="outline"

@@ -6,7 +6,8 @@ export type CsvType =
   | "class_data"
   | "conference_stats"
   | "park_factors"
-  | "nil";
+  | "nil"
+  | "portal_entries";
 
 export type RegistryEntry = {
   type: CsvType;
@@ -238,6 +239,25 @@ export const REGISTRY: RegistryEntry[] = [
     filenameHints: [/park[_\-]?factor/i, /\bpf[_\-]/i],
     downstream: ["recalculate"],
     description: "Per-team park adjustment multipliers. Importer not yet wired (Phase D).",
+  },
+  {
+    type: "portal_entries",
+    label: "Portal Entries (Verified Athletics)",
+    required: ["First Name", "Last Name", "Current School"],
+    signature: [
+      "Year",
+      "Division",
+      "Commit School",
+      "Commit Date",
+      "Date",
+      "Athletic Aid",
+      "Position",
+      "Conference",
+      "Roster Link",
+    ],
+    filenameHints: [/transfers?/i, /portal/i, /verified[_\-]?athletics/i, /\bva[_\-]/i],
+    downstream: [],
+    description: "Daily Verified Athletics portal export. Filters to D1, fuzzy-matches against players, updates portal_status / commit info / contact fields. Ambiguous + no-match rows land in portal_entries_unmatched.",
   },
   {
     type: "nil",

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 import { runJucoImport } from "./runner.ts";
+import { runDataCascade } from "@/lib/runDataCascade";
 
 const DEFAULT_DIR = join(homedir(), "RSTR IQ Data", "juco-exploration");
 const CURRENT_SEASON = 2026;
@@ -146,9 +147,20 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
-    ok("Done");
+    ok("Import done");
+
     if (args.write) {
-      console.log("\nNext: run `npm run recompute-stuff` to cascade through the Stuff+ pipeline.");
+      // Auto-run the data cascade so ncaa_averages, scoring, conference Stuff+,
+      // env-rates, predictions, and target_board snapshots all reflect the
+      // freshly-imported JUCO state. Without this, projections for JUCO players
+      // (and any conference whose stats moved) silently stay stale.
+      console.log(`\n${COLOR.bold}=== Cascade ===${COLOR.reset}`);
+      const report = await runDataCascade({ season: args.season });
+      if (report.errors.length > 0) {
+        console.log(`\n${COLOR.red}Cascade errors (${report.errors.length}):${COLOR.reset}`);
+        for (const e of report.errors.slice(0, 10)) err(e);
+        process.exit(1);
+      }
     }
     process.exit(0);
   } catch (e) {

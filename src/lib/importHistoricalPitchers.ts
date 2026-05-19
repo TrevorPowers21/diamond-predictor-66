@@ -200,9 +200,10 @@ export async function importHistoricalPitchersCsv(csvText: string, season: numbe
   console.log(`[importHistoricalPitchers v4-ip-required] Parsed ${rows.length} pitcher rows for season ${season}, skipped ${skippedNonPitchers} non-pitchers (0 IP), sample IP:`, rows.slice(0, 3).map(r => r.IP));
   result.teamsUnresolved = [...unresolvedTeams].sort();
 
-  // Clear existing data for this season only
-  console.log(`[importHistoricalPitchers] Clearing existing ${season} pitching data...`);
-  const { error: clearErr } = await supabase.from("Pitching Master").delete().eq("Season", season);
+  // Clear existing D1 data for this season — leaves NJCAA_D1 (JUCO) rows
+  // untouched so a D1 final import doesn't nuke JUCO foundation data.
+  console.log(`[importHistoricalPitchers] Clearing existing D1 ${season} pitching data (NJCAA_D1 preserved)...`);
+  const { error: clearErr } = await supabase.from("Pitching Master").delete().eq("Season", season).neq("division", "NJCAA_D1");
   if (clearErr) {
     result.errors.push(`Failed to clear season ${season}: ${clearErr.message}`);
     return result;

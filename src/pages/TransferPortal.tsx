@@ -36,7 +36,7 @@ import { assessHitterRisk, assessPitcherRisk } from "@/lib/playerRisk";
 import type { RiskFactor, RiskAssessment } from "@/lib/playerRisk";
 import { JucoPitcherRiskCard, JucoHitterRiskCard } from "@/components/JucoRiskCards";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
-import { TRANSFER_WEIGHT_DEFAULTS, transferWeightsForSource, JUCO_PITCHING_TRANSFER_WEIGHTS, JUCO_DISTRICT_HTP_OVERRIDE, applyJucoOutlierRegression, JUCO_REGRESSION_CONFIG } from "@/lib/transferWeightDefaults";
+import { TRANSFER_WEIGHT_DEFAULTS, transferWeightsForSource, JUCO_PITCHING_TRANSFER_WEIGHTS, JUCO_DISTRICT_HTP_OVERRIDE, JUCO_DISTRICT_CONFERENCE_ID, jucoDistrictNameFromConference, applyJucoOutlierRegression, JUCO_REGRESSION_CONFIG } from "@/lib/transferWeightDefaults";
 import { computeDataReliability } from "@/lib/jucoDataReliability";
 
 type SimPlayer = {
@@ -1144,6 +1144,18 @@ export default function TransferPortal() {
     if (conferenceId) {
       const byId = confByConfId.get(conferenceId);
       if (byId) return byId;
+    }
+    // JUCO district fallback — players.conference is "NJCAA D1 Midwest"
+    // (no "District" suffix) but Conference Stats stores "NJCAA D1 Midwest
+    // District". Skip the name aliasing dance and resolve via the hardcoded
+    // district → UUID map.
+    const jucoName = jucoDistrictNameFromConference(conference);
+    if (jucoName) {
+      const jucoId = JUCO_DISTRICT_CONFERENCE_ID[jucoName];
+      if (jucoId) {
+        const byJucoId = confByConfId.get(jucoId);
+        if (byJucoId) return byJucoId;
+      }
     }
     const aliases = conferenceKeyAliases(conference);
     let best: ConferenceRow | null = null;

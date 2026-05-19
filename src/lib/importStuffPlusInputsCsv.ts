@@ -301,16 +301,17 @@ export async function importStuffPlusInputsCsv(
     return result;
   }
 
-  // Idempotent guard: delete existing rows for (season, pitch_type, hand) so
-  // re-running on the same CSV produces the same row set, not duplicates.
-  // The UI importer doesn't do this, which is why running it twice doubles
-  // rows. Automation should be safe to re-run.
+  // Idempotent guard: delete existing D1 rows for (season, pitch_type, hand)
+  // so re-running on the same CSV produces the same row set, not duplicates.
+  // Scoped with `.neq("division", "NJCAA_D1")` so a D1 Stuff+ import never
+  // nukes JUCO Stuff+ rows (which use the same season/pitch_type/hand keys).
   const { error: delError, count: delCount } = await (supabase as any)
     .from("pitcher_stuff_plus_inputs")
     .delete({ count: "exact" })
     .eq("season", season)
     .eq("pitch_type", detectedPitchType)
-    .eq("hand", detectedHand);
+    .eq("hand", detectedHand)
+    .neq("division", "NJCAA_D1");
   if (delError) {
     result.errors.push(`Delete existing rows failed: ${delError.message}`);
     return result;

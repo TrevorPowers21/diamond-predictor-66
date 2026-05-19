@@ -5,6 +5,7 @@ import { importHistoricalHittersCsv } from "@/lib/importHistoricalHitters";
 import { importHistoricalPitchersCsv } from "@/lib/importHistoricalPitchers";
 import { importStuffPlusInputsCsv } from "@/lib/importStuffPlusInputsCsv";
 import { importConferenceStatsCsv, computeConferenceEnvRates } from "@/lib/importConferenceStats";
+import { importPortalEntriesCsv } from "@/lib/importPortalEntries";
 import { calculateConferenceStuffPlus } from "@/savant/lib/conferenceStuffPlus";
 import { addMissingPlayers } from "@/lib/syncMasterToPlayers";
 import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
@@ -302,6 +303,20 @@ export async function runImports(
         }
         break;
       }
+      case "portal_entries": {
+        step(`${r.probe.fileName} → Portal Entries`);
+        try {
+          const res = await importPortalEntriesCsv(csvText);
+          ok(`${res.matched} matched (${res.committed} committed), ${res.unmatched} unmatched, ${res.arrived} arrived (cleared), ${res.withdrawn} withdrawn (${timeMs(startMs)})`);
+          console.log(`  ${COLOR.dim}total CSV rows: ${res.totalRows}, D1 rows: ${res.d1Rows}${COLOR.reset}`);
+          for (const e of res.errors.slice(0, 3)) err(e);
+          if (res.errors.length > 3) warn(`...and ${res.errors.length - 3} more errors`);
+          if (res.matched > 0 || res.unmatched > 0) importedFilePaths.push(r.probe.filePath);
+        } catch (e) {
+          err(`Portal importer threw: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        break;
+      }
       case "conference_stats": {
         step(`${r.probe.fileName} → Conference Stats`);
         try {
@@ -514,6 +529,21 @@ export async function runImports(
     const start = Date.now();
     await bulkRecalculatePredictionsLocal(season);
     ok(`done (${timeMs(start)})`);
+  } catch (e) {
+    err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // Invalidate target_board snapshots — projection inputs just changed, so the
+  // stored snapshots are stale. Null them out so TB recomputes fresh on next view.
+  step("Invalidate target_board snapshots");
+  try {
+    const start = Date.now();
+    const { error } = await (supabase as any)
+      .from("target_board")
+      .update({ transfer_snapshot: null })
+      .not("transfer_snapshot", "is", null);
+    if (error) throw error;
+    ok(`snapshots cleared (${timeMs(start)})`);
   } catch (e) {
     err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
   }
