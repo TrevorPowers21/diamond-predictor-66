@@ -23,7 +23,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Pencil, RefreshCw, Scale, Sliders, Trophy, Plus, Trash2, Check, Edit2, Save, X, Upload, LogIn, UserPlus } from "lucide-react";
+import { Pencil, RefreshCw, Scale, Sliders, Trophy, Plus, Trash2, Check, Edit2, Save, X, Upload, LogIn, UserPlus, AlertTriangle } from "lucide-react";
+import { PortalUnmatchedReviewTab } from "@/components/PortalUnmatchedReviewTab";
 import RosterOverrideTab from "@/components/RosterOverrideTab";
 import { useAuth } from "@/hooks/useAuth";
 import { bulkRecalculatePredictionsLocal } from "@/lib/predictionEngine";
@@ -4420,6 +4421,10 @@ export default function AdminDashboard() {
               <LogIn className="h-4 w-4" />
               Portal
             </TabsTrigger>
+            <TabsTrigger value="portal-review" className="gap-1.5">
+              <AlertTriangle className="h-4 w-4" />
+              Portal Review
+            </TabsTrigger>
             <TabsTrigger value="stuff-import" className="gap-1.5">
               <Upload className="h-4 w-4" />
               Stuff+ Import
@@ -4452,6 +4457,9 @@ export default function AdminDashboard() {
           </TabsContent>
           <TabsContent value="portal">
             <BulkPortalStatusTab />
+          </TabsContent>
+          <TabsContent value="portal-review">
+            <PortalUnmatchedReviewTab />
           </TabsContent>
           <TabsContent value="stuff-import">
             <StuffPlusImporter />

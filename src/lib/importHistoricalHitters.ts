@@ -177,12 +177,14 @@ export async function importHistoricalHittersCsv(csvText: string, season: number
   console.log(`[importHistorical v2-skip-non-hitters] Parsed ${rows.length} hitter rows for season ${season}, skipped ${skippedNonHitters} non-hitters (0 AB and 0 PA)`);
   result.teamsUnresolved = [...unresolvedTeams].sort();
 
-  // Delete existing data for this season only to avoid duplicates
-  console.log(`[importHistorical] Clearing existing ${season} data...`);
+  // Delete existing D1 data for this season only — leaves NJCAA_D1 (JUCO)
+  // rows untouched so a D1 final import doesn't nuke JUCO foundation data.
+  console.log(`[importHistorical] Clearing existing D1 ${season} data (NJCAA_D1 preserved)...`);
   const { error: clearErr } = await supabase
     .from("Hitter Master")
     .delete()
-    .eq("Season", season);
+    .eq("Season", season)
+    .neq("division", "NJCAA_D1");
   if (clearErr) {
     result.errors.push(`Failed to clear season ${season}: ${clearErr.message}`);
     return result;

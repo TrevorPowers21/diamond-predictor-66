@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 import { runJucoImport } from "./runner.ts";
+import { runDataCascade } from "@/lib/runDataCascade";
 
 const DEFAULT_DIR = join(homedir(), "RSTR IQ Data", "juco-exploration");
 const CURRENT_SEASON = 2026;
@@ -139,16 +140,35 @@ async function main(): Promise<void> {
     console.log(`Pitching Master ${args.write ? "rows" : "rows to write"}: ${report.pitchingMasterUpserted}`);
     console.log(`Stuff+ per-pitch ${args.write ? "rows" : "rows to write"}: ${report.stuffPlusUpserted}`);
 
-    if (report.errors.length > 0) {
-      console.log(`\n${COLOR.red}Errors (${report.errors.length}):${COLOR.reset}`);
-      for (const e of report.errors.slice(0, 20)) err(e);
-      if (report.errors.length > 20) console.log(`  ...and ${report.errors.length - 20} more`);
+    // Distinguish skip warnings (non-region files, harmless) from real errors.
+    const skips = report.errors.filter((e) => /^Skip /.test(e));
+    const fatal = report.errors.filter((e) => !/^Skip /.test(e));
+    if (skips.length > 0) {
+      console.log(`\n${COLOR.yellow}Skipped (${skips.length} non-region files — harmless):${COLOR.reset}`);
+      for (const e of skips.slice(0, 5)) console.log(`  · ${e}`);
+      if (skips.length > 5) console.log(`  ...and ${skips.length - 5} more`);
+    }
+    if (fatal.length > 0) {
+      console.log(`\n${COLOR.red}Errors (${fatal.length}):${COLOR.reset}`);
+      for (const e of fatal.slice(0, 20)) err(e);
+      if (fatal.length > 20) console.log(`  ...and ${fatal.length - 20} more`);
       process.exit(1);
     }
 
-    ok("Done");
+    ok("Import done");
+
     if (args.write) {
-      console.log("\nNext: run `npm run recompute-stuff` to cascade through the Stuff+ pipeline.");
+      // Auto-run the data cascade so ncaa_averages, scoring, conference Stuff+,
+      // env-rates, predictions, and target_board snapshots all reflect the
+      // freshly-imported JUCO state. Without this, projections for JUCO players
+      // (and any conference whose stats moved) silently stay stale.
+      console.log(`\n${COLOR.bold}=== Cascade ===${COLOR.reset}`);
+      const report = await runDataCascade({ season: args.season });
+      if (report.errors.length > 0) {
+        console.log(`\n${COLOR.red}Cascade errors (${report.errors.length}):${COLOR.reset}`);
+        for (const e of report.errors.slice(0, 10)) err(e);
+        process.exit(1);
+      }
     }
     process.exit(0);
   } catch (e) {

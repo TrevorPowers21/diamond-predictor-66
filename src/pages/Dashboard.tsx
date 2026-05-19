@@ -1,6 +1,7 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useQuery } from "@tanstack/react-query";
+import { useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
@@ -211,34 +212,92 @@ export default function Dashboard() {
     ...new Set([...highFollowList.map((p) => p.player_id), ...targetBoard.map((p) => p.player_id)]),
   ].sort().join(",");
 
-  const { data: personalActivity = [] } = useQuery({
-    queryKey: ["overview-personal-activity", watchedIdsKey],
-    enabled: watchedIdsKey.length > 0,
-    staleTime: 5 * 60 * 1000,
+  // Activity-feed cutoff. The stored value IS the cutoff (point we show items
+  // "since"). Logic:
+  //   - First-ever visit → set cutoff to 14 days ago so the feed isn't empty.
+  //   - Cutoff older than 48h → slide forward to "48h ago" (gives a fresh window).
+  //   - Otherwise → keep stored value (cutoff holds steady, click-in doesn't reset).
+  const LAST_VISIT_KEY = "rstr_iq_dashboard_last_visit_v3";
+  const HOLD_MS = 48 * 60 * 60 * 1000;
+  const FIRST_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
+  const lastVisitRef = useRef<string>(
+    (() => {
+      if (typeof window === "undefined") return new Date(0).toISOString();
+      try {
+        const now = Date.now();
+        const stored = localStorage.getItem(LAST_VISIT_KEY);
+        const storedMs = stored ? new Date(stored).getTime() : NaN;
+        let cutoff: string;
+        if (!Number.isFinite(storedMs)) {
+          cutoff = new Date(now - FIRST_LOOKBACK_MS).toISOString();
+        } else if (now - storedMs > HOLD_MS) {
+          cutoff = new Date(now - HOLD_MS).toISOString();
+        } else {
+          cutoff = stored as string;
+        }
+        localStorage.setItem(LAST_VISIT_KEY, cutoff);
+        return cutoff;
+      } catch {
+        return new Date(0).toISOString();
+      }
+    })()
+  );
+
+  // Recent portal activity — combines (a) high-follow/board players and (b) top
+  // available portal hitters by projected WRC+, ranked together. Cut off at the
+  // user's last visit so the list reflects "what's new" rather than the whole
+  // backlog.
+  const { data: portalActivity = [] } = useQuery({
+    queryKey: ["overview-portal-activity", watchedIdsKey, lastVisitRef.current],
+    staleTime: 60 * 1000,
     queryFn: async () => {
-      const ids = watchedIdsKey.split(",").filter(Boolean);
-      if (ids.length === 0) return [];
-      const { data, error } = await supabase
-        .from("players")
-        .select("id, first_name, last_name, team, from_team, portal_status, updated_at")
-        .in("id", ids)
-        .in("portal_status", ["IN PORTAL", "COMMITTED"])
-        .order("updated_at", { ascending: false })
-        .limit(10);
-      if (error) throw error;
-      // Flag which list each player belongs to
+      const watchedIds = watchedIdsKey.split(",").filter(Boolean);
+      const cutoff = lastVisitRef.current;
+
+      // Single source query: every portal/committed player joined to their
+      // pWRC+ projection. We filter + sort + tag in-memory afterwards.
+      const { data: raw } = await (supabase as any)
+        .from("player_predictions")
+        .select(`p_wrc_plus, players!inner(id, first_name, last_name, team, from_team, portal_status, portal_entry_date, commit_school, commit_date, updated_at)`)
+        .in("players.portal_status", ["IN PORTAL", "COMMITTED"])
+        .not("p_wrc_plus", "is", null)
+        .order("p_wrc_plus", { ascending: false })
+        .limit(200);
+
       const followSet = new Set(highFollowList.map((p) => p.player_id));
       const boardSet = new Set(targetBoard.map((p) => p.player_id));
-      return (data || []).map((p: any) => ({
-        ...p,
-        source: followSet.has(p.id) ? "following" : boardSet.has(p.id) ? "board" : "other",
-      })) as Array<{ id: string; first_name: string; last_name: string; team: string | null; from_team: string | null; portal_status: string; updated_at: string; source: "following" | "board" | "other" }>;
+
+      const all = (raw || [])
+        .map((r: any) => ({ ...r.players, p_wrc_plus: r.p_wrc_plus }))
+        .filter((p: any) => (p.updated_at || "") >= cutoff)
+        .map((p: any) => ({
+          ...p,
+          source: followSet.has(p.id) ? "following" : boardSet.has(p.id) ? "board" : "top",
+        }));
+
+      // Sort: newest portal_entry_date first → within date, watching first
+      // (following/board), then by p_wrc_plus desc.
+      const sourceRank = (s: string) => (s === "following" || s === "board" ? 0 : 1);
+      all.sort((a: any, b: any) => {
+        const dateCmp = (b.portal_entry_date || "").localeCompare(a.portal_entry_date || "");
+        if (dateCmp !== 0) return dateCmp;
+        const srcCmp = sourceRank(a.source) - sourceRank(b.source);
+        if (srcCmp !== 0) return srcCmp;
+        return (b.p_wrc_plus ?? -Infinity) - (a.p_wrc_plus ?? -Infinity);
+      });
+
+      // Cap at 50 — keeps the scrollable list bounded but allows generous scroll.
+      return all.slice(0, 50) as Array<{
+        id: string; first_name: string; last_name: string; team: string | null; from_team: string | null;
+        portal_status: string; portal_entry_date: string | null; commit_school: string | null; commit_date: string | null;
+        updated_at: string; p_wrc_plus?: number | null; source: "following" | "board" | "top";
+      }>;
     },
   });
 
+
   const stats = briefingStats ?? { portalCount: 0, committedCount: 0, recentPortal: [], lastPredictionAt: null };
 
-  const displayActivity = personalActivity;
 
   const fmt3 = (v: number | null) => (v == null ? "—" : v.toFixed(3));
   const fmt2 = (v: number | null) => (v == null ? "—" : v.toFixed(2));
@@ -311,89 +370,75 @@ export default function Dashboard() {
               accent="blue"
             />
           </div>
-          {/* Personalized updates — your followed/board players with recent portal activity */}
-          {displayActivity.length > 0 ? (
-            <div className="mt-2 rounded-lg border border-border/60 bg-muted/20 px-4 py-2">
-              <div className="flex items-center justify-between mb-1.5">
-                <span
-                  className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#D4AF37]"
-                  style={{ fontFamily: "Oswald, sans-serif" }}
-                >
-                  Your Updates
-                </span>
-                <span className="text-[10px] text-muted-foreground font-mono">{displayActivity.length} {displayActivity.length === 1 ? "update" : "updates"}</span>
-              </div>
-              <div className="divide-y divide-border/30">
-                {displayActivity.slice(0, 5).map((p) => {
-                  const isPortal = p.portal_status === "IN PORTAL";
-                  const arrowClass = isPortal ? "text-emerald-500" : "text-blue-500";
-                  const destClass = isPortal ? "text-emerald-600" : "text-blue-600";
-                  const sourceLabel = p.source === "following" ? "Following" : p.source === "board" ? "On Board" : null;
-                  const fromTeam = p.from_team;
-                  const toLabel = isPortal ? "Portal" : (p.team || "—");
+          {/* Recent Portal Activity — scrollable, prioritized:
+              high-follow/board players first → top portal players by pWRC+ →
+              capped at last-visit timestamp. */}
+          <div className="mt-2 rounded-lg border border-border/60 bg-muted/20 px-4 py-2.5">
+            <div className="flex items-center justify-between mb-2">
+              <span
+                className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#D4AF37]"
+                style={{ fontFamily: "Oswald, sans-serif" }}
+              >
+                Recent Portal Activity
+              </span>
+              <span className="text-[10px] text-muted-foreground font-mono">
+                {portalActivity.length === 0
+                  ? "No updates since your last visit"
+                  : `${portalActivity.length} ${portalActivity.length === 1 ? "update" : "updates"} since your last visit`}
+              </span>
+            </div>
+            {portalActivity.length === 0 ? (
+              <p className="py-3 text-xs text-muted-foreground text-center">Nothing new — check back after the next portal import.</p>
+            ) : (
+              <div className="max-h-[280px] overflow-y-auto pr-1 divide-y divide-border/30">
+                {portalActivity.map((p) => {
+                  const isCommitted = p.portal_status === "COMMITTED";
+                  const arrowClass = isCommitted ? "text-blue-500" : "text-emerald-500";
+                  const destClass = isCommitted ? "text-blue-600" : "text-emerald-600";
+                  const sourceLabel =
+                    p.source === "following" ? "Following" :
+                    p.source === "board"     ? "On Board" :
+                    null;
+                  const fromTeam = p.from_team || p.team;
+                  const toLabel = isCommitted ? (p.commit_school || "Committed") : "Portal";
+                  const wrcLabel = p.p_wrc_plus != null ? Math.round(p.p_wrc_plus).toString() : null;
+                  const entryDate = p.portal_entry_date
+                    ? new Date(p.portal_entry_date).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+                    : null;
                   return (
                     <Link
                       key={p.id}
                       to={`/dashboard/player/${p.id}`}
                       className="flex items-center gap-2 py-1.5 text-xs hover:text-primary transition-colors cursor-pointer"
                     >
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#D4AF37] shrink-0" />
-                      <span className="font-semibold">{p.first_name} {p.last_name}</span>
+                      <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", isCommitted ? "bg-blue-500" : "bg-[#D4AF37]")} />
+                      <span className="font-semibold truncate max-w-[140px]">{p.first_name} {p.last_name}</span>
                       {sourceLabel && (
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-px rounded">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-[#D4AF37] bg-[#D4AF37]/10 ring-1 ring-[#D4AF37]/30 px-1.5 py-px rounded">
                           {sourceLabel}
                         </span>
                       )}
-                      <span className="flex items-center gap-1.5 ml-1">
-                        <span className="text-muted-foreground">{fromTeam || "—"}</span>
+                      {wrcLabel && (
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-px rounded font-mono">
+                          {wrcLabel} pWRC+
+                        </span>
+                      )}
+                      <span className="flex items-center gap-1.5 ml-1 min-w-0">
+                        <span className="text-muted-foreground truncate max-w-[120px]">{fromTeam || "—"}</span>
                         <ArrowRight className={cn("h-3 w-3 shrink-0", arrowClass)} />
-                        <span className={cn("font-semibold", destClass)}>{toLabel}</span>
+                        <span className={cn("font-semibold truncate max-w-[140px]", destClass)}>{toLabel}</span>
                       </span>
-                      <span className="ml-auto text-[10px] text-muted-foreground font-mono">{timeSince(p.updated_at)}</span>
+                      {entryDate && (
+                        <span className="ml-auto text-[10px] text-muted-foreground font-mono shrink-0">
+                          {entryDate}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}
               </div>
-            </div>
-          ) : (
-            // Demo placeholder — shown when there's no personalized activity yet.
-            // TODO: replace with real portal activity feed once portal data is populated.
-            <div className="mt-2 rounded-lg border border-border/60 bg-muted/20 px-4 py-2">
-              <div className="flex items-center justify-between mb-1.5">
-                <span
-                  className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#D4AF37]"
-                  style={{ fontFamily: "Oswald, sans-serif" }}
-                >
-                  Recent Portal Activity
-                </span>
-                <span className="text-[10px] text-muted-foreground font-mono">2 updates</span>
-              </div>
-              <div className="divide-y divide-border/30">
-                {/* Example 1: Player entering the portal */}
-                <div className="flex items-center gap-2 py-1.5 text-xs">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#D4AF37] shrink-0" />
-                  <span className="font-semibold">Mason Carter</span>
-                  <span className="flex items-center gap-1.5 ml-1">
-                    <span className="text-muted-foreground">Vanderbilt</span>
-                    <ArrowRight className="h-3 w-3 shrink-0 text-emerald-500" />
-                    <span className="font-semibold text-emerald-600">Portal</span>
-                  </span>
-                  <span className="ml-auto text-[10px] text-muted-foreground font-mono">2h ago</span>
-                </div>
-                {/* Example 2: Player committing to the demo school */}
-                <div className="flex items-center gap-2 py-1.5 text-xs">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#D4AF37] shrink-0" />
-                  <span className="font-semibold">Tyler Bridges</span>
-                  <span className="flex items-center gap-1.5 ml-1">
-                    <span className="text-muted-foreground">Auburn</span>
-                    <ArrowRight className="h-3 w-3 shrink-0 text-blue-500" />
-                    <span className="font-semibold text-blue-600">Georgia</span>
-                  </span>
-                  <span className="ml-auto text-[10px] text-muted-foreground font-mono">5h ago</span>
-                </div>
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Top 5 Hitters + Top 5 Pitchers (data-dense dashboard style) */}
