@@ -4,6 +4,8 @@ import { dirname, join, basename } from "node:path";
 import { importHistoricalHittersCsv } from "@/lib/importHistoricalHitters";
 import { importHistoricalPitchersCsv } from "@/lib/importHistoricalPitchers";
 import { importStuffPlusInputsCsv } from "@/lib/importStuffPlusInputsCsv";
+import { importConferenceStatsCsv, computeConferenceEnvRates } from "@/lib/importConferenceStats";
+import { calculateConferenceStuffPlus } from "@/savant/lib/conferenceStuffPlus";
 import { addMissingPlayers } from "@/lib/syncMasterToPlayers";
 import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
 import { computeAndStoreNcaaAverages } from "@/lib/computeNcaaAverages";
@@ -230,6 +232,7 @@ export async function runImports(
   let hitterImported = false;
   let pitcherImported = false;
   let stuffInputsImported = false;
+  let conferenceImported = false;
   const stuffInputsImports: Array<{ file: string; pitchType: string; hand: string; inserted: number; deleted: number }> = [];
   const classYearPairs: ClassYearPair[] = [];
   // Files that imported successfully — archived to imported/<date>/ after the
@@ -296,6 +299,25 @@ export async function runImports(
           }
         } catch (e) {
           err(`Stuff+ importer threw: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        break;
+      }
+      case "conference_stats": {
+        step(`${r.probe.fileName} → Conference Stats`);
+        try {
+          const res = await importConferenceStatsCsv(csvText, season);
+          ok(`${res.updated} updated, ${res.skipped} skipped (${timeMs(startMs)})`);
+          if (res.unknownAbbrevs.length > 0) {
+            warn(`Unknown conference abbrevs (no DB row for season ${season}): ${res.unknownAbbrevs.join(", ")}`);
+          }
+          for (const e of res.errors.slice(0, 3)) err(e);
+          if (res.errors.length > 3) warn(`...and ${res.errors.length - 3} more errors`);
+          if (res.updated > 0) {
+            conferenceImported = true;
+            importedFilePaths.push(r.probe.filePath);
+          }
+        } catch (e) {
+          err(`Conference Stats importer threw: ${e instanceof Error ? e.message : String(e)}`);
         }
         break;
       }
@@ -395,8 +417,8 @@ export async function runImports(
   // Stuff+ Inputs alone justify a recalc (per-pitch stuff_plus → Pitching
   // Master.stuff_plus → projection equation reads it for transfer/returner
   // pitcher projections).
-  if (!hitterImported && !pitcherImported && !stuffInputsImported) {
-    console.log("\nNo master or Stuff+ imports — skipping cascade.");
+  if (!hitterImported && !pitcherImported && !stuffInputsImported && !conferenceImported) {
+    console.log("\nNo master, Stuff+, or conference imports — skipping cascade.");
     return;
   }
 
@@ -458,6 +480,33 @@ export async function runImports(
     if (Array.isArray(res?.errors)) for (const e of res.errors.slice(0, 3)) err(e);
   } catch (e) {
     err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // Conference rollups — refresh per-conf Stuff+ (from rolled-up per-pitcher
+  // stuff_plus) and env-rate plusses (from fresh NCAA averages). Runs before
+  // bulkRecalc so projection math sees the latest conference data.
+  if (conferenceImported || pitcherImported || stuffInputsImported) {
+    step("calculateConferenceStuffPlus (rollup → Conference Stats.Stuff_plus)");
+    try {
+      const start = Date.now();
+      const { report, errors } = await calculateConferenceStuffPlus(season);
+      ok(`${report.written} conferences updated, ${errors.length} errors (${timeMs(start)})`);
+      for (const e of errors.slice(0, 3)) err(e);
+    } catch (e) {
+      err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  if (conferenceImported || hitterImported) {
+    step("computeConferenceEnvRates (ba_plus/obp_plus/iso_plus/slg_plus)");
+    try {
+      const start = Date.now();
+      const res = await computeConferenceEnvRates(season);
+      ok(`${res.updated} updated, ${res.skipped} skipped, ${res.errors.length} errors (${timeMs(start)})`);
+      for (const e of res.errors.slice(0, 3)) err(e);
+    } catch (e) {
+      err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   step("bulkRecalculatePredictionsLocal");
