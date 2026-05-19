@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
  * older than this will see the modal on next dashboard load. Format:
  * `YYYY-MM-DD` keeps the version stable and self-documenting.
  */
-const CURRENT_RELEASE = "2026-05-18";
+const CURRENT_RELEASE = "2026-05-19";
 const STORAGE_KEY = "rstr_iq_whats_new_seen";
 
 type Feature = {
@@ -35,7 +35,17 @@ const FEATURES: Feature[] = [
     details: [
       "Year-over-year compare and championship benchmark cards quantify exactly where the build stands.",
       "Pitcher and hitter tier labels reworked — a 1.8 pWAR starter now reads \"Contributor,\" not \"Below.\"",
-      "2026 comparison rolling in once the regular season is fully locked and conference champions are confirmed.",
+      "2026 regular-season WAR snapshot live (308 D1 teams + 34 conference champions flagged).",
+    ],
+  },
+  {
+    title: "2026 Final Regular Season Stats Locked",
+    tagline:
+      "Full end-of-regular-season D1 refresh — hitters, pitchers, every Stuff+ input, and conference aggregates are now the latest available numbers.",
+    details: [
+      "All projections, power ratings, and scouting grades recomputed against fresh 2026 NCAA averages.",
+      "Per-pitch Stuff+ re-rolled across 26K+ rows; per-conference Stuff+ and env-rate plusses (BA+/OBP+/ISO+/SLG+) refreshed for every league.",
+      "Postseason updates (CWS, national champion) will land once the bracket plays out.",
     ],
   },
 ];
