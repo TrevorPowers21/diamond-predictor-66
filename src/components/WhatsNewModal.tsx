@@ -20,6 +20,48 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    date: "2026-05-20",
+    headline: "Transfer Portal automation and visibility across the app",
+    features: [
+      {
+        title: "Verified Athletics Portal Sync",
+        tagline:
+          "Daily portal exports flow straight into RSTR IQ. Auto-matched D1 hitters and pitchers get a live portal badge, contact info, commit destination, and athletic-aid status. Window-close resets (Jan 15 + Sep 15) keep the feed clean.",
+        details: [
+          "Smart matching across name variants and school-name aliases (Aiden ↔ Aidan, Mike ↔ Michael, Queens-Charlotte ↔ Queens University of Charlotte). Ambiguous and no-match rows land in an admin review queue.",
+          "Player profile shows entry date, commit school, and a Contact popover with cell, email, GPA, athletic aid, and Verified Athletics roster link.",
+          "Withdrawal sweep auto-flips players to WITHDRAWN if they drop off the feed for 2+ days.",
+        ],
+      },
+      {
+        title: "Portal Status on Every Player Row",
+        tagline:
+          "Spot portal entries at a glance on the Player Dashboard. Color-coded chips next to position match the profile-page badge language so the visual story stays consistent across the app.",
+        details: [
+          "New \"In Portal\" filter that bypasses the PA stat-qualification gate so mid-season portal entries surface even with low playing time.",
+          "Chips for IN PORTAL, COMMITTED, WATCHING, and WITHDRAWN render next to TWP in the same pill style.",
+          "Filter state persists alongside Class, Bats, Conference selections.",
+        ],
+      },
+      {
+        title: "Recent Portal Activity Feed",
+        tagline:
+          "Bigger, scrollable feed on the Dashboard that surfaces portal news in priority order: players you're Following or have On Board first, then top available portal players by projected wRC+.",
+        details: [
+          "Sorted newest portal entry date first; within each date, watched players bubble to the top and the rest rank by pWRC+ badge.",
+          "Cutoff anchors at \"since your last visit\" and holds steady for 48 hours so the feed doesn't clear the moment you click in.",
+          "Every row carries the player's pWRC+ projection inline so coaches can scan talent at a glance.",
+        ],
+      },
+    ],
+    whatElse: [
+      "Data Safety: D1 stat imports never wipe JUCO rows and vice versa. Importers scope their DELETE windows so a final regular-season upload can't take down a division.",
+      "Transfer Portal Simulator: JUCO district lookup wired through the conference UUID map so \"NJCAA D1 Midwest\" resolves to its Conference Stats row (BA+ 117.7 etc.) instead of falling back to NCAA defaults.",
+      "Cascade Automation: JUCO imports now auto-run the full recompute (NCAA averages, scoring, conf Stuff+, env-rates, bulk recalc) and invalidate target board snapshots so stored projections can't go stale.",
+      "What's New: release history view added. See every prior update by date via the \"See all releases\" link.",
+    ],
+  },
+  {
     date: "2026-05-19",
     headline: "Full JUCO upload, Program Analytics, 2026 final regular season locked",
     features: [
