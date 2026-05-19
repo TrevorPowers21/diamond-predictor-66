@@ -40,7 +40,9 @@ export type PipelineStep =
   | "rollup_stuff_plus"
   | "ncaa_averages"
   | "compute_scores"
-  | "recalculate";
+  | "recalculate"
+  | "conf_stuff_plus_rollup"
+  | "conf_env_rates";
 
 export const PIPELINE_LABELS: Record<PipelineStep, string> = {
   sync_master_to_players: "Sync master → players",
@@ -53,6 +55,8 @@ export const PIPELINE_LABELS: Record<PipelineStep, string> = {
   ncaa_averages: "Refresh NCAA averages",
   compute_scores: "Recompute power-rating scores",
   recalculate: "Bulk-recalculate predictions",
+  conf_stuff_plus_rollup: "Rollup Stuff+ → Conference Stats",
+  conf_env_rates: "Compute Conference env-rate plusses (ba_plus/obp_plus/iso_plus/slg_plus)",
 };
 
 export const REGISTRY: RegistryEntry[] = [
@@ -203,22 +207,21 @@ export const REGISTRY: RegistryEntry[] = [
   {
     type: "conference_stats",
     label: "Conference Stats",
-    required: ["conference"],
+    required: ["conference abbreviation"],
     signature: [
       "AVG",
       "OBP",
-      "SLG",
       "ISO",
       "ERA",
       "FIP",
       "WHIP",
-      "BA+",
-      "OBP+",
-      "ERA+",
+      "K9",
+      "BB9",
+      "HR9",
     ],
     filenameHints: [/conference/i, /\bconf[_\-]/i],
-    downstream: ["ncaa_averages", "compute_scores", "recalculate"],
-    description: "Per-conference aggregate stats. Importer not yet wired (Phase D).",
+    downstream: ["conf_stuff_plus_rollup", "conf_env_rates"],
+    description: "Per-conference aggregate hitter + pitcher rates. Updates AVG/OBP/ISO/ERA/FIP/WHIP/K9/BB9/HR9; downstream re-rolls conf Stuff+ and computes env-rate plusses (ba_plus/obp_plus/iso_plus/slg_plus) from NCAA averages.",
   },
   {
     type: "park_factors",
