@@ -21,87 +21,84 @@ type Release = {
 const RELEASES: Release[] = [
   {
     date: "2026-05-20",
-    headline: "Transfer Portal automation and visibility across the app",
+    headline: "Portal updates flowing daily, with visibility across the app",
     features: [
       {
-        title: "Verified Athletics Portal Sync",
+        title: "Daily Portal Updates",
         tagline:
-          "Daily portal exports flow straight into RSTR IQ. Auto-matched D1 hitters and pitchers get a live portal badge, contact info, commit destination, and athletic-aid status. Window-close resets (Jan 15 + Sep 15) keep the feed clean.",
+          "Portal entries flow into RSTR IQ daily. Players who enter, commit, or withdraw update on their profile as it happens, so your board reflects today's reality.",
         details: [
-          "Smart matching across name variants and school-name aliases (Aiden ↔ Aidan, Mike ↔ Michael, Queens-Charlotte ↔ Queens University of Charlotte). Ambiguous and no-match rows land in an admin review queue.",
-          "Player profile shows entry date, commit school, and a Contact popover with cell, email, GPA, athletic aid, and Verified Athletics roster link.",
-          "Withdrawal sweep auto-flips players to WITHDRAWN if they drop off the feed for 2+ days.",
+          "Every D1 portal entry gets a live status badge and updated commit destination on the profile.",
+          "Contact info on the player profile: phone, email, GPA, athletic aid, and roster link, all in one tap.",
+          "Players who drop out of the portal are flagged automatically so your board stays current.",
         ],
       },
       {
-        title: "Portal Status on Every Player Row",
+        title: "Portal Status on Every Row",
         tagline:
-          "Spot portal entries at a glance on the Player Dashboard. Color-coded chips next to position match the profile-page badge language so the visual story stays consistent across the app.",
+          "Color-coded chips on the Player Dashboard make portal entries obvious at a scan. Same visual language as the profile-page badge so it reads the same everywhere.",
         details: [
-          "New \"In Portal\" filter that bypasses the PA stat-qualification gate so mid-season portal entries surface even with low playing time.",
-          "Chips for IN PORTAL, COMMITTED, WATCHING, and WITHDRAWN render next to TWP in the same pill style.",
-          "Filter state persists alongside Class, Bats, Conference selections.",
+          "New \"In Portal\" filter on the Player Dashboard. Flip it on and you only see portal players, including mid-season entries that don't meet the usual playing-time threshold.",
+          "PRT, CMT, WCH, and WDN chips sit next to the position so you can spot portal status while sorting by any stat.",
+          "Filter saves alongside Class, Bats, and Conference so you can stay locked in on a slice.",
         ],
       },
       {
         title: "Recent Portal Activity Feed",
         tagline:
-          "Bigger, scrollable feed on the Dashboard that surfaces portal news in priority order: players you're Following or have On Board first, then top available portal players by projected wRC+.",
+          "Bigger, scrollable feed on your overview that surfaces the portal news that matters to you first.",
         details: [
-          "Sorted newest portal entry date first; within each date, watched players bubble to the top and the rest rank by pWRC+ badge.",
-          "Cutoff anchors at \"since your last visit\" and holds steady for 48 hours so the feed doesn't clear the moment you click in.",
-          "Every row carries the player's pWRC+ projection inline so coaches can scan talent at a glance.",
+          "Players you're Following or have On Board show up at the top.",
+          "Then top available portal players ranked by projected wRC+, with the pWRC+ number on each row so you can scan talent fast.",
+          "Sorted newest portal entry first, and the feed holds for 48 hours so it doesn't clear the moment you click in.",
         ],
       },
     ],
     whatElse: [
-      "Data Safety: D1 stat imports never wipe JUCO rows and vice versa. Importers scope their DELETE windows so a final regular-season upload can't take down a division.",
-      "Transfer Portal Simulator: JUCO district lookup wired through the conference UUID map so \"NJCAA D1 Midwest\" resolves to its Conference Stats row (BA+ 117.7 etc.) instead of falling back to NCAA defaults.",
-      "Cascade Automation: JUCO imports now auto-run the full recompute (NCAA averages, scoring, conf Stuff+, env-rates, bulk recalc) and invalidate target board snapshots so stored projections can't go stale.",
-      "What's New: release history view added. See every prior update by date via the \"See all releases\" link.",
+      "Transfer Portal Simulator: JUCO projections now pull the right district context every time. Numbers line up with what you'd expect from a power-conference landing spot.",
+      "Release History: a new \"See all releases\" link on this popup lets you scroll past updates by date in case you missed one.",
     ],
   },
   {
     date: "2026-05-19",
-    headline: "Full JUCO upload, Program Analytics, 2026 final regular season locked",
+    headline: "JUCO live across the app, Program Analytics, 2026 final season locked",
     features: [
       {
-        title: "Full JUCO Player Upload + Transfer Portal",
+        title: "JUCO Players Live Across the App",
         tagline:
-          "Every qualified NJCAA D1 hitter and pitcher is now live in RSTR IQ, fully wired into the Transfer Portal simulator.",
+          "Every qualified NJCAA D1 hitter and pitcher is in RSTR IQ and fully wired into the Transfer Portal simulator.",
         details: [
-          "Run JUCO-to-D1 transfer projections for any player, any destination. Calibrated weights, district-specific competition, JUCO-specific risk model.",
-          "New JUCO subtab on the Player Dashboard with leaderboards, district filter, and target board.",
-          "Dedicated JUCO player + pitcher profile pages with 2026 actuals and scouting grades.",
+          "Run JUCO-to-D1 transfer projections for any player, any destination, with district-specific competition baked in.",
+          "JUCO subtab on the Player Dashboard with leaderboards, district filter, and target board support.",
+          "JUCO player and pitcher profile pages built out with 2026 actuals and scouting grades.",
         ],
       },
       {
         title: "Program Analytics",
         tagline:
-          "A full Team Builder analytics view that grades your roster position-by-position, tier-by-tier, broken out by lineup, rotation, and bullpen WAR with championship benchmarks alongside.",
+          "A Team Builder analytics view that grades your roster position-by-position and tier-by-tier — lineup, rotation, bullpen — alongside championship benchmarks.",
         details: [
-          "Year-over-year compare and championship benchmark cards quantify exactly where the build stands.",
-          "Pitcher and hitter tier labels reworked. A 1.8 pWAR starter now reads \"Contributor,\" not \"Below.\"",
-          "2026 regular-season WAR snapshot live (308 D1 teams + 34 conference champions flagged).",
+          "Year-over-year compare card shows where this build stands against your 2025 roster.",
+          "Championship benchmark dropdown to compare against any 2025 conference champ or the national title team.",
+          "Tier labels reworked so a 1.8 pWAR starter reads \"Contributor,\" not \"Below.\"",
         ],
       },
       {
-        title: "2026 Final Regular Season Stats Locked",
+        title: "2026 Final Regular Season Stats",
         tagline:
-          "Full end-of-regular-season D1 refresh. Hitters, pitchers, every Stuff+ input, and conference aggregates are now the latest available numbers.",
+          "Final end-of-regular-season D1 refresh complete. Hitters, pitchers, conference aggregates, and Stuff+ are all the latest numbers.",
         details: [
-          "All projections, power ratings, and scouting grades recomputed against fresh 2026 NCAA averages.",
-          "Per-pitch Stuff+ re-rolled across 26K+ rows. Per-conference Stuff+ and env-rate plusses (BA+/OBP+/ISO+/SLG+) refreshed for every league.",
-          "Postseason updates (CWS, national champion) will land once the bracket plays out.",
+          "Every projection, power rating, and scouting grade recomputed against the fresh season totals.",
+          "2026 conference champions are flagged on Program Analytics for benchmarking next year's build.",
+          "Postseason updates roll in after the College World Series wraps.",
         ],
       },
     ],
     whatElse: [
-      "Team Builder: bench-everywhere default fixed. Tiers now distribute correctly.",
-      "Team Builder: depth-chart class colors read the current class year (R-JR shows as JR, etc.).",
-      "Team Builder: redundant \"Class Adj\" column removed (equation still applies).",
-      "Risk Assessment: Stuff+ added as a factor. Pitcher Skillset falls back to K/9 · BB/9 · HR/9 when TrackMan is missing.",
-      "Data: DOB and class year columns added to the master tables (D1 backfill comes with 2026 final stats).",
+      "Team Builder: tier distribution fixed. Players now spread across cornerstone / everyday / platoon / utility / bench like you'd expect.",
+      "Team Builder: depth-chart class colors read the player's current year (R-JR shows as JR).",
+      "Team Builder: \"Class Adj\" column removed from the build table to clean up clutter.",
+      "Risk Assessment: Stuff+ now factors into pitcher risk profiles when TrackMan data is available.",
     ],
   },
 ];
