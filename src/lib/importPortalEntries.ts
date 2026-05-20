@@ -406,24 +406,22 @@ export async function importPortalEntriesCsv(csvText: string): Promise<PortalImp
   // count + activity feed reflect current reality, not lingering bookkeeping.
   await resetArrivedCommittedPlayers(result);
 
-  // Withdrawal sweep — players previously marked IN_PORTAL who weren't in
-  // today's export (or any export in the last 2 days). Flip to WITHDRAWN.
-  const cutoff = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-  const { data: stale, error: staleErr } = await (supabase as any)
-    .from("players")
-    .select("id")
-    .eq("portal_status", "IN PORTAL")
-    .lt("portal_last_seen_at", cutoff);
-
-  if (!staleErr && stale && stale.length > 0) {
-    const staleIds = (stale as Array<{ id: string }>).map((s) => s.id);
-    const { error: updErr } = await (supabase as any)
-      .from("players")
-      .update({ portal_status: "WITHDRAWN" })
-      .in("id", staleIds);
-    if (!updErr) result.withdrawn = staleIds.length;
-    else result.errors.push(`Withdrawal sweep: ${updErr.message}`);
-  }
+  // Auto-withdrawal sweep DISABLED 2026-05-20.
+  //
+  // Verified Athletics exports cap at 500 rows. Once D1 portal windows open
+  // (early-June, mid-August), the actual portal population will exceed 500
+  // and players ranked 501+ would be incorrectly marked WITHDRAWN here just
+  // because they fell out of the daily snapshot. Absence ≠ withdrawn under
+  // a hard export cap.
+  //
+  // Replacement strategy:
+  //   - portal_last_seen_at is still maintained on every matched update, so
+  //     admins can manually surface "haven't seen this player in N days"
+  //     queries when curating the board.
+  //   - When VA does include an explicit WITHDRAWN status in the CSV (future
+  //     export format), wire that signal into the matched-player update
+  //     path so we have a positive signal rather than absence-based proxy.
+  result.withdrawn = 0;
 
   return result;
 }
