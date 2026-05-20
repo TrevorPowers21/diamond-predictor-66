@@ -1473,7 +1473,9 @@ export default function TransferPortal() {
     const basePerOwar = readLocalNum("nil_base_per_owar", 25000, remoteEquationValues);
     const ptm = getProgramTierMultiplierByConference(toConference, DEFAULT_NIL_TIER_MULTIPLIERS);
     const pvm = getPositionValueMultiplier(selectedPlayer.position);
-    const nilValuation = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
+    // Market value floors at $0 — negative oWAR shouldn't produce a negative dollar projection.
+    const nilValuationRaw = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
+    const nilValuation = nilValuationRaw == null ? null : Math.max(0, nilValuationRaw);
     const safeBaStdPower = baStdPower === 0 ? 1 : baStdPower;
     const baScaled = ncaaAvgBA + (((baPR - 100) / safeBaStdPower) * baStdNcaa);
     const baBlended = (lastAvg * (1 - baPowerWeight)) + (baScaled * baPowerWeight);

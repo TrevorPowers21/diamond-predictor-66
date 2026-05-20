@@ -3682,7 +3682,9 @@ export default function TeamBuilder() {
     const basePerOwar = eqNum("nil_base_per_owar", 25000);
     const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
     const pvm = getPositionValueMultiplier(player.position ?? null);
-    const nilValuation = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
+    // Market value floors at $0 — negative oWAR shouldn't produce a negative dollar projection.
+    const nilValuationRaw = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
+    const nilValuation = nilValuationRaw == null ? null : Math.max(0, nilValuationRaw);
 
     return {
       fromTeam: fromTeamName,
@@ -3975,7 +3977,8 @@ export default function TeamBuilder() {
             const basePerOwar = eqNum("nil_base_per_owar", 25000);
             const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
             const pvm = getPositionValueMultiplier(row.position);
-            const nilValuation = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
+            const nilValuationRaw = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
+            const nilValuation = nilValuationRaw == null ? null : Math.max(0, nilValuationRaw);
             newP.transfer_snapshot = {
               p_avg: pAvgAdj,
               p_obp: pObpAdj,
@@ -4363,7 +4366,8 @@ export default function TeamBuilder() {
           const raaAdj = offValueAdj == null ? null : offValueAdj * pa * runsPerPa;
           const rarAdj = raaAdj == null ? null : raaAdj + replacementRuns;
           const owarAdj = rarAdj == null ? null : rarAdj / 10;
-          const nilValuation = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
+          const nilValuationRaw = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
+          const nilValuation = nilValuationRaw == null ? null : Math.max(0, nilValuationRaw);
 
           transferSnapshot = {
             p_avg: pAvgAdj,

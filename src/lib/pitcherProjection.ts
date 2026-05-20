@@ -493,7 +493,10 @@ export function computePitcherProjection(
   const ptm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
   const pvm = getPitchingPvfForRole(projectedRole, eq);
   const marketEligible = canShowPitchingMarketValue(input.team, conferenceForMarket);
-  const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
+  // Market value floors at $0 — negative WAR shouldn't produce a negative
+  // dollar projection. Null stays null (unknown vs zero are different signals).
+  const marketValueRaw = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
+  const marketValue = marketValueRaw == null ? null : Math.max(0, marketValueRaw);
 
   return {
     p_era: roleAdjustedEra,

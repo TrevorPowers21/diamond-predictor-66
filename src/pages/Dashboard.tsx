@@ -437,7 +437,7 @@ export default function Dashboard() {
                   return (
                     <Link
                       key={p.id}
-                      to={`/dashboard/player/${p.id}`}
+                      to={profileRouteFor(p.id, p.position)}
                       className="flex items-center gap-2 py-1.5 text-xs hover:text-primary transition-colors cursor-pointer"
                     >
                       <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", isCommitted ? "bg-blue-500" : "bg-[#D4AF37]")} />

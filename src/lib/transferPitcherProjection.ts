@@ -436,7 +436,9 @@ export function computeTransferPitcherProjection(
   const ptm = getProgramTierMultiplierByConference(input.toConference, pitchingTierMultipliers);
   const pvm = getPitchingPvfForRole(projectedRole, eq);
   const marketEligible = canShowPitchingMarketValue(input.toTeam, input.toConference);
-  const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
+  // Market value floors at $0 — negative WAR shouldn't produce a negative dollar projection.
+  const marketValueRaw = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
+  const marketValue = marketValueRaw == null ? null : Math.max(0, marketValueRaw);
 
   const showWork: TransferPitcherShowWork = {
     era: { ...eraWork, roleAdjusted: roleAdjustedEra },
