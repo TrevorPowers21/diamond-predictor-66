@@ -13,6 +13,7 @@ import {
   PITCHER_IP_THRESHOLD,
   PITCHER_IP_NOISE_FLOOR,
 } from "@/lib/combinedStats";
+import { readPitchingWeights } from "@/lib/pitchingEquations";
 
 const round2 = (v: number | null) => (v == null ? null : Math.round(v * 100) / 100);
 
@@ -394,6 +395,9 @@ export async function computeAndStorePitchingScores(season = 2026): Promise<{ up
 
   console.time("[ComputePitching] 1. fetch baselines");
   const { pitcher: pitcherBaselines } = await fetchSeasonBaselines(season);
+  // Pitching equation weights drive p_rv_plus = weighted composite of the
+  // six +stats. Reads from localStorage overlay → Supabase cache → defaults.
+  const pitchingEq = readPitchingWeights();
   console.timeEnd("[ComputePitching] 1. fetch baselines");
   console.log(`[computeAndStorePitchingScores] Using baselines for ${season}:`, pitcherBaselines);
 
@@ -474,6 +478,21 @@ export async function computeAndStorePitchingScores(season = 2026): Promise<{ up
         bb9_pr_plus: round2(ratings.bb9PrPlus),
         hr9_pr_plus: round2(ratings.hr9PrPlus),
         overall_pr_plus: round2(ratings.overallPrPlus),
+        // p_rv_plus = weighted composite of the six +stats. Same formula as
+        // pitcherProjection.ts step 5, applied to actual-stats-based +s
+        // (era_pr_plus etc.) instead of projected rates. Used as the
+        // "last-year pRV+" for WAR snapshots and any historical pRV+ view.
+        // Null when any input is missing — caller must handle.
+        p_rv_plus: round2(
+          [ratings.eraPrPlus, ratings.fipPrPlus, ratings.whipPrPlus, ratings.k9PrPlus, ratings.bb9PrPlus, ratings.hr9PrPlus].every((v) => v != null)
+            ? (Number(ratings.eraPrPlus) * pitchingEq.era_plus_weight) +
+              (Number(ratings.fipPrPlus) * pitchingEq.fip_plus_weight) +
+              (Number(ratings.whipPrPlus) * pitchingEq.whip_plus_weight) +
+              (Number(ratings.k9PrPlus) * pitchingEq.k9_plus_weight) +
+              (Number(ratings.bb9PrPlus) * pitchingEq.bb9_plus_weight) +
+              (Number(ratings.hr9PrPlus) * pitchingEq.hr9_plus_weight)
+            : null
+        ),
         combined_used: blended.combined,
         combined_ip: blended.combined ? blended.totalIp : null,
         combined_seasons: blended.combined ? blended.seasonsUsed.join(",") : null,

@@ -12,6 +12,7 @@ import { Eye, LogIn, X, CheckCircle, TrendingUp, Users, Calendar, Activity, Arro
 import { profileRouteFor } from "@/lib/profileRoutes";
 import SchoolBanner from "@/components/SchoolBanner";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
+import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 
 type HitterRow = {
   player_id: string;
@@ -62,6 +63,7 @@ const timeSince = (iso: string | null | undefined): string => {
 export default function Dashboard() {
   const { devBypassed, disableDevBypass } = useAuth();
   const serviceKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+  const { schoolName, schoolFullName } = useEffectiveSchool();
 
   const { data: topHitters = [] } = useQuery({
     queryKey: ["overview-top-hitters"],
@@ -176,12 +178,26 @@ export default function Dashboard() {
 
   // Total player counts + recent portal activity for the briefing
   const { data: briefingStats } = useQuery({
-    queryKey: ["overview-briefing-stats"],
+    queryKey: ["overview-briefing-stats", schoolName ?? "", schoolFullName ?? ""],
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
+      // "Committed" tile counts commits TO the user's school only — not every
+      // commit globally. commit_school strings come from Verified Athletics and
+      // may be either the short name ("Arkansas") or the full name ("University
+      // of Arkansas"), so we OR-match on both via ilike.
+      let committedQuery = supabase
+        .from("players")
+        .select("id", { count: "exact", head: true })
+        .eq("portal_status", "COMMITTED");
+      if (schoolName || schoolFullName) {
+        const ors: string[] = [];
+        if (schoolName) ors.push(`commit_school.ilike.%${schoolName}%`);
+        if (schoolFullName && schoolFullName !== schoolName) ors.push(`commit_school.ilike.%${schoolFullName}%`);
+        committedQuery = committedQuery.or(ors.join(","));
+      }
       const [portalCountRes, committedCountRes, recentPortalRes, lastPredRes] = await Promise.all([
         supabase.from("players").select("id", { count: "exact", head: true }).eq("portal_status", "IN PORTAL"),
-        supabase.from("players").select("id", { count: "exact", head: true }).eq("portal_status", "COMMITTED"),
+        committedQuery,
         supabase
           .from("players")
           .select("id, first_name, last_name, team, portal_status")
@@ -255,42 +271,54 @@ export default function Dashboard() {
       const cutoff = lastVisitRef.current;
 
       // Single source query: every portal/committed player joined to their
-      // pWRC+ projection. We filter + sort + tag in-memory afterwards.
+      // projection. Hitters surface pWRC+, pitchers surface pRV+ — both
+      // pulled so we can pick the right metric per row in-memory.
       const { data: raw } = await (supabase as any)
         .from("player_predictions")
-        .select(`p_wrc_plus, players!inner(id, first_name, last_name, team, from_team, portal_status, portal_entry_date, commit_school, commit_date, updated_at)`)
+        .select(`p_wrc_plus, p_rv_plus, players!inner(id, first_name, last_name, team, from_team, position, portal_status, portal_entry_date, commit_school, commit_date, updated_at)`)
         .in("players.portal_status", ["IN PORTAL", "COMMITTED"])
-        .not("p_wrc_plus", "is", null)
-        .order("p_wrc_plus", { ascending: false })
-        .limit(200);
+        .or("p_wrc_plus.not.is.null,p_rv_plus.not.is.null")
+        .limit(400);
 
       const followSet = new Set(highFollowList.map((p) => p.player_id));
       const boardSet = new Set(targetBoard.map((p) => p.player_id));
 
+      const isPitcher = (pos: string | null | undefined) =>
+        /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
+
       const all = (raw || [])
-        .map((r: any) => ({ ...r.players, p_wrc_plus: r.p_wrc_plus }))
+        .map((r: any) => ({ ...r.players, p_wrc_plus: r.p_wrc_plus, p_rv_plus: r.p_rv_plus }))
         .filter((p: any) => (p.updated_at || "") >= cutoff)
-        .map((p: any) => ({
-          ...p,
-          source: followSet.has(p.id) ? "following" : boardSet.has(p.id) ? "board" : "top",
-        }));
+        .map((p: any) => {
+          const pitcher = isPitcher(p.position);
+          const metric = pitcher ? p.p_rv_plus : p.p_wrc_plus;
+          return {
+            ...p,
+            is_pitcher: pitcher,
+            metric_value: metric ?? null,
+            source: followSet.has(p.id) ? "following" : boardSet.has(p.id) ? "board" : "top",
+          };
+        })
+        .filter((p: any) => p.metric_value != null);
 
       // Sort: newest portal_entry_date first → within date, watching first
-      // (following/board), then by p_wrc_plus desc.
+      // (following/board), then by projected metric desc.
       const sourceRank = (s: string) => (s === "following" || s === "board" ? 0 : 1);
       all.sort((a: any, b: any) => {
         const dateCmp = (b.portal_entry_date || "").localeCompare(a.portal_entry_date || "");
         if (dateCmp !== 0) return dateCmp;
         const srcCmp = sourceRank(a.source) - sourceRank(b.source);
         if (srcCmp !== 0) return srcCmp;
-        return (b.p_wrc_plus ?? -Infinity) - (a.p_wrc_plus ?? -Infinity);
+        return (b.metric_value ?? -Infinity) - (a.metric_value ?? -Infinity);
       });
 
       // Cap at 50 — keeps the scrollable list bounded but allows generous scroll.
       return all.slice(0, 50) as Array<{
-        id: string; first_name: string; last_name: string; team: string | null; from_team: string | null;
+        id: string; first_name: string; last_name: string; team: string | null; from_team: string | null; position: string | null;
         portal_status: string; portal_entry_date: string | null; commit_school: string | null; commit_date: string | null;
-        updated_at: string; p_wrc_plus?: number | null; source: "following" | "board" | "top";
+        updated_at: string; p_wrc_plus?: number | null; p_rv_plus?: number | null;
+        is_pitcher: boolean; metric_value: number | null;
+        source: "following" | "board" | "top";
       }>;
     },
   });
@@ -364,7 +392,7 @@ export default function Dashboard() {
               accent="gold"
             />
             <BriefingTile
-              label="Committed"
+              label={schoolName ? `Committed to ${schoolName}` : "Committed"}
               value={String(stats.committedCount)}
               icon={<CheckCircle className="h-3.5 w-3.5" />}
               accent="blue"
@@ -401,7 +429,8 @@ export default function Dashboard() {
                     null;
                   const fromTeam = p.from_team || p.team;
                   const toLabel = isCommitted ? (p.commit_school || "Committed") : "Portal";
-                  const wrcLabel = p.p_wrc_plus != null ? Math.round(p.p_wrc_plus).toString() : null;
+                  const metricLabel = p.metric_value != null ? Math.round(p.metric_value).toString() : null;
+                  const metricSuffix = p.is_pitcher ? "pRV+" : "pWRC+";
                   const entryDate = p.portal_entry_date
                     ? new Date(p.portal_entry_date).toLocaleDateString(undefined, { month: "short", day: "numeric" })
                     : null;
@@ -418,9 +447,9 @@ export default function Dashboard() {
                           {sourceLabel}
                         </span>
                       )}
-                      {wrcLabel && (
+                      {metricLabel && (
                         <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-px rounded font-mono">
-                          {wrcLabel} pWRC+
+                          {metricLabel} {metricSuffix}
                         </span>
                       )}
                       <span className="flex items-center gap-1.5 ml-1 min-w-0">

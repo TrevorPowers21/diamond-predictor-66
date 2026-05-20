@@ -23,7 +23,7 @@ import { computeTransferProjection } from "@/lib/transferProjection";
 import { computeTransferPitcherProjection } from "@/lib/transferPitcherProjection";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
-import { resolveMetricParkFactor } from "@/lib/parkFactors";
+import { resolveMetricParkFactor, batsHandToHandedness } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
@@ -572,7 +572,7 @@ export default function TransferPortal() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, team, from_team, conference, division, transfer_portal, team_id, source_team_id")
+          .select("id, first_name, last_name, position, team, from_team, conference, division, transfer_portal, team_id, source_team_id, bats_hand")
           .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
         allPlayers = allPlayers.concat(data || []);
@@ -1282,12 +1282,16 @@ export default function TransferPortal() {
     const fromStuff = fromConfStats?.stuff_plus ?? null;
     const toStuff = toConfStats?.stuff_plus ?? null;
 
-    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name);
-    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name);
-    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name);
-    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name);
-    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name);
-    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name);
+    // Park factors are handedness-aware for hitters. LHB hitters apply LHB
+    // park factors (which capture how the park plays for left-handed bats);
+    // RHB applies RHB; switch and unknown fall back to combined.
+    const playerHand = batsHandToHandedness((selectedPlayer as any).bats_hand);
+    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name, undefined, undefined, playerHand);
+    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name, undefined, undefined, playerHand);
+    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name, undefined, undefined, playerHand);
+    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name, undefined, undefined, playerHand);
+    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name, undefined, undefined, playerHand);
+    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name, undefined, undefined, playerHand);
     if (fromAvgPlus == null) missingInputs.push("From AVG+");
     if (toAvgPlus == null) missingInputs.push("To AVG+");
     if (fromObpPlus == null) missingInputs.push("From OBP+");

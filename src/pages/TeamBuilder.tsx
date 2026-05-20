@@ -32,7 +32,7 @@ import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { usePitcherRoleOverrides } from "@/hooks/usePitcherRoleOverrides";
-import { resolveMetricParkFactor } from "@/lib/parkFactors";
+import { resolveMetricParkFactor, batsHandToHandedness } from "@/lib/parkFactors";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 import { useParkFactors } from "@/hooks/useParkFactors";
@@ -1212,7 +1212,7 @@ export default function TeamBuilder() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, is_twp, class_year, throws_hand, team, from_team, conference, transfer_portal, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at), nil_valuations(estimated_value, component_breakdown)")
+          .select("id, first_name, last_name, position, is_twp, class_year, throws_hand, bats_hand, team, from_team, conference, transfer_portal, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at), nil_valuations(estimated_value, component_breakdown)")
           .range(from, from + PAGE - 1);
         if (error) throw error;
         all = all.concat(data || []);
@@ -1787,7 +1787,7 @@ export default function TeamBuilder() {
       for (const r of hitterStats) { if (r.player_id) active2025Ids.add(r.player_id); }
       for (const r of pitchingMasterRows) { if (r.source_player_id) active2025Ids.add(r.source_player_id); }
       // Try team_id UUID first, fall back to team name match
-      const selectCols = "id, first_name, last_name, position, is_twp, class_year, throws_hand, team, from_team, conference, transfer_portal, source_player_id, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at)";
+      const selectCols = "id, first_name, last_name, position, is_twp, class_year, throws_hand, bats_hand, team, from_team, conference, transfer_portal, source_player_id, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at)";
       let query = supabase.from("players").select(selectCols).eq("transfer_portal", false);
       if (selectedTeamId) {
         query = query.eq("team_id", selectedTeamId);
@@ -1955,6 +1955,12 @@ export default function TeamBuilder() {
     // compares lastDepthTeamRef.current vs the new selectedTeam; matching
     // them here makes it a no-op for this load.
     lastDepthTeamRef.current = build.team || null;
+    // Suppress the next auto-seed pass — loadBuild has already supplied the
+    // returner+target rows from the saved build. Without this guard, the
+    // returners query refetches when selectedTeam changes and the auto-seed
+    // effect wipes the loaded roster, replacing it with fresh defaults.
+    skipAutoSeedOnceRef.current = true;
+    autoSeededTeamRef.current = normalizeName(build.team || "");
     setSelectedTeam(build.team);
     setTotalBudget(Number(build.total_budget) || 0);
     const savedDepthAssignments =
@@ -1984,7 +1990,7 @@ export default function TeamBuilder() {
         const { data: pData, error: pErr } = await supabase
           .from("players")
           .select(`
-            id, first_name, last_name, position, is_twp, class_year, throws_hand, team, from_team, conference,
+            id, first_name, last_name, position, is_twp, class_year, throws_hand, bats_hand, team, from_team, conference,
             player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at),
             nil_valuations(estimated_value, component_breakdown)
           `)
@@ -2278,8 +2284,27 @@ export default function TeamBuilder() {
       // the user just added from the player profile page. Returners are
       // re-seeded from this effect; targets/portal/manual entries are kept.
       setRosterPlayers((prev) => {
-        const preserved = prev.filter((p) => (p.roster_status || "returner") !== "returner");
-        return [...roster, ...preserved];
+        // Stable-merge so array indices don't shift on re-seed. depthAssignments
+        // keys by array index, so any reorder rebinds the wrong player to a
+        // depth slot. Strategy: walk `prev` in order, swap each returner row
+        // for its refreshed counterpart from `roster` (matched by player_id),
+        // append any returners not yet in prev, and keep non-returner rows
+        // (targets/portal/manual) at their existing positions.
+        const rosterByPid = new Map<string, BuildPlayer>();
+        for (const r of roster) {
+          if (r.player_id) rosterByPid.set(r.player_id, r);
+        }
+        const seenPids = new Set<string>();
+        const merged: BuildPlayer[] = prev.map((p) => {
+          if ((p.roster_status || "returner") !== "returner") return p;
+          if (!p.player_id) return p;
+          const refreshed = rosterByPid.get(p.player_id);
+          if (!refreshed) return p; // no longer a returner in fresh data — keep as-is
+          seenPids.add(p.player_id);
+          return refreshed;
+        });
+        const appended = roster.filter((r) => r.player_id && !seenPids.has(r.player_id));
+        return [...merged, ...appended];
       });
       autoSeededTeamRef.current = seedKey;
     }
@@ -2622,7 +2647,10 @@ export default function TeamBuilder() {
     if (supabaseTargetBoard.length > 0) {
       targetSyncedRef.current = true;
     }
-  }, [supabaseTargetBoard, rosterPlayers]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Intentionally not depending on rosterPlayers — this is a one-shot sync
+    // (gated by targetSyncedRef). Re-running on every roster edit churned the
+    // effect needlessly and caused position-shuffle glitches.
+  }, [supabaseTargetBoard]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   const teamByKey = useMemo(() => {
@@ -3366,12 +3394,15 @@ export default function TeamBuilder() {
     const toIsoPlus = toConfStats?.iso_plus ?? null;
     const fromStuff = fromConfStats?.stuff_plus ?? null;
     const toStuff = toConfStats?.stuff_plus ?? null;
-    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name);
-    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name);
-    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name);
-    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name);
-    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name);
-    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name);
+    // Handedness-aware park factors: LHB/RHB applies their split factor; switch
+    // and unknown fall back to combined.
+    const hand = batsHandToHandedness((livePlayer as any).bats_hand);
+    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name, undefined, undefined, hand);
+    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name, undefined, undefined, hand);
+    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name, undefined, undefined, hand);
+    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name, undefined, undefined, hand);
+    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name, undefined, undefined, hand);
+    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name, undefined, undefined, hand);
     if (
       fromAvgPlus == null || toAvgPlus == null ||
       fromObpPlus == null || toObpPlus == null ||
@@ -3599,12 +3630,13 @@ export default function TeamBuilder() {
       fromConfStats.stuff_plus == null || toConfStats.stuff_plus == null
     ) return null;
 
-    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name);
-    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name);
-    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name);
-    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name);
-    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name);
-    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name);
+    const compareHand = batsHandToHandedness((player as any).bats_hand);
+    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name, undefined, undefined, compareHand);
+    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name, undefined, undefined, compareHand);
+    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name, undefined, undefined, compareHand);
+    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name, undefined, undefined, compareHand);
+    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name, undefined, undefined, compareHand);
+    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name, undefined, undefined, compareHand);
     if (
       fromParkAvgRaw == null || toParkAvgRaw == null ||
       fromParkObpRaw == null || toParkObpRaw == null ||
