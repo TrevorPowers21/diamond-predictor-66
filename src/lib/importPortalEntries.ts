@@ -24,6 +24,10 @@ export interface PortalImportResult {
   unmatched: number;
   withdrawn: number;
   arrived: number;
+  /** Rows skipped because portal_entry_date predates the current window cutoff
+   *  (most-recent passed Jan 15 / Sep 15). VA exports keep historical entries
+   *  visible for ranking purposes — we don't want to re-tag those as active. */
+  staleSkipped: number;
   errors: string[];
 }
 
@@ -327,8 +331,15 @@ export async function importPortalEntriesCsv(
   mode: PortalImportMode = "entries",
 ): Promise<PortalImportResult> {
   const result: PortalImportResult = {
-    totalRows: 0, d1Rows: 0, matched: 0, committed: 0, unmatched: 0, withdrawn: 0, arrived: 0, errors: [],
+    totalRows: 0, d1Rows: 0, matched: 0, committed: 0, unmatched: 0, withdrawn: 0, arrived: 0, staleSkipped: 0, errors: [],
   };
+
+  // Stale-row cutoff: skip any CSV row whose portal_entry_date predates the
+  // most-recent window-close (Jan 15 / Sep 15). VA's export keeps historical
+  // entries visible — we shouldn't re-tag a 2024-08-15 entry as active in
+  // May 2026. The resetArrivedCommittedPlayers sweep handles already-stored
+  // stale rows; this filter prevents new stale rows from being written.
+  const windowCutoff = getLastResetCutoff(new Date()).toISOString().slice(0, 10);
 
   const allRows = parseRows(csvText);
   result.totalRows = allRows.length;
@@ -361,6 +372,12 @@ export async function importPortalEntriesCsv(
 
   for (const row of rows) {
     try {
+      // Skip rows older than the current portal window. Pre-cutoff entries
+      // are from a previous semester and shouldn't be reactivated.
+      if (row.portalEntryDate && row.portalEntryDate < windowCutoff) {
+        result.staleSkipped++;
+        continue;
+      }
       const candidates = matchPlayers(row, players);
 
       if (candidates.length === 0) {
