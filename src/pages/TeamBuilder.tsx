@@ -2592,16 +2592,26 @@ export default function TeamBuilder() {
 
   // Bidirectional sync between Supabase target board and Team Builder roster targets
   const targetSyncedRef = useRef(false);
+  // Per-id push tracker — without this, an empty initial supabaseTargetBoard
+  // load lets the effect re-run after each mutation invalidation. Even
+  // though isOnSupabaseBoard guards the call, the query is invalidated but
+  // not yet refetched, so isOnSupabaseBoard returns false and we re-push the
+  // same player. Result: an infinite "Added to target board" toast loop the
+  // user hit on hard refresh.
+  const pushedPlayerIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (targetSyncedRef.current) return;
     const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 
-    // Push roster targets → Supabase
+    // Push roster targets → Supabase (deduped against in-session push history)
     const rosterTargets = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target" && p.player_id && isUuid(p.player_id));
     for (const p of rosterTargets) {
-      if (!isOnSupabaseBoard(p.player_id!)) {
-        addToSupabaseBoard({ playerId: p.player_id! });
+      const pid = p.player_id!;
+      if (pushedPlayerIdsRef.current.has(pid)) continue;
+      if (!isOnSupabaseBoard(pid)) {
+        addToSupabaseBoard({ playerId: pid });
       }
+      pushedPlayerIdsRef.current.add(pid);
     }
 
     // 2. Pull Supabase board → roster targets (players added from profiles/dashboard)
