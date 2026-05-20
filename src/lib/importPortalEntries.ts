@@ -451,7 +451,8 @@ export async function importPortalEntriesCsv(
   //   - When VA does include an explicit WITHDRAWN status in the CSV (future
   //     export format), wire that signal into the matched-player update
   //     path so we have a positive signal rather than absence-based proxy.
-  result.withdrawn = 0;
+  // result.withdrawn is incremented per-row in withdrawals-mode above; don't
+  // overwrite it here.
 
   return result;
 }

@@ -306,8 +306,8 @@ export async function runImports(
       case "portal_entries":
       case "portal_commits":
       case "portal_withdrawals": {
-        const mode = r.probe.type === "portal_commits" ? "commits"
-                   : r.probe.type === "portal_withdrawals" ? "withdrawals"
+        const mode = r.match.type === "portal_commits" ? "commits"
+                   : r.match.type === "portal_withdrawals" ? "withdrawals"
                    : "entries";
         const label = mode === "commits" ? "Portal Commits"
                     : mode === "withdrawals" ? "Portal Withdrawals"

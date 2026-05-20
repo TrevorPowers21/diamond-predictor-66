@@ -275,7 +275,7 @@ export const REGISTRY: RegistryEntry[] = [
     label: "Portal Withdrawals (Verified Athletics)",
     required: ["First Name", "Last Name", "Current School"],
     signature: ["Date", "Position", "Year"],
-    filenameHints: [/^withdrawals?[_-]/i, /^withdrawn[_-]/i],
+    filenameHints: [/^withdraw(s|als?|n)?[_-]/i],
     downstream: [],
     description: "VA export filtered to withdrawn players. Same matcher as portal entries — flips matched players to WITHDRAWN. The only authoritative signal for withdrawal; absence-from-entries-CSV no longer auto-withdraws.",
   },
