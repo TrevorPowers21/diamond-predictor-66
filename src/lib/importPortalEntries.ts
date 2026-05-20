@@ -308,7 +308,24 @@ function matchPlayers(row: PortalRow, players: PlayerLite[]): PlayerLite[] {
   return candidates;
 }
 
-export async function importPortalEntriesCsv(csvText: string): Promise<PortalImportResult> {
+// Mode determines what status to apply to matched players. The three modes
+// correspond to the three VA export filters:
+//   "entries"     — full portal list. Per-row decision: IN PORTAL unless
+//                   commit_school is set, in which case COMMITTED.
+//   "commits"     — VA-filtered to signed players. Forces COMMITTED + writes
+//                   commit_school/commit_date from the row.
+//   "withdrawals" — VA-filtered to withdrawn players. Forces WITHDRAWN, clears
+//                   commit info.
+//
+// All three modes share the matcher, unmatched-row handling, and reset-on-
+// arrival sweep. None of them perform the absence-based withdrawal sweep —
+// that was removed because the VA export caps at 500 rows.
+export type PortalImportMode = "entries" | "commits" | "withdrawals";
+
+export async function importPortalEntriesCsv(
+  csvText: string,
+  mode: PortalImportMode = "entries",
+): Promise<PortalImportResult> {
   const result: PortalImportResult = {
     totalRows: 0, d1Rows: 0, matched: 0, committed: 0, unmatched: 0, withdrawn: 0, arrived: 0, errors: [],
   };
@@ -327,16 +344,19 @@ export async function importPortalEntriesCsv(csvText: string): Promise<PortalImp
   const seenPlayerIds = new Set<string>();
   const nowIso = new Date().toISOString();
 
-  // Idempotency: clear all UNRESOLVED unmatched rows before this pass so the
-  // table reflects only today's CSV. Admin-resolved rows (resolved=true) stay
-  // forever — they're the audit log of what's been handled. Without this,
-  // re-running the importer accumulates duplicate review-queue entries.
-  const { error: clearErr } = await (supabase as any)
-    .from("portal_entries_unmatched")
-    .delete()
-    .eq("resolved", false);
-  if (clearErr) {
-    console.warn(`[importPortalEntries] Failed to clear unresolved rows: ${clearErr.message}`);
+  // Idempotency: clear unresolved unmatched rows ONLY when running the full
+  // "entries" pass (which is supposed to be the authoritative snapshot of
+  // who's currently in the portal). Commits + withdrawals CSVs are filtered
+  // subsets and would falsely clear the entries-pass review queue.
+  // Admin-resolved rows (resolved=true) always persist — audit log.
+  if (mode === "entries") {
+    const { error: clearErr } = await (supabase as any)
+      .from("portal_entries_unmatched")
+      .delete()
+      .eq("resolved", false);
+    if (clearErr) {
+      console.warn(`[importPortalEntries] Failed to clear unresolved rows: ${clearErr.message}`);
+    }
   }
 
   for (const row of rows) {
@@ -359,21 +379,30 @@ export async function importPortalEntriesCsv(csvText: string): Promise<PortalImp
 
       // Unique match — update players row
       const player = candidates[0];
-      const isCommitted = !!row.commitSchool;
-      const status = isCommitted ? "COMMITTED" : "IN PORTAL";
+      // Status resolution per mode:
+      //   entries     — IN PORTAL unless commit_school filled (COMMITTED)
+      //   commits     — always COMMITTED (VA pre-filtered to signed)
+      //   withdrawals — always WITHDRAWN (VA pre-filtered to withdrawn)
+      const isCommitted = mode === "commits" || (mode === "entries" && !!row.commitSchool);
+      const isWithdrawn = mode === "withdrawals";
+      const status = isWithdrawn ? "WITHDRAWN" : isCommitted ? "COMMITTED" : "IN PORTAL";
 
       const payload: Record<string, unknown> = {
         portal_status: status,
-        transfer_portal: true,
+        transfer_portal: !isWithdrawn,
         portal_entry_date: row.portalEntryDate,
         portal_last_seen_at: nowIso,
-        commit_school: row.commitSchool,
-        commit_date: row.commitDate,
-        athletic_aid: row.athleticAid,
-        contact_cell: row.contactCell,
-        contact_email: row.contactEmail,
-        gpa: row.gpa,
-        va_roster_link: row.rosterLink,
+        // Don't clobber commit info for withdrawal rows — leave whatever was
+        // there. For entries + commits, write the row's commit details.
+        ...(isWithdrawn ? {} : {
+          commit_school: row.commitSchool,
+          commit_date: row.commitDate,
+          athletic_aid: row.athleticAid,
+          contact_cell: row.contactCell,
+          contact_email: row.contactEmail,
+          gpa: row.gpa,
+          va_roster_link: row.rosterLink,
+        }),
       };
       // Fill bio fields if missing on player record
       if (row.highSchool) payload.high_school = row.highSchool;
@@ -392,6 +421,7 @@ export async function importPortalEntriesCsv(csvText: string): Promise<PortalImp
       seenPlayerIds.add(player.id);
       result.matched++;
       if (isCommitted) result.committed++;
+      if (isWithdrawn) result.withdrawn++;
     } catch (e) {
       result.errors.push(`${row.firstName} ${row.lastName}: ${e instanceof Error ? e.message : String(e)}`);
     }
