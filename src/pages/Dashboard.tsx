@@ -320,7 +320,12 @@ export default function Dashboard() {
             metric_value: metric ?? null,
             source: followSet.has(p.id) ? "following" : boardSet.has(p.id) ? "board" : "top",
           };
-        });
+        })
+        // Hide players we have no 2026 stats for. No prediction at all = no
+        // Hitter/Pitching Master row to compute from = nothing useful for
+        // coaches to act on (Ryan Brown, Connor Misch, etc. — the VA portal
+        // CSV matched a name but we don't track their production).
+        .filter((p: any) => p.p_wrc_plus != null || p.p_rv_plus != null);
 
       // Sort: newest portal_entry_date first → within date, watching first
       // (following/board), then by projected metric desc.

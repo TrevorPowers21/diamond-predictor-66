@@ -1476,7 +1476,18 @@ export default function TeamBuilder() {
     const idKeyOf = (p: any) => (p?.id ? `id:${String(p.id).trim()}` : "");
     const nameTeamKeyOf = (p: any) => `${normalizeName(`${p.first_name} ${p.last_name}`)}|${normalizeName(p.team || "")}`;
 
+    // Filter: only include players we have 2026 stats for. Predictions are
+    // generated only from Hitter/Pitching Master rows, so requiring at least
+    // one prediction with a non-null projection ensures we never surface
+    // VA-portal-matched players whose production we don't actually track
+    // (Ryan Brown, Connor Misch cases — they exist in `players` because
+    // the portal CSV created a row, but we have no master data on them).
+    const hasUsableProjection = (p: any) => {
+      const preds = Array.isArray(p?.player_predictions) ? p.player_predictions : [];
+      return preds.some((pr: any) => pr?.p_wrc_plus != null || pr?.p_rv_plus != null);
+    };
     for (const p of allPlayersForSearch) {
+      if (!hasUsableProjection(p)) continue;
       const idKey = idKeyOf(p);
       if (idKey) {
         byKey.set(idKey, p);
