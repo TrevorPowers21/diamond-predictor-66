@@ -3,7 +3,7 @@ import { Sparkles, ArrowLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const STORAGE_KEY = "rstr_iq_whats_new_seen";
+const STORAGE_KEY = "rstr_iq_whats_new_seen_v2";
 
 type Feature = {
   title: string;
@@ -20,7 +20,7 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
-    date: "2026-05-21",
+    date: "2026-05-20",
     headline: "Handedness-aware park factors, daily portal updates, sharper projections",
     features: [
       {
