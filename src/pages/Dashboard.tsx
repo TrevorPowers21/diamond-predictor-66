@@ -278,6 +278,10 @@ export default function Dashboard() {
         .select(`p_wrc_plus, p_rv_plus, players!inner(id, first_name, last_name, team, from_team, position, portal_status, portal_entry_date, commit_school, commit_date, updated_at)`)
         .in("players.portal_status", ["IN PORTAL", "COMMITTED"])
         .or("p_wrc_plus.not.is.null,p_rv_plus.not.is.null")
+        // Order by portal_entry_date desc at the DB level so the limit cut
+        // never excludes the newest entries. The in-memory sort below still
+        // does the watching-first / metric-desc tie-breaking.
+        .order("portal_entry_date", { ascending: false, referencedTable: "players" })
         .limit(400);
 
       const followSet = new Set(highFollowList.map((p) => p.player_id));
