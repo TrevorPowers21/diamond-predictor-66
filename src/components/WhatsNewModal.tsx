@@ -26,11 +26,11 @@ const RELEASES: Release[] = [
       {
         title: "Park Factors by Handedness",
         tagline:
-          "Transfer projections now account for how a park actually plays for left-handed vs right-handed hitters — not just the team's overall park factor. A LHB pulling to a pull-friendly right field gets credit for that fit; an RHB doesn't.",
+          "Transfer projections now account for how a park actually plays for left-handed vs right-handed hitters, not just the team's overall park factor. A LHB pulling to a pull-friendly right field gets credit for that fit; an RHB doesn't.",
         details: [
-          "Every D1 park factor refreshed against the 2026 NCAA baseline using the standard methodology — your hitters at home + opponents at home, averaged to remove team-quality bias.",
-          "LHB hitters apply LHB-specific AVG / OBP / ISO factors. RHB hitters apply RHB factors. Switch hitters use the combined.",
-          "Wired into the Transfer Portal simulator, Team Builder transfer projections, target board adds, and player compare — every destination move now uses the right handedness.",
+          "Every D1 park factor refreshed against the 2026 NCAA baseline using the standard methodology: your hitters at home plus opponents at home, averaged to remove team-quality bias.",
+          "LHB hitters apply LHB-specific AVG, OBP, and ISO factors. RHB hitters apply RHB factors. Switch hitters use the combined.",
+          "Wired into the Transfer Portal simulator, Team Builder transfer projections, target board adds, and player compare. Every destination move now uses the right handedness.",
         ],
       },
       {
@@ -86,7 +86,7 @@ const RELEASES: Release[] = [
       {
         title: "Program Analytics",
         tagline:
-          "A Team Builder analytics view that grades your roster position-by-position and tier-by-tier — lineup, rotation, bullpen — alongside championship benchmarks.",
+          "A Team Builder analytics view that grades your roster position-by-position and tier-by-tier (lineup, rotation, bullpen) alongside championship benchmarks.",
         details: [
           "Year-over-year compare card shows where this build stands against your 2025 roster.",
           "Championship benchmark dropdown to compare against any 2025 conference champ or the national title team.",
