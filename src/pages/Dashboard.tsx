@@ -270,19 +270,39 @@ export default function Dashboard() {
       const watchedIds = watchedIdsKey.split(",").filter(Boolean);
       const cutoff = lastVisitRef.current;
 
-      // Single source query: every portal/committed player joined to their
-      // projection. Hitters surface pWRC+, pitchers surface pRV+ — both
-      // pulled so we can pick the right metric per row in-memory.
-      const { data: raw } = await (supabase as any)
-        .from("player_predictions")
-        .select(`p_wrc_plus, p_rv_plus, players!inner(id, first_name, last_name, team, from_team, position, portal_status, portal_entry_date, commit_school, commit_date, updated_at)`)
-        .in("players.portal_status", ["IN PORTAL", "COMMITTED"])
-        .or("p_wrc_plus.not.is.null,p_rv_plus.not.is.null")
-        // Order by portal_entry_date desc at the DB level so the limit cut
-        // never excludes the newest entries. The in-memory sort below still
-        // does the watching-first / metric-desc tie-breaking.
-        .order("portal_entry_date", { ascending: false, referencedTable: "players" })
+      // Two-step query because PostgREST's referencedTable order doesn't
+      // reliably sort embedded resources for !inner joins. Step 1: pull
+      // portal/committed players ordered by portal_entry_date desc. Step 2:
+      // hydrate with predictions. Limit at step 1 ensures the newest
+      // entries always make the cut.
+      const { data: playerRows } = await (supabase as any)
+        .from("players")
+        .select("id, first_name, last_name, team, from_team, position, portal_status, portal_entry_date, commit_school, commit_date, updated_at")
+        .in("portal_status", ["IN PORTAL", "COMMITTED"])
+        .order("portal_entry_date", { ascending: false, nullsFirst: false })
         .limit(400);
+      const playerIds = (playerRows || []).map((p: any) => p.id);
+      const { data: predRows } = playerIds.length === 0
+        ? { data: [] }
+        : await (supabase as any)
+            .from("player_predictions")
+            .select("player_id, p_wrc_plus, p_rv_plus, variant, status")
+            .in("player_id", playerIds)
+            .eq("variant", "regular")
+            .in("status", ["active", "departed"]);
+      const predByPlayer = new Map<string, { p_wrc_plus: number | null; p_rv_plus: number | null }>();
+      for (const pr of predRows || []) {
+        const pid = (pr as any).player_id;
+        const existing = predByPlayer.get(pid);
+        if (!existing || (pr.p_wrc_plus != null && (existing.p_wrc_plus == null))) {
+          predByPlayer.set(pid, { p_wrc_plus: pr.p_wrc_plus, p_rv_plus: pr.p_rv_plus });
+        }
+      }
+      const raw = (playerRows || []).map((p: any) => ({
+        players: p,
+        p_wrc_plus: predByPlayer.get(p.id)?.p_wrc_plus ?? null,
+        p_rv_plus: predByPlayer.get(p.id)?.p_rv_plus ?? null,
+      }));
 
       const followSet = new Set(highFollowList.map((p) => p.player_id));
       const boardSet = new Set(targetBoard.map((p) => p.player_id));
