@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { CURRENT_SEASON, PRIOR_SEASON } from "@/lib/seasonConstants";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -538,12 +538,22 @@ export default function TransferPortal() {
   // demoing as their program shouldn't have to retype "Kansas Jayhawks"
   // every time they open the simulator. Replaces the old DEMO_SCHOOL default.
   const { schoolName: effectiveSchoolName, allowAllTeams } = useEffectiveSchool();
+  // Always pin destination to the current effective school. Whether you just
+  // logged in, switched team via superadmin impersonation, or navigated back
+  // to this page, the destination follows your active school. Trade-off:
+  // superadmin's manual destination choice doesn't survive a route change
+  // (back-from-profile), but that's a smaller cost than leaking another
+  // team's destination across impersonations. After mount, the user is free
+  // to change destination manually; the ref-equality guard prevents this
+  // effect from clobbering it.
+  const lastEffectiveSchoolRef = useRef<string | null>(null);
   useEffect(() => {
     if (!effectiveSchoolName) return;
-    if (selectedDestinationTeam) return;
+    if (lastEffectiveSchoolRef.current === effectiveSchoolName) return;
+    lastEffectiveSchoolRef.current = effectiveSchoolName;
     setSelectedDestinationTeam(effectiveSchoolName);
     setTeamSearch(effectiveSchoolName);
-  }, [effectiveSchoolName, selectedDestinationTeam]);
+  }, [effectiveSchoolName]);
   const [simType, setSimType] = useState<"hitting" | "pitching">(initialState?.simType ?? "hitting");
   const [selectedPitcherId, setSelectedPitcherId] = useState<string>(initialState?.selectedPitcherId ?? "");
   const [pitcherSearch, setPitcherSearch] = useState<string>("");

@@ -101,6 +101,7 @@ type BuildPlayer = {
     is_twp?: boolean | null;
     class_year?: string | null;
     throws_hand?: string | null;
+    bats_hand?: string | null;
     team: string | null;
     from_team: string | null;
     conference: string | null;
@@ -1476,7 +1477,18 @@ export default function TeamBuilder() {
     const idKeyOf = (p: any) => (p?.id ? `id:${String(p.id).trim()}` : "");
     const nameTeamKeyOf = (p: any) => `${normalizeName(`${p.first_name} ${p.last_name}`)}|${normalizeName(p.team || "")}`;
 
+    // Filter: only include players we have 2026 stats for. Predictions are
+    // generated only from Hitter/Pitching Master rows, so requiring at least
+    // one prediction with a non-null projection ensures we never surface
+    // VA-portal-matched players whose production we don't actually track
+    // (Ryan Brown, Connor Misch cases — they exist in `players` because
+    // the portal CSV created a row, but we have no master data on them).
+    const hasUsableProjection = (p: any) => {
+      const preds = Array.isArray(p?.player_predictions) ? p.player_predictions : [];
+      return preds.some((pr: any) => pr?.p_wrc_plus != null || pr?.p_rv_plus != null);
+    };
     for (const p of allPlayersForSearch) {
+      if (!hasUsableProjection(p)) continue;
       const idKey = idKeyOf(p);
       if (idKey) {
         byKey.set(idKey, p);
@@ -1827,7 +1839,7 @@ export default function TeamBuilder() {
           results.push({
             ...(best || {}),
             player_id: player.id,
-            players: { id: player.id, first_name: player.first_name, last_name: player.last_name, position: player.position, is_twp: (player as any).is_twp ?? false, class_year: (player as any).class_year ?? null, throws_hand: (player as any).throws_hand ?? null, team: player.team, from_team: player.from_team, conference: player.conference, transfer_portal: player.transfer_portal },
+            players: { id: player.id, first_name: player.first_name, last_name: player.last_name, position: player.position, is_twp: (player as any).is_twp ?? false, class_year: (player as any).class_year ?? null, throws_hand: (player as any).throws_hand ?? null, bats_hand: (player as any).bats_hand ?? null, team: player.team, from_team: player.from_team, conference: player.conference, transfer_portal: player.transfer_portal },
           });
         }
         return results;
@@ -2265,6 +2277,7 @@ export default function TeamBuilder() {
           is_twp: (player as any).is_twp ?? false,
           class_year: (player as any).class_year ?? null,
           throws_hand: (player as any).throws_hand ?? null,
+          bats_hand: (player as any).bats_hand ?? null,
           team: player.team,
           from_team: player.from_team,
           conference: player.conference ?? null,
@@ -2579,16 +2592,26 @@ export default function TeamBuilder() {
 
   // Bidirectional sync between Supabase target board and Team Builder roster targets
   const targetSyncedRef = useRef(false);
+  // Per-id push tracker — without this, an empty initial supabaseTargetBoard
+  // load lets the effect re-run after each mutation invalidation. Even
+  // though isOnSupabaseBoard guards the call, the query is invalidated but
+  // not yet refetched, so isOnSupabaseBoard returns false and we re-push the
+  // same player. Result: an infinite "Added to target board" toast loop the
+  // user hit on hard refresh.
+  const pushedPlayerIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (targetSyncedRef.current) return;
     const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 
-    // Push roster targets → Supabase
+    // Push roster targets → Supabase (deduped against in-session push history)
     const rosterTargets = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target" && p.player_id && isUuid(p.player_id));
     for (const p of rosterTargets) {
-      if (!isOnSupabaseBoard(p.player_id!)) {
-        addToSupabaseBoard({ playerId: p.player_id! });
+      const pid = p.player_id!;
+      if (pushedPlayerIdsRef.current.has(pid)) continue;
+      if (!isOnSupabaseBoard(pid)) {
+        addToSupabaseBoard({ playerId: pid });
       }
+      pushedPlayerIdsRef.current.add(pid);
     }
 
     // 2. Pull Supabase board → roster targets (players added from profiles/dashboard)
@@ -2625,6 +2648,7 @@ export default function TeamBuilder() {
                 last_name: sb.last_name,
                 position: sb.position,
                 class_year: sb.class_year ?? null,
+                bats_hand: sb.bats_hand ?? null,
                 team: sb.team,
                 from_team: sb.team,
                 conference: sb.conference ?? null,
@@ -3867,6 +3891,7 @@ export default function TeamBuilder() {
           last_name: row.last_name || "",
           position: row.position || null,
           class_year: row.class_year ?? null,
+          bats_hand: (row as any).bats_hand ?? null,
           team: row.team || null,
           from_team: row.team || null,
           conference: row.conference || null,
@@ -4059,6 +4084,7 @@ export default function TeamBuilder() {
           last_name: row.last_name || "",
           position: inferredRole,
           class_year: row.class_year ?? null,
+          bats_hand: (row as any).bats_hand ?? null,
           team: row.team || null,
           from_team: row.from_team || row.team || null,
           conference: row.conference || null,
@@ -4407,6 +4433,7 @@ export default function TeamBuilder() {
         first_name: row.first_name,
         last_name: row.last_name,
         position: row.position,
+        bats_hand: (row as any).bats_hand ?? null,
         team: row.team,
         from_team: row.from_team,
         conference: row.conference ?? null,
@@ -5564,6 +5591,7 @@ export default function TeamBuilder() {
           is_twp: (player as any).is_twp ?? false,
           class_year: (player as any).class_year ?? null,
           throws_hand: (player as any).throws_hand ?? null,
+          bats_hand: (player as any).bats_hand ?? null,
           team: player.team,
           from_team: player.from_team,
           conference: player.conference ?? null,
