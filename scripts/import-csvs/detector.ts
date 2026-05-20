@@ -35,8 +35,12 @@ function scoreEntry(probe: CsvProbe, entry: RegistryEntry): Scored {
 
 function compositeScore(s: Scored): number {
   // required is gated separately — entries missing required are eliminated upstream.
-  // Within remaining entries, sort by signature count (with filename hint as a small bump).
-  return s.signature * 10 + (s.filename ? 5 : 0);
+  // Filename hint is a strong tiebreaker: when two entries share the same
+  // required columns (e.g. portal_entries vs portal_commits vs portal_withdrawals
+  // all derive from the same VA export schema), the filename is the only signal
+  // that distinguishes them. Weight it heavily so a specific prefix beats raw
+  // signature-column count.
+  return (s.filename ? 1000 : 0) + s.signature * 10;
 }
 
 export function detect(probe: CsvProbe): DetectionResult {

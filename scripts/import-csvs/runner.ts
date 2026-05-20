@@ -303,11 +303,19 @@ export async function runImports(
         }
         break;
       }
-      case "portal_entries": {
-        step(`${r.probe.fileName} → Portal Entries`);
+      case "portal_entries":
+      case "portal_commits":
+      case "portal_withdrawals": {
+        const mode = r.match.type === "portal_commits" ? "commits"
+                   : r.match.type === "portal_withdrawals" ? "withdrawals"
+                   : "entries";
+        const label = mode === "commits" ? "Portal Commits"
+                    : mode === "withdrawals" ? "Portal Withdrawals"
+                    : "Portal Entries";
+        step(`${r.probe.fileName} → ${label}`);
         try {
-          const res = await importPortalEntriesCsv(csvText);
-          ok(`${res.matched} matched (${res.committed} committed), ${res.unmatched} unmatched, ${res.arrived} arrived (cleared), ${res.withdrawn} withdrawn (${timeMs(startMs)})`);
+          const res = await importPortalEntriesCsv(csvText, mode);
+          ok(`${res.matched} matched (${res.committed} committed, ${res.withdrawn} withdrawn), ${res.unmatched} unmatched, ${res.arrived} arrived (cleared), ${res.staleSkipped} stale-skipped (${timeMs(startMs)})`);
           console.log(`  ${COLOR.dim}total CSV rows: ${res.totalRows}, D1 rows: ${res.d1Rows}${COLOR.reset}`);
           for (const e of res.errors.slice(0, 3)) err(e);
           if (res.errors.length > 3) warn(`...and ${res.errors.length - 3} more errors`);

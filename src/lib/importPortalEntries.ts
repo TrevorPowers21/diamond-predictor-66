@@ -24,6 +24,10 @@ export interface PortalImportResult {
   unmatched: number;
   withdrawn: number;
   arrived: number;
+  /** Rows skipped because portal_entry_date predates the current window cutoff
+   *  (most-recent passed Jan 15 / Sep 15). VA exports keep historical entries
+   *  visible for ranking purposes — we don't want to re-tag those as active. */
+  staleSkipped: number;
   errors: string[];
 }
 
@@ -308,10 +312,34 @@ function matchPlayers(row: PortalRow, players: PlayerLite[]): PlayerLite[] {
   return candidates;
 }
 
-export async function importPortalEntriesCsv(csvText: string): Promise<PortalImportResult> {
+// Mode determines what status to apply to matched players. The three modes
+// correspond to the three VA export filters:
+//   "entries"     — full portal list. Per-row decision: IN PORTAL unless
+//                   commit_school is set, in which case COMMITTED.
+//   "commits"     — VA-filtered to signed players. Forces COMMITTED + writes
+//                   commit_school/commit_date from the row.
+//   "withdrawals" — VA-filtered to withdrawn players. Forces WITHDRAWN, clears
+//                   commit info.
+//
+// All three modes share the matcher, unmatched-row handling, and reset-on-
+// arrival sweep. None of them perform the absence-based withdrawal sweep —
+// that was removed because the VA export caps at 500 rows.
+export type PortalImportMode = "entries" | "commits" | "withdrawals";
+
+export async function importPortalEntriesCsv(
+  csvText: string,
+  mode: PortalImportMode = "entries",
+): Promise<PortalImportResult> {
   const result: PortalImportResult = {
-    totalRows: 0, d1Rows: 0, matched: 0, committed: 0, unmatched: 0, withdrawn: 0, arrived: 0, errors: [],
+    totalRows: 0, d1Rows: 0, matched: 0, committed: 0, unmatched: 0, withdrawn: 0, arrived: 0, staleSkipped: 0, errors: [],
   };
+
+  // Stale-row cutoff: skip any CSV row whose portal_entry_date predates the
+  // most-recent window-close (Jan 15 / Sep 15). VA's export keeps historical
+  // entries visible — we shouldn't re-tag a 2024-08-15 entry as active in
+  // May 2026. The resetArrivedCommittedPlayers sweep handles already-stored
+  // stale rows; this filter prevents new stale rows from being written.
+  const windowCutoff = getLastResetCutoff(new Date()).toISOString().slice(0, 10);
 
   const allRows = parseRows(csvText);
   result.totalRows = allRows.length;
@@ -327,8 +355,29 @@ export async function importPortalEntriesCsv(csvText: string): Promise<PortalImp
   const seenPlayerIds = new Set<string>();
   const nowIso = new Date().toISOString();
 
+  // Idempotency: clear unresolved unmatched rows ONLY when running the full
+  // "entries" pass (which is supposed to be the authoritative snapshot of
+  // who's currently in the portal). Commits + withdrawals CSVs are filtered
+  // subsets and would falsely clear the entries-pass review queue.
+  // Admin-resolved rows (resolved=true) always persist — audit log.
+  if (mode === "entries") {
+    const { error: clearErr } = await (supabase as any)
+      .from("portal_entries_unmatched")
+      .delete()
+      .eq("resolved", false);
+    if (clearErr) {
+      console.warn(`[importPortalEntries] Failed to clear unresolved rows: ${clearErr.message}`);
+    }
+  }
+
   for (const row of rows) {
     try {
+      // Skip rows older than the current portal window. Pre-cutoff entries
+      // are from a previous semester and shouldn't be reactivated.
+      if (row.portalEntryDate && row.portalEntryDate < windowCutoff) {
+        result.staleSkipped++;
+        continue;
+      }
       const candidates = matchPlayers(row, players);
 
       if (candidates.length === 0) {
@@ -347,21 +396,30 @@ export async function importPortalEntriesCsv(csvText: string): Promise<PortalImp
 
       // Unique match — update players row
       const player = candidates[0];
-      const isCommitted = !!row.commitSchool;
-      const status = isCommitted ? "COMMITTED" : "IN PORTAL";
+      // Status resolution per mode:
+      //   entries     — IN PORTAL unless commit_school filled (COMMITTED)
+      //   commits     — always COMMITTED (VA pre-filtered to signed)
+      //   withdrawals — always WITHDRAWN (VA pre-filtered to withdrawn)
+      const isCommitted = mode === "commits" || (mode === "entries" && !!row.commitSchool);
+      const isWithdrawn = mode === "withdrawals";
+      const status = isWithdrawn ? "WITHDRAWN" : isCommitted ? "COMMITTED" : "IN PORTAL";
 
       const payload: Record<string, unknown> = {
         portal_status: status,
-        transfer_portal: true,
+        transfer_portal: !isWithdrawn,
         portal_entry_date: row.portalEntryDate,
         portal_last_seen_at: nowIso,
-        commit_school: row.commitSchool,
-        commit_date: row.commitDate,
-        athletic_aid: row.athleticAid,
-        contact_cell: row.contactCell,
-        contact_email: row.contactEmail,
-        gpa: row.gpa,
-        va_roster_link: row.rosterLink,
+        // Don't clobber commit info for withdrawal rows — leave whatever was
+        // there. For entries + commits, write the row's commit details.
+        ...(isWithdrawn ? {} : {
+          commit_school: row.commitSchool,
+          commit_date: row.commitDate,
+          athletic_aid: row.athleticAid,
+          contact_cell: row.contactCell,
+          contact_email: row.contactEmail,
+          gpa: row.gpa,
+          va_roster_link: row.rosterLink,
+        }),
       };
       // Fill bio fields if missing on player record
       if (row.highSchool) payload.high_school = row.highSchool;
@@ -380,6 +438,7 @@ export async function importPortalEntriesCsv(csvText: string): Promise<PortalImp
       seenPlayerIds.add(player.id);
       result.matched++;
       if (isCommitted) result.committed++;
+      if (isWithdrawn) result.withdrawn++;
     } catch (e) {
       result.errors.push(`${row.firstName} ${row.lastName}: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -394,24 +453,23 @@ export async function importPortalEntriesCsv(csvText: string): Promise<PortalImp
   // count + activity feed reflect current reality, not lingering bookkeeping.
   await resetArrivedCommittedPlayers(result);
 
-  // Withdrawal sweep — players previously marked IN_PORTAL who weren't in
-  // today's export (or any export in the last 2 days). Flip to WITHDRAWN.
-  const cutoff = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-  const { data: stale, error: staleErr } = await (supabase as any)
-    .from("players")
-    .select("id")
-    .eq("portal_status", "IN PORTAL")
-    .lt("portal_last_seen_at", cutoff);
-
-  if (!staleErr && stale && stale.length > 0) {
-    const staleIds = (stale as Array<{ id: string }>).map((s) => s.id);
-    const { error: updErr } = await (supabase as any)
-      .from("players")
-      .update({ portal_status: "WITHDRAWN" })
-      .in("id", staleIds);
-    if (!updErr) result.withdrawn = staleIds.length;
-    else result.errors.push(`Withdrawal sweep: ${updErr.message}`);
-  }
+  // Auto-withdrawal sweep DISABLED 2026-05-20.
+  //
+  // Verified Athletics exports cap at 500 rows. Once D1 portal windows open
+  // (early-June, mid-August), the actual portal population will exceed 500
+  // and players ranked 501+ would be incorrectly marked WITHDRAWN here just
+  // because they fell out of the daily snapshot. Absence ≠ withdrawn under
+  // a hard export cap.
+  //
+  // Replacement strategy:
+  //   - portal_last_seen_at is still maintained on every matched update, so
+  //     admins can manually surface "haven't seen this player in N days"
+  //     queries when curating the board.
+  //   - When VA does include an explicit WITHDRAWN status in the CSV (future
+  //     export format), wire that signal into the matched-player update
+  //     path so we have a positive signal rather than absence-based proxy.
+  // result.withdrawn is incremented per-row in withdrawals-mode above; don't
+  // overwrite it here.
 
   return result;
 }

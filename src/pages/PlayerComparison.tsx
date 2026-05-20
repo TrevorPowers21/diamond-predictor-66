@@ -21,7 +21,7 @@ import {
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { useHitterSeedData } from "@/hooks/useHitterSeedData";
-import { resolveMetricParkFactor, type ParkFactorsMap } from "@/lib/parkFactors";
+import { resolveMetricParkFactor, batsHandToHandedness, type ParkFactorsMap, type Handedness } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
@@ -192,16 +192,17 @@ const resolveParkFactorFromCandidates = (
   names: Array<string | null | undefined>,
   metric: "avg" | "obp" | "iso" | "era" | "whip" | "hr9",
   map: ParkFactorsMap,
+  hand?: Handedness | null,
 ) => {
   if (teamId) {
-    const v = resolveMetricParkFactor(teamId, metric, map);
+    const v = resolveMetricParkFactor(teamId, metric, map, undefined, undefined, undefined, hand);
     if (v != null && Number.isFinite(v)) return v;
   }
   for (const name of names) {
-    const v = resolveMetricParkFactor(null, metric, map, name);
+    const v = resolveMetricParkFactor(null, metric, map, name, undefined, undefined, hand);
     if (v != null && Number.isFinite(v)) return v;
   }
-  return resolveMetricParkFactor(null, metric, map, names[0] || null);
+  return resolveMetricParkFactor(null, metric, map, names[0] || null, undefined, undefined, hand);
 };
 
 const calcPitchingPlus = (
@@ -423,12 +424,13 @@ function simulateHitter(args: {
   const fromConference = fromTeamRow?.conference || player.conference || null;
   const fromConfStats = resolveConf(fromConference, fromTeamRow?.conference_id ?? (player as any).conference_id ?? null);
   const toConfStats = resolveConf(toTeamRow.conference || null, toTeamRow.conference_id ?? null);
-  const fromParkAvgRaw = resolveParkFactorFromCandidates(fromTeamRow?.id, [fromTeamName, fromTeamRow?.name], "avg", parkMap);
-  const toParkAvgRaw = resolveParkFactorFromCandidates(toTeamRow?.id, [destinationTeam, toTeamRow?.name], "avg", parkMap);
-  const fromParkObpRaw = resolveParkFactorFromCandidates(fromTeamRow?.id, [fromTeamName, fromTeamRow?.name], "obp", parkMap);
-  const toParkObpRaw = resolveParkFactorFromCandidates(toTeamRow?.id, [destinationTeam, toTeamRow?.name], "obp", parkMap);
-  const fromParkIsoRaw = resolveParkFactorFromCandidates(fromTeamRow?.id, [fromTeamName, fromTeamRow?.name], "iso", parkMap);
-  const toParkIsoRaw = resolveParkFactorFromCandidates(toTeamRow?.id, [destinationTeam, toTeamRow?.name], "iso", parkMap);
+  const compareHand = batsHandToHandedness((player as any).bats_hand);
+  const fromParkAvgRaw = resolveParkFactorFromCandidates(fromTeamRow?.id, [fromTeamName, fromTeamRow?.name], "avg", parkMap, compareHand);
+  const toParkAvgRaw = resolveParkFactorFromCandidates(toTeamRow?.id, [destinationTeam, toTeamRow?.name], "avg", parkMap, compareHand);
+  const fromParkObpRaw = resolveParkFactorFromCandidates(fromTeamRow?.id, [fromTeamName, fromTeamRow?.name], "obp", parkMap, compareHand);
+  const toParkObpRaw = resolveParkFactorFromCandidates(toTeamRow?.id, [destinationTeam, toTeamRow?.name], "obp", parkMap, compareHand);
+  const fromParkIsoRaw = resolveParkFactorFromCandidates(fromTeamRow?.id, [fromTeamName, fromTeamRow?.name], "iso", parkMap, compareHand);
+  const toParkIsoRaw = resolveParkFactorFromCandidates(toTeamRow?.id, [destinationTeam, toTeamRow?.name], "iso", parkMap, compareHand);
   if (
     !fromConfStats || !toConfStats ||
     fromConfStats.avg_plus == null || toConfStats.avg_plus == null ||

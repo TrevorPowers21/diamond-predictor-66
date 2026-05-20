@@ -7,7 +7,9 @@ export type CsvType =
   | "conference_stats"
   | "park_factors"
   | "nil"
-  | "portal_entries";
+  | "portal_entries"
+  | "portal_commits"
+  | "portal_withdrawals";
 
 export type RegistryEntry = {
   type: CsvType;
@@ -255,9 +257,27 @@ export const REGISTRY: RegistryEntry[] = [
       "Conference",
       "Roster Link",
     ],
-    filenameHints: [/transfers?/i, /portal/i, /verified[_\-]?athletics/i, /\bva[_\-]/i],
+    filenameHints: [/^transfers?[_-]/i, /portal[_-]entries/i, /verified[_\-]?athletics/i, /\bva[_\-]/i],
     downstream: [],
     description: "Daily Verified Athletics portal export. Filters to D1, fuzzy-matches against players, updates portal_status / commit info / contact fields. Ambiguous + no-match rows land in portal_entries_unmatched.",
+  },
+  {
+    type: "portal_commits",
+    label: "Portal Commits (Verified Athletics)",
+    required: ["First Name", "Last Name", "Current School"],
+    signature: ["Commit School", "Commit Date", "Date", "Position"],
+    filenameHints: [/^commits?[_-]/i, /^signed[_-]/i],
+    downstream: [],
+    description: "VA export filtered to signed players. Same matcher as portal entries — flips matched players to COMMITTED with their commit_school + date. Use when the entries CSV hits the 500-row cap so commits are guaranteed not to be missed.",
+  },
+  {
+    type: "portal_withdrawals",
+    label: "Portal Withdrawals (Verified Athletics)",
+    required: ["First Name", "Last Name", "Current School"],
+    signature: ["Date", "Position", "Year"],
+    filenameHints: [/^withdraw(s|als?|n)?[_-]/i],
+    downstream: [],
+    description: "VA export filtered to withdrawn players. Same matcher as portal entries — flips matched players to WITHDRAWN. The only authoritative signal for withdrawal; absence-from-entries-CSV no longer auto-withdraws.",
   },
   {
     type: "nil",

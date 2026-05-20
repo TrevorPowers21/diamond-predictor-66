@@ -2,6 +2,25 @@ import { fetchParkFactors, type ParkFactorsRow } from "@/lib/supabaseQueries";
 
 export type ParkMetric = "avg" | "obp" | "iso" | "era" | "whip" | "hr9";
 
+// Handedness hint for hitter park-factor lookups.
+//   "lhb"    — apply LHB-split factors
+//   "rhb"    — apply RHB-split factors
+//   "switch" — apply combined factors (switch hitters see both sides)
+//   undefined / null — use combined factors (default, e.g. pitchers, callers
+//                      that don't know handedness, returner paths)
+export type Handedness = "lhb" | "rhb" | "switch";
+
+/** Convert a player's bats_hand value ("L"/"R"/"S"/"B") into the Handedness
+ *  enum used by resolveMetricParkFactor. Returns null on unknown/blank input. */
+export const batsHandToHandedness = (bats: string | null | undefined): Handedness | null => {
+  if (!bats) return null;
+  const x = bats.trim().toUpperCase();
+  if (x === "L") return "lhb";
+  if (x === "R") return "rhb";
+  if (x === "S" || x === "B") return "switch";
+  return null;
+};
+
 export type TeamParkFactorComponents = {
   avg: number | null;
   obp: number | null;
@@ -9,6 +28,15 @@ export type TeamParkFactorComponents = {
   era?: number | null;
   whip?: number | null;
   hr9?: number | null;
+  // Handedness-split factors (hitters only — pitchers use combined).
+  // Populated by the 2026 park factor loader; older seasons may be null,
+  // in which case the combined avg/obp/iso are used as fallback.
+  lhb_avg?: number | null;
+  lhb_obp?: number | null;
+  lhb_iso?: number | null;
+  rhb_avg?: number | null;
+  rhb_obp?: number | null;
+  rhb_iso?: number | null;
 };
 
 const normalize = (v: string | null | undefined) =>
@@ -32,6 +60,12 @@ const rowToComponents = (row: ParkFactorsRow): TeamParkFactorComponents => ({
   era: toNum(row.rg_factor),
   whip: toNum(row.whip_factor),
   hr9: toNum(row.hr9_factor),
+  lhb_avg: toNum((row as any).lhb_avg_factor),
+  lhb_obp: toNum((row as any).lhb_obp_factor),
+  lhb_iso: toNum((row as any).lhb_iso_factor),
+  rhb_avg: toNum((row as any).rhb_avg_factor),
+  rhb_obp: toNum((row as any).rhb_obp_factor),
+  rhb_iso: toNum((row as any).rhb_iso_factor),
 });
 
 export type ParkFactorsMap = {
@@ -90,7 +124,35 @@ export async function fetchParkFactorsMap(season?: number): Promise<ParkFactorsM
 /** Resolve a single metric's park factor.
  *  Resolution order: source_team_id (most stable) → per-season team_id UUID → team name → fallback.
  *  Pass `sourceTeamId` whenever it's available — it's the only lookup key that
- *  doesn't drift with season transitions. */
+ *  doesn't drift with season transitions.
+ *
+ *  Handedness:
+ *    - "lhb" or "rhb" picks the matching handedness-split factor for the
+ *      avg/obp/iso metrics. If the handedness column is null (older seasons),
+ *      falls back to the combined factor at the same metric.
+ *    - "switch" and undefined both use the combined factors.
+ *    - Pitcher metrics (era/whip/hr9) ignore handedness — pitchers always use
+ *      combined factors per spec.
+ */
+const handednessKey = (metric: ParkMetric, hand?: Handedness | null): keyof TeamParkFactorComponents => {
+  if (!hand || hand === "switch") return metric;
+  if (metric === "avg") return hand === "lhb" ? "lhb_avg" : "rhb_avg";
+  if (metric === "obp") return hand === "lhb" ? "lhb_obp" : "rhb_obp";
+  if (metric === "iso") return hand === "lhb" ? "lhb_iso" : "rhb_iso";
+  return metric;
+};
+
+const pickFactor = (
+  components: TeamParkFactorComponents,
+  metric: ParkMetric,
+  hand?: Handedness | null,
+): number | null => {
+  const splitKey = handednessKey(metric, hand);
+  const splitVal = toNum((components as any)[splitKey]);
+  if (splitVal != null) return splitVal;
+  return toNum((components as any)[metric]);
+};
+
 export const resolveMetricParkFactor = (
   teamId: string | null | undefined,
   metric: ParkMetric,
@@ -98,18 +160,19 @@ export const resolveMetricParkFactor = (
   teamName?: string | null,
   fallbackParkFactor?: number | null,
   sourceTeamId?: string | null,
+  hand?: Handedness | null,
 ) => {
   if (!map) return toNum(fallbackParkFactor);
 
   // 1. source_team_id (stable program identifier) — preferred
   if (sourceTeamId && map.bySourceTeamId[sourceTeamId]) {
-    const resolved = toNum(map.bySourceTeamId[sourceTeamId][metric]);
+    const resolved = pickFactor(map.bySourceTeamId[sourceTeamId], metric, hand);
     if (resolved != null) return resolved;
   }
 
   // 2. Per-season team UUID
   if (teamId && map.byTeamId[teamId]) {
-    const resolved = toNum(map.byTeamId[teamId][metric]);
+    const resolved = pickFactor(map.byTeamId[teamId], metric, hand);
     if (resolved != null) return resolved;
   }
 
@@ -117,10 +180,12 @@ export const resolveMetricParkFactor = (
   const key = normalize(teamName);
   const compact = normalizeCompact(teamName);
   const short = normalizeShort(teamName);
-  const fromMap = key ? map.byName[key]?.[metric] : null;
-  const fromCompact = fromMap == null && compact ? map.byName[compact]?.[metric] : fromMap;
-  const fromShort = fromCompact == null && short ? map.byName[short]?.[metric] : fromCompact;
-  const resolved = toNum(fromShort);
-  if (resolved != null) return resolved;
+  const fromMap = key ? map.byName[key] : null;
+  const fromCompact = fromMap == null && compact ? map.byName[compact] : fromMap;
+  const fromShort = fromCompact == null && short ? map.byName[short] : fromCompact;
+  if (fromShort) {
+    const resolved = pickFactor(fromShort, metric, hand);
+    if (resolved != null) return resolved;
+  }
   return toNum(fallbackParkFactor);
 };
