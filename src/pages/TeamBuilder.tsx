@@ -101,6 +101,7 @@ type BuildPlayer = {
     is_twp?: boolean | null;
     class_year?: string | null;
     throws_hand?: string | null;
+    bats_hand?: string | null;
     team: string | null;
     from_team: string | null;
     conference: string | null;
@@ -1838,7 +1839,7 @@ export default function TeamBuilder() {
           results.push({
             ...(best || {}),
             player_id: player.id,
-            players: { id: player.id, first_name: player.first_name, last_name: player.last_name, position: player.position, is_twp: (player as any).is_twp ?? false, class_year: (player as any).class_year ?? null, throws_hand: (player as any).throws_hand ?? null, team: player.team, from_team: player.from_team, conference: player.conference, transfer_portal: player.transfer_portal },
+            players: { id: player.id, first_name: player.first_name, last_name: player.last_name, position: player.position, is_twp: (player as any).is_twp ?? false, class_year: (player as any).class_year ?? null, throws_hand: (player as any).throws_hand ?? null, bats_hand: (player as any).bats_hand ?? null, team: player.team, from_team: player.from_team, conference: player.conference, transfer_portal: player.transfer_portal },
           });
         }
         return results;
@@ -2276,6 +2277,7 @@ export default function TeamBuilder() {
           is_twp: (player as any).is_twp ?? false,
           class_year: (player as any).class_year ?? null,
           throws_hand: (player as any).throws_hand ?? null,
+          bats_hand: (player as any).bats_hand ?? null,
           team: player.team,
           from_team: player.from_team,
           conference: player.conference ?? null,
@@ -2636,6 +2638,7 @@ export default function TeamBuilder() {
                 last_name: sb.last_name,
                 position: sb.position,
                 class_year: sb.class_year ?? null,
+                bats_hand: sb.bats_hand ?? null,
                 team: sb.team,
                 from_team: sb.team,
                 conference: sb.conference ?? null,
@@ -3878,6 +3881,7 @@ export default function TeamBuilder() {
           last_name: row.last_name || "",
           position: row.position || null,
           class_year: row.class_year ?? null,
+          bats_hand: (row as any).bats_hand ?? null,
           team: row.team || null,
           from_team: row.team || null,
           conference: row.conference || null,
@@ -4070,6 +4074,7 @@ export default function TeamBuilder() {
           last_name: row.last_name || "",
           position: inferredRole,
           class_year: row.class_year ?? null,
+          bats_hand: (row as any).bats_hand ?? null,
           team: row.team || null,
           from_team: row.from_team || row.team || null,
           conference: row.conference || null,
@@ -4418,6 +4423,7 @@ export default function TeamBuilder() {
         first_name: row.first_name,
         last_name: row.last_name,
         position: row.position,
+        bats_hand: (row as any).bats_hand ?? null,
         team: row.team,
         from_team: row.from_team,
         conference: row.conference ?? null,
@@ -5575,6 +5581,7 @@ export default function TeamBuilder() {
           is_twp: (player as any).is_twp ?? false,
           class_year: (player as any).class_year ?? null,
           throws_hand: (player as any).throws_hand ?? null,
+          bats_hand: (player as any).bats_hand ?? null,
           team: player.team,
           from_team: player.from_team,
           conference: player.conference ?? null,
