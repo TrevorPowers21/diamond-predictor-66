@@ -259,26 +259,22 @@ export default function Dashboard() {
     })()
   );
 
-  // Recent portal activity — combines (a) high-follow/board players and (b) top
-  // available portal hitters by projected WRC+, ranked together. Cut off at the
-  // user's last visit so the list reflects "what's new" rather than the whole
-  // backlog.
+  // Recent portal activity — last 3 days of portal/committed entries, sorted
+  // newest first. Hard 3-day floor at the DB level keeps the feed focused on
+  // "what's new this week" rather than the full active backlog. Anything
+  // older lives on the Transfer Portal page instead.
   const { data: portalActivity = [] } = useQuery({
-    queryKey: ["overview-portal-activity", watchedIdsKey, lastVisitRef.current],
+    queryKey: ["overview-portal-activity-v4", watchedIdsKey],
     staleTime: 60 * 1000,
     queryFn: async () => {
-      const watchedIds = watchedIdsKey.split(",").filter(Boolean);
-      const cutoff = lastVisitRef.current;
+      // 3-day floor — anything entered before this drops out of the feed.
+      const floorDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-      // Two-step query because PostgREST's referencedTable order doesn't
-      // reliably sort embedded resources for !inner joins. Step 1: pull
-      // portal/committed players ordered by portal_entry_date desc. Step 2:
-      // hydrate with predictions. Limit at step 1 ensures the newest
-      // entries always make the cut.
       const { data: playerRows } = await (supabase as any)
         .from("players")
         .select("id, first_name, last_name, team, from_team, position, portal_status, portal_entry_date, commit_school, commit_date, updated_at")
         .in("portal_status", ["IN PORTAL", "COMMITTED"])
+        .gte("portal_entry_date", floorDate)
         .order("portal_entry_date", { ascending: false, nullsFirst: false })
         .limit(400);
       const playerIds = (playerRows || []).map((p: any) => p.id);
@@ -310,9 +306,11 @@ export default function Dashboard() {
       const isPitcher = (pos: string | null | undefined) =>
         /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
 
+      // No second filter — the 3-day DB floor IS the floor. Players without
+      // predictions yet (just imported, cascade hasn't run) still show up;
+      // their badge just renders without a metric value.
       const all = (raw || [])
         .map((r: any) => ({ ...r.players, p_wrc_plus: r.p_wrc_plus, p_rv_plus: r.p_rv_plus }))
-        .filter((p: any) => (p.updated_at || "") >= cutoff)
         .map((p: any) => {
           const pitcher = isPitcher(p.position);
           const metric = pitcher ? p.p_rv_plus : p.p_wrc_plus;
@@ -322,8 +320,7 @@ export default function Dashboard() {
             metric_value: metric ?? null,
             source: followSet.has(p.id) ? "following" : boardSet.has(p.id) ? "board" : "top",
           };
-        })
-        .filter((p: any) => p.metric_value != null);
+        });
 
       // Sort: newest portal_entry_date first → within date, watching first
       // (following/board), then by projected metric desc.
@@ -455,8 +452,12 @@ export default function Dashboard() {
                   const toLabel = isCommitted ? (p.commit_school || "Committed") : "Portal";
                   const metricLabel = p.metric_value != null ? Math.round(p.metric_value).toString() : null;
                   const metricSuffix = p.is_pitcher ? "pRV+" : "pWRC+";
+                  // portal_entry_date is a calendar date string (YYYY-MM-DD).
+                  // new Date("2026-05-19") parses as midnight UTC, which in
+                  // US Eastern renders as the prior day. Pin to UTC for display
+                  // so the calendar date matches what was stored.
                   const entryDate = p.portal_entry_date
-                    ? new Date(p.portal_entry_date).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+                    ? new Date(p.portal_entry_date).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })
                     : null;
                   return (
                     <Link
