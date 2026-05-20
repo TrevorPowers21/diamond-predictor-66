@@ -20,9 +20,19 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
-    date: "2026-05-20",
-    headline: "Portal updates flowing daily, with visibility across the app",
+    date: "2026-05-21",
+    headline: "Handedness-aware park factors, daily portal updates, sharper projections",
     features: [
+      {
+        title: "Park Factors by Handedness",
+        tagline:
+          "Transfer projections now account for how a park actually plays for left-handed vs right-handed hitters — not just the team's overall park factor. A LHB pulling to a pull-friendly right field gets credit for that fit; an RHB doesn't.",
+        details: [
+          "Every D1 park factor refreshed against the 2026 NCAA baseline using the standard methodology — your hitters at home + opponents at home, averaged to remove team-quality bias.",
+          "LHB hitters apply LHB-specific AVG / OBP / ISO factors. RHB hitters apply RHB factors. Switch hitters use the combined.",
+          "Wired into the Transfer Portal simulator, Team Builder transfer projections, target board adds, and player compare — every destination move now uses the right handedness.",
+        ],
+      },
       {
         title: "Daily Portal Updates",
         tagline:
