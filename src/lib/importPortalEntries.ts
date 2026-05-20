@@ -327,6 +327,18 @@ export async function importPortalEntriesCsv(csvText: string): Promise<PortalImp
   const seenPlayerIds = new Set<string>();
   const nowIso = new Date().toISOString();
 
+  // Idempotency: clear all UNRESOLVED unmatched rows before this pass so the
+  // table reflects only today's CSV. Admin-resolved rows (resolved=true) stay
+  // forever — they're the audit log of what's been handled. Without this,
+  // re-running the importer accumulates duplicate review-queue entries.
+  const { error: clearErr } = await (supabase as any)
+    .from("portal_entries_unmatched")
+    .delete()
+    .eq("resolved", false);
+  if (clearErr) {
+    console.warn(`[importPortalEntries] Failed to clear unresolved rows: ${clearErr.message}`);
+  }
+
   for (const row of rows) {
     try {
       const candidates = matchPlayers(row, players);
