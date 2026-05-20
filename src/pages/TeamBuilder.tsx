@@ -2355,7 +2355,13 @@ export default function TeamBuilder() {
     if (!(seasonUsage.hitterAbByNameTeam?.size > 0)) return;
     if (usageCorrectedBuildRef.current === selectedBuildId) return;
     usageCorrectedBuildRef.current = selectedBuildId;
-    setRosterPlayers((prev) => prev.map((p) => {
+    // Track which player indices got their depth_role corrected so we can
+    // also clear their stale depthAssignment entries — otherwise the saved
+    // build's depthAssignments (with hitters pinned to d3 bench slots from
+    // the stale-tier era) would carry forward and lock the chart even
+    // though depth_role is now correct.
+    const correctedIdxs = new Set<number>();
+    setRosterPlayers((prev) => prev.map((p, idx) => {
       if (!p.player) return p;
       if ((p.roster_status || "returner") !== "returner") return p;
       const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(p.player.position || ""));
@@ -2366,8 +2372,21 @@ export default function TeamBuilder() {
       if (hitterAb == null || hitterAb <= 0) return p;
       const recomputed = defaultHitterDepthRoleFromPa(hitterAb);
       if (recomputed === p.depth_role) return p;
+      correctedIdxs.add(idx);
       return { ...p, depth_role: recomputed };
     }));
+    // Clear any depthAssignments that pin a corrected player to a slot — the
+    // auto-fill effect will then re-place them according to their new tier.
+    if (correctedIdxs.size > 0) {
+      setDepthAssignments((prev) => {
+        const next: Record<string, number> = {};
+        for (const [k, idx] of Object.entries(prev)) {
+          if (correctedIdxs.has(idx)) continue;
+          next[k] = idx;
+        }
+        return next;
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBuildId, seasonUsage]);
 
