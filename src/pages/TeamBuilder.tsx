@@ -2166,12 +2166,30 @@ export default function TeamBuilder() {
             nil_value: Number(bp.nil_value) || 0,
             production_notes: meta.notes,
             roster_status: meta.rosterStatus ?? ((bp.source as string) === "portal" ? "target" : "returner"),
-            depth_role: meta.depthRole ?? (isPitcherRow
-              ? defaultPitcherDepthRoleFromIp(
-                  (pd?.source_player_id ? pitchingStatsByNameTeam.bySourceId.get(pd.source_player_id)?.ip : null) ?? null,
-                  (inferredRole === "SP") ? "SP" : "RP",
-                )
-              : "everyday_starter"),
+            // depth_role recomputed from current PA/IP for hitters. Saved
+            // builds from before 2026-05-20 baked in "bench" for hitters
+            // when seasonUsage was empty at save time; that stale value
+            // would persist forever otherwise. PA-based recompute fixes
+            // load-time bench-reversion. Pitcher recompute from IP also
+            // keeps the latest reality. Saved meta.depthRole used only
+            // as a final fallback when neither PA nor IP is available.
+            depth_role: (() => {
+              if (isPitcherRow) {
+                const ip = (pd?.source_player_id ? pitchingStatsByNameTeam.bySourceId.get(pd.source_player_id)?.ip : null) ?? null;
+                if (ip != null) {
+                  return defaultPitcherDepthRoleFromIp(ip, (inferredRole === "SP") ? "SP" : "RP");
+                }
+                return meta.depthRole ?? defaultPitcherDepthRoleFromIp(null, (inferredRole === "SP") ? "SP" : "RP");
+              }
+              // Hitter: PA-based tier from current seasonUsage. Falls back
+              // to meta.depthRole only if usage hasn't loaded yet.
+              const hNameKey = pd ? `${normalizeName(`${pd.first_name || ""} ${pd.last_name || ""}`.trim())}|${normalizeName(pd.team || "")}` : null;
+              const hitterAb = (pd?.id ? seasonUsage.hitterAb?.get(pd.id) : null) ?? (hNameKey ? seasonUsage.hitterAbByNameTeam?.get(hNameKey) : null) ?? null;
+              if (hitterAb != null && hitterAb > 0) {
+                return defaultHitterDepthRoleFromPa(hitterAb);
+              }
+              return meta.depthRole ?? "everyday_starter";
+            })(),
             class_transition: meta.classTransitionOverridden ? (meta.classTransition ?? "SJ") : (activePred?.class_transition ?? "SJ"),
             dev_aggressiveness: meta.devAggressivenessOverridden ? (meta.devAggressiveness ?? 0) : (activePred?.dev_aggressiveness ?? 0),
             class_transition_overridden: meta.classTransitionOverridden,
@@ -2322,6 +2340,36 @@ export default function TeamBuilder() {
       autoSeededTeamRef.current = seedKey;
     }
   }, [returners, returnersUpdatedAt, selectedTeam, selectedBuildId, playerOverrides, seasonUsage]);
+
+  // Saved-build depth-role corrective. The main auto-seed effect bails when a
+  // saved build is loaded (selectedBuildId truthy), so it can't recompute
+  // depth_role when seasonUsage transitions empty→loaded. Result: builds
+  // saved before seasonUsage cached had hitters baked in as "bench" forever,
+  // even after PA data caught up. This effect catches that case: when usage
+  // loads AND we have a saved build in state, walk the returner rows and
+  // refresh hitter depth_role from current PA. Runs once per seasonUsage
+  // load (gated by ref).
+  const usageCorrectedBuildRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedBuildId) return;
+    if (!(seasonUsage.hitterAbByNameTeam?.size > 0)) return;
+    if (usageCorrectedBuildRef.current === selectedBuildId) return;
+    usageCorrectedBuildRef.current = selectedBuildId;
+    setRosterPlayers((prev) => prev.map((p) => {
+      if (!p.player) return p;
+      if ((p.roster_status || "returner") !== "returner") return p;
+      const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(p.player.position || ""));
+      if (isPitcherRow) return p;
+      const hNameKey = `${normalizeName(`${p.player.first_name || ""} ${p.player.last_name || ""}`.trim())}|${normalizeName(p.player.team || "")}`;
+      const playerIdHit = p.player_id ? seasonUsage.hitterAb?.get(p.player_id) : null;
+      const hitterAb = playerIdHit ?? seasonUsage.hitterAbByNameTeam?.get(hNameKey) ?? null;
+      if (hitterAb == null || hitterAb <= 0) return p;
+      const recomputed = defaultHitterDepthRoleFromPa(hitterAb);
+      if (recomputed === p.depth_role) return p;
+      return { ...p, depth_role: recomputed };
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBuildId, seasonUsage]);
 
   // Restore unsaved Team Builder draft on mount or whenever the active
   // customer team changes (login, sign-out, or superadmin impersonation
