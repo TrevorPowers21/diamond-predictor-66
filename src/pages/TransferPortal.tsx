@@ -538,23 +538,22 @@ export default function TransferPortal() {
   // demoing as their program shouldn't have to retype "Kansas Jayhawks"
   // every time they open the simulator. Replaces the old DEMO_SCHOOL default.
   const { schoolName: effectiveSchoolName, allowAllTeams } = useEffectiveSchool();
-  // When the user's effective school changes (login, team switch, superadmin
-  // impersonation), force the destination to that school. Without this guard,
-  // a previous user's destination cached in sessionStorage (e.g. Arkansas)
-  // leaks into the next user (e.g. TCU) on the same browser — a real
-  // multi-tenant data display bug coaches flagged.
+  // Always pin destination to the current effective school. Whether you just
+  // logged in, switched team via superadmin impersonation, or navigated back
+  // to this page, the destination follows your active school. Trade-off:
+  // superadmin's manual destination choice doesn't survive a route change
+  // (back-from-profile), but that's a smaller cost than leaking another
+  // team's destination across impersonations. After mount, the user is free
+  // to change destination manually; the ref-equality guard prevents this
+  // effect from clobbering it.
   const lastEffectiveSchoolRef = useRef<string | null>(null);
   useEffect(() => {
     if (!effectiveSchoolName) return;
-    if (lastEffectiveSchoolRef.current === effectiveSchoolName && selectedDestinationTeam) return;
+    if (lastEffectiveSchoolRef.current === effectiveSchoolName) return;
     lastEffectiveSchoolRef.current = effectiveSchoolName;
-    // For locked customers (allowAllTeams = false), always pin to their school.
-    // For superadmin / all-team users, only default if no destination is set.
-    if (!allowAllTeams || !selectedDestinationTeam) {
-      setSelectedDestinationTeam(effectiveSchoolName);
-      setTeamSearch(effectiveSchoolName);
-    }
-  }, [effectiveSchoolName, allowAllTeams, selectedDestinationTeam]);
+    setSelectedDestinationTeam(effectiveSchoolName);
+    setTeamSearch(effectiveSchoolName);
+  }, [effectiveSchoolName]);
   const [simType, setSimType] = useState<"hitting" | "pitching">(initialState?.simType ?? "hitting");
   const [selectedPitcherId, setSelectedPitcherId] = useState<string>(initialState?.selectedPitcherId ?? "");
   const [pitcherSearch, setPitcherSearch] = useState<string>("");
