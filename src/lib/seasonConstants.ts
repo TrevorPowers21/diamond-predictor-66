@@ -11,7 +11,7 @@
  * Anywhere else in the codebase that needs "the current active season",
  * import from here instead of inlining a literal.
  */
-export const CURRENT_SEASON = 2026;
+export const CURRENT_SEASON = 2027;
 
 /** Prior season relative to CURRENT_SEASON. Useful for blend / fallback queries. */
 export const PRIOR_SEASON = CURRENT_SEASON - 1;
