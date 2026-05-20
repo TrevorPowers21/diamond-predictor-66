@@ -192,13 +192,23 @@ function normalizeClassTransition(raw?: string | null): string {
   return "SJ";
 }
 
-async function loadEngineConfig(): Promise<EngineConfig> {
+async function loadEngineConfig(customerTeamId?: string | null): Promise<EngineConfig> {
   // Load from "Equation Weights" table (primary), fall back to "model_config" (legacy)
   let eqWeights: Map<string, number>;
   try {
     eqWeights = await loadEquationWeightsMap(2025);
   } catch {
     eqWeights = new Map();
+  }
+  // Per-team overrides on equation_weights keys win over globals when provided.
+  if (customerTeamId) {
+    const { data: ovRows } = await (supabase as any)
+      .from("customer_team_equation_overrides")
+      .select("config_key, config_value")
+      .eq("customer_team_id", customerTeamId);
+    for (const r of (ovRows || []) as Array<{ config_key: string; config_value: number }>) {
+      eqWeights.set(r.config_key, Number(r.config_value));
+    }
   }
   const eq = (key: string) => eqWeights.get(key) ?? eqWeights.get(key.toLowerCase());
 
@@ -208,8 +218,28 @@ async function loadEngineConfig(): Promise<EngineConfig> {
 
   if (error && eqWeights.size === 0) throw error;
 
-  const returnerRows = ((data || []) as any[]).filter((row) => row.model_type === "returner");
-  const transferRows = ((data || []) as any[]).filter((row) => row.model_type === "transfer");
+  let returnerRows = ((data || []) as any[]).filter((row) => row.model_type === "returner");
+  let transferRows = ((data || []) as any[]).filter((row) => row.model_type === "transfer");
+
+  // Layer model_type-scoped overrides on top of the legacy model_config rows
+  if (customerTeamId) {
+    const { data: ovTypedRows } = await (supabase as any)
+      .from("customer_team_equation_overrides")
+      .select("model_type, config_key, config_value")
+      .eq("customer_team_id", customerTeamId);
+    const overlay = (rows: any[], modelType: string) => {
+      const overrides = ((ovTypedRows || []) as any[]).filter((o) => o.model_type === modelType);
+      if (overrides.length === 0) return rows;
+      const byKey = new Map<string, any>();
+      for (const r of rows) byKey.set(r.config_key, r);
+      for (const o of overrides) {
+        byKey.set(o.config_key, { model_type: modelType, config_key: o.config_key, config_value: Number(o.config_value) });
+      }
+      return Array.from(byKey.values());
+    };
+    returnerRows = overlay(returnerRows, "returner");
+    transferRows = overlay(transferRows, "transfer");
+  }
 
   const returner: ReturnerConfig = {
     ncaaAvg: 0.28,
@@ -781,6 +811,23 @@ async function fetchPitcherContext(
       .maybeSingle(),
   ]);
 
+  // Layer per-team pitcher equation overrides on top of the global eq object.
+  // Keys that match named fields on the eq shape win over globals when the
+  // prediction row carries a customer_team_id.
+  const customerTeamId = (pred as any).customer_team_id ?? null;
+  if (customerTeamId) {
+    const { data: ovRows } = await (supabase as any)
+      .from("customer_team_equation_overrides")
+      .select("config_key, config_value")
+      .eq("customer_team_id", customerTeamId)
+      .in("model_type", ["pitching", "transfer", "global"]);
+    for (const r of (ovRows || []) as Array<{ config_key: string; config_value: number }>) {
+      if (r.config_key in (eq as any)) {
+        (eq as any)[r.config_key] = Number(r.config_value);
+      }
+    }
+  }
+
   const internal = internalsResp.data as any;
   const internalsPr = internal
     ? {
@@ -892,6 +939,11 @@ export async function recalculatePredictionById(predictionId: string, updates: U
 
   const merged = { ...(pred as PredictionRow), ...updates };
 
+  // Per-team equation overrides flow when the prediction row carries a
+  // customer_team_id (set by the eager pre-compute pipeline). Global rows
+  // (customer_team_id = NULL) keep using the universal weights.
+  const customerTeamId = (merged as any).customer_team_id ?? null;
+
   // Detect two-way players. For is_twp=true players we run BOTH the hitter
   // path AND the pitcher path and merge into a single row so dashboards on
   // both sides can read canonical projections from one prediction row.
@@ -912,7 +964,7 @@ export async function recalculatePredictionById(predictionId: string, updates: U
 
   // ─── TWP path: run both sides and merge ─────────────────────────────
   if (isTwp && hasPitcherStats && hasHitterStats) {
-    const config = await loadEngineConfig();
+    const config = await loadEngineConfig(customerTeamId);
 
     // Pitcher half
     const { eq, powerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride } = await fetchPitcherContext(predictionId, merged);
@@ -1015,7 +1067,7 @@ export async function recalculatePredictionById(predictionId: string, updates: U
   }
 
   // ─── Hitter path (unchanged) ────────────────────────────────────────
-  const config = await loadEngineConfig();
+  const config = await loadEngineConfig(customerTeamId);
   let powerContext: ReturnerPowerContext | undefined;
   let combinedUsed = false;
   if (merged.model_type === "returner") {

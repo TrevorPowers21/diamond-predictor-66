@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
-import { CURRENT_SEASON, PRIOR_SEASON } from "@/lib/seasonConstants";
+import { CURRENT_SEASON, PRIOR_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1366,7 +1366,7 @@ export default function TeamBuilder() {
     pitcherGs: new Map<string, number>(),
     pitcherG: new Map<string, number>(),
   } } = useQuery({
-    queryKey: ["team-builder-season-usage-lookup-v6"],
+    queryKey: ["team-builder-season-usage-lookup-v7", CURRENT_SEASON],
     queryFn: async () => {
       const thinSample = new Map<string, boolean>();
       const hitterAb = new Map<string, number>();
@@ -1846,6 +1846,56 @@ export default function TeamBuilder() {
       }
     },
   });
+  const pitchingStatsByNameTeam = useMemo(() => {
+    type PStatRec = { team: string | null; role: "SP" | "RP" | "SM" | null; era: number | null; fip: number | null; whip: number | null; k9: number | null; bb9: number | null; hr9: number | null; g: number | null; gs: number | null; ip: number | null };
+    const byKey = new Map<string, PStatRec>();
+    const byName = new Map<string, PStatRec[]>();
+    const bySourceId = new Map<string, PStatRec>();
+    const abbrToFull = new Map<string, string>();
+    const fullToAbbr = new Map<string, string>();
+    for (const t of teams) {
+      if (t.abbreviation && t.fullName) {
+        abbrToFull.set(normalizeName(t.abbreviation), normalizeName(t.fullName));
+        fullToAbbr.set(normalizeName(t.fullName), normalizeName(t.abbreviation));
+      }
+    }
+    const addRec = (name: string, team: string, rec: PStatRec, sourceId?: string | null) => {
+      const nName = normalizeName(name);
+      const nTeam = normalizeName(team);
+      const key = `${nName}|${nTeam}`;
+      if (!byKey.has(key)) byKey.set(key, rec);
+      const altTeam = abbrToFull.get(nTeam) || fullToAbbr.get(nTeam);
+      if (altTeam) {
+        const altKey = `${nName}|${altTeam}`;
+        if (!byKey.has(altKey)) byKey.set(altKey, rec);
+      }
+      const bucket = byName.get(nName) || [];
+      bucket.push(rec);
+      byName.set(nName, bucket);
+      if (sourceId) bySourceId.set(sourceId, rec);
+    };
+    for (const r of pitchingMasterRows) {
+      const name = (r.playerName || "").trim();
+      const team = (r.team || "").trim();
+      if (!name) continue;
+      const rec = {
+        team: team || null,
+        role: toPitchingRole(r.role),
+        era: r.era != null ? Number(r.era) : null,
+        fip: r.fip != null ? Number(r.fip) : null,
+        whip: r.whip != null ? Number(r.whip) : null,
+        k9: r.k9 != null ? Number(r.k9) : null,
+        bb9: r.bb9 != null ? Number(r.bb9) : null,
+        hr9: r.hr9 != null ? Number(r.hr9) : null,
+        g: r.g != null ? Number(r.g) : null,
+        gs: r.gs != null ? Number(r.gs) : null,
+        ip: r.ip != null ? Number(r.ip) : null,
+      };
+      addRec(name, team, rec, r.source_player_id);
+    }
+    return { byKey, byName, bySourceId };
+  }, [pitchingMasterRows, teams]);
+
   const storagePitchersForSelectedTeam = useMemo(() => {
     if (!selectedTeam) return [] as BuildPlayer[];
     return readStoragePitcherLocalPlayers(selectedTeam, pitchingMasterRows, selectedTeamId).map((lp) => ({
@@ -2787,21 +2837,16 @@ export default function TeamBuilder() {
     };
   }, [selectedTeam, teams, teamsByName]);
 
-  // Customer team's PRIOR_SEASON actual WAR (year-over-year compare baseline).
-  // Pass source_team_id plus EVERY name variant we know about — the hook
-  // tries source_team_id first, then case-insensitive name match against
-  // any of the candidates. This handles the common case where the team's
-  // Teams Table row has a stale source_team_id (e.g. Georgia: "226" in
-  // teams, UUID in Hitter Master) but the team_name is consistent.
-  // Season auto-rolls forward when CURRENT_SEASON bumps.
+  // Customer team's CURRENT_SEASON actual WAR (year-over-year compare baseline).
+  // Build represents PROJECTION_SEASON; baseline is CURRENT_SEASON actuals.
   const { data: priorYearSnapshot } = useTeamWarSnapshot(
     selectedTeamSourceId,
-    PRIOR_SEASON,
+    CURRENT_SEASON,
     [selectedTeam, selectedTeamFullName],
   );
 
-  // Prior-season champion benchmarks — auto-derive national + customer-conference champ(s)
-  const { data: warBenchmarks = [] } = useWarBenchmarks(PRIOR_SEASON);
+  // Current-season champion benchmarks — auto-derive national + customer-conference champ(s)
+  const { data: warBenchmarks = [] } = useWarBenchmarks(CURRENT_SEASON);
   const nationalChampBenchmark = useMemo(
     () => warBenchmarks.find((b) => b.is_national_champ) ?? null,
     [warBenchmarks],
@@ -2812,58 +2857,6 @@ export default function TeamBuilder() {
       (b) => b.is_conference_champ && b.conference === selectedTeamConference,
     );
   }, [warBenchmarks, selectedTeamConference]);
-  const pitchingStatsByNameTeam = useMemo(() => {
-    type PStatRec = { team: string | null; role: "SP" | "RP" | "SM" | null; era: number | null; fip: number | null; whip: number | null; k9: number | null; bb9: number | null; hr9: number | null; g: number | null; gs: number | null; ip: number | null };
-    const byKey = new Map<string, PStatRec>();
-    const byName = new Map<string, PStatRec[]>();
-    const bySourceId = new Map<string, PStatRec>();
-    // Build abbreviation → full name map from teams
-    const abbrToFull = new Map<string, string>();
-    const fullToAbbr = new Map<string, string>();
-    for (const t of teams) {
-      if (t.abbreviation && t.fullName) {
-        abbrToFull.set(normalizeName(t.abbreviation), normalizeName(t.fullName));
-        fullToAbbr.set(normalizeName(t.fullName), normalizeName(t.abbreviation));
-      }
-    }
-    const addRec = (name: string, team: string, rec: PStatRec, sourceId?: string | null) => {
-      const nName = normalizeName(name);
-      const nTeam = normalizeName(team);
-      const key = `${nName}|${nTeam}`;
-      if (!byKey.has(key)) byKey.set(key, rec);
-      // Also index by alternate team name (abbreviation ↔ full name)
-      const altTeam = abbrToFull.get(nTeam) || fullToAbbr.get(nTeam);
-      if (altTeam) {
-        const altKey = `${nName}|${altTeam}`;
-        if (!byKey.has(altKey)) byKey.set(altKey, rec);
-      }
-      const bucket = byName.get(nName) || [];
-      bucket.push(rec);
-      byName.set(nName, bucket);
-      if (sourceId) bySourceId.set(sourceId, rec);
-    };
-    for (const r of pitchingMasterRows) {
-      const name = (r.playerName || "").trim();
-      const team = (r.team || "").trim();
-      if (!name) continue;
-      const rec = {
-        team: team || null,
-        role: toPitchingRole(r.role),
-        era: r.era != null ? Number(r.era) : null,
-        fip: r.fip != null ? Number(r.fip) : null,
-        whip: r.whip != null ? Number(r.whip) : null,
-        k9: r.k9 != null ? Number(r.k9) : null,
-        bb9: r.bb9 != null ? Number(r.bb9) : null,
-        hr9: r.hr9 != null ? Number(r.hr9) : null,
-        g: r.g != null ? Number(r.g) : null,
-        gs: r.gs != null ? Number(r.gs) : null,
-        ip: r.ip != null ? Number(r.ip) : null,
-      };
-      addRec(name, team, rec, r.source_player_id);
-    }
-    return { byKey, byName, bySourceId };
-  }, [pitchingMasterRows, teams]);
-
   const pitchingPrByNameTeam = useMemo(() => {
     type PRec = { eraPrPlus: number | null; fipPrPlus: number | null; whipPrPlus: number | null; k9PrPlus: number | null; bb9PrPlus: number | null; hr9PrPlus: number | null };
     const byKey = new Map<string, PRec>();
@@ -7112,20 +7105,20 @@ export default function TeamBuilder() {
                     const benchRows: Array<{ label: string; sublabel?: string; bench: TeamWarSnapshot }> = [];
                     if (benchTeam) {
                       benchRows.push({
-                        label: `${PRIOR_SEASON} Actual — ${benchTeam.team_name}`,
+                        label: `${CURRENT_SEASON} Actual — ${benchTeam.team_name}`,
                         sublabel: `${benchTeam.games_played_est ?? "?"} games · factor ${benchTeam.proration_factor?.toFixed(2) ?? "—"}`,
                         bench: benchTeam,
                       });
                     }
                     if (nationalChampBenchmark) {
                       benchRows.push({
-                        label: `${PRIOR_SEASON} National Champion — ${nationalChampBenchmark.team_name}`,
+                        label: `${CURRENT_SEASON} National Champion — ${nationalChampBenchmark.team_name}`,
                         bench: nationalChampBenchmark,
                       });
                     }
                     for (const c of conferenceChampBenchmarks) {
                       benchRows.push({
-                        label: `${PRIOR_SEASON} ${c.conference} Champion — ${c.team_name}`,
+                        label: `${CURRENT_SEASON} ${c.conference} Champion — ${c.team_name}`,
                         sublabel: conferenceChampBenchmarks.length > 1 ? "split regular-season champ" : undefined,
                         bench: c,
                       });
@@ -7152,7 +7145,7 @@ export default function TeamBuilder() {
                       <Card className="border-l-[3px] border-l-[#D4AF37]">
                         <CardHeader className="pb-3">
                           <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>
-                            WAR Comparison — {selectedTeam || "Select a team"} {CURRENT_SEASON} Build
+                            WAR Comparison — {selectedTeam || "Select a team"} {PROJECTION_SEASON} Build
                           </CardTitle>
                         </CardHeader>
                         <CardContent>
@@ -7163,7 +7156,7 @@ export default function TeamBuilder() {
                               <span className="text-4xl font-bold tabular-nums text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>{buildTotalWar.toFixed(2)}</span>
                               {priorYearTotalDelta != null && (
                                 <span className={`text-sm font-semibold tabular-nums ${Math.abs(priorYearTotalDelta) < 0.05 ? "text-muted-foreground" : priorYearTotalDelta > 0 ? "text-[hsl(var(--success))]" : "text-destructive"}`}>
-                                  {priorYearTotalDelta > 0 ? "+" : priorYearTotalDelta < 0 ? "−" : ""}{Math.abs(priorYearTotalDelta).toFixed(2)} vs {PRIOR_SEASON}
+                                  {priorYearTotalDelta > 0 ? "+" : priorYearTotalDelta < 0 ? "−" : ""}{Math.abs(priorYearTotalDelta).toFixed(2)} vs {CURRENT_SEASON}
                                 </span>
                               )}
                             </div>
@@ -7557,7 +7550,7 @@ export default function TeamBuilder() {
                                 <span className="text-4xl font-bold tabular-nums text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>{starterTotalOwar.toFixed(2)}</span>
                                 {priorYearLineupDelta != null && (
                                   <span className={`text-sm font-semibold tabular-nums ${Math.abs(priorYearLineupDelta) < 0.05 ? "text-muted-foreground" : priorYearLineupDelta > 0 ? "text-[hsl(var(--success))]" : "text-destructive"}`}>
-                                    {priorYearLineupDelta > 0 ? "+" : priorYearLineupDelta < 0 ? "−" : ""}{Math.abs(priorYearLineupDelta).toFixed(2)} vs {PRIOR_SEASON}
+                                    {priorYearLineupDelta > 0 ? "+" : priorYearLineupDelta < 0 ? "−" : ""}{Math.abs(priorYearLineupDelta).toFixed(2)} vs {CURRENT_SEASON}
                                   </span>
                                 )}
                               </div>
@@ -7646,7 +7639,7 @@ export default function TeamBuilder() {
                                 <span className="text-4xl font-bold tabular-nums text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>{pitchingWarTotal.toFixed(2)}</span>
                                 {priorYearStaffDelta != null && (
                                   <span className={`text-sm font-semibold tabular-nums ${Math.abs(priorYearStaffDelta) < 0.05 ? "text-muted-foreground" : priorYearStaffDelta > 0 ? "text-[hsl(var(--success))]" : "text-destructive"}`}>
-                                    {priorYearStaffDelta > 0 ? "+" : priorYearStaffDelta < 0 ? "−" : ""}{Math.abs(priorYearStaffDelta).toFixed(2)} vs {PRIOR_SEASON}
+                                    {priorYearStaffDelta > 0 ? "+" : priorYearStaffDelta < 0 ? "−" : ""}{Math.abs(priorYearStaffDelta).toFixed(2)} vs {CURRENT_SEASON}
                                   </span>
                                 )}
                               </div>
