@@ -42,6 +42,7 @@ import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { useAuth } from "@/hooks/useAuth";
+import { applyTeamScopeFilter, dedupePreferredPerPlayer } from "@/lib/teamScopedPredictions";
 import { HistoricalPlayerTable, HistoricalPitcherTable } from "@/components/HistoricalPlayerTable";
 import {
   ScoutingReportProvider,
@@ -1099,7 +1100,7 @@ export default function ReturningPlayers() {
   };
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(100);
-  const { hasRole } = useAuth();
+  const { hasRole, effectiveTeamId } = useAuth();
   const isAdmin = hasRole("admin");
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
   const { addPlayers: addToHighFollow } = useHighFollow();
@@ -1450,6 +1451,7 @@ export default function ReturningPlayers() {
         sortKey,
         sortDir,
         seedSource,
+        teamScope: effectiveTeamId ?? null,
       },
     ],
     queryFn: async () => {
@@ -1564,6 +1566,10 @@ export default function ReturningPlayers() {
       // Bail out to the slow path whenever any of the new multi-select filters are
       // engaged so we can apply them server-side via the standard players query
       // (or, for conference, post-fetch client-side over the full dataset).
+      //
+      // Team-scoped: skip the fast path when an effective customer team is set
+      // — the team-scoped row + global row both match server-side sorts and
+      // would yield duplicates; the slow path handles dedupe in JS.
       if (
         FAST_DB_SORT_KEYS.includes(sortKey) &&
         positionFilter === "all" &&
@@ -1571,7 +1577,8 @@ export default function ReturningPlayers() {
         batsFilters.size === 0 &&
         confFilters.size === 0 &&
         portalFilters.size === 0 &&
-        !showMissingOnly
+        !showMissingOnly &&
+        !effectiveTeamId
       ) {
         const orderColumn =
           sortKey === "p_war"
@@ -1628,20 +1635,24 @@ export default function ReturningPlayers() {
         let predFrom = 0;
         const PRED_PAGE_SIZE = 1000;
         while (true) {
-          const { data, error } = await supabase
+          let q = supabase
             .from("player_predictions")
             .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip)")
             .in("model_type", ["returner", "transfer"])
-            .eq("variant", "regular")
+            .in("variant", ["regular", "precomputed"])
             .in("status", ["active", "departed"])
             .or("position.not.in.(SP,RP,CL,P,LHP,RHP),is_twp.eq.true", { referencedTable: "players" })
-            .gte("players.pa", 75)
-            .range(predFrom, predFrom + PRED_PAGE_SIZE - 1);
+            .gte("players.pa", 75);
+          q = applyTeamScopeFilter(q as any, effectiveTeamId);
+          const { data, error } = await q.range(predFrom, predFrom + PRED_PAGE_SIZE - 1);
           if (error) throw error;
           allData = allData.concat(data || []);
           if (!data || data.length < PRED_PAGE_SIZE) break;
           predFrom += PRED_PAGE_SIZE;
         }
+        // Prefer team-scoped precomputed row per player before existing
+        // best-of-multiple-regular picker runs.
+        allData = dedupePreferredPerPlayer(allData, effectiveTeamId);
 
         const byPlayer = new Map<string, any>();
         for (const row of allData || []) {
@@ -1817,14 +1828,17 @@ export default function ReturningPlayers() {
       const playerIds = (playerRows || []).map((r: any) => r.id).filter(Boolean);
       if (playerIds.length === 0) return { rows: [] as ReturnerPlayer[], total: count ?? 0 };
 
-      const { data: allData, error: predErr } = await supabase
+      let predQuery = supabase
         .from("player_predictions")
         .select("*")
         .in("player_id", playerIds)
         .in("model_type", ["returner", "transfer"])
-        .eq("variant", "regular")
+        .in("variant", ["regular", "precomputed"])
         .in("status", ["active", "departed"]);
+      predQuery = applyTeamScopeFilter(predQuery as any, effectiveTeamId);
+      const { data: allDataRaw, error: predErr } = await predQuery;
       if (predErr) throw predErr;
+      const allData = dedupePreferredPerPlayer(allDataRaw || [], effectiveTeamId);
 
       const nilByPlayer = new Map<string, number | null>();
       if (playerIds.length > 0) {

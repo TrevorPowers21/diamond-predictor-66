@@ -303,6 +303,161 @@ User wants the team-scoped equation to apply to **every player**, not just porta
 
 ---
 
+## 2026-05-20 (cont.) — Scope expansion + Independent fix + D1/JUCO separation
+
+**Branch:** `feature/season-transition-2027` (uncommitted)
+
+### Script changes (`scripts/precompute-transfer-projections.ts`)
+
+1. **Dropped portal filter.** Was `.or("portal_status.eq.IN PORTAL,transfer_portal.eq.true")`. Now loads every player.
+2. **Added own-team exclusion.** Players whose `source_team_id` matches the destination team's `source_id` are skipped — transfer math doesn't make sense for a player staying put (their returner row stays canonical).
+3. **Conference resolution switched to UUID.** `fromConferenceId` now flows through from `teamByName.get(...).conference_id` (was name-only). Recovered ~1,200 D1 players whose conference NAME drifted but conference_id matched.
+4. **Batched .in() queries.** UUIDs at 36 chars each blow Supabase's 16KB URL limit with 500 IDs; dropped to 200.
+5. **`--division D1|JUCO|all`** CLI flag (default D1). JUCO is opt-in until district-ID resolver lands.
+6. **Division + block-category breakdown** in dry-run output for visibility.
+
+### Database change (NOT a migration — data fix)
+
+Independent conference had a Conference Stats row for 2026 with all stats NULL (1-team conference, importer couldn't aggregate). Caused all Oregon State players (only Independent team) to block on missing From AVG+/OBP+/ISO+.
+
+**Fix (applied to STAGING):**
+```sql
+UPDATE "Conference Stats"
+SET "AVG"=0.280, "OBP"=0.385, "ISO"=0.162, "Stuff_plus"=100
+WHERE "conference abbreviation"='Independent' AND season=2026;
+```
+
+This is a data statement: Independent = NCAA averages (since there's no actual conference aggregation possible). Applies retroactively to TP simulator + every consumer.
+
+### D1 dry-run results on staging (Georgia)
+
+```
+Total hitters in D1:    5,162  (after excluding Georgia's own 39)
+Computed:               4,999  (97%)
+Blocked:                  163  (3% — all real data gaps)
+  158  Missing PR+ (small-school scouting — known gap)
+   11  Zero source stats (no PA in 2026 — player-side data gap)
+```
+
+### Bugs discovered during this round
+
+- Teams Table `conference` column is lowercase but `Season` is capitalized (already known).
+- An earlier accidental `replace_all` on "Conference" → "conference" broke `fromConference`/`toConference` variable names and `ConferenceHittingStats` type name. All fixed.
+- `.in()` URL length: cap at ~200 UUIDs per call.
+
+### What needs to happen on PROD (when ready to promote)
+
+#### Migrations (already applied to staging + prod earlier):
+- `20260520200000_eager_transfer_precompute_schema.sql` ✅
+- `20260520210000_player_predictions_unique_with_customer_team.sql` ✅
+
+#### Data fix (NOT YET on prod):
+```sql
+-- Run on prod when ready
+UPDATE "Conference Stats"
+SET "AVG"=0.280, "OBP"=0.385, "ISO"=0.162, "Stuff_plus"=100
+WHERE "conference abbreviation"='Independent' AND season=2026;
+```
+
+#### Precompute run (NOT YET on prod):
+For each customer team on prod, run:
+```bash
+npm run precompute-transfers:prod -- --team <customer_team_uuid> --division D1
+```
+
+Today that's just Georgia (`289f4f16-555e-46d3-b899-2462c5cfaa24`). If other customer teams exist on prod, run for each.
+
+#### JUCO (deferred — needs separate work):
+JUCO uses district IDs (separate namespace from conference IDs). Need to wire `jucoDistrictNameFromConference` + `JUCO_DISTRICT_CONFERENCE_ID` from `transferWeightDefaults.ts` into the script's resolver. Once that's wired:
+```bash
+npm run precompute-transfers:prod -- --team <uuid> --division JUCO
+```
+
+#### Code (committed on `feature/season-transition-2027`, needs feature→staging→main flow):
+All read-path + script + helper code changes need to land on main.
+
+### Recurring sanity check to add later
+
+For new seasons: scan Conference Stats for null-AVG rows. Any non-aggregated single-team conference (currently just Independent) needs the NCAA-average backfill. Easy to forget for 2027/2028.
+
+---
+
+## 2026-05-20 (cont.) — TeamBuilder + Rankings + TP handedness bug + Dashboard badge
+
+**Branch:** `feature/season-transition-2027` (uncommitted)
+
+### Bugs fixed
+
+1. **TP handedness silently dropped.** `bats_hand` was being selected from the DB but DROPPED in the `SimPlayer` mapper at TransferPortal.tsx:657. Result: `playerHand` was always null in `resolveMetricParkFactor`, so TP was using COMBINED park factors instead of LHB/RHB-specific ones for years. Added `bats_hand` to both the `SimPlayer` type and the mapper. Now Show Work park values reflect actual LHB/RHB factors and simulator output matches the precompute exactly. (Found via Hairston divergence: TP showed 0.354/0.476/139, precompute 0.345/0.470/136. After fix both match precompute.)
+2. **Dashboard "Portal" badge.** Was keyed on `prediction.model_type === "transfer"`. With team-scoped precomputed rows (model_type='transfer' for every D1 hitter), every returner showed an amber Portal chip. Switched to `players.transfer_portal` flag from the joined player row.
+3. **buildTransferProjectionInputs handedness casing.** Local `batsHandToHandedness` returned uppercase "LHB" but `resolveMetricParkFactor` expects lowercase Handedness enum ("lhb"). Removed local copy, imports canonical helper from `parkFactors.ts`. Hairston shifted from 141 → 136 (LHB park now applied).
+
+### Read-path surfaces wired this round
+
+4. **TeamBuilder live target predictions** (`src/pages/TeamBuilder.tsx:3004`) — applies team-scope filter, prefers team-scoped precomputed row via `pickPreferredPrediction`, falls back to the existing `selectTransferPortalPreferredPrediction` ranker when no team-scoped row.
+5. **TeamBuilder loadBuild predictions** (`src/pages/TeamBuilder.tsx:2068`) — same pattern: expanded variants to include precomputed, applied team scope, dedupes preferring team-scoped row before the existing best-of-regular picker.
+6. **Rankings (ReturningPlayers) "fast path" — bypassed when team set.** Branch A is server-paginated by sort column; team-scoped duplicates would break that. Routed through Branch B (load all + JS sort + dedupe) when `effectiveTeamId` is set. No team set → unchanged.
+7. **Rankings Branch B** — expanded variants, applied scope, dedupes preferring team-scoped row via `dedupePreferredPerPlayer` before the existing best-of-multiple picker.
+8. **Rankings NIL aux query** — same pattern.
+9. **queryKey** updated on Rankings useQuery to include `teamScope: effectiveTeamId` so cache busts on team switch.
+
+### Where Add-to-Board surfaces are now team-scoped
+
+- PlayerProfile ✅ (previous round)
+- Dashboard target-board panel ✅ (previous round)
+- HighFollowList page ✅ (previous round)
+- TransferPortal simulator (overlay) ✅ (previous round)
+- TeamBuilder candidate pool ✅ (this round)
+- Rankings (browse-to-add) ✅ (this round)
+
+### Surfaces NOT yet wired (deferred / parallel work)
+
+- **PitcherProfile** — pitcher precompute data doesn't exist yet; read-path wiring is a no-op for hitters. Worth wiring once pitcher precompute lands.
+- **PitcherRanking pagination** (line 2183) — same reasoning.
+- **JucoPlayerDashboardPanel** — JUCO-specific surface; tied to JUCO district-ID resolver work.
+- **Admin batch query** (line 2067) — counts returner prediction IDs, no display impact.
+
+### Typecheck
+
+`npx tsc --noEmit` clean after all changes.
+
+---
+
+## 2026-05-20 (cont.) — TB target-add: stop re-deriving, read stored row
+
+**Branch:** `feature/season-transition-2027` → PR to `staging`
+
+### Problem
+
+User added Hairston via TB target-search expecting the stored precomputed value (0.345 pAVG). TB displayed 0.359 instead. Root cause: two layers of re-derivation that ran AFTER my earlier add-time fix.
+
+### Two-layer fix
+
+1. **Add-time** (`addPlayerFromTargetSearch`, line ~4335) — replaced the join-based lookup (PostgREST FK + RLS made it unreliable) with an explicit Supabase fetch for `(player_id, customer_team_id, variant='precomputed', status='active')`. If found, the snapshot is built from those columns directly. No live computation. Live-compute fallback is now guarded behind `skipLiveCompute` and only fires for agent views (no team) or pitchers (no precompute yet).
+
+2. **Display-time** (`simulateTransferProjection`, line ~3135) — this hook re-derives the projection on EVERY render of a target row, overwriting the stored snapshot. Added an early-return at the top of the hitter branch: when `effectiveTeamId` is set AND `livePred` is a team-scoped `variant='precomputed'` row, return its stored `p_avg/p_obp/p_slg/p_wrc_plus` directly. Pitcher branch unchanged (no pitcher precompute yet).
+
+### Architectural principle (locked in this session)
+
+When a customer team is active and a team-scoped precomputed row exists for a player, the displayed projection IS the stored row. No re-derivation, no fallback to live math. Live computation only happens:
+- In TransferPortal simulator (what-if; editable inputs)
+- For agent views / no impersonation (no team-scoped row exists)
+- For pitchers (until pitcher precompute is built)
+
+### Diagnostic note
+
+A `console.log("[TB target-add stored row]", {...})` was left in `addPlayerFromTargetSearch` for one round of verification. Once Peyton or Trevor confirms Hairston shows 0.345 in TB, remove that log line.
+
+### Commits in this PR
+
+- `3c8063b` — TeamBuilder target-add: use stored precomputed row instead of re-deriving
+- `cf7b7c0` — TeamBuilder target-search: include customer_team_id in joined predictions
+- `9a2c2e5` — TB target-add: temp diagnostic for precompute fast path
+- `5783629` — TB target-add: explicit stored-row fetch, block live compute when team set
+- `d1e2d9f` — TB simulateTransferProjection: short-circuit when team-scoped row exists
+
+---
+
 ## Template for future entries
 
 ```

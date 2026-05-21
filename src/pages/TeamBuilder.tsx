@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, BarChart3, DollarSign, Upload, ChevronDown, ChevronUp } from "lucide-react";
@@ -1205,7 +1206,7 @@ export default function TeamBuilder() {
 
   // All players for target board search
   const { data: allPlayersForSearch = [] } = useQuery({
-    queryKey: ["team-builder-all-players-search"],
+    queryKey: ["team-builder-all-players-search", effectiveTeamId],
     queryFn: async () => {
       let all: any[] = [];
       let from = 0;
@@ -1213,7 +1214,7 @@ export default function TeamBuilder() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, is_twp, class_year, throws_hand, bats_hand, team, from_team, conference, transfer_portal, portal_status, player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at), nil_valuations(estimated_value, component_breakdown)")
+          .select("id, first_name, last_name, position, is_twp, class_year, throws_hand, bats_hand, team, from_team, conference, transfer_portal, portal_status, player_predictions(id, customer_team_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at), nil_valuations(estimated_value, component_breakdown)")
           .range(from, from + PAGE - 1);
         if (error) throw error;
         all = all.concat(data || []);
@@ -2064,12 +2065,14 @@ export default function TeamBuilder() {
           playerMap[p.id] = p;
         });
 
-        const { data: predData, error: predErr } = await supabase
+        let predQuery = supabase
           .from("player_predictions")
-          .select("id, player_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at")
+          .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at")
           .in("player_id", playerIds)
-          .eq("variant", "regular")
+          .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"]);
+        predQuery = applyTeamScopeFilter(predQuery as any, effectiveTeamId);
+        const { data: predData, error: predErr } = await predQuery;
         if (predErr) {
           console.error("TeamBuilder loadBuild predictions fetch failed:", predErr);
         }
@@ -2084,11 +2087,14 @@ export default function TeamBuilder() {
         for (const [pid, rows] of grouped.entries()) {
           const player = playerMap[pid];
           if (!player) continue;
-          // Match the auto-load path's picker: don't hard-filter by model_type
-          // (some predictions are stored as "transfer" even for returning
-          // players). Pick the best-scoring prediction among regular+active
-          // rows and tie-break on updated_at. This is copy-paste of the
-          // logic at lines ~1573-1585 in the returners useQuery.
+          // Prefer team-scoped precomputed row when active team has one (so
+          // saved builds for a customer team reflect their tuned equation),
+          // else fall back to the existing best-of-regular picker.
+          const teamScoped = pickPreferredPrediction(rows as any[], effectiveTeamId);
+          if (teamScoped && (teamScoped as any).customer_team_id === effectiveTeamId) {
+            predictionMap[pid] = teamScoped;
+            continue;
+          }
           const preds = rows.filter((r: any) => r.variant === "regular" && (r.status === "active" || r.status === "departed"));
           if (preds.length === 0) continue;
           let best = preds[0];
@@ -3002,14 +3008,16 @@ export default function TeamBuilder() {
 
 
   const { data: liveTargetPredictions = [] } = useQuery({
-    queryKey: ["team-builder-live-target-predictions", targetPlayerIds],
+    queryKey: ["team-builder-live-target-predictions", targetPlayerIds, effectiveTeamId],
     enabled: targetPlayerIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
+      let q = supabase
         .from("player_predictions")
-        .select("id, player_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at")
+        .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at")
         .in("model_type", ["returner", "transfer"])
         .in("player_id", targetPlayerIds);
+      q = applyTeamScopeFilter(q as any, effectiveTeamId);
+      const { data, error } = await q;
       if (error) throw error;
       return (data || []) as LivePredictionRow[];
     },
@@ -3024,11 +3032,14 @@ export default function TeamBuilder() {
     }
     const out = new Map<string, LivePredictionRow>();
     for (const [playerId, rows] of grouped.entries()) {
-      const best = selectTransferPortalPreferredPrediction(rows) as LivePredictionRow | null;
+      // Prefer team-scoped precomputed row when active team has one, else
+      // fall back to the legacy TP-style ranker.
+      const teamScoped = pickPreferredPrediction(rows as any[], effectiveTeamId) as LivePredictionRow | null;
+      const best = teamScoped ?? (selectTransferPortalPreferredPrediction(rows) as LivePredictionRow | null);
       if (best) out.set(playerId, best);
     }
     return out;
-  }, [liveTargetPredictions]);
+  }, [liveTargetPredictions, effectiveTeamId]);
 
   const { data: liveTargetPlayers = [] } = useQuery({
     queryKey: ["team-builder-live-target-players", targetPlayerIds],
@@ -3147,6 +3158,26 @@ export default function TeamBuilder() {
     const livePred = (p.player_id ? liveTargetPredictionByPlayerId.get(p.player_id) : null) || p.prediction;
     if (!livePred) {
       return snapshotFallback;
+    }
+
+    // Architecture: when a customer team is active AND we have a team-scoped
+    // precomputed row, that row IS the projection. No re-derivation. This
+    // mirrors the add-time fast path so the displayed value stays consistent
+    // across renders and matches the precompute exactly. (Hitter only;
+    // pitcher precompute hasn't been built yet so the pitcher branch below
+    // still runs.)
+    if (!treatAsPitcher && effectiveTeamId && (livePred as any)?.variant === "precomputed" && (livePred as any)?.customer_team_id === effectiveTeamId) {
+      const lp = livePred as any;
+      return {
+        p_avg: lp.p_avg ?? null,
+        p_obp: lp.p_obp ?? null,
+        p_slg: lp.p_slg ?? null,
+        p_ops: lp.p_ops ?? ((lp.p_obp ?? 0) + (lp.p_slg ?? 0)),
+        p_iso: lp.p_iso ?? null,
+        p_wrc_plus: lp.p_wrc_plus ?? null,
+        owar: computeOWarFromWrcPlus(lp.p_wrc_plus ?? null),
+        nil_valuation: null,
+      } as any;
     }
 
     // ── Pitcher branch ──────────────────────────────────────────────
@@ -4317,9 +4348,63 @@ export default function TeamBuilder() {
     const inferredRole = overrideRole || asPitcherRole(row.position || null);
     const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(row.position || ""));
 
-    // Fetch prediction internals so we can run the same simulation as Transfer Portal
+    // Honest fix for the eager pre-compute architecture: if a team-scoped
+    // precomputed row exists for this player + customer team, use it directly
+    // (no re-derivation). Otherwise fall through to live computation for
+    // agents / non-team contexts.
     let transferSnapshot: TransferSnapshot | null = null;
-    if (chosenPred?.id && selectedTeam) {
+    // Architecture: when a customer team is active, the projection IS the
+    // stored row. No live computation. Read it explicitly (don't rely on the
+    // joined search query — joins can miss rows depending on PostgREST FK
+    // disambiguation, RLS, or stale cache).
+    if (effectiveTeamId && row.id && !isPitcherRow) {
+      const { data: precomputedTeamRow, error: precomputeErr } = await supabase
+        .from("player_predictions")
+        .select("p_avg, p_obp, p_slg, p_wrc_plus")
+        .eq("player_id", row.id)
+        .eq("customer_team_id", effectiveTeamId)
+        .eq("variant", "precomputed")
+        .eq("status", "active")
+        .maybeSingle();
+      // eslint-disable-next-line no-console
+      console.log("[TB target-add stored row]", {
+        playerName: `${row.first_name} ${row.last_name}`,
+        playerId: row.id,
+        effectiveTeamId,
+        found: !!precomputedTeamRow,
+        error: precomputeErr?.message,
+        precomputedTeamRow,
+      });
+      if (precomputedTeamRow) {
+        const fromTeamName = row.from_team || row.team;
+        const fromTeamRow = fromTeamName ? teamByKey.get(normalizeKey(fromTeamName)) || null : null;
+        const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
+        const owar = computeOWarFromWrcPlus(precomputedTeamRow.p_wrc_plus ?? null);
+        const basePerOwar = eqNum("nil_base_per_owar", 25000);
+        const ptm = getProgramTierMultiplierByConference(toTeamRow?.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
+        const pvm = getPositionValueMultiplier(row.position);
+        const nilRaw = owar == null ? null : owar * basePerOwar * ptm * pvm;
+        const nilValuation = nilRaw == null ? null : Math.max(0, nilRaw);
+        transferSnapshot = {
+          p_avg: precomputedTeamRow.p_avg ?? null,
+          p_obp: precomputedTeamRow.p_obp ?? null,
+          p_slg: precomputedTeamRow.p_slg ?? null,
+          p_wrc_plus: precomputedTeamRow.p_wrc_plus ?? null,
+          owar,
+          nil_valuation: nilValuation,
+          from_team: fromTeamName || null,
+          from_conference: fromTeamRow?.conference || row.conference || null,
+        } as any;
+      }
+    }
+
+    // Live-compute fallback path. Only runs when:
+    //   - No customer team is active (agent view, superadmin not impersonating)
+    //   - OR player is a pitcher (precompute is hitter-only today)
+    // Never falls through here when team IS set but the precomputed lookup
+    // missed — that's a data gap to surface, not silently re-derive.
+    const skipLiveCompute = !!effectiveTeamId && !isPitcherRow && !transferSnapshot;
+    if (!transferSnapshot && !skipLiveCompute && chosenPred?.id && selectedTeam) {
       const { data: internals } = await supabase
         .from("player_prediction_internals")
         .select("avg_power_rating, obp_power_rating, slg_power_rating")
