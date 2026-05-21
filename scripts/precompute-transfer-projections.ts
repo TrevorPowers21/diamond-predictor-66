@@ -60,6 +60,9 @@ async function main() {
   const dryRun = process.argv.includes("--dry-run");
   const teamId = arg("team");
   const season = Number(arg("season") || PROJECTION_SEASON);
+  // --division D1|JUCO|all   (default D1; JUCO needs district-ID resolution
+  // which isn't wired yet — keep it opt-in until that lands)
+  const divisionArg = (arg("division") || "D1").toUpperCase();
 
   if (!teamId) {
     console.error(`${C.red}✗ --team <customer_team_uuid> required${C.reset}`);
@@ -69,6 +72,7 @@ async function main() {
   console.log(`${C.bold}Eager Transfer Pre-compute${C.reset} on ${isProd ? "PROD" : "STAGING"}${dryRun ? ` ${C.yellow}[DRY RUN]${C.reset}` : ""}`);
   console.log(`  customer_team: ${teamId}`);
   console.log(`  season:        ${season} (data from ${CURRENT_SEASON})`);
+  console.log(`  division:      ${divisionArg}`);
 
   // 1. Customer team → destination team + conference
   const { data: ct, error: ctErr } = await supabase
@@ -85,7 +89,7 @@ async function main() {
   // Resolve the destination team row (this is the "to" school for every projection)
   const { data: toTeamRow, error: ttErr } = await (supabase as any)
     .from("Teams Table")
-    .select("id, full_name, abbreviation, source_id, conference, Season")
+    .select("id, full_name, abbreviation, source_id, conference, conference_id, Season")
     .eq("id", ct.school_team_id)
     .maybeSingle();
   if (ttErr) throw ttErr;
@@ -95,7 +99,9 @@ async function main() {
   }
   const toTeam = { id: toTeamRow.id as string, name: (toTeamRow.full_name || toTeamRow.abbreviation) as string };
   const toConference = toTeamRow.conference as string | null;
-  console.log(`  destination:   ${toTeam.name} (${toConference || "no conf"})`);
+  const toConferenceId = (toTeamRow.conference_id as string | null) ?? null;
+  const toSourceId = (toTeamRow.source_id as string | null) ?? null;
+  console.log(`  destination:   ${toTeam.name} (${toConference || "no conf"}, source_id=${toSourceId})`);
 
   // 2. Lookups (loaded once)
   console.log(`${C.cyan}→${C.reset} loading lookups...`);
@@ -157,12 +163,18 @@ async function main() {
 
   // 2d. Teams Table — for resolving each player's from_team
   const allTeams = await loadAllPaged<any>(() =>
-    (supabase as any).from("Teams Table").select("id, full_name, abbreviation, source_id, conference, Season").eq("Season", CURRENT_SEASON),
+    (supabase as any).from("Teams Table").select("id, full_name, abbreviation, source_id, conference, conference_id, Season").eq("Season", CURRENT_SEASON),
   );
-  const teamByName = new Map<string, { id: string; name: string; conference: string | null }>();
+  type TeamRow = { id: string; name: string; conference: string | null; conference_id: string | null };
+  const teamByName = new Map<string, TeamRow>();
   for (const t of allTeams) {
     const name = (t.full_name || t.abbreviation || "") as string;
-    const row = { id: t.id as string, name, conference: (t.conference as string | null) ?? null };
+    const row: TeamRow = {
+      id: t.id as string,
+      name,
+      conference: (t.conference as string | null) ?? null,
+      conference_id: (t.conference_id as string | null) ?? null,
+    };
     for (const k of [t.full_name, t.abbreviation, t.source_id]) {
       const nk = normalizeKey(k);
       if (nk) teamByName.set(nk, row);
@@ -170,29 +182,50 @@ async function main() {
   }
   console.log(`  ${allTeams.length} Teams Table rows`);
 
-  // 2e. Players (in portal only)
-  const portalPlayers = await loadAllPaged<any>(() =>
+  // 2e. Players — ALL hitters, excluding the customer team's own roster
+  // (transfer math doesn't make sense for a player staying put; their
+  // returner projection comes from the canonical global "regular" row).
+  const allPlayers = await loadAllPaged<any>(() =>
     supabase
       .from("players")
-      .select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, portal_status")
-      .or("portal_status.eq.IN PORTAL,transfer_portal.eq.true"),
+      .select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, portal_status"),
   );
-  console.log(`  ${portalPlayers.length} portal players`);
-  // Exclude pitchers (v1 = hitters only)
+  console.log(`  ${allPlayers.length} total players`);
   const isPitcher = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
-  const hitters = portalPlayers.filter((p) => !isPitcher(p.position));
-  console.log(`  ${hitters.length} hitters after pitcher filter`);
+  const matchesDivision = (div: string | null | undefined) => {
+    if (divisionArg === "ALL") return true;
+    if (divisionArg === "JUCO") return div === "NJCAA_D1";
+    // D1 default: exclude JUCO; include null (legacy D1 rows without division tag)
+    return div !== "NJCAA_D1";
+  };
+  const hitters = allPlayers.filter((p) => {
+    if (isPitcher(p.position)) return false;
+    if (toSourceId && p.source_team_id === toSourceId) return false; // skip own roster
+    if (!matchesDivision(p.division)) return false;
+    return true;
+  });
+  console.log(`  ${hitters.length} hitters after pitcher + own-team + division=${divisionArg} filter`);
 
   // 2f. Latest active player_predictions per player (for from_avg/obp/slg + class)
+  // Batch the .in() queries — Supabase URL length limits would break a single
+  // 15k-id call.
+  // UUIDs are ~36 chars; .in() with many UUIDs blows the 16KB URL limit.
+  // 200 keeps us comfortably under at any selection size.
+  const PRED_ID_BATCH = 200;
   const playerIds = hitters.map((p) => p.id);
-  const predRows = await loadAllPaged<any>(() =>
-    supabase
-      .from("player_predictions")
-      .select("id, player_id, model_type, variant, status, updated_at, from_avg, from_obp, from_slg, class_transition, dev_aggressiveness")
-      .in("player_id", playerIds)
-      .in("model_type", ["returner", "transfer"])
-      .is("customer_team_id", null),
-  );
+  const predRows: any[] = [];
+  for (let i = 0; i < playerIds.length; i += PRED_ID_BATCH) {
+    const idsChunk = playerIds.slice(i, i + PRED_ID_BATCH);
+    const chunk = await loadAllPaged<any>(() =>
+      supabase
+        .from("player_predictions")
+        .select("id, player_id, model_type, variant, status, updated_at, from_avg, from_obp, from_slg, class_transition, dev_aggressiveness")
+        .in("player_id", idsChunk)
+        .in("model_type", ["returner", "transfer"])
+        .is("customer_team_id", null),
+    );
+    predRows.push(...chunk);
+  }
   const rank = (row: any) => {
     const hasFrom = row.from_avg != null || row.from_obp != null || row.from_slg != null;
     const statusBoost = row.status === "active" ? 2 : row.status === "departed" ? 1 : 0;
@@ -206,14 +239,19 @@ async function main() {
     if (!existing || rank(row) > rank(existing)) bestPredByPlayer.set(k, row);
   }
 
-  // 2g. Internals for the chosen predictions
+  // 2g. Internals for the chosen predictions (batched same as predictions)
   const predIds = Array.from(bestPredByPlayer.values()).map((r) => r.id);
-  const internalsRows = predIds.length === 0 ? [] : await loadAllPaged<any>(() =>
-    supabase
-      .from("player_prediction_internals")
-      .select("prediction_id, avg_power_rating, obp_power_rating, slg_power_rating")
-      .in("prediction_id", predIds),
-  );
+  const internalsRows: any[] = [];
+  for (let i = 0; i < predIds.length; i += PRED_ID_BATCH) {
+    const idsChunk = predIds.slice(i, i + PRED_ID_BATCH);
+    const chunk = await loadAllPaged<any>(() =>
+      supabase
+        .from("player_prediction_internals")
+        .select("prediction_id, avg_power_rating, obp_power_rating, slg_power_rating")
+        .in("prediction_id", idsChunk),
+    );
+    internalsRows.push(...chunk);
+  }
   const internalsByPredId = new Map<string, any>();
   for (const r of internalsRows) internalsByPredId.set(r.prediction_id, r);
 
@@ -223,6 +261,28 @@ async function main() {
   let blocked = 0;
   let computed = 0;
   const blockReasons = new Map<string, number>();
+  // For dry-run debugging: collect first N blocked-player samples per category
+  const SAMPLES_PER_CATEGORY = 8;
+  const blockSamples: Record<string, Array<{ name: string; team: string | null; conf: string | null; missing: string[] }>> = {
+    "no_stats": [],         // missing Last AVG/OBP/SLG (no source season)
+    "no_from_team": [],     // from_team didn't match any Teams Table row
+    "no_from_conf": [],     // team matched but conference unresolved
+    "missing_pr": [],       // PR+ missing (small school no scouting)
+    "other": [],
+  };
+  const pushSample = (cat: string, name: string, team: string | null, conf: string | null, missing: string[]) => {
+    const arr = blockSamples[cat] || blockSamples["other"];
+    if (arr.length < SAMPLES_PER_CATEGORY) arr.push({ name, team, conf, missing });
+  };
+  // Track scope + outcome by division so we can see whether JUCO needs its
+  // own resolver path (district IDs are separate from conference IDs).
+  const divCounters: Record<string, { total: number; computed: number; blocked: number }> = {};
+  const bumpDiv = (div: string | null, key: "computed" | "blocked") => {
+    const d = div || "UNKNOWN";
+    if (!divCounters[d]) divCounters[d] = { total: 0, computed: 0, blocked: 0 };
+    divCounters[d].total += 1;
+    divCounters[d][key] += 1;
+  };
 
   for (const p of hitters) {
     const pred = bestPredByPlayer.get(p.id);
@@ -231,6 +291,7 @@ async function main() {
     const fromTeamName = (p.from_team || p.team || "") as string;
     const fromTeamRow = teamByName.get(normalizeKey(fromTeamName)) || null;
     const fromConference = fromTeamRow?.conference ?? (p.conference as string | null) ?? null;
+    const fromConferenceId = fromTeamRow?.conference_id ?? null;
 
     const result = buildHitterTransferInputs({
       player: {
@@ -248,7 +309,9 @@ async function main() {
       fromTeam: fromTeamRow ? { id: fromTeamRow.id, name: fromTeamRow.name } : { id: null, name: fromTeamName },
       toTeam,
       fromConference,
+      fromConferenceId,
       toConference,
+      toConferenceId,
       internals,
       resolveConferenceHitting,
       resolveParkFactor,
@@ -257,9 +320,19 @@ async function main() {
 
     if (result.blocked) {
       blocked++;
+      bumpDiv(p.division, "blocked");
       for (const m of result.missingInputs) blockReasons.set(m, (blockReasons.get(m) || 0) + 1);
+      // Bucket the blocked player for debug visibility
+      const missing = result.missingInputs;
+      let cat = "other";
+      if (missing.some((m) => m.startsWith("Last "))) cat = "no_stats";
+      else if (!fromTeamRow && missing.some((m) => m.startsWith("From "))) cat = "no_from_team";
+      else if (missing.some((m) => m.startsWith("From AVG+") || m.startsWith("From OBP+"))) cat = "no_from_conf";
+      else if (missing.some((m) => m.includes("Power Rating+"))) cat = "missing_pr";
+      pushSample(cat, `${p.first_name} ${p.last_name}`, fromTeamName || null, fromConference, missing);
       continue;
     }
+    bumpDiv(p.division, "computed");
 
     const projected = computeTransferProjection(result.inputs);
     const final = applyTransferPostprocess(projected, result.inputs, result.transferMultiplier);
@@ -292,10 +365,22 @@ async function main() {
   }
 
   console.log(`${C.bold}Result:${C.reset} ${C.green}${computed} computed${C.reset}, ${C.yellow}${blocked} blocked${C.reset}`);
+  console.log(`${C.dim}By division:${C.reset}`);
+  const divs = Object.entries(divCounters).sort((a, b) => b[1].total - a[1].total);
+  for (const [d, c] of divs) {
+    const pct = c.total === 0 ? "0" : ((c.computed / c.total) * 100).toFixed(0);
+    console.log(`  ${d.padEnd(12)} total=${c.total.toString().padStart(5)}  computed=${c.computed.toString().padStart(5)}  blocked=${c.blocked.toString().padStart(5)}  (${pct}%)`);
+  }
   if (blocked > 0) {
     console.log(`${C.dim}Top block reasons:${C.reset}`);
     const sorted = Array.from(blockReasons.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
     for (const [r, n] of sorted) console.log(`  ${n.toString().padStart(4)}  ${r}`);
+    console.log(`${C.dim}Sample blocked players (per category):${C.reset}`);
+    for (const [cat, arr] of Object.entries(blockSamples)) {
+      if (arr.length === 0) continue;
+      console.log(`  [${cat}] (${arr.length} shown)`);
+      for (const s of arr) console.log(`    ${s.name.padEnd(28)} team=${(s.team || "-").padEnd(28)} conf=${s.conf || "-"}  missing=[${s.missing.slice(0, 3).join(", ")}${s.missing.length > 3 ? "..." : ""}]`);
+    }
   }
 
   if (dryRun) {

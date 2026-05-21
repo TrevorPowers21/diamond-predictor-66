@@ -15,6 +15,7 @@ import {
   JUCO_REGRESSION_CONFIG,
 } from "@/lib/transferWeightDefaults";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
+import { batsHandToHandedness } from "@/lib/parkFactors";
 import type { TransferProjectionInputs, TransferProjectionOutput } from "@/lib/transferProjection";
 
 // ---------- helpers (kept local so the precompute script doesn't need to
@@ -125,15 +126,8 @@ export type BuildHitterTransferInputsResult =
       isJucoSource: boolean;
     };
 
-// Map bats hand strings to LHB/RHB/SWITCH (subset of parkFactors helper).
-function batsHandToHandedness(bats: string | null | undefined): string | null {
-  if (!bats) return null;
-  const v = String(bats).trim().toUpperCase();
-  if (v === "L" || v === "LHB" || v === "LEFT") return "LHB";
-  if (v === "R" || v === "RHB" || v === "RIGHT") return "RHB";
-  if (v === "S" || v === "SWITCH" || v === "B") return "SWITCH";
-  return null;
-}
+// Uses canonical batsHandToHandedness (lowercase "lhb"/"rhb"/"switch") from
+// parkFactors so casing matches what resolveMetricParkFactor expects.
 
 // ---------- main entry ----------
 

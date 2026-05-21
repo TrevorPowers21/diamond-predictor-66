@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, BarChart3, DollarSign, Upload, ChevronDown, ChevronUp } from "lucide-react";
@@ -2064,12 +2065,14 @@ export default function TeamBuilder() {
           playerMap[p.id] = p;
         });
 
-        const { data: predData, error: predErr } = await supabase
+        let predQuery = supabase
           .from("player_predictions")
-          .select("id, player_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at")
+          .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at")
           .in("player_id", playerIds)
-          .eq("variant", "regular")
+          .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"]);
+        predQuery = applyTeamScopeFilter(predQuery as any, effectiveTeamId);
+        const { data: predData, error: predErr } = await predQuery;
         if (predErr) {
           console.error("TeamBuilder loadBuild predictions fetch failed:", predErr);
         }
@@ -2084,11 +2087,14 @@ export default function TeamBuilder() {
         for (const [pid, rows] of grouped.entries()) {
           const player = playerMap[pid];
           if (!player) continue;
-          // Match the auto-load path's picker: don't hard-filter by model_type
-          // (some predictions are stored as "transfer" even for returning
-          // players). Pick the best-scoring prediction among regular+active
-          // rows and tie-break on updated_at. This is copy-paste of the
-          // logic at lines ~1573-1585 in the returners useQuery.
+          // Prefer team-scoped precomputed row when active team has one (so
+          // saved builds for a customer team reflect their tuned equation),
+          // else fall back to the existing best-of-regular picker.
+          const teamScoped = pickPreferredPrediction(rows as any[], effectiveTeamId);
+          if (teamScoped && (teamScoped as any).customer_team_id === effectiveTeamId) {
+            predictionMap[pid] = teamScoped;
+            continue;
+          }
           const preds = rows.filter((r: any) => r.variant === "regular" && (r.status === "active" || r.status === "departed"));
           if (preds.length === 0) continue;
           let best = preds[0];
@@ -3002,14 +3008,16 @@ export default function TeamBuilder() {
 
 
   const { data: liveTargetPredictions = [] } = useQuery({
-    queryKey: ["team-builder-live-target-predictions", targetPlayerIds],
+    queryKey: ["team-builder-live-target-predictions", targetPlayerIds, effectiveTeamId],
     enabled: targetPlayerIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
+      let q = supabase
         .from("player_predictions")
-        .select("id, player_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at")
+        .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at")
         .in("model_type", ["returner", "transfer"])
         .in("player_id", targetPlayerIds);
+      q = applyTeamScopeFilter(q as any, effectiveTeamId);
+      const { data, error } = await q;
       if (error) throw error;
       return (data || []) as LivePredictionRow[];
     },
@@ -3024,11 +3032,14 @@ export default function TeamBuilder() {
     }
     const out = new Map<string, LivePredictionRow>();
     for (const [playerId, rows] of grouped.entries()) {
-      const best = selectTransferPortalPreferredPrediction(rows) as LivePredictionRow | null;
+      // Prefer team-scoped precomputed row when active team has one, else
+      // fall back to the legacy TP-style ranker.
+      const teamScoped = pickPreferredPrediction(rows as any[], effectiveTeamId) as LivePredictionRow | null;
+      const best = teamScoped ?? (selectTransferPortalPreferredPrediction(rows) as LivePredictionRow | null);
       if (best) out.set(playerId, best);
     }
     return out;
-  }, [liveTargetPredictions]);
+  }, [liveTargetPredictions, effectiveTeamId]);
 
   const { data: liveTargetPlayers = [] } = useQuery({
     queryKey: ["team-builder-live-target-players", targetPlayerIds],

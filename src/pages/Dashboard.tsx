@@ -24,6 +24,7 @@ type HitterRow = {
   conference: string | null;
   position: string | null;
   model_type: string;
+  in_portal: boolean;
   p_wrc_plus: number;
   p_avg: number | null;
   p_obp: number | null;
@@ -39,6 +40,7 @@ type PitcherRow = {
   conference: string | null;
   position: string | null;
   model_type: string;
+  in_portal: boolean;
   p_rv_plus: number;
   p_era: number | null;
   p_fip: number | null;
@@ -77,7 +79,7 @@ export default function Dashboard() {
         let q = supabase
           .from("player_predictions")
           .select(
-            "id, player_id, customer_team_id, model_type, variant, status, p_wrc_plus, p_avg, p_obp, p_slg, players!inner(first_name, last_name, team, from_team, conference, position, pa)",
+            "id, player_id, customer_team_id, model_type, variant, status, p_wrc_plus, p_avg, p_obp, p_slg, players!inner(first_name, last_name, team, from_team, conference, position, pa, transfer_portal)",
           )
           .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"])
@@ -105,6 +107,7 @@ export default function Dashboard() {
           conference: r.players.conference ?? null,
           position: r.players.position ?? null,
           model_type: r.model_type,
+          in_portal: r.players.transfer_portal === true,
           p_wrc_plus: Number(r.p_wrc_plus),
           p_avg: r.p_avg,
           p_obp: r.p_obp,
@@ -130,7 +133,7 @@ export default function Dashboard() {
         let q = supabase
           .from("player_predictions")
           .select(
-            "id, player_id, customer_team_id, model_type, variant, status, p_rv_plus, p_era, p_fip, p_k9, players!inner(first_name, last_name, team, from_team, conference, position, ip)",
+            "id, player_id, customer_team_id, model_type, variant, status, p_rv_plus, p_era, p_fip, p_k9, players!inner(first_name, last_name, team, from_team, conference, position, ip, transfer_portal)",
           )
           .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"])
@@ -157,6 +160,7 @@ export default function Dashboard() {
           conference: r.players.conference ?? null,
           position: r.players.position ?? null,
           model_type: r.model_type,
+          in_portal: r.players.transfer_portal === true,
           p_rv_plus: Number(r.p_rv_plus),
           p_era: r.p_era,
           p_fip: r.p_fip,
@@ -533,7 +537,7 @@ export default function Dashboard() {
                           <span className="truncate text-sm font-semibold group-hover:text-primary transition-colors">
                             {row.first_name} {row.last_name}
                           </span>
-                          {row.model_type === "transfer" && (
+                          {row.in_portal && (
                             <span className="text-[9px] font-bold uppercase tracking-wider text-amber-600 bg-amber-50 border border-amber-200 rounded px-1 py-px">
                               Portal
                             </span>
@@ -594,7 +598,7 @@ export default function Dashboard() {
                           <span className="truncate text-sm font-semibold group-hover:text-primary transition-colors">
                             {row.first_name} {row.last_name}
                           </span>
-                          {row.model_type === "transfer" && (
+                          {row.in_portal && (
                             <span className="text-[9px] font-bold uppercase tracking-wider text-amber-600 bg-amber-50 border border-amber-200 rounded px-1 py-px">
                               Portal
                             </span>

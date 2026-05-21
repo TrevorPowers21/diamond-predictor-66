@@ -58,6 +58,7 @@ type SimPlayer = {
   dev_aggressiveness: number | null;
   team_id: string | null;
   source_team_id: string | null;
+  bats_hand: string | null;
 };
 
 type ConferenceRow = {
@@ -670,6 +671,7 @@ export default function TransferPortal() {
             division: (p.division as string | null) ?? null,
             team_id: (p.team_id as string | null) ?? null,
             source_team_id: (p.source_team_id as string | null) ?? null,
+            bats_hand: (p.bats_hand as string | null) ?? null,
             from_avg: (row?.from_avg as number | undefined) ?? null,
             from_obp: (row?.from_obp as number | undefined) ?? null,
             from_slg: (row?.from_slg as number | undefined) ?? null,
