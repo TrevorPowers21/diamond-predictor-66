@@ -3,6 +3,7 @@ import AnalyticsTab from "./team-builder/tabs/AnalyticsTab";
 import RosterTab from "./team-builder/tabs/RosterTab";
 import TargetBoardTab from "./team-builder/tabs/TargetBoardTab";
 import DepthTab from "./team-builder/tabs/DepthTab";
+import CompareTab from "./team-builder/tabs/CompareTab";
 import PlayerTableRow from "./team-builder/PlayerTableRow";
 import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -1094,18 +1095,6 @@ export default function TeamBuilder() {
   const [teamSearchOpen, setTeamSearchOpen] = useState(false);
   const [targetPlayerSearchQuery, setTargetPlayerSearchQuery] = useState("");
   const [targetPlayerSearchOpen, setTargetPlayerSearchOpen] = useState(false);
-  const [compareAPlayerId, setCompareAPlayerId] = useState<string>("");
-  const [compareAPlayerSearch, setCompareAPlayerSearch] = useState("");
-  const [compareAPlayerOpen, setCompareAPlayerOpen] = useState(false);
-  const [compareADestinationTeam, setCompareADestinationTeam] = useState<string>("");
-  const [compareATeamSearch, setCompareATeamSearch] = useState("");
-  const [compareATeamOpen, setCompareATeamOpen] = useState(false);
-  const [compareBPlayerId, setCompareBPlayerId] = useState<string>("");
-  const [compareBPlayerSearch, setCompareBPlayerSearch] = useState("");
-  const [compareBPlayerOpen, setCompareBPlayerOpen] = useState(false);
-  const [compareBDestinationTeam, setCompareBDestinationTeam] = useState<string>("");
-  const [compareBTeamSearch, setCompareBTeamSearch] = useState("");
-  const [compareBTeamOpen, setCompareBTeamOpen] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const skipAutoSeedOnceRef = useRef(false);
   const autoSeededTeamRef = useRef<string>("");
@@ -1519,42 +1508,6 @@ export default function TeamBuilder() {
     if (candidates.length === 1) return candidates[0];
     return null;
   }, [allPlayersById, allPlayersForSearch]);
-
-  const filterPlayersForCompare = useCallback((q: string) => {
-    const nq = normalizeName(q);
-    if (!nq) return [] as any[];
-    return allPlayersForSearch
-      .filter((p) =>
-        normalizeName(`${p.first_name} ${p.last_name} ${p.team || ""} ${p.position || ""}`).includes(nq),
-      )
-      .slice(0, 25);
-  }, [allPlayersForSearch]);
-
-  const filteredCompareAPlayers = useMemo(
-    () => filterPlayersForCompare(compareAPlayerSearch),
-    [compareAPlayerSearch, filterPlayersForCompare],
-  );
-  const filteredCompareBPlayers = useMemo(
-    () => filterPlayersForCompare(compareBPlayerSearch),
-    [compareBPlayerSearch, filterPlayersForCompare],
-  );
-
-  const filterTeamsForCompare = useCallback((q: string) => {
-    const nq = normalizeName(q);
-    if (!nq) return [] as TeamRow[];
-    return (teams as TeamRow[])
-      .filter((t) => normalizeName(`${t.name} ${t.conference || ""}`).includes(nq))
-      .slice(0, 30);
-  }, [teams]);
-
-  const filteredCompareATeams = useMemo(
-    () => filterTeamsForCompare(compareATeamSearch),
-    [compareATeamSearch, filterTeamsForCompare],
-  );
-  const filteredCompareBTeams = useMemo(
-    () => filterTeamsForCompare(compareBTeamSearch),
-    [compareBTeamSearch, filterTeamsForCompare],
-  );
 
   // Fetch existing builds
   const pitchingStatsByNameTeam = useMemo(() => {
@@ -3255,251 +3208,16 @@ export default function TeamBuilder() {
           </TabsContent>
 
           <TabsContent value="compare-hidden" className="hidden">
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Compare A</CardTitle>
-                  <CardDescription>Run Transfer Portal simulation inputs in a standalone panel.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="relative">
-                    <Label className="text-xs mb-1 block">Player</Label>
-                    <Input
-                      placeholder="Search player by name, team, or position…"
-                      value={compareAPlayerSearch}
-                      onChange={(e) => {
-                        setCompareAPlayerSearch(e.target.value);
-                        setCompareAPlayerOpen(true);
-                      }}
-                      onFocus={() => setCompareAPlayerOpen(true)}
-                      onBlur={() => setTimeout(() => setCompareAPlayerOpen(false), 150)}
-                    />
-                    {compareAPlayerOpen && filteredCompareAPlayers.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
-                        {filteredCompareAPlayers.map((p) => (
-                          <div
-                            key={`compare-a-${p.id}`}
-                            className="px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground flex justify-between items-center gap-2"
-                            onMouseDown={() => {
-                              setCompareAPlayerId(p.id);
-                              setCompareAPlayerSearch(`${p.first_name} ${p.last_name}`);
-                              setCompareAPlayerOpen(false);
-                            }}
-                          >
-                            <span className="font-medium">{p.first_name} {p.last_name}</span>
-                            <span className="text-muted-foreground text-xs">{p.team || "—"} · {p.position || "—"}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="relative">
-                    <Label className="text-xs mb-1 block">To Team</Label>
-                    <Input
-                      placeholder="Search destination team…"
-                      value={compareATeamSearch}
-                      onChange={(e) => {
-                        setCompareATeamSearch(e.target.value);
-                        setCompareATeamOpen(true);
-                      }}
-                      onFocus={() => setCompareATeamOpen(true)}
-                      onBlur={() => setTimeout(() => setCompareATeamOpen(false), 150)}
-                    />
-                    {compareATeamOpen && filteredCompareATeams.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
-                        {filteredCompareATeams.map((t) => (
-                          <div
-                            key={`compare-a-team-${t.name}`}
-                            className="px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground"
-                            onMouseDown={() => {
-                              setCompareADestinationTeam(t.name);
-                              setCompareATeamSearch(t.name);
-                              setCompareATeamOpen(false);
-                            }}
-                          >
-                            {t.name} {t.conference ? `· ${t.conference}` : ""}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {compareAPlayer?.id && (
-                    <div className="text-xs text-muted-foreground">
-                      Selected:{" "}
-                      <Link
-                        className="underline underline-offset-2 text-primary"
-                        to={profileRouteFor(compareAPlayer.id, compareAPlayer.position ?? null)}
-                        state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}
-                      >
-                        {compareAPlayer.first_name} {compareAPlayer.last_name}
-                      </Link>
-                    </div>
-                  )}
-
-                  {compareASimulation ? (
-                    <div className="space-y-3">
-                      <div className="rounded-md border p-3 bg-muted/20">
-                        <p className="text-xs font-medium mb-2">Context + Multipliers Used</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                          <div>From Team</div><div className="font-mono text-right">{compareASimulation.fromTeam || "—"}</div>
-                          <div>From Conference</div><div className="font-mono text-right">{compareASimulation.fromConference || "—"}</div>
-                          <div>To Conference</div><div className="font-mono text-right">{compareASimulation.toConference || "—"}</div>
-                          <div>From Park Factor</div><div className="font-mono text-right">{compareASimulation.fromPark ?? "—"}</div>
-                          <div>To Park Factor</div><div className="font-mono text-right">{compareASimulation.toPark ?? "—"}</div>
-                          <div>AVG+ Delta</div><div className="font-mono text-right">{compareASimulation.fromAvgPlus} → {compareASimulation.toAvgPlus}</div>
-                          <div>OBP+ Delta</div><div className="font-mono text-right">{compareASimulation.fromObpPlus} → {compareASimulation.toObpPlus}</div>
-                          <div>ISO+ Delta</div><div className="font-mono text-right">{compareASimulation.fromIsoPlus} → {compareASimulation.toIsoPlus}</div>
-                          <div>Stuff+ Delta</div><div className="font-mono text-right">{compareASimulation.fromStuff} → {compareASimulation.toStuff}</div>
-                        </div>
-                      </div>
-
-                      <div className="rounded-md border p-3">
-                        <p className="text-xs font-medium mb-2">Projected Outcomes</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                          <div>pAVG / pOBP / pSLG</div>
-                          <div className="font-mono text-right">
-                            {compareASimulation.pAvg?.toFixed(3) ?? "—"} / {compareASimulation.pObp?.toFixed(3) ?? "—"} / {compareASimulation.pSlg?.toFixed(3) ?? "—"}
-                          </div>
-                          <div>pOPS</div><div className="font-mono text-right">{compareASimulation.pOps?.toFixed(3) ?? "—"}</div>
-                          <div>pISO</div><div className="font-mono text-right">{compareASimulation.pIso?.toFixed(3) ?? "—"}</div>
-                          <div>pWRC+</div><div className="font-mono text-right">{compareASimulation.pWrcPlus?.toFixed(0) ?? "—"}</div>
-                          <div>oWAR</div><div className="font-mono text-right">{compareASimulation.owar?.toFixed(2) ?? "—"}</div>
-                          <div>Projected NIL</div><div className="font-mono text-right">{compareASimulation.nilValuation != null ? `$${Math.round(compareASimulation.nilValuation).toLocaleString()}` : "—"}</div>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-                      Select player and destination team to run comparison panel A.
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Compare B</CardTitle>
-                  <CardDescription>Independent panel. You can select the same player as Compare A.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="relative">
-                    <Label className="text-xs mb-1 block">Player</Label>
-                    <Input
-                      placeholder="Search player by name, team, or position…"
-                      value={compareBPlayerSearch}
-                      onChange={(e) => {
-                        setCompareBPlayerSearch(e.target.value);
-                        setCompareBPlayerOpen(true);
-                      }}
-                      onFocus={() => setCompareBPlayerOpen(true)}
-                      onBlur={() => setTimeout(() => setCompareBPlayerOpen(false), 150)}
-                    />
-                    {compareBPlayerOpen && filteredCompareBPlayers.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
-                        {filteredCompareBPlayers.map((p) => (
-                          <div
-                            key={`compare-b-${p.id}`}
-                            className="px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground flex justify-between items-center gap-2"
-                            onMouseDown={() => {
-                              setCompareBPlayerId(p.id);
-                              setCompareBPlayerSearch(`${p.first_name} ${p.last_name}`);
-                              setCompareBPlayerOpen(false);
-                            }}
-                          >
-                            <span className="font-medium">{p.first_name} {p.last_name}</span>
-                            <span className="text-muted-foreground text-xs">{p.team || "—"} · {p.position || "—"}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="relative">
-                    <Label className="text-xs mb-1 block">To Team</Label>
-                    <Input
-                      placeholder="Search destination team…"
-                      value={compareBTeamSearch}
-                      onChange={(e) => {
-                        setCompareBTeamSearch(e.target.value);
-                        setCompareBTeamOpen(true);
-                      }}
-                      onFocus={() => setCompareBTeamOpen(true)}
-                      onBlur={() => setTimeout(() => setCompareBTeamOpen(false), 150)}
-                    />
-                    {compareBTeamOpen && filteredCompareBTeams.length > 0 && (
-                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md max-h-72 overflow-auto">
-                        {filteredCompareBTeams.map((t) => (
-                          <div
-                            key={`compare-b-team-${t.name}`}
-                            className="px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground"
-                            onMouseDown={() => {
-                              setCompareBDestinationTeam(t.name);
-                              setCompareBTeamSearch(t.name);
-                              setCompareBTeamOpen(false);
-                            }}
-                          >
-                            {t.name} {t.conference ? `· ${t.conference}` : ""}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {compareBPlayer?.id && (
-                    <div className="text-xs text-muted-foreground">
-                      Selected:{" "}
-                      <Link
-                        className="underline underline-offset-2 text-primary"
-                        to={profileRouteFor(compareBPlayer.id, compareBPlayer.position ?? null)}
-                        state={{ returnTo: `${location.pathname}${location.search}${location.hash}` }}
-                      >
-                        {compareBPlayer.first_name} {compareBPlayer.last_name}
-                      </Link>
-                    </div>
-                  )}
-
-                  {compareBSimulation ? (
-                    <div className="space-y-3">
-                      <div className="rounded-md border p-3 bg-muted/20">
-                        <p className="text-xs font-medium mb-2">Context + Multipliers Used</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                          <div>From Team</div><div className="font-mono text-right">{compareBSimulation.fromTeam || "—"}</div>
-                          <div>From Conference</div><div className="font-mono text-right">{compareBSimulation.fromConference || "—"}</div>
-                          <div>To Conference</div><div className="font-mono text-right">{compareBSimulation.toConference || "—"}</div>
-                          <div>From Park Factor</div><div className="font-mono text-right">{compareBSimulation.fromPark ?? "—"}</div>
-                          <div>To Park Factor</div><div className="font-mono text-right">{compareBSimulation.toPark ?? "—"}</div>
-                          <div>AVG+ Delta</div><div className="font-mono text-right">{compareBSimulation.fromAvgPlus} → {compareBSimulation.toAvgPlus}</div>
-                          <div>OBP+ Delta</div><div className="font-mono text-right">{compareBSimulation.fromObpPlus} → {compareBSimulation.toObpPlus}</div>
-                          <div>ISO+ Delta</div><div className="font-mono text-right">{compareBSimulation.fromIsoPlus} → {compareBSimulation.toIsoPlus}</div>
-                          <div>Stuff+ Delta</div><div className="font-mono text-right">{compareBSimulation.fromStuff} → {compareBSimulation.toStuff}</div>
-                        </div>
-                      </div>
-
-                      <div className="rounded-md border p-3">
-                        <p className="text-xs font-medium mb-2">Projected Outcomes</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                          <div>pAVG / pOBP / pSLG</div>
-                          <div className="font-mono text-right">
-                            {compareBSimulation.pAvg?.toFixed(3) ?? "—"} / {compareBSimulation.pObp?.toFixed(3) ?? "—"} / {compareBSimulation.pSlg?.toFixed(3) ?? "—"}
-                          </div>
-                          <div>pOPS</div><div className="font-mono text-right">{compareBSimulation.pOps?.toFixed(3) ?? "—"}</div>
-                          <div>pISO</div><div className="font-mono text-right">{compareBSimulation.pIso?.toFixed(3) ?? "—"}</div>
-                          <div>pWRC+</div><div className="font-mono text-right">{compareBSimulation.pWrcPlus?.toFixed(0) ?? "—"}</div>
-                          <div>oWAR</div><div className="font-mono text-right">{compareBSimulation.owar?.toFixed(2) ?? "—"}</div>
-                          <div>Projected NIL</div><div className="font-mono text-right">{compareBSimulation.nilValuation != null ? `$${Math.round(compareBSimulation.nilValuation).toLocaleString()}` : "—"}</div>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-                      Select player and destination team to run comparison panel B.
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+            <CompareTab
+              allPlayersForSearch={allPlayersForSearch}
+              teams={teams}
+              allPlayersById={allPlayersById}
+              resolveConferenceStats={resolveConferenceStats}
+              teamByKey={teamByKey}
+              teamParkComponents={teamParkComponents}
+              eqNum={eqNum}
+              seedByName={seedByName}
+            />
           </TabsContent>
 
           <TabsContent value="depth">
