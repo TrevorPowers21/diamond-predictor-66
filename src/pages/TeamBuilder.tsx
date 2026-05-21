@@ -2400,6 +2400,637 @@ export default function TeamBuilder() {
     },
   });
 
+  const removePlayer = useCallback((idx: number) => {
+    const removed = rosterPlayers[idx];
+    setRosterPlayers((prev) => prev.filter((_, i) => i !== idx));
+    setDirty(true);
+    if (removed && (removed.roster_status || "returner") === "target" && removed.player_id) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(removed.player_id);
+      if (isUuid) removeFromSupabaseBoard(removed.player_id);
+    }
+  }, [rosterPlayers, removeFromSupabaseBoard]);
+
+  const updatePlayer = useCallback((idx: number, updates: Partial<BuildPlayer>) => {
+    setRosterPlayers((prev) => prev.map((p, i) => (i === idx ? { ...p, ...updates } : p)));
+    setDirty(true);
+  }, []);
+
+  const updatePlayerWithRecalc = useCallback(async (idx: number, updates: Partial<BuildPlayer>) => {
+    const current = rosterPlayers[idx];
+    setRosterPlayers((prev) => prev.map((p, i) => (i === idx ? { ...p, ...updates } : p)));
+    setDirty(true);
+    if (!current || (current.roster_status || "returner") === "target") return;
+    const predictionId = current.prediction?.id;
+    if (!predictionId) return;
+    const classTransition = (updates.class_transition ?? current.class_transition ?? null) as string | null;
+    const devAgg = Number(updates.dev_aggressiveness ?? current.dev_aggressiveness ?? 0);
+    try {
+      const res = await recalculatePredictionById(predictionId, {
+        class_transition: classTransition ?? undefined,
+        dev_aggressiveness: Number.isFinite(devAgg) ? devAgg : undefined,
+      });
+      setRosterPlayers((prev) =>
+        prev.map((p, i) =>
+          i === idx
+            ? { ...p, prediction: p.prediction ? { ...p.prediction, ...(res?.prediction || {}) } : p.prediction }
+            : p,
+        ),
+      );
+    } catch (e: any) {
+      toast({ title: "Recalc failed", description: e?.message || "Could not recalculate player outputs.", variant: "destructive" });
+    }
+  }, [rosterPlayers, toast]);
+
+  const markPlayerLeaving = useCallback((idx: number, name: string) => {
+    setRosterPlayers((prev) => prev.filter((_, i) => i !== idx));
+    setDirty(true);
+    toast({ title: "Removed from build", description: `${name} was removed from this build only.` });
+  }, [toast]);
+
+  const addIncomingFreshman = () => {
+    const name = incomingName.trim();
+    if (!name) {
+      toast({ title: "Name required", description: "Enter a player name for incoming freshman.", variant: "destructive" });
+      return;
+    }
+    const newP: BuildPlayer = {
+      player_id: null,
+      source: "returner",
+      custom_name: name,
+      position_slot: incomingPosition || null,
+      depth_order: 1,
+      nil_value: Number(incomingNil) || 0,
+      production_notes: null,
+      roster_status: "returner",
+      depth_role: "bench",
+      class_transition: "FS",
+      dev_aggressiveness: 0,
+      class_transition_overridden: false,
+      dev_aggressiveness_overridden: false,
+      transfer_snapshot: null,
+      player: {
+        first_name: name,
+        last_name: "",
+        position: incomingPosition || null,
+        team: selectedTeam || null,
+        from_team: null,
+        conference: null,
+      },
+      prediction: null,
+      nilVal: null,
+      nil_owar: 0,
+      team_metrics: null,
+      team_power_plus: null,
+    };
+    setRosterPlayers((prev) => [...prev, newP]);
+    setIncomingName("");
+    setIncomingPosition("");
+    setIncomingNil(0);
+    setDirty(true);
+  };
+
+  const addPlayerFromTargetSearch = async (row: any) => {
+    try {
+    if (row?.__seedHitter) {
+      const matchedDb = allPlayersForSearch.find((p: any) =>
+        normalizeName(`${p.first_name || ""} ${p.last_name || ""}`) === normalizeName(`${row.first_name || ""} ${row.last_name || ""}`) &&
+        normalizeName(p.team || "") === normalizeName(row.team || ""),
+      );
+      if (matchedDb) {
+        await addPlayerFromTargetSearch(matchedDb);
+        return;
+      }
+      const fullName = `${row.first_name || ""} ${row.last_name || ""}`.trim();
+      const alreadyAddedSeed = rosterPlayers.some((p) => {
+        if ((p.roster_status || "returner") !== "target") return false;
+        const existingName = p.player ? `${p.player.first_name} ${p.player.last_name}`.trim() : (p.custom_name || "");
+        return normalizeName(existingName) === normalizeName(fullName) && normalizeName(p.player?.team || "") === normalizeName(row.team || "");
+      });
+      if (alreadyAddedSeed) {
+        toast({ title: "Already on target board", description: `${fullName} is already a target.` });
+        setTargetPlayerSearchQuery("");
+        setTargetPlayerSearchOpen(false);
+        return;
+      }
+      const newP: BuildPlayer = {
+        player_id: null,
+        source: "portal",
+        custom_name: fullName || null,
+        position_slot: null,
+        depth_order: 1,
+        nil_value: 0,
+        production_notes: null,
+        roster_status: "target",
+        depth_role: "utility",
+        class_transition: classTransitionFromYearOrDefault(row.class_year),
+        dev_aggressiveness: 0,
+        class_transition_overridden: false,
+        dev_aggressiveness_overridden: false,
+        transfer_snapshot: {
+          p_avg: row.__seedStats?.avg ?? null,
+          p_obp: row.__seedStats?.obp ?? null,
+          p_slg: row.__seedStats?.slg ?? null,
+          p_wrc_plus: null,
+          owar: null,
+          nil_valuation: null,
+          from_team: row.team || null,
+          from_conference: row.conference || null,
+        },
+        player: {
+          first_name: row.first_name || "",
+          last_name: row.last_name || "",
+          position: row.position || null,
+          class_year: row.class_year ?? null,
+          bats_hand: (row as any).bats_hand ?? null,
+          team: row.team || null,
+          from_team: row.team || null,
+          conference: row.conference || null,
+        },
+        prediction: null,
+        nilVal: null,
+        nil_owar: null,
+        team_metrics: null,
+        team_power_plus: null,
+      };
+      if (selectedTeam && row.__seedPowerPlus?.baPlus != null && row.__seedPowerPlus?.obpPlus != null && row.__seedPowerPlus?.isoPlus != null) {
+        const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
+        const fromTeamRow = row.team ? (teamByKey.get(normalizeKey(row.team)) || null) : null;
+        const fromConference = fromTeamRow?.conference || row.conference || null;
+        const fromConfStats = resolveConferenceStats(fromConference);
+        const toConfStats = resolveConferenceStats(toTeamRow?.conference || null);
+        const lastAvg = row.__seedStats?.avg ?? null;
+        const lastObp = row.__seedStats?.obp ?? null;
+        const lastSlg = row.__seedStats?.slg ?? null;
+        if (
+          toTeamRow && fromConfStats && toConfStats &&
+          lastAvg != null && lastObp != null && lastSlg != null &&
+          fromConfStats.avg_plus != null && toConfStats.avg_plus != null &&
+          fromConfStats.obp_plus != null && toConfStats.obp_plus != null &&
+          fromConfStats.iso_plus != null && toConfStats.iso_plus != null &&
+          fromConfStats.stuff_plus != null && toConfStats.stuff_plus != null
+        ) {
+          const targetSeedHand = batsHandToHandedness((row as any).bats_hand);
+          const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name, undefined, undefined, targetSeedHand);
+          const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name, undefined, undefined, targetSeedHand);
+          const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name, undefined, undefined, targetSeedHand);
+          const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name, undefined, undefined, targetSeedHand);
+          const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name, undefined, undefined, targetSeedHand);
+          const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name, undefined, undefined, targetSeedHand);
+          if (
+            fromParkAvgRaw != null && toParkAvgRaw != null &&
+            fromParkObpRaw != null && toParkObpRaw != null &&
+            fromParkIsoRaw != null && toParkIsoRaw != null
+          ) {
+            const projected = computeTransferProjection({
+              lastAvg, lastObp, lastSlg,
+              baPR: Number(row.__seedPowerPlus.baPlus),
+              obpPR: Number(row.__seedPowerPlus.obpPlus),
+              isoPR: Number(row.__seedPowerPlus.isoPlus),
+              fromAvgPlus: fromConfStats.avg_plus, toAvgPlus: toConfStats.avg_plus,
+              fromObpPlus: fromConfStats.obp_plus, toObpPlus: toConfStats.obp_plus,
+              fromIsoPlus: fromConfStats.iso_plus, toIsoPlus: toConfStats.iso_plus,
+              fromStuff: fromConfStats.stuff_plus, toStuff: toConfStats.stuff_plus,
+              fromPark: normalizeParkToIndex(fromParkAvgRaw), toPark: normalizeParkToIndex(toParkAvgRaw),
+              fromObpPark: normalizeParkToIndex(fromParkObpRaw), toObpPark: normalizeParkToIndex(toParkObpRaw),
+              fromIsoPark: normalizeParkToIndex(fromParkIsoRaw), toIsoPark: normalizeParkToIndex(toParkIsoRaw),
+              ncaaAvgBA: toRate(eqNum("t_ba_ncaa_avg", 0.280)),
+              ncaaAvgOBP: toRate(eqNum("t_obp_ncaa_avg", 0.385)),
+              ncaaAvgISO: toRate(eqNum("t_iso_ncaa_avg", 0.162)),
+              ncaaAvgWrc: toRate(eqNum("t_wrc_ncaa_avg", 0.364)),
+              baStdPower: eqNum("t_ba_std_pr", 31.297),
+              baStdNcaa: toRate(eqNum("t_ba_std_ncaa", 0.043455)),
+              obpStdPower: eqNum("t_obp_std_pr", 28.889),
+              obpStdNcaa: toRate(eqNum("t_obp_std_ncaa", 0.046781)),
+              baPowerWeight: toRate(eqNum("t_ba_power_weight", 0.70)),
+              obpPowerWeight: toRate(eqNum("t_obp_power_weight", 0.70)),
+              baConferenceWeight: toWeight(eqNum("t_ba_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight)),
+              obpConferenceWeight: toWeight(eqNum("t_obp_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight)),
+              isoConferenceWeight: toWeight(eqNum("t_iso_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight)),
+              baPitchingWeight: toWeight(eqNum("t_ba_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight)),
+              obpPitchingWeight: toWeight(eqNum("t_obp_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight)),
+              isoPitchingWeight: toWeight(eqNum("t_iso_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight)),
+              baParkWeight: toWeight(eqNum("t_ba_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight)),
+              obpParkWeight: toWeight(eqNum("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight)),
+              isoParkWeight: toWeight(eqNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight)),
+              isoStdPower: eqNum("t_iso_std_power", 45.423),
+              isoStdNcaa: toRate(eqNum("t_iso_std_ncaa", 0.07849797197)),
+              wObp: toRate(eqNum("r_w_obp", 0.45)),
+              wSlg: toRate(eqNum("r_w_slg", 0.30)),
+              wAvg: toRate(eqNum("r_w_avg", 0.15)),
+              wIso: toRate(eqNum("r_w_iso", 0.10)),
+            });
+            const classKey = "SJ";
+            const classAdj = classKey === "SJ" ? 0.02 : 0.02;
+            const devAgg = 0;
+            const transferMult = 1 + classAdj + (devAgg * 0.06);
+            const pAvgAdj = projected.pAvg * transferMult;
+            const pObpAdj = projected.pObp * transferMult;
+            const pIsoAdj = projected.pIso * transferMult;
+            const pSlgAdj = pAvgAdj + pIsoAdj;
+            const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.364));
+            const wObp = toRate(eqNum("r_w_obp", 0.45));
+            const wSlg = toRate(eqNum("r_w_slg", 0.30));
+            const wAvg = toRate(eqNum("r_w_avg", 0.15));
+            const wIso = toRate(eqNum("r_w_iso", 0.10));
+            const pWrcAdj = (wObp * pObpAdj) + (wSlg * pSlgAdj) + (wAvg * pAvgAdj) + (wIso * pIsoAdj);
+            const pWrcPlusAdj = ncaaAvgWrc === 0 ? null : Math.round((pWrcAdj / ncaaAvgWrc) * 100);
+            const offValueAdj = pWrcPlusAdj == null ? null : (pWrcPlusAdj - 100) / 100;
+            const pa = 260;
+            const runsPerPa = 0.13;
+            const replacementRuns = (pa / 600) * 25;
+            const raaAdj = offValueAdj == null ? null : offValueAdj * pa * runsPerPa;
+            const rarAdj = raaAdj == null ? null : raaAdj + replacementRuns;
+            const owarAdj = rarAdj == null ? null : rarAdj / 10;
+            const basePerOwar = eqNum("nil_base_per_owar", 25000);
+            const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
+            const pvm = getPositionValueMultiplier(row.position);
+            const nilValuationRaw = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
+            const nilValuation = nilValuationRaw == null ? null : Math.max(0, nilValuationRaw);
+            newP.transfer_snapshot = {
+              p_avg: pAvgAdj, p_obp: pObpAdj, p_slg: pSlgAdj,
+              p_wrc_plus: pWrcPlusAdj, owar: owarAdj, nil_valuation: nilValuation,
+              from_team: row.team || null, from_conference: fromConference,
+            };
+          }
+        }
+      }
+      setRosterPlayers((prev) => [...prev, newP]);
+      setDirty(true);
+      setTargetPlayerSearchQuery("");
+      setTargetPlayerSearchOpen(false);
+      toast({ title: "Added to targets", description: fullName });
+      return;
+    }
+    if (row?.__storagePitcher) {
+      const fullName = `${row.first_name || ""} ${row.last_name || ""}`.trim();
+      const alreadyAddedStorage = rosterPlayers.some((p) => {
+        if ((p.roster_status || "returner") !== "target") return false;
+        const existingName = p.player ? `${p.player.first_name} ${p.player.last_name}`.trim() : (p.custom_name || "");
+        return normalizeName(existingName) === normalizeName(fullName) && normalizeName(p.player?.team || "") === normalizeName(row.team || "");
+      });
+      if (alreadyAddedStorage) {
+        toast({ title: "Already on target board", description: `${fullName} is already a target.` });
+        setTargetPlayerSearchQuery("");
+        setTargetPlayerSearchOpen(false);
+        return;
+      }
+      const inferredRole = asPitcherRole(row.__pitching?.role || row.position || "RP") || "RP";
+      let transferSnapshot: TransferSnapshot = {
+        p_avg: null, p_obp: null, p_slg: null,
+        p_wrc_plus: row.__pitching?.p_rv_plus ?? null,
+        p_era: row.__pitching?.p_era ?? null, p_fip: row.__pitching?.p_fip ?? null,
+        p_whip: row.__pitching?.p_whip ?? null, p_k9: row.__pitching?.p_k9 ?? null,
+        p_bb9: row.__pitching?.p_bb9 ?? null, p_hr9: row.__pitching?.p_hr9 ?? null,
+        p_rv_plus: row.__pitching?.p_rv_plus ?? null, p_war: row.__pitching?.p_war ?? null,
+        owar: row.__pitching?.p_war ?? null, nil_valuation: null,
+        from_team: row.team || null, from_conference: row.conference || null,
+      };
+      const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+      const realPlayerId = (row.id && isUuid(row.id)) ? row.id : null;
+      const newP: BuildPlayer = {
+        player_id: realPlayerId,
+        source: "portal",
+        custom_name: fullName || null,
+        position_slot: inferredRole,
+        depth_order: 1,
+        nil_value: 0,
+        production_notes: null,
+        roster_status: "target",
+        depth_role: defaultPitcherDepthRoleFromIp(
+          (row.source_player_id ? pitchingStatsByNameTeam.bySourceId.get(row.source_player_id)?.ip : null) ?? row.__pitching?.ip ?? null,
+          (inferredRole === "SP") ? "SP" : "RP",
+        ),
+        class_transition: classTransitionFromYearOrDefault(row.class_year),
+        dev_aggressiveness: 0,
+        class_transition_overridden: false,
+        dev_aggressiveness_overridden: false,
+        transfer_snapshot: transferSnapshot,
+        player: {
+          first_name: row.first_name || "", last_name: row.last_name || "",
+          position: inferredRole, class_year: row.class_year ?? null,
+          bats_hand: (row as any).bats_hand ?? null,
+          team: row.team || null, from_team: row.from_team || row.team || null,
+          conference: row.conference || null,
+        },
+        prediction: null, nilVal: null, nil_owar: null, team_metrics: null, team_power_plus: null,
+      };
+      const fullNameKey = normalizeName(fullName);
+      const teamKey = normalizeName(row.team || "");
+      const statsKey = `${fullNameKey}|${teamKey}`;
+      const pStats = pitchingStatsByNameTeam.byKey.get(statsKey) || (() => {
+        const bucket = pitchingStatsByNameTeam.byName.get(fullNameKey) || [];
+        return bucket.length === 1 ? bucket[0] : null;
+      })();
+      const pPower = pitchingPrByNameTeam.byKey.get(statsKey) || (() => {
+        const bucket = pitchingPrByNameTeam.byName.get(fullNameKey) || [];
+        return bucket.length === 1 ? bucket[0] : null;
+      })();
+      if (pStats && pPower) {
+        const normConf = (c: string | null) => (c || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+        const fromConf = row.conference || null;
+        const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
+        const toConf = toTeamRow?.conference || null;
+        const fromPC = pitchingConfLookup.get(normConf(fromConf));
+        const toPC = pitchingConfLookup.get(normConf(toConf));
+        if (fromPC && toPC && toTeamRow) {
+          const fromTeamRowPark = row.team ? (teamByKey.get(normalizeKey(row.team)) || null) : null;
+          const baseRole = (() => {
+            const r = pStats.role || null;
+            if (r === "SP" || r === "RP" || r === "SM") return r as "SP" | "RP" | "SM";
+            const g = Number(pStats.g) || 0;
+            const gs = Number(pStats.gs) || 0;
+            if (g > 0 && gs != null) return ((gs / g) < 0.5 ? "RP" : "SP") as "SP" | "RP";
+            return null;
+          })();
+          const result = computeTransferPitcherProjection(
+            {
+              era: pStats.era ?? null, fip: pStats.fip ?? null, whip: pStats.whip ?? null,
+              k9: pStats.k9 ?? null, bb9: pStats.bb9 ?? null, hr9: pStats.hr9 ?? null,
+              storedPrPlus: {
+                era: pPower.eraPrPlus ?? null, fip: pPower.fipPrPlus ?? null,
+                whip: pPower.whipPrPlus ?? null, k9: pPower.k9PrPlus ?? null,
+                bb9: pPower.bb9PrPlus ?? null, hr9: pPower.hr9PrPlus ?? null,
+              },
+              baseRole,
+              fromEraPlus: fromPC.era_plus ?? null, toEraPlus: toPC.era_plus ?? null,
+              fromFipPlus: fromPC.fip_plus ?? null, toFipPlus: toPC.fip_plus ?? null,
+              fromWhipPlus: fromPC.whip_plus ?? null, toWhipPlus: toPC.whip_plus ?? null,
+              fromK9Plus: fromPC.k9_plus ?? null, toK9Plus: toPC.k9_plus ?? null,
+              fromBb9Plus: fromPC.bb9_plus ?? null, toBb9Plus: toPC.bb9_plus ?? null,
+              fromHr9Plus: fromPC.hr9_plus ?? null, toHr9Plus: toPC.hr9_plus ?? null,
+              fromHitterTalent: fromPC.hitter_talent_plus ?? null, toHitterTalent: toPC.hitter_talent_plus ?? null,
+              fromEraParkRaw: resolveMetricParkFactor(fromTeamRowPark?.id, "era", teamParkComponents, fromTeamRowPark?.name),
+              toEraParkRaw: resolveMetricParkFactor(toTeamRow.id, "era", teamParkComponents, toTeamRow.name),
+              fromWhipParkRaw: resolveMetricParkFactor(fromTeamRowPark?.id, "whip", teamParkComponents, fromTeamRowPark?.name),
+              toWhipParkRaw: resolveMetricParkFactor(toTeamRow.id, "whip", teamParkComponents, toTeamRow.name),
+              fromHr9ParkRaw: resolveMetricParkFactor(fromTeamRowPark?.id, "hr9", teamParkComponents, fromTeamRowPark?.name),
+              toHr9ParkRaw: resolveMetricParkFactor(toTeamRow.id, "hr9", teamParkComponents, toTeamRow.name),
+              toTeam: toTeamRow.name, toConference: toConf,
+            },
+            { eq: pitchingEq },
+          );
+          if (!result.blocked) {
+            transferSnapshot = {
+              ...transferSnapshot,
+              p_era: result.p_era, p_fip: result.p_fip, p_whip: result.p_whip,
+              p_k9: result.p_k9, p_bb9: result.p_bb9, p_hr9: result.p_hr9,
+              p_rv_plus: result.p_rv_plus, p_war: result.p_war,
+              p_wrc_plus: result.p_rv_plus, owar: result.p_war, nil_valuation: result.market_value,
+            };
+            newP.transfer_snapshot = transferSnapshot;
+          } else {
+            const computed = computeReturnerPitchingProjection(newP);
+            if (computed) {
+              transferSnapshot = { ...transferSnapshot, p_era: computed.p_era ?? null, p_fip: computed.p_fip ?? null, p_whip: computed.p_whip ?? null, p_k9: computed.p_k9 ?? null, p_bb9: computed.p_bb9 ?? null, p_hr9: computed.p_hr9 ?? null, p_rv_plus: computed.p_rv_plus ?? null, p_war: computed.p_war ?? null, p_wrc_plus: computed.p_rv_plus ?? null, owar: computed.p_war ?? null, nil_valuation: computed.nil_valuation ?? null };
+              newP.transfer_snapshot = transferSnapshot;
+            }
+          }
+        } else {
+          const computed = computeReturnerPitchingProjection(newP);
+          if (computed) {
+            transferSnapshot = { ...transferSnapshot, p_era: computed.p_era ?? null, p_fip: computed.p_fip ?? null, p_whip: computed.p_whip ?? null, p_k9: computed.p_k9 ?? null, p_bb9: computed.p_bb9 ?? null, p_hr9: computed.p_hr9 ?? null, p_rv_plus: computed.p_rv_plus ?? null, p_war: computed.p_war ?? null, p_wrc_plus: computed.p_rv_plus ?? null, owar: computed.p_war ?? null, nil_valuation: computed.nil_valuation ?? null };
+            newP.transfer_snapshot = transferSnapshot;
+          }
+        }
+      }
+      setRosterPlayers((prev) => [...prev, newP]);
+      setDirty(true);
+      setTargetPlayerSearchQuery("");
+      setTargetPlayerSearchOpen(false);
+      toast({ title: "Added to targets", description: fullName });
+      return;
+    }
+
+    const alreadyAdded = rosterPlayers.some(
+      (p) => p.player_id === row.id && (p.roster_status || "returner") === "target"
+    );
+    if (alreadyAdded) {
+      toast({ title: "Already on target board", description: `${row.first_name} ${row.last_name} is already a target.` });
+      setTargetPlayerSearchQuery("");
+      setTargetPlayerSearchOpen(false);
+      return;
+    }
+
+    const chosenPred = selectTransferPortalPreferredPrediction(
+      (row.player_predictions || []).filter((pr: any) => pr.variant === "regular")
+    );
+    const overrideRole = asPitcherRole(getSupabaseRole(row.id) || null);
+    const inferredRole = overrideRole || asPitcherRole(row.position || null);
+    const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(row.position || ""));
+
+    let transferSnapshot: TransferSnapshot | null = null;
+    if (effectiveTeamId && row.id && !isPitcherRow) {
+      const { data: precomputedTeamRow } = await supabase
+        .from("player_predictions")
+        .select("p_avg, p_obp, p_slg, p_wrc_plus")
+        .eq("player_id", row.id)
+        .eq("customer_team_id", effectiveTeamId)
+        .eq("variant", "precomputed")
+        .eq("status", "active")
+        .maybeSingle();
+      if (precomputedTeamRow) {
+        const fromTeamName = row.from_team || row.team;
+        const fromTeamRow = fromTeamName ? teamByKey.get(normalizeKey(fromTeamName)) || null : null;
+        const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
+        const owar = computeOWarFromWrcPlus(precomputedTeamRow.p_wrc_plus ?? null);
+        const basePerOwar = eqNum("nil_base_per_owar", 25000);
+        const ptm = getProgramTierMultiplierByConference(toTeamRow?.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
+        const pvm = getPositionValueMultiplier(row.position);
+        const nilRaw = owar == null ? null : owar * basePerOwar * ptm * pvm;
+        transferSnapshot = {
+          p_avg: precomputedTeamRow.p_avg ?? null, p_obp: precomputedTeamRow.p_obp ?? null,
+          p_slg: precomputedTeamRow.p_slg ?? null, p_wrc_plus: precomputedTeamRow.p_wrc_plus ?? null,
+          owar, nil_valuation: nilRaw == null ? null : Math.max(0, nilRaw),
+          from_team: fromTeamName || null, from_conference: fromTeamRow?.conference || row.conference || null,
+        } as any;
+      }
+    }
+
+    const skipLiveCompute = !!effectiveTeamId && !isPitcherRow && !transferSnapshot;
+    if (!transferSnapshot && !skipLiveCompute && chosenPred?.id && selectedTeam) {
+      const { data: internals } = await supabase
+        .from("player_prediction_internals")
+        .select("avg_power_rating, obp_power_rating, slg_power_rating")
+        .eq("prediction_id", chosenPred.id)
+        .maybeSingle();
+      const baPR = internals?.avg_power_rating ?? null;
+      const obpPR = internals?.obp_power_rating ?? null;
+      const isoPR = internals?.slg_power_rating ?? null;
+      const lastAvg = chosenPred.from_avg ?? null;
+      const lastObp = chosenPred.from_obp ?? null;
+      const lastSlg = chosenPred.from_slg ?? null;
+      const fullName = `${row.first_name} ${row.last_name}`;
+      const byId = row.id ? seedByPlayerId.get(row.id) : undefined;
+      let inferredFromTeam: string | null = byId?.team ?? null;
+      if (!inferredFromTeam) {
+        const candidates = seedByName.get(normalizeKey(fullName)) || [];
+        if (candidates.length === 1) {
+          inferredFromTeam = candidates[0].team;
+        } else if (candidates.length > 1 && lastAvg != null) {
+          const key = `${statKey(lastAvg)}|${statKey(lastObp)}|${statKey(lastSlg)}`;
+          const exact = candidates.find((r) => `${statKey(r.avg)}|${statKey(r.obp)}|${statKey(r.slg)}` === key);
+          inferredFromTeam = exact?.team || candidates[0].team;
+        }
+      }
+      const fromTeamName = row.from_team || inferredFromTeam || row.team;
+      const fromTeamRow = fromTeamName ? teamByKey.get(normalizeKey(fromTeamName)) || null : null;
+      const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
+      const fromConference = fromTeamRow?.conference || row.conference || null;
+      const fromConfStats = resolveConferenceStats(fromConference);
+      const toConfStats = resolveConferenceStats(toTeamRow?.conference || null);
+      if (
+        baPR != null && obpPR != null && isoPR != null &&
+        lastAvg != null && lastObp != null && lastSlg != null &&
+        toTeamRow && fromConfStats && toConfStats &&
+        fromConfStats.avg_plus != null && toConfStats.avg_plus != null &&
+        fromConfStats.obp_plus != null && toConfStats.obp_plus != null &&
+        fromConfStats.iso_plus != null && toConfStats.iso_plus != null &&
+        fromConfStats.stuff_plus != null && toConfStats.stuff_plus != null
+      ) {
+        const targetSearchHand = batsHandToHandedness((row as any).bats_hand);
+        const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name, undefined, undefined, targetSearchHand);
+        const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name, undefined, undefined, targetSearchHand);
+        const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name, undefined, undefined, targetSearchHand);
+        const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name, undefined, undefined, targetSearchHand);
+        const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name, undefined, undefined, targetSearchHand);
+        const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name, undefined, undefined, targetSearchHand);
+        if (
+          fromParkAvgRaw != null && toParkAvgRaw != null &&
+          fromParkObpRaw != null && toParkObpRaw != null &&
+          fromParkIsoRaw != null && toParkIsoRaw != null
+        ) {
+          const fromPark = normalizeParkToIndex(fromParkAvgRaw);
+          const toPark = normalizeParkToIndex(toParkAvgRaw);
+          const fromObpPark = normalizeParkToIndex(fromParkObpRaw);
+          const toObpPark = normalizeParkToIndex(toParkObpRaw);
+          const fromIsoPark = normalizeParkToIndex(fromParkIsoRaw);
+          const toIsoPark = normalizeParkToIndex(toParkIsoRaw);
+          const ncaaAvgBA = toRate(eqNum("t_ba_ncaa_avg", 0.280));
+          const ncaaAvgOBP = toRate(eqNum("t_obp_ncaa_avg", 0.385));
+          const ncaaAvgISO = toRate(eqNum("t_iso_ncaa_avg", 0.162));
+          const ncaaAvgWrc = toRate(eqNum("t_wrc_ncaa_avg", 0.364));
+          const baStdPower = eqNum("t_ba_std_pr", 31.297);
+          const baStdNcaa = toRate(eqNum("t_ba_std_ncaa", 0.043455));
+          const obpStdPower = eqNum("t_obp_std_pr", 28.889);
+          const obpStdNcaa = toRate(eqNum("t_obp_std_ncaa", 0.046781));
+          const baPowerWeight = toRate(eqNum("t_ba_power_weight", 0.70));
+          const obpPowerWeight = toRate(eqNum("t_obp_power_weight", 0.70));
+          const baConferenceWeight = toWeight(eqNum("t_ba_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight));
+          const obpConferenceWeight = toWeight(eqNum("t_obp_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight));
+          const isoConferenceWeight = toWeight(eqNum("t_iso_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight));
+          const baPitchingWeight = toWeight(eqNum("t_ba_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight));
+          const obpPitchingWeight = toWeight(eqNum("t_obp_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight));
+          const isoPitchingWeight = toWeight(eqNum("t_iso_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight));
+          const baParkWeight = toWeight(eqNum("t_ba_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight));
+          const obpParkWeight = toWeight(eqNum("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight));
+          const isoParkWeight = toWeight(eqNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight));
+          const isoStdPower = eqNum("t_iso_std_power", 45.423);
+          const isoStdNcaa = toRate(eqNum("t_iso_std_ncaa", 0.07849797197));
+          const wObp = toRate(eqNum("r_w_obp", 0.45));
+          const wSlg = toRate(eqNum("r_w_slg", 0.30));
+          const wAvg = toRate(eqNum("r_w_avg", 0.15));
+          const wIso = toRate(eqNum("r_w_iso", 0.10));
+          const projected = computeTransferProjection({
+            lastAvg, lastObp, lastSlg, baPR, obpPR, isoPR,
+            fromAvgPlus: fromConfStats.avg_plus, toAvgPlus: toConfStats.avg_plus,
+            fromObpPlus: fromConfStats.obp_plus, toObpPlus: toConfStats.obp_plus,
+            fromIsoPlus: fromConfStats.iso_plus, toIsoPlus: toConfStats.iso_plus,
+            fromStuff: fromConfStats.stuff_plus, toStuff: toConfStats.stuff_plus,
+            fromPark, toPark, fromObpPark, toObpPark, fromIsoPark, toIsoPark,
+            ncaaAvgBA, ncaaAvgOBP, ncaaAvgISO, ncaaAvgWrc,
+            baStdPower, baStdNcaa, obpStdPower, obpStdNcaa,
+            baPowerWeight, obpPowerWeight,
+            baConferenceWeight, obpConferenceWeight, isoConferenceWeight,
+            baPitchingWeight, obpPitchingWeight, isoPitchingWeight,
+            baParkWeight, obpParkWeight, isoParkWeight,
+            isoStdPower, isoStdNcaa, wObp, wSlg, wAvg, wIso,
+          });
+          const basePerOwar = eqNum("nil_base_per_owar", 25000);
+          const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
+          const pvm = getPositionValueMultiplier(row.position);
+          const classKey = String(chosenPred?.class_transition || "SJ").toUpperCase();
+          const classAdj = classKey === "FS" ? 0.03 : classKey === "SJ" ? 0.02 : classKey === "JS" ? 0.015 : classKey === "GR" ? 0.01 : 0.02;
+          const devAgg = Number.isFinite(Number(chosenPred?.dev_aggressiveness)) ? Number(chosenPred?.dev_aggressiveness) : 0;
+          const transferMult = 1 + classAdj + (devAgg * 0.06);
+          const pAvgAdj = projected.pAvg * transferMult;
+          const pObpAdj = projected.pObp * transferMult;
+          const pIsoAdj = projected.pIso * transferMult;
+          const pSlgAdj = pAvgAdj + pIsoAdj;
+          const pWrcAdj = (wObp * pObpAdj) + (wSlg * pSlgAdj) + (wAvg * pAvgAdj) + (wIso * pIsoAdj);
+          const pWrcPlusAdj = ncaaAvgWrc === 0 ? null : Math.round((pWrcAdj / ncaaAvgWrc) * 100);
+          const offValueAdj = pWrcPlusAdj == null ? null : (pWrcPlusAdj - 100) / 100;
+          const pa = 260;
+          const runsPerPa = 0.13;
+          const replacementRuns = (pa / 600) * 25;
+          const raaAdj = offValueAdj == null ? null : offValueAdj * pa * runsPerPa;
+          const rarAdj = raaAdj == null ? null : raaAdj + replacementRuns;
+          const owarAdj = rarAdj == null ? null : rarAdj / 10;
+          const nilValuationRaw = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
+          const nilValuation = nilValuationRaw == null ? null : Math.max(0, nilValuationRaw);
+          transferSnapshot = {
+            p_avg: pAvgAdj, p_obp: pObpAdj, p_slg: pSlgAdj, p_wrc_plus: pWrcPlusAdj,
+            owar: owarAdj, nil_valuation: nilValuation,
+            from_team: fromTeamName || null, from_conference: fromConference,
+          };
+        }
+      }
+    }
+
+    const newP: BuildPlayer = {
+      player_id: row.id,
+      source: "portal",
+      custom_name: `${row.first_name || ""} ${row.last_name || ""}`.trim() || null,
+      position_slot: isPitcherRow ? (inferredRole || "RP") : (playerOverrides[row.id]?.position ?? null),
+      depth_order: 1,
+      nil_value: row.nil_valuations?.[0]?.estimated_value ? Number(row.nil_valuations[0].estimated_value) : 0,
+      production_notes: null,
+      roster_status: "target",
+      depth_role: isPitcherRow
+        ? defaultPitcherDepthRoleFromIp(
+            (row.source_player_id ? pitchingStatsByNameTeam.bySourceId.get(row.source_player_id)?.ip : null) ?? null,
+            (inferredRole === "SP") ? "SP" : "RP",
+          )
+        : "utility",
+      class_transition: chosenPred?.class_transition ?? "SJ",
+      dev_aggressiveness: chosenPred?.dev_aggressiveness ?? 0,
+      transfer_snapshot: transferSnapshot,
+      player: {
+        first_name: row.first_name, last_name: row.last_name,
+        position: row.position, bats_hand: (row as any).bats_hand ?? null,
+        team: row.team, from_team: row.from_team, conference: row.conference ?? null,
+      },
+      prediction: chosenPred ?? null,
+      nilVal: row.nil_valuations?.[0]?.estimated_value ?? null,
+      nil_owar: row.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
+      team_metrics: null, team_power_plus: null,
+    };
+    if (isPitcherRow && !transferSnapshot) {
+      const computed = computeReturnerPitchingProjection(newP);
+      if (computed) {
+        newP.transfer_snapshot = {
+          p_avg: null, p_obp: null, p_slg: null,
+          p_wrc_plus: computed.p_rv_plus ?? null, p_era: computed.p_era ?? null,
+          p_fip: computed.p_fip ?? null, p_whip: computed.p_whip ?? null,
+          p_k9: computed.p_k9 ?? null, p_bb9: computed.p_bb9 ?? null, p_hr9: computed.p_hr9 ?? null,
+          p_rv_plus: computed.p_rv_plus ?? null, p_war: computed.p_war ?? null,
+          owar: computed.p_war ?? null, nil_valuation: computed.nil_valuation ?? null,
+          from_team: row.from_team || row.team || null, from_conference: row.conference || null,
+        };
+      }
+    }
+    setRosterPlayers((prev) => [...prev, newP]);
+    setDirty(true);
+    setTargetPlayerSearchQuery("");
+    setTargetPlayerSearchOpen(false);
+    if (row.id && !isOnSupabaseBoard(row.id)) {
+      addToSupabaseBoard({ playerId: row.id });
+    }
+    toast({ title: "Added to targets", description: `${row.first_name} ${row.last_name}` });
+    } catch (err: any) {
+      toast({ title: "Failed to add target", description: err?.message || "Unexpected error while adding player target.", variant: "destructive" });
+    }
+  };
+
   // Bidirectional sync between Supabase target board and Team Builder roster targets
   const targetSyncedRef = useRef(false);
   // Per-id push tracker — without this, an empty initial supabaseTargetBoard
