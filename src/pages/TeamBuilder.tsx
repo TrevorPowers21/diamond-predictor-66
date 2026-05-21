@@ -1792,7 +1792,7 @@ export default function TeamBuilder() {
   const { data: returners = [], dataUpdatedAt: returnersUpdatedAt } = useQuery({
     queryKey: ["team-builder-returners-v3", selectedTeamId, selectedTeam, hitterStats.length, pitchingMasterRows.length],
     enabled: !!selectedTeam,
-    staleTime: 0,
+    staleTime: 5 * 60 * 1000,
     retry: 1,
     queryFn: async () => {
       // Build set of source_player_ids that exist in 2025 data
@@ -2259,6 +2259,7 @@ export default function TeamBuilder() {
                   is_twp: (pd as any).is_twp ?? false,
                   class_year: (pd as any).class_year ?? null,
                   throws_hand: (pd as any).throws_hand ?? null,
+                  bats_hand: (pd as any).bats_hand ?? null,
                   team: pd.team,
                   from_team: pd.from_team,
                   conference: pd.conference ?? null,
@@ -2411,13 +2412,14 @@ export default function TeamBuilder() {
     if (!(seasonUsage.hitterAbByNameTeam?.size > 0)) return;
     if (usageCorrectedBuildRef.current === selectedBuildId) return;
     usageCorrectedBuildRef.current = selectedBuildId;
-    // Track which player indices got their depth_role corrected so we can
-    // also clear their stale depthAssignment entries — otherwise the saved
-    // build's depthAssignments (with hitters pinned to d3 bench slots from
-    // the stale-tier era) would carry forward and lock the chart even
-    // though depth_role is now correct.
-    const correctedIdxs = new Set<number>();
-    setRosterPlayers((prev) => prev.map((p, idx) => {
+    // Update depth_role from current-season PA so WAR calculations stay
+    // accurate. Do NOT touch depthAssignments — the auto-fill effect already
+    // skips filled slots, so manual assignments (and the coach's starter
+    // lineup) stay exactly where they are even when the underlying tier
+    // changes. Clearing assignments caused "starters moving to bench" when
+    // a corrected player's old slot got filled by someone else before they
+    // could be re-placed.
+    setRosterPlayers((prev) => prev.map((p) => {
       if (!p.player) return p;
       if ((p.roster_status || "returner") !== "returner") return p;
       const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(p.player.position || ""));
@@ -2428,21 +2430,8 @@ export default function TeamBuilder() {
       if (hitterAb == null || hitterAb <= 0) return p;
       const recomputed = defaultHitterDepthRoleFromPa(hitterAb);
       if (recomputed === p.depth_role) return p;
-      correctedIdxs.add(idx);
       return { ...p, depth_role: recomputed };
     }));
-    // Clear any depthAssignments that pin a corrected player to a slot — the
-    // auto-fill effect will then re-place them according to their new tier.
-    if (correctedIdxs.size > 0) {
-      setDepthAssignments((prev) => {
-        const next: Record<string, number> = {};
-        for (const [k, idx] of Object.entries(prev)) {
-          if (correctedIdxs.has(idx)) continue;
-          next[k] = idx;
-        }
-        return next;
-      });
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBuildId, seasonUsage]);
 
@@ -2489,22 +2478,26 @@ export default function TeamBuilder() {
           depthPlaceholders?: Record<string, "freshman" | "transfer">;
         };
         if (draft) {
-          setSelectedBuildId(draft.selectedBuildId ?? null);
-          setBuildName(draft.buildName ?? "My Team Build");
-          setSelectedTeam(draft.selectedTeam ?? "");
-          setTotalBudget(Number(draft.totalBudget) || 0);
-          setRosterPlayers(Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers : []);
-          setProgramTierMultiplier(Number(draft.programTierMultiplier) || 1.2);
-          setProgramTierConference(draft.programTierConference ?? "");
-          setFallbackRosterTotalPlayerScore(Number(draft.fallbackRosterTotalPlayerScore) || DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
-          setDirty(Boolean(draft.dirty));
-          if (draft.depthAssignments) setDepthAssignments(draft.depthAssignments);
-          if (draft.depthPlaceholders) setDepthPlaceholders(draft.depthPlaceholders);
-          skipAutoSeedOnceRef.current = true;
-          if (draft.selectedTeam) {
+          if (!draft.selectedTeam) {
+            // Empty draft (written before the persist guard was added). Purge
+            // it so the auto-load effect can default to the most-recent build.
+            if (draftKey) localStorage.removeItem(draftKey);
+          } else {
+            setSelectedBuildId(draft.selectedBuildId ?? null);
+            setBuildName(draft.buildName ?? "My Team Build");
+            setSelectedTeam(draft.selectedTeam ?? "");
+            setTotalBudget(Number(draft.totalBudget) || 0);
+            setRosterPlayers(Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers : []);
+            setProgramTierMultiplier(Number(draft.programTierMultiplier) || 1.2);
+            setProgramTierConference(draft.programTierConference ?? "");
+            setFallbackRosterTotalPlayerScore(Number(draft.fallbackRosterTotalPlayerScore) || DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
+            setDirty(Boolean(draft.dirty));
+            if (draft.depthAssignments) setDepthAssignments(draft.depthAssignments);
+            if (draft.depthPlaceholders) setDepthPlaceholders(draft.depthPlaceholders);
+            skipAutoSeedOnceRef.current = true;
             autoSeededTeamRef.current = normalizeName(draft.selectedTeam);
+            restoredFromDraftRef.current = true;
           }
-          restoredFromDraftRef.current = true;
         }
       }
     } catch {
@@ -2539,6 +2532,7 @@ export default function TeamBuilder() {
   useEffect(() => {
     if (!effectiveTeamId) return;
     if (stateTeamRef.current !== effectiveTeamId) return;
+    if (!selectedTeam) return;
     const draftKey = getDraftKey(effectiveTeamId);
     if (!draftKey) return;
     try {
@@ -4366,15 +4360,6 @@ export default function TeamBuilder() {
         .eq("variant", "precomputed")
         .eq("status", "active")
         .maybeSingle();
-      // eslint-disable-next-line no-console
-      console.log("[TB target-add stored row]", {
-        playerName: `${row.first_name} ${row.last_name}`,
-        playerId: row.id,
-        effectiveTeamId,
-        found: !!precomputedTeamRow,
-        error: precomputeErr?.message,
-        precomputedTeamRow,
-      });
       if (precomputedTeamRow) {
         const fromTeamName = row.from_team || row.team;
         const fromTeamRow = fromTeamName ? teamByKey.get(normalizeKey(fromTeamName)) || null : null;
@@ -6196,6 +6181,16 @@ export default function TeamBuilder() {
             <Button variant="outline" onClick={newBuild}>
               <Plus className="h-4 w-4 mr-1" /> New Build
             </Button>
+            {selectedBuildId && (
+              <Button
+                variant="outline"
+                onClick={() => saveMutation.mutate({})}
+                disabled={!selectedTeam || saveMutation.isPending}
+              >
+                {saveMutation.isPending ? "Saving…" : "Save"}
+                {dirty && <span className="ml-1 text-xs opacity-70">•</span>}
+              </Button>
+            )}
             <Button
               onClick={() => {
                 const name = askBuildName(buildName);
@@ -6205,7 +6200,6 @@ export default function TeamBuilder() {
               disabled={!selectedTeam || saveMutation.isPending}
             >
               {saveMutation.isPending ? "Saving…" : "Save As"}
-              {dirty && <span className="ml-1 text-xs opacity-70">•</span>}
             </Button>
           </div>
         </div>
@@ -6332,7 +6326,7 @@ export default function TeamBuilder() {
           <TabsContent value="roster" className="space-y-6">
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Add Incoming Freshman <span className="text-xs font-normal text-muted-foreground italic ml-2">Coming soon</span></CardTitle>
+                <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Add Incoming Freshman</CardTitle>
                 <CardDescription>Add a player with no projected stats; NIL can still be tracked.</CardDescription>
               </CardHeader>
               <CardContent>
@@ -6409,7 +6403,7 @@ export default function TeamBuilder() {
                       })
                     )}
                     <TableRow className="bg-muted/40 font-medium">
-                      <TableCell colSpan={7} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
+                      <TableCell colSpan={6} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2 whitespace-nowrap">
                         {positionTableTotals.avg != null && positionTableTotals.obp != null && positionTableTotals.slg != null
                           ? `${positionTableTotals.avg.toFixed(3)} / ${positionTableTotals.obp.toFixed(3)} / ${positionTableTotals.slg.toFixed(3)}`
@@ -6471,7 +6465,7 @@ export default function TeamBuilder() {
                       })
                     )}
                     <TableRow className="bg-muted/40 font-medium">
-                      <TableCell colSpan={7} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
+                      <TableCell colSpan={6} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2 whitespace-nowrap">
                         {pitcherTableTotals.pEraAvg != null && pitcherTableTotals.pWhipAvg != null && pitcherTableTotals.pK9Avg != null && pitcherTableTotals.pBb9Avg != null
                           ? `${pitcherTableTotals.pEraAvg.toFixed(2)} / ${pitcherTableTotals.pWhipAvg.toFixed(2)} / ${pitcherTableTotals.pK9Avg.toFixed(2)} / ${pitcherTableTotals.pBb9Avg.toFixed(2)}`
@@ -6630,7 +6624,7 @@ export default function TeamBuilder() {
                       })
                     )}
                     <TableRow className="bg-muted/40 font-medium">
-                      <TableCell colSpan={7} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
+                      <TableCell colSpan={6} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2 whitespace-nowrap">
                         {targetPositionTableTotals.avg != null && targetPositionTableTotals.obp != null && targetPositionTableTotals.slg != null
                           ? `${targetPositionTableTotals.avg.toFixed(3)} / ${targetPositionTableTotals.obp.toFixed(3)} / ${targetPositionTableTotals.slg.toFixed(3)}`
@@ -6689,7 +6683,7 @@ export default function TeamBuilder() {
                       })
                     )}
                     <TableRow className="bg-muted/40 font-medium">
-                      <TableCell colSpan={7} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
+                      <TableCell colSpan={6} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
                       <TableCell className="font-mono text-sm font-semibold text-center py-2 whitespace-nowrap">
                         {targetPitcherTableTotals.pEraAvg != null && targetPitcherTableTotals.pWhipAvg != null && targetPitcherTableTotals.pK9Avg != null && targetPitcherTableTotals.pBb9Avg != null
                           ? `${targetPitcherTableTotals.pEraAvg.toFixed(2)} / ${targetPitcherTableTotals.pWhipAvg.toFixed(2)} / ${targetPitcherTableTotals.pK9Avg.toFixed(2)} / ${targetPitcherTableTotals.pBb9Avg.toFixed(2)}`
@@ -6718,13 +6712,6 @@ export default function TeamBuilder() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="compare" className="space-y-6">
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground italic">Coming soon</p>
-              </CardContent>
-            </Card>
-          </TabsContent>
           <TabsContent value="compare-hidden" className="hidden">
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               <Card>
