@@ -6151,21 +6151,22 @@ export default function TeamBuilder() {
             <Button variant="outline" onClick={newBuild}>
               <Plus className="h-4 w-4 mr-1" /> New Build
             </Button>
-            <Button
-              onClick={() => {
-                if (selectedBuildId) {
-                  saveMutation.mutate({});
-                } else {
-                  const name = askBuildName(buildName);
-                  if (!name) return;
-                  saveMutation.mutate({ saveAs: true, nameOverride: name });
-                }
-              }}
-              disabled={!selectedTeam || saveMutation.isPending}
-            >
-              {saveMutation.isPending ? "Saving…" : "Save"}
-              {dirty && <span className="ml-1 text-xs opacity-70">•</span>}
-            </Button>
+            {dirty && (
+              <Button
+                onClick={() => {
+                  if (selectedBuildId) {
+                    saveMutation.mutate({});
+                  } else {
+                    const name = askBuildName(buildName);
+                    if (!name) return;
+                    saveMutation.mutate({ saveAs: true, nameOverride: name });
+                  }
+                }}
+                disabled={!selectedTeam || saveMutation.isPending}
+              >
+                {saveMutation.isPending ? "Saving…" : "Save"}
+              </Button>
+            )}
             <Button
               variant="outline"
               onClick={() => {
