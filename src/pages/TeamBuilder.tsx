@@ -6374,10 +6374,16 @@ export default function TeamBuilder() {
                     {positionPlayers.length === 0 ? (
                       <TableRow><TableCell colSpan={13} className="text-center text-muted-foreground py-8">No position players added</TableCell></TableRow>
                     ) : (
-                      positionPlayers.map((p, i) => {
-                        const globalIdx = rosterPlayers.indexOf(p);
-                        return renderPlayerRow(p, i, globalIdx, "hitter");
-                      })
+                      [...positionPlayers]
+                        .sort((a, b) => {
+                          const aWar = playerProjection(a, "hitter")?.owar ?? -Infinity;
+                          const bWar = playerProjection(b, "hitter")?.owar ?? -Infinity;
+                          return (bWar as number) - (aWar as number);
+                        })
+                        .map((p, i) => {
+                          const globalIdx = rosterPlayers.indexOf(p);
+                          return renderPlayerRow(p, i, globalIdx, "hitter");
+                        })
                     )}
                     <TableRow className="bg-muted/40 font-medium">
                       <TableCell colSpan={6} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
@@ -6436,10 +6442,16 @@ export default function TeamBuilder() {
                     {pitchers.length === 0 ? (
                       <TableRow><TableCell colSpan={13} className="text-center text-muted-foreground py-8">No pitchers added</TableCell></TableRow>
                     ) : (
-                      pitchers.map((p, i) => {
-                        const globalIdx = rosterPlayers.indexOf(p);
-                        return renderPlayerRow(p, i, globalIdx, "pitcher");
-                      })
+                      [...pitchers]
+                        .sort((a, b) => {
+                          const aWar = (playerProjection(a, "pitcher") as any)?.pwar ?? -Infinity;
+                          const bWar = (playerProjection(b, "pitcher") as any)?.pwar ?? -Infinity;
+                          return (bWar as number) - (aWar as number);
+                        })
+                        .map((p, i) => {
+                          const globalIdx = rosterPlayers.indexOf(p);
+                          return renderPlayerRow(p, i, globalIdx, "pitcher");
+                        })
                     )}
                     <TableRow className="bg-muted/40 font-medium">
                       <TableCell colSpan={6} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
@@ -6595,10 +6607,16 @@ export default function TeamBuilder() {
                     {targetPositionPlayers.length === 0 ? (
                       <TableRow><TableCell colSpan={13} className="text-center text-muted-foreground py-8">No target position players</TableCell></TableRow>
                     ) : (
-                      targetPositionPlayers.map((p, i) => {
-                        const globalIdx = rosterPlayers.indexOf(p);
-                        return renderPlayerRow(p, i, globalIdx, "hitter");
-                      })
+                      [...targetPositionPlayers]
+                        .sort((a, b) => {
+                          const aWar = playerProjection(a, "hitter")?.owar ?? -Infinity;
+                          const bWar = playerProjection(b, "hitter")?.owar ?? -Infinity;
+                          return (bWar as number) - (aWar as number);
+                        })
+                        .map((p, i) => {
+                          const globalIdx = rosterPlayers.indexOf(p);
+                          return renderPlayerRow(p, i, globalIdx, "hitter");
+                        })
                     )}
                     <TableRow className="bg-muted/40 font-medium">
                       <TableCell colSpan={6} className="text-right align-middle py-2 pr-3 font-semibold">Totals</TableCell>
@@ -6654,9 +6672,15 @@ export default function TeamBuilder() {
                     {targetPitchers.length === 0 ? (
                       <TableRow><TableCell colSpan={13} className="text-center text-muted-foreground py-8">No target pitchers</TableCell></TableRow>
                     ) : (
-                      targetPitchers.map((p, i) => {
-                        const globalIdx = rosterPlayers.indexOf(p);
-                        return renderPlayerRow(p, i, globalIdx, "pitcher");
+                      [...targetPitchers]
+                        .sort((a, b) => {
+                          const aWar = (playerProjection(a, "pitcher") as any)?.pwar ?? -Infinity;
+                          const bWar = (playerProjection(b, "pitcher") as any)?.pwar ?? -Infinity;
+                          return (bWar as number) - (aWar as number);
+                        })
+                        .map((p, i) => {
+                          const globalIdx = rosterPlayers.indexOf(p);
+                          return renderPlayerRow(p, i, globalIdx, "pitcher");
                       })
                     )}
                     <TableRow className="bg-muted/40 font-medium">
