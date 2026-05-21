@@ -103,3 +103,23 @@ export type TeamRow = {
   conference_id?: string | null;
   source_team_id?: string | null;
 };
+
+export type PitcherDepthRole =
+  | "weekend_starter"
+  | "weekday_starter"
+  | "swing_starter"
+  | "workhorse_reliever"
+  | "high_leverage_reliever"
+  | "mid_leverage_reliever"
+  | "low_impact_reliever"
+  | "specialist_reliever";
+
+export type ConferenceStatsRow = {
+  conference: string;
+  conference_id: string | null;
+  season?: number | null;
+  avg_plus: number | null;
+  obp_plus: number | null;
+  iso_plus: number | null;
+  stuff_plus: number | null;
+};
