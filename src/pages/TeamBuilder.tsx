@@ -4337,6 +4337,21 @@ export default function TeamBuilder() {
       const precomputedTeamRow = ((row.player_predictions || []) as any[]).find(
         (pr) => pr.variant === "precomputed" && pr.customer_team_id === effectiveTeamId && pr.status === "active",
       );
+      // TEMP diagnostic — remove once verified
+      // eslint-disable-next-line no-console
+      console.log("[TB target-add precompute fast path]", {
+        playerName: `${row.first_name} ${row.last_name}`,
+        playerId: row.id,
+        effectiveTeamId,
+        predCount: (row.player_predictions || []).length,
+        variants: ((row.player_predictions || []) as any[]).map((p) => ({
+          variant: p.variant,
+          customer_team_id: p.customer_team_id,
+          status: p.status,
+          p_avg: p.p_avg,
+        })),
+        precomputedTeamRowFound: !!precomputedTeamRow,
+      });
       if (precomputedTeamRow) {
         const fromTeamName = row.from_team || row.team;
         const fromTeamRow = fromTeamName ? teamByKey.get(normalizeKey(fromTeamName)) || null : null;
