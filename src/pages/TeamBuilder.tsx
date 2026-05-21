@@ -2491,7 +2491,7 @@ export default function TeamBuilder() {
             setProgramTierMultiplier(Number(draft.programTierMultiplier) || 1.2);
             setProgramTierConference(draft.programTierConference ?? "");
             setFallbackRosterTotalPlayerScore(Number(draft.fallbackRosterTotalPlayerScore) || DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
-            setDirty(Boolean(draft.dirty));
+            setDirty(false);
             if (draft.depthAssignments) setDepthAssignments(draft.depthAssignments);
             if (draft.depthPlaceholders) setDepthPlaceholders(draft.depthPlaceholders);
             skipAutoSeedOnceRef.current = true;
