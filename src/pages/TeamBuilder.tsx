@@ -3839,17 +3839,6 @@ export default function TeamBuilder() {
 
   const updatePlayer = (idx: number, updates: Partial<BuildPlayer>) => {
     setRosterPlayers((prev) => prev.map((p, i) => (i === idx ? { ...p, ...updates } : p)));
-    if ("depth_role" in updates) {
-      // Coach explicitly changed a player's tier — evict them from their
-      // current slot so the auto-fill effect re-places them in the right slot.
-      setDepthAssignments((prev) => {
-        const next: Record<string, number> = {};
-        for (const [k, v] of Object.entries(prev)) {
-          if (v !== idx) next[k] = v;
-        }
-        return next;
-      });
-    }
     setDirty(true);
   };
 
