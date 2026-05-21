@@ -4388,7 +4388,7 @@ export default function TeamBuilder() {
     //   - OR player is a pitcher (precompute is hitter-only today)
     // Never falls through here when team IS set but the precomputed lookup
     // missed — that's a data gap to surface, not silently re-derive.
-    const skipLiveCompute = !!effectiveTeamId && !isPitcherRow && !transferSnapshot;
+    const skipLiveCompute = !!effectiveTeamId && !isPitcherRow && !!transferSnapshot;
     if (!transferSnapshot && !skipLiveCompute && chosenPred?.id && selectedTeam) {
       const { data: internals } = await supabase
         .from("player_prediction_internals")
