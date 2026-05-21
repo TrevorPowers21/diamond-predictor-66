@@ -164,4 +164,172 @@ WHERE customer_team_id = '<uuid>' AND variant = 'precomputed';
 
 ---
 
+---
+
+## Section H — Architectural principle (the one rule)
+
+**When a customer team is active AND a team-scoped precomputed row exists, the displayed projection IS the stored row. No re-derivation, no live math.** Live computation only fires when:
+- No customer team active (agent view / no impersonation)
+- No precomputed row exists yet for that player + team
+- TransferPortal simulator (intentional what-if with editable destination)
+- Pitchers (until pitcher precompute is built)
+
+This rule is enforced in:
+- `src/pages/PlayerProfile.tsx` — `regularPred` selector
+- `src/pages/TeamBuilder.tsx` — `addPlayerFromTargetSearch` + `simulateTransferProjection`
+- `src/lib/teamScopedPredictions.ts` — shared `pickPreferredPrediction` helper
+
+---
+
+## Section I — Reference (copy/paste constants)
+
+### Supabase project refs
+
+| Env | Project Ref | Link command |
+|---|---|---|
+| Staging | `slrxowawbijbjrkozqlj` | `supabase link --project-ref slrxowawbijbjrkozqlj` |
+| Prod | `trbvxuoliwrfowibatkm` | `supabase link --project-ref trbvxuoliwrfowibatkm` |
+
+### Customer team UUIDs
+
+**STAGING** (look up fresh on prod — UUIDs differ):
+```sql
+SELECT id, name, school_team_id FROM customer_teams;
+```
+
+Known staging UUIDs (validated 2026-05-20):
+- Georgia: `289f4f16-555e-46d3-b899-2462c5cfaa24`
+- Arkansas: `81ad0369-e0c7-4427-a8db-39a091863d40`
+- RSTR IQ All-Americans: internal, no `school_team_id`, skip
+
+### Env files used by NPM scripts
+
+- `.env.local` — staging credentials (gitignored)
+- `.env.production.local` — prod credentials (gitignored)
+
+The npm scripts load these via `tsx --env-file-if-exists=...`. Service role keys must be present in both files.
+
+### NPM script aliases
+
+```bash
+# Staging
+npm run precompute-transfers -- --team <uuid> --division D1 [--dry-run]
+
+# Prod (uses .env.production.local automatically)
+npm run precompute-transfers:prod -- --team <uuid> --division D1 [--dry-run]
+```
+
+Other flags:
+- `--division JUCO` (NOT YET IMPLEMENTED — district-ID resolver pending)
+- `--division all` (D1 + JUCO once JUCO lands)
+- `--debug-player Hairston` (dumps full inputs for one player)
+
+### Per-team equation override SQL pattern
+
+Override a single weight for one customer team (the principle is the same for any `config_key` in `model_config` admin_ui domain):
+
+```sql
+-- Example: drop Georgia's BA power weight from 0.70 default to 0.30
+INSERT INTO customer_team_equation_overrides
+  (customer_team_id, model_type, config_key, config_value)
+VALUES
+  ('<georgia-uuid>', 'admin_ui', 't_ba_power_weight', 0.30)
+ON CONFLICT (customer_team_id, model_type, config_key)
+DO UPDATE SET config_value = EXCLUDED.config_value;
+
+-- Re-run precompute for that team to materialize the new math
+-- npm run precompute-transfers:prod -- --team <georgia-uuid> --division D1
+
+-- Read all overrides for one team
+SELECT model_type, config_key, config_value
+FROM customer_team_equation_overrides
+WHERE customer_team_id = '<georgia-uuid>'
+ORDER BY model_type, config_key;
+
+-- Remove an override (revert to canonical default)
+DELETE FROM customer_team_equation_overrides
+WHERE customer_team_id = '<georgia-uuid>' AND config_key = 't_ba_power_weight';
+```
+
+`model_type` should be `'admin_ui'` to match the global query. Other valid values: `'transfer'`, `'global'`, `'returner'` — the script overlays all of these. Use `'admin_ui'` when in doubt.
+
+---
+
+## Section J — Schema gotchas (in case you forget)
+
+These bit us during yesterday's script work. Save the time.
+
+| Table | Gotcha |
+|---|---|
+| `"Teams Table"` (quoted, space) | `full_name` column (NOT `"Team"`). `Season` is **capital S**. `conference` is lowercase. `source_id` is the external ID; `id` is the per-season UUID. `customer_teams.school_team_id` references `id` (NOT `source_id`). |
+| `"Conference Stats"` (quoted, space) | Columns: `"AVG"`, `"OBP"`, `"ISO"`, `"Stuff_plus"` (uppercase). Conference name lives in `"conference abbreviation"` (lowercase, with space). `season` is lowercase. **For 1-team conferences (e.g. Independent), the importer leaves stats NULL — must backfill with NCAA averages.** |
+| `player_predictions` | Columns are `p_avg`, `p_obp`, `p_slg`, `p_ops`, `p_iso`, `p_wrc`, `p_wrc_plus`, `p_rv_plus`, `p_war`, `p_era`, etc. **NO `owar` or `nil_valuation` columns** — those are derived at read time from `p_wrc_plus`. |
+| `players` | `transfer_portal` (boolean) is the source of truth for portal status — NOT `prediction.model_type === 'transfer'` (which is now true for every precomputed row regardless). |
+| `customer_team_equation_overrides` | RLS: SELECT for team members + superadmin; WRITE for superadmin only (team-admin self-service is v2). |
+
+### Supabase JS client gotchas
+
+- `.in("player_id", uuids)` URL is built as a query string. **~200 UUIDs is the safe upper bound** — go higher and you hit `HeadersOverflowError` at 16KB. The precompute script batches at 200.
+- PostgREST FK disambiguation can return unexpected join rows when a table has multiple FKs (e.g. `player_predictions` → `players` + `customer_teams`). When in doubt, use an **explicit follow-up query** instead of an inline join.
+- Default cache (React Query) ignores Supabase RLS context changes — always include `effectiveTeamId` in `queryKey` for team-scoped queries.
+
+### `playerProjection()` return shape gotcha
+
+Returns different keys depending on `treatAsPitcher`:
+- **Hitter side:** `owar` (not `p_war`)
+- **Pitcher side:** `owar` (aliased to pwar) AND `pwar` — read `pwar` for pitchers
+
+This burned us yesterday on the WAR sort.
+
+---
+
+## Section K — Cutover Day Runbook (target: minutes)
+
+For when we're ready to flip prod from "pre-precompute" to "fully-precomputed with autofire."
+
+**Pre-flight (done before cutover day):**
+- [x] Schema migrations on prod (Section A1/A2 — done 2026-05-20)
+- [x] Independent SQL fix on prod (Section A3 — done 2026-05-21)
+- [ ] PR #24 merged to main → Vercel auto-deploys (Section B — pending)
+- [ ] Auto-fire infra built + tested on staging (Section E)
+- [ ] Auto-fire infra deployed to prod (Section E5)
+
+**Day-of (in order):**
+
+```bash
+# 1. Link to prod
+cd ~/dev-main/diamond-predictor-66
+supabase link --project-ref trbvxuoliwrfowibatkm
+
+# 2. Inventory customer teams on prod
+supabase db query --linked "SELECT id, name, school_team_id FROM customer_teams ORDER BY name;"
+# Copy each customer_team_id
+
+# 3. Dry-run precompute for each team (sanity)
+npm run precompute-transfers:prod -- --team <uuid-1> --division D1 --dry-run
+npm run precompute-transfers:prod -- --team <uuid-2> --division D1 --dry-run
+# ... etc. Expect ~5,000 D1 hitters per team, ~97% computed.
+
+# 4. Real run for each team
+npm run precompute-transfers:prod -- --team <uuid-1> --division D1
+npm run precompute-transfers:prod -- --team <uuid-2> --division D1
+# ... ~30s per team. Verify each one prints "✓ done".
+
+# 5. Verify on prod
+supabase db query --linked "
+  SELECT customer_team_id, count(*) AS rows
+  FROM player_predictions
+  WHERE variant='precomputed'
+  GROUP BY customer_team_id;
+"
+# Expect one row per customer team with ~5,000 each.
+
+# 6. Spot-check in browser (impersonate each customer team, verify Hairston / known portal hitter shows team-scoped value)
+# 7. Notify customers (optional WhatsNewModal bump)
+```
+
+Estimated total time: **5–10 minutes** for everything in step 1–6 once auto-fire is live for future customer onboarding.
+
+---
+
 *Last updated: 2026-05-21. Pair with `docs/eager-precompute-session-log.md` for chronological detail.*
