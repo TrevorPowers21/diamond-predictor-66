@@ -3160,6 +3160,26 @@ export default function TeamBuilder() {
       return snapshotFallback;
     }
 
+    // Architecture: when a customer team is active AND we have a team-scoped
+    // precomputed row, that row IS the projection. No re-derivation. This
+    // mirrors the add-time fast path so the displayed value stays consistent
+    // across renders and matches the precompute exactly. (Hitter only;
+    // pitcher precompute hasn't been built yet so the pitcher branch below
+    // still runs.)
+    if (!treatAsPitcher && effectiveTeamId && (livePred as any)?.variant === "precomputed" && (livePred as any)?.customer_team_id === effectiveTeamId) {
+      const lp = livePred as any;
+      return {
+        p_avg: lp.p_avg ?? null,
+        p_obp: lp.p_obp ?? null,
+        p_slg: lp.p_slg ?? null,
+        p_ops: lp.p_ops ?? ((lp.p_obp ?? 0) + (lp.p_slg ?? 0)),
+        p_iso: lp.p_iso ?? null,
+        p_wrc_plus: lp.p_wrc_plus ?? null,
+        owar: computeOWarFromWrcPlus(lp.p_wrc_plus ?? null),
+        nil_valuation: null,
+      } as any;
+    }
+
     // ── Pitcher branch ──────────────────────────────────────────────
     // Live-recompute via shared transferPitcherProjection lib. Mirrors
     // the hitter live-recompute below so target board pitcher stats
