@@ -4328,9 +4328,40 @@ export default function TeamBuilder() {
     const inferredRole = overrideRole || asPitcherRole(row.position || null);
     const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(row.position || ""));
 
-    // Fetch prediction internals so we can run the same simulation as Transfer Portal
+    // Honest fix for the eager pre-compute architecture: if a team-scoped
+    // precomputed row exists for this player + customer team, use it directly
+    // (no re-derivation). Otherwise fall through to live computation for
+    // agents / non-team contexts.
     let transferSnapshot: TransferSnapshot | null = null;
-    if (chosenPred?.id && selectedTeam) {
+    if (effectiveTeamId && row.id && !isPitcherRow) {
+      const precomputedTeamRow = ((row.player_predictions || []) as any[]).find(
+        (pr) => pr.variant === "precomputed" && pr.customer_team_id === effectiveTeamId && pr.status === "active",
+      );
+      if (precomputedTeamRow) {
+        const fromTeamName = row.from_team || row.team;
+        const fromTeamRow = fromTeamName ? teamByKey.get(normalizeKey(fromTeamName)) || null : null;
+        const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
+        const owar = computeOWarFromWrcPlus(precomputedTeamRow.p_wrc_plus ?? null);
+        const basePerOwar = eqNum("nil_base_per_owar", 25000);
+        const ptm = getProgramTierMultiplierByConference(toTeamRow?.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
+        const pvm = getPositionValueMultiplier(row.position);
+        const nilRaw = owar == null ? null : owar * basePerOwar * ptm * pvm;
+        const nilValuation = nilRaw == null ? null : Math.max(0, nilRaw);
+        transferSnapshot = {
+          p_avg: precomputedTeamRow.p_avg ?? null,
+          p_obp: precomputedTeamRow.p_obp ?? null,
+          p_slg: precomputedTeamRow.p_slg ?? null,
+          p_wrc_plus: precomputedTeamRow.p_wrc_plus ?? null,
+          owar,
+          nil_valuation: nilValuation,
+          from_team: fromTeamName || null,
+          from_conference: fromTeamRow?.conference || row.conference || null,
+        } as any;
+      }
+    }
+
+    // Fetch prediction internals so we can run the same simulation as Transfer Portal
+    if (!transferSnapshot && chosenPred?.id && selectedTeam) {
       const { data: internals } = await supabase
         .from("player_prediction_internals")
         .select("avg_power_rating, obp_power_rating, slg_power_rating")
