@@ -423,6 +423,41 @@ For new seasons: scan Conference Stats for null-AVG rows. Any non-aggregated sin
 
 ---
 
+## 2026-05-20 (cont.) — TB target-add: stop re-deriving, read stored row
+
+**Branch:** `feature/season-transition-2027` → PR to `staging`
+
+### Problem
+
+User added Hairston via TB target-search expecting the stored precomputed value (0.345 pAVG). TB displayed 0.359 instead. Root cause: two layers of re-derivation that ran AFTER my earlier add-time fix.
+
+### Two-layer fix
+
+1. **Add-time** (`addPlayerFromTargetSearch`, line ~4335) — replaced the join-based lookup (PostgREST FK + RLS made it unreliable) with an explicit Supabase fetch for `(player_id, customer_team_id, variant='precomputed', status='active')`. If found, the snapshot is built from those columns directly. No live computation. Live-compute fallback is now guarded behind `skipLiveCompute` and only fires for agent views (no team) or pitchers (no precompute yet).
+
+2. **Display-time** (`simulateTransferProjection`, line ~3135) — this hook re-derives the projection on EVERY render of a target row, overwriting the stored snapshot. Added an early-return at the top of the hitter branch: when `effectiveTeamId` is set AND `livePred` is a team-scoped `variant='precomputed'` row, return its stored `p_avg/p_obp/p_slg/p_wrc_plus` directly. Pitcher branch unchanged (no pitcher precompute yet).
+
+### Architectural principle (locked in this session)
+
+When a customer team is active and a team-scoped precomputed row exists for a player, the displayed projection IS the stored row. No re-derivation, no fallback to live math. Live computation only happens:
+- In TransferPortal simulator (what-if; editable inputs)
+- For agent views / no impersonation (no team-scoped row exists)
+- For pitchers (until pitcher precompute is built)
+
+### Diagnostic note
+
+A `console.log("[TB target-add stored row]", {...})` was left in `addPlayerFromTargetSearch` for one round of verification. Once Peyton or Trevor confirms Hairston shows 0.345 in TB, remove that log line.
+
+### Commits in this PR
+
+- `3c8063b` — TeamBuilder target-add: use stored precomputed row instead of re-deriving
+- `cf7b7c0` — TeamBuilder target-search: include customer_team_id in joined predictions
+- `9a2c2e5` — TB target-add: temp diagnostic for precompute fast path
+- `5783629` — TB target-add: explicit stored-row fetch, block live compute when team set
+- `d1e2d9f` — TB simulateTransferProjection: short-circuit when team-scoped row exists
+
+---
+
 ## Template for future entries
 
 ```
