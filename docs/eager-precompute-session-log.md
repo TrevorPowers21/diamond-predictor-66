@@ -121,6 +121,188 @@ Code revert: `git checkout main -- src/lib/predictionEngine.ts` undoes the loade
 
 ---
 
+## 2026-05-20 (cont.) — Shared input-builder extracted
+
+**Branch:** `feature/season-transition-2027` (uncommitted; will commit at next checkpoint).
+
+### Code changes
+
+- **NEW `src/lib/buildTransferProjectionInputs.ts`** — pure helper exporting:
+  - `readEquationValue(key, fallback, remoteValues?)` — renamed equivalent of the per-page `readLocalNum` (no localStorage involvement; Supabase model_config wins, then `TRANSFER_WEIGHT_DEFAULTS`).
+  - `normalizeParkToIndex(n)` — same semantics as TP page helper.
+  - `buildHitterTransferInputs(args)` — main entry. Takes player row + from/to team rows + conference + handedness + internals/seedPower fallback + two resolver callbacks (`resolveConferenceHitting`, `resolveParkFactor`) + `remoteEquationValues` map. Returns either `{ blocked: true, missingInputs: [] }` or `{ blocked: false, inputs: TransferProjectionInputs, transferMultiplier, classAdj, isJucoSource }`.
+  - Encapsulates: JUCO outlier regression for AVG/OBP/ISO, PR+ resolution (internals → seed-power compute fallback), park handedness routing, conference + park missing-input gating, NCAA averages + std-dev defaults, JUCO-vs-D1 weight branch via `transferWeightsForSource`, class-transition + dev-aggressiveness multiplier.
+
+### What this enables now
+
+- Both TP and the precompute script (next step) can call one function and stay locked together.
+- New equation keys are zero-touch: as long as the upstream `loadEngineConfig` returns them in `remoteEquationValues`, the builder reads them via `readEquationValue`. No code changes when keys are added/renamed in Supabase.
+
+### NOT yet done in this sub-step
+
+- TP page (`src/pages/TransferPortal.tsx`) has NOT yet been refactored to use the new builder. The duplication is intentional for now: builder is verified pure and typechecks; TP refactor lands when the precompute script is wired so both can be smoke-tested side-by-side against the same player. Risk of refactoring TP first without a second consumer = silently breaking the simulator with no second source-of-truth to diff against.
+
+### Typecheck
+
+`npx tsc --noEmit` clean.
+
+---
+
+## 2026-05-20 (cont.) — UPSERT unique constraint widened
+
+**File:** `supabase/migrations/20260520210000_player_predictions_unique_with_customer_team.sql`
+
+**Applied to:** STAGING + PROD (`supabase db query --linked --file ...` against both project refs).
+
+### Before / after
+
+- Before: `UNIQUE (player_id, model_type, variant, season)` — pre-dated `customer_team_id`, would have blocked team-scoped UPSERTs from coexisting with global rows.
+- After: `UNIQUE NULLS NOT DISTINCT (player_id, customer_team_id, model_type, variant, season)`. Constraint name: `player_predictions_player_team_model_variant_season_key`.
+
+`NULLS NOT DISTINCT` ensures the global row (customer_team_id IS NULL) is still deduped — without it, NULL would be treated as always-distinct and you'd accumulate duplicate global rows.
+
+### Pre-flight check (both envs)
+
+```sql
+SELECT player_id, customer_team_id, model_type, variant, season, count(*)
+FROM player_predictions
+GROUP BY 1,2,3,4,5
+HAVING count(*) > 1;
+-- staging: 0 rows, prod: 0 rows
+```
+
+### Post-apply verification (both envs)
+
+```sql
+SELECT conname FROM pg_constraint
+WHERE conrelid = 'public.player_predictions'::regclass AND contype = 'u';
+-- → player_predictions_player_team_model_variant_season_key
+```
+
+### Rollback (if needed)
+
+```sql
+ALTER TABLE public.player_predictions
+  DROP CONSTRAINT IF EXISTS player_predictions_player_team_model_variant_season_key;
+ALTER TABLE public.player_predictions
+  ADD CONSTRAINT player_predictions_player_id_model_type_variant_season_key
+  UNIQUE (player_id, model_type, variant, season);
+```
+
+---
+
+## 2026-05-20 (cont.) — Precompute script shipped + first staging run
+
+**Branch:** `feature/season-transition-2027` (uncommitted)
+
+### Code changes
+
+- **NEW `scripts/precompute-transfer-projections.ts`** — batch eager pre-compute. Loads lookups once (model_config + per-team overrides → `remoteEquationValues`; `Conference Stats` via `fetchConferenceStats`; `Park Factors` via `fetchParkFactorsMap`; `Teams Table` for source-team conference resolution; portal hitters; their latest active `player_predictions` row for `from_avg/obp/slg` + `class_transition`; `player_prediction_internals` for PR+). Calls the shared `buildHitterTransferInputs` then `computeTransferProjection` + `applyTransferPostprocess`. UPSERTs rows scoped to one `customer_team_id`. Pitchers excluded (v1 hitter-only).
+- **`src/lib/buildTransferProjectionInputs.ts`** — added `applyTransferPostprocess` so script and TP page derive identical `pSlg/pOps/pWrc/pWrcPlus/oWAR` from `computeTransferProjection` output + `transferMultiplier`.
+- **`package.json`** — added `precompute-transfers` and `precompute-transfers:prod` scripts.
+
+### Schema discoveries (column names in player_predictions)
+
+The table uses `p_avg` / `p_obp` / `p_slg` / `p_ops` / `p_iso` / `p_wrc` / `p_wrc_plus` (NOT `projected_*`). There are NO `owar` or `nil_valuation` columns — those are derived at read time from `p_wrc_plus` + position/conference. The script does not persist them.
+
+### Staging run results
+
+```
+npm run precompute-transfers -- --team 289f4f16-555e-46d3-b899-2462c5cfaa24
+→  destination: University of Georgia (SEC)
+→  0 equation keys (model_config empty on staging — readEquationValue falls
+    through to TRANSFER_WEIGHT_DEFAULTS canonical values, same as TP page)
+→  40 Conference Stats rows, 466 Teams Table rows
+→  49 portal players → 27 hitters → 22 computed, 5 blocked
+→  upserted 22 rows
+```
+
+Block reasons (all unblockable without source-data fixes, same as TP page):
+- 4× missing source conference stats (probably JUCO / unknown conferences)
+- 1× missing PR+ for one player
+
+### Verification
+
+```sql
+SELECT
+  count(*) FILTER (WHERE customer_team_id = '289f4f16-...') AS georgia,
+  count(*) FILTER (WHERE customer_team_id = '289f4f16-...' AND variant='precomputed') AS georgia_precomputed
+FROM player_predictions;
+-- → 22, 22
+```
+
+### Bugs found + fixed during the run
+
+1. `school_team_id` references Teams Table `id` (primary key), not `source_id` (numeric external id like "226"). Fixed lookup.
+2. `Conference Stats` is the quoted/spaced table name with weird columns ("AVG", "OBP", "ISO", "Stuff_plus", "conference abbreviation"). Switched to the existing `fetchConferenceStats` helper which knows how to handle it.
+3. Teams Table uses `Season` (capital S) for season but `conference` (lowercase) for conference. Got both right.
+
+### What this enables now
+
+- Anyone can run `npm run precompute-transfers -- --team <uuid> [--dry-run]` to generate team-scoped transfer projections for portal hitters.
+- Per-team equation overrides ARE honored (overlay happens in step 2a).
+- Prod is still untouched — only used when explicitly invoked.
+
+### Rollback
+
+```sql
+DELETE FROM player_predictions
+WHERE customer_team_id IS NOT NULL AND variant = 'precomputed';
+```
+
+---
+
+## 2026-05-20 (cont.) — Read-path wired (PlayerProfile + Dashboard + HighFollow)
+
+**Branch:** `feature/season-transition-2027` (uncommitted)
+
+### NEW shared helper
+
+`src/lib/teamScopedPredictions.ts`:
+
+- `applyTeamScopeFilter(query, effectiveTeamId)` — Supabase query helper. With a team set, filters to `(customer_team_id IS NULL OR customer_team_id = team)`. Without a team, filters strict-NULL.
+- `pickPreferredPrediction(rows, effectiveTeamId)` — given rows for ONE player, picks team-scoped precomputed row first, else global regular row.
+- `dedupePreferredPerPlayer(rows, effectiveTeamId)` — same logic but reduces a mixed bag down to one row per player.
+
+### Surfaces wired
+
+1. **PlayerProfile** (`src/pages/PlayerProfile.tsx`)
+   - `predictions` query: now loads global + team-scoped rows. `regularPred` selector prefers team-scoped `precomputed` row over global `regular` row.
+   - queryKey includes `effectiveTeamId` so cache busts on team switch / impersonation.
+
+2. **Dashboard** (`src/pages/Dashboard.tsx`) — 3 query sites:
+   - `topHitters` leaderboard
+   - `topPitchers` leaderboard
+   - `targetBoard` panel (overview-portal-activity-v4)
+   - All use `applyTeamScopeFilter` on the query + `dedupePreferredPerPlayer` on the result. queryKeys all include `effectiveTeamId`.
+
+3. **HighFollowList** (`src/pages/HighFollowList.tsx`) — target board page:
+   - `predictions` query updated identically. queryKey includes `effectiveTeamId`.
+
+### What this means for users today
+
+- Superadmin (no impersonation): sees global rows as before. **No behavior change.**
+- Superadmin impersonating Georgia: sees team-scoped projections for the 22 hitters that have one; everything else falls back to global. Cache key includes team so switching impersonation re-fetches.
+- Real Georgia coach (when account exists): same as impersonating Georgia.
+
+### Surfaces NOT yet wired (deliberate — deferred to next turn)
+
+- **Rankings / ReturningPlayers** (5 query sites) — biggest blast radius, separate turn.
+- **PitcherProfile** — counterpart to PlayerProfile; pitcher precompute scope not built yet, so wiring it now buys nothing for pitchers but adds risk.
+- **NilValuations** — derives NIL from p_wrc_plus, would benefit but lower priority.
+- **TeamBuilder / TransferPortal** — intentionally untouched. TB is the destination flow; TP is the simulator that PRODUCES the math, not consumes precomputed rows.
+- **PDF export** — `pdfGenerator.ts` is fed a `ReportPlayer[]` by callers. Whatever surface the PDF is launched from (PlayerProfile, Rankings) propagates naturally. PlayerProfile already wired; Rankings pending.
+
+### Scope expansion note
+
+User wants the team-scoped equation to apply to **every player**, not just portal hitters. Precompute script currently filters `WHERE portal_status = 'IN PORTAL'`. Need a follow-up pass to widen to all hitters (and pitchers when their builder lands). Logged as a todo.
+
+### Typecheck
+
+`npx tsc --noEmit` clean after all four file changes.
+
+---
+
 ## Template for future entries
 
 ```

@@ -13,6 +13,7 @@ import { profileRouteFor } from "@/lib/profileRoutes";
 import SchoolBanner from "@/components/SchoolBanner";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
 import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
+import { applyTeamScopeFilter, dedupePreferredPerPlayer } from "@/lib/teamScopedPredictions";
 
 type HitterRow = {
   player_id: string;
@@ -61,44 +62,40 @@ const timeSince = (iso: string | null | undefined): string => {
 };
 
 export default function Dashboard() {
-  const { devBypassed, disableDevBypass } = useAuth();
+  const { devBypassed, disableDevBypass, effectiveTeamId } = useAuth();
   const serviceKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
   const { schoolName, schoolFullName } = useEffectiveSchool();
 
   const { data: topHitters = [] } = useQuery({
-    queryKey: ["overview-top-hitters"],
+    queryKey: ["overview-top-hitters", effectiveTeamId],
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
       const all: any[] = [];
       let from = 0;
       const PAGE = 1000;
       while (true) {
-        const { data, error } = await supabase
+        let q = supabase
           .from("player_predictions")
           .select(
-            "id, player_id, model_type, variant, status, p_wrc_plus, p_avg, p_obp, p_slg, players!inner(first_name, last_name, team, from_team, conference, position, pa)",
+            "id, player_id, customer_team_id, model_type, variant, status, p_wrc_plus, p_avg, p_obp, p_slg, players!inner(first_name, last_name, team, from_team, conference, position, pa)",
           )
-          .eq("variant", "regular")
+          .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"])
           .in("model_type", ["returner", "transfer"])
           .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
           .gte("players.pa", 75)
-          .not("p_wrc_plus", "is", null)
-          .range(from, from + PAGE - 1);
+          .not("p_wrc_plus", "is", null);
+        q = applyTeamScopeFilter(q as any, effectiveTeamId);
+        const { data, error } = await q.range(from, from + PAGE - 1);
         if (error) throw error;
         const rows = data || [];
         all.push(...rows);
         if (rows.length < PAGE) break;
         from += PAGE;
       }
-      const byPlayer = new Map<string, any>();
-      for (const row of all) {
-        const existing = byPlayer.get(row.player_id);
-        if (!existing || (row.p_wrc_plus ?? -Infinity) > (existing.p_wrc_plus ?? -Infinity)) {
-          byPlayer.set(row.player_id, row);
-        }
-      }
-      const rows: HitterRow[] = Array.from(byPlayer.values())
+      // Per player: prefer team-scoped precomputed row, else global regular row.
+      const deduped = dedupePreferredPerPlayer(all, effectiveTeamId);
+      const rows: HitterRow[] = deduped
         .map((r) => ({
           player_id: r.player_id,
           first_name: r.players.first_name,
@@ -120,42 +117,37 @@ export default function Dashboard() {
   });
 
   const { data: topPitchers = [] } = useQuery({
-    queryKey: ["overview-top-pitchers"],
+    queryKey: ["overview-top-pitchers", effectiveTeamId],
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
       // Mirror topHitters: read PROJECTIONS from player_predictions, not raw
       // 2026 stats from Pitching Master. Sort by p_rv_plus (pitcher composite),
-      // take the player's best variant (returner vs transfer) per player_id.
+      // prefer team-scoped precomputed row per player.
       const all: any[] = [];
       let from = 0;
       const PAGE = 1000;
       while (true) {
-        const { data, error } = await supabase
+        let q = supabase
           .from("player_predictions")
           .select(
-            "id, player_id, model_type, variant, status, p_rv_plus, p_era, p_fip, p_k9, players!inner(first_name, last_name, team, from_team, conference, position, ip)",
+            "id, player_id, customer_team_id, model_type, variant, status, p_rv_plus, p_era, p_fip, p_k9, players!inner(first_name, last_name, team, from_team, conference, position, ip)",
           )
-          .eq("variant", "regular")
+          .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"])
           .in("model_type", ["returner", "transfer"])
           .in("players.position", ["SP", "RP", "CL", "P", "LHP", "RHP"])
           .gte("players.ip", 20)
-          .not("p_rv_plus", "is", null)
-          .range(from, from + PAGE - 1);
+          .not("p_rv_plus", "is", null);
+        q = applyTeamScopeFilter(q as any, effectiveTeamId);
+        const { data, error } = await q.range(from, from + PAGE - 1);
         if (error) throw error;
         const rows = data || [];
         all.push(...rows);
         if (rows.length < PAGE) break;
         from += PAGE;
       }
-      const byPlayer = new Map<string, any>();
-      for (const row of all) {
-        const existing = byPlayer.get(row.player_id);
-        if (!existing || (row.p_rv_plus ?? -Infinity) > (existing.p_rv_plus ?? -Infinity)) {
-          byPlayer.set(row.player_id, row);
-        }
-      }
-      const rows: PitcherRow[] = Array.from(byPlayer.values())
+      const deduped = dedupePreferredPerPlayer(all, effectiveTeamId);
+      const rows: PitcherRow[] = deduped
         .map((r) => ({
           player_id: r.player_id,
           first_name: r.players.first_name,
@@ -264,7 +256,7 @@ export default function Dashboard() {
   // "what's new this week" rather than the full active backlog. Anything
   // older lives on the Transfer Portal page instead.
   const { data: portalActivity = [] } = useQuery({
-    queryKey: ["overview-portal-activity-v4", watchedIdsKey],
+    queryKey: ["overview-portal-activity-v4", watchedIdsKey, effectiveTeamId],
     staleTime: 60 * 1000,
     queryFn: async () => {
       // 3-day floor — anything entered before this drops out of the feed.
@@ -280,19 +272,21 @@ export default function Dashboard() {
       const playerIds = (playerRows || []).map((p: any) => p.id);
       const { data: predRows } = playerIds.length === 0
         ? { data: [] }
-        : await (supabase as any)
-            .from("player_predictions")
-            .select("player_id, p_wrc_plus, p_rv_plus, variant, status")
-            .in("player_id", playerIds)
-            .eq("variant", "regular")
-            .in("status", ["active", "departed"]);
+        : await (() => {
+            let q = (supabase as any)
+              .from("player_predictions")
+              .select("player_id, customer_team_id, p_wrc_plus, p_rv_plus, variant, status")
+              .in("player_id", playerIds)
+              .in("variant", ["regular", "precomputed"])
+              .in("status", ["active", "departed"]);
+            q = applyTeamScopeFilter(q, effectiveTeamId);
+            return q;
+          })();
+      // Prefer team-scoped precomputed row per player when active team has one.
+      const preferred = dedupePreferredPerPlayer((predRows as any[]) || [], effectiveTeamId);
       const predByPlayer = new Map<string, { p_wrc_plus: number | null; p_rv_plus: number | null }>();
-      for (const pr of predRows || []) {
-        const pid = (pr as any).player_id;
-        const existing = predByPlayer.get(pid);
-        if (!existing || (pr.p_wrc_plus != null && (existing.p_wrc_plus == null))) {
-          predByPlayer.set(pid, { p_wrc_plus: pr.p_wrc_plus, p_rv_plus: pr.p_rv_plus });
-        }
+      for (const pr of preferred) {
+        predByPlayer.set(pr.player_id as string, { p_wrc_plus: pr.p_wrc_plus, p_rv_plus: pr.p_rv_plus });
       }
       const raw = (playerRows || []).map((p: any) => ({
         players: p,
