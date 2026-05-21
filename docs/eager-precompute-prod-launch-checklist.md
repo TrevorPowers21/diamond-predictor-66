@@ -144,10 +144,28 @@ In order:
    ```
    The prod service role key lives in `.env.production.local`.
 
-4. **Bootstrap existing customer teams** (one-time; auto-fire only covers NEW inserts going forward):
+4. **Bootstrap existing customer teams** (one-time; auto-fire only covers NEW inserts going forward).
+
+   Prod has **8 customer teams** as of 2026-05-21 (verify with `SELECT id, name FROM customer_teams ORDER BY name;` before cutover — list may have grown).
+
    ```bash
-   npm run precompute-transfers:prod -- --team <georgia-prod-uuid> --division D1
-   npm run precompute-transfers:prod -- --team <arkansas-prod-uuid> --division D1
+   # Verified prod UUIDs 2026-05-21:
+   npm run precompute-transfers:prod -- --team 6deca66a-b4c0-403f-9614-a9d32f1d5994 --division D1   # Arkansas
+   npm run precompute-transfers:prod -- --team 66b33ebe-8449-4894-808e-f86f15e3d1f0 --division D1   # Florida Atlantic Owls
+   npm run precompute-transfers:prod -- --team 9aef3923-0f11-4813-8036-5766b0db64b6 --division D1   # Georgia Bulldogs
+   npm run precompute-transfers:prod -- --team ee947a80-a37e-46d7-bb83-629ee338cfa6 --division D1   # Kansas Jayhawks
+   npm run precompute-transfers:prod -- --team 8e21628e-5ad2-421d-bce9-6b54175d1375 --division D1   # Penn State Nittany Lions
+   npm run precompute-transfers:prod -- --team b061b218-397c-40b7-ab97-894eb8f75d05 --division D1   # Stetson Hatters
+   npm run precompute-transfers:prod -- --team e032ef44-dfd1-420c-a4f0-0917094c440e --division D1   # TCU Horned Frogs
+   # RSTR IQ All-Americans is skipped — no school_team_id, no destination
+   ```
+
+   Each run takes ~30-60s. Expect ~5,000 rows per team. After all 7 complete:
+   ```sql
+   SELECT customer_team_id, count(*) AS rows
+   FROM player_predictions WHERE variant='precomputed'
+   GROUP BY customer_team_id ORDER BY rows DESC;
+   -- Should show 7 customer_team_id rows, each with ~5,000.
    ```
 
 5. **Smoke test on prod**:
