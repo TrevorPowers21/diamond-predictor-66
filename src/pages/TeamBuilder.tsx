@@ -23,6 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2 } from "lucide-react";
 import { useTeamBuilderData, scorePredictionLikeDashboard } from "./team-builder/hooks/useTeamBuilderData";
 import { useTeamBuilderSimulation } from "./team-builder/hooks/useTeamBuilderSimulation";
+import { getPlayerName, depthKey } from "./team-builder/helpers";
 import {
   calcPlayerScore,
   DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
@@ -3117,7 +3118,6 @@ export default function TeamBuilder() {
     // effect needlessly and caused position-shuffle glitches.
   }, [supabaseTargetBoard]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const depthKey = (slot: string, depth: number) => `${slot}:${depth}`;
 
   const slotMatchesPosition = useCallback((posRaw: string | null | undefined, slot: string) => {
     const pos = (posRaw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -3289,9 +3289,6 @@ export default function TeamBuilder() {
     });
   }, [rosterPlayers, slotMatchesPosition, playerProjection]);
 
-  const getPlayerName = (p: BuildPlayer) =>
-    p.player ? `${p.player.first_name} ${p.player.last_name}` : p.custom_name || "TBD";
-
   const eligiblePositionPlayers = useMemo(
     () =>
       rosterPlayers
@@ -3330,149 +3327,6 @@ export default function TeamBuilder() {
   };
 
   // Class color reads the player's CURRENT class_year (FR/SO/JR/SR/GR),
-  // not class_transition. class_transition encodes the year-to-year move
-  // ("SJ" = sophomore-to-junior projection), so a SJ-tagged player is
-  // currently a junior — coloring them green ("SO") was off by one and
-  // didn't match the depth-chart legend or the player profile. Falls back
-  // to deriving the current class from class_transition for legacy rows.
-  const classColor = (cy: string | null | undefined, isPlaceholder?: boolean) => {
-    if (isPlaceholder) return "border-blue-500 bg-blue-100 text-blue-900";
-    // Strip redshirt prefix — R-JR colors as JR, R-SO as SO, etc.
-    const c = (cy || "").toUpperCase().replace(/^R-/, "");
-    if (!c) return "border-slate-300 bg-white text-black";
-    if (c === "FR") return "border-blue-500 bg-blue-100 text-blue-900";
-    if (c === "SO") return "border-green-600 bg-green-200 text-green-900";
-    if (c === "JR") return "border-yellow-500 bg-yellow-100 text-yellow-900";
-    if (c === "SR" || c === "GR") return "border-red-500 bg-red-100 text-red-900";
-    return "border-slate-300 bg-white text-black";
-  };
-  // Derive the player's current class for color coding. Prefer canonical
-  // class_year; fall back to the second letter of class_transition (SJ → J → JR).
-  const playerCurrentClass = (p: BuildPlayer | null | undefined): string | null => {
-    if (!p) return null;
-    const cy = (p.player?.class_year || "").toUpperCase();
-    if (cy) return cy;
-    const ct = String(p.class_transition || "").toUpperCase();
-    if (ct === "FS") return "SO";
-    if (ct === "SJ") return "JR";
-    if (ct === "JS") return "SR";
-    if (ct === "GR") return "GR";
-    return null;
-  };
-
-  const renderDepthStack = (
-    slot: string,
-    eligible: Array<{ rp: BuildPlayer; idx: number }>,
-    className: string,
-  ) => {
-    return (
-      <div className={`absolute -translate-x-1/2 ${className}`}>
-        <p className="mb-1 text-[10px] font-semibold tracking-wide text-slate-700 text-center">{slot}</p>
-        <div className="w-[106px] space-y-1">
-          {[1, 2, 3].map((depth) => {
-            const currentIdx = depthAssignments[depthKey(slot, depth)];
-            const placeholder = depthPlaceholders[depthKey(slot, depth)] ?? null;
-            const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
-            const cy = playerCurrentClass(selectedPlayer);
-            const isPlaceholder = placeholder === "freshman" || placeholder === "transfer";
-            const colorCls = currentIdx != null ? classColor(cy) : isPlaceholder ? classColor(null, true) : "border-slate-300 bg-white text-black";
-            return (
-              <Select key={`${slot}-${depth}`} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, depth, v)}>
-                <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
-                  <SelectValue placeholder={`${depth}`} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">—</SelectItem>
-                  <SelectItem value="freshman">Freshman</SelectItem>
-                  <SelectItem value="transfer">Transfer</SelectItem>
-                  {eligible.map(({ rp, idx }) => (
-                    <SelectItem key={`${slot}-${depth}-${idx}`} value={String(idx)}>
-                      {getPlayerName(rp)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
-  const renderStartingRotationStack = (
-    eligible: Array<{ rp: BuildPlayer; idx: number }>,
-    className: string,
-  ) => {
-    return (
-      <div className={`absolute -translate-x-1/2 ${className}`}>
-        <p className="mb-1 text-[10px] font-semibold tracking-wide text-slate-700 text-center">Starting Rotation</p>
-        <div className="w-[120px] space-y-1">
-          {[1, 2, 3, 4, 5].map((sp) => {
-            const slot = `SP${sp}`;
-            const currentIdx = depthAssignments[depthKey(slot, 1)];
-            const placeholder = depthPlaceholders[depthKey(slot, 1)] ?? null;
-            const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
-            const colorCls = currentIdx != null ? classColor(playerCurrentClass(selectedPlayer)) : "border-slate-300 bg-white text-black";
-            return (
-              <Select key={slot} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, 1, v)}>
-                <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
-                  <SelectValue placeholder={slot} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">—</SelectItem>
-                  <SelectItem value="freshman">Freshman</SelectItem>
-                  <SelectItem value="transfer">Transfer</SelectItem>
-                  {eligible.map(({ rp, idx }) => (
-                    <SelectItem key={`${slot}-${idx}`} value={String(idx)}>
-                      {getPlayerName(rp)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
-  const renderRelieversStack = (
-    eligible: Array<{ rp: BuildPlayer; idx: number }>,
-    className: string,
-  ) => {
-    return (
-      <div className={`absolute -translate-x-1/2 ${className}`}>
-        <p className="mb-1 text-[10px] font-semibold tracking-wide text-slate-700 text-center">Relievers</p>
-        <div className="w-[120px] space-y-1">
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((rpNum) => {
-            const slot = `RP${rpNum}`;
-            const currentIdx = depthAssignments[depthKey(slot, 1)];
-            const placeholder = depthPlaceholders[depthKey(slot, 1)] ?? null;
-            const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
-            const colorCls = currentIdx != null ? classColor(playerCurrentClass(selectedPlayer)) : "border-slate-300 bg-white text-black";
-            return (
-              <Select key={slot} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, 1, v)}>
-                <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
-                  <SelectValue placeholder={slot} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">—</SelectItem>
-                  <SelectItem value="freshman">Freshman</SelectItem>
-                  <SelectItem value="transfer">Transfer</SelectItem>
-                  {eligible.map(({ rp, idx }) => (
-                    <SelectItem key={`${slot}-${idx}`} value={String(idx)}>
-                      {getPlayerName(rp)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
   const newBuild = () => {
     setSelectedBuildId(null);
     setBuildName("My Team Build");
@@ -3855,9 +3709,10 @@ export default function TeamBuilder() {
             <DepthTab
               eligiblePositionPlayers={eligiblePositionPlayers}
               eligiblePitchers={eligiblePitchers}
-              renderDepthStack={renderDepthStack}
-              renderStartingRotationStack={renderStartingRotationStack}
-              renderRelieversStack={renderRelieversStack}
+              depthAssignments={depthAssignments}
+              depthPlaceholders={depthPlaceholders}
+              rosterPlayers={rosterPlayers}
+              assignDepthSlot={assignDepthSlot}
             />
           </TabsContent>
 

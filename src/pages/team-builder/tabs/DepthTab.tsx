@@ -1,20 +1,123 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { depthKey, getPlayerName, classColor, playerCurrentClass } from "../helpers";
 import type { BuildPlayer } from "../types";
 
+interface EligiblePlayer { rp: BuildPlayer; idx: number; }
+
 interface DepthTabProps {
-  eligiblePositionPlayers: BuildPlayer[];
-  eligiblePitchers: BuildPlayer[];
-  renderDepthStack: (slot: string, players: BuildPlayer[], className: string) => React.ReactNode;
-  renderStartingRotationStack: (players: BuildPlayer[], className: string) => React.ReactNode;
-  renderRelieversStack: (players: BuildPlayer[], className: string) => React.ReactNode;
+  eligiblePositionPlayers: EligiblePlayer[];
+  eligiblePitchers: EligiblePlayer[];
+  depthAssignments: Record<string, number>;
+  depthPlaceholders: Record<string, string>;
+  rosterPlayers: BuildPlayer[];
+  assignDepthSlot: (slot: string, depth: number, value: string) => void;
 }
 
 export default function DepthTab({
   eligiblePositionPlayers,
   eligiblePitchers,
-  renderDepthStack,
-  renderStartingRotationStack,
-  renderRelieversStack,
+  depthAssignments,
+  depthPlaceholders,
+  rosterPlayers,
+  assignDepthSlot,
 }: DepthTabProps) {
+  const renderDepthStack = (slot: string, eligible: EligiblePlayer[], className: string) => (
+    <div className={`absolute -translate-x-1/2 ${className}`}>
+      <p className="mb-1 text-[10px] font-semibold tracking-wide text-slate-700 text-center">{slot}</p>
+      <div className="w-[106px] space-y-1">
+        {[1, 2, 3].map((depth) => {
+          const currentIdx = depthAssignments[depthKey(slot, depth)];
+          const placeholder = depthPlaceholders[depthKey(slot, depth)] ?? null;
+          const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
+          const cy = playerCurrentClass(selectedPlayer);
+          const isPlaceholder = placeholder === "freshman" || placeholder === "transfer";
+          const colorCls = currentIdx != null ? classColor(cy) : isPlaceholder ? classColor(null, true) : "border-slate-300 bg-white text-black";
+          return (
+            <Select key={`${slot}-${depth}`} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, depth, v)}>
+              <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
+                <SelectValue placeholder={`${depth}`} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">—</SelectItem>
+                <SelectItem value="freshman">Freshman</SelectItem>
+                <SelectItem value="transfer">Transfer</SelectItem>
+                {eligible.map(({ rp, idx }) => (
+                  <SelectItem key={`${slot}-${depth}-${idx}`} value={String(idx)}>
+                    {getPlayerName(rp)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const renderStartingRotationStack = (eligible: EligiblePlayer[], className: string) => (
+    <div className={`absolute -translate-x-1/2 ${className}`}>
+      <p className="mb-1 text-[10px] font-semibold tracking-wide text-slate-700 text-center">Starting Rotation</p>
+      <div className="w-[120px] space-y-1">
+        {[1, 2, 3, 4, 5].map((sp) => {
+          const slot = `SP${sp}`;
+          const currentIdx = depthAssignments[depthKey(slot, 1)];
+          const placeholder = depthPlaceholders[depthKey(slot, 1)] ?? null;
+          const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
+          const colorCls = currentIdx != null ? classColor(playerCurrentClass(selectedPlayer)) : "border-slate-300 bg-white text-black";
+          return (
+            <Select key={slot} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, 1, v)}>
+              <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
+                <SelectValue placeholder={slot} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">—</SelectItem>
+                <SelectItem value="freshman">Freshman</SelectItem>
+                <SelectItem value="transfer">Transfer</SelectItem>
+                {eligible.map(({ rp, idx }) => (
+                  <SelectItem key={`${slot}-${idx}`} value={String(idx)}>
+                    {getPlayerName(rp)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const renderRelieversStack = (eligible: EligiblePlayer[], className: string) => (
+    <div className={`absolute -translate-x-1/2 ${className}`}>
+      <p className="mb-1 text-[10px] font-semibold tracking-wide text-slate-700 text-center">Relievers</p>
+      <div className="w-[120px] space-y-1">
+        {[1, 2, 3, 4, 5, 6, 7, 8].map((rpNum) => {
+          const slot = `RP${rpNum}`;
+          const currentIdx = depthAssignments[depthKey(slot, 1)];
+          const placeholder = depthPlaceholders[depthKey(slot, 1)] ?? null;
+          const selectedPlayer = currentIdx != null ? rosterPlayers[currentIdx] : null;
+          const colorCls = currentIdx != null ? classColor(playerCurrentClass(selectedPlayer)) : "border-slate-300 bg-white text-black";
+          return (
+            <Select key={slot} value={currentIdx != null ? String(currentIdx) : (placeholder ?? "none")} onValueChange={(v) => assignDepthSlot(slot, 1, v)}>
+              <SelectTrigger className={`h-6 rounded-sm px-1 text-[10px] shadow-sm ${colorCls}`}>
+                <SelectValue placeholder={slot} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">—</SelectItem>
+                <SelectItem value="freshman">Freshman</SelectItem>
+                <SelectItem value="transfer">Transfer</SelectItem>
+                {eligible.map(({ rp, idx }) => (
+                  <SelectItem key={`${slot}-${idx}`} value={String(idx)}>
+                    {getPlayerName(rp)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   return (
     <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
       <div className="flex flex-col space-y-1.5 p-6 pb-3">

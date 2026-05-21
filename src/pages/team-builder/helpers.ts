@@ -114,3 +114,33 @@ export const isTwp = (p: BuildPlayer): boolean => !!p.player?.is_twp;
 export const hitterEligible = (p: BuildPlayer): boolean => !isPitcher(p) || isTwp(p);
 
 export const pitcherEligible = (p: BuildPlayer): boolean => isPitcher(p) || isTwp(p);
+
+export const depthKey = (slot: string, depth: number) => `${slot}:${depth}`;
+
+// Class color reads the player's CURRENT class_year (FR/SO/JR/SR/GR).
+// class_transition encodes the year-to-year move ("SJ" = sophomore-to-junior),
+// so a SJ-tagged player is currently a junior — don't color them as SO.
+export const classColor = (cy: string | null | undefined, isPlaceholder?: boolean): string => {
+  if (isPlaceholder) return "border-blue-500 bg-blue-100 text-blue-900";
+  const c = (cy || "").toUpperCase().replace(/^R-/, "");
+  if (!c) return "border-slate-300 bg-white text-black";
+  if (c === "FR") return "border-blue-500 bg-blue-100 text-blue-900";
+  if (c === "SO") return "border-green-600 bg-green-200 text-green-900";
+  if (c === "JR") return "border-yellow-500 bg-yellow-100 text-yellow-900";
+  if (c === "SR" || c === "GR") return "border-red-500 bg-red-100 text-red-900";
+  return "border-slate-300 bg-white text-black";
+};
+
+// Derive the player's current class for color coding. Prefer canonical
+// class_year; fall back to the second letter of class_transition (SJ → J → JR).
+export const playerCurrentClass = (p: BuildPlayer | null | undefined): string | null => {
+  if (!p) return null;
+  const cy = (p.player?.class_year || "").toUpperCase();
+  if (cy) return cy;
+  const ct = String(p.class_transition || "").toUpperCase();
+  if (ct === "FS") return "SO";
+  if (ct === "SJ") return "JR";
+  if (ct === "JS") return "SR";
+  if (ct === "GR") return "GR";
+  return null;
+};
