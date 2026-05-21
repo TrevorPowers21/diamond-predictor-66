@@ -2846,7 +2846,7 @@ export default function TeamBuilder() {
       }
     }
 
-    const skipLiveCompute = !!effectiveTeamId && !isPitcherRow && !transferSnapshot;
+    const skipLiveCompute = !!effectiveTeamId && !isPitcherRow && !!transferSnapshot;
     if (!transferSnapshot && !skipLiveCompute && chosenPred?.id && selectedTeam) {
       const { data: internals } = await supabase
         .from("player_prediction_internals")
