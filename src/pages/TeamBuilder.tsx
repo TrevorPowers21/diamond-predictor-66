@@ -4818,26 +4818,8 @@ export default function TeamBuilder() {
     role === "low_impact_reliever" ? 6 :
     role === "specialist_reliever" ? 7 :
     8;
-  const positionPlayers = rosterPlayers
-    .filter(hitterEligible)
-    .map((p, i) => ({ p, i }))
-    .sort((a, b) => {
-      const ra = hitterDepthRank(a.p.depth_role);
-      const rb = hitterDepthRank(b.p.depth_role);
-      if (ra !== rb) return ra - rb;
-      return a.i - b.i;
-    })
-    .map((x) => x.p);
-  const pitchers = rosterPlayers
-    .filter(pitcherEligible)
-    .map((p, i) => ({ p, i }))
-    .sort((a, b) => {
-      const ra = pitcherDepthRank(a.p.depth_role);
-      const rb = pitcherDepthRank(b.p.depth_role);
-      if (ra !== rb) return ra - rb;
-      return a.i - b.i;
-    })
-    .map((x) => x.p);
+  const positionPlayers = rosterPlayers.filter(hitterEligible);
+  const pitchers = rosterPlayers.filter(pitcherEligible);
   const targetPlayers = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target");
   const targetPositionPlayers = targetPlayers.filter(hitterEligible);
   const targetPitchers = targetPlayers.filter(pitcherEligible);
@@ -5467,13 +5449,7 @@ export default function TeamBuilder() {
     () =>
       rosterPlayers
         .map((rp, idx) => ({ rp, idx }))
-        .filter(({ rp }) => !isPitcher(rp) && (rp.roster_status || "returner") !== "leaving")
-        .sort((a, b) => {
-          const ra = hitterDepthRank(a.rp.depth_role);
-          const rb = hitterDepthRank(b.rp.depth_role);
-          if (ra !== rb) return ra - rb;
-          return a.idx - b.idx;
-        }),
+        .filter(({ rp }) => !isPitcher(rp) && (rp.roster_status || "returner") !== "leaving"),
     [rosterPlayers],
   );
 
@@ -5481,13 +5457,7 @@ export default function TeamBuilder() {
     () =>
       rosterPlayers
         .map((rp, idx) => ({ rp, idx }))
-        .filter(({ rp }) => isPitcher(rp) && (rp.roster_status || "returner") !== "leaving")
-        .sort((a, b) => {
-          const ra = pitcherDepthRank(a.rp.depth_role);
-          const rb = pitcherDepthRank(b.rp.depth_role);
-          if (ra !== rb) return ra - rb;
-          return a.idx - b.idx;
-        }),
+        .filter(({ rp }) => isPitcher(rp) && (rp.roster_status || "returner") !== "leaving"),
     [rosterPlayers],
   );
 
