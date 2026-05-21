@@ -88,19 +88,23 @@ export default function AdminTeams() {
   });
 
   const schoolsQuery = useQuery({
-    queryKey: ["admin-d1-schools", CURRENT_SEASON],
+    queryKey: ["admin-d1-schools"],
     queryFn: async () => {
-      // Teams Table holds one row per (program × season). Without filtering by
-      // Season, every school shows up multiple times in the picker (Georgia
-      // 2023, Georgia 2024, Georgia 2025, Georgia 2026). Filter to the current
-      // season so each program appears exactly once.
-      // NOTE: school_team_id stored on customer_teams will be this season's
-      // UUID. Year-rollover work (punch list item 2) needs to re-point these
-      // to the new season's UUIDs via source_id.
+      // Teams Table holds one row per (program × season). Resolve the most
+      // recent season that actually has D1 rows (so the picker survives a
+      // CURRENT_SEASON bump before the new season's Teams Table is seeded).
+      const latest = await (supabase as any)
+        .from("Teams Table")
+        .select("Season")
+        .eq("division", "D1")
+        .order("Season", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const season = latest.data?.Season ?? CURRENT_SEASON;
       const { data, error } = await (supabase as any)
         .from("Teams Table")
         .select("id, full_name, abbreviation, conference, source_id, Mascot")
-        .eq("Season", CURRENT_SEASON)
+        .eq("Season", season)
         .eq("division", "D1")
         .order("full_name");
       if (error) throw error;

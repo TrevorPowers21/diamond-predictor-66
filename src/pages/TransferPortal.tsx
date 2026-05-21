@@ -58,6 +58,7 @@ type SimPlayer = {
   dev_aggressiveness: number | null;
   team_id: string | null;
   source_team_id: string | null;
+  bats_hand: string | null;
 };
 
 type ConferenceRow = {
@@ -512,7 +513,7 @@ function readLocalNum(key: string, fallback: number, remoteValues?: Record<strin
 export default function TransferPortal() {
   const location = useLocation();
   const { toast } = useToast();
-  const { hasRole } = useAuth();
+  const { hasRole, effectiveTeamId } = useAuth();
   const { hitterStats, powerRatings } = useHitterSeedData();
   const { addPlayer: addToSupabaseBoard, isOnBoard: isOnSupabaseBoard } = useTargetBoard();
   const isAdmin = hasRole("admin");
@@ -670,6 +671,7 @@ export default function TransferPortal() {
             division: (p.division as string | null) ?? null,
             team_id: (p.team_id as string | null) ?? null,
             source_team_id: (p.source_team_id as string | null) ?? null,
+            bats_hand: (p.bats_hand as string | null) ?? null,
             from_avg: (row?.from_avg as number | undefined) ?? null,
             from_obp: (row?.from_obp as number | undefined) ?? null,
             from_slg: (row?.from_slg as number | undefined) ?? null,
@@ -719,7 +721,7 @@ export default function TransferPortal() {
   }, [newConfStats]);
 
   const { data: remoteEquationValues = {} } = useQuery({
-    queryKey: ["admin-ui-equation-values", CURRENT_SEASON],
+    queryKey: ["admin-ui-equation-values", CURRENT_SEASON, effectiveTeamId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("model_config")
@@ -729,6 +731,17 @@ export default function TransferPortal() {
       if (error) throw error;
       const map: Record<string, number> = {};
       for (const row of data || []) map[row.config_key] = Number(row.config_value);
+      // Per-team override overlay: when a customer team is active (impersonation
+      // or coach login), team-specific equation weights win for the live
+      // simulator math. Without a team, agents see canonical global numbers.
+      if (effectiveTeamId) {
+        const { data: overrides } = await (supabase as any)
+          .from("customer_team_equation_overrides")
+          .select("config_key, config_value")
+          .eq("customer_team_id", effectiveTeamId)
+          .in("model_type", ["transfer", "global", "admin_ui"]);
+        for (const row of overrides || []) map[row.config_key] = Number(row.config_value);
+      }
       return map;
     },
   });

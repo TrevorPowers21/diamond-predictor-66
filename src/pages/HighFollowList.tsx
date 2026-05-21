@@ -13,6 +13,8 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
+import { useAuth } from "@/hooks/useAuth";
+import { applyTeamScopeFilter, dedupePreferredPerPlayer } from "@/lib/teamScopedPredictions";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
@@ -72,6 +74,7 @@ function ScoutMini({ label, value }: { label: string; value: number | null | und
 
 export default function HighFollowList() {
   const { list, isLoading, removePlayer } = useHighFollow();
+  const { effectiveTeamId } = useAuth();
   const [search, setSearch] = useState("");
   const [positionFilters, setPositionFilters] = useState<Set<string>>(new Set());
   const [typeFilter, setTypeFilter] = useState<"hitter" | "pitcher">("hitter");
@@ -109,11 +112,14 @@ export default function HighFollowList() {
   });
 
   const { data: predictions = [] } = useQuery({
-    queryKey: ["hf-predictions", playerIds],
+    queryKey: ["hf-predictions", playerIds, effectiveTeamId],
     enabled: playerIds.length > 0,
     queryFn: async () => {
-      const { data } = await supabase.from("player_predictions").select("*").in("player_id", playerIds).eq("status", "active");
-      return data || [];
+      let q = supabase.from("player_predictions").select("*").in("player_id", playerIds).eq("status", "active");
+      q = applyTeamScopeFilter(q as any, effectiveTeamId);
+      const { data } = await q;
+      // Prefer team-scoped precomputed row per player, fall back to global regular.
+      return dedupePreferredPerPlayer(data || [], effectiveTeamId);
     },
   });
 

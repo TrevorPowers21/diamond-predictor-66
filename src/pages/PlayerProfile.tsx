@@ -204,7 +204,7 @@ export default function PlayerProfile() {
   const location = useLocation();
   const returnTo = (location.state as any)?.returnTo as string | undefined;
   const queryClient = useQueryClient();
-  const { hasRole } = useAuth();
+  const { hasRole, effectiveTeamId } = useAuth();
   const isAdmin = hasRole("admin");
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
   const { notes: coachNotesForExport } = useCoachNotes(id ?? null);
@@ -293,13 +293,20 @@ export default function PlayerProfile() {
   });
 
   const { data: predictions = [] } = useQuery({
-    queryKey: ["player-predictions", id],
+    queryKey: ["player-predictions", id, effectiveTeamId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Load global rows (customer_team_id IS NULL) plus team-scoped rows
+      // for the active customer team if any. The team-scoped row is preferred
+      // downstream via regularPred selection so a coach sees "their numbers".
+      let query = supabase
         .from("player_predictions")
         .select("*")
         .eq("player_id", id!)
         .eq("status", "active");
+      query = effectiveTeamId
+        ? query.or(`customer_team_id.is.null,customer_team_id.eq.${effectiveTeamId}`)
+        : query.is("customer_team_id", null);
+      const { data, error } = await query;
       if (error) throw error;
       return data || [];
     },
@@ -560,7 +567,17 @@ export default function PlayerProfile() {
     updatePlayer.mutate(updates);
   };
 
-  const regularPred = predictions.find((p) => p.variant === "regular");
+  // Prefer the team-scoped precomputed row when the current customer team has
+  // one. Falls back to the canonical global "regular" row otherwise.
+  const regularPred = (() => {
+    if (effectiveTeamId) {
+      const teamRow = predictions.find(
+        (p: any) => p.customer_team_id === effectiveTeamId && p.variant === "precomputed",
+      );
+      if (teamRow) return teamRow;
+    }
+    return predictions.find((p: any) => p.variant === "regular" && p.customer_team_id == null);
+  })();
   const isTransferPortal = player?.transfer_portal && predictions.some((p) => p.model_type === "transfer");
   const isReturner = predictions.some((p) => p.model_type === "returner");
   const { getOverride } = usePlayerOverrides();
