@@ -117,6 +117,21 @@ export const pitcherEligible = (p: BuildPlayer): boolean => isPitcher(p) || isTw
 
 export const depthKey = (slot: string, depth: number) => `${slot}:${depth}`;
 
+export const slotMatchesPosition = (posRaw: string | null | undefined, slot: string): boolean => {
+  const pos = (posRaw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!pos) return false;
+  if (slot === "C") return pos === "C";
+  if (slot === "1B") return pos === "1B";
+  if (slot === "2B") return pos === "2B";
+  if (slot === "3B") return pos === "3B";
+  if (slot === "SS") return pos === "SS";
+  if (slot === "LF") return pos === "LF";
+  if (slot === "CF") return pos === "CF";
+  if (slot === "RF") return pos === "RF";
+  if (slot === "DH") return pos === "DH";
+  return false;
+};
+
 // Class color reads the player's CURRENT class_year (FR/SO/JR/SR/GR).
 // class_transition encodes the year-to-year move ("SJ" = sophomore-to-junior),
 // so a SJ-tagged player is currently a junior — don't color them as SO.

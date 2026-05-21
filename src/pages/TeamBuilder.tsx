@@ -22,7 +22,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2 } from "lucide-react";
 import { useTeamBuilderData, scorePredictionLikeDashboard } from "./team-builder/hooks/useTeamBuilderData";
 import { useTeamBuilderSimulation } from "./team-builder/hooks/useTeamBuilderSimulation";
-import { getPlayerName, depthKey } from "./team-builder/helpers";
+import { getPlayerName, depthKey, slotMatchesPosition } from "./team-builder/helpers";
 import {
   calcPlayerScore,
   DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
@@ -3118,20 +3118,6 @@ export default function TeamBuilder() {
   }, [supabaseTargetBoard]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
-  const slotMatchesPosition = useCallback((posRaw: string | null | undefined, slot: string) => {
-    const pos = (posRaw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (!pos) return false;
-    if (slot === "C") return pos === "C";
-    if (slot === "1B") return pos === "1B";
-    if (slot === "2B") return pos === "2B";
-    if (slot === "3B") return pos === "3B";
-    if (slot === "SS") return pos === "SS";
-    if (slot === "LF") return pos === "LF";
-    if (slot === "CF") return pos === "CF";
-    if (slot === "RF") return pos === "RF";
-    if (slot === "DH") return pos === "DH";
-    return false;
-  }, []);
 
   useEffect(() => {
     setDepthAssignments((prev) => {
@@ -3286,7 +3272,7 @@ export default function TeamBuilder() {
 
       return next;
     });
-  }, [rosterPlayers, slotMatchesPosition, playerProjection]);
+  }, [rosterPlayers, playerProjection]);
 
   const eligiblePositionPlayers = useMemo(
     () =>
