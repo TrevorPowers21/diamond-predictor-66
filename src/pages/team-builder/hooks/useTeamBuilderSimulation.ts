@@ -1058,11 +1058,16 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   // (isPitcher, isTwp, hitterEligible, pitcherEligible already defined above)
 
   // ── Block K: positionPlayers, pitchers, targetPlayers, targetPositionPlayers, targetPitchers
-  const positionPlayers = rosterPlayers.filter(hitterEligible);
-  const pitchers = rosterPlayers.filter(pitcherEligible);
+  // Sorted by WAR desc so highest-impact players appear at the top of each table.
+  const positionPlayers = [...rosterPlayers.filter(hitterEligible)]
+    .sort((a, b) => (playerProjection(b, "hitter")?.owar ?? -Infinity) - (playerProjection(a, "hitter")?.owar ?? -Infinity));
+  const pitchers = [...rosterPlayers.filter(pitcherEligible)]
+    .sort((a, b) => ((playerProjection(b, "pitcher") as any)?.pwar ?? -Infinity) - ((playerProjection(a, "pitcher") as any)?.pwar ?? -Infinity));
   const targetPlayers = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target");
-  const targetPositionPlayers = targetPlayers.filter(hitterEligible);
-  const targetPitchers = targetPlayers.filter(pitcherEligible);
+  const targetPositionPlayers = [...targetPlayers.filter(hitterEligible)]
+    .sort((a, b) => (playerProjection(b, "hitter")?.owar ?? -Infinity) - (playerProjection(a, "hitter")?.owar ?? -Infinity));
+  const targetPitchers = [...targetPlayers.filter(pitcherEligible)]
+    .sort((a, b) => ((playerProjection(b, "pitcher") as any)?.pwar ?? -Infinity) - ((playerProjection(a, "pitcher") as any)?.pwar ?? -Infinity));
 
   // ── Block L: pitchingTierMultipliers, pitchingPvfForRole ─────────────────────
   const pitchingTierMultipliers = useMemo(
