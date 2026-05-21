@@ -106,12 +106,72 @@ Validated on staging first; only then promote to prod.
 
 | # | Step | Status |
 |---|---|---|
-| E1 | Create `precompute_jobs` queue table on staging | ⏳ |
-| E2 | Build Edge Function `process-precompute-jobs` worker | ⏳ |
-| E3 | DB trigger: `AFTER INSERT ON customer_teams` → enqueue + `pg_net.http_post` to Edge Function | ⏳ |
-| E4 | Test on staging: insert new customer_team row → row appears in precompute_jobs → Edge Function processes → player_predictions rows land | ⏳ |
+| E1 | Create `precompute_jobs` queue table on staging | ✅ 2026-05-21 |
+| E2 | Build Edge Function `process-precompute-jobs` worker | ✅ 2026-05-21 |
+| E3 | DB trigger: `AFTER INSERT ON customer_teams` → enqueue + `pg_net.http_post` to Edge Function | ✅ 2026-05-21 |
+| E4 | Test on staging: insert new customer_team row → row appears in precompute_jobs → Edge Function processes → player_predictions rows land | ✅ 2026-05-21 (Auburn: 3.5s total, 5,000 rows) |
 | E5 | Promote to prod: same migrations + Edge Function deployment + trigger | ⏳ |
 | E6 | Test on prod: provision a real test customer team through AdminTeams → verify auto-precompute fires | ⏳ |
+
+### E5 Prod promotion runbook (auto-fire infra)
+
+In order:
+
+1. **Apply migrations on prod** (the two new ones from this branch):
+   ```bash
+   supabase link --project-ref trbvxuoliwrfowibatkm
+   supabase db query --linked --file supabase/migrations/20260521120000_precompute_jobs_queue.sql
+   supabase db query --linked --file supabase/migrations/20260521130000_customer_teams_autofire_trigger.sql
+   ```
+
+2. **Deploy Edge Function to prod**:
+   ```bash
+   supabase functions deploy process-precompute-jobs --project-ref trbvxuoliwrfowibatkm
+   ```
+
+3. **Seed prod vault secrets** (paste in prod SQL editor, replace placeholder):
+   ```sql
+   SELECT vault.create_secret(
+     'https://trbvxuoliwrfowibatkm.supabase.co/functions/v1/process-precompute-jobs',
+     'precompute_edge_function_url',
+     'Edge Function URL for the eager precompute worker'
+   );
+   SELECT vault.create_secret(
+     '<PROD_SERVICE_ROLE_JWT>',
+     'precompute_service_role_key',
+     'Service role key the trigger uses to invoke process-precompute-jobs'
+   );
+   ```
+   The prod service role key lives in `.env.production.local`.
+
+4. **Bootstrap existing customer teams** (one-time; auto-fire only covers NEW inserts going forward):
+   ```bash
+   npm run precompute-transfers:prod -- --team <georgia-prod-uuid> --division D1
+   npm run precompute-transfers:prod -- --team <arkansas-prod-uuid> --division D1
+   ```
+
+5. **Smoke test on prod**:
+   ```sql
+   -- Pick any D1 team that isn't a current customer
+   SELECT t.id, t.full_name FROM "Teams Table" t
+   LEFT JOIN customer_teams ct ON ct.school_team_id = t.id
+   WHERE t."Season"=2026 AND t.conference='SEC' AND ct.id IS NULL LIMIT 1;
+
+   -- Insert a TEST customer team (clean up after)
+   INSERT INTO customer_teams (name, school_team_id) VALUES
+     ('AUTOFIRE TEST', '<the-id-above>') RETURNING id;
+
+   -- Wait 5s, then check precompute_jobs (should show status='completed')
+   SELECT status, rows_written, completed_at - created_at AS duration
+   FROM precompute_jobs WHERE customer_team_id = '<inserted-id>';
+
+   -- Verify rows landed
+   SELECT count(*) FROM player_predictions
+   WHERE customer_team_id = '<inserted-id>' AND variant='precomputed';
+
+   -- Clean up
+   DELETE FROM customer_teams WHERE id = '<inserted-id>';
+   ```
 
 ---
 
