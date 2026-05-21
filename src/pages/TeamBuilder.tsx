@@ -4,7 +4,6 @@ import RosterTab from "./team-builder/tabs/RosterTab";
 import TargetBoardTab from "./team-builder/tabs/TargetBoardTab";
 import DepthTab from "./team-builder/tabs/DepthTab";
 import CompareTab from "./team-builder/tabs/CompareTab";
-import PlayerTableRow from "./team-builder/PlayerTableRow";
 import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -3409,36 +3408,30 @@ export default function TeamBuilder() {
     autoSeededTeamRef.current = normalizeName(selectedTeam);
   };
 
-  const renderPlayerRow = useCallback((p: BuildPlayer, idx: number, globalIdx: number, pool?: "hitter" | "pitcher") => (
-    <PlayerTableRow
-      p={p}
-      idx={idx}
-      globalIdx={globalIdx}
-      pool={pool}
-      allPlayersById={allPlayersById}
-      pitchingSourceMap={pitchingStatsByNameTeam.bySourceId}
-      thinSampleMap={thinSampleMap}
-      powerLookup={powerLookup}
-      confByKey={confByKey}
-      hitterMasterPaMap={hitterMasterPaMap}
-      exitPositions={exitPositions}
-      totalBudget={totalBudget}
-      fallbackRosterTotalPlayerScore={fallbackRosterTotalPlayerScore}
-      selectedTeam={selectedTeam}
-      returnTo={`${location.pathname}${location.search}${location.hash}`}
-      playerProjection={playerProjection}
-      simulateTransferProjection={simulateTransferProjection}
-      projectedNilForPlayer={projectedNilForPlayer}
-      projectedBudgetValue={projectedBudgetValue}
-      resolveTeamBuilderPlayer={resolveTeamBuilderPlayer}
-      updatePlayer={updatePlayer}
-      updatePlayerWithRecalc={updatePlayerWithRecalc}
-      removePlayer={removePlayer}
-      markPlayerLeaving={markPlayerLeaving}
-      updatePlayerOverrideFn={updatePlayerOverrideFn}
-      setSupabaseRole={setSupabaseRole}
-    />
-  ), [
+  const playerRowProps = useMemo(() => ({
+    allPlayersById,
+    pitchingSourceMap: pitchingStatsByNameTeam.bySourceId,
+    thinSampleMap,
+    powerLookup,
+    confByKey,
+    hitterMasterPaMap,
+    exitPositions,
+    totalBudget,
+    fallbackRosterTotalPlayerScore,
+    selectedTeam,
+    returnTo: `${location.pathname}${location.search}${location.hash}`,
+    playerProjection,
+    simulateTransferProjection,
+    projectedNilForPlayer,
+    projectedBudgetValue,
+    resolveTeamBuilderPlayer,
+    updatePlayer,
+    updatePlayerWithRecalc,
+    removePlayer,
+    markPlayerLeaving,
+    updatePlayerOverrideFn,
+    setSupabaseRole,
+  }), [
     allPlayersById,
     pitchingStatsByNameTeam,
     thinSampleMap,
@@ -3656,7 +3649,7 @@ export default function TeamBuilder() {
               positionPlayers={positionPlayers}
               pitchers={pitchers}
               rosterPlayers={rosterPlayers}
-              renderPlayerRow={renderPlayerRow}
+              playerRowProps={playerRowProps}
               isProjectedStatus={isProjectedStatus}
               projectedBudgetValue={projectedBudgetValue}
               positionTableTotals={positionTableTotals}
@@ -3683,7 +3676,7 @@ export default function TeamBuilder() {
               targetPositionPlayers={targetPositionPlayers}
               targetPitchers={targetPitchers}
               rosterPlayers={rosterPlayers}
-              renderPlayerRow={renderPlayerRow}
+              playerRowProps={playerRowProps}
               isProjectedStatus={isProjectedStatus}
               projectedBudgetValue={projectedBudgetValue}
               targetPositionTableTotals={targetPositionTableTotals}

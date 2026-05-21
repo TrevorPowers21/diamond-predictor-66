@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import PlayerTableRow, { type PlayerTableRowSharedProps } from "../PlayerTableRow";
 import type { BuildPlayer } from "../types";
 
 type HitterTotals = {
@@ -41,7 +42,7 @@ interface TargetBoardTabProps {
   targetPositionPlayers: BuildPlayer[];
   targetPitchers: BuildPlayer[];
   rosterPlayers: BuildPlayer[];
-  renderPlayerRow: (p: BuildPlayer, idx: number, globalIdx: number, pool?: "hitter" | "pitcher") => React.ReactNode;
+  playerRowProps: PlayerTableRowSharedProps;
   isProjectedStatus: (p: BuildPlayer) => boolean;
   projectedBudgetValue: (p: BuildPlayer) => number | null;
   targetPositionTableTotals: HitterTotals;
@@ -62,7 +63,7 @@ export default function TargetBoardTab({
   targetPositionPlayers,
   targetPitchers,
   rosterPlayers,
-  renderPlayerRow,
+  playerRowProps,
   isProjectedStatus,
   projectedBudgetValue,
   targetPositionTableTotals,
@@ -146,7 +147,7 @@ export default function TargetBoardTab({
               ) : (
                 targetPositionPlayers.map((p, i) => {
                   const globalIdx = rosterPlayers.indexOf(p);
-                  return renderPlayerRow(p, i, globalIdx, "hitter");
+                  return <PlayerTableRow key={globalIdx} p={p} idx={i} globalIdx={globalIdx} pool="hitter" {...playerRowProps} />;
                 })
               )}
               <TableRow className="bg-muted/40 font-medium">
@@ -205,7 +206,7 @@ export default function TargetBoardTab({
               ) : (
                 targetPitchers.map((p, i) => {
                   const globalIdx = rosterPlayers.indexOf(p);
-                  return renderPlayerRow(p, i, globalIdx, "pitcher");
+                  return <PlayerTableRow key={globalIdx} p={p} idx={i} globalIdx={globalIdx} pool="pitcher" {...playerRowProps} />;
                 })
               )}
               <TableRow className="bg-muted/40 font-medium">

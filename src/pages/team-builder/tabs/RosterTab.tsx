@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
+import PlayerTableRow, { type PlayerTableRowSharedProps } from "../PlayerTableRow";
 import type { BuildPlayer } from "../types";
 
 const POSITION_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"] as const;
@@ -42,7 +43,7 @@ interface RosterTabProps {
   positionPlayers: BuildPlayer[];
   pitchers: BuildPlayer[];
   rosterPlayers: BuildPlayer[];
-  renderPlayerRow: (p: BuildPlayer, idx: number, globalIdx: number, pool?: "hitter" | "pitcher") => React.ReactNode;
+  playerRowProps: PlayerTableRowSharedProps;
   isProjectedStatus: (p: BuildPlayer) => boolean;
   projectedBudgetValue: (p: BuildPlayer) => number | null;
   positionTableTotals: HitterTotals;
@@ -68,7 +69,7 @@ export default function RosterTab({
   positionPlayers,
   pitchers,
   rosterPlayers,
-  renderPlayerRow,
+  playerRowProps,
   isProjectedStatus,
   projectedBudgetValue,
   positionTableTotals,
@@ -159,7 +160,7 @@ export default function RosterTab({
               ) : (
                 positionPlayers.map((p, i) => {
                   const globalIdx = rosterPlayers.indexOf(p);
-                  return renderPlayerRow(p, i, globalIdx, "hitter");
+                  return <PlayerTableRow key={globalIdx} p={p} idx={i} globalIdx={globalIdx} pool="hitter" {...playerRowProps} />;
                 })
               )}
               <TableRow className="bg-muted/40 font-medium">
@@ -221,7 +222,7 @@ export default function RosterTab({
               ) : (
                 pitchers.map((p, i) => {
                   const globalIdx = rosterPlayers.indexOf(p);
-                  return renderPlayerRow(p, i, globalIdx, "pitcher");
+                  return <PlayerTableRow key={globalIdx} p={p} idx={i} globalIdx={globalIdx} pool="pitcher" {...playerRowProps} />;
                 })
               )}
               <TableRow className="bg-muted/40 font-medium">
