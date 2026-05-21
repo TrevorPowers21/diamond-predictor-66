@@ -4333,24 +4333,27 @@ export default function TeamBuilder() {
     // (no re-derivation). Otherwise fall through to live computation for
     // agents / non-team contexts.
     let transferSnapshot: TransferSnapshot | null = null;
+    // Architecture: when a customer team is active, the projection IS the
+    // stored row. No live computation. Read it explicitly (don't rely on the
+    // joined search query — joins can miss rows depending on PostgREST FK
+    // disambiguation, RLS, or stale cache).
     if (effectiveTeamId && row.id && !isPitcherRow) {
-      const precomputedTeamRow = ((row.player_predictions || []) as any[]).find(
-        (pr) => pr.variant === "precomputed" && pr.customer_team_id === effectiveTeamId && pr.status === "active",
-      );
-      // TEMP diagnostic — remove once verified
+      const { data: precomputedTeamRow, error: precomputeErr } = await supabase
+        .from("player_predictions")
+        .select("p_avg, p_obp, p_slg, p_wrc_plus")
+        .eq("player_id", row.id)
+        .eq("customer_team_id", effectiveTeamId)
+        .eq("variant", "precomputed")
+        .eq("status", "active")
+        .maybeSingle();
       // eslint-disable-next-line no-console
-      console.log("[TB target-add precompute fast path]", {
+      console.log("[TB target-add stored row]", {
         playerName: `${row.first_name} ${row.last_name}`,
         playerId: row.id,
         effectiveTeamId,
-        predCount: (row.player_predictions || []).length,
-        variants: ((row.player_predictions || []) as any[]).map((p) => ({
-          variant: p.variant,
-          customer_team_id: p.customer_team_id,
-          status: p.status,
-          p_avg: p.p_avg,
-        })),
-        precomputedTeamRowFound: !!precomputedTeamRow,
+        found: !!precomputedTeamRow,
+        error: precomputeErr?.message,
+        precomputedTeamRow,
       });
       if (precomputedTeamRow) {
         const fromTeamName = row.from_team || row.team;
@@ -4375,8 +4378,13 @@ export default function TeamBuilder() {
       }
     }
 
-    // Fetch prediction internals so we can run the same simulation as Transfer Portal
-    if (!transferSnapshot && chosenPred?.id && selectedTeam) {
+    // Live-compute fallback path. Only runs when:
+    //   - No customer team is active (agent view, superadmin not impersonating)
+    //   - OR player is a pitcher (precompute is hitter-only today)
+    // Never falls through here when team IS set but the precomputed lookup
+    // missed — that's a data gap to surface, not silently re-derive.
+    const skipLiveCompute = !!effectiveTeamId && !isPitcherRow && !transferSnapshot;
+    if (!transferSnapshot && !skipLiveCompute && chosenPred?.id && selectedTeam) {
       const { data: internals } = await supabase
         .from("player_prediction_internals")
         .select("avg_power_rating, obp_power_rating, slg_power_rating")
