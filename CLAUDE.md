@@ -198,6 +198,17 @@ When a function closes over 8+ deps and has 5+ logical sections, extract as a `u
 **Last Updated:** 2026-05-22 (session 4)
 **Session Status:** Refactor complete for this cycle — branch pushed to origin, ready for next session
 
+### Next Session for Peyton — Live-Compute vs Stored-Values Audit
+
+Trevor's directive: **stored player_predictions values come first and foremost.** Live engine only runs when a coach changes an interactive knob (dev aggressiveness, depth role, class transition, position slot). Full spec + bugs that will disappear + what needs to keep working: `docs/stored-derived-values-plan.md` — see "NOTE FOR PEYTON" at the top.
+
+Bugs in this branch that the audit will collapse (don't fix in isolation):
+- TB add path passes only conference name, not conference_id, to resolveConferenceStats — causes wrong env+ for players whose `players.conference` is null (e.g. Rossow)
+- "From: Campbell (—)" display gap — same root cause
+- TB Compare tab shows wrong values
+- Dev aggressiveness change is slow (full sim re-cascade)
+- PitcherProfile vs Dashboard show different numbers for same pitcher
+
 ### Refactor Progress Summary
 | Phase | Lines removed | What moved |
 |---|---|---|

@@ -27,7 +27,7 @@ import {
   getPlayerName, depthKey, slotMatchesPosition, asPitcherRole, pitcherRoleFromSlot,
   normalizeName, isUuid, readStoragePitcherLocalPlayers, parseBuildPlayerMeta,
   serializeBuildPlayerMeta, defaultHitterDepthRoleFromPa, defaultPitcherDepthRoleFromIp,
-  teamMatchesSelectedTeam, splitFullNameExport as splitFullName,
+  teamMatchesSelectedTeam, splitFullNameExport as splitFullName, isPitcher,
 } from "./team-builder/helpers";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
 import {

@@ -1047,18 +1047,9 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
 
   // ── Block I: inline helpers (module-level, exposed for TB) ───────────────────
   // (isPitcher, isTwp, hitterEligible, pitcherEligible already defined above)
-
-  // ── Block K: positionPlayers, pitchers, targetPlayers, targetPositionPlayers, targetPitchers
-  // Sorted by WAR desc so highest-impact players appear at the top of each table.
-  const positionPlayers = [...rosterPlayers.filter(hitterEligible)]
-    .sort((a, b) => (playerProjection(b, "hitter")?.owar ?? -Infinity) - (playerProjection(a, "hitter")?.owar ?? -Infinity));
-  const pitchers = [...rosterPlayers.filter(pitcherEligible)]
-    .sort((a, b) => ((playerProjection(b, "pitcher") as any)?.pwar ?? -Infinity) - ((playerProjection(a, "pitcher") as any)?.pwar ?? -Infinity));
-  const targetPlayers = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target");
-  const targetPositionPlayers = [...targetPlayers.filter(hitterEligible)]
-    .sort((a, b) => (playerProjection(b, "hitter")?.owar ?? -Infinity) - (playerProjection(a, "hitter")?.owar ?? -Infinity));
-  const targetPitchers = [...targetPlayers.filter(pitcherEligible)]
-    .sort((a, b) => ((playerProjection(b, "pitcher") as any)?.pwar ?? -Infinity) - ((playerProjection(a, "pitcher") as any)?.pwar ?? -Infinity));
+  // Block K (positionPlayers / pitchers / target* arrays) moved below Block O
+  // because their WAR-desc sort comparators call playerProjection — declaration
+  // order matters here, otherwise TDZ throws on first TB render.
 
   // ── Block L: pitchingTierMultipliers, pitchingPvfForRole ─────────────────────
   const pitchingTierMultipliers = useMemo(
@@ -1302,6 +1293,19 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const owar = baseOwar * depthRoleMultiplier(p.depth_role);
     return { sim, shown, shownWrc, owar, pwar: null };
   }, [computePitcherPwar, computeReturnerPitchingProjection, simulateTransferProjection, pitchingEq, liveTargetPredictionByPlayerId, remoteEquationValues]);
+
+  // ── Block K (relocated): positionPlayers, pitchers, targetPlayers, targetPositionPlayers, targetPitchers
+  // Sorted by WAR desc so highest-impact players appear at the top of each table.
+  // Must live AFTER playerProjection — sort comparators call into it.
+  const positionPlayers = [...rosterPlayers.filter(hitterEligible)]
+    .sort((a, b) => (playerProjection(b, "hitter")?.owar ?? -Infinity) - (playerProjection(a, "hitter")?.owar ?? -Infinity));
+  const pitchers = [...rosterPlayers.filter(pitcherEligible)]
+    .sort((a, b) => ((playerProjection(b, "pitcher") as any)?.pwar ?? -Infinity) - ((playerProjection(a, "pitcher") as any)?.pwar ?? -Infinity));
+  const targetPlayers = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target");
+  const targetPositionPlayers = [...targetPlayers.filter(hitterEligible)]
+    .sort((a, b) => (playerProjection(b, "hitter")?.owar ?? -Infinity) - (playerProjection(a, "hitter")?.owar ?? -Infinity));
+  const targetPitchers = [...targetPlayers.filter(pitcherEligible)]
+    .sort((a, b) => ((playerProjection(b, "pitcher") as any)?.pwar ?? -Infinity) - ((playerProjection(a, "pitcher") as any)?.pwar ?? -Infinity));
 
   // ── Block P: projectedPlayerScore, nilBasePerOWar, projectedNilForPlayer, effectiveNilForPlayer
   const projectedPlayerScore = useCallback((p: BuildPlayer) => {
