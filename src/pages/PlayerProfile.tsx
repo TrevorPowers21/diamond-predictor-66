@@ -36,6 +36,10 @@ import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
 import { JucoHitterRiskCard } from "@/components/JucoRiskCards";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { isThinSampleHitter } from "@/lib/combinedStats";
+import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
+import { normalizeName, nameTeamKey, normalizeTeamForKey, getNameVariants } from "@/lib/nameUtils";
+import { useSeedDataMaps } from "@/hooks/useSeedDataMaps";
+import { useTransferPortalContext } from "@/hooks/useTransferPortalContext";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -58,16 +62,6 @@ const computeDerived = (avg: number | null, obp: number | null, slg: number | nu
   return { ops, iso, wrc, wrcPlus };
 };
 
-const computeOWarFromWrcPlus = (wrcPlus: number | null, actualPa?: number | null) => {
-  if (wrcPlus == null) return null;
-  const pa = actualPa ?? 260;
-  const runsPerPa = 0.13;
-  const replacementRuns = (pa / 600) * 25;
-  const offValue = (wrcPlus - 100) / 100;
-  const raa = offValue * pa * runsPerPa;
-  const rar = raa + replacementRuns;
-  return rar / 10;
-};
 
 const warTierClass = (value: number | null | undefined) => {
   if (value == null) return "text-muted-foreground";
@@ -85,38 +79,6 @@ const powerTierClass = (value: number | null | undefined) => {
 
 const computePowerRatings = computeHitterPowerRatings;
 
-const normalizeName = (value: string | null | undefined) =>
-  (value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-const FIRST_NAME_ALIASES: Record<string, string[]> = {
-  christopher: ["chris"],
-  matthew: ["matt"],
-  michael: ["mike"],
-  joseph: ["joe"],
-  alexander: ["alex"],
-};
-const getNameVariants = (fullName: string) => {
-  const cleaned = normalizeName(fullName);
-  if (!cleaned) return [];
-  const parts = cleaned.split(" ").filter(Boolean);
-  if (parts.length < 2) return [cleaned];
-  const [first, ...rest] = parts;
-  const restJoined = rest.join(" ");
-  const variants = new Set<string>([cleaned]);
-  const aliases = FIRST_NAME_ALIASES[first] || [];
-  for (const a of aliases) variants.add(`${a} ${restJoined}`.trim());
-  if (first.length > 1) variants.add(`${first[0]} ${restJoined}`.trim());
-  return Array.from(variants);
-};
-const normalizeTeamForKey = (team: string | null | undefined) => {
-  const t = normalizeName(team);
-  return t.replace(/\buniversity\b/g, "").replace(/\bof\b/g, "").replace(/\s+/g, " ").trim();
-};
-const nameTeamKey = (name: string | null | undefined, team: string | null | undefined) =>
-  `${normalizeName(name)}|${normalizeTeamForKey(team)}`;
 
 const classTransitionLabel: Record<string, string> = {
   FS: "Freshman → Sophomore",
@@ -211,37 +173,10 @@ export default function PlayerProfile() {
   const { conferenceStatsByKey } = useConferenceStats(2026);
   const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
 
-  const [storageByName, storageByNameTeam, storageByPlayerId] = useMemo(() => {
-    const byName = new Map<string, Array<any>>();
-    const byNameTeam = new Map<string, any>();
-    const byPlayerId = new Map<string, any>();
-    for (const row of hitterStats) {
-      const key = normalizeName(row.playerName);
-      const arr = byName.get(key) || [];
-      arr.push(row);
-      byName.set(key, arr);
-      const ntKey = nameTeamKey(row.playerName, row.team);
-      if (!byNameTeam.has(ntKey)) byNameTeam.set(ntKey, row);
-      if (row.player_id) byPlayerId.set(row.player_id, row);
-    }
-    return [byName, byNameTeam, byPlayerId];
-  }, [hitterStats]);
-
-  const [powerByName, powerByNameTeam, powerByPlayerId] = useMemo(() => {
-    const byName = new Map<string, Array<any>>();
-    const byNameTeam = new Map<string, any>();
-    const byPlayerId = new Map<string, any>();
-    for (const row of powerRatingsData) {
-      const key = normalizeName(row.playerName);
-      const arr = byName.get(key) || [];
-      arr.push(row);
-      byName.set(key, arr);
-      const ntKey = nameTeamKey(row.playerName, row.team);
-      if (!byNameTeam.has(ntKey)) byNameTeam.set(ntKey, row);
-      if (row.player_id) byPlayerId.set(row.player_id, row);
-    }
-    return [byName, byNameTeam, byPlayerId];
-  }, [powerRatingsData]);
+  const {
+    storageByName, storageByNameTeam, storageByPlayerId,
+    powerByName, powerByNameTeam, powerByPlayerId,
+  } = useSeedDataMaps(hitterStats, powerRatingsData);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, any>>({});
   const [editingPrediction, setEditingPrediction] = useState(false);
@@ -578,8 +513,9 @@ export default function PlayerProfile() {
     }
     return predictions.find((p: any) => p.variant === "regular" && p.customer_team_id == null);
   })();
-  const isTransferPortal = player?.transfer_portal && predictions.some((p) => p.model_type === "transfer");
-  const isReturner = predictions.some((p) => p.model_type === "returner");
+  const { isTransferPortal, isReturner, fromTeamData } = useTransferPortalContext(
+    player, predictions, effectiveTeamId,
+  );
   const { getOverride } = usePlayerOverrides();
   const playerOverride = id ? getOverride(id) : null;
   const effectivePosition = playerOverride?.position ?? player?.position ?? null;
@@ -615,39 +551,6 @@ export default function PlayerProfile() {
     }
     updatePrediction.mutate({ predictionIds: returnerPreds.map((p) => p.id), updates });
   };
-
-  const { data: fromTeamData } = useQuery({
-    queryKey: ["from-team-conference", player?.from_team],
-    queryFn: async () => {
-      const fromTeam = player!.from_team!;
-      // Handle "Unknown (Conference)" pattern
-      const unknownMatch = fromTeam.match(/^Unknown \((.+)\)$/);
-      if (unknownMatch) return { conference: unknownMatch[1] };
-      // Try exact match first
-      let { data } = await supabase
-        .from("Teams Table")
-        .select("conference")
-        .eq("full_name", fromTeam)
-        .maybeSingle();
-      if (data) return data;
-      // Try abbreviation match
-      const { data: byAbbr } = await supabase
-        .from("Teams Table")
-        .select("conference")
-        .eq("abbreviation", fromTeam)
-        .maybeSingle();
-      if (byAbbr) return byAbbr;
-      // Try contains match (short name within full formal name)
-      const { data: fuzzy } = await supabase
-        .from("Teams Table")
-        .select("conference")
-        .ilike("full_name", `%${fromTeam}%`)
-        .limit(1)
-        .maybeSingle();
-      return fuzzy;
-    },
-    enabled: !!player?.from_team && !!isTransferPortal,
-  });
 
   // Pinned 2026 row — anchors projections, risk, and scouting report so they
   // don't shift when the scouting grades dropdown changes season. Substitutes

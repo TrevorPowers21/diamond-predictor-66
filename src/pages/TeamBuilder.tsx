@@ -22,7 +22,14 @@ import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2 } from "lucide-react";
 import { useTeamBuilderData, scorePredictionLikeDashboard } from "./team-builder/hooks/useTeamBuilderData";
 import { useTeamBuilderSimulation } from "./team-builder/hooks/useTeamBuilderSimulation";
-import { getPlayerName, depthKey, slotMatchesPosition } from "./team-builder/helpers";
+import { useLoadBuild } from "./team-builder/hooks/useLoadBuild";
+import {
+  getPlayerName, depthKey, slotMatchesPosition, asPitcherRole, pitcherRoleFromSlot,
+  normalizeName, isUuid, readStoragePitcherLocalPlayers, parseBuildPlayerMeta,
+  serializeBuildPlayerMeta, defaultHitterDepthRoleFromPa, defaultPitcherDepthRoleFromIp,
+  teamMatchesSelectedTeam, splitFullNameExport as splitFullName,
+} from "./team-builder/helpers";
+import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
 import {
   calcPlayerScore,
   DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
@@ -245,50 +252,6 @@ const EMPTY_TEAM_METRICS: TeamMetricInputs = {
   gb: null,
 };
 
-const normalizeName = (value: string | null | undefined) =>
-  (value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-const isUuid = (value: string | null | undefined) =>
-  !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value).trim());
-const teamNameVariants = (team: string | null | undefined) => {
-  const base = (team || "").trim();
-  if (!base) return [] as string[];
-  const out = new Set<string>([base]);
-  const lower = base.toLowerCase();
-  if (lower.endsWith(" university")) out.add(base.replace(/\s+university$/i, "").trim());
-  else out.add(`${base} University`);
-  if (lower.startsWith("university of ")) out.add(base.replace(/^university of\s+/i, "").trim());
-  else out.add(`University of ${base}`.trim());
-  if (lower === "west virginia") out.add("West Virginia University");
-  if (lower === "west virginia university") out.add("West Virginia");
-  if (lower === "west virginia" || lower === "west virginia university" || lower === "wvu") {
-    out.add("WVU");
-    out.add("West Virginia");
-    out.add("West Virginia University");
-  }
-  return Array.from(out).filter(Boolean);
-};
-
-const teamMatchesSelectedTeam = (candidateTeam: string | null | undefined, selectedTeam: string | null | undefined) => {
-  const candidate = (candidateTeam || "").trim();
-  const selected = (selectedTeam || "").trim();
-  if (!candidate || !selected) return false;
-
-  const candidateVariants = teamNameVariants(candidate);
-  const selectedVariants = teamNameVariants(selected);
-  const selectedNorms = new Set(selectedVariants.map((v) => normalizeName(v)));
-
-  for (const variant of candidateVariants) {
-    const norm = normalizeName(variant);
-    if (selectedNorms.has(norm)) return true;
-  }
-
-  return false;
-};
-
 const parseNum = (raw: unknown): number | null => {
   if (raw == null) return null;
   const s = String(raw).trim();
@@ -296,60 +259,6 @@ const parseNum = (raw: unknown): number | null => {
   const cleaned = s.replace(/[%$,]/g, "");
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
-};
-const splitFullName = (fullName: string) => {
-  const parts = String(fullName || "").trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return { first: "", last: "" };
-  if (parts.length === 1) return { first: parts[0], last: "" };
-  return { first: parts[0], last: parts.slice(1).join(" ") };
-};
-
-const readStoragePitcherLocalPlayers = (
-  teamName: string | null | undefined,
-  masterRows: Array<{ playerName: string; team: string | null; teamId?: string | null; throwHand: string | null; role: string | null; conference: string | null }> = [],
-  selectedTeamId?: string | null,
-): Array<{
-  first_name: string;
-  last_name: string;
-  position: string | null;
-  team: string | null;
-  from_team: string | null;
-  conference: string | null;
-  role: "SP" | "RP" | null;
-}> => {
-  if (!teamName && !selectedTeamId) return [];
-  const out: Array<{
-    first_name: string;
-    last_name: string;
-    position: string | null;
-    team: string | null;
-    from_team: string | null;
-    conference: string | null;
-    role: "SP" | "RP" | null;
-  }> = [];
-  for (const r of masterRows) {
-    const playerName = (r.playerName || "").trim();
-    const rowTeam = (r.team || "").trim();
-    if (!playerName || !rowTeam) continue;
-    // ID-first: compare teamId if available, name fallback
-    const teamMatch = (selectedTeamId && (r as any).teamId) ? (r as any).teamId === selectedTeamId : teamMatchesSelectedTeam(rowTeam, teamName);
-    if (!teamMatch) continue;
-    const hand = (r.throwHand || "").trim().toUpperCase();
-    const roleRaw = (r.role || "").trim().toUpperCase();
-    const role: "SP" | "RP" | null = roleRaw === "SP" || roleRaw === "RP" ? roleRaw : null;
-    const position = hand === "RHP" || hand === "LHP" ? hand : (role || "P");
-    const split = splitFullName(playerName);
-    out.push({
-      first_name: split.first,
-      last_name: split.last,
-      position,
-      team: rowTeam,
-      from_team: null,
-      conference: r.conference || null,
-      role,
-    });
-  }
-  return out;
 };
 
 const erf = (x: number) => {
@@ -459,102 +368,6 @@ const pickCell = (row: Record<string, string>, aliases: string[]): string | unde
   return undefined;
 };
 
-const parseBuildPlayerMeta = (raw: string | null | undefined): {
-  notes: string | null;
-  metrics: TeamMetricInputs | null;
-  power: TeamPowerPlus | null;
-  rosterStatus: "returner" | "leaving" | "target" | null;
-  depthRole: "cornerstone" | "everyday_starter" | "platoon_starter" | "utility" | "bench" | "starter" | "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever" | null;
-  classTransition: string | null;
-  devAggressiveness: number | null;
-  classTransitionOverridden: boolean;
-  devAggressivenessOverridden: boolean;
-  transferSnapshot: TransferSnapshot | null;
-  localPlayer: { first_name: string; last_name: string; position: string | null; team: string | null; from_team: string | null; conference: string | null } | null;
-} => {
-  if (!raw) return { notes: null, metrics: null, power: null, rosterStatus: null, depthRole: null, classTransition: null, devAggressiveness: null, classTransitionOverridden: false, devAggressivenessOverridden: false, transferSnapshot: null, localPlayer: null };
-  try {
-    const obj = JSON.parse(raw);
-    if (obj && obj.__team_builder_metrics_v1) {
-      return {
-        notes: typeof obj.notes === "string" ? obj.notes : null,
-        metrics: (obj.metrics ?? null) as TeamMetricInputs | null,
-        power: (obj.power ?? null) as TeamPowerPlus | null,
-        rosterStatus:
-          obj.rosterStatus === "returner" || obj.rosterStatus === "leaving" || obj.rosterStatus === "target"
-            ? obj.rosterStatus
-            : null,
-        depthRole:
-          obj.depthRole === "cornerstone" ||
-          obj.depthRole === "everyday_starter" ||
-          obj.depthRole === "platoon_starter" ||
-          obj.depthRole === "starter" ||
-          obj.depthRole === "utility" ||
-          obj.depthRole === "bench" ||
-          obj.depthRole === "weekend_starter" ||
-          obj.depthRole === "weekday_starter" ||
-          obj.depthRole === "swing_starter" ||
-          obj.depthRole === "workhorse_reliever" ||
-          obj.depthRole === "high_leverage_reliever" ||
-          obj.depthRole === "mid_leverage_reliever" ||
-          obj.depthRole === "low_impact_reliever" ||
-          obj.depthRole === "specialist_reliever"
-            ? obj.depthRole
-            : null,
-        classTransition: typeof obj.classTransition === "string" ? obj.classTransition : null,
-        devAggressiveness: Number.isFinite(Number(obj.devAggressiveness)) ? Number(obj.devAggressiveness) : null,
-        classTransitionOverridden: Boolean(obj.classTransitionOverridden),
-        devAggressivenessOverridden: Boolean(obj.devAggressivenessOverridden),
-        transferSnapshot: (obj.transferSnapshot ?? null) as TransferSnapshot | null,
-        localPlayer:
-          obj.localPlayer && typeof obj.localPlayer === "object"
-            ? {
-                first_name: String(obj.localPlayer.first_name || ""),
-                last_name: String(obj.localPlayer.last_name || ""),
-                position: obj.localPlayer.position != null ? String(obj.localPlayer.position) : null,
-                team: obj.localPlayer.team != null ? String(obj.localPlayer.team) : null,
-                from_team: obj.localPlayer.from_team != null ? String(obj.localPlayer.from_team) : null,
-                conference: obj.localPlayer.conference != null ? String(obj.localPlayer.conference) : null,
-              }
-            : null,
-      };
-    }
-  } catch {
-    // legacy free-text note
-  }
-  return { notes: raw, metrics: null, power: null, rosterStatus: null, depthRole: null, classTransition: null, devAggressiveness: null, classTransitionOverridden: false, devAggressivenessOverridden: false, transferSnapshot: null, localPlayer: null };
-};
-
-const serializeBuildPlayerMeta = (
-  notes: string | null,
-  metrics: TeamMetricInputs | null,
-  power: TeamPowerPlus | null,
-  rosterStatus: "returner" | "leaving" | "target" | null | undefined,
-  depthRole: "cornerstone" | "everyday_starter" | "platoon_starter" | "utility" | "bench" | "starter" | "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever" | null | undefined,
-  classTransition: string | null | undefined,
-  devAggressiveness: number | null | undefined,
-  classTransitionOverridden: boolean | null | undefined,
-  devAggressivenessOverridden: boolean | null | undefined,
-  transferSnapshot: TransferSnapshot | null | undefined,
-  localPlayer: { first_name: string; last_name: string; position: string | null; team: string | null; from_team: string | null; conference: string | null } | null | undefined,
-) => {
-  if (!notes && !metrics && !power && !rosterStatus && !depthRole && !classTransition && devAggressiveness == null && !transferSnapshot && !localPlayer) return null;
-  return JSON.stringify({
-    __team_builder_metrics_v1: true,
-    notes: notes ?? null,
-    metrics: metrics ?? null,
-    power: power ?? null,
-    rosterStatus: rosterStatus ?? null,
-    depthRole: depthRole ?? null,
-    classTransition: classTransition ?? null,
-    devAggressiveness: devAggressiveness ?? null,
-    classTransitionOverridden: Boolean(classTransitionOverridden),
-    devAggressivenessOverridden: Boolean(devAggressivenessOverridden),
-    transferSnapshot: transferSnapshot ?? null,
-    localPlayer: localPlayer ?? null,
-  });
-};
-
 const hasSystemPredictionStats = (p: BuildPlayer) =>
   p.prediction?.p_avg != null ||
   p.prediction?.p_obp != null ||
@@ -584,16 +397,6 @@ const selectTransferPortalPreferredPrediction = (predictions: any[] | null | und
 };
 
 
-const computeOWarFromWrcPlus = (wrcPlus: number | null | undefined, actualPa?: number | null) => {
-  if (wrcPlus == null) return null;
-  const pa = actualPa ?? 260;
-  const runsPerPa = 0.13;
-  const replacementRuns = (pa / 600) * 25;
-  const offValue = (wrcPlus - 100) / 100;
-  const raa = offValue * pa * runsPerPa;
-  const rar = raa + replacementRuns;
-  return rar / 10;
-};
 
 const projectedNilTierClass = (
   value: number | null | undefined,
@@ -649,44 +452,6 @@ const depthRoleMultiplier = (role: BuildPlayer["depth_role"]) => {
 //   platoon_starter:   PA 50–129  (~5 per team — strong-side platoon)
 //   utility:           PA 15–49   (~3 per team — multi-position sub)
 //   bench:             PA < 15    (~2 per team — end-of-bench, development)
-const defaultHitterDepthRoleFromPa = (
-  pa: number | null | undefined,
-): "cornerstone" | "everyday_starter" | "platoon_starter" | "utility" | "bench" => {
-  const paNum = Number(pa);
-  const safePa = Number.isFinite(paNum) ? paNum : 0;
-  if (safePa >= 220) return "cornerstone";
-  if (safePa >= 130) return "everyday_starter";
-  if (safePa >= 50) return "platoon_starter";
-  if (safePa >= 15) return "utility";
-  return "bench";
-};
-
-// Infer default depth_role tier from a pitcher's prior-year IP. Used at
-// build-seeding time so newly added players land in the tier that matches
-// what they actually did last year (coach can override). Thresholds tuned
-// to D1 norms:
-//   SP: 65+ IP weekend, 35-65 weekday, <35 swing
-//   RP: 40+ workhorse, 25-40 high lev, 15-25 mid lev, 8-15 low impact, <8 specialist
-// Falls back to role-based default if IP is missing/zero.
-const defaultPitcherDepthRoleFromIp = (
-  ip: number | null | undefined,
-  role: "SP" | "RP",
-): "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever" => {
-  const ipNum = Number(ip);
-  if (!Number.isFinite(ipNum) || ipNum <= 0) {
-    return role === "SP" ? "weekend_starter" : "high_leverage_reliever";
-  }
-  if (role === "SP") {
-    if (ipNum >= 65) return "weekend_starter";
-    if (ipNum >= 35) return "weekday_starter";
-    return "swing_starter";
-  }
-  if (ipNum >= 40) return "workhorse_reliever";
-  if (ipNum >= 25) return "high_leverage_reliever";
-  if (ipNum >= 15) return "mid_leverage_reliever";
-  if (ipNum >= 8) return "low_impact_reliever";
-  return "specialist_reliever";
-};
 
 // Per-tier expected IP for pitchers — replaces the old binary
 // (pwar_ip_sp vs pwar_ip_sm vs pwar_ip_rp) lookup. Tuned to typical D1
@@ -711,24 +476,6 @@ const pitcherExpectedIp = (
   }
 };
 
-const pitcherRoleFromSlot = (slot: string | null | undefined): "SP" | "RP" | "SM" | null => {
-  if (!slot) return null;
-  const s = slot.toUpperCase();
-  if (s.startsWith("SP")) return "SP";
-  if (s.startsWith("RP") || s === "CL") return "RP";
-  return "SM";
-};
-
-const normalizePitcherRole = (raw: string | null | undefined): "SP" | "RP" => {
-  const v = String(raw || "").toUpperCase();
-  return v.startsWith("SP") ? "SP" : "RP";
-};
-const asPitcherRole = (raw: string | null | undefined): "SP" | "RP" | null => {
-  const v = String(raw || "").toUpperCase();
-  if (v.startsWith("SP") || v === "STARTER" || v === "SM") return "SP";
-  if (v.startsWith("RP") || v === "RELIEVER" || v === "CL" || v === "CLOSER") return "RP";
-  return null;
-};
 
 // Resolve a pitcher role for the pitcher-pool render / pWAR compute. For
 // traditional pitchers, this returns the explicit slot role (SP/RP). For TWPs
@@ -1700,282 +1447,14 @@ export default function TeamBuilder() {
       }));
   }, [allPlayersForSearch, seedHittersForSearch, selectedTeam]);
 
-  // Load a saved build
-  const loadBuild = useCallback(async (buildId: string) => {
-    const build = builds.find((b) => b.id === buildId);
-    if (!build) return;
-    setSelectedBuildId(buildId);
-    setBuildName(build.name);
-    // Pre-record the team in the depth-clear ref so the team-change effect
-    // doesn't wipe the depth chart we're about to restore. The effect
-    // compares lastDepthTeamRef.current vs the new selectedTeam; matching
-    // them here makes it a no-op for this load.
-    lastDepthTeamRef.current = build.team || null;
-    // Suppress the next auto-seed pass — loadBuild has already supplied the
-    // returner+target rows from the saved build. Without this guard, the
-    // returners query refetches when selectedTeam changes and the auto-seed
-    // effect wipes the loaded roster, replacing it with fresh defaults.
-    skipAutoSeedOnceRef.current = true;
-    autoSeededTeamRef.current = normalizeName(build.team || "");
-    setSelectedTeam(build.team);
-    setTotalBudget(Number(build.total_budget) || 0);
-    const savedDepthAssignments =
-      build.depth_assignments && typeof build.depth_assignments === "object" && !Array.isArray(build.depth_assignments)
-        ? (build.depth_assignments as Record<string, number>)
-        : {};
-    const savedDepthPlaceholders =
-      build.depth_placeholders && typeof build.depth_placeholders === "object" && !Array.isArray(build.depth_placeholders)
-        ? (build.depth_placeholders as Record<string, "freshman" | "transfer">)
-        : {};
-    setDepthAssignments(savedDepthAssignments);
-    setDepthPlaceholders(savedDepthPlaceholders);
-
-    const { data: players } = await supabase
-      .from("team_build_players")
-      .select("*")
-      .eq("build_id", buildId);
-
-    if (players) {
-      // Fetch player details for each
-      const playerIds = players
-        .map((p) => (typeof p.player_id === "string" ? p.player_id.trim() : p.player_id))
-        .filter((id): id is string => isUuid(id));
-      let playerMap: Record<string, any> = {};
-      let predictionMap: Record<string, any> = {};
-      if (playerIds.length > 0) {
-        const { data: pData, error: pErr } = await supabase
-          .from("players")
-          .select(`
-            id, first_name, last_name, position, is_twp, class_year, throws_hand, bats_hand, team, from_team, conference,
-            player_predictions(id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at),
-            nil_valuations(estimated_value, component_breakdown)
-          `)
-          .in("id", playerIds);
-        if (pErr) {
-          console.error("TeamBuilder loadBuild players fetch failed:", pErr);
-        }
-        (pData ?? []).forEach((p) => {
-          playerMap[p.id] = p;
-        });
-
-        let predQuery = supabase
-          .from("player_predictions")
-          .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at")
-          .in("player_id", playerIds)
-          .in("variant", ["regular", "precomputed"])
-          .in("status", ["active", "departed"]);
-        predQuery = applyTeamScopeFilter(predQuery as any, effectiveTeamId);
-        const { data: predData, error: predErr } = await predQuery;
-        if (predErr) {
-          console.error("TeamBuilder loadBuild predictions fetch failed:", predErr);
-        }
-        const grouped = new Map<string, any[]>();
-        for (const row of predData || []) {
-          const pid = String(row.player_id || "");
-          if (!pid) continue;
-          const list = grouped.get(pid) || [];
-          list.push(row);
-          grouped.set(pid, list);
-        }
-        for (const [pid, rows] of grouped.entries()) {
-          const player = playerMap[pid];
-          if (!player) continue;
-          // Prefer team-scoped precomputed row when active team has one (so
-          // saved builds for a customer team reflect their tuned equation),
-          // else fall back to the existing best-of-regular picker.
-          const teamScoped = pickPreferredPrediction(rows as any[], effectiveTeamId);
-          if (teamScoped && (teamScoped as any).customer_team_id === effectiveTeamId) {
-            predictionMap[pid] = teamScoped;
-            continue;
-          }
-          const preds = rows.filter((r: any) => r.variant === "regular" && (r.status === "active" || r.status === "departed"));
-          if (preds.length === 0) continue;
-          let best = preds[0];
-          for (const row of preds) {
-            if (!best) { best = row; continue; }
-            const rowScore = scorePredictionLikeDashboard(row, false);
-            const bestScore = scorePredictionLikeDashboard(best, false);
-            if (rowScore > bestScore) best = row;
-            else if (rowScore === bestScore) {
-              if (new Date(row.updated_at || 0).getTime() > new Date(best.updated_at || 0).getTime()) best = row;
-            }
-          }
-          predictionMap[pid] = best;
-        }
-      }
-
-      const fallbackPitchers = readStoragePitcherLocalPlayers(build.team || selectedTeam || "", pitchingMasterRows, selectedTeamId);
-      const usedFallbackIndices = new Set<number>();
-      const reserveFallbackIndexByName = (fullName: string) => {
-        const key = normalizeName(fullName);
-        if (!key) return;
-        for (let i = 0; i < fallbackPitchers.length; i += 1) {
-          if (usedFallbackIndices.has(i)) continue;
-          const fp = fallbackPitchers[i];
-          const fpName = normalizeName(`${fp.first_name || ""} ${fp.last_name || ""}`);
-          if (fpName === key) {
-            usedFallbackIndices.add(i);
-            return;
-          }
-        }
-      };
-      const claimFallbackPitcher = (preferredRole: "SP" | "RP" | null) => {
-        const pick = (idx: number) => {
-          usedFallbackIndices.add(idx);
-          const fp = fallbackPitchers[idx];
-          return {
-            first_name: fp.first_name,
-            last_name: fp.last_name,
-            position: fp.position,
-            team: fp.team,
-            from_team: fp.from_team,
-            conference: fp.conference,
-          };
-        };
-        if (preferredRole) {
-          for (let i = 0; i < fallbackPitchers.length; i += 1) {
-            if (usedFallbackIndices.has(i)) continue;
-            if (fallbackPitchers[i].role === preferredRole) return pick(i);
-          }
-        }
-        for (let i = 0; i < fallbackPitchers.length; i += 1) {
-          if (!usedFallbackIndices.has(i)) return pick(i);
-        }
-        return null;
-      };
-
-      setRosterPlayers(
-        players.map((bp: any) => {
-          try {
-          const meta = parseBuildPlayerMeta(bp.production_notes);
-          const fallbackName = (() => {
-            if (bp.custom_name && bp.custom_name.trim()) return bp.custom_name.trim();
-            if (meta.notes && meta.notes.trim()) return meta.notes.trim();
-            if (!meta.localPlayer) return null;
-            const full = `${meta.localPlayer.first_name || ""} ${meta.localPlayer.last_name || ""}`.trim();
-            return full || null;
-          })();
-          const fallbackTeam = meta.localPlayer?.team ?? build.team ?? selectedTeam ?? null;
-          const fallbackPosition = meta.localPlayer?.position ?? bp.position_slot ?? null;
-          const fallbackPitcherLike = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(fallbackPosition || ""));
-          const normalizedPlayerIdRaw = typeof bp.player_id === "string" ? bp.player_id.trim() : bp.player_id;
-          const recoveredPlayer = !normalizedPlayerIdRaw && fallbackName
-            ? resolveTeamBuilderPlayer(
-                null,
-                fallbackName,
-                fallbackTeam,
-                fallbackPitcherLike ? true : false,
-              )
-            : null;
-          const normalizedPlayerId = normalizedPlayerIdRaw || recoveredPlayer?.id || null;
-          const pd = normalizedPlayerId ? (playerMap[normalizedPlayerId] || recoveredPlayer || null) : null;
-          const activePred = normalizedPlayerId ? (predictionMap[normalizedPlayerId] ?? null) : null;
-          const localPlayerRaw = !pd && meta.localPlayer
-            ? {
-                first_name: (meta.localPlayer.first_name || "").trim(),
-                last_name: (meta.localPlayer.last_name || "").trim(),
-                position: meta.localPlayer.position ?? null,
-                team: meta.localPlayer.team ?? null,
-                from_team: meta.localPlayer.from_team ?? null,
-                conference: meta.localPlayer.conference ?? null,
-              }
-            : null;
-          const overrideRole = asPitcherRole(pd?.id ? (getSupabaseRole(pd.id) || null) : null);
-          const inferredRole = overrideRole || asPitcherRole(pd?.position || null);
-          const positionForPitcherInference = pd?.position || localPlayerRaw?.position || "";
-          const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(positionForPitcherInference));
-          const fallbackRole =
-            (bp.position_slot === "SP" || bp.position_slot === "RP" ? bp.position_slot : null) ??
-            ((meta.depthRole === "weekend_starter" || meta.depthRole === "weekday_starter") ? "SP" : null) ??
-            ((meta.depthRole === "high_leverage_reliever" || meta.depthRole === "low_impact_reliever") ? "RP" : null);
-
-          if (pd) {
-            const full = `${pd.first_name || ""} ${pd.last_name || ""}`.trim();
-            reserveFallbackIndexByName(full);
-          } else if (localPlayerRaw) {
-            const full = `${localPlayerRaw.first_name || ""} ${localPlayerRaw.last_name || ""}`.trim();
-            reserveFallbackIndexByName(full);
-          } else if (fallbackName) {
-            reserveFallbackIndexByName(fallbackName);
-          }
-
-          const recoveredPitcher = !pd && !localPlayerRaw && isPitcherRow ? claimFallbackPitcher(fallbackRole) : null;
-          const resolvedLocalPlayer = localPlayerRaw || recoveredPitcher;
-          const resolvedName = fallbackName
-            || (resolvedLocalPlayer ? `${resolvedLocalPlayer.first_name || ""} ${resolvedLocalPlayer.last_name || ""}`.trim() || null : null)
-            || (pd ? `${pd.first_name || ""} ${pd.last_name || ""}`.trim() || null : null);
-          return {
-            ...(bp as any),
-            id: bp.id,
-            player_id: normalizedPlayerId ?? null,
-            source: bp.source as "returner" | "portal",
-            custom_name: resolvedName || null,
-            position_slot: bp.position_slot || (isPitcherRow ? (inferredRole || "RP") : null),
-            depth_order: bp.depth_order ?? 1,
-            nil_value: Number(bp.nil_value) || 0,
-            production_notes: meta.notes,
-            roster_status: meta.rosterStatus ?? ((bp.source as string) === "portal" ? "target" : "returner"),
-            // depth_role recomputed from current PA/IP for hitters. Saved
-            // builds from before 2026-05-20 baked in "bench" for hitters
-            // when seasonUsage was empty at save time; that stale value
-            // would persist forever otherwise. PA-based recompute fixes
-            // load-time bench-reversion. Pitcher recompute from IP also
-            // keeps the latest reality. Saved meta.depthRole used only
-            // as a final fallback when neither PA nor IP is available.
-            depth_role: (() => {
-              if (isPitcherRow) {
-                const ip = (pd?.source_player_id ? pitchingStatsByNameTeam.bySourceId.get(pd.source_player_id)?.ip : null) ?? null;
-                if (ip != null) {
-                  return defaultPitcherDepthRoleFromIp(ip, (inferredRole === "SP") ? "SP" : "RP");
-                }
-                return meta.depthRole ?? defaultPitcherDepthRoleFromIp(null, (inferredRole === "SP") ? "SP" : "RP");
-              }
-              // Hitter: PA-based tier from current seasonUsage. Falls back
-              // to meta.depthRole only if usage hasn't loaded yet.
-              const hNameKey = pd ? `${normalizeName(`${pd.first_name || ""} ${pd.last_name || ""}`.trim())}|${normalizeName(pd.team || "")}` : null;
-              const hitterAb = (pd?.id ? seasonUsage.hitterAb?.get(pd.id) : null) ?? (hNameKey ? seasonUsage.hitterAbByNameTeam?.get(hNameKey) : null) ?? null;
-              if (hitterAb != null && hitterAb > 0) {
-                return defaultHitterDepthRoleFromPa(hitterAb);
-              }
-              return meta.depthRole ?? "everyday_starter";
-            })(),
-            class_transition: meta.classTransitionOverridden ? (meta.classTransition ?? "SJ") : (activePred?.class_transition ?? "SJ"),
-            dev_aggressiveness: meta.devAggressivenessOverridden ? (meta.devAggressiveness ?? 0) : (activePred?.dev_aggressiveness ?? 0),
-            class_transition_overridden: meta.classTransitionOverridden,
-            dev_aggressiveness_overridden: meta.devAggressivenessOverridden,
-            transfer_snapshot: meta.transferSnapshot ?? null,
-            player: pd
-              ? {
-                  first_name: pd.first_name,
-                  last_name: pd.last_name,
-                  position: pd.position,
-                  is_twp: (pd as any).is_twp ?? false,
-                  class_year: (pd as any).class_year ?? null,
-                  throws_hand: (pd as any).throws_hand ?? null,
-                  bats_hand: (pd as any).bats_hand ?? null,
-                  team: pd.team,
-                  from_team: pd.from_team,
-                  conference: pd.conference ?? null,
-                }
-              : (resolvedLocalPlayer || null),
-            prediction: activePred ?? null,
-            nilVal: pd?.nil_valuations?.[0]?.estimated_value ?? null,
-            nil_owar: pd?.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
-            team_metrics: meta.metrics,
-            team_power_plus: meta.power,
-          };
-          } catch (err) {
-            // Per-row data-quality warning — noisy in prod when a saved build
-            // has any malformed players. Keep visible in dev to flag bad rows.
-            if (import.meta.env.DEV) {
-              console.warn("[TeamBuilder] Failed to process roster player:", err, bp);
-            }
-            return null;
-          }
-        }).filter(Boolean) as any[]);
-    }
-    setDirty(false);
-  }, [builds, playerOverrides, allPlayersForSearch, selectedTeam, resolveTeamBuilderPlayer]);
+  const loadBuild = useLoadBuild({
+    builds, allPlayersForSearch, selectedTeam, selectedTeamId, effectiveTeamId,
+    pitchingMasterRows, pitchingStatsByNameTeam, seasonUsage,
+    resolveTeamBuilderPlayer, getSupabaseRole,
+    setSelectedBuildId, setBuildName, setTotalBudget, setSelectedTeam,
+    setDepthAssignments, setDepthPlaceholders, setRosterPlayers, setDirty,
+    lastDepthTeamRef, skipAutoSeedOnceRef, autoSeededTeamRef,
+  });
 
   // Auto-load roster when team changes and it's a new build.
   // Single source: Supabase players table via the returners query.

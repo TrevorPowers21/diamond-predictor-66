@@ -155,22 +155,70 @@ pWAR = (((pRV+ − 100) / 100) · (IP/9) · 5.5 + (IP/9 · 2.5)) / 10
 
 ---
 
+## Refactoring Policy
+
+These rules apply across all pages (TeamBuilder, PlayerProfile, TransferPortal, Rankings, Dashboard). When touching any file, enforce them in the same PR.
+
+### Shared location for shared logic
+
+| If you find... | It belongs in... |
+|---|---|
+| Pure calculation or formatting function | `src/lib/` (e.g. `playerCalcs.ts`, `nameUtils.ts`) |
+| Name/team normalization helpers | `src/lib/nameUtils.ts` |
+| Data-fetching + derived state pattern | `src/hooks/` (e.g. `useSeedDataMaps.ts`, `useTransferPortalContext.ts`) |
+| Page-specific hook with no UI | `src/pages/<page>/hooks/` |
+| Reusable UI widget | `src/components/` |
+
+**Rule:** When refactoring page A surfaces a function that also exists in page B, extract to shared first, then update both call sites in the same PR. Improving one and leaving the other creates drift — don't do it.
+
+### Known shared functions (canonical locations)
+
+| Function | File | Was duplicated in |
+|---|---|---|
+| `computeOWarFromWrcPlus` | `src/lib/playerCalcs.ts` | TeamBuilder, PlayerProfile, ReturningPlayers, useTeamBuilderSimulation |
+| `normalizeName` | `src/lib/nameUtils.ts` (re-exported from `helpers.ts`) | TeamBuilder, PlayerProfile |
+| `nameTeamKey`, `normalizeTeamForKey`, `getNameVariants` | `src/lib/nameUtils.ts` | PlayerProfile |
+| `isUuid`, `readStoragePitcherLocalPlayers`, `parseBuildPlayerMeta`, `serializeBuildPlayerMeta` | `src/pages/team-builder/helpers.ts` | TeamBuilder (inline) |
+| `defaultHitterDepthRoleFromPa`, `defaultPitcherDepthRoleFromIp` | `src/pages/team-builder/helpers.ts` | TeamBuilder (inline) |
+| `asPitcherRole` | `src/pages/team-builder/helpers.ts` | TeamBuilder had a duplicate — removed |
+| Prediction selection (`pickPreferredPrediction`, team-scoped logic) | `src/lib/teamScopedPredictions.ts` | — |
+
+### addPlayerFromTargetSearch — deferred, not extracted
+
+Extraction difficulty: CRITICAL (3 interleaved async paths, transfer projection duplicated ~130 lines). Leave in TeamBuilder until a 4th player-add path is needed — that's the forcing function.
+
+### Hook extraction guidelines
+
+When a function closes over 8+ deps and has 5+ logical sections, extract as a `use*` hook that accepts deps as a typed params object and returns the callback. Keep the dep array accurate — omit values that are not read inside the function body.
+
+---
+
 ## Current Session State
 
-**Last Updated:** 2026-05-22 (session 3)
-**Session Status:** Refactor paused — branch pushed to origin, ready for next session
+**Last Updated:** 2026-05-22 (session 4)
+**Session Status:** Refactor complete for this cycle — branch pushed to origin, ready for next session
 
 ### Refactor Progress Summary
 | Phase | Lines removed | What moved |
 |---|---|---|
 | Session 1 | -2,082 | useTeamBuilderData hook, useTeamBuilderSimulation hook, CompareTab |
 | Session 2 | -166 | DepthTab render fns, renderPlayerRow → playerRowProps, slotMatchesPosition |
-| **Total** | **-2,248 (-38%)** | TeamBuilder: 5,973 → 3,725 lines |
+| Session 3–4 | -521 | loadBuild → useLoadBuild; shared utils to lib/; useSeedDataMaps + useTransferPortalContext for PlayerProfile |
+| **Total** | **-2,769 (-46%)** | TeamBuilder: 5,973 → 3,204 lines |
 
 ### Current Branch State
 - **`refactor/team-builder-split`** pushed to origin — Trevor can review on GitHub
 - Fully synced with staging `0cd3a5f` (cherry-picked Trevor's pitcher precompute + autofire PRs — zero conflicts)
 - tsc zero errors
+
+### New files this cycle
+| File | Purpose |
+|---|---|
+| `src/lib/playerCalcs.ts` | `computeOWarFromWrcPlus` — was copy-pasted in 4 files |
+| `src/lib/nameUtils.ts` | `normalizeName`, `nameTeamKey`, `normalizeTeamForKey`, `getNameVariants` |
+| `src/pages/team-builder/hooks/useLoadBuild.ts` | Extracted 275-line `loadBuild` callback |
+| `src/hooks/useSeedDataMaps.ts` | Replaces 2 duplicate useMemo seed-map blocks in PlayerProfile |
+| `src/hooks/useTransferPortalContext.ts` | `isTransferPortal`, `isReturner`, `fromTeamData` query |
 
 ### Remaining Hard Extractions (defer to fresh session)
 Both blocks are deeply coupled — need 15-20 params each to extract cleanly:

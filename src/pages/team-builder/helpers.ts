@@ -1,13 +1,7 @@
-import type { BuildPlayer, PitcherDepthRole } from "./types";
+import type { BuildPlayer, PitcherDepthRole, TransferSnapshot, TeamMetricInputs, TeamPowerPlus } from "./types";
+export { normalizeName } from "@/lib/nameUtils";
 
 const LEGACY_PITCHING_ROLE_OVERRIDE_KEY = "pitching_role_overrides_v1";
-
-export const normalizeName = (value: string | null | undefined) =>
-  (value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 
 export const normalizeKey = (value: string | null | undefined) =>
   (value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
@@ -158,4 +152,240 @@ export const playerCurrentClass = (p: BuildPlayer | null | undefined): string | 
   if (ct === "JS") return "SR";
   if (ct === "GR") return "GR";
   return null;
+};
+
+// ---------------------------------------------------------------------------
+// Functions migrated from TeamBuilder.tsx inline — canonical home is here.
+// Import these in useLoadBuild and any other hook that needs them.
+// ---------------------------------------------------------------------------
+
+export const isUuid = (value: string | null | undefined): boolean =>
+  !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value).trim(),
+  );
+
+const splitFullName = (fullName: string): { first: string; last: string } => {
+  const parts = String(fullName || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { first: "", last: "" };
+  if (parts.length === 1) return { first: parts[0], last: "" };
+  return { first: parts[0], last: parts.slice(1).join(" ") };
+};
+
+const teamNameVariants = (team: string | null | undefined): string[] => {
+  const base = (team || "").trim();
+  if (!base) return [];
+  const out = new Set<string>([base]);
+  const lower = base.toLowerCase();
+  if (lower.endsWith(" university")) out.add(base.replace(/\s+university$/i, "").trim());
+  else out.add(`${base} University`);
+  if (lower.startsWith("university of ")) out.add(base.replace(/^university of\s+/i, "").trim());
+  else out.add(`University of ${base}`.trim());
+  if (lower === "west virginia" || lower === "west virginia university" || lower === "wvu") {
+    out.add("WVU");
+    out.add("West Virginia");
+    out.add("West Virginia University");
+  }
+  return Array.from(out).filter(Boolean);
+};
+
+export const teamMatchesSelectedTeam = (
+  candidateTeam: string | null | undefined,
+  selectedTeam: string | null | undefined,
+): boolean => {
+  const candidate = (candidateTeam || "").trim();
+  const selected = (selectedTeam || "").trim();
+  if (!candidate || !selected) return false;
+  const candidateVariants = teamNameVariants(candidate);
+  const selectedVariants = teamNameVariants(selected);
+  const selectedNorms = new Set(selectedVariants.map((v) => normalizeName(v)));
+  for (const variant of candidateVariants) {
+    if (selectedNorms.has(normalizeName(variant))) return true;
+  }
+  return false;
+};
+
+export const splitFullNameExport = splitFullName;
+
+export const readStoragePitcherLocalPlayers = (
+  teamName: string | null | undefined,
+  masterRows: Array<{
+    playerName: string;
+    team: string | null;
+    teamId?: string | null;
+    throwHand: string | null;
+    role: string | null;
+    conference: string | null;
+  }> = [],
+  selectedTeamId?: string | null,
+): Array<{
+  first_name: string;
+  last_name: string;
+  position: string | null;
+  team: string | null;
+  from_team: string | null;
+  conference: string | null;
+  role: "SP" | "RP" | null;
+}> => {
+  if (!teamName && !selectedTeamId) return [];
+  const out: Array<{
+    first_name: string;
+    last_name: string;
+    position: string | null;
+    team: string | null;
+    from_team: string | null;
+    conference: string | null;
+    role: "SP" | "RP" | null;
+  }> = [];
+  for (const r of masterRows) {
+    const playerName = (r.playerName || "").trim();
+    const rowTeam = (r.team || "").trim();
+    if (!playerName || !rowTeam) continue;
+    const teamMatch =
+      selectedTeamId && (r as any).teamId
+        ? (r as any).teamId === selectedTeamId
+        : teamMatchesSelectedTeam(rowTeam, teamName);
+    if (!teamMatch) continue;
+    const hand = (r.throwHand || "").trim().toUpperCase();
+    const roleRaw = (r.role || "").trim().toUpperCase();
+    const role: "SP" | "RP" | null = roleRaw === "SP" || roleRaw === "RP" ? roleRaw : null;
+    const position = hand === "RHP" || hand === "LHP" ? hand : role || "P";
+    const split = splitFullName(playerName);
+    out.push({ first_name: split.first, last_name: split.last, position, team: rowTeam, from_team: null, conference: r.conference || null, role });
+  }
+  return out;
+};
+
+export const defaultHitterDepthRoleFromPa = (
+  pa: number | null | undefined,
+): "cornerstone" | "everyday_starter" | "platoon_starter" | "utility" | "bench" => {
+  const safePa = Number.isFinite(Number(pa)) ? Number(pa) : 0;
+  if (safePa >= 220) return "cornerstone";
+  if (safePa >= 130) return "everyday_starter";
+  if (safePa >= 50) return "platoon_starter";
+  if (safePa >= 15) return "utility";
+  return "bench";
+};
+
+export const defaultPitcherDepthRoleFromIp = (
+  ip: number | null | undefined,
+  role: "SP" | "RP",
+): "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever" => {
+  const ipNum = Number(ip);
+  if (!Number.isFinite(ipNum) || ipNum <= 0) {
+    return role === "SP" ? "weekend_starter" : "high_leverage_reliever";
+  }
+  if (role === "SP") {
+    if (ipNum >= 65) return "weekend_starter";
+    if (ipNum >= 35) return "weekday_starter";
+    return "swing_starter";
+  }
+  if (ipNum >= 40) return "workhorse_reliever";
+  if (ipNum >= 25) return "high_leverage_reliever";
+  if (ipNum >= 15) return "mid_leverage_reliever";
+  if (ipNum >= 8) return "low_impact_reliever";
+  return "specialist_reliever";
+};
+
+type DepthRole =
+  | "cornerstone" | "everyday_starter" | "platoon_starter" | "utility" | "bench" | "starter"
+  | "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever"
+  | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever";
+
+export const parseBuildPlayerMeta = (raw: string | null | undefined): {
+  notes: string | null;
+  metrics: TeamMetricInputs | null;
+  power: TeamPowerPlus | null;
+  rosterStatus: "returner" | "leaving" | "target" | null;
+  depthRole: DepthRole | null;
+  classTransition: string | null;
+  devAggressiveness: number | null;
+  classTransitionOverridden: boolean;
+  devAggressivenessOverridden: boolean;
+  transferSnapshot: TransferSnapshot | null;
+  localPlayer: {
+    first_name: string; last_name: string; position: string | null;
+    team: string | null; from_team: string | null; conference: string | null;
+  } | null;
+} => {
+  if (!raw) {
+    return {
+      notes: null, metrics: null, power: null, rosterStatus: null, depthRole: null,
+      classTransition: null, devAggressiveness: null, classTransitionOverridden: false,
+      devAggressivenessOverridden: false, transferSnapshot: null, localPlayer: null,
+    };
+  }
+  try {
+    const obj = JSON.parse(raw);
+    if (obj && obj.__team_builder_metrics_v1) {
+      const VALID_DEPTH_ROLES: DepthRole[] = [
+        "cornerstone", "everyday_starter", "platoon_starter", "starter", "utility", "bench",
+        "weekend_starter", "weekday_starter", "swing_starter", "workhorse_reliever",
+        "high_leverage_reliever", "mid_leverage_reliever", "low_impact_reliever", "specialist_reliever",
+      ];
+      return {
+        notes: typeof obj.notes === "string" ? obj.notes : null,
+        metrics: (obj.metrics ?? null) as TeamMetricInputs | null,
+        power: (obj.power ?? null) as TeamPowerPlus | null,
+        rosterStatus:
+          obj.rosterStatus === "returner" || obj.rosterStatus === "leaving" || obj.rosterStatus === "target"
+            ? obj.rosterStatus : null,
+        depthRole: VALID_DEPTH_ROLES.includes(obj.depthRole) ? obj.depthRole : null,
+        classTransition: typeof obj.classTransition === "string" ? obj.classTransition : null,
+        devAggressiveness: Number.isFinite(Number(obj.devAggressiveness)) ? Number(obj.devAggressiveness) : null,
+        classTransitionOverridden: Boolean(obj.classTransitionOverridden),
+        devAggressivenessOverridden: Boolean(obj.devAggressivenessOverridden),
+        transferSnapshot: (obj.transferSnapshot ?? null) as TransferSnapshot | null,
+        localPlayer: obj.localPlayer && typeof obj.localPlayer === "object"
+          ? {
+              first_name: String(obj.localPlayer.first_name || ""),
+              last_name: String(obj.localPlayer.last_name || ""),
+              position: obj.localPlayer.position != null ? String(obj.localPlayer.position) : null,
+              team: obj.localPlayer.team != null ? String(obj.localPlayer.team) : null,
+              from_team: obj.localPlayer.from_team != null ? String(obj.localPlayer.from_team) : null,
+              conference: obj.localPlayer.conference != null ? String(obj.localPlayer.conference) : null,
+            }
+          : null,
+      };
+    }
+  } catch {
+    // legacy free-text note
+  }
+  return {
+    notes: raw, metrics: null, power: null, rosterStatus: null, depthRole: null,
+    classTransition: null, devAggressiveness: null, classTransitionOverridden: false,
+    devAggressivenessOverridden: false, transferSnapshot: null, localPlayer: null,
+  };
+};
+
+export const serializeBuildPlayerMeta = (
+  notes: string | null,
+  metrics: TeamMetricInputs | null,
+  power: TeamPowerPlus | null,
+  rosterStatus: "returner" | "leaving" | "target" | null | undefined,
+  depthRole: DepthRole | null | undefined,
+  classTransition: string | null | undefined,
+  devAggressiveness: number | null | undefined,
+  classTransitionOverridden: boolean | null | undefined,
+  devAggressivenessOverridden: boolean | null | undefined,
+  transferSnapshot: TransferSnapshot | null | undefined,
+  localPlayer: {
+    first_name: string; last_name: string; position: string | null;
+    team: string | null; from_team: string | null; conference: string | null;
+  } | null | undefined,
+): string | null => {
+  if (!notes && !metrics && !power && !rosterStatus && !depthRole && !classTransition && devAggressiveness == null && !transferSnapshot && !localPlayer) return null;
+  return JSON.stringify({
+    __team_builder_metrics_v1: true,
+    notes: notes ?? null,
+    metrics: metrics ?? null,
+    power: power ?? null,
+    rosterStatus: rosterStatus ?? null,
+    depthRole: depthRole ?? null,
+    classTransition: classTransition ?? null,
+    devAggressiveness: devAggressiveness ?? null,
+    classTransitionOverridden: Boolean(classTransitionOverridden),
+    devAggressivenessOverridden: Boolean(devAggressivenessOverridden),
+    transferSnapshot: transferSnapshot ?? null,
+    localPlayer: localPlayer ?? null,
+  });
 };

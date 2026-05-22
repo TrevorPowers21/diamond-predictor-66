@@ -2,6 +2,7 @@ import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
+import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
 import { computeTransferProjection } from "@/lib/transferProjection";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { computePitcherProjection } from "@/lib/pitcherProjection";
@@ -116,16 +117,6 @@ const toWeight = (n: number) => (Math.abs(n) >= 10 ? n / 100 : n);
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 const statKey = (v: number | null | undefined) => (v == null ? "na" : round3(v).toFixed(3));
 
-const computeOWarFromWrcPlus = (wrcPlus: number | null | undefined, actualPa?: number | null) => {
-  if (wrcPlus == null) return null;
-  const pa = actualPa ?? 260;
-  const runsPerPa = 0.13;
-  const replacementRuns = (pa / 600) * 25;
-  const offValue = (wrcPlus - 100) / 100;
-  const raa = offValue * pa * runsPerPa;
-  const rar = raa + replacementRuns;
-  return rar / 10;
-};
 
 const selectTransferPortalPreferredPrediction = (predictions: any[] | null | undefined) => {
   const list = (predictions || []).filter(Boolean);
