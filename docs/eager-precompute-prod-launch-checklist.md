@@ -491,26 +491,58 @@ npm run precompute-transfers:prod -- --team <uuid-1> --division D1 --dry-run
 npm run precompute-transfers:prod -- --team <uuid-2> --division D1 --dry-run
 # ... etc. Expect ~5,000 D1 hitters per team, ~97% computed.
 
-# 4. Real run for each team
+# 4. Real run for HITTER precompute (each team)
 npm run precompute-transfers:prod -- --team <uuid-1> --division D1
 npm run precompute-transfers:prod -- --team <uuid-2> --division D1
 # ... ~30s per team. Verify each one prints "✓ done".
 
-# 5. Verify on prod
+# 5. Real run for PITCHER precompute (each team) — added 2026-05-21
+npm run precompute-pitchers:prod -- --team <uuid-1>
+npm run precompute-pitchers:prod -- --team <uuid-2>
+# ... ~30s per team. Expect ~5,000 D1 pitchers per team, ~97% computed.
+# Verify each prints "✓ done" with row count.
+
+# 6. Verify on prod (hitter + pitcher row counts)
 supabase db query --linked "
-  SELECT customer_team_id, count(*) AS rows
+  SELECT customer_team_id, count(*) AS rows,
+         count(p_avg) AS hitter_rows,
+         count(p_era) AS pitcher_rows
   FROM player_predictions
   WHERE variant='precomputed'
   GROUP BY customer_team_id;
 "
-# Expect one row per customer team with ~5,000 each.
+# Expect ~5,000 hitter_rows + ~5,000 pitcher_rows per team.
 
-# 6. Spot-check in browser (impersonate each customer team, verify Hairston / known portal hitter shows team-scoped value)
-# 7. Notify customers (optional WhatsNewModal bump)
+# 7. Spot-check in browser (impersonate each customer team):
+#    - Hairston or known portal hitter shows team-scoped value (hitter side)
+#    - Sean Jenkins or known portal pitcher shows team-scoped value (pitcher side)
+# 8. Notify customers (optional WhatsNewModal bump)
 ```
 
-Estimated total time: **5–10 minutes** for everything in step 1–6 once auto-fire is live for future customer onboarding.
+Estimated total time: **10–15 minutes** for steps 1–7 once auto-fire is live for future customer onboarding.
 
 ---
 
-*Last updated: 2026-05-21. Pair with `docs/eager-precompute-session-log.md` for chronological detail.*
+## Section L — DEPENDENCIES BEFORE PROD CUTOVER (added 2026-05-21 EOD)
+
+The cutover above ships team-scoped precomputed projections (hitter + pitcher). **DO NOT promote to main yet** — these gating items must land first:
+
+| Gate | Status | Blocker |
+|---|---|---|
+| L1 | Returner pipeline writes pitcher rates + p_war + market_value | Not started — see `docs/stored-derived-values-plan.md` Phase 3b |
+| L2 | PitcherProfile + Dashboard read pure-stored values (no live recompute fallback) | Partial — c1af893 has stored-first with fallback. Plan Phase 4a removes fallback. |
+| L3 | Pitcher precompute Edge Function (auto-fire scope = pitchers_d1) | Not started — see Phase 6 of master plan |
+| L4 | Auto-fire trigger extension to enqueue pitcher jobs on customer_team INSERT | Not started |
+| L5 | Verification: Rossow + 5 pitchers show identical values on Profile + Dashboard on staging | Not done — see `docs/stored-derived-values-plan.md` Phase 6 |
+| L6 | TB target board cleanup (add depth default + read precomputed + market value team-scoped) | Not done — flagged BEFORE MAIN |
+
+**Skipped/reverted this session (NOT to be re-applied to prod):**
+- DEFAULT_PITCHING_WEIGHTS calibration (era_sd 1.588 → 2.567 etc.) — broke elite-tail math (powerAdj went negative for PR+ > 170). Reverted in code. Needs different approach. See memory `pitcher-precompute-calibration` for the 12 calibrated values when we retry.
+
+**Why the gate matters:** without L1, no-impersonation pitcher views show stale or missing returner rows. Without L2, profile and dashboard diverge. Without L3+L4, new customer teams won't auto-get pitcher precompute. Without L5, we don't have confidence the math is right end-to-end. Without L6, target board UX regressions ship.
+
+**Order of operations to clear gates:** L5 verification → L1 returner pipeline → re-verify L5 → L2 read-path cleanup → L3 + L4 auto-fire → L5 final verification → L6 TB cleanup → merge to main → run cutover runbook above.
+
+---
+
+*Last updated: 2026-05-21 EOD. Pair with `docs/eager-precompute-session-log.md` for chronological detail and `docs/stored-derived-values-plan.md` for the architecture refactor.*
