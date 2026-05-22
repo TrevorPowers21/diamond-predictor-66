@@ -3,6 +3,44 @@
 **Created:** 2026-05-21 EOD
 **Why:** PitcherProfile and Dashboard show different numbers for the same pitcher in no-impersonation mode (e.g. Rossow 2.13 vs 2.15 ERA). Root cause: PitcherProfile live-recomputes while Dashboard reads from stored `player_predictions` row. Live recompute drifts from stored as inputs evolve (equation weight changes, PR+ refreshes, etc.).
 
+---
+
+## NOTE FOR PEYTON (added 2026-05-22)
+
+You're going to do a full live-compute vs stored-values audit. The principle Trevor wants enforced:
+
+**Stored values come FIRST AND FOREMOST. They are the source of truth for every cell the UI displays. The live engine only runs when a coach interacts with a knob that the precompute couldn't anticipate.**
+
+Specifically:
+
+1. **Default read** — every surface (PlayerProfile, PitcherProfile, Dashboard, TB, TP, Rankings) reads the stored row first. Stored returner row for no-impersonation views, stored transfer row for impersonated views. No live recompute as the default path.
+
+2. **Coach interaction overlay** — the live engine ONLY runs when a coach changes:
+   - Developmental aggressiveness slider on a player
+   - Depth role / depth chart assignment that affects WAR contribution
+   - Class transition override (where still relevant — most are auto-derived now)
+   - Position slot override
+   - Any other interactive simulator knob in TB or TP
+
+3. **How the overlay works** — when a coach changes a knob, take the stored values as the BASE and apply the delta from the knob change. Don't recompute the entire projection from raw scouting metrics. The engine that produced the stored row IS the right engine — just modulate its output by the coach's intent.
+
+4. **Cross-surface consistency** — when stored row is the source, PitcherProfile, Dashboard, TB target board, Rankings all show the same number for the same player. Today they don't because each surface has its own live-compute path. Audit + collapse to one read path.
+
+**Bugs that will disappear when this lands:**
+- "From: Campbell (—)" display gap (TB add path passes only conf name; would resolve via stored row's already-correct conference)
+- TB Compare tab values wrong (was live-computing with stale/missing inputs)
+- Dev aggressiveness slowness (no full re-sim cascade; just apply delta to stored values)
+- PitcherProfile vs Dashboard mismatch (same source, no drift)
+
+**What needs to keep working through the cleanup:**
+- Coach can still toggle dev agg / depth role / class transition and see projection respond — but driven by overlay math, not full re-derive.
+- Save build still persists the coach's overlays so reload reproduces the view.
+- TP simulator still computes "what-if" cross-shopping in real time (since the destination team isn't pre-baked into stored rows for arbitrary destinations).
+
+Start with the audit phase listed below (Phase 6 verification) — pick 5 pitchers + 5 hitters, document what each surface displays today, then trace each value back to its source code path. That map will show exactly how many duplicate compute paths exist and which ones to collapse first.
+
+---
+
 ## End-State Architecture (the rule)
 
 **Every derived player value displayed in the UI is a pure read from `player_predictions`. Zero live recompute. Zero fallback paths.**

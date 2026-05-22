@@ -35,6 +35,7 @@ import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { projectPitchingRate } from "@/lib/pitcherProjection";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { profileRouteFor } from "@/lib/profileRoutes";
+import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
 import { canonicalConferenceName } from "@/lib/conferenceMapping";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
@@ -832,16 +833,6 @@ const computeDerived = (avg: number | null, obp: number | null, slg: number | nu
   return { ops, iso, wrcPlus };
 };
 
-const computeOWarFromWrcPlus = (wrcPlus: number | null, actualPa?: number | null) => {
-  if (wrcPlus == null) return null;
-  const pa = actualPa ?? 260;
-  const runsPerPa = 0.13;
-  const replacementRuns = (pa / 600) * 25;
-  const offValue = (wrcPlus - 100) / 100;
-  const raa = offValue * pa * runsPerPa;
-  const rar = raa + replacementRuns;
-  return rar / 10;
-};
 
 const computeNilFallback = ({
   storedNil,
