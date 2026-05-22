@@ -157,50 +157,37 @@ pWAR = (((pRV+ − 100) / 100) · (IP/9) · 5.5 + (IP/9 · 2.5)) / 10
 
 ## Current Session State
 
-**Last Updated:** 2026-05-21 (session 2)
-**Session Status:** Active refactor continuing
+**Last Updated:** 2026-05-22 (session 3)
+**Session Status:** Refactor paused — branch pushed to origin, ready for next session
 
-### What We Completed (Session 2)
-- **DepthTab extraction** — `renderDepthStack`, `renderStartingRotationStack`, `renderRelieversStack` moved OUT of TeamBuilder into `DepthTab.tsx`. Now accepts data props (`depthAssignments`, `depthPlaceholders`, `rosterPlayers`, `assignDepthSlot`) instead of render function props. `-145 lines` from TeamBuilder.
-- **helpers.ts enriched** — `classColor`, `playerCurrentClass`, `depthKey`, `slotMatchesPosition` all moved there as exported pure functions. TeamBuilder now imports them.
-- **renderPlayerRow inlined** — replaced the `useCallback` closure with a `useMemo`-based `playerRowProps: PlayerTableRowSharedProps` object. `RosterTab` and `TargetBoardTab` now import `PlayerTableRow` directly and call it with a spread. `-7 lines` TeamBuilder, cleaner architecture.
-- **slotMatchesPosition extracted** — was a `useCallback` with `[]` deps. Now a module-level pure function in helpers.ts. Removed from dep array in depth-chart auto-assign useEffect.
+### Refactor Progress Summary
+| Phase | Lines removed | What moved |
+|---|---|---|
+| Session 1 | -2,082 | useTeamBuilderData hook, useTeamBuilderSimulation hook, CompareTab |
+| Session 2 | -166 | DepthTab render fns, renderPlayerRow → playerRowProps, slotMatchesPosition |
+| **Total** | **-2,248 (-38%)** | TeamBuilder: 5,973 → 3,725 lines |
 
-### Session 2 Commits
-```
-dbcbd3f refactor(helpers): extract slotMatchesPosition as pure exported function
-1200829 refactor(PlayerTableRow): inline renderPlayerRow into RosterTab and TargetBoardTab
-30701c2 refactor(DepthTab): move depth render functions out of TeamBuilder
-```
+### Current Branch State
+- **`refactor/team-builder-split`** pushed to origin — Trevor can review on GitHub
+- Fully synced with staging `0cd3a5f` (cherry-picked Trevor's pitcher precompute + autofire PRs — zero conflicts)
+- tsc zero errors
 
-### Current State
-- **`staging` branch:** has all bug fixes + WAR sort + `skipLiveCompute` hotfix. Ready for Trevor to deploy to prod.
-- **`refactor/team-builder-split` branch:** `TeamBuilder.tsx` is **3,725 lines** (down from 5,973 = -2,248 lines, -38%). tsc zero errors.
-- **Precompute:** Georgia hitting precompute confirmed working. Arkansas not yet seeded. `skipLiveCompute` fix means prod is safe to deploy before precompute runs for other schools.
-
-### What Remains (Hardest Parts)
-The two remaining large blocks are deeply coupled to state — extracting them into hooks requires passing 15-20 parameters each. Worth doing eventually but lower urgency now:
-1. **`loadBuild`** (~395 lines, line ~1705) — closes over: `builds`, many state setters, `supabase`, `effectiveTeamId`, `pitchingMasterRows`, `toast`, refs (`lastDepthTeamRef`, `skipAutoSeedOnceRef`, `autoSeededTeamRef`)
-2. **`addPlayerFromTargetSearch`** (~540 lines, line ~2493) — closes over: `allPlayersForSearch`, `rosterPlayers`, `selectedTeam`, `teamByKey`, `teamParkComponents`, `resolveConferenceStats`, many state setters, `supabase`, `toast`, computation utilities
-3. **`saveMutation` + `deleteBuildMutation`** (~100 lines combined) — could go to `useTeamBuilderMutations` but require 20+ params, net saving minimal
-4. **`renderPlayerRow`** — done (inlined to tabs)
-
-### Queued Next
-- Push `refactor/team-builder-split` to origin so Trevor can read branch doc on GitHub (ASK FIRST)
-- Continue precompute rollout: seed Arkansas hitting → batch all schools hitting → pitching passes
+### Remaining Hard Extractions (defer to fresh session)
+Both blocks are deeply coupled — need 15-20 params each to extract cleanly:
+1. **`loadBuild`** (~395 lines, ~line 1705) — closes over: `builds`, state setters, `supabase`, `effectiveTeamId`, `pitchingMasterRows`, `toast`, 3 refs
+2. **`addPlayerFromTargetSearch`** (~540 lines, ~line 2493) — closes over: `allPlayersForSearch`, `rosterPlayers`, `selectedTeam`, `teamByKey`, `teamParkComponents`, `resolveConferenceStats`, many state setters, `supabase`, `toast`
 
 ### Watch Out For
-- `depthAssignments` and `depthPlaceholders` state lives in TeamBuilder — must be passed as props to DepthTab, NOT moved there (they're persisted to Supabase as part of build save/load)
-- tsc uses `./node_modules/.bin/tsc --noEmit` (not `npx tsc`) in this project
-- Cherry-picks between `staging` and `refactor/team-builder-split` always conflict — make the change directly on the target branch instead
+- `depthAssignments`/`depthPlaceholders` state stays in TeamBuilder — passed as props to DepthTab, NOT moved there (persisted to Supabase)
+- tsc: use `./node_modules/.bin/tsc --noEmit` (not `npx tsc`)
+- Merging staging → refactor always conflicts on TeamBuilder.tsx — cherry-pick individual commits instead
+- New staging commits since our last sync: cherry-pick order was `b2beb17 33f3fb6 ada1fd0 99d2050 c1af893 0cd3a5f`
 
-### Relevant Files
-- `src/pages/TeamBuilder.tsx` — **3,725 lines** (was 5,973), active refactor target
-- `src/pages/team-builder/helpers.ts` — enriched with `depthKey`, `slotMatchesPosition`, `classColor`, `playerCurrentClass`
-- `src/pages/team-builder/hooks/useTeamBuilderSimulation.ts` — 1,546 lines, owns projection math + WAR sort
-- `src/pages/team-builder/tabs/DepthTab.tsx` — 174 lines, owns all depth render logic
-- `src/pages/team-builder/tabs/RosterTab.tsx` — ~310 lines
-- `src/pages/team-builder/tabs/TargetBoardTab.tsx` — ~245 lines
+### Key Files
+- `src/pages/TeamBuilder.tsx` — 3,725 lines, two large blocks remain
+- `src/pages/team-builder/helpers.ts` — `depthKey`, `slotMatchesPosition`, `classColor`, `playerCurrentClass` all exported here
+- `src/pages/team-builder/hooks/useTeamBuilderSimulation.ts` — 1,546 lines, projection math + WAR sort
+- `src/pages/team-builder/tabs/DepthTab.tsx` — 174 lines, self-contained depth render logic
 - `BRANCH_REVIEW_refactor_team_builder_split.md` — full change doc for Trevor
 
 ---
