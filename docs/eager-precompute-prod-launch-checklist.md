@@ -13,6 +13,9 @@ Goal: zero-surprise launch. Every step here has been validated on staging first.
 | A1 | Migration `20260520200000_eager_transfer_precompute_schema.sql` (column + override table + RLS) | ✅ | 2026-05-20 | yes |
 | A2 | Migration `20260520210000_player_predictions_unique_with_customer_team.sql` (widened UNIQUE constraint) | ✅ | 2026-05-20 | yes |
 | A3 | Independent conference SQL fix (NCAA averages for 1-team conferences) | ✅ | 2026-05-21 by Trevor | pending |
+| A3b | Conference Stats Independent pitching rates (mean ERA/FIP/WHIP/K9/BB9/HR9 → env+ = 100) | ⏳ | staging only | pending |
+| A3c | Park Factors corruption fix for Indiana + Hawaii (rows had malformed values from import bug, recomputed from source CSVs) | ✅ | 2026-05-21 prod by Trevor | yes |
+| A3d | D1 Conference Stats `Overall_Power_Rating` refresh (PA-weighted from per-hitter OPR, ID-based skip Independent) | ⏳ | staging only | pending |
 | A4 | `precompute_jobs` queue table | ⏳ | not yet | |
 | A5 | DB trigger: `AFTER INSERT ON customer_teams` → enqueue | ⏳ | not yet | |
 | A6 | Optional: trigger on stats ingest (debounced) | ⏳ | future | |
@@ -35,6 +38,106 @@ SELECT "conference abbreviation", "AVG", "OBP", "ISO", "Stuff_plus"
 FROM "Conference Stats"
 WHERE "conference abbreviation"='Independent' AND season=2026;
 ```
+
+**Pitcher-side data fixes to apply on PROD (also during cutover) — ID-based for safety:**
+
+PROD IDs (verified 2026-05-21):
+- Independent conference_id: `f40c786c-7496-4d22-9629-9abb929ffcd3`
+- Indiana Park Factors id: `2c1d8e00-7cb2-45a3-9ea4-6241c775234c`
+- Hawaii Park Factors id: `076bf758-ee53-40a4-b654-f2e13d2cc6a3`
+
+A3b — Independent conference pitching rates + OPR/WRC+ (so env+ and HTP both compute to 100):
+```sql
+UPDATE "Conference Stats"
+SET "ERA"  = 6.191, "FIP"  = 4.407, "WHIP" = 1.635,
+    "K9"   = 8.418, "BB9"  = 4.750, "HR9"  = 0.810,
+    "Overall_Power_Rating" = 100,
+    "WRC_plus" = 100
+WHERE conference_id = 'f40c786c-7496-4d22-9629-9abb929ffcd3' AND season = 2026;
+```
+
+A3c — Park Factors corruption fix for Indiana + Hawaii:
+```sql
+-- Indiana (2c1d8e00)
+UPDATE "Park Factors"
+SET rg_factor=110.7, avg_factor=102.3, obp_factor=102.3, whip_factor=102.3,
+    iso_factor=129.1, hr9_factor=129.1,
+    lhb_avg_factor=101.3, lhb_obp_factor=105.9, lhb_iso_factor=124.7,
+    rhb_avg_factor=103.1, rhb_obp_factor=99.0,  rhb_iso_factor=131.3
+WHERE id = '2c1d8e00-7cb2-45a3-9ea4-6241c775234c';
+
+-- Hawaii (076bf758)
+UPDATE "Park Factors"
+SET rg_factor=80.1, avg_factor=91.9, obp_factor=92.4, whip_factor=92.4,
+    iso_factor=63.0, hr9_factor=63.0,
+    lhb_avg_factor=92.4, lhb_obp_factor=93.9, lhb_iso_factor=64.6,
+    rhb_avg_factor=90.3, rhb_obp_factor=90.9, rhb_iso_factor=60.8
+WHERE id = '076bf758-ee53-40a4-b654-f2e13d2cc6a3';
+```
+
+Verify (run in two separate queries on prod since UNION ALL on mixed columns won't render cleanly):
+```sql
+SELECT "conference abbreviation" AS conf, "ERA", "FIP", "WHIP", "K9", "BB9", "HR9",
+       "Overall_Power_Rating", "WRC_plus"
+FROM "Conference Stats"
+WHERE conference_id = 'f40c786c-7496-4d22-9629-9abb929ffcd3' AND season=2026;
+
+SELECT team_name, rg_factor, avg_factor, obp_factor, iso_factor, hr9_factor
+FROM "Park Factors"
+WHERE id IN ('2c1d8e00-7cb2-45a3-9ea4-6241c775234c',
+             '076bf758-ee53-40a4-b654-f2e13d2cc6a3');
+```
+
+A3d — D1 Conference Stats Overall_Power_Rating refresh (PA-weighted from per-hitter `overall_power_rating`).
+
+Stored conference OPR was stale (last rolled up before final 2026 scouting upload). Bottom conferences were under-credited by 5-11 points, top conferences over-credited by 1-2 points. Refresh corrects HTP without touching weights — same Option 1 principle as the pitcher calibration. Independent skipped because it's manually locked to 100 (Oregon State consistency).
+
+Apply on prod via npm script with prod env vars:
+
+```bash
+# In a shell with prod SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY:
+SUPABASE_URL=https://trbvxuoliwrfowibatkm.supabase.co \
+SUPABASE_SERVICE_ROLE_KEY=<PROD SERVICE ROLE KEY> \
+npx tsx scripts/populate-conference-stats-env-plus.ts --apply
+# Type "yes-populate-conf-stats" when prompted
+```
+
+Note: the script's staging URL guard at line 304 must be temporarily inverted for prod, or invoke `populateD1OverallPowerRating` directly. Safer: just run the equivalent SQL by hand. Below is the SQL equivalent (29 UPDATEs derived from staging's post-refresh values — but values will be slightly different on prod since per-hitter OPR may have drifted between staging + prod data uploads. Re-derive on prod):
+
+```sql
+-- Derive + apply in one statement using prod's current per-hitter data:
+WITH live_opr AS (
+  SELECT
+    t.conference_id,
+    round((sum(h.overall_power_rating * h.pa) / nullif(sum(h.pa), 0))::numeric, 1) AS new_opr
+  FROM "Hitter Master" h
+  JOIN "Teams Table" t ON t.id = h."TeamID"
+  WHERE h."Season" = 2026
+    AND h.division = 'D1'
+    AND h.pa > 0
+    AND h.overall_power_rating IS NOT NULL
+    AND t.conference_id != 'f40c786c-7496-4d22-9629-9abb929ffcd3'  -- skip Independent
+  GROUP BY t.conference_id
+)
+UPDATE "Conference Stats" cs
+SET "Overall_Power_Rating" = lo.new_opr
+FROM live_opr lo
+WHERE cs.conference_id = lo.conference_id AND cs.season = 2026;
+
+-- Verify: post-refresh table
+SELECT "conference abbreviation", "Overall_Power_Rating", "Stuff_plus", "WRC_plus",
+       round(("Overall_Power_Rating" + 1.25*("Stuff_plus" - 100) + 0.75*(100 - "WRC_plus"))::numeric, 1) AS htp
+FROM "Conference Stats"
+WHERE season = 2026 AND "conference abbreviation" NOT ILIKE 'NJCAA%'
+ORDER BY htp DESC;
+```
+
+Staging post-refresh ordering (for sanity): SEC ~132, ACC ~122, Big 12 ~119, Big Ten ~114, … SWAC ~78, NEC ~78.
+
+Conference Stuff+ and WRC+ already current (verified delta=0 staging 2026-05-21) — no V2 runner needed unless per-pitcher Stuff+ or pitcher_stuff_plus_inputs has changed.
+
+**Open follow-up (not blocking):**
+`scripts/import-park-factors-2026.ts` had a parser bug that corrupted Indiana + Hawaii rows during last import. CSVs are clean; DB rows were malformed. Investigate before next park import run.
 
 ---
 
