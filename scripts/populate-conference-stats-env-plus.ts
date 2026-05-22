@@ -115,8 +115,122 @@ async function populateD1EnvPlus(staging: SupabaseClient, apply: boolean) {
   ok(`D1 env+ populated: ${done}/${updates.length} rows`);
 }
 
+// ── Phase 1b: Refresh D1 conference Overall_Power_Rating ────────────────
+// PA-weighted rollup of per-hitter overall_power_rating per conference.
+// No PA floor — PA weighting itself collapses 1-PA outliers to noise.
+// Skips Independent (manually locked to 100 for Oregon State consistency).
+async function populateD1OverallPowerRating(staging: SupabaseClient, apply: boolean) {
+  step("Phase 1b: D1 conference Overall_Power_Rating refresh (PA-weighted)");
+
+  // Pull D1 hitters w/ OPR. Page through to bypass 1000-row default.
+  const hitters: any[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await staging
+      .from("Hitter Master")
+      .select(`"TeamID", pa, overall_power_rating`)
+      .eq("Season", SEASON_D1)
+      .eq("division", "D1")
+      .not("overall_power_rating", "is", null)
+      .gt("pa", 0)
+      .range(from, from + 999);
+    if (error) throw new Error(`Hitter Master: ${error.message}`);
+    if (!data || data.length === 0) break;
+    hitters.push(...data);
+    if (data.length < 1000) break;
+    from += 1000;
+  }
+  info(`Loaded ${hitters.length} D1 hitters with OPR + pa>0`);
+
+  // Team → conference_id map
+  const { data: teamsTable, error: teamsErr } = await staging
+    .from("Teams Table")
+    .select("id, conference_id");
+  if (teamsErr) throw new Error(`Teams Table: ${teamsErr.message}`);
+  const teamConf = new Map<string, string>();
+  for (const t of (teamsTable ?? []) as any[]) {
+    if (t.id && t.conference_id) teamConf.set(t.id, t.conference_id);
+  }
+
+  // Identify Independent so we can skip (manual override holds)
+  const { data: csRows, error: csErr } = await staging
+    .from("Conference Stats")
+    .select(`conference_id, "conference abbreviation"`)
+    .eq("season", SEASON_D1);
+  if (csErr) throw new Error(`Conference Stats: ${csErr.message}`);
+  const independentId = (csRows ?? []).find((r: any) =>
+    String(r["conference abbreviation"]).toLowerCase() === "independent"
+  )?.conference_id;
+  if (independentId) info(`Independent conference_id ${independentId} will be skipped`);
+
+  // PA-weighted aggregate per conference_id
+  type Agg = { sumWeighted: number; sumPa: number; hitters: number };
+  const byConf = new Map<string, Agg>();
+  let unmappedHitters = 0;
+  for (const h of hitters) {
+    const conf = teamConf.get(h.TeamID);
+    if (!conf) { unmappedHitters++; continue; }
+    if (conf === independentId) continue;
+    const pa = Number(h.pa) || 0;
+    const opr = Number(h.overall_power_rating);
+    if (!pa || !Number.isFinite(opr)) continue;
+    const cur = byConf.get(conf) ?? { sumWeighted: 0, sumPa: 0, hitters: 0 };
+    cur.sumWeighted += opr * pa;
+    cur.sumPa += pa;
+    cur.hitters += 1;
+    byConf.set(conf, cur);
+  }
+  if (unmappedHitters > 0) warn(`${unmappedHitters} hitters had no conference (TeamID not in Teams Table)`);
+
+  // Build update list + preview before/after
+  const abbrById = new Map<string, string>();
+  for (const r of (csRows ?? []) as any[]) abbrById.set(r.conference_id, r["conference abbreviation"]);
+
+  const updates: Array<{ conference_id: string; opr: number; hitters: number; pa: number; abbr: string }> = [];
+  for (const [conf, agg] of byConf) {
+    if (agg.sumPa <= 0) continue;
+    const opr = Math.round((agg.sumWeighted / agg.sumPa) * 10) / 10;
+    updates.push({ conference_id: conf, opr, hitters: agg.hitters, pa: agg.sumPa, abbr: abbrById.get(conf) ?? "?" });
+  }
+  updates.sort((a, b) => b.opr - a.opr);
+
+  // Pull current stored OPR for before/after table
+  const { data: storedRows } = await staging
+    .from("Conference Stats")
+    .select(`conference_id, "Overall_Power_Rating"`)
+    .eq("season", SEASON_D1);
+  const storedById = new Map<string, number | null>();
+  for (const r of (storedRows ?? []) as any[]) storedById.set(r.conference_id, r["Overall_Power_Rating"]);
+
+  console.log(`  ${"conf".padEnd(15)} ${"hitters".padStart(8)} ${"pa".padStart(7)} ${"stored".padStart(8)} ${"new".padStart(8)} ${"delta".padStart(7)}`);
+  for (const u of updates) {
+    const stored = storedById.get(u.conference_id);
+    const delta = stored != null ? (u.opr - stored).toFixed(1) : "n/a";
+    console.log(`  ${u.abbr.padEnd(15)} ${String(u.hitters).padStart(8)} ${String(u.pa).padStart(7)} ${String(stored ?? "null").padStart(8)} ${String(u.opr).padStart(8)} ${delta.padStart(7)}`);
+  }
+
+  if (!apply) { info("(dry-run — not writing)"); return; }
+
+  let done = 0, failed = 0;
+  for (let i = 0; i < updates.length; i += BATCH_SIZE) {
+    const chunk = updates.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(chunk.map(async (u) => {
+      const { error } = await staging
+        .from("Conference Stats")
+        .update({ Overall_Power_Rating: u.opr })
+        .eq("conference_id", u.conference_id)
+        .eq("season", SEASON_D1);
+      return error;
+    }));
+    failed += results.filter(Boolean).length;
+    done += chunk.length - results.filter(Boolean).length;
+  }
+  ok(`D1 OPR refreshed: ${done}/${updates.length} rows (${failed} failed)`);
+}
+
 // ── Phase 2: Insert 10 JUCO district rows ────────────────────────────────
 const SEASON = 2026;
+const SEASON_D1 = 2026;
 
 type DistrictInfo = { district: string; regions: number[]; teamCountByRegion: Record<number, number> };
 
@@ -309,6 +423,7 @@ async function main() {
 
   if (args.apply) await confirm();
   await populateD1EnvPlus(staging, args.apply);
+  await populateD1OverallPowerRating(staging, args.apply);
   await populateJucoDistricts(staging, args.apply);
   console.log("\n" + (args.apply ? COLOR.green + "Done." : COLOR.cyan + "Dry-run complete. Re-run with --apply.") + COLOR.reset);
 }
