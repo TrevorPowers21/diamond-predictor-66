@@ -31,6 +31,8 @@
     "backfill-juco-pitcher-preds": "tsx --env-file-if-exists=.env.local scripts/backfill-juco-pitcher-predictions.ts",
     "precompute-transfers": "tsx --env-file-if-exists=.env.local scripts/precompute-transfer-projections.ts",
     "precompute-transfers:prod": "tsx --env-file-if-exists=.env.production.local scripts/precompute-transfer-projections.ts --prod",
+    "precompute-pitchers": "tsx --env-file-if-exists=.env.local scripts/precompute-pitchers.ts",
+    "precompute-pitchers:prod": "tsx --env-file-if-exists=.env.production.local scripts/precompute-pitchers.ts --prod",
     "import-presto-hitters": "tsx --env-file-if-exists=.env.local scripts/import-juco-presto-hitters.ts",
     "add-presto-missing": "tsx --env-file-if-exists=.env.local scripts/add-presto-missing-hitters.ts",
     "import-presto-pitchers": "tsx --env-file-if-exists=.env.local scripts/import-juco-presto-pitchers.ts",
@@ -91,6 +93,7 @@
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^0.9.9",
+    "web-vitals": "^5.2.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

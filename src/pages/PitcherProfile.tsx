@@ -292,7 +292,7 @@ export default function PitcherProfile() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { hasRole } = useAuth();
+  const { hasRole, effectiveTeamId } = useAuth();
   const { getRole: getSupabaseRole, setRole: setSupabaseRole } = usePitcherRoleOverrides();
   const isAdmin = hasRole("admin");
   const queryClient = useQueryClient();
@@ -1306,18 +1306,42 @@ export default function PitcherProfile() {
     const marketEligible = canShowPitchingMarketValue(teamForMarket, conferenceForMarket);
     const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
 
-    const result = {
-      pEra: roleAdjustedEra,
-      pFip: roleAdjustedFip,
-      pWhip: roleAdjustedWhip,
-      pK9: roleAdjustedK9,
-      pBb9: roleAdjustedBb9,
-      pHr9: roleAdjustedHr9,
-      pRvPlus,
-      pWar,
-      marketValue,
-      projectedIp,
-    };
+    // Prefer stored player_predictions row over live recompute so PitcherProfile
+    // and Dashboard show the same numbers. Precedence:
+    //   - Impersonating a customer team → that team's precomputed transfer row
+    //   - Otherwise → the canonical global "returner" row (customer_team_id NULL)
+    // Live `pEra/pFip/...` above kept as fallback when no stored row exists.
+    const storedTeamRow = effectiveTeamId
+      ? (predictions as any[]).find((p) => p.customer_team_id === effectiveTeamId && p.variant === "precomputed")
+      : null;
+    const storedReturnerRow = (predictions as any[]).find((p) => p.model_type === "returner" && p.variant === "regular" && p.customer_team_id == null);
+    const stored = storedTeamRow ?? storedReturnerRow ?? null;
+
+    const result = stored
+      ? {
+          pEra: stored.p_era ?? roleAdjustedEra,
+          pFip: stored.p_fip ?? roleAdjustedFip,
+          pWhip: stored.p_whip ?? roleAdjustedWhip,
+          pK9: stored.p_k9 ?? roleAdjustedK9,
+          pBb9: stored.p_bb9 ?? roleAdjustedBb9,
+          pHr9: stored.p_hr9 ?? roleAdjustedHr9,
+          pRvPlus: stored.p_rv_plus ?? pRvPlus,
+          pWar,
+          marketValue,
+          projectedIp,
+        }
+      : {
+          pEra: roleAdjustedEra,
+          pFip: roleAdjustedFip,
+          pWhip: roleAdjustedWhip,
+          pK9: roleAdjustedK9,
+          pBb9: roleAdjustedBb9,
+          pHr9: roleAdjustedHr9,
+          pRvPlus,
+          pWar,
+          marketValue,
+          projectedIp,
+        };
     // Cache first valid projection so switching scouting year doesn't wipe it
     const hasData = result.pEra != null || result.pFip != null || result.pWar != null;
     if (hasData) cachedProjectionRef.current = result;
@@ -1345,6 +1369,8 @@ export default function PitcherProfile() {
     displayConference,
     derivedRole,
     projectedRole,
+    predictions,
+    effectiveTeamId,
     storageProjectionOverride?.class_transition,
     storageProjectionOverride?.dev_aggressiveness,
     storageProjectionOverride?.pitcher_role,
