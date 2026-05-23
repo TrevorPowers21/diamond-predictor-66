@@ -223,7 +223,8 @@ async function main() {
         .select("id, player_id, model_type, variant, status, updated_at, from_avg, from_obp, from_slg, class_transition, dev_aggressiveness")
         .in("player_id", idsChunk)
         .in("model_type", ["returner", "transfer"])
-        .is("customer_team_id", null),
+        .is("customer_team_id", null)
+        .eq("season", season),
     );
     predRows.push(...chunk);
   }
