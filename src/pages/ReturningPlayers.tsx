@@ -479,6 +479,7 @@ interface ReturnerPlayer {
     p_ops: number | null;
     p_iso: number | null;
     p_wrc_plus: number | null;
+    o_war: number | null;
     power_rating_plus: number | null;
     ev_score: number | null;
     barrel_score: number | null;
@@ -1531,7 +1532,10 @@ export default function ReturningPlayers() {
           model_type: row.model_type,
           status: row.status,
           pa: player.pa ?? null,
-          nil_value: nilByPlayer.get(player.id) ?? null,
+          // Prefer stored market_value from player_predictions (single source of
+          // truth, matches profile). Falls back to legacy nil_valuations only
+          // when the prediction row has no market_value yet (pre-backfill data).
+          nil_value: (row.market_value ?? nilByPlayer.get(player.id)) ?? null,
           prediction: {
             from_avg: row.from_avg,
             from_obp: row.from_obp,
@@ -1544,6 +1548,7 @@ export default function ReturningPlayers() {
             p_ops: row.p_ops,
             p_iso: row.p_iso,
             p_wrc_plus: row.p_wrc_plus,
+            o_war: row.o_war ?? null,
             power_rating_plus: row.power_rating_plus,
             ev_score: seedEvScore ?? null,
             barrel_score: seedBarrelScore ?? null,
@@ -1734,7 +1739,7 @@ export default function ReturningPlayers() {
           if (sortKey === "p_ops") return p.prediction.p_ops ?? computeDerived(p.prediction.p_avg, p.prediction.p_obp, p.prediction.p_slg).ops ?? -999;
           if (sortKey === "p_iso") return p.prediction.p_iso ?? computeDerived(p.prediction.p_avg, p.prediction.p_obp, p.prediction.p_slg).iso ?? -999;
           if (sortKey === "p_wrc_plus") return p.prediction.p_wrc_plus ?? -999;
-          if (sortKey === "p_war") return computeOWarFromWrcPlus(p.prediction.p_wrc_plus) ?? -999;
+          if (sortKey === "p_war") return p.prediction.o_war ?? computeOWarFromWrcPlus(p.prediction.p_wrc_plus, p.pa) ?? -999;
           if (sortKey === "p_nil") return computeNilFallback({ storedNil: p.nil_value, wrcPlus: p.prediction.p_wrc_plus, conference: p.conference, position: p.position }) ?? -999;
           return -999;
         };
@@ -2935,7 +2940,7 @@ export default function ReturningPlayers() {
                                 class_year: p.class_year,
                                 p_avg: pred.p_avg, p_obp: pred.p_obp, p_slg: pred.p_slg,
                                 p_ops: pred.p_ops, p_iso: pred.p_iso, p_wrc_plus: pred.p_wrc_plus,
-                                owar: computeOWarFromWrcPlus(pred.p_wrc_plus),
+                                owar: pred.o_war ?? computeOWarFromWrcPlus(pred.p_wrc_plus, p.pa),
                                 nil_value: p.nil_value,
                                 power_rating_plus: pred.power_rating_plus,
                                 barrel_score: pred.barrel_score, ev_score: pred.ev_score,
@@ -3020,7 +3025,7 @@ export default function ReturningPlayers() {
                               {pctFormat(pred.p_wrc_plus)}
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">
-                              {statFormat(computeOWarFromWrcPlus(pred.p_wrc_plus), 2)}
+                              {statFormat(pred.o_war ?? computeOWarFromWrcPlus(pred.p_wrc_plus, p.pa), 2)}
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">
                               {moneyFormat(

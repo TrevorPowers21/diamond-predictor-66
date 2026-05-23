@@ -256,8 +256,8 @@ export default function HighFollowList() {
         case "p_ops": av = (a.pred?.p_obp ?? 0) + (a.pred?.p_slg ?? 0); bv = (b.pred?.p_obp ?? 0) + (b.pred?.p_slg ?? 0); break;
         case "p_iso": av = (a.pred?.p_slg ?? 0) - (a.pred?.p_avg ?? 0); bv = (b.pred?.p_slg ?? 0) - (b.pred?.p_avg ?? 0); break;
         case "p_wrc_plus": av = a.pred?.p_wrc_plus ?? -999; bv = b.pred?.p_wrc_plus ?? -999; break;
-        case "owar": av = a.pred?.p_wrc_plus ?? -999; bv = b.pred?.p_wrc_plus ?? -999; break;
-        case "nil": av = a.pred?.nil_value ?? -999; bv = b.pred?.nil_value ?? -999; break;
+        case "owar": av = a.pred?.o_war ?? a.pred?.p_wrc_plus ?? -999; bv = b.pred?.o_war ?? b.pred?.p_wrc_plus ?? -999; break;
+        case "nil": av = a.pred?.market_value ?? -999; bv = b.pred?.market_value ?? -999; break;
         case "p_era": av = a.pitcherProjection?.p_era ?? 999; bv = b.pitcherProjection?.p_era ?? 999; break;
         case "p_fip": av = a.pitcherProjection?.p_fip ?? 999; bv = b.pitcherProjection?.p_fip ?? 999; break;
         case "p_whip": av = a.pitcherProjection?.p_whip ?? 999; bv = b.pitcherProjection?.p_whip ?? 999; break;
