@@ -456,6 +456,8 @@ async function main() {
       devAggressiveness: pred?.dev_aggressiveness ?? null,
       isJucoSource: result.isJucoSource,
       pitchingEq,
+      toConference,
+      toTeam: toTeam.name,
     });
 
     bumpDiv(p.division, "computed");
