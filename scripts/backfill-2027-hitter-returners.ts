@@ -113,25 +113,58 @@ async function main() {
   // ─── Step 3b: load player meta (position + conference + pa) for oWAR/$ ─
   // Returner rows have customer_team_id=NULL, so the "home" conference is the
   // player's current team conference — used for the program-tier market scale.
+  // players.conference is NULL for ~10K rows, so fall back to Teams Table
+  // resolution via source_team_id (or team name) when missing — otherwise the
+  // multiplier defaults to lowMajor (0.5) and every affected player gets
+  // mid-major market values regardless of where they actually play.
   console.log(`${C.cyan}→${C.reset} loading player meta (position + conference + pa)...`);
   const playerIds = Array.from(new Set(rows.map((r) => r.player_id as string)));
   const playerMeta = new Map<string, { position: string | null; conference: string | null; pa: number | null }>();
   const PLAYER_BATCH = 200;
+  const rawPlayers: Array<{ id: string; position: string | null; conference: string | null; pa: number | null; source_team_id: string | null; team: string | null }> = [];
   for (let i = 0; i < playerIds.length; i += PLAYER_BATCH) {
     const ids = playerIds.slice(i, i + PLAYER_BATCH);
     const { data, error } = await supabase
       .from("players")
-      .select("id, position, conference, pa")
+      .select("id, position, conference, pa, source_team_id, team")
       .in("id", ids);
     if (error) throw error;
-    for (const p of (data || []) as any[]) {
-      playerMeta.set(p.id, {
-        position: p.position ?? null,
-        conference: p.conference ?? null,
-        pa: p.pa ?? null,
-      });
-    }
+    for (const p of (data || []) as any[]) rawPlayers.push(p);
   }
+
+  // Build a Teams Table lookup keyed by source_id and by normalized team name
+  // so we can resolve conference when players.conference is null.
+  console.log(`${C.cyan}→${C.reset} loading Teams Table for conference fallback...`);
+  const teamsRows = await loadAllPaged<any>(() =>
+    (supabase as any).from("Teams Table").select("source_id, full_name, abbreviation, conference"),
+  );
+  const teamConfBySourceId = new Map<string, string | null>();
+  const teamConfByName = new Map<string, string | null>();
+  const normKey = (s: string | null | undefined) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  for (const t of teamsRows as any[]) {
+    if (t.source_id) teamConfBySourceId.set(String(t.source_id), t.conference ?? null);
+    if (t.full_name) teamConfByName.set(normKey(t.full_name), t.conference ?? null);
+    if (t.abbreviation) teamConfByName.set(normKey(t.abbreviation), t.conference ?? null);
+  }
+  let confFromPlayer = 0;
+  let confFromSourceId = 0;
+  let confFromName = 0;
+  let confUnresolved = 0;
+  for (const p of rawPlayers) {
+    let conf: string | null = p.conference ?? null;
+    if (conf) confFromPlayer++;
+    else if (p.source_team_id && teamConfBySourceId.has(String(p.source_team_id))) {
+      conf = teamConfBySourceId.get(String(p.source_team_id)) ?? null;
+      if (conf) confFromSourceId++; else confUnresolved++;
+    } else if (p.team && teamConfByName.has(normKey(p.team))) {
+      conf = teamConfByName.get(normKey(p.team)) ?? null;
+      if (conf) confFromName++; else confUnresolved++;
+    } else {
+      confUnresolved++;
+    }
+    playerMeta.set(p.id, { position: p.position, conference: conf, pa: p.pa });
+  }
+  console.log(`  conference resolution: ${confFromPlayer} from players.conference, ${confFromSourceId} from source_team_id, ${confFromName} from team name, ${confUnresolved} unresolved`);
 
   // ─── Step 4: batch-load internals + recalc ───────────────────────────
   console.log(`${C.cyan}→${C.reset} recomputing p_* fields...`);
