@@ -1123,55 +1123,14 @@ export default function PitcherProfile() {
     setProjectedDevAggressiveness(initialProjectedDevAggressiveness);
     setDepthRole(initialDepthRole);
   }, [initialProjectedRole, initialProjectedDevAggressiveness, initialDepthRole]);
+  // Session-only display overlay. Profile dropdowns (depth role, dev agg,
+  // pitcher role) are NEVER persisted — the coach can preview "what if this
+  // pitcher started weekends and was developed aggressively" without
+  // touching stored values. To make any of these stick, the coach uses Team
+  // Builder + target board.
   const updateProjectedInputs = async (updates: { pitcher_role?: "SP" | "RP" | "SM"; dev_aggressiveness?: number }) => {
     if (updates.pitcher_role) setProjectedRole(updates.pitcher_role);
     if (Number.isFinite(Number(updates.dev_aggressiveness))) setProjectedDevAggressiveness(Number(updates.dev_aggressiveness));
-    // Persist pitcher role to Supabase (separate override table, read at display time)
-    if (updates.pitcher_role && id) {
-      setSupabaseRole(id, updates.pitcher_role);
-    }
-    // Route coach edits through the recalc engine so it re-runs the projection
-    // with the new inputs and writes fresh p_era/p_fip/p_whip/p_k9/p_bb9/p_hr9/
-    // p_rv_plus/pitcher_role to player_predictions. Every downstream surface
-    // (Returning Players, High Follow, Team Builder) picks up the updated
-    // values on next render without recomputing.
-    if (isDbRoute && id && (updates.dev_aggressiveness !== undefined || updates.pitcher_role !== undefined)) {
-      const returnerPreds = (predictions as any[]).filter((p) => p.model_type === "returner");
-      if (returnerPreds.length > 0) {
-        const patch: Record<string, any> = {};
-        if (updates.dev_aggressiveness !== undefined) patch.dev_aggressiveness = Number(updates.dev_aggressiveness);
-        if (updates.pitcher_role !== undefined) patch.pitcher_role = updates.pitcher_role;
-        try {
-          for (const pred of returnerPreds) {
-            await recalculatePredictionById(pred.id, patch);
-          }
-          queryClient.invalidateQueries({ queryKey: ["pitcher-profile-predictions", id] });
-          queryClient.invalidateQueries({ queryKey: ["returning-pitcher-predictions-by-source-id"] });
-          queryClient.invalidateQueries({ queryKey: ["hf-predictions"] });
-        } catch (e: any) {
-          toast.error(`Save failed: ${e.message}`);
-        }
-      }
-    }
-    if (isDbRoute && id) {
-      // DB-route edits are persisted by the recalc engine + setSupabaseRole
-      // above. No additional localStorage write needed.
-      return;
-    }
-    // Legacy storage-only path: only reached when the route is non-UUID
-    // (e.g., /dashboard/pitcher/storage__name__team for custom-roster pitchers
-    // without a Supabase UUID). DB-backed pitchers save through the engine
-    // above and never reach this branch. Don't migrate edits made here to the
-    // DB — they belong to phantom pitchers that have no DB row.
-    try {
-      const raw = localStorage.getItem(PITCHER_PROFILE_STORAGE_OVERRIDE_KEY);
-      const parsed = raw ? (JSON.parse(raw) as Record<string, { pitcher_role?: "SP" | "RP" | "SM"; class_transition?: "FS" | "SJ" | "JS" | "GR"; dev_aggressiveness?: number }>) : {};
-      const prev = parsed[storageOverrideKey] || {};
-      parsed[storageOverrideKey] = { ...prev, ...updates };
-      localStorage.setItem(PITCHER_PROFILE_STORAGE_OVERRIDE_KEY, JSON.stringify(parsed));
-    } catch {
-      // ignore local storage failures
-    }
   };
   const cachedProjectionRef = useRef<any>(null);
   const projectedPitching = useMemo(() => {

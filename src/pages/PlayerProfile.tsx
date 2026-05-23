@@ -183,6 +183,9 @@ export default function PlayerProfile() {
   const [editForm, setEditForm] = useState<Record<string, any>>({});
   const [editingPrediction, setEditingPrediction] = useState(false);
   const [predForm, setPredForm] = useState<{ dev_aggressiveness: string }>({ dev_aggressiveness: "0.5" });
+  // Session-only dev_aggressiveness overlay. Profile dropdown is preview-only —
+  // changes never persist. Coach saves via Team Builder target board.
+  const [sessionDevAgg, setSessionDevAgg] = useState<string>("0.5");
   // Session-only depth role overlay. Default = everyday_starter; no DB writes,
   // resets on navigation. Scales the displayed oWAR + market_value.
   const [depthRole, setDepthRole] = useState<HitterDepthRole>("everyday_starter");
@@ -1462,18 +1465,10 @@ export default function PlayerProfile() {
                             </SelectContent>
                           </Select>
                           <Select
-                            value={String(regularPred?.dev_aggressiveness ?? 0.5)}
-                            onValueChange={(v) => {
-                              const returnerPreds = predictions.filter((p) => p.model_type === "returner");
-                              if (returnerPreds.length === 0) return;
-                              updatePrediction.mutate({
-                                predictionIds: returnerPreds.map((p) => p.id),
-                                updates: { dev_aggressiveness: Number(v) },
-                              });
-                            }}
-                            disabled={!isReturner || !regularPred || updatePrediction.isPending}
+                            value={sessionDevAgg}
+                            onValueChange={setSessionDevAgg}
                           >
-                            <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200" title="Developmental aggressiveness — saved"><SelectValue /></SelectTrigger>
+                            <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200" title="Dev aggressiveness — session preview only, not saved"><SelectValue /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="0">0.0</SelectItem>
                               <SelectItem value="0.5">0.5</SelectItem>
