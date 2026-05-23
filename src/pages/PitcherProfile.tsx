@@ -1337,41 +1337,27 @@ export default function PitcherProfile() {
     const storedReturnerRow = (predictions as any[]).find((p) => p.model_type === "returner" && p.variant === "regular" && p.customer_team_id == null);
     const stored = storedTeamRow ?? storedReturnerRow ?? null;
 
-    // Stored-values only. Two-tier source of truth:
-    //   1. player_predictions (precompute output) — preferred when present
-    //   2. Pitching Master (pipeline composite) — fallback when no precompute
-    //      row exists (storage-route pitchers, players not yet covered by the
-    //      precompute filter)
-    // Never live-recompute from raw inputs — that drifts from the pipeline.
-    const pmRvPlus = (projectionSourceRow as any)?.p_rv_plus ?? null;
-    const pmEra = (projectionSourceRow as any)?.era ?? null;
-    const pmFip = (projectionSourceRow as any)?.fip ?? null;
-    const pmWhip = (projectionSourceRow as any)?.whip ?? null;
-    const pmK9 = (projectionSourceRow as any)?.k9 ?? null;
-    const pmBb9 = (projectionSourceRow as any)?.bb9 ?? null;
-    const pmHr9 = (projectionSourceRow as any)?.hr9 ?? null;
-
+    // Stored prediction values only. If no stored row exists, surface "—".
+    // Depth-role knob is the only display overlay; when depth matches stored
+    // role, use stored p_war / market_value directly. When depth differs,
+    // re-scale pWAR + market value from the stored pRV+ × depth-tuned IP.
     const overlayIp = pitcherExpectedIp(depthRole, eq);
     const storedDefaultDepth = stored?.pitcher_role === pitcherRoleFromDepthRole(depthRole);
-    // pWAR + market value: prefer stored at default depth, otherwise re-derive
-    // from canonical pRV+ × depth-tuned IP. Canonical pRV+ falls back from
-    // player_predictions → Pitching Master.
-    const canonicalPrvPlus = stored?.p_rv_plus ?? pmRvPlus;
     const overlayPWar = storedDefaultDepth
-      ? (stored?.p_war ?? computePitcherWar(canonicalPrvPlus, overlayIp, eq))
-      : computePitcherWar(canonicalPrvPlus, overlayIp, eq);
+      ? (stored?.p_war ?? null)
+      : computePitcherWar(stored?.p_rv_plus ?? null, overlayIp, eq);
     const overlayMarketValue = storedDefaultDepth
-      ? (stored?.market_value ?? computePitcherMarketValue(overlayPWar, { conference: conferenceForMarket, role: pitcherRoleFromDepthRole(depthRole), team: teamForMarket }, eq))
+      ? (stored?.market_value ?? null)
       : computePitcherMarketValue(overlayPWar, { conference: conferenceForMarket, role: pitcherRoleFromDepthRole(depthRole), team: teamForMarket }, eq);
 
     const result = {
-      pEra: stored?.p_era ?? pmEra,
-      pFip: stored?.p_fip ?? pmFip,
-      pWhip: stored?.p_whip ?? pmWhip,
-      pK9: stored?.p_k9 ?? pmK9,
-      pBb9: stored?.p_bb9 ?? pmBb9,
-      pHr9: stored?.p_hr9 ?? pmHr9,
-      pRvPlus: canonicalPrvPlus,
+      pEra: stored?.p_era ?? null,
+      pFip: stored?.p_fip ?? null,
+      pWhip: stored?.p_whip ?? null,
+      pK9: stored?.p_k9 ?? null,
+      pBb9: stored?.p_bb9 ?? null,
+      pHr9: stored?.p_hr9 ?? null,
+      pRvPlus: stored?.p_rv_plus ?? null,
       pWar: overlayPWar,
       marketValue: overlayMarketValue,
       projectedIp: overlayIp,
