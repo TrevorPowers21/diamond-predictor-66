@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -185,7 +185,9 @@ export default function PlayerProfile() {
   const [predForm, setPredForm] = useState<{ dev_aggressiveness: string }>({ dev_aggressiveness: "0.5" });
   // Session-only dev_aggressiveness overlay. Profile dropdown is preview-only —
   // changes never persist. Coach saves via Team Builder target board.
-  const [sessionDevAgg, setSessionDevAgg] = useState<string>("0.5");
+  // Default value initialized from stored row in a useEffect below once
+  // predictions load (can't read it here because the query hasn't fired yet).
+  const [sessionDevAgg, setSessionDevAgg] = useState<string>("0");
   // Session-only depth role overlay. Default = everyday_starter; no DB writes,
   // resets on navigation. Scales the displayed oWAR + market_value.
   const [depthRole, setDepthRole] = useState<HitterDepthRole>("everyday_starter");
@@ -526,6 +528,13 @@ export default function PlayerProfile() {
   const { isTransferPortal, isReturner, fromTeamData } = useTransferPortalContext(
     player, predictions, effectiveTeamId,
   );
+  // Sync session dev_agg dropdown to the stored row's value whenever the
+  // prediction changes (player nav, impersonation switch, etc.). Default to
+  // 0 when no stored value exists.
+  useEffect(() => {
+    const stored = regularPred?.dev_aggressiveness;
+    setSessionDevAgg(Number.isFinite(Number(stored)) ? String(Number(stored)) : "0");
+  }, [regularPred?.id, regularPred?.dev_aggressiveness]);
   const { getOverride } = usePlayerOverrides();
   const playerOverride = id ? getOverride(id) : null;
   const effectivePosition = playerOverride?.position ?? player?.position ?? null;
