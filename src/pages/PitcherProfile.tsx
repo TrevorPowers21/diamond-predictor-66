@@ -2219,6 +2219,51 @@ export default function PitcherProfile() {
               );
             })()}
 
+            {/* Career Season Stats — mirrors hitter profile season table */}
+            {(pitcherMasterSeasons as any[]).length > 0 && (
+              <Card className="border-[#162241] bg-[#0a1428]">
+                <CardHeader className="pb-1 pt-3 px-4">
+                  <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Season Stats</CardTitle>
+                </CardHeader>
+                <CardContent className="px-3 pb-3">
+                  <table className="w-full text-xs" style={{ fontFamily: "Inter, sans-serif" }}>
+                    <thead>
+                      <tr className="border-b border-[#162241]">
+                        <th className="text-left py-1.5 pr-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Season</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">G</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">GS</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">IP</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">ERA</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">FIP</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">WHIP</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">K/9</th>
+                        <th className="text-right py-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">BB/9</th>
+                        <th className="text-right py-1.5 pl-1 text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">HR/9</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...(pitcherMasterSeasons as any[])]
+                        .sort((a, b) => Number(b.Season) - Number(a.Season))
+                        .map((s: any, i: number) => (
+                        <tr key={`${s.Season}-${s.Team ?? ""}`} className={`border-b border-[#162241]/60 last:border-0 transition-colors duration-150 hover:bg-[#162241]/40 ${i % 2 === 1 ? "bg-[#0d1a30]" : ""}`}>
+                          <td className="py-1.5 pr-1 font-semibold text-white">{s.Season}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{s.G ?? "—"}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{s.GS ?? "—"}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{s.IP != null ? Number(s.IP).toFixed(1) : "—"}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{fmt(s.ERA, 2)}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{fmt(s.FIP, 2)}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{fmt(s.WHIP, 2)}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{fmt(s.K9, 2)}</td>
+                          <td className="text-right py-1.5 px-1 tabular-nums text-slate-200">{fmt(s.BB9, 2)}</td>
+                          <td className="text-right py-1.5 pl-1 tabular-nums font-bold text-white">{fmt(s.HR9, 2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </CardContent>
+              </Card>
+            )}
+
             <Card className="border-[#162241] bg-[#0a1428]">
               <CardHeader className="pb-2 pt-3 px-4">
                 <div className="flex items-center justify-between">
