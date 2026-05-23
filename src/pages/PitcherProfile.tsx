@@ -36,6 +36,14 @@ import { computePrvPlus } from "@/savant/lib/prvPlus";
 import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
+import {
+  computePitcherWar,
+  computePitcherMarketValue,
+  pitcherExpectedIp,
+  pitcherRoleFromDepthRole,
+  type PitcherDepthRole,
+} from "@/lib/depthRoles";
+import { defaultPitcherDepthRoleFromIp } from "@/pages/team-builder/helpers";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
@@ -1087,11 +1095,12 @@ export default function PitcherProfile() {
   const supabaseRole = id ? getSupabaseRole(id) : null;
   const initialProjectedRole = supabaseRole || storageProjectionOverride?.pitcher_role || derivedRole || "SM";
   const effectiveRoleDisplay = supabaseRole || derivedRole;
-  // DB (activePrediction) is the authoritative source once a coach saves an
-  // edit; localStorage only fills gaps for storage-backed profile editing.
-  const initialProjectedClassTransition = (() => {
+  // Class transition is now auto-derived from class_year in createPredictionsFromMaster,
+  // so the stored row is the source of truth. No UI editor — read it from the
+  // active prediction (or fall back to SJ for the live-recompute fallback path).
+  const projectedClassTransition: "FS" | "SJ" | "JS" | "GR" = (() => {
     const raw = String(activePrediction?.class_transition || playerOverride?.class_transition || storageProjectionOverride?.class_transition || "SJ").toUpperCase();
-    return raw === "FS" || raw === "SJ" || raw === "JS" || raw === "GR" ? raw : "SJ";
+    return raw === "FS" || raw === "SJ" || raw === "JS" || raw === "GR" ? (raw as "FS" | "SJ" | "JS" | "GR") : "SJ";
   })();
   const initialProjectedDevAggressiveness = Number.isFinite(Number(activePrediction?.dev_aggressiveness))
     ? Number(activePrediction?.dev_aggressiveness)
@@ -1099,16 +1108,22 @@ export default function PitcherProfile() {
         ? Number(playerOverride?.dev_aggressiveness ?? storageProjectionOverride?.dev_aggressiveness)
         : 0);
   const [projectedRole, setProjectedRole] = useState<"SP" | "RP" | "SM">(initialProjectedRole as "SP" | "RP" | "SM");
-  const [projectedClassTransition, setProjectedClassTransition] = useState<"FS" | "SJ" | "JS" | "GR">(initialProjectedClassTransition as "FS" | "SJ" | "JS" | "GR");
   const [projectedDevAggressiveness, setProjectedDevAggressiveness] = useState<number>(initialProjectedDevAggressiveness);
+  // Session-only depth role overlay. Default derived from stored pitcher_role +
+  // sample IP — no DB writes, resets on navigation. Drives the displayed
+  // pWAR + market_value via the depthRoles helpers.
+  const initialDepthRole: PitcherDepthRole = defaultPitcherDepthRoleFromIp(
+    storageIp,
+    (effectiveRoleDisplay === "SP" || effectiveRoleDisplay === "RP") ? effectiveRoleDisplay : "RP",
+  );
+  const [depthRole, setDepthRole] = useState<PitcherDepthRole>(initialDepthRole);
   useEffect(() => {
     setProjectedRole(initialProjectedRole as "SP" | "RP" | "SM");
-    setProjectedClassTransition(initialProjectedClassTransition as "FS" | "SJ" | "JS" | "GR");
     setProjectedDevAggressiveness(initialProjectedDevAggressiveness);
-  }, [initialProjectedRole, initialProjectedClassTransition, initialProjectedDevAggressiveness]);
-  const updateProjectedInputs = async (updates: { pitcher_role?: "SP" | "RP" | "SM"; class_transition?: "FS" | "SJ" | "JS" | "GR"; dev_aggressiveness?: number }) => {
+    setDepthRole(initialDepthRole);
+  }, [initialProjectedRole, initialProjectedDevAggressiveness, initialDepthRole]);
+  const updateProjectedInputs = async (updates: { pitcher_role?: "SP" | "RP" | "SM"; dev_aggressiveness?: number }) => {
     if (updates.pitcher_role) setProjectedRole(updates.pitcher_role);
-    if (updates.class_transition) setProjectedClassTransition(updates.class_transition);
     if (Number.isFinite(Number(updates.dev_aggressiveness))) setProjectedDevAggressiveness(Number(updates.dev_aggressiveness));
     // Persist pitcher role to Supabase (separate override table, read at display time)
     if (updates.pitcher_role && id) {
@@ -1119,11 +1134,10 @@ export default function PitcherProfile() {
     // p_rv_plus/pitcher_role to player_predictions. Every downstream surface
     // (Returning Players, High Follow, Team Builder) picks up the updated
     // values on next render without recomputing.
-    if (isDbRoute && id && (updates.class_transition !== undefined || updates.dev_aggressiveness !== undefined || updates.pitcher_role !== undefined)) {
+    if (isDbRoute && id && (updates.dev_aggressiveness !== undefined || updates.pitcher_role !== undefined)) {
       const returnerPreds = (predictions as any[]).filter((p) => p.model_type === "returner");
       if (returnerPreds.length > 0) {
         const patch: Record<string, any> = {};
-        if (updates.class_transition !== undefined) patch.class_transition = updates.class_transition;
         if (updates.dev_aggressiveness !== undefined) patch.dev_aggressiveness = Number(updates.dev_aggressiveness);
         if (updates.pitcher_role !== undefined) patch.pitcher_role = updates.pitcher_role;
         try {
@@ -1322,6 +1336,23 @@ export default function PitcherProfile() {
     const storedReturnerRow = (predictions as any[]).find((p) => p.model_type === "returner" && p.variant === "regular" && p.customer_team_id == null);
     const stored = storedTeamRow ?? storedReturnerRow ?? null;
 
+    // Session-only depth role overlay: swap in fresh pWAR + market_value
+    // derived from the depth-role-tuned IP, keeping the stored row's rates
+    // (era/fip/whip/k9/bb9/hr9 + pRV+) intact. Falls back to live values when
+    // no stored row exists.
+    const overlayBasePrvPlus = stored?.p_rv_plus ?? pRvPlus;
+    const overlayIp = pitcherExpectedIp(depthRole, eq);
+    const overlayPWar = computePitcherWar(overlayBasePrvPlus, overlayIp, eq);
+    const overlayMarketValue = computePitcherMarketValue(
+      overlayPWar,
+      {
+        conference: conferenceForMarket,
+        role: pitcherRoleFromDepthRole(depthRole),
+        team: teamForMarket,
+      },
+      eq,
+    );
+
     const result = stored
       ? {
           pEra: stored.p_era ?? roleAdjustedEra,
@@ -1331,9 +1362,9 @@ export default function PitcherProfile() {
           pBb9: stored.p_bb9 ?? roleAdjustedBb9,
           pHr9: stored.p_hr9 ?? roleAdjustedHr9,
           pRvPlus: stored.p_rv_plus ?? pRvPlus,
-          pWar,
-          marketValue,
-          projectedIp,
+          pWar: overlayPWar ?? pWar,
+          marketValue: overlayMarketValue ?? marketValue,
+          projectedIp: overlayIp,
         }
       : {
           pEra: roleAdjustedEra,
@@ -1343,9 +1374,9 @@ export default function PitcherProfile() {
           pBb9: roleAdjustedBb9,
           pHr9: roleAdjustedHr9,
           pRvPlus,
-          pWar,
-          marketValue,
-          projectedIp,
+          pWar: overlayPWar ?? pWar,
+          marketValue: overlayMarketValue ?? marketValue,
+          projectedIp: overlayIp,
         };
     // Cache first valid projection so switching scouting year doesn't wipe it
     const hasData = result.pEra != null || result.pFip != null || result.pWar != null;
@@ -1354,6 +1385,7 @@ export default function PitcherProfile() {
   }, [
     projectedClassTransition,
     projectedDevAggressiveness,
+    depthRole,
     internalPowerRatings?.bb9Plus,
     internalPowerRatings?.eraPlus,
     internalPowerRatings?.fipPlus,
@@ -2150,13 +2182,17 @@ export default function PitcherProfile() {
                             <SelectItem value="SM">SM</SelectItem>
                           </SelectContent>
                         </Select>
-                        <Select value={projectedClassTransition} onValueChange={(v) => updateProjectedInputs({ class_transition: v as "FS" | "SJ" | "JS" | "GR" })}>
-                          <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
+                        <Select value={depthRole} onValueChange={(v) => setDepthRole(v as PitcherDepthRole)}>
+                          <SelectTrigger className="h-7 w-[160px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200" title="Depth role — session-only display overlay; not saved"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="FS">FS</SelectItem>
-                            <SelectItem value="SJ">SJ</SelectItem>
-                            <SelectItem value="JS">JS</SelectItem>
-                            <SelectItem value="GR">GR</SelectItem>
+                            <SelectItem value="weekend_starter">Weekend Starter</SelectItem>
+                            <SelectItem value="weekday_starter">Weekday Starter</SelectItem>
+                            <SelectItem value="swing_starter">Swing Starter</SelectItem>
+                            <SelectItem value="workhorse_reliever">Workhorse Reliever</SelectItem>
+                            <SelectItem value="high_leverage_reliever">High-Leverage Reliever</SelectItem>
+                            <SelectItem value="mid_leverage_reliever">Mid-Leverage Reliever</SelectItem>
+                            <SelectItem value="low_impact_reliever">Low-Impact Reliever</SelectItem>
+                            <SelectItem value="specialist_reliever">Specialist Reliever</SelectItem>
                           </SelectContent>
                         </Select>
                         <Select value={String(projectedDevAggressiveness)} onValueChange={(v) => updateProjectedInputs({ dev_aggressiveness: Number(v) })}>

@@ -41,6 +41,7 @@ import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
 import { normalizeName, nameTeamKey, normalizeTeamForKey, getNameVariants } from "@/lib/nameUtils";
 import { useSeedDataMaps } from "@/hooks/useSeedDataMaps";
 import { useTransferPortalContext } from "@/hooks/useTransferPortalContext";
+import { hitterDepthRoleMultiplier, type HitterDepthRole } from "@/lib/depthRoles";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -181,7 +182,10 @@ export default function PlayerProfile() {
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, any>>({});
   const [editingPrediction, setEditingPrediction] = useState(false);
-  const [predForm, setPredForm] = useState<{ class_transition: string; dev_aggressiveness: string }>({ class_transition: "", dev_aggressiveness: "0.5" });
+  const [predForm, setPredForm] = useState<{ dev_aggressiveness: string }>({ dev_aggressiveness: "0.5" });
+  // Session-only depth role overlay. Default = everyday_starter; no DB writes,
+  // resets on navigation. Scales the displayed oWAR + market_value.
+  const [depthRole, setDepthRole] = useState<HitterDepthRole>("everyday_starter");
 
   const { data: player, isLoading } = useQuery({
     queryKey: ["player-profile", id],
@@ -454,7 +458,6 @@ export default function PlayerProfile() {
         if (error) throw error;
         await recalculatePredictionById(predId, {
           dev_aggressiveness: updates.dev_aggressiveness,
-          class_transition: updates.class_transition,
         });
         // Re-lock
         await supabase.from("player_predictions").update({ locked: true }).eq("id", predId);
@@ -526,7 +529,6 @@ export default function PlayerProfile() {
 
   const startPredEdit = () => {
     setPredForm({
-      class_transition: regularPred?.class_transition || "",
       dev_aggressiveness: regularPred?.dev_aggressiveness?.toString() ?? "0.5",
     });
     setEditingPrediction(true);
@@ -536,23 +538,8 @@ export default function PlayerProfile() {
     const returnerPreds = predictions.filter((p) => p.model_type === "returner");
     if (returnerPreds.length === 0) return;
     const updates: Record<string, any> = {
-      class_transition: predForm.class_transition || null,
       dev_aggressiveness: predForm.dev_aggressiveness !== "" ? Number(predForm.dev_aggressiveness) : null,
     };
-    // Keep players.class_year aligned with the source side of the transition
-    // (the player's CURRENT class this season — not the post-transition target).
-    // Preserve an R-/RS- redshirt prefix when the underlying class still matches:
-    // a coach picking FS on a player already stored as "R-FR" should leave R-FR intact.
-    if (predForm.class_transition && classTransitionToCurrentYear[predForm.class_transition]) {
-      const targetPlain = classTransitionToCurrentYear[predForm.class_transition];
-      const currentRaw = (player?.class_year || "").trim().toUpperCase();
-      const currentStripped = currentRaw.replace(/^(RS?-?\s*)+/, "");
-      if (currentStripped !== targetPlain) {
-        supabase.from("players").update({ class_year: targetPlain }).eq("id", id!).then(() => {
-          queryClient.invalidateQueries({ queryKey: ["player-profile", id] });
-        });
-      }
-    }
     updatePrediction.mutate({ predictionIds: returnerPreds.map((p) => p.id), updates });
   };
 
@@ -739,12 +726,18 @@ export default function PlayerProfile() {
   // projects to ~100 PA of WAR, not a full-time 260. Prevents misleading
   // 2 WAR / 90K valuations for limited-role returners.
   const carryForwardPa = projectionSourceRow?.pa ?? (player as any)?.pa ?? null;
-  const projectedOWar = computeOWarFromWrcPlus(regularPred?.p_wrc_plus ?? null, carryForwardPa);
+  const baseProjectedOWar = computeOWarFromWrcPlus(regularPred?.p_wrc_plus ?? null, carryForwardPa);
   const historicalOWar = computeOWarFromWrcPlus(seedDerived?.wrcPlus ?? null, (player as any)?.pa ?? null);
+  // Session-only depth role overlay scales the projected/displayed oWAR
+  // (and downstream market value) without touching the stored row.
+  const depthMultiplier = hitterDepthRoleMultiplier(depthRole);
+  const projectedOWar = baseProjectedOWar != null ? baseProjectedOWar * depthMultiplier : null;
   const displayOWar =
     projectedOWar ??
-    ((nilValuation as any)?.war as number | null) ??
-    historicalOWar;
+    (((nilValuation as any)?.war as number | null) != null
+      ? ((nilValuation as any).war as number) * depthMultiplier
+      : null) ??
+    (historicalOWar != null ? historicalOWar * depthMultiplier : null);
   const nilBasePerOWar = 25000;
   const resolvedConference = (() => {
     if (player.conference) return player.conference;
@@ -757,7 +750,12 @@ export default function PlayerProfile() {
     const pvm = getPositionValueMultiplier(effectivePosition);
     return displayOWar * nilBasePerOWar * ptm * pvm;
   })();
-  const displayNilValuation = (nilValuation as any)?.estimated_value ?? fallbackNilValuation;
+  // When depth role is overlaid (non-default), derive market value from the
+  // overlaid oWAR so it tracks the displayed pWAR-equivalent. Otherwise prefer
+  // the stored estimated_value when present.
+  const displayNilValuation = depthRole !== "everyday_starter"
+    ? fallbackNilValuation
+    : ((nilValuation as any)?.estimated_value ?? fallbackNilValuation);
   const predFromAvg = seedStatRow?.avg ?? regularPred?.from_avg ?? null;
   const predFromObp = seedStatRow?.obp ?? regularPred?.from_obp ?? null;
   const predFromSlg = seedStatRow?.slg ?? regularPred?.from_slg ?? null;
@@ -1456,44 +1454,45 @@ export default function PlayerProfile() {
                     <CardHeader className="pb-2 pt-3 px-4">
                       <div className="flex items-center gap-3 flex-wrap">
                         <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2027 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
-                        {editingPrediction && regularPred ? (
-                          <div className="flex items-center gap-1.5">
-                            <Select value={predForm.class_transition || "none"} onValueChange={(v) => setPredForm({ ...predForm, class_transition: v === "none" ? "" : v })}>
-                              <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">—</SelectItem>
-                                <SelectItem value="FS">FS</SelectItem>
-                                <SelectItem value="SJ">SJ</SelectItem>
-                                <SelectItem value="JS">JS</SelectItem>
-                                <SelectItem value="GR">GR</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <Select value={predForm.dev_aggressiveness} onValueChange={(v) => setPredForm({ ...predForm, dev_aggressiveness: v })}>
-                              <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="0">0.0</SelectItem>
-                                <SelectItem value="0.5">0.5</SelectItem>
-                                <SelectItem value="1">1.0</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setEditingPrediction(false)}>
-                              <X className="h-3 w-3" />
-                            </Button>
-                            <Button size="sm" className="h-7 text-xs" onClick={savePredEdit} disabled={updatePrediction.isPending}>
-                              <Save className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1.5">
-                            {regularPred?.class_transition && <span className="text-xs text-[#8a94a6]">{regularPred.class_transition}</span>}
-                            {regularPred?.dev_aggressiveness != null && <span className="text-xs text-[#8a94a6]">· Dev {regularPred.dev_aggressiveness}</span>}
-                            {isReturner && regularPred && (
-                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={startPredEdit}>
-                                <Pencil className="h-3 w-3" />
+                        <div className="flex items-center gap-1.5">
+                          <Select value={depthRole} onValueChange={(v) => setDepthRole(v as HitterDepthRole)}>
+                            <SelectTrigger className="h-7 w-[150px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200" title="Depth role — session-only display overlay; not saved"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="cornerstone">Cornerstone</SelectItem>
+                              <SelectItem value="everyday_starter">Everyday Starter</SelectItem>
+                              <SelectItem value="platoon_starter">Platoon Starter</SelectItem>
+                              <SelectItem value="utility">Utility</SelectItem>
+                              <SelectItem value="bench">Bench</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {editingPrediction && regularPred ? (
+                            <>
+                              <Select value={predForm.dev_aggressiveness} onValueChange={(v) => setPredForm({ ...predForm, dev_aggressiveness: v })}>
+                                <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="0">0.0</SelectItem>
+                                  <SelectItem value="0.5">0.5</SelectItem>
+                                  <SelectItem value="1">1.0</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setEditingPrediction(false)}>
+                                <X className="h-3 w-3" />
                               </Button>
-                            )}
-                          </div>
-                        )}
+                              <Button size="sm" className="h-7 text-xs" onClick={savePredEdit} disabled={updatePrediction.isPending}>
+                                <Save className="h-3 w-3" />
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              {regularPred?.dev_aggressiveness != null && <span className="text-xs text-[#8a94a6]">Dev {regularPred.dev_aggressiveness}</span>}
+                              {isReturner && regularPred && (
+                                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={startPredEdit}>
+                                  <Pencil className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </>
+                          )}
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent className="px-4 pb-4">

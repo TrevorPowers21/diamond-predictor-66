@@ -120,7 +120,7 @@ interface EngineConfig {
   transfer: TransferConfig;
 }
 
-interface ReturnerPowerContext {
+export interface ReturnerPowerContext {
   baPlus: number | null;
   obpPlus: number | null;
   isoPlus: number | null;
@@ -168,7 +168,7 @@ function normalizeProjectedRate(v: number): number {
   return v;
 }
 
-function readSpecificPlus(v: number | null | undefined): number | null {
+export function readSpecificPlus(v: number | null | undefined): number | null {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
@@ -192,7 +192,7 @@ function normalizeClassTransition(raw?: string | null): string {
   return "SJ";
 }
 
-async function loadEngineConfig(customerTeamId?: string | null): Promise<EngineConfig> {
+export async function loadEngineConfig(customerTeamId?: string | null): Promise<EngineConfig> {
   // Load from "Equation Weights" table (primary), fall back to "model_config" (legacy)
   let eqWeights: Map<string, number>;
   try {
@@ -399,7 +399,7 @@ async function loadEngineConfig(customerTeamId?: string | null): Promise<EngineC
   return { returner, transfer };
 }
 
-function recalcReturner(
+export function recalcReturner(
   pred: PredictionRow,
   config: ReturnerConfig,
   powerContext?: ReturnerPowerContext,
