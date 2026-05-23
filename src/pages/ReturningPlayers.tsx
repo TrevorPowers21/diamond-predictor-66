@@ -490,6 +490,7 @@ interface ReturnerPlayer {
 
 interface PitchingDashboardRow {
   id: string;
+  player_id: string | null;
   playerName: string;
   team: string | null;
   conference: string | null;
@@ -2246,13 +2247,13 @@ export default function ReturningPlayers() {
   const { data: pitcherMetaBySourceId } = useQuery({
     queryKey: ["returning-pitcher-meta-by-source-id"],
     queryFn: async () => {
-      const map = new Map<string, { class_year: string | null; is_twp: boolean }>();
+      const map = new Map<string, { class_year: string | null; is_twp: boolean; player_id: string | null }>();
       let from = 0;
       const PAGE = 1000;
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("source_player_id, class_year, is_twp")
+          .select("id, source_player_id, class_year, is_twp")
           .not("source_player_id", "is", null)
           .range(from, from + PAGE - 1);
         if (error) throw error;
@@ -2261,6 +2262,7 @@ export default function ReturningPlayers() {
             map.set(r.source_player_id, {
               class_year: r.class_year ?? null,
               is_twp: !!r.is_twp,
+              player_id: r.id ?? null,
             });
           }
         }
@@ -2425,6 +2427,7 @@ export default function ReturningPlayers() {
           // misleading info is worse than no info.
           return {
             id: r.id || `pitching-master-${idx}`,
+            player_id: pitcherMeta?.player_id ?? null,
             playerName,
             team: normalizedTeam || null,
             conference: teamMatch?.conference ?? r.conference ?? null,
@@ -3321,7 +3324,9 @@ export default function ReturningPlayers() {
                               <div className={(r.is_twp || ((r as any).portal_status && (r as any).portal_status !== "NOT IN PORTAL")) ? "flex items-center gap-2" : undefined}>
                                 <div className="min-w-0">
                                   <Link
-                                    to={`/dashboard/pitcher/storage__${encodeURIComponent(r.playerName)}__${encodeURIComponent(r.team || "")}`}
+                                    to={r.player_id
+                                      ? `/dashboard/pitcher/${r.player_id}`
+                                      : `/dashboard/pitcher/storage__${encodeURIComponent(r.playerName)}__${encodeURIComponent(r.team || "")}`}
                                     onClick={saveViewSnapshot}
                                     className="hover:text-primary hover:underline transition-colors"
                                   >
