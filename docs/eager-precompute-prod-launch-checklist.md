@@ -16,6 +16,7 @@ Goal: zero-surprise launch. Every step here has been validated on staging first.
 | A3b | Conference Stats Independent pitching rates (mean ERA/FIP/WHIP/K9/BB9/HR9 → env+ = 100) | ⏳ | staging only | pending |
 | A3c | Park Factors corruption fix for Indiana + Hawaii (rows had malformed values from import bug, recomputed from source CSVs) | ✅ | 2026-05-21 prod by Trevor | yes |
 | A3d | D1 Conference Stats `Overall_Power_Rating` refresh (PA-weighted from per-hitter OPR, ID-based skip Independent) | ⏳ | staging only | pending |
+| A3e | Add `p_war` + `o_war` + `market_value` + `projected_ip` + `projected_pa` columns to `player_predictions` (stored derived values) | ⏳ | staging only | pending |
 | A4 | `precompute_jobs` queue table | ⏳ | not yet | |
 | A5 | DB trigger: `AFTER INSERT ON customer_teams` → enqueue | ⏳ | not yet | |
 | A6 | Optional: trigger on stats ingest (debounced) | ⏳ | future | |
@@ -138,6 +139,39 @@ Conference Stuff+ and WRC+ already current (verified delta=0 staging 2026-05-21)
 
 **Open follow-up (not blocking):**
 `scripts/import-park-factors-2026.ts` had a parser bug that corrupted Indiana + Hawaii rows during last import. CSVs are clean; DB rows were malformed. Investigate before next park import run.
+
+A3e — Stored derived value columns on `player_predictions` (additive, idempotent).
+
+Replaces live recompute of pWAR/oWAR/market_value across PitcherProfile, PlayerProfile, Dashboard, etc. with pure stored reads. Paste on prod:
+
+```sql
+ALTER TABLE player_predictions
+  ADD COLUMN IF NOT EXISTS p_war numeric,
+  ADD COLUMN IF NOT EXISTS o_war numeric,
+  ADD COLUMN IF NOT EXISTS market_value numeric,
+  ADD COLUMN IF NOT EXISTS projected_ip numeric,
+  ADD COLUMN IF NOT EXISTS projected_pa numeric;
+
+COMMENT ON COLUMN player_predictions.p_war IS
+  'Stored pitcher WAR — derived from p_rv_plus + projected_ip + role. Replaces live compute.';
+COMMENT ON COLUMN player_predictions.o_war IS
+  'Stored hitter WAR — derived from p_wrc_plus + projected_pa + depth_role multiplier.';
+COMMENT ON COLUMN player_predictions.market_value IS
+  'Stored dollar valuation — derived from p_war/o_war × conference tier × position-value multiplier.';
+COMMENT ON COLUMN player_predictions.projected_ip IS
+  'IP estimate used in p_war calc (varies by role: SP=85, RP=35, SM=50 from equation weights).';
+COMMENT ON COLUMN player_predictions.projected_pa IS
+  'PA estimate used in o_war calc (varies by depth_role).';
+
+-- Verify
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name = 'player_predictions'
+  AND column_name IN ('p_war','o_war','market_value','projected_ip','projected_pa')
+ORDER BY column_name;
+```
+
+Expected verify: 5 rows, all `numeric`. After columns exist, prod also needs the pitcher precompute re-run (Section K step 5) + returner pipeline run so columns get populated for all pitchers.
 
 ---
 

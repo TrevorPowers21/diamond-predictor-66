@@ -459,6 +459,15 @@ async function main() {
 
     bumpDiv(p.division, "computed");
 
+    // projected_ip drives pWAR — base SP/RP/SM lookup from equation weights.
+    // Display overlays (depth_role) modify this at read time; the stored
+    // value is the base-role IP estimate.
+    const projectedIp = final.pitcher_role === "SP"
+      ? pitchingEq.pwar_ip_sp
+      : final.pitcher_role === "RP"
+        ? pitchingEq.pwar_ip_rp
+        : pitchingEq.pwar_ip_sm;
+
     upserts.push({
       player_id: p.id,
       customer_team_id: teamId,
@@ -475,6 +484,9 @@ async function main() {
       p_bb9: final.p_bb9,
       p_hr9: final.p_hr9,
       p_rv_plus: final.p_rv_plus,
+      p_war: final.p_war,
+      market_value: final.market_value,
+      projected_ip: projectedIp,
       pitcher_role: final.pitcher_role,
       updated_at: new Date().toISOString(),
     });

@@ -3,7 +3,7 @@ import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
 import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { fetchParkFactorsMap, type ParkFactorsMap } from "@/lib/parkFactors";
-import { PRIOR_SEASON } from "@/lib/seasonConstants";
+import { PRIOR_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { computePitcherProjection, type PitcherProjectionInput } from "@/lib/pitcherProjection";
 import { PITCHING_EQ_DEFAULTS } from "@/hooks/usePitchingEquationWeights";
 
@@ -1128,7 +1128,7 @@ export async function recalculatePredictionById(predictionId: string, updates: U
   return { success: true, prediction: result };
 }
 
-export async function bulkRecalculatePredictionsLocal(season = 2026) {
+export async function bulkRecalculatePredictionsLocal(season: number = PROJECTION_SEASON) {
   const config = await loadEngineConfig();
   const allPreds = await fetchAllPredictionsForReturnerMode(season);
   // A prediction row qualifies for the hitter pass when it has any hitter

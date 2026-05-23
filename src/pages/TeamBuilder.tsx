@@ -30,6 +30,7 @@ import {
   teamMatchesSelectedTeam, splitFullNameExport as splitFullName, isPitcher,
 } from "./team-builder/helpers";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
+import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import {
   calcPlayerScore,
   DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
@@ -2305,6 +2306,7 @@ export default function TeamBuilder() {
         .eq("player_id", row.id)
         .eq("customer_team_id", effectiveTeamId)
         .eq("variant", "precomputed")
+        .eq("season", PROJECTION_SEASON)
         .eq("status", "active")
         .maybeSingle();
       if (precomputedTeamRow) {

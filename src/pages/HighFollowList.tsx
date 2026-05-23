@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Search, X, ArrowUpDown, Star } from "lucide-react";
-import { CURRENT_SEASON } from "@/lib/seasonConstants";
+import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { cn } from "@/lib/utils";
 import { useHighFollow, type HighFollowRow } from "@/hooks/useHighFollow";
 import { useQuery } from "@tanstack/react-query";
@@ -115,7 +115,7 @@ export default function HighFollowList() {
     queryKey: ["hf-predictions", playerIds, effectiveTeamId],
     enabled: playerIds.length > 0,
     queryFn: async () => {
-      let q = supabase.from("player_predictions").select("*").in("player_id", playerIds).eq("status", "active");
+      let q = supabase.from("player_predictions").select("*").in("player_id", playerIds).eq("season", PROJECTION_SEASON).eq("status", "active");
       q = applyTeamScopeFilter(q as any, effectiveTeamId);
       const { data } = await q;
       // Prefer team-scoped precomputed row per player, fall back to global regular.

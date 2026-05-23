@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import {
   ArrowUpDown,
   Search,
@@ -1580,6 +1581,7 @@ export default function ReturningPlayers() {
         const { data: pageData, error: pageErr, count } = await supabase
           .from("player_predictions")
           .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip)", { count: "exact" })
+          .eq("season", PROJECTION_SEASON)
           .in("model_type", ["returner", "transfer"])
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
@@ -1629,6 +1631,7 @@ export default function ReturningPlayers() {
           let q = supabase
             .from("player_predictions")
             .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip)")
+            .eq("season", PROJECTION_SEASON)
             .in("model_type", ["returner", "transfer"])
             .in("variant", ["regular", "precomputed"])
             .in("status", ["active", "departed"])
@@ -1822,6 +1825,7 @@ export default function ReturningPlayers() {
       let predQuery = supabase
         .from("player_predictions")
         .select("*")
+        .eq("season", PROJECTION_SEASON)
         .in("player_id", playerIds)
         .in("model_type", ["returner", "transfer"])
         .in("variant", ["regular", "precomputed"])
@@ -2071,6 +2075,7 @@ export default function ReturningPlayers() {
       const { data: allReturnerPreds, error } = await supabase
         .from("player_predictions")
         .select("id")
+        .eq("season", PROJECTION_SEASON)
         .eq("model_type", "returner")
         .eq("variant", "regular")
         .in("status", ["active", "departed"]);
@@ -2187,6 +2192,7 @@ export default function ReturningPlayers() {
         const { data, error } = await supabase
           .from("player_predictions")
           .select("p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, players!inner(source_player_id, class_year)")
+          .eq("season", PROJECTION_SEASON)
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
           .not("p_era", "is", null)

@@ -24,8 +24,14 @@ import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
 import { calculateConferenceStuffPlus } from "@/savant/lib/conferenceStuffPlus";
 import { computeConferenceEnvRates } from "@/lib/importConferenceStats";
 import { bulkRecalculatePredictionsLocal } from "@/lib/predictionEngine";
+import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 
-const SEASON = 2026;
+// DATA steps (read Master tables, compute NCAA averages, conference rates,
+// Stuff+) run against the actuals season — what's on the field.
+// PROJECTION steps (write/recalc player_predictions rows) run against the
+// projection season — what we predict for next year.
+const DATA_SEASON = CURRENT_SEASON;
+const PROJ_SEASON = PROJECTION_SEASON;
 const C = { reset: "\x1b[0m", bold: "\x1b[1m", green: "\x1b[32m", red: "\x1b[31m", cyan: "\x1b[36m" };
 
 async function step(label: string, fn: () => Promise<any>) {
@@ -43,15 +49,15 @@ async function step(label: string, fn: () => Promise<any>) {
 
 async function main() {
   const isProd = process.argv.includes("--prod");
-  console.log(`${C.bold}Cascade replay — season ${SEASON} on ${isProd ? "PROD" : "STAGING"}${C.reset}`);
+  console.log(`${C.bold}Cascade replay — data ${DATA_SEASON} → projections ${PROJ_SEASON} on ${isProd ? "PROD" : "STAGING"}${C.reset}`);
 
-  await step("addMissingPlayers", () => addMissingPlayers(SEASON));
-  await step("computeAndStoreNcaaAverages", () => computeAndStoreNcaaAverages(SEASON));
-  await step("computeAndStoreAllScores", () => computeAndStoreAllScores(SEASON));
-  await step("createPredictionsFromMaster", () => createPredictionsFromMaster(SEASON));
-  await step("calculateConferenceStuffPlus", () => calculateConferenceStuffPlus(SEASON));
-  await step("computeConferenceEnvRates", () => computeConferenceEnvRates(SEASON));
-  await step("bulkRecalculatePredictionsLocal", () => bulkRecalculatePredictionsLocal(SEASON));
+  await step("addMissingPlayers", () => addMissingPlayers(DATA_SEASON));
+  await step("computeAndStoreNcaaAverages", () => computeAndStoreNcaaAverages(DATA_SEASON));
+  await step("computeAndStoreAllScores", () => computeAndStoreAllScores(DATA_SEASON));
+  await step("createPredictionsFromMaster", () => createPredictionsFromMaster(DATA_SEASON, PROJ_SEASON));
+  await step("calculateConferenceStuffPlus", () => calculateConferenceStuffPlus(DATA_SEASON));
+  await step("computeConferenceEnvRates", () => computeConferenceEnvRates(DATA_SEASON));
+  await step("bulkRecalculatePredictionsLocal", () => bulkRecalculatePredictionsLocal(PROJ_SEASON));
 
   console.log(`\n${C.green}✓✓✓  Cascade complete${C.reset}`);
 }

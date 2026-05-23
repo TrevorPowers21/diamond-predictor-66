@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -233,10 +234,13 @@ export default function PlayerProfile() {
       // Load global rows (customer_team_id IS NULL) plus team-scoped rows
       // for the active customer team if any. The team-scoped row is preferred
       // downstream via regularPred selection so a coach sees "their numbers".
+      // Season pinned to PROJECTION_SEASON so historical projection rows
+      // (preserved as research material) don't leak into display.
       let query = supabase
         .from("player_predictions")
         .select("*")
         .eq("player_id", id!)
+        .eq("season", PROJECTION_SEASON)
         .eq("status", "active");
       query = effectiveTeamId
         ? query.or(`customer_team_id.is.null,customer_team_id.eq.${effectiveTeamId}`)

@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
+import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { projectPitchingRate } from "@/lib/pitcherProjection";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
@@ -474,10 +475,14 @@ export default function PitcherProfile() {
     queryKey: ["pitcher-profile-predictions", id],
     enabled: !!id && isDbRoute,
     queryFn: async () => {
+      // Season filter pins to PROJECTION_SEASON so the read picks the
+      // current projection-year row, not any historical row from prior years
+      // (which we now preserve as research history). See docs/stored-derived-values-plan.md.
       const { data, error } = await supabase
         .from("player_predictions")
         .select("*")
         .eq("player_id", id!)
+        .eq("season", PROJECTION_SEASON)
         .eq("status", "active");
       if (error) throw error;
       return data || [];
