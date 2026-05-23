@@ -1337,60 +1337,36 @@ export default function PitcherProfile() {
     const storedReturnerRow = (predictions as any[]).find((p) => p.model_type === "returner" && p.variant === "regular" && p.customer_team_id == null);
     const stored = storedTeamRow ?? storedReturnerRow ?? null;
 
-    // Canonical pRV+ precedence: stored player_predictions → Pitching Master's
-    // pipeline composite → live recompute. Pitching Master.p_rv_plus is the
-    // weighted composite the pipeline writes; using the live-recomputed
-    // value here drifts from what every other surface shows.
-    const pmPrvPlus = (projectionSourceRow as any)?.p_rv_plus ?? null;
-    const canonicalPrvPlus = stored?.p_rv_plus ?? pmPrvPlus ?? pRvPlus;
-
-    // Session-only depth role overlay: re-derive pWAR + market_value from the
-    // canonical pRV+ and the depth-role-tuned IP. When at the default role
-    // (depthRole matches what's stored), prefer stored p_war/market_value
-    // directly so the profile matches the dashboard byte-for-byte.
+    // Stored-values only. If no precompute row exists, surface nulls
+    // (display as "—") instead of live-computing — live drifts from stored
+    // and misleading numbers are worse than no numbers.
     const overlayIp = pitcherExpectedIp(depthRole, eq);
-    const overlayPWar = computePitcherWar(canonicalPrvPlus, overlayIp, eq);
-    const overlayMarketValue = computePitcherMarketValue(
-      overlayPWar,
-      {
-        conference: conferenceForMarket,
-        role: pitcherRoleFromDepthRole(depthRole),
-        team: teamForMarket,
-      },
-      eq,
-    );
-
-    // Use stored p_war + market_value directly when at default depth role
-    // (no overlay applied). Otherwise the overlay version reflects the knob.
     const storedDefaultDepth = stored?.pitcher_role === pitcherRoleFromDepthRole(depthRole);
-    const finalPWar = storedDefaultDepth ? (stored?.p_war ?? overlayPWar) : overlayPWar;
-    const finalMarketValue = storedDefaultDepth ? (stored?.market_value ?? overlayMarketValue) : overlayMarketValue;
+    // Depth-role overlay is the ONLY allowed display adjustment — it scales
+    // pWAR + market value to the new IP, using the stored pRV+ as the base.
+    const overlayPWar = storedDefaultDepth
+      ? (stored?.p_war ?? null)
+      : computePitcherWar(stored?.p_rv_plus ?? null, overlayIp, eq);
+    const overlayMarketValue = storedDefaultDepth
+      ? (stored?.market_value ?? null)
+      : computePitcherMarketValue(
+          overlayPWar,
+          { conference: conferenceForMarket, role: pitcherRoleFromDepthRole(depthRole), team: teamForMarket },
+          eq,
+        );
 
-    const result = stored
-      ? {
-          pEra: stored.p_era ?? roleAdjustedEra,
-          pFip: stored.p_fip ?? roleAdjustedFip,
-          pWhip: stored.p_whip ?? roleAdjustedWhip,
-          pK9: stored.p_k9 ?? roleAdjustedK9,
-          pBb9: stored.p_bb9 ?? roleAdjustedBb9,
-          pHr9: stored.p_hr9 ?? roleAdjustedHr9,
-          pRvPlus: canonicalPrvPlus,
-          pWar: finalPWar ?? pWar,
-          marketValue: finalMarketValue ?? marketValue,
-          projectedIp: overlayIp,
-        }
-      : {
-          pEra: roleAdjustedEra,
-          pFip: roleAdjustedFip,
-          pWhip: roleAdjustedWhip,
-          pK9: roleAdjustedK9,
-          pBb9: roleAdjustedBb9,
-          pHr9: roleAdjustedHr9,
-          pRvPlus: canonicalPrvPlus,
-          pWar: overlayPWar ?? pWar,
-          marketValue: overlayMarketValue ?? marketValue,
-          projectedIp: overlayIp,
-        };
+    const result = {
+      pEra: stored?.p_era ?? null,
+      pFip: stored?.p_fip ?? null,
+      pWhip: stored?.p_whip ?? null,
+      pK9: stored?.p_k9 ?? null,
+      pBb9: stored?.p_bb9 ?? null,
+      pHr9: stored?.p_hr9 ?? null,
+      pRvPlus: stored?.p_rv_plus ?? null,
+      pWar: overlayPWar,
+      marketValue: overlayMarketValue,
+      projectedIp: overlayIp,
+    };
     // Cache first valid projection so switching scouting year doesn't wipe it
     const hasData = result.pEra != null || result.pFip != null || result.pWar != null;
     if (hasData) cachedProjectionRef.current = result;

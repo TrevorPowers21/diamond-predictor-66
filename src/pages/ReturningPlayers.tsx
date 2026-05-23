@@ -2178,7 +2178,7 @@ export default function ReturningPlayers() {
   // These are the canonical values shown on PitcherProfile; live compute here is
   // a fallback for pitchers whose preds haven't been backfilled yet.
   const { data: pitcherPredBySourceId } = useQuery({
-    queryKey: ["returning-pitcher-predictions-by-source-id"],
+    queryKey: ["returning-pitcher-predictions-by-source-id", effectiveTeamId],
     queryFn: async () => {
       const map = new Map<string, {
         p_era: number | null;
@@ -2199,31 +2199,38 @@ export default function ReturningPlayers() {
       while (true) {
         const { data, error } = await supabase
           .from("player_predictions")
-          .select("p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, projected_ip, pitcher_role, players!inner(source_player_id, class_year)")
+          .select("player_id, customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, projected_ip, pitcher_role, players!inner(source_player_id, class_year)")
           .eq("season", PROJECTION_SEASON)
-          .eq("variant", "regular")
+          .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"])
           .not("p_era", "is", null)
           .range(from, from + PAGE - 1);
         if (error) throw error;
         for (const r of (data || []) as any[]) {
           const srcId = r.players?.source_player_id;
-          if (srcId) {
-            map.set(srcId, {
-              p_era: r.p_era,
-              p_fip: r.p_fip,
-              p_whip: r.p_whip,
-              p_k9: r.p_k9,
-              p_bb9: r.p_bb9,
-              p_hr9: r.p_hr9,
-              p_rv_plus: r.p_rv_plus,
-              p_war: r.p_war ?? null,
-              market_value: r.market_value ?? null,
-              projected_ip: r.projected_ip ?? null,
-              pitcher_role: r.pitcher_role,
-              class_year: r.players?.class_year ?? null,
-            });
-          }
+          if (!srcId) continue;
+          const existing = map.get(srcId);
+          // Prefer team-scoped precomputed row when impersonating a customer
+          // team. Otherwise prefer the global returner regular row.
+          const wantsTeamRow = effectiveTeamId && r.customer_team_id === effectiveTeamId && r.variant === "precomputed";
+          const wantsGlobalRow = !effectiveTeamId && r.variant === "regular" && r.customer_team_id == null;
+          const fallback = r.variant === "regular" && r.customer_team_id == null;
+          const shouldSet = wantsTeamRow || wantsGlobalRow || (!existing && fallback);
+          if (!shouldSet && existing) continue;
+          map.set(srcId, {
+            p_era: r.p_era,
+            p_fip: r.p_fip,
+            p_whip: r.p_whip,
+            p_k9: r.p_k9,
+            p_bb9: r.p_bb9,
+            p_hr9: r.p_hr9,
+            p_rv_plus: r.p_rv_plus,
+            p_war: r.p_war ?? null,
+            market_value: r.market_value ?? null,
+            projected_ip: r.projected_ip ?? null,
+            pitcher_role: r.pitcher_role,
+            class_year: r.players?.class_year ?? null,
+          });
         }
         if (!data || data.length < PAGE) break;
         from += PAGE;
@@ -2412,6 +2419,10 @@ export default function ReturningPlayers() {
             null
           );
           const pitcherIsTwp = !!pitcherMeta?.is_twp;
+          // Stored-values only: if no precompute row exists for this pitcher,
+          // surface them with null projections (display as "—") rather than
+          // live-computing from raw stats. Live compute drifts from stored —
+          // misleading info is worse than no info.
           return {
             id: r.id || `pitching-master-${idx}`,
             playerName,
@@ -2435,15 +2446,15 @@ export default function ReturningPlayers() {
             bb9_pr_plus: scoreObj.bb9PrPlus,
             ip: Number(r.ip) || 0,
             era, fip, whip, k9, bb9, hr9,
-            p_era: dbPred?.p_era ?? parkAdjustedEra,
-            p_fip: dbPred?.p_fip ?? pFip,
-            p_whip: dbPred?.p_whip ?? parkAdjustedWhip,
-            p_k9: dbPred?.p_k9 ?? pK9,
-            p_bb9: dbPred?.p_bb9 ?? pBb9,
-            p_hr9: dbPred?.p_hr9 ?? parkAdjustedHr9,
-            p_rv_plus: dbPRvPlus ?? pRvPlus,
-            p_war: dbPWar ?? pWar,
-            market_value: dbMarketValue ?? marketValue,
+            p_era: dbPred?.p_era ?? null,
+            p_fip: dbPred?.p_fip ?? null,
+            p_whip: dbPred?.p_whip ?? null,
+            p_k9: dbPred?.p_k9 ?? null,
+            p_bb9: dbPred?.p_bb9 ?? null,
+            p_hr9: dbPred?.p_hr9 ?? null,
+            p_rv_plus: dbPRvPlus,
+            p_war: dbPWar,
+            market_value: dbMarketValue,
           } as PitchingDashboardRow;
         })
         .filter((r) => !!r.playerName);
