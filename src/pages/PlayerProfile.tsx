@@ -1464,18 +1464,14 @@ export default function PlayerProfile() {
                           <Select
                             value={String(regularPred?.dev_aggressiveness ?? 0.5)}
                             onValueChange={(v) => {
-                              // Update the SAME row the dropdown reads from
-                              // (regularPred). Otherwise impersonation cases
-                              // update the returner row but the displayed
-                              // value comes from the transfer/precomputed row
-                              // and never changes.
-                              if (!regularPred) return;
+                              const returnerPreds = predictions.filter((p) => p.model_type === "returner");
+                              if (returnerPreds.length === 0) return;
                               updatePrediction.mutate({
-                                predictionIds: [regularPred.id],
+                                predictionIds: returnerPreds.map((p) => p.id),
                                 updates: { dev_aggressiveness: Number(v) },
                               });
                             }}
-                            disabled={!regularPred || updatePrediction.isPending}
+                            disabled={!isReturner || !regularPred || updatePrediction.isPending}
                           >
                             <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200" title="Developmental aggressiveness — saved"><SelectValue /></SelectTrigger>
                             <SelectContent>
