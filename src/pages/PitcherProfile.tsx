@@ -1055,6 +1055,7 @@ export default function PitcherProfile() {
       bb9_pr_plus: row.bb9_pr_plus ?? null,
       hr9_pr_plus: row.hr9_pr_plus ?? null,
       overall_pr_plus: row.overall_pr_plus ?? null,
+      p_rv_plus: row.p_rv_plus ?? null,
       // Scouting metrics — always blended when combined_used so risk/scouting reports
       // anchor on the 2025 blended sample regardless of historical dropdown selection
       stuffPlus: combinedUsed ? (row.blended_stuff_plus ?? row.stuff_plus) : row.stuff_plus,
@@ -1336,13 +1337,19 @@ export default function PitcherProfile() {
     const storedReturnerRow = (predictions as any[]).find((p) => p.model_type === "returner" && p.variant === "regular" && p.customer_team_id == null);
     const stored = storedTeamRow ?? storedReturnerRow ?? null;
 
-    // Session-only depth role overlay: swap in fresh pWAR + market_value
-    // derived from the depth-role-tuned IP, keeping the stored row's rates
-    // (era/fip/whip/k9/bb9/hr9 + pRV+) intact. Falls back to live values when
-    // no stored row exists.
-    const overlayBasePrvPlus = stored?.p_rv_plus ?? pRvPlus;
+    // Canonical pRV+ precedence: stored player_predictions → Pitching Master's
+    // pipeline composite → live recompute. Pitching Master.p_rv_plus is the
+    // weighted composite the pipeline writes; using the live-recomputed
+    // value here drifts from what every other surface shows.
+    const pmPrvPlus = (projectionSourceRow as any)?.p_rv_plus ?? null;
+    const canonicalPrvPlus = stored?.p_rv_plus ?? pmPrvPlus ?? pRvPlus;
+
+    // Session-only depth role overlay: re-derive pWAR + market_value from the
+    // canonical pRV+ and the depth-role-tuned IP. When at the default role
+    // (depthRole matches what's stored), prefer stored p_war/market_value
+    // directly so the profile matches the dashboard byte-for-byte.
     const overlayIp = pitcherExpectedIp(depthRole, eq);
-    const overlayPWar = computePitcherWar(overlayBasePrvPlus, overlayIp, eq);
+    const overlayPWar = computePitcherWar(canonicalPrvPlus, overlayIp, eq);
     const overlayMarketValue = computePitcherMarketValue(
       overlayPWar,
       {
@@ -1353,6 +1360,12 @@ export default function PitcherProfile() {
       eq,
     );
 
+    // Use stored p_war + market_value directly when at default depth role
+    // (no overlay applied). Otherwise the overlay version reflects the knob.
+    const storedDefaultDepth = stored?.pitcher_role === pitcherRoleFromDepthRole(depthRole);
+    const finalPWar = storedDefaultDepth ? (stored?.p_war ?? overlayPWar) : overlayPWar;
+    const finalMarketValue = storedDefaultDepth ? (stored?.market_value ?? overlayMarketValue) : overlayMarketValue;
+
     const result = stored
       ? {
           pEra: stored.p_era ?? roleAdjustedEra,
@@ -1361,9 +1374,9 @@ export default function PitcherProfile() {
           pK9: stored.p_k9 ?? roleAdjustedK9,
           pBb9: stored.p_bb9 ?? roleAdjustedBb9,
           pHr9: stored.p_hr9 ?? roleAdjustedHr9,
-          pRvPlus: stored.p_rv_plus ?? pRvPlus,
-          pWar: overlayPWar ?? pWar,
-          marketValue: overlayMarketValue ?? marketValue,
+          pRvPlus: canonicalPrvPlus,
+          pWar: finalPWar ?? pWar,
+          marketValue: finalMarketValue ?? marketValue,
           projectedIp: overlayIp,
         }
       : {
@@ -1373,7 +1386,7 @@ export default function PitcherProfile() {
           pK9: roleAdjustedK9,
           pBb9: roleAdjustedBb9,
           pHr9: roleAdjustedHr9,
-          pRvPlus,
+          pRvPlus: canonicalPrvPlus,
           pWar: overlayPWar ?? pWar,
           marketValue: overlayMarketValue ?? marketValue,
           projectedIp: overlayIp,

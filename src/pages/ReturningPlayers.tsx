@@ -2188,6 +2188,9 @@ export default function ReturningPlayers() {
         p_bb9: number | null;
         p_hr9: number | null;
         p_rv_plus: number | null;
+        p_war: number | null;
+        market_value: number | null;
+        projected_ip: number | null;
         pitcher_role: string | null;
         class_year: string | null;
       }>();
@@ -2196,7 +2199,7 @@ export default function ReturningPlayers() {
       while (true) {
         const { data, error } = await supabase
           .from("player_predictions")
-          .select("p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, players!inner(source_player_id, class_year)")
+          .select("p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, projected_ip, pitcher_role, players!inner(source_player_id, class_year)")
           .eq("season", PROJECTION_SEASON)
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
@@ -2214,6 +2217,9 @@ export default function ReturningPlayers() {
               p_bb9: r.p_bb9,
               p_hr9: r.p_hr9,
               p_rv_plus: r.p_rv_plus,
+              p_war: r.p_war ?? null,
+              market_value: r.market_value ?? null,
+              projected_ip: r.projected_ip ?? null,
               pitcher_role: r.pitcher_role,
               class_year: r.players?.class_year ?? null,
             });
@@ -2370,7 +2376,10 @@ export default function ReturningPlayers() {
           const parkAdjustedHr9 = pHr9;
           void teamParkComponents;
 
-          const pRvPlus = scoreObj.eraPrPlus;
+          // Prefer Pitching Master.p_rv_plus (canonical composite of the 6
+          // component PR+ values, computed by the pipeline). Live fallback was
+          // using eraPrPlus as a proxy — wrong, that's just one component.
+          const pRvPlus = (r as any).p_rv_plus ?? scoreObj.eraPrPlus;
           const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);
           const pWar = pitcherValue == null || eq.pwar_runs_per_win === 0 ? null : ((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
 
@@ -2381,26 +2390,16 @@ export default function ReturningPlayers() {
           const marketEligible = canShowPitchingMarketValue(normalizedTeam, conferenceForMarket);
           const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
 
-          // DB-stored projections take precedence over live compute. If the
-          // recalc engine has processed this pitcher, use those canonical
-          // values. pWAR is re-derived from the stored p_rv_plus + projected
-          // IP so it stays consistent with the displayed pRV+.
+          // DB-stored projections are the source of truth. Read p_war +
+          // market_value directly from player_predictions (pitcher precompute
+          // writes them). Only fall back to the live `pWar`/`marketValue`
+          // when no stored row exists for this pitcher (unflagged TWPs etc.).
           const dbPred = r.source_player_id ? pitcherPredBySourceId?.get(r.source_player_id) : null;
           const dbPRvPlus = dbPred?.p_rv_plus ?? null;
           const dbRole = (dbPred?.pitcher_role as "SP" | "RP" | "SM" | null) ?? null;
           const effectiveRole: "SP" | "RP" | "SM" = dbRole || projectedRole;
-          const dbProjectedIp = effectiveRole === "SP" ? eq.pwar_ip_sp : effectiveRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
-          const dbPitcherValue = dbPRvPlus == null ? null : ((dbPRvPlus - 100) / 100);
-          const dbPWar = dbPitcherValue == null || eq.pwar_runs_per_win === 0
-            ? null
-            : ((((dbPitcherValue * (dbProjectedIp / 9) * eq.pwar_r_per_9) + ((dbProjectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
-          const dbMarketValue = (() => {
-            if (dbPWar == null) return null;
-            const dbPtm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
-            const dbPvm = getPitchingPvfForRole(effectiveRole, eq);
-            if (!marketEligible) return null;
-            return dbPWar * eq.market_dollars_per_war * dbPtm * dbPvm;
-          })();
+          const dbPWar = dbPred?.p_war ?? null;
+          const dbMarketValue = dbPred?.market_value ?? null;
 
           // Class for this pitcher: prefer the value attached to their
           // prediction (canonical, came from the recalc engine's player join);
