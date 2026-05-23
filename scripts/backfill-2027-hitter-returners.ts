@@ -35,6 +35,7 @@ import {
   readSpecificPlus,
   type ReturnerPowerContext,
 } from "@/lib/predictionEngine";
+import { computeHitterOWar, computeHitterMarketValue } from "@/lib/depthRoles";
 
 const C = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m", cyan: "\x1b[36m" };
 
@@ -109,6 +110,29 @@ async function main() {
   console.log(`${C.cyan}→${C.reset} loading engine config (returner side)...`);
   const config = await loadEngineConfig();
 
+  // ─── Step 3b: load player meta (position + conference + pa) for oWAR/$ ─
+  // Returner rows have customer_team_id=NULL, so the "home" conference is the
+  // player's current team conference — used for the program-tier market scale.
+  console.log(`${C.cyan}→${C.reset} loading player meta (position + conference + pa)...`);
+  const playerIds = Array.from(new Set(rows.map((r) => r.player_id as string)));
+  const playerMeta = new Map<string, { position: string | null; conference: string | null; pa: number | null }>();
+  const PLAYER_BATCH = 200;
+  for (let i = 0; i < playerIds.length; i += PLAYER_BATCH) {
+    const ids = playerIds.slice(i, i + PLAYER_BATCH);
+    const { data, error } = await supabase
+      .from("players")
+      .select("id, position, conference, pa")
+      .in("id", ids);
+    if (error) throw error;
+    for (const p of (data || []) as any[]) {
+      playerMeta.set(p.id, {
+        position: p.position ?? null,
+        conference: p.conference ?? null,
+        pa: p.pa ?? null,
+      });
+    }
+  }
+
   // ─── Step 4: batch-load internals + recalc ───────────────────────────
   console.log(`${C.cyan}→${C.reset} recomputing p_* fields...`);
   const INTERNALS_BATCH = 200;
@@ -140,6 +164,12 @@ async function main() {
       if (result.p_avg == null && result.p_obp == null && result.p_slg == null) {
         nullProjected++;
       }
+      const meta = playerMeta.get(row.player_id) ?? { position: null, conference: null, pa: null };
+      const oWar = computeHitterOWar(result.p_wrc_plus, meta.pa, null);
+      const marketValue = computeHitterMarketValue(oWar, {
+        conference: meta.conference,
+        position: meta.position,
+      });
       updates.push({
         id: row.id,
         patch: {
@@ -150,6 +180,9 @@ async function main() {
           p_iso: result.p_iso,
           p_wrc: result.p_wrc,
           p_wrc_plus: result.p_wrc_plus,
+          o_war: oWar,
+          market_value: marketValue,
+          projected_pa: meta.pa,
           updated_at: new Date().toISOString(),
         },
       });

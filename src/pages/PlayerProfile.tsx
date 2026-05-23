@@ -19,11 +19,6 @@ import { useHitterSeedData } from "@/hooks/useHitterSeedData";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
-import {
-  DEFAULT_NIL_TIER_MULTIPLIERS,
-  getPositionValueMultiplier,
-  getProgramTierMultiplierByConference,
-} from "@/lib/nilProgramSpecific";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
@@ -41,7 +36,12 @@ import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
 import { normalizeName, nameTeamKey, normalizeTeamForKey, getNameVariants } from "@/lib/nameUtils";
 import { useSeedDataMaps } from "@/hooks/useSeedDataMaps";
 import { useTransferPortalContext } from "@/hooks/useTransferPortalContext";
-import { hitterDepthRoleMultiplier, type HitterDepthRole } from "@/lib/depthRoles";
+import {
+  computeHitterMarketValue,
+  computeHitterOWar,
+  hitterDepthRoleMultiplier,
+  type HitterDepthRole,
+} from "@/lib/depthRoles";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -726,36 +726,32 @@ export default function PlayerProfile() {
   // projects to ~100 PA of WAR, not a full-time 260. Prevents misleading
   // 2 WAR / 90K valuations for limited-role returners.
   const carryForwardPa = projectionSourceRow?.pa ?? (player as any)?.pa ?? null;
-  const baseProjectedOWar = computeOWarFromWrcPlus(regularPred?.p_wrc_plus ?? null, carryForwardPa);
-  const historicalOWar = computeOWarFromWrcPlus(seedDerived?.wrcPlus ?? null, (player as any)?.pa ?? null);
-  // Session-only depth role overlay scales the projected/displayed oWAR
-  // (and downstream market value) without touching the stored row.
-  const depthMultiplier = hitterDepthRoleMultiplier(depthRole);
-  const projectedOWar = baseProjectedOWar != null ? baseProjectedOWar * depthMultiplier : null;
-  const displayOWar =
-    projectedOWar ??
-    (((nilValuation as any)?.war as number | null) != null
-      ? ((nilValuation as any).war as number) * depthMultiplier
-      : null) ??
-    (historicalOWar != null ? historicalOWar * depthMultiplier : null);
-  const nilBasePerOWar = 25000;
   const resolvedConference = (() => {
     if (player.conference) return player.conference;
     const norm = (v: string) => (v || "").trim().toLowerCase().replace(/\b(university|college|of)\b/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
     return teamsForConference.find(t => norm(t.name) === norm(player.team || ""))?.conference || null;
   })();
-  const fallbackNilValuation = (() => {
-    if (displayOWar == null) return null;
-    const ptm = getProgramTierMultiplierByConference(resolvedConference, DEFAULT_NIL_TIER_MULTIPLIERS);
-    const pvm = getPositionValueMultiplier(effectivePosition);
-    return displayOWar * nilBasePerOWar * ptm * pvm;
+  // Read stored values first — these reflect the active customer-team scoping
+  // (transfer/precomputed when impersonating, returner/regular at baseline).
+  // Live recompute is a fallback only when the stored column is null.
+  const storedOWar = (regularPred as any)?.o_war as number | null | undefined;
+  const storedMarketValue = (regularPred as any)?.market_value as number | null | undefined;
+  const baseProjectedOWar = storedOWar ?? computeHitterOWar(regularPred?.p_wrc_plus ?? null, carryForwardPa, null);
+  const historicalOWar = computeOWarFromWrcPlus(seedDerived?.wrcPlus ?? null, (player as any)?.pa ?? null);
+  // Session-only depth role overlay scales the projected/displayed oWAR
+  // (and downstream market value) without touching the stored row.
+  const depthMultiplier = hitterDepthRoleMultiplier(depthRole);
+  const projectedOWar = baseProjectedOWar != null ? baseProjectedOWar * depthMultiplier : null;
+  const displayOWar = projectedOWar ?? (historicalOWar != null ? historicalOWar * depthMultiplier : null);
+  // Market value: scale stored value by depth overlay when role is non-default,
+  // otherwise show stored. If stored missing, compute live from displayOWar.
+  const displayNilValuation = (() => {
+    if (storedMarketValue != null) return storedMarketValue * depthMultiplier;
+    return computeHitterMarketValue(displayOWar, {
+      conference: resolvedConference,
+      position: effectivePosition,
+    });
   })();
-  // When depth role is overlaid (non-default), derive market value from the
-  // overlaid oWAR so it tracks the displayed pWAR-equivalent. Otherwise prefer
-  // the stored estimated_value when present.
-  const displayNilValuation = depthRole !== "everyday_starter"
-    ? fallbackNilValuation
-    : ((nilValuation as any)?.estimated_value ?? fallbackNilValuation);
   const predFromAvg = seedStatRow?.avg ?? regularPred?.from_avg ?? null;
   const predFromObp = seedStatRow?.obp ?? regularPred?.from_obp ?? null;
   const predFromSlg = seedStatRow?.slg ?? regularPred?.from_slg ?? null;
@@ -1465,33 +1461,25 @@ export default function PlayerProfile() {
                               <SelectItem value="bench">Bench</SelectItem>
                             </SelectContent>
                           </Select>
-                          {editingPrediction && regularPred ? (
-                            <>
-                              <Select value={predForm.dev_aggressiveness} onValueChange={(v) => setPredForm({ ...predForm, dev_aggressiveness: v })}>
-                                <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="0">0.0</SelectItem>
-                                  <SelectItem value="0.5">0.5</SelectItem>
-                                  <SelectItem value="1">1.0</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setEditingPrediction(false)}>
-                                <X className="h-3 w-3" />
-                              </Button>
-                              <Button size="sm" className="h-7 text-xs" onClick={savePredEdit} disabled={updatePrediction.isPending}>
-                                <Save className="h-3 w-3" />
-                              </Button>
-                            </>
-                          ) : (
-                            <>
-                              {regularPred?.dev_aggressiveness != null && <span className="text-xs text-[#8a94a6]">Dev {regularPred.dev_aggressiveness}</span>}
-                              {isReturner && regularPred && (
-                                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={startPredEdit}>
-                                  <Pencil className="h-3 w-3" />
-                                </Button>
-                              )}
-                            </>
-                          )}
+                          <Select
+                            value={String(regularPred?.dev_aggressiveness ?? 0.5)}
+                            onValueChange={(v) => {
+                              const returnerPreds = predictions.filter((p) => p.model_type === "returner");
+                              if (returnerPreds.length === 0) return;
+                              updatePrediction.mutate({
+                                predictionIds: returnerPreds.map((p) => p.id),
+                                updates: { dev_aggressiveness: Number(v) },
+                              });
+                            }}
+                            disabled={!isReturner || !regularPred || updatePrediction.isPending}
+                          >
+                            <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200" title="Developmental aggressiveness — saved"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="0">0.0</SelectItem>
+                              <SelectItem value="0.5">0.5</SelectItem>
+                              <SelectItem value="1">1.0</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
                     </CardHeader>

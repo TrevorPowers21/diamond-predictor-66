@@ -127,7 +127,11 @@ export function computePitcherWar(
 // Returns null when ineligible (e.g., missing team/conference) so callers
 // can show "—" instead of $0 (which means a different thing).
 
-import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
+import {
+  DEFAULT_NIL_TIER_MULTIPLIERS,
+  getPositionValueMultiplier,
+  getProgramTierMultiplierByConference,
+} from "@/lib/nilProgramSpecific";
 
 // Local mirror of the eligibility check that lives privately in
 // pitcherProjection.ts + transferPitcherProjection.ts. Independent conference
@@ -170,5 +174,59 @@ export function computePitcherMarketValue(
   const ptm = getProgramTierMultiplierByConference(ctx.conference, tiers);
   const pvm = getPitchingPvfForRole(ctx.role, eq);
   const raw = pWar * eq.market_dollars_per_war * ptm * pvm;
+  return Math.max(0, raw);
+}
+
+// ── Hitter oWAR — single canonical formula ───────────────────────────────────
+//
+// oWAR scales offense (wRC+) by playing time (PA). Carries prior-season PA
+// forward for returners so a fringe starter with 100 PA doesn't get a full
+// season's WAR. Depth-role multiplier scales the playing-time slice (cornerstone
+// gets more PA, bench gets fewer) without re-deriving from the equation.
+//
+// Returns null when wRC+ is missing — caller decides how to display.
+
+export function computeHitterOWar(
+  wrcPlus: number | null | undefined,
+  projectedPa: number | null | undefined,
+  depthRole?: AnyDepthRole,
+): number | null {
+  if (wrcPlus == null || !Number.isFinite(wrcPlus)) return null;
+  const pa = projectedPa != null && Number.isFinite(projectedPa) ? Number(projectedPa) : 260;
+  const runsPerPa = 0.13;
+  const replacementRuns = (pa / 600) * 25;
+  const offValue = (wrcPlus - 100) / 100;
+  const raa = offValue * pa * runsPerPa;
+  const rar = raa + replacementRuns;
+  const base = rar / 10;
+  return base * hitterDepthRoleMultiplier(depthRole ?? null);
+}
+
+// ── Hitter market value — single canonical formula ───────────────────────────
+//
+// market_value = oWAR × $/WAR × program_tier_mult × position_value_mult
+// Floors at $0. Uses DEFAULT_NIL_TIER_MULTIPLIERS as program-tier scale; per-
+// team override would happen at the eq weights layer (none today).
+//
+// Returns null when oWAR is missing so callers can show "—".
+
+const HITTER_DOLLARS_PER_WAR = 25000;
+
+export function computeHitterMarketValue(
+  oWar: number | null | undefined,
+  ctx: {
+    conference: string | null | undefined;
+    position: string | null | undefined;
+  },
+  opts?: {
+    dollarsPerWar?: number;
+    tiers?: typeof DEFAULT_NIL_TIER_MULTIPLIERS;
+  },
+): number | null {
+  if (oWar == null || !Number.isFinite(oWar)) return null;
+  const ptm = getProgramTierMultiplierByConference(ctx.conference, opts?.tiers ?? DEFAULT_NIL_TIER_MULTIPLIERS);
+  const pvm = getPositionValueMultiplier(ctx.position);
+  const dpw = opts?.dollarsPerWar ?? HITTER_DOLLARS_PER_WAR;
+  const raw = oWar * dpw * ptm * pvm;
   return Math.max(0, raw);
 }
