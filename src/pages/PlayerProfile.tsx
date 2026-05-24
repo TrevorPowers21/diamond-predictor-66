@@ -37,8 +37,6 @@ import { normalizeName, nameTeamKey, normalizeTeamForKey, getNameVariants } from
 import { useSeedDataMaps } from "@/hooks/useSeedDataMaps";
 import { useTransferPortalContext } from "@/hooks/useTransferPortalContext";
 import {
-  computeHitterMarketValue,
-  computeHitterOWar,
   hitterDepthRoleMultiplier,
   type HitterDepthRole,
 } from "@/lib/depthRoles";
@@ -767,30 +765,19 @@ export default function PlayerProfile() {
     v == null || !Number.isFinite(Number(v)) ? null : Number(v) * devAggScale;
 
   // Read stored values first — these reflect the active customer-team scoping
-  // (transfer/precomputed when impersonating, returner/regular at baseline).
-  // Live recompute is a fallback only when the stored column is null.
+  // Stored values are the source of truth — D1 backfills populate o_war +
+  // market_value on every row with p_wrc_plus. Null means data quality issue,
+  // not a display fallback to paper over.
   const storedOWar = (regularPred as any)?.o_war as number | null | undefined;
   const storedMarketValue = (regularPred as any)?.market_value as number | null | undefined;
-  const baseProjectedOWar = storedOWar ?? computeHitterOWar(regularPred?.p_wrc_plus ?? null, carryForwardPa, null);
   const historicalOWar = computeOWarFromWrcPlus(seedDerived?.wrcPlus ?? null, (player as any)?.pa ?? null);
   // Session-only depth role overlay scales the projected/displayed oWAR
   // (and downstream market value) without touching the stored row.
   const depthMultiplier = hitterDepthRoleMultiplier(depthRole);
-  // Session overlays multiplied together (depth role × dev_agg). devAggScale
-  // is computed below from sessionDevAgg vs stored dev_aggressiveness.
-  // Both are display-only — never written to DB.
   const overlayScale = depthMultiplier * (devAggScale ?? 1);
-  const projectedOWar = baseProjectedOWar != null ? baseProjectedOWar * overlayScale : null;
+  const projectedOWar = storedOWar != null ? storedOWar * overlayScale : null;
   const displayOWar = projectedOWar ?? (historicalOWar != null ? historicalOWar * overlayScale : null);
-  // Market value: scale stored value by combined overlay when non-default,
-  // otherwise show stored. If stored missing, compute live from displayOWar.
-  const displayNilValuation = (() => {
-    if (storedMarketValue != null) return storedMarketValue * overlayScale;
-    return computeHitterMarketValue(displayOWar, {
-      conference: resolvedConference,
-      position: effectivePosition,
-    });
-  })();
+  const displayNilValuation = storedMarketValue != null ? storedMarketValue * overlayScale : null;
   const predFromAvg = seedStatRow?.avg ?? regularPred?.from_avg ?? null;
   const predFromObp = seedStatRow?.obp ?? regularPred?.from_obp ?? null;
   const predFromSlg = seedStatRow?.slg ?? regularPred?.from_slg ?? null;
