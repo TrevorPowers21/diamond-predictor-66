@@ -193,6 +193,30 @@ When a function closes over 8+ deps and has 5+ logical sections, extract as a `u
 
 ---
 
+## Testing
+
+Run the test suite any time you touch formula logic, projection math, or add a new metric:
+
+```bash
+npm test
+```
+
+Full suite runs in ~2 seconds. **When to run:**
+- Changing equation weights (predictionEngine, wrcPlus, pitcherProjection) → parity tests catch if you updated one copy but not another
+- Adding a new metric to the precompute pipeline → add a parity test in `src/lib/storedVsLive.test.ts`, then run
+- Modifying oWAR, pWAR, wRC+, or `projectPitchingRate` → formula unit tests catch regressions
+- Activating a `.skip` regression test in `storedVsLive.test.ts` → means the stored-first read path for that surface is in place
+
+**Test files:**
+| File | Covers |
+|---|---|
+| `src/savant/lib/war.test.ts` | wRC+, oWAR, pWAR formulas |
+| `src/lib/playerCalcs.test.ts` | `computeOWarFromWrcPlus` parity vs `computeOWar` |
+| `src/lib/pitcherProjection.test.ts` | `projectPitchingRate`, blend weight, damping |
+| `src/lib/storedVsLive.test.ts` | Formula constant parity across all duplicate call sites; regression placeholders for Rossow ERA + TB Compare |
+
+---
+
 ## Current Session State
 
 **Last Updated:** 2026-05-22 (session 4)
