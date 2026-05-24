@@ -2195,14 +2195,22 @@ export default function PitcherProfile() {
                         <Select value={depthRole} onValueChange={(v) => setDepthRole(v as PitcherDepthRole)}>
                           <SelectTrigger className="h-7 w-[160px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200" title="Depth role — session-only display overlay; not saved"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="weekend_starter">Weekend Starter</SelectItem>
-                            <SelectItem value="weekday_starter">Weekday Starter</SelectItem>
-                            <SelectItem value="swing_starter">Swing Starter</SelectItem>
-                            <SelectItem value="workhorse_reliever">Workhorse Reliever</SelectItem>
-                            <SelectItem value="high_leverage_reliever">High-Leverage Reliever</SelectItem>
-                            <SelectItem value="mid_leverage_reliever">Mid-Leverage Reliever</SelectItem>
-                            <SelectItem value="low_impact_reliever">Low-Impact Reliever</SelectItem>
-                            <SelectItem value="specialist_reliever">Specialist Reliever</SelectItem>
+                            {projectedRole === "SP" ? (
+                              <>
+                                <SelectItem value="weekend_starter">Weekend Starter</SelectItem>
+                                <SelectItem value="weekday_starter">Weekday Starter</SelectItem>
+                                <SelectItem value="swing_starter">Swing Starter</SelectItem>
+                              </>
+                            ) : (
+                              <>
+                                <SelectItem value="swing_starter">Swing Starter</SelectItem>
+                                <SelectItem value="workhorse_reliever">Workhorse Reliever</SelectItem>
+                                <SelectItem value="high_leverage_reliever">High-Leverage Reliever</SelectItem>
+                                <SelectItem value="mid_leverage_reliever">Mid-Leverage Reliever</SelectItem>
+                                <SelectItem value="low_impact_reliever">Low-Impact Reliever</SelectItem>
+                                <SelectItem value="specialist_reliever">Specialist Reliever</SelectItem>
+                              </>
+                            )}
                           </SelectContent>
                         </Select>
                         <Select value={String(projectedDevAggressiveness)} onValueChange={(v) => updateProjectedInputs({ dev_aggressiveness: Number(v) })}>
