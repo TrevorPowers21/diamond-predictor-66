@@ -2001,7 +2001,9 @@ export default function TeamBuilder() {
         nil_value: 0,
         production_notes: null,
         roster_status: "target",
-        depth_role: "utility",
+        // Default to everyday_starter so displayed oWAR/market match the
+        // projection at the multiplier=1.0 baseline. Coach adjusts from there.
+        depth_role: "everyday_starter",
         class_transition: classTransitionFromYearOrDefault(row.class_year),
         dev_aggressiveness: 0,
         class_transition_overridden: false,
@@ -2472,7 +2474,10 @@ export default function TeamBuilder() {
             (row.source_player_id ? pitchingStatsByNameTeam.bySourceId.get(row.source_player_id)?.ip : null) ?? null,
             (inferredRole === "SP") ? "SP" : "RP",
           )
-        : "utility",
+        // Default hitters to everyday_starter so the displayed oWAR/market
+        // match the stored projection on add (multiplier = 1.0). Coach
+        // adjusts depth from there.
+        : "everyday_starter",
       class_transition: chosenPred?.class_transition ?? "SJ",
       dev_aggressiveness: chosenPred?.dev_aggressiveness ?? 0,
       transfer_snapshot: transferSnapshot,
