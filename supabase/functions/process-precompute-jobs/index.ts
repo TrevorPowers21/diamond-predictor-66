@@ -720,6 +720,47 @@ const PROJECTION_SEASON = 2027;
 const PRED_ID_BATCH = 200;
 const UPSERT_BATCH = 500;
 
+// ── Hitter oWAR + market value (mirrors src/lib/depthRoles.ts + nilProgramSpecific.ts) ──
+const HITTER_DOLLARS_PER_WAR = 25000;
+const NIL_TIER_MULTIPLIERS = { sec: 1.5, p4: 1.2, bigTen: 1.0, strongMid: 0.8, lowMajor: 0.5 };
+const STRONG_MID_KEYS = new Set([
+  "americanathleticconference","aac","sunbeltconference","sunbelt",
+  "bigwestconference","bigwest","mountainwestconference","mountainwest",
+]);
+function normalizeConferenceKey(c: string | null | undefined): string {
+  return (c || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+function getProgramTierMultiplierByConference(c: string | null | undefined): number {
+  const key = normalizeConferenceKey(c);
+  if (!key) return NIL_TIER_MULTIPLIERS.lowMajor;
+  if (key.includes("southeasternconference") || key === "sec") return NIL_TIER_MULTIPLIERS.sec;
+  if (key.includes("bigten")) return NIL_TIER_MULTIPLIERS.bigTen;
+  if (key.includes("atlanticcoastconference") || key === "acc" || key.includes("big12")) return NIL_TIER_MULTIPLIERS.p4;
+  if (STRONG_MID_KEYS.has(key)) return NIL_TIER_MULTIPLIERS.strongMid;
+  return NIL_TIER_MULTIPLIERS.lowMajor;
+}
+function getPositionValueMultiplier(position: string | null | undefined): number {
+  const pos = (position || "").trim().toUpperCase();
+  if (["C","CATCHER","SS","SHORTSTOP","CF","CENTER FIELD","CENTERFIELD"].includes(pos)) return 1.3;
+  if (["2B","SECOND BASE","SECONDBASE","3B","THIRD BASE","THIRDBASE","LF","RF","CORNER OUTFIELD","COF","OF","OUTFIELD"].includes(pos)) return 1.1;
+  if (["1B","FIRST BASE","FIRSTBASE","DH","DESIGNATED HITTER","DESIGNATEDHITTER","UT","UTL","UTIL","UTILITY"].includes(pos)) return 1.0;
+  if (["BENCH","BENCH UTILITY","BENCHUTILITY"].includes(pos)) return 0.8;
+  return 1.0;
+}
+function computeHitterOWar(wrcPlus: number | null | undefined, projectedPa: number | null | undefined): number | null {
+  if (wrcPlus == null || !Number.isFinite(wrcPlus)) return null;
+  const pa = projectedPa != null && Number.isFinite(projectedPa) ? Number(projectedPa) : 260;
+  const replacementRuns = (pa / 600) * 25;
+  const raa = ((wrcPlus - 100) / 100) * pa * 0.13;
+  return (raa + replacementRuns) / 10;
+}
+function computeHitterMarketValue(oWar: number | null, conference: string | null | undefined, position: string | null | undefined): number | null {
+  if (oWar == null || !Number.isFinite(oWar)) return null;
+  const ptm = getProgramTierMultiplierByConference(conference);
+  const pvm = getPositionValueMultiplier(position);
+  return Math.max(0, oWar * HITTER_DOLLARS_PER_WAR * ptm * pvm);
+}
+
 async function runPrecomputeForTeam(supabase: any, customerTeamId: string, scope: string) {
   if (scope === "pitchers_d1") return runPitcherPrecompute(supabase, customerTeamId);
   return runHitterPrecompute(supabase, customerTeamId, scope);
@@ -839,7 +880,7 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
 
   // Players — D1 hitters only, exclude own roster
   const allPlayers = await loadAllPaged(() =>
-    supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id"),
+    supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, pa, is_twp"),
   );
   const isPitcher = (p: string | null) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(p || ""));
   const matchesDivision = (d: string | null) => {
@@ -847,7 +888,7 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     return d !== "NJCAA_D1"; // hitters_d1 / default
   };
   const hitters = allPlayers.filter((p: any) =>
-    !isPitcher(p.position)
+    (!isPitcher(p.position) || p.is_twp)
     && (!toSourceId || p.source_team_id !== toSourceId)
     && matchesDivision(p.division));
 
@@ -937,6 +978,10 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     const projected = computeTransferProjection(result.inputs);
     const final = applyTransferPostprocess(projected, result.inputs, result.transferMultiplier);
 
+    const projectedPa = (p as any).pa ?? null;
+    const oWar = computeHitterOWar(final.pWrcPlus, projectedPa);
+    const marketValue = computeHitterMarketValue(oWar, toConference, p.position);
+
     upserts.push({
       player_id: p.id,
       customer_team_id: customerTeamId,
@@ -956,6 +1001,10 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
       p_iso: final.pIso,
       p_wrc: final.pWrc,
       p_wrc_plus: final.pWrcPlus,
+      o_war: oWar,
+      market_value: marketValue,
+      projected_pa: projectedPa,
+      locked: false,
       updated_at: new Date().toISOString(),
     });
   }
