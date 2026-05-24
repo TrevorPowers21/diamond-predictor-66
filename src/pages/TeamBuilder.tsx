@@ -2300,9 +2300,12 @@ export default function TeamBuilder() {
 
     let transferSnapshot: TransferSnapshot | null = null;
     if (effectiveTeamId && row.id && !isPitcherRow) {
+      // Eager precompute path: read STORED projection for this customer team
+      // and use it directly — no live recompute. Includes o_war + market_value
+      // (PA carry-forward + program tier already baked in by the precompute).
       const { data: precomputedTeamRow } = await supabase
         .from("player_predictions")
-        .select("p_avg, p_obp, p_slg, p_wrc_plus")
+        .select("p_avg, p_obp, p_slg, p_wrc_plus, o_war, market_value")
         .eq("player_id", row.id)
         .eq("customer_team_id", effectiveTeamId)
         .eq("variant", "precomputed")
@@ -2312,17 +2315,15 @@ export default function TeamBuilder() {
       if (precomputedTeamRow) {
         const fromTeamName = row.from_team || row.team;
         const fromTeamRow = fromTeamName ? teamByKey.get(normalizeKey(fromTeamName)) || null : null;
-        const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
-        const owar = computeOWarFromWrcPlus(precomputedTeamRow.p_wrc_plus ?? null);
-        const basePerOwar = eqNum("nil_base_per_owar", 25000);
-        const ptm = getProgramTierMultiplierByConference(toTeamRow?.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
-        const pvm = getPositionValueMultiplier(row.position);
-        const nilRaw = owar == null ? null : owar * basePerOwar * ptm * pvm;
         transferSnapshot = {
-          p_avg: precomputedTeamRow.p_avg ?? null, p_obp: precomputedTeamRow.p_obp ?? null,
-          p_slg: precomputedTeamRow.p_slg ?? null, p_wrc_plus: precomputedTeamRow.p_wrc_plus ?? null,
-          owar, nil_valuation: nilRaw == null ? null : Math.max(0, nilRaw),
-          from_team: fromTeamName || null, from_conference: fromTeamRow?.conference || row.conference || null,
+          p_avg: precomputedTeamRow.p_avg ?? null,
+          p_obp: precomputedTeamRow.p_obp ?? null,
+          p_slg: precomputedTeamRow.p_slg ?? null,
+          p_wrc_plus: precomputedTeamRow.p_wrc_plus ?? null,
+          owar: (precomputedTeamRow as any).o_war ?? null,
+          nil_valuation: (precomputedTeamRow as any).market_value ?? null,
+          from_team: fromTeamName || null,
+          from_conference: fromTeamRow?.conference || row.conference || null,
         } as any;
       }
     }
