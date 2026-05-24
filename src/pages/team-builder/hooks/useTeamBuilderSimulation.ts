@@ -620,6 +620,15 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
 
     if (!treatAsPitcher && effectiveTeamId && (livePred as any)?.variant === "precomputed" && (livePred as any)?.customer_team_id === effectiveTeamId) {
       const lp = livePred as any;
+      // Stored o_war + market_value reflect the canonical precompute
+      // (PA carry-forward + program tier baked in). Scale by depth role
+      // multiplier so changing the depth dropdown moves the row's oWAR + market
+      // alongside the team totals (which use the same depth multiplier).
+      const depthMult = depthRoleMultiplier(p.depth_role);
+      const storedOwar = lp.o_war as number | null | undefined;
+      const storedMarket = lp.market_value as number | null | undefined;
+      const owar = storedOwar != null ? storedOwar * depthMult : computeOWarFromWrcPlus(lp.p_wrc_plus ?? null);
+      const nil_valuation = storedMarket != null ? storedMarket * depthMult : null;
       return {
         p_avg: lp.p_avg ?? null,
         p_obp: lp.p_obp ?? null,
@@ -627,8 +636,8 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         p_ops: lp.p_ops ?? ((lp.p_obp ?? 0) + (lp.p_slg ?? 0)),
         p_iso: lp.p_iso ?? null,
         p_wrc_plus: lp.p_wrc_plus ?? null,
-        owar: computeOWarFromWrcPlus(lp.p_wrc_plus ?? null),
-        nil_valuation: null,
+        owar,
+        nil_valuation,
       } as any;
     }
 
