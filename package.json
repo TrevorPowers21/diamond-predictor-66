@@ -37,6 +37,8 @@
     "precompute-returner-pitchers:prod": "tsx --env-file-if-exists=.env.production.local scripts/precompute-returner-pitchers.ts --prod",
     "backfill-2027-hitter-returners": "tsx --env-file-if-exists=.env.local scripts/backfill-2027-hitter-returners.ts",
     "backfill-2027-hitter-returners:prod": "tsx --env-file-if-exists=.env.production.local scripts/backfill-2027-hitter-returners.ts --prod",
+    "precompute-returner-hitters": "tsx --env-file-if-exists=.env.local scripts/backfill-2027-hitter-returners.ts",
+    "precompute-returner-hitters:prod": "tsx --env-file-if-exists=.env.production.local scripts/backfill-2027-hitter-returners.ts --prod",
     "import-presto-hitters": "tsx --env-file-if-exists=.env.local scripts/import-juco-presto-hitters.ts",
     "add-presto-missing": "tsx --env-file-if-exists=.env.local scripts/add-presto-missing-hitters.ts",
     "import-presto-pitchers": "tsx --env-file-if-exists=.env.local scripts/import-juco-presto-pitchers.ts",
