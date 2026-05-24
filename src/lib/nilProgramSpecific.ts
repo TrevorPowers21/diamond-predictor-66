@@ -48,9 +48,9 @@ export const getPositionValueMultiplier = (position: string | null | undefined):
   const pos = (position || "").trim().toUpperCase();
 
   if (["C", "CATCHER", "SS", "SHORTSTOP", "CF", "CENTER FIELD", "CENTERFIELD"].includes(pos)) return 1.3;
-  if (["2B", "SECOND BASE", "SECONDBASE", "3B", "THIRD BASE", "THIRDBASE", "LF", "RF", "CORNER OUTFIELD", "COF"].includes(pos)) return 1.1;
-  if (["1B", "FIRST BASE", "FIRSTBASE", "DH", "DESIGNATED HITTER", "DESIGNATEDHITTER"].includes(pos)) return 1.0;
-  if (["UT", "UTIL", "UTILITY", "BENCH", "BENCH UTILITY", "BENCHUTILITY"].includes(pos)) return 0.8;
+  if (["2B", "SECOND BASE", "SECONDBASE", "3B", "THIRD BASE", "THIRDBASE", "LF", "RF", "CORNER OUTFIELD", "COF", "OF", "OUTFIELD"].includes(pos)) return 1.1;
+  if (["1B", "FIRST BASE", "FIRSTBASE", "DH", "DESIGNATED HITTER", "DESIGNATEDHITTER", "UT", "UTL", "UTIL", "UTILITY"].includes(pos)) return 1.0;
+  if (["BENCH", "BENCH UTILITY", "BENCHUTILITY"].includes(pos)) return 0.8;
 
   // default neutral multiplier when position is unknown
   return 1.0;

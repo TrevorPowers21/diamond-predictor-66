@@ -84,21 +84,21 @@ describe("getPositionValueMultiplier", () => {
   });
 
   describe("above-average positions → 1.1", () => {
-    it.each(["2B", "Second Base", "3B", "Third Base", "LF", "RF", "Corner Outfield", "COF"])(
+    it.each(["2B", "Second Base", "3B", "Third Base", "LF", "RF", "Corner Outfield", "COF", "OF", "Outfield"])(
       'returns 1.1 for "%s"',
       (pos) => expect(getPositionValueMultiplier(pos)).toBe(1.1),
     );
   });
 
   describe("neutral positions → 1.0", () => {
-    it.each(["1B", "First Base", "DH", "Designated Hitter"])(
+    it.each(["1B", "First Base", "DH", "Designated Hitter", "UT", "UTL", "UTIL", "Utility"])(
       'returns 1.0 for "%s"',
       (pos) => expect(getPositionValueMultiplier(pos)).toBe(1.0),
     );
   });
 
-  describe("utility → 0.8", () => {
-    it.each(["UT", "UTIL", "Utility", "Bench", "Bench Utility"])(
+  describe("bench → 0.8", () => {
+    it.each(["Bench", "Bench Utility"])(
       'returns 0.8 for "%s"',
       (pos) => expect(getPositionValueMultiplier(pos)).toBe(0.8),
     );
