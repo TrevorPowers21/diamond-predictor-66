@@ -1297,46 +1297,85 @@ export default function PitcherProfile() {
     const stored = storedTeamRow ?? storedReturnerRow ?? null;
 
     // Stored prediction values only. If no stored row exists, surface "—".
-    // Session overlays (depth role + dev_agg) are applied at display time —
-    // no DB writes, no recompute from raw inputs.
+    // Session overlays (depth role + dev_agg + role transition) are applied
+    // at display time — no DB writes, no recompute from raw inputs.
     //
-    // Depth role: re-derives pWAR/market from stored pRV+ × depth-tuned IP.
-    // Dev agg: scales pRV+ proportionally (mirrors equation: each dev step
-    //   is ±6% on the projection multiplier; raw ratio vs stored dev applied
-    //   to pRV+ here, then pWAR/market cascade off the scaled pRV+).
+    // Order of overlays:
+    //   1. Role transition (RP↔SP): apply applyRoleTransitionAdjustment to
+    //      each stored rate stat using exact same math as transferPitcherProjection.
+    //   2. Dev agg: each step ±6% scale on top of role-adjusted rates.
+    //   3. Depth role: drives projectedIp for pWAR; market value re-derived.
     const overlayIp = pitcherExpectedIp(depthRole, eq);
     const storedDevAgg = Number.isFinite(Number((stored as any)?.dev_aggressiveness)) ? Number((stored as any).dev_aggressiveness) : 0;
     const sessionDevAggNum = Number.isFinite(Number(projectedDevAggressiveness)) ? Number(projectedDevAggressiveness) : 0;
     const devAggDelta = (sessionDevAggNum - storedDevAgg) * 0.06;
-    const storedDefaultDepth = stored?.pitcher_role === pitcherRoleFromDepthRole(depthRole);
     const devAggUnchanged = sessionDevAggNum === storedDevAgg;
-    // Apply dev_agg overlay as a proportional bump on stored pRV+: each
-    // 1.0-step change ≈ +6% on the projection equation.
-    const overlayPRvPlus = stored?.p_rv_plus == null
+
+    const storedRole = ((stored as any)?.pitcher_role as "SP" | "RP" | "SM" | null) ?? null;
+    const sessionRole = projectedRole;
+    const roleChanged = storedRole != null && storedRole !== sessionRole;
+    const roleCurve = {
+      tier1Max: eq.rp_to_sp_low_better_tier1_max,
+      tier2Max: eq.rp_to_sp_low_better_tier2_max,
+      tier3Max: eq.rp_to_sp_low_better_tier3_max,
+      tier1Mult: eq.rp_to_sp_low_better_tier1_mult,
+      tier2Mult: eq.rp_to_sp_low_better_tier2_mult,
+      tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
+    };
+    // Apply role transition first (mirrors transferPitcherProjection.ts lines 399-404)
+    const rtEra = roleChanged ? applyRoleTransitionAdjustment(stored?.p_era ?? null, eq.sp_to_rp_reg_era_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_era ?? null);
+    const rtFip = roleChanged ? applyRoleTransitionAdjustment(stored?.p_fip ?? null, eq.sp_to_rp_reg_fip_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_fip ?? null);
+    const rtWhip = roleChanged ? applyRoleTransitionAdjustment(stored?.p_whip ?? null, eq.sp_to_rp_reg_whip_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_whip ?? null);
+    const rtK9 = roleChanged ? applyRoleTransitionAdjustment(stored?.p_k9 ?? null, eq.sp_to_rp_reg_k9_pct, storedRole, sessionRole, false, roleCurve) : (stored?.p_k9 ?? null);
+    const rtBb9 = roleChanged ? applyRoleTransitionAdjustment(stored?.p_bb9 ?? null, eq.sp_to_rp_reg_bb9_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_bb9 ?? null);
+    const rtHr9 = roleChanged ? applyRoleTransitionAdjustment(stored?.p_hr9 ?? null, eq.sp_to_rp_reg_hr9_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_hr9 ?? null);
+
+    // Re-derive pRV+ from role-adjusted rates (only when role changed; otherwise use stored)
+    const rolePRvPlus = roleChanged && [rtEra, rtFip, rtWhip, rtK9, rtBb9, rtHr9].every((v) => v != null)
+      ? (() => {
+          const eraPlusRA = calcPitchingPlus(rtEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
+          const fipPlusRA = calcPitchingPlus(rtFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
+          const whipPlusRA = calcPitchingPlus(rtWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
+          const k9PlusRA = calcPitchingPlus(rtK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
+          const bb9PlusRA = calcPitchingPlus(rtBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
+          const hr9PlusRA = calcPitchingPlus(rtHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
+          if ([eraPlusRA, fipPlusRA, whipPlusRA, k9PlusRA, bb9PlusRA, hr9PlusRA].some((v) => v == null)) return stored?.p_rv_plus ?? null;
+          return (Number(eraPlusRA) * eq.era_plus_weight)
+            + (Number(fipPlusRA) * eq.fip_plus_weight)
+            + (Number(whipPlusRA) * eq.whip_plus_weight)
+            + (Number(k9PlusRA) * eq.k9_plus_weight)
+            + (Number(bb9PlusRA) * eq.bb9_plus_weight)
+            + (Number(hr9PlusRA) * eq.hr9_plus_weight);
+        })()
+      : (stored?.p_rv_plus ?? null);
+
+    // Apply dev_agg scale on top of role-adjusted values
+    const overlayPRvPlus = rolePRvPlus == null
       ? null
       : devAggUnchanged
-        ? stored.p_rv_plus
-        : 100 + ((stored.p_rv_plus - 100) * (1 + devAggDelta));
-    const overlayPWar = (storedDefaultDepth && devAggUnchanged)
+        ? rolePRvPlus
+        : 100 + ((rolePRvPlus - 100) * (1 + devAggDelta));
+    const storedDefaultDepth = stored?.pitcher_role === pitcherRoleFromDepthRole(depthRole);
+    const noOverlay = storedDefaultDepth && devAggUnchanged && !roleChanged;
+    const overlayPWar = noOverlay
       ? (stored?.p_war ?? null)
       : computePitcherWar(overlayPRvPlus, overlayIp, eq);
-    const overlayMarketValue = (storedDefaultDepth && devAggUnchanged)
+    const overlayMarketValue = noOverlay
       ? (stored?.market_value ?? null)
       : computePitcherMarketValue(overlayPWar, { conference: conferenceForMarket, role: pitcherRoleFromDepthRole(depthRole), team: teamForMarket }, eq);
-    // Rate stats (ERA/FIP/WHIP/K9/BB9/HR9) also scale with dev_agg — better
-    // pitcher = lower ERA/FIP/WHIP/BB9/HR9, higher K9.
+    // Rate stats also scale with dev_agg on top of role-adjusted values.
     const scaleLow = (v: number | null | undefined) =>
       v == null ? null : devAggUnchanged ? v : v * (1 - devAggDelta);
     const scaleHigh = (v: number | null | undefined) =>
       v == null ? null : devAggUnchanged ? v : v * (1 + devAggDelta);
 
     const result = {
-      pEra: scaleLow(stored?.p_era),
-      pFip: scaleLow(stored?.p_fip),
-      pWhip: scaleLow(stored?.p_whip),
-      pK9: scaleHigh(stored?.p_k9),
-      pBb9: scaleLow(stored?.p_bb9),
-      pHr9: scaleLow(stored?.p_hr9),
+      pEra: scaleLow(rtEra),
+      pFip: scaleLow(rtFip),
+      pWhip: scaleLow(rtWhip),
+      pK9: scaleHigh(rtK9),
+      pBb9: scaleLow(rtBb9),
+      pHr9: scaleLow(rtHr9),
       pRvPlus: overlayPRvPlus,
       pWar: overlayPWar,
       marketValue: overlayMarketValue,
@@ -2138,25 +2177,42 @@ export default function PitcherProfile() {
                     <div className="flex items-center gap-3 flex-wrap">
                       <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2027 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
                       <div className="flex items-center gap-1.5">
-                        <Select value={projectedRole} onValueChange={(v) => updateProjectedInputs({ pitcher_role: v as "SP" | "RP" | "SM" })}>
+                        <Select value={projectedRole === "SM" ? "SP" : projectedRole} onValueChange={(v) => {
+                          const newRole = v as "SP" | "RP";
+                          updateProjectedInputs({ pitcher_role: newRole });
+                          // Snap depth role into the new role's allowed set
+                          const spDepths: PitcherDepthRole[] = ["weekend_starter", "weekday_starter", "swing_starter"];
+                          const rpDepths: PitcherDepthRole[] = ["swing_starter", "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever", "low_impact_reliever", "specialist_reliever"];
+                          const allowed = newRole === "SP" ? spDepths : rpDepths;
+                          if (!allowed.includes(depthRole)) {
+                            setDepthRole(newRole === "SP" ? "weekend_starter" : "high_leverage_reliever");
+                          }
+                        }}>
                           <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="SP">SP</SelectItem>
                             <SelectItem value="RP">RP</SelectItem>
-                            <SelectItem value="SM">SM</SelectItem>
                           </SelectContent>
                         </Select>
                         <Select value={depthRole} onValueChange={(v) => setDepthRole(v as PitcherDepthRole)}>
                           <SelectTrigger className="h-7 w-[160px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200" title="Depth role — session-only display overlay; not saved"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="weekend_starter">Weekend Starter</SelectItem>
-                            <SelectItem value="weekday_starter">Weekday Starter</SelectItem>
-                            <SelectItem value="swing_starter">Swing Starter</SelectItem>
-                            <SelectItem value="workhorse_reliever">Workhorse Reliever</SelectItem>
-                            <SelectItem value="high_leverage_reliever">High-Leverage Reliever</SelectItem>
-                            <SelectItem value="mid_leverage_reliever">Mid-Leverage Reliever</SelectItem>
-                            <SelectItem value="low_impact_reliever">Low-Impact Reliever</SelectItem>
-                            <SelectItem value="specialist_reliever">Specialist Reliever</SelectItem>
+                            {projectedRole === "SP" || projectedRole === "SM" ? (
+                              <>
+                                <SelectItem value="weekend_starter">Weekend Starter</SelectItem>
+                                <SelectItem value="weekday_starter">Weekday Starter</SelectItem>
+                                <SelectItem value="swing_starter">Swing Starter</SelectItem>
+                              </>
+                            ) : (
+                              <>
+                                <SelectItem value="swing_starter">Swing Starter</SelectItem>
+                                <SelectItem value="workhorse_reliever">Workhorse Reliever</SelectItem>
+                                <SelectItem value="high_leverage_reliever">High-Leverage Reliever</SelectItem>
+                                <SelectItem value="mid_leverage_reliever">Mid-Leverage Reliever</SelectItem>
+                                <SelectItem value="low_impact_reliever">Low-Impact Reliever</SelectItem>
+                                <SelectItem value="specialist_reliever">Specialist Reliever</SelectItem>
+                              </>
+                            )}
                           </SelectContent>
                         </Select>
                         <Select value={String(projectedDevAggressiveness)} onValueChange={(v) => updateProjectedInputs({ dev_aggressiveness: Number(v) })}>
