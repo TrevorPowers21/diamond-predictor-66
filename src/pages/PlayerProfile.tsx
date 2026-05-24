@@ -743,6 +743,26 @@ export default function PlayerProfile() {
     const norm = (v: string) => (v || "").trim().toLowerCase().replace(/\b(university|college|of)\b/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
     return teamsForConference.find(t => norm(t.name) === norm(player.team || ""))?.conference || null;
   })();
+  // Session dev_agg overlay scale (preview only, no DB writes). Mirrors
+  // transferMultiplier shape: 1 + classAdj + devAgg * 0.06. Scale = ratio of
+  // session multiplier to stored multiplier so projections re-derive on the
+  // fly when the coach previews a different dev_agg setting.
+  const devAggClassAdj = (() => {
+    const ct = String(regularPred?.class_transition || "SJ").toUpperCase();
+    if (ct === "FS") return 0.03;
+    if (ct === "SJ") return 0.02;
+    if (ct === "JS") return 0.015;
+    if (ct === "GR") return 0.01;
+    return 0.02;
+  })();
+  const storedDevAgg = Number.isFinite(Number(regularPred?.dev_aggressiveness)) ? Number(regularPred?.dev_aggressiveness) : 0;
+  const sessionDevAggNum = Number(sessionDevAgg);
+  const _storedMult = 1 + devAggClassAdj + (storedDevAgg * 0.06);
+  const _sessionMult = 1 + devAggClassAdj + (sessionDevAggNum * 0.06);
+  const devAggScale = _storedMult > 0 ? _sessionMult / _storedMult : 1;
+  const applyDevScale = (v: number | null | undefined) =>
+    v == null || !Number.isFinite(Number(v)) ? null : Number(v) * devAggScale;
+
   // Read stored values first — these reflect the active customer-team scoping
   // (transfer/precomputed when impersonating, returner/regular at baseline).
   // Live recompute is a fallback only when the stored column is null.
@@ -753,12 +773,16 @@ export default function PlayerProfile() {
   // Session-only depth role overlay scales the projected/displayed oWAR
   // (and downstream market value) without touching the stored row.
   const depthMultiplier = hitterDepthRoleMultiplier(depthRole);
-  const projectedOWar = baseProjectedOWar != null ? baseProjectedOWar * depthMultiplier : null;
-  const displayOWar = projectedOWar ?? (historicalOWar != null ? historicalOWar * depthMultiplier : null);
-  // Market value: scale stored value by depth overlay when role is non-default,
+  // Session overlays multiplied together (depth role × dev_agg). devAggScale
+  // is computed below from sessionDevAgg vs stored dev_aggressiveness.
+  // Both are display-only — never written to DB.
+  const overlayScale = depthMultiplier * (devAggScale ?? 1);
+  const projectedOWar = baseProjectedOWar != null ? baseProjectedOWar * overlayScale : null;
+  const displayOWar = projectedOWar ?? (historicalOWar != null ? historicalOWar * overlayScale : null);
+  // Market value: scale stored value by combined overlay when non-default,
   // otherwise show stored. If stored missing, compute live from displayOWar.
   const displayNilValuation = (() => {
-    if (storedMarketValue != null) return storedMarketValue * depthMultiplier;
+    if (storedMarketValue != null) return storedMarketValue * overlayScale;
     return computeHitterMarketValue(displayOWar, {
       conference: resolvedConference,
       position: effectivePosition,
@@ -767,12 +791,12 @@ export default function PlayerProfile() {
   const predFromAvg = seedStatRow?.avg ?? regularPred?.from_avg ?? null;
   const predFromObp = seedStatRow?.obp ?? regularPred?.from_obp ?? null;
   const predFromSlg = seedStatRow?.slg ?? regularPred?.from_slg ?? null;
-  const projectedAvg = regularPred?.p_avg ?? null;
-  const projectedObp = regularPred?.p_obp ?? null;
-  const projectedSlg = regularPred?.p_slg ?? null;
+  const projectedAvg = applyDevScale(regularPred?.p_avg);
+  const projectedObp = applyDevScale(regularPred?.p_obp);
+  const projectedSlg = applyDevScale(regularPred?.p_slg);
   const fromDerived = computeDerived(predFromAvg, predFromObp, predFromSlg);
   const projectedDerived = computeDerived(projectedAvg, projectedObp, projectedSlg);
-  const projectedWrcPlus = regularPred?.p_wrc_plus ?? null;
+  const projectedWrcPlus = applyDevScale(regularPred?.p_wrc_plus);
 
   // Always use 2025 row for determining if player has data — don't bail on historical year with no AB
   const activeMasterRow = currentHitterRow;

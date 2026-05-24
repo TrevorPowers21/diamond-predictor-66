@@ -1297,26 +1297,47 @@ export default function PitcherProfile() {
     const stored = storedTeamRow ?? storedReturnerRow ?? null;
 
     // Stored prediction values only. If no stored row exists, surface "—".
-    // Depth-role knob is the only display overlay; when depth matches stored
-    // role, use stored p_war / market_value directly. When depth differs,
-    // re-scale pWAR + market value from the stored pRV+ × depth-tuned IP.
+    // Session overlays (depth role + dev_agg) are applied at display time —
+    // no DB writes, no recompute from raw inputs.
+    //
+    // Depth role: re-derives pWAR/market from stored pRV+ × depth-tuned IP.
+    // Dev agg: scales pRV+ proportionally (mirrors equation: each dev step
+    //   is ±6% on the projection multiplier; raw ratio vs stored dev applied
+    //   to pRV+ here, then pWAR/market cascade off the scaled pRV+).
     const overlayIp = pitcherExpectedIp(depthRole, eq);
+    const storedDevAgg = Number.isFinite(Number((stored as any)?.dev_aggressiveness)) ? Number((stored as any).dev_aggressiveness) : 0;
+    const sessionDevAggNum = Number.isFinite(Number(projectedDevAggressiveness)) ? Number(projectedDevAggressiveness) : 0;
+    const devAggDelta = (sessionDevAggNum - storedDevAgg) * 0.06;
     const storedDefaultDepth = stored?.pitcher_role === pitcherRoleFromDepthRole(depthRole);
-    const overlayPWar = storedDefaultDepth
+    const devAggUnchanged = sessionDevAggNum === storedDevAgg;
+    // Apply dev_agg overlay as a proportional bump on stored pRV+: each
+    // 1.0-step change ≈ +6% on the projection equation.
+    const overlayPRvPlus = stored?.p_rv_plus == null
+      ? null
+      : devAggUnchanged
+        ? stored.p_rv_plus
+        : 100 + ((stored.p_rv_plus - 100) * (1 + devAggDelta));
+    const overlayPWar = (storedDefaultDepth && devAggUnchanged)
       ? (stored?.p_war ?? null)
-      : computePitcherWar(stored?.p_rv_plus ?? null, overlayIp, eq);
-    const overlayMarketValue = storedDefaultDepth
+      : computePitcherWar(overlayPRvPlus, overlayIp, eq);
+    const overlayMarketValue = (storedDefaultDepth && devAggUnchanged)
       ? (stored?.market_value ?? null)
       : computePitcherMarketValue(overlayPWar, { conference: conferenceForMarket, role: pitcherRoleFromDepthRole(depthRole), team: teamForMarket }, eq);
+    // Rate stats (ERA/FIP/WHIP/K9/BB9/HR9) also scale with dev_agg — better
+    // pitcher = lower ERA/FIP/WHIP/BB9/HR9, higher K9.
+    const scaleLow = (v: number | null | undefined) =>
+      v == null ? null : devAggUnchanged ? v : v * (1 - devAggDelta);
+    const scaleHigh = (v: number | null | undefined) =>
+      v == null ? null : devAggUnchanged ? v : v * (1 + devAggDelta);
 
     const result = {
-      pEra: stored?.p_era ?? null,
-      pFip: stored?.p_fip ?? null,
-      pWhip: stored?.p_whip ?? null,
-      pK9: stored?.p_k9 ?? null,
-      pBb9: stored?.p_bb9 ?? null,
-      pHr9: stored?.p_hr9 ?? null,
-      pRvPlus: stored?.p_rv_plus ?? null,
+      pEra: scaleLow(stored?.p_era),
+      pFip: scaleLow(stored?.p_fip),
+      pWhip: scaleLow(stored?.p_whip),
+      pK9: scaleHigh(stored?.p_k9),
+      pBb9: scaleLow(stored?.p_bb9),
+      pHr9: scaleLow(stored?.p_hr9),
+      pRvPlus: overlayPRvPlus,
       pWar: overlayPWar,
       marketValue: overlayMarketValue,
       projectedIp: overlayIp,
