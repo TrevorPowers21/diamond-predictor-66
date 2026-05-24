@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 /**
- * 2027 Hitter Returner Backfill.
+ * Returner Hitter Pre-compute (also aliased as npm run precompute-returner-hitters).
  *
- * After the 2026-05-23 season-convention fix, all read paths filter for
- * `season = PROJECTION_SEASON = 2027`. The hitter side has zero returner rows
- * at 2027 (they're all preserved at 2026 as history), so Dashboard hitter
- * leaderboards are empty. This script fixes that in two steps:
+ * Batch-updates EVERY D1 hitter's returner projection row in player_predictions
+ * for PROJECTION_SEASON. Idempotent — safe to re-run after any equation weight
+ * change or Hitter Master refresh. Originally written to seed the 2027 season;
+ * now the canonical recurring precompute for hitter returners.
+ *
+ * Run: npm run precompute-returner-hitters [-- --dry-run]
+ *
+ * Does this in two steps:
  *
  *   1. `createPredictionsFromMaster()` — creates `(model_type='returner',
  *      variant='regular', customer_team_id=NULL, season=2027)` rows for every

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Download, Target, TrendingUp } from "lucide-react";
@@ -13,7 +13,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/hooks/useAuth";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
-import { projectPitchingRate } from "@/lib/pitcherProjection";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
@@ -217,16 +216,6 @@ const applyRoleTransitionAdjustment = (
   return step > 0 ? value * factor : value / factor;
 };
 
-const toPitchingClassAdj = (
-  classTransition: "FS" | "SJ" | "JS" | "GR",
-  fs: number,
-  sj: number,
-  js: number,
-  gr: number,
-) => {
-  const pct = classTransition === "FS" ? fs : classTransition === "SJ" ? sj : classTransition === "JS" ? js : gr;
-  return Number.isFinite(pct) ? pct / 100 : 0;
-};
 
 const calcPitchingPlus = (
   value: number | null,
@@ -1132,111 +1121,8 @@ export default function PitcherProfile() {
     if (updates.pitcher_role) setProjectedRole(updates.pitcher_role);
     if (Number.isFinite(Number(updates.dev_aggressiveness))) setProjectedDevAggressiveness(Number(updates.dev_aggressiveness));
   };
-  const cachedProjectionRef = useRef<any>(null);
   const projectedPitching = useMemo(() => {
     const eq = readPitchingWeights();
-    const classTransitionRaw = String(projectedClassTransition || "SJ").toUpperCase();
-    const classTransition: "FS" | "SJ" | "JS" | "GR" =
-      classTransitionRaw === "FS" || classTransitionRaw === "SJ" || classTransitionRaw === "JS" || classTransitionRaw === "GR"
-        ? classTransitionRaw
-        : "SJ";
-    const devAggressiveness = projectedDevAggressiveness;
-
-    // Use stored PR+ values from the 2025 projection source row (pipeline computed
-    // these from blended inputs). Falls back to locally-computed internalPowerRatings
-    // only if the stored values aren't available. This pins projections to 2025
-    // regardless of which season the Scouting Grades dropdown is viewing.
-    const eraPrPlus = (projectionSourceRow as any)?.era_pr_plus ?? internalPowerRatings?.eraPlus ?? parseNum(powerRatingsRow?.[30]);
-    const fipPrPlus = (projectionSourceRow as any)?.fip_pr_plus ?? internalPowerRatings?.fipPlus ?? parseNum(powerRatingsRow?.[31]);
-    const whipPrPlus = (projectionSourceRow as any)?.whip_pr_plus ?? internalPowerRatings?.whipPlus ?? parseNum(powerRatingsRow?.[32]);
-    const k9PrPlus = (projectionSourceRow as any)?.k9_pr_plus ?? internalPowerRatings?.k9Plus ?? parseNum(powerRatingsRow?.[33]);
-    const hr9PrPlus = (projectionSourceRow as any)?.hr9_pr_plus ?? internalPowerRatings?.hr9Plus ?? parseNum(powerRatingsRow?.[34]);
-    const bb9PrPlus = (projectionSourceRow as any)?.bb9_pr_plus ?? internalPowerRatings?.bb9Plus ?? parseNum(powerRatingsRow?.[35]);
-
-    const classEraAdj = toPitchingClassAdj(classTransition, eq.class_era_fs, eq.class_era_sj, eq.class_era_js, eq.class_era_gr);
-    const classFipAdj = toPitchingClassAdj(classTransition, eq.class_fip_fs, eq.class_fip_sj, eq.class_fip_js, eq.class_fip_gr);
-    const classWhipAdj = toPitchingClassAdj(classTransition, eq.class_whip_fs, eq.class_whip_sj, eq.class_whip_js, eq.class_whip_gr);
-    const classK9Adj = toPitchingClassAdj(classTransition, eq.class_k9_fs, eq.class_k9_sj, eq.class_k9_js, eq.class_k9_gr);
-    const classBb9Adj = toPitchingClassAdj(classTransition, eq.class_bb9_fs, eq.class_bb9_sj, eq.class_bb9_js, eq.class_bb9_gr);
-    const classHr9Adj = toPitchingClassAdj(classTransition, eq.class_hr9_fs, eq.class_hr9_sj, eq.class_hr9_js, eq.class_hr9_gr);
-
-    const pEra = projectPitchingRate({
-      lastStat: storageEra,
-      prPlus: eraPrPlus,
-      ncaaAvg: eq.era_plus_ncaa_avg,
-      ncaaSd: eq.era_plus_ncaa_sd,
-      prSd: eq.era_pr_sd,
-      classAdjustment: classEraAdj,
-      devAggressiveness,
-      thresholds: eq.era_damp_thresholds,
-      impacts: eq.era_damp_impacts,
-      lowerIsBetter: true,
-    });
-    const pFip = projectPitchingRate({
-      lastStat: storageFip,
-      prPlus: fipPrPlus,
-      ncaaAvg: eq.fip_plus_ncaa_avg,
-      ncaaSd: eq.fip_plus_ncaa_sd,
-      prSd: eq.fip_pr_sd,
-      classAdjustment: classFipAdj,
-      devAggressiveness,
-      thresholds: eq.fip_damp_thresholds,
-      impacts: eq.fip_damp_impacts,
-      lowerIsBetter: true,
-    });
-    const pWhip = projectPitchingRate({
-      lastStat: storageWhip,
-      prPlus: whipPrPlus,
-      ncaaAvg: eq.whip_plus_ncaa_avg,
-      ncaaSd: eq.whip_plus_ncaa_sd,
-      prSd: eq.whip_pr_sd,
-      classAdjustment: classWhipAdj,
-      devAggressiveness,
-      thresholds: eq.whip_damp_thresholds,
-      impacts: eq.whip_damp_impacts,
-      lowerIsBetter: true,
-    });
-    const pK9 = projectPitchingRate({
-      lastStat: storageK9,
-      prPlus: k9PrPlus,
-      ncaaAvg: eq.k9_plus_ncaa_avg,
-      ncaaSd: eq.k9_plus_ncaa_sd,
-      prSd: eq.k9_pr_sd,
-      classAdjustment: classK9Adj,
-      devAggressiveness,
-      thresholds: eq.k9_damp_thresholds,
-      impacts: eq.k9_damp_impacts,
-      lowerIsBetter: false,
-    });
-    const pBb9 = projectPitchingRate({
-      lastStat: storageBb9,
-      prPlus: bb9PrPlus,
-      ncaaAvg: eq.bb9_plus_ncaa_avg,
-      ncaaSd: eq.bb9_plus_ncaa_sd,
-      prSd: eq.bb9_pr_sd,
-      classAdjustment: classBb9Adj,
-      devAggressiveness,
-      thresholds: eq.bb9_damp_thresholds,
-      impacts: eq.bb9_damp_impacts,
-      lowerIsBetter: true,
-    });
-    const pHr9 = projectPitchingRate({
-      lastStat: storageHr9,
-      prPlus: hr9PrPlus,
-      ncaaAvg: eq.hr9_plus_ncaa_avg,
-      ncaaSd: eq.hr9_plus_ncaa_sd,
-      prSd: eq.hr9_pr_sd,
-      classAdjustment: classHr9Adj,
-      devAggressiveness,
-      thresholds: eq.hr9_damp_thresholds,
-      impacts: eq.hr9_damp_impacts,
-      lowerIsBetter: true,
-    });
-    // Park factor intentionally NOT applied to returner projections — the
-    // pitcher's lastStat already reflects their home park (they stayed at the
-    // same school next season, park is invariant). Mirrors the lib edit in
-    // pitcherProjection.ts. Park-adjustment lives only on the transfer path.
-    void teamByName; void teamParkComponents;
     const roleCurve = {
       tier1Max: eq.rp_to_sp_low_better_tier1_max,
       tier2Max: eq.rp_to_sp_low_better_tier2_max,
@@ -1245,66 +1131,16 @@ export default function PitcherProfile() {
       tier2Mult: eq.rp_to_sp_low_better_tier2_mult,
       tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
     };
-    const roleAdjustedEra = applyRoleTransitionAdjustment(pEra, eq.sp_to_rp_reg_era_pct, derivedRole, projectedRole, true, roleCurve);
-    const roleAdjustedFip = applyRoleTransitionAdjustment(pFip, eq.sp_to_rp_reg_fip_pct, derivedRole, projectedRole, true, roleCurve);
-    const roleAdjustedWhip = applyRoleTransitionAdjustment(pWhip, eq.sp_to_rp_reg_whip_pct, derivedRole, projectedRole, true, roleCurve);
-    const roleAdjustedK9 = applyRoleTransitionAdjustment(pK9, eq.sp_to_rp_reg_k9_pct, derivedRole, projectedRole, false, roleCurve);
-    const roleAdjustedBb9 = applyRoleTransitionAdjustment(pBb9, eq.sp_to_rp_reg_bb9_pct, derivedRole, projectedRole, true, roleCurve);
-    const roleAdjustedHr9 = applyRoleTransitionAdjustment(pHr9, eq.sp_to_rp_reg_hr9_pct, derivedRole, projectedRole, true, roleCurve);
 
-    const eraPlus = calcPitchingPlus(roleAdjustedEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale);
-    const fipPlus = calcPitchingPlus(roleAdjustedFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale);
-    const whipPlus = calcPitchingPlus(roleAdjustedWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale);
-    const k9Plus = calcPitchingPlus(roleAdjustedK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
-    const bb9Plus = calcPitchingPlus(roleAdjustedBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale);
-    const hr9Plus = calcPitchingPlus(roleAdjustedHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale);
-    const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-      ? (Number(eraPlus) * eq.era_plus_weight) +
-        (Number(fipPlus) * eq.fip_plus_weight) +
-        (Number(whipPlus) * eq.whip_plus_weight) +
-        (Number(k9Plus) * eq.k9_plus_weight) +
-        (Number(bb9Plus) * eq.bb9_plus_weight) +
-        (Number(hr9Plus) * eq.hr9_plus_weight)
-      : null;
-    const projectedIp = projectedRole === "SP" ? eq.pwar_ip_sp : projectedRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
-    const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);
-    const pWar = pitcherValue == null || eq.pwar_runs_per_win === 0
-      ? null
-      : ((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
-    const pitchingTierMultipliers = {
-      sec: eq.market_tier_sec,
-      p4: eq.market_tier_acc_big12,
-      bigTen: eq.market_tier_big_ten,
-      strongMid: eq.market_tier_strong_mid,
-      lowMajor: eq.market_tier_low_major,
-    };
-    const teamForMarket = displayTeam || null;
-    const conferenceForMarket = displayConference === "—" ? null : displayConference;
-    const ptm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
-    const pvm = getPitchingPvfForRole(projectedRole, eq);
-    const marketEligible = canShowPitchingMarketValue(teamForMarket, conferenceForMarket);
-    const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
-
-    // Prefer stored player_predictions row over live recompute so PitcherProfile
-    // and Dashboard show the same numbers. Precedence:
-    //   - Impersonating a customer team → that team's precomputed transfer row
-    //   - Otherwise → the canonical global "returner" row (customer_team_id NULL)
-    // Live `pEra/pFip/...` above kept as fallback when no stored row exists.
+    // Stored-first: prefer precomputed row (team transfer) then returner row.
+    // Session overlays (role transition, dev_agg, depth role) apply on top —
+    // no raw-input recompute, no DB writes.
     const storedTeamRow = effectiveTeamId
       ? (predictions as any[]).find((p) => p.customer_team_id === effectiveTeamId && p.variant === "precomputed")
       : null;
     const storedReturnerRow = (predictions as any[]).find((p) => p.model_type === "returner" && p.variant === "regular" && p.customer_team_id == null);
     const stored = storedTeamRow ?? storedReturnerRow ?? null;
 
-    // Stored prediction values only. If no stored row exists, surface "—".
-    // Session overlays (depth role + dev_agg + role transition) are applied
-    // at display time — no DB writes, no recompute from raw inputs.
-    //
-    // Order of overlays:
-    //   1. Role transition (RP↔SP): apply applyRoleTransitionAdjustment to
-    //      each stored rate stat using exact same math as transferPitcherProjection.
-    //   2. Dev agg: each step ±6% scale on top of role-adjusted rates.
-    //   3. Depth role: drives projectedIp for pWAR; market value re-derived.
     const overlayIp = pitcherExpectedIp(depthRole, eq);
     const storedDevAgg = Number.isFinite(Number((stored as any)?.dev_aggressiveness)) ? Number((stored as any).dev_aggressiveness) : 0;
     const sessionDevAggNum = Number.isFinite(Number(projectedDevAggressiveness)) ? Number(projectedDevAggressiveness) : 0;
@@ -1319,7 +1155,6 @@ export default function PitcherProfile() {
     const storedRole = validRole((stored as any)?.pitcher_role) ?? validRole(derivedRole) ?? null;
     const sessionRole = validRole(projectedRole) ?? "RP";
     const roleChanged = storedRole != null && storedRole !== sessionRole;
-    // Reuses the roleCurve declared above for the live-compute path.
     // Apply role transition first (mirrors transferPitcherProjection.ts lines 399-404)
     const rtEra = roleChanged ? applyRoleTransitionAdjustment(stored?.p_era ?? null, eq.sp_to_rp_reg_era_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_era ?? null);
     const rtFip = roleChanged ? applyRoleTransitionAdjustment(stored?.p_fip ?? null, eq.sp_to_rp_reg_fip_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_fip ?? null);
@@ -1347,7 +1182,6 @@ export default function PitcherProfile() {
         })()
       : (stored?.p_rv_plus ?? null);
 
-    // Apply dev_agg scale on top of role-adjusted values
     const overlayPRvPlus = rolePRvPlus == null
       ? null
       : devAggUnchanged
@@ -1358,16 +1192,17 @@ export default function PitcherProfile() {
     const overlayPWar = noOverlay
       ? (stored?.p_war ?? null)
       : computePitcherWar(overlayPRvPlus, overlayIp, eq);
+    const teamForMarket = displayTeam || null;
+    const conferenceForMarket = displayConference === "—" ? null : displayConference;
     const overlayMarketValue = noOverlay
       ? (stored?.market_value ?? null)
       : computePitcherMarketValue(overlayPWar, { conference: conferenceForMarket, role: pitcherRoleFromDepthRole(depthRole), team: teamForMarket }, eq);
-    // Rate stats also scale with dev_agg on top of role-adjusted values.
     const scaleLow = (v: number | null | undefined) =>
       v == null ? null : devAggUnchanged ? v : v * (1 - devAggDelta);
     const scaleHigh = (v: number | null | undefined) =>
       v == null ? null : devAggUnchanged ? v : v * (1 + devAggDelta);
 
-    const result = {
+    return {
       pEra: scaleLow(rtEra),
       pFip: scaleLow(rtFip),
       pWhip: scaleLow(rtWhip),
@@ -1379,42 +1214,15 @@ export default function PitcherProfile() {
       marketValue: overlayMarketValue,
       projectedIp: overlayIp,
     };
-    // Cache first valid projection so switching scouting year doesn't wipe it
-    const hasData = result.pEra != null || result.pFip != null || result.pWar != null;
-    if (hasData) cachedProjectionRef.current = result;
-    return hasData ? result : (cachedProjectionRef.current ?? result);
   }, [
-    projectedClassTransition,
     projectedDevAggressiveness,
     depthRole,
-    internalPowerRatings?.bb9Plus,
-    internalPowerRatings?.eraPlus,
-    internalPowerRatings?.fipPlus,
-    internalPowerRatings?.hr9Plus,
-    internalPowerRatings?.k9Plus,
-    internalPowerRatings?.whipPlus,
-    latestStats?.era,
-    latestStats?.whip,
-    powerRatingsRow,
-    projectionSourceRow,
-    storageBb9,
-    storageEra,
-    storageFip,
-    storageHr9,
-    storageK9,
-    storageIp,
-    storageWhip,
     displayConference,
     derivedRole,
     projectedRole,
     predictions,
     effectiveTeamId,
-    storageProjectionOverride?.class_transition,
-    storageProjectionOverride?.dev_aggressiveness,
-    storageProjectionOverride?.pitcher_role,
     displayTeam,
-    teamByName,
-    teamParkComponents,
   ]);
 
   const pitching2025 = useMemo(() => {

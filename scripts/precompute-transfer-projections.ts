@@ -65,6 +65,20 @@ async function main() {
   // which isn't wired yet — keep it opt-in until that lands)
   const divisionArg = (arg("division") || "D1").toUpperCase();
 
+  // Env-detection guard: refuse to write prod unless --prod explicitly passed.
+  const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").toLowerCase();
+  const looksLikeProd = supabaseUrl.includes("ualmkgkdnoubccoieahf") || supabaseUrl.includes("trbvxuoliwrfowibatkm") || supabaseUrl.includes("prod");
+  if (looksLikeProd && !isProd) {
+    console.error(`${C.red}✗ SUPABASE_URL looks like PROD but --prod was not passed. Refusing to write.${C.reset}`);
+    console.error(`  URL: ${supabaseUrl || "(unset)"}`);
+    process.exit(1);
+  }
+  if (isProd && !looksLikeProd) {
+    console.error(`${C.red}✗ --prod passed but SUPABASE_URL doesn't look like prod. Refusing to write.${C.reset}`);
+    console.error(`  URL: ${supabaseUrl || "(unset)"}`);
+    process.exit(1);
+  }
+
   if (!teamId) {
     console.error(`${C.red}✗ --team <customer_team_uuid> required${C.reset}`);
     process.exit(1);
