@@ -473,7 +473,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     queryFn: async () => {
       let q = supabase
         .from("player_predictions")
-        .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at")
+        .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at, o_war, market_value, projected_pa, p_war, projected_ip, pitcher_role")
         .eq("season", PROJECTION_SEASON)
         .in("model_type", ["returner", "transfer"])
         .in("player_id", targetPlayerIds);
