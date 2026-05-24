@@ -695,10 +695,7 @@ export default function PlayerProfile() {
     exitPositions[`${player.first_name} ${player.last_name}`] ||
     exitPositions[abbrevName] ||
     null;
-  const seedDerived = useMemo(
-    () => (seedStatRow ? computeDerived(seedStatRow.avg, seedStatRow.obp, seedStatRow.slg) : null),
-    [seedStatRow],
-  );
+  const seedDerived = seedStatRow ? computeDerived(seedStatRow.avg, seedStatRow.obp, seedStatRow.slg) : null;
   const seedPowerDerived = seedPowerRow ? computePowerRatings({
     contact: seedPowerRow.contact,
     lineDrive: seedPowerRow.lineDrive,
@@ -784,14 +781,8 @@ export default function PlayerProfile() {
   const projectedAvg = applyDevScale(regularPred?.p_avg);
   const projectedObp = applyDevScale(regularPred?.p_obp);
   const projectedSlg = applyDevScale(regularPred?.p_slg);
-  const fromDerived = useMemo(
-    () => computeDerived(predFromAvg, predFromObp, predFromSlg),
-    [predFromAvg, predFromObp, predFromSlg],
-  );
-  const projectedDerived = useMemo(
-    () => computeDerived(projectedAvg, projectedObp, projectedSlg),
-    [projectedAvg, projectedObp, projectedSlg],
-  );
+  const fromDerived = computeDerived(predFromAvg, predFromObp, predFromSlg);
+  const projectedDerived = computeDerived(projectedAvg, projectedObp, projectedSlg);
   const projectedWrcPlus = applyDevScale(regularPred?.p_wrc_plus);
 
   // Always use 2025 row for determining if player has data — don't bail on historical year with no AB
