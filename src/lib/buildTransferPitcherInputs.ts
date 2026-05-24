@@ -22,6 +22,11 @@ import {
   type TransferPitcherInput,
   type TransferPitcherResult,
 } from "@/lib/transferPitcherProjection";
+import {
+  computePitcherWar,
+  computePitcherMarketValue,
+  pitcherExpectedIp,
+} from "@/lib/depthRoles";
 
 // ---------- shapes ----------
 
@@ -292,6 +297,11 @@ export function applyTransferPitcherPostprocess(
     devAggressiveness: number | null;
     isJucoSource: boolean;
     pitchingEq: PitchingEquationWeights;
+    // Conference + team needed to re-derive market_value from the postprocessed
+    // pRV+. Optional for backward compatibility — callers that don't pass them
+    // get the pre-postprocess market_value (legacy behavior).
+    toConference?: string | null;
+    toTeam?: string | null;
   },
 ): PitcherTransferFinal {
   const { isJucoSource, pitchingEq } = args;
@@ -338,6 +348,25 @@ export function applyTransferPitcherPostprocess(
       (Number(hr9PlusAdj) * pitchingEq.hr9_plus_weight)
     : result.p_rv_plus;
 
+  // pRV+ drives pWAR; pWAR drives market value. Re-derive both from the
+  // postprocessed pRV+ so the stored (p_rv_plus, p_war, market_value) triple
+  // is internally consistent. Falls back to result.p_war / market_value when
+  // pRvPlusAdj is null or when caller didn't supply conference/team context.
+  const projectedIpForRole =
+    result.projected_role === "SP" ? pitchingEq.pwar_ip_sp
+      : result.projected_role === "RP" ? pitchingEq.pwar_ip_rp
+      : pitchingEq.pwar_ip_sm;
+  const recomputedPWar = pRvPlusAdj != null
+    ? computePitcherWar(pRvPlusAdj, projectedIpForRole, pitchingEq)
+    : result.p_war;
+  const recomputedMarketValue = (recomputedPWar != null && args.toConference !== undefined && args.toTeam !== undefined)
+    ? computePitcherMarketValue(
+        recomputedPWar,
+        { conference: args.toConference, role: result.projected_role, team: args.toTeam },
+        pitchingEq,
+      )
+    : result.market_value;
+
   return {
     p_era: adjEra,
     p_fip: adjFip,
@@ -346,11 +375,8 @@ export function applyTransferPitcherPostprocess(
     p_bb9: adjBb9,
     p_hr9: adjHr9,
     p_rv_plus: pRvPlusAdj,
-    // pWar + market value: lib already computes from the unadjusted projection.
-    // Mirrors TB's behavior of returning result.p_war / result.market_value
-    // even after class+dev adjustments (those affect rates, not WAR derivation).
-    p_war: result.p_war,
-    market_value: result.market_value,
+    p_war: recomputedPWar,
+    market_value: recomputedMarketValue,
     pitcher_role: result.projected_role,
   };
 }

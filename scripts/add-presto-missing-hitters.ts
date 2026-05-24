@@ -26,9 +26,14 @@ import { createInterface } from "node:readline/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
+import { CURRENT_SEASON, PROJECTION_SEASON } from "../src/lib/seasonConstants";
+
 const CONFIRM = "yes-add-presto-missing";
 const PA_THRESHOLD = 75;
-const SEASON = 2026;
+// DATA season — reads from + writes to Hitter Master (actuals)
+const SEASON = CURRENT_SEASON;
+// PROJECTION season — writes player_predictions rows
+const PRED_SEASON = PROJECTION_SEASON;
 const COLOR = { reset: "\x1b[0m", bold: "\x1b[1m", green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m", cyan: "\x1b[36m" };
 const ok = (s: string) => console.log(`  ${COLOR.green}✓${COLOR.reset} ${s}`);
 const warn = (s: string) => console.log(`  ${COLOR.yellow}!${COLOR.reset} ${s}`);
@@ -292,7 +297,7 @@ async function main() {
     player_id: idMap.get(p.sourceId)!,
     model_type: "returner",
     variant: "regular",
-    season: SEASON,
+    season: PRED_SEASON,
     status: "active",
     from_avg: p.payload.avg,
     from_obp: p.payload.obp,

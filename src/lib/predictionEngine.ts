@@ -3,9 +3,54 @@ import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
 import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { fetchParkFactorsMap, type ParkFactorsMap } from "@/lib/parkFactors";
-import { PRIOR_SEASON } from "@/lib/seasonConstants";
+import { PRIOR_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { computePitcherProjection, type PitcherProjectionInput } from "@/lib/pitcherProjection";
 import { PITCHING_EQ_DEFAULTS } from "@/hooks/usePitchingEquationWeights";
+import {
+  computePitcherWar,
+  computePitcherMarketValue,
+  computeHitterOWar,
+  computeHitterMarketValue,
+} from "@/lib/depthRoles";
+
+// Fetch player meta needed to derive stored p_war / o_war / market_value
+// after a recalc. Returns nulls when player_id missing.
+async function fetchPlayerMetaForDerived(playerId: string | null | undefined) {
+  if (!playerId) return { conference: null, team: null, position: null, pa: null };
+  const { data } = await supabase
+    .from("players")
+    .select("conference, team, position, pa")
+    .eq("id", playerId)
+    .maybeSingle();
+  return {
+    conference: (data as any)?.conference ?? null,
+    team: (data as any)?.team ?? null,
+    position: (data as any)?.position ?? null,
+    pa: (data as any)?.pa ?? null,
+  };
+}
+
+// Compute pitcher derived columns from a freshly-recalculated row.
+function derivePitcherStored(
+  pRvPlus: number | null | undefined,
+  role: "SP" | "RP" | "SM",
+  meta: { conference: string | null; team: string | null },
+  eq: ReturnType<typeof readPitchingWeights>,
+) {
+  const projectedIp = role === "SP" ? eq.pwar_ip_sp : role === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
+  const pWar = computePitcherWar(pRvPlus, projectedIp, eq);
+  const marketValue = computePitcherMarketValue(pWar, { conference: meta.conference, role, team: meta.team }, eq);
+  return { p_war: pWar, market_value: marketValue, projected_ip: projectedIp };
+}
+
+function deriveHitterStored(
+  pWrcPlus: number | null | undefined,
+  meta: { conference: string | null; position: string | null; pa: number | null },
+) {
+  const oWar = computeHitterOWar(pWrcPlus, meta.pa, null);
+  const marketValue = computeHitterMarketValue(oWar, { conference: meta.conference, position: meta.position });
+  return { o_war: oWar, market_value: marketValue, projected_pa: meta.pa };
+}
 
 type PredictionRow = {
   id: string;
@@ -120,7 +165,7 @@ interface EngineConfig {
   transfer: TransferConfig;
 }
 
-interface ReturnerPowerContext {
+export interface ReturnerPowerContext {
   baPlus: number | null;
   obpPlus: number | null;
   isoPlus: number | null;
@@ -168,7 +213,7 @@ function normalizeProjectedRate(v: number): number {
   return v;
 }
 
-function readSpecificPlus(v: number | null | undefined): number | null {
+export function readSpecificPlus(v: number | null | undefined): number | null {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
@@ -192,7 +237,7 @@ function normalizeClassTransition(raw?: string | null): string {
   return "SJ";
 }
 
-async function loadEngineConfig(customerTeamId?: string | null): Promise<EngineConfig> {
+export async function loadEngineConfig(customerTeamId?: string | null): Promise<EngineConfig> {
   // Load from "Equation Weights" table (primary), fall back to "model_config" (legacy)
   let eqWeights: Map<string, number>;
   try {
@@ -399,7 +444,7 @@ async function loadEngineConfig(customerTeamId?: string | null): Promise<EngineC
   return { returner, transfer };
 }
 
-function recalcReturner(
+export function recalcReturner(
   pred: PredictionRow,
   config: ReturnerConfig,
   powerContext?: ReturnerPowerContext,
@@ -1017,11 +1062,20 @@ export async function recalculatePredictionById(predictionId: string, updates: U
     if (updates.class_transition !== undefined) {
       extraFields.class_transition_overridden = true;
     }
+    // Derive stored p_war + o_war + market_value so depth/dev/role changes
+    // reflect in displays without re-running the precompute scripts.
+    const meta = await fetchPlayerMetaForDerived(merged.player_id);
+    const pitcherRole = ((updates as any).pitcher_role ?? (pitcherUpdate as any).pitcher_role ?? merged.pitcher_role ?? "RP") as "SP" | "RP" | "SM";
+    const pitcherDerived = derivePitcherStored((pitcherUpdate as any).p_rv_plus, pitcherRole, meta, eq);
+    const hitterDerived = deriveHitterStored((hitterResult as any).p_wrc_plus, meta);
+    // Hitter market_value would stomp pitcher market_value; for TWP we let the
+    // pitcher side win (pitcher precompute is canonical for value attribution).
+    const { market_value: _hitterMv, ...hitterDerivedNoMv } = hitterDerived;
     // Merge hitter result first, then pitcher fields — they target disjoint
     // columns (p_avg/p_obp/... vs p_era/p_fip/...) so neither stomps the other.
     const { error: updateErr } = await supabase
       .from("player_predictions")
-      .update({ ...updates, ...hitterResult, ...pitcherUpdate, ...extraFields, locked: true })
+      .update({ ...updates, ...hitterResult, ...pitcherUpdate, ...hitterDerivedNoMv, ...pitcherDerived, ...extraFields, locked: true })
       .eq("id", predictionId);
     if (updateErr) throw updateErr;
 
@@ -1048,9 +1102,14 @@ export async function recalculatePredictionById(predictionId: string, updates: U
     if (updates.class_transition !== undefined) {
       extraFields.class_transition_overridden = true;
     }
+    // Derive stored p_war + market_value so dev_agg / class / role changes
+    // reflect in profile/dashboard without re-running the precompute scripts.
+    const meta = await fetchPlayerMetaForDerived(merged.player_id);
+    const pitcherRole = ((updates as any).pitcher_role ?? (predictionUpdate as any).pitcher_role ?? merged.pitcher_role ?? "RP") as "SP" | "RP" | "SM";
+    const pitcherDerived = derivePitcherStored((predictionUpdate as any).p_rv_plus, pitcherRole, meta, eq);
     const { error: updateErr } = await supabase
       .from("player_predictions")
-      .update({ ...predictionUpdate, ...extraFields, locked: true })
+      .update({ ...predictionUpdate, ...pitcherDerived, ...extraFields, locked: true })
       .eq("id", predictionId);
     if (updateErr) throw updateErr;
 
@@ -1119,16 +1178,20 @@ export async function recalculatePredictionById(predictionId: string, updates: U
   if (updates.class_transition !== undefined) {
     extraFields.class_transition_overridden = true;
   }
+  // Derive stored o_war + market_value so dev_agg / class / depth changes
+  // reflect in profile/dashboard without re-running the precompute scripts.
+  const hitterMeta = await fetchPlayerMetaForDerived(merged.player_id);
+  const hitterDerived = deriveHitterStored((result as any).p_wrc_plus, hitterMeta);
   const { error: updateErr } = await supabase
     .from("player_predictions")
-    .update({ ...updates, ...result, ...extraFields, locked: true })
+    .update({ ...updates, ...result, ...hitterDerived, ...extraFields, locked: true })
     .eq("id", predictionId);
   if (updateErr) throw updateErr;
 
   return { success: true, prediction: result };
 }
 
-export async function bulkRecalculatePredictionsLocal(season = 2026) {
+export async function bulkRecalculatePredictionsLocal(season: number = PROJECTION_SEASON) {
   const config = await loadEngineConfig();
   const allPreds = await fetchAllPredictionsForReturnerMode(season);
   // A prediction row qualifies for the hitter pass when it has any hitter

@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import {
   ArrowUpDown,
   Search,
@@ -478,6 +479,7 @@ interface ReturnerPlayer {
     p_ops: number | null;
     p_iso: number | null;
     p_wrc_plus: number | null;
+    o_war: number | null;
     power_rating_plus: number | null;
     ev_score: number | null;
     barrel_score: number | null;
@@ -488,6 +490,7 @@ interface ReturnerPlayer {
 
 interface PitchingDashboardRow {
   id: string;
+  player_id: string | null;
   playerName: string;
   team: string | null;
   conference: string | null;
@@ -1530,7 +1533,10 @@ export default function ReturningPlayers() {
           model_type: row.model_type,
           status: row.status,
           pa: player.pa ?? null,
-          nil_value: nilByPlayer.get(player.id) ?? null,
+          // Prefer stored market_value from player_predictions (single source of
+          // truth, matches profile). Falls back to legacy nil_valuations only
+          // when the prediction row has no market_value yet (pre-backfill data).
+          nil_value: (row.market_value ?? nilByPlayer.get(player.id)) ?? null,
           prediction: {
             from_avg: row.from_avg,
             from_obp: row.from_obp,
@@ -1543,6 +1549,7 @@ export default function ReturningPlayers() {
             p_ops: row.p_ops,
             p_iso: row.p_iso,
             p_wrc_plus: row.p_wrc_plus,
+            o_war: row.o_war ?? null,
             power_rating_plus: row.power_rating_plus,
             ev_score: seedEvScore ?? null,
             barrel_score: seedBarrelScore ?? null,
@@ -1580,6 +1587,7 @@ export default function ReturningPlayers() {
         const { data: pageData, error: pageErr, count } = await supabase
           .from("player_predictions")
           .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip)", { count: "exact" })
+          .eq("season", PROJECTION_SEASON)
           .in("model_type", ["returner", "transfer"])
           .eq("variant", "regular")
           .in("status", ["active", "departed"])
@@ -1629,6 +1637,7 @@ export default function ReturningPlayers() {
           let q = supabase
             .from("player_predictions")
             .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip)")
+            .eq("season", PROJECTION_SEASON)
             .in("model_type", ["returner", "transfer"])
             .in("variant", ["regular", "precomputed"])
             .in("status", ["active", "departed"])
@@ -1731,7 +1740,7 @@ export default function ReturningPlayers() {
           if (sortKey === "p_ops") return p.prediction.p_ops ?? computeDerived(p.prediction.p_avg, p.prediction.p_obp, p.prediction.p_slg).ops ?? -999;
           if (sortKey === "p_iso") return p.prediction.p_iso ?? computeDerived(p.prediction.p_avg, p.prediction.p_obp, p.prediction.p_slg).iso ?? -999;
           if (sortKey === "p_wrc_plus") return p.prediction.p_wrc_plus ?? -999;
-          if (sortKey === "p_war") return computeOWarFromWrcPlus(p.prediction.p_wrc_plus) ?? -999;
+          if (sortKey === "p_war") return p.prediction.o_war ?? computeOWarFromWrcPlus(p.prediction.p_wrc_plus, p.pa) ?? -999;
           if (sortKey === "p_nil") return computeNilFallback({ storedNil: p.nil_value, wrcPlus: p.prediction.p_wrc_plus, conference: p.conference, position: p.position }) ?? -999;
           return -999;
         };
@@ -1822,6 +1831,7 @@ export default function ReturningPlayers() {
       let predQuery = supabase
         .from("player_predictions")
         .select("*")
+        .eq("season", PROJECTION_SEASON)
         .in("player_id", playerIds)
         .in("model_type", ["returner", "transfer"])
         .in("variant", ["regular", "precomputed"])
@@ -2071,6 +2081,7 @@ export default function ReturningPlayers() {
       const { data: allReturnerPreds, error } = await supabase
         .from("player_predictions")
         .select("id")
+        .eq("season", PROJECTION_SEASON)
         .eq("model_type", "returner")
         .eq("variant", "regular")
         .in("status", ["active", "departed"]);
@@ -2167,8 +2178,8 @@ export default function ReturningPlayers() {
   // Keyed by source_player_id so we can join against Pitching Master rows below.
   // These are the canonical values shown on PitcherProfile; live compute here is
   // a fallback for pitchers whose preds haven't been backfilled yet.
-  const { data: pitcherPredBySourceId } = useQuery({
-    queryKey: ["returning-pitcher-predictions-by-source-id"],
+  const { data: pitcherPredBySourceId, isLoading: pitcherPredLoading } = useQuery({
+    queryKey: ["returning-pitcher-predictions-by-source-id", effectiveTeamId],
     queryFn: async () => {
       const map = new Map<string, {
         p_era: number | null;
@@ -2178,6 +2189,9 @@ export default function ReturningPlayers() {
         p_bb9: number | null;
         p_hr9: number | null;
         p_rv_plus: number | null;
+        p_war: number | null;
+        market_value: number | null;
+        projected_ip: number | null;
         pitcher_role: string | null;
         class_year: string | null;
       }>();
@@ -2186,27 +2200,38 @@ export default function ReturningPlayers() {
       while (true) {
         const { data, error } = await supabase
           .from("player_predictions")
-          .select("p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, players!inner(source_player_id, class_year)")
-          .eq("variant", "regular")
+          .select("player_id, customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, projected_ip, pitcher_role, players!inner(source_player_id, class_year)")
+          .eq("season", PROJECTION_SEASON)
+          .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"])
           .not("p_era", "is", null)
           .range(from, from + PAGE - 1);
         if (error) throw error;
         for (const r of (data || []) as any[]) {
           const srcId = r.players?.source_player_id;
-          if (srcId) {
-            map.set(srcId, {
-              p_era: r.p_era,
-              p_fip: r.p_fip,
-              p_whip: r.p_whip,
-              p_k9: r.p_k9,
-              p_bb9: r.p_bb9,
-              p_hr9: r.p_hr9,
-              p_rv_plus: r.p_rv_plus,
-              pitcher_role: r.pitcher_role,
-              class_year: r.players?.class_year ?? null,
-            });
-          }
+          if (!srcId) continue;
+          const existing = map.get(srcId);
+          // Prefer team-scoped precomputed row when impersonating a customer
+          // team. Otherwise prefer the global returner regular row.
+          const wantsTeamRow = effectiveTeamId && r.customer_team_id === effectiveTeamId && r.variant === "precomputed";
+          const wantsGlobalRow = !effectiveTeamId && r.variant === "regular" && r.customer_team_id == null;
+          const fallback = r.variant === "regular" && r.customer_team_id == null;
+          const shouldSet = wantsTeamRow || wantsGlobalRow || (!existing && fallback);
+          if (!shouldSet && existing) continue;
+          map.set(srcId, {
+            p_era: r.p_era,
+            p_fip: r.p_fip,
+            p_whip: r.p_whip,
+            p_k9: r.p_k9,
+            p_bb9: r.p_bb9,
+            p_hr9: r.p_hr9,
+            p_rv_plus: r.p_rv_plus,
+            p_war: r.p_war ?? null,
+            market_value: r.market_value ?? null,
+            projected_ip: r.projected_ip ?? null,
+            pitcher_role: r.pitcher_role,
+            class_year: r.players?.class_year ?? null,
+          });
         }
         if (!data || data.length < PAGE) break;
         from += PAGE;
@@ -2222,13 +2247,13 @@ export default function ReturningPlayers() {
   const { data: pitcherMetaBySourceId } = useQuery({
     queryKey: ["returning-pitcher-meta-by-source-id"],
     queryFn: async () => {
-      const map = new Map<string, { class_year: string | null; is_twp: boolean }>();
+      const map = new Map<string, { class_year: string | null; is_twp: boolean; player_id: string | null }>();
       let from = 0;
       const PAGE = 1000;
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("source_player_id, class_year, is_twp")
+          .select("id, source_player_id, class_year, is_twp")
           .not("source_player_id", "is", null)
           .range(from, from + PAGE - 1);
         if (error) throw error;
@@ -2237,6 +2262,7 @@ export default function ReturningPlayers() {
             map.set(r.source_player_id, {
               class_year: r.class_year ?? null,
               is_twp: !!r.is_twp,
+              player_id: r.id ?? null,
             });
           }
         }
@@ -2249,6 +2275,9 @@ export default function ReturningPlayers() {
   });
 
   const pitchingRows = useMemo<PitchingDashboardRow[]>(() => {
+    // Gate on the pitcher prediction query so the table doesn't render with
+    // "—" placeholders during the brief window before stored preds resolve.
+    if (pitcherPredLoading) return [] as PitchingDashboardRow[];
     const eq = readPitchingWeights();
     const powerEq = pitchingPowerEq;
     let roleOverrides: Record<string, "SP" | "RP" | "SM"> = {};
@@ -2359,7 +2388,10 @@ export default function ReturningPlayers() {
           const parkAdjustedHr9 = pHr9;
           void teamParkComponents;
 
-          const pRvPlus = scoreObj.eraPrPlus;
+          // Prefer Pitching Master.p_rv_plus (canonical composite of the 6
+          // component PR+ values, computed by the pipeline). Live fallback was
+          // using eraPrPlus as a proxy — wrong, that's just one component.
+          const pRvPlus = (r as any).p_rv_plus ?? scoreObj.eraPrPlus;
           const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);
           const pWar = pitcherValue == null || eq.pwar_runs_per_win === 0 ? null : ((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
 
@@ -2370,26 +2402,16 @@ export default function ReturningPlayers() {
           const marketEligible = canShowPitchingMarketValue(normalizedTeam, conferenceForMarket);
           const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
 
-          // DB-stored projections take precedence over live compute. If the
-          // recalc engine has processed this pitcher, use those canonical
-          // values. pWAR is re-derived from the stored p_rv_plus + projected
-          // IP so it stays consistent with the displayed pRV+.
+          // DB-stored projections are the source of truth. Read p_war +
+          // market_value directly from player_predictions (pitcher precompute
+          // writes them). Only fall back to the live `pWar`/`marketValue`
+          // when no stored row exists for this pitcher (unflagged TWPs etc.).
           const dbPred = r.source_player_id ? pitcherPredBySourceId?.get(r.source_player_id) : null;
           const dbPRvPlus = dbPred?.p_rv_plus ?? null;
           const dbRole = (dbPred?.pitcher_role as "SP" | "RP" | "SM" | null) ?? null;
           const effectiveRole: "SP" | "RP" | "SM" = dbRole || projectedRole;
-          const dbProjectedIp = effectiveRole === "SP" ? eq.pwar_ip_sp : effectiveRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
-          const dbPitcherValue = dbPRvPlus == null ? null : ((dbPRvPlus - 100) / 100);
-          const dbPWar = dbPitcherValue == null || eq.pwar_runs_per_win === 0
-            ? null
-            : ((((dbPitcherValue * (dbProjectedIp / 9) * eq.pwar_r_per_9) + ((dbProjectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
-          const dbMarketValue = (() => {
-            if (dbPWar == null) return null;
-            const dbPtm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
-            const dbPvm = getPitchingPvfForRole(effectiveRole, eq);
-            if (!marketEligible) return null;
-            return dbPWar * eq.market_dollars_per_war * dbPtm * dbPvm;
-          })();
+          const dbPWar = dbPred?.p_war ?? null;
+          const dbMarketValue = dbPred?.market_value ?? null;
 
           // Class for this pitcher: prefer the value attached to their
           // prediction (canonical, came from the recalc engine's player join);
@@ -2402,8 +2424,13 @@ export default function ReturningPlayers() {
             null
           );
           const pitcherIsTwp = !!pitcherMeta?.is_twp;
+          // Stored-values only: if no precompute row exists for this pitcher,
+          // surface them with null projections (display as "—") rather than
+          // live-computing from raw stats. Live compute drifts from stored —
+          // misleading info is worse than no info.
           return {
             id: r.id || `pitching-master-${idx}`,
+            player_id: pitcherMeta?.player_id ?? null,
             playerName,
             team: normalizedTeam || null,
             conference: teamMatch?.conference ?? r.conference ?? null,
@@ -2425,21 +2452,21 @@ export default function ReturningPlayers() {
             bb9_pr_plus: scoreObj.bb9PrPlus,
             ip: Number(r.ip) || 0,
             era, fip, whip, k9, bb9, hr9,
-            p_era: dbPred?.p_era ?? parkAdjustedEra,
-            p_fip: dbPred?.p_fip ?? pFip,
-            p_whip: dbPred?.p_whip ?? parkAdjustedWhip,
-            p_k9: dbPred?.p_k9 ?? pK9,
-            p_bb9: dbPred?.p_bb9 ?? pBb9,
-            p_hr9: dbPred?.p_hr9 ?? parkAdjustedHr9,
-            p_rv_plus: dbPRvPlus ?? pRvPlus,
-            p_war: dbPWar ?? pWar,
-            market_value: dbMarketValue ?? marketValue,
+            p_era: dbPred?.p_era ?? null,
+            p_fip: dbPred?.p_fip ?? null,
+            p_whip: dbPred?.p_whip ?? null,
+            p_k9: dbPred?.p_k9 ?? null,
+            p_bb9: dbPred?.p_bb9 ?? null,
+            p_hr9: dbPred?.p_hr9 ?? null,
+            p_rv_plus: dbPRvPlus,
+            p_war: dbPWar,
+            market_value: dbMarketValue,
           } as PitchingDashboardRow;
         })
         .filter((r) => !!r.playerName);
     }
     return [] as PitchingDashboardRow[];
-  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq, pitcherPredBySourceId, pitcherMetaBySourceId]);
+  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq, pitcherPredBySourceId, pitcherMetaBySourceId, pitcherPredLoading]);
   const filteredPitchingRows = useMemo(() => {
     // Qualification threshold: pitchers need at least 25 IP to show in the table
     // (parallel to hitters needing 75 PA). Profile pages are still searchable/accessible
@@ -2929,7 +2956,7 @@ export default function ReturningPlayers() {
                                 class_year: p.class_year,
                                 p_avg: pred.p_avg, p_obp: pred.p_obp, p_slg: pred.p_slg,
                                 p_ops: pred.p_ops, p_iso: pred.p_iso, p_wrc_plus: pred.p_wrc_plus,
-                                owar: computeOWarFromWrcPlus(pred.p_wrc_plus),
+                                owar: pred.o_war ?? computeOWarFromWrcPlus(pred.p_wrc_plus, p.pa),
                                 nil_value: p.nil_value,
                                 power_rating_plus: pred.power_rating_plus,
                                 barrel_score: pred.barrel_score, ev_score: pred.ev_score,
@@ -3014,7 +3041,7 @@ export default function ReturningPlayers() {
                               {pctFormat(pred.p_wrc_plus)}
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">
-                              {statFormat(computeOWarFromWrcPlus(pred.p_wrc_plus), 2)}
+                              {statFormat(pred.o_war ?? computeOWarFromWrcPlus(pred.p_wrc_plus, p.pa), 2)}
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">
                               {moneyFormat(
@@ -3300,7 +3327,9 @@ export default function ReturningPlayers() {
                               <div className={(r.is_twp || ((r as any).portal_status && (r as any).portal_status !== "NOT IN PORTAL")) ? "flex items-center gap-2" : undefined}>
                                 <div className="min-w-0">
                                   <Link
-                                    to={`/dashboard/pitcher/storage__${encodeURIComponent(r.playerName)}__${encodeURIComponent(r.team || "")}`}
+                                    to={r.player_id
+                                      ? `/dashboard/pitcher/${r.player_id}`
+                                      : `/dashboard/pitcher/storage__${encodeURIComponent(r.playerName)}__${encodeURIComponent(r.team || "")}`}
                                     onClick={saveViewSnapshot}
                                     className="hover:text-primary hover:underline transition-colors"
                                   >

@@ -16,6 +16,7 @@ Goal: zero-surprise launch. Every step here has been validated on staging first.
 | A3b | Conference Stats Independent pitching rates (mean ERA/FIP/WHIP/K9/BB9/HR9 → env+ = 100) | ⏳ | staging only | pending |
 | A3c | Park Factors corruption fix for Indiana + Hawaii (rows had malformed values from import bug, recomputed from source CSVs) | ✅ | 2026-05-21 prod by Trevor | yes |
 | A3d | D1 Conference Stats `Overall_Power_Rating` refresh (PA-weighted from per-hitter OPR, ID-based skip Independent) | ⏳ | staging only | pending |
+| A3e | Add `p_war` + `o_war` + `market_value` + `projected_ip` + `projected_pa` columns to `player_predictions` (stored derived values) | ⏳ | staging only | pending |
 | A4 | `precompute_jobs` queue table | ⏳ | not yet | |
 | A5 | DB trigger: `AFTER INSERT ON customer_teams` → enqueue | ⏳ | not yet | |
 | A6 | Optional: trigger on stats ingest (debounced) | ⏳ | future | |
@@ -138,6 +139,39 @@ Conference Stuff+ and WRC+ already current (verified delta=0 staging 2026-05-21)
 
 **Open follow-up (not blocking):**
 `scripts/import-park-factors-2026.ts` had a parser bug that corrupted Indiana + Hawaii rows during last import. CSVs are clean; DB rows were malformed. Investigate before next park import run.
+
+A3e — Stored derived value columns on `player_predictions` (additive, idempotent).
+
+Replaces live recompute of pWAR/oWAR/market_value across PitcherProfile, PlayerProfile, Dashboard, etc. with pure stored reads. Paste on prod:
+
+```sql
+ALTER TABLE player_predictions
+  ADD COLUMN IF NOT EXISTS p_war numeric,
+  ADD COLUMN IF NOT EXISTS o_war numeric,
+  ADD COLUMN IF NOT EXISTS market_value numeric,
+  ADD COLUMN IF NOT EXISTS projected_ip numeric,
+  ADD COLUMN IF NOT EXISTS projected_pa numeric;
+
+COMMENT ON COLUMN player_predictions.p_war IS
+  'Stored pitcher WAR — derived from p_rv_plus + projected_ip + role. Replaces live compute.';
+COMMENT ON COLUMN player_predictions.o_war IS
+  'Stored hitter WAR — derived from p_wrc_plus + projected_pa + depth_role multiplier.';
+COMMENT ON COLUMN player_predictions.market_value IS
+  'Stored dollar valuation — derived from p_war/o_war × conference tier × position-value multiplier.';
+COMMENT ON COLUMN player_predictions.projected_ip IS
+  'IP estimate used in p_war calc (varies by role: SP=85, RP=35, SM=50 from equation weights).';
+COMMENT ON COLUMN player_predictions.projected_pa IS
+  'PA estimate used in o_war calc (varies by depth_role).';
+
+-- Verify
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name = 'player_predictions'
+  AND column_name IN ('p_war','o_war','market_value','projected_ip','projected_pa')
+ORDER BY column_name;
+```
+
+Expected verify: 5 rows, all `numeric`. After columns exist, prod also needs the pitcher precompute re-run (Section K step 5) + returner pipeline run so columns get populated for all pitchers.
 
 ---
 
@@ -545,4 +579,123 @@ The cutover above ships team-scoped precomputed projections (hitter + pitcher). 
 
 ---
 
-*Last updated: 2026-05-21 EOD. Pair with `docs/eager-precompute-session-log.md` for chronological detail and `docs/stored-derived-values-plan.md` for the architecture refactor.*
+---
+
+## Section M — 2026-05-23 cleanup pass (PROD prep notes)
+
+This session shipped the stored-values-only architecture for both hitter and pitcher surfaces on the `feature/pitcher-stored-cleanup` branch. The notes below capture EXACTLY what needs to happen on prod for cutover to land cleanly. Most of this is data fixes; a few are conditional ("might already be fine on prod, verify first").
+
+### M1 — Schema migration (REQUIRED on prod)
+
+Adds the stored derived-value columns referenced by every surface change in this session. Same as A3e but called out here as a hard prerequisite — none of the read-path changes work until these columns exist on prod.
+
+```sql
+ALTER TABLE player_predictions
+  ADD COLUMN IF NOT EXISTS p_war numeric,
+  ADD COLUMN IF NOT EXISTS o_war numeric,
+  ADD COLUMN IF NOT EXISTS market_value numeric,
+  ADD COLUMN IF NOT EXISTS projected_ip numeric,
+  ADD COLUMN IF NOT EXISTS projected_pa numeric;
+```
+
+**Verify on prod:**
+```sql
+SELECT column_name FROM information_schema.columns
+WHERE table_name='player_predictions'
+  AND column_name IN ('p_war','o_war','market_value','projected_ip','projected_pa');
+-- expect: 5 rows
+```
+
+### M2 — `players.conference` permanent backfill (REQUIRED on prod, verify first)
+
+On staging, 10,399 / ~16K players had `players.conference = NULL`. With no conference, the hitter market-value math defaults to `lowMajor` (0.5x) — every affected player gets mid-major valuations regardless of where they actually play (Arizona State LF projected to $35K instead of $85K).
+
+**Check prod first** to see how many rows need patching:
+```sql
+SELECT count(*) FROM players WHERE conference IS NULL AND source_team_id IS NOT NULL;
+```
+
+If > 0, run the backfill (resolves via `Teams Table` keyed by `source_team_id`, picks the most recent season's conference per team):
+```sql
+UPDATE players p
+SET conference = tt.conference
+FROM (
+  SELECT DISTINCT ON (source_id) source_id, conference
+  FROM "Teams Table"
+  WHERE conference IS NOT NULL
+  ORDER BY source_id, "Season" DESC NULLS LAST
+) tt
+WHERE p.conference IS NULL
+  AND p.source_team_id IS NOT NULL
+  AND tt.source_id = p.source_team_id;
+```
+
+**Verify on prod:**
+```sql
+-- Should be 0 (or only rows with no source_team_id)
+SELECT count(*) FROM players p
+WHERE p.conference IS NULL
+  AND p.source_team_id IS NOT NULL
+  AND EXISTS (SELECT 1 FROM "Teams Table" t WHERE t.source_id = p.source_team_id AND t.conference IS NOT NULL);
+```
+
+The backfill script `backfill-2027-hitter-returners.ts` still resolves conference at write time as a safety net, but this UPDATE makes it idempotent across every other surface (filters, sorts, etc.).
+
+### M3 — Class transition resync (PROBABLY NOT NEEDED on prod, verify first)
+
+On staging the pitcher precompute defaulted `class_transition = "SJ"` for any pitcher whose Pitching Master `class_year` was null. Rossow (R-SR) ended up with SJ on every transfer row → wrong development math. Prod **looks clean** based on a Rossow spot-check (his prod row has `class_transition = NULL` and no precompute yet), but **verify before skipping**:
+
+```sql
+-- Check on prod: how many 2027 rows have class_transition that doesn't match players.class_year?
+SELECT count(*) FROM player_predictions pp
+JOIN players p ON p.id = pp.player_id
+WHERE pp.season = 2027
+  AND pp.class_transition IS NOT NULL
+  AND p.class_year IS NOT NULL
+  AND pp.class_transition <> (
+    CASE
+      WHEN regexp_replace(UPPER(p.class_year), '^(RS?-?\s*)+', '') IN ('FR','FRESHMAN','FRESH') THEN 'FS'
+      WHEN regexp_replace(UPPER(p.class_year), '^(RS?-?\s*)+', '') IN ('SO','SOPHOMORE','SOPH')  THEN 'SJ'
+      WHEN regexp_replace(UPPER(p.class_year), '^(RS?-?\s*)+', '') IN ('JR','JUNIOR')           THEN 'JS'
+      WHEN regexp_replace(UPPER(p.class_year), '^(RS?-?\s*)+', '') IN ('SR','SENIOR','GR','GRADUATE','GRAD','GS') THEN 'GR'
+    END
+  );
+```
+
+If the count is small (likely 0 on prod since precomputes haven't run there), no action needed — the new precompute scripts now correctly read class from `players.class_year` via `classTransitionFromYearOrDefault()` so they'll land right on first prod run. If the count is non-trivial, run the resync SQL from this session (see commits aafd8fa / class_transition resync).
+
+### M4 — Precompute order on prod cutover
+
+After M1 + M2 land + M3 verified clean, run in this order (parallel within each step OK):
+
+1. **Hitter returner backfill** — `npm run backfill-2027-hitter-returners:prod`
+2. **Pitcher returner precompute** — `npm run precompute-returner-pitchers:prod`
+3. **Per customer team** (run all in parallel after 1+2 done):
+   - `npm run precompute-transfers:prod -- --team <UUID>` (hitter side)
+   - `npm run precompute-pitchers:prod -- --team <UUID>` (pitcher side)
+
+Returner backfills must finish before transfer precomputes — the transfer scripts read the returner row's class_transition / dev_aggressiveness as the source of truth.
+
+### M5 — Code changes shipping with this branch (for context)
+
+| File | Change | Why |
+|---|---|---|
+| `src/lib/depthRoles.ts` | Added `computeHitterOWar` + `computeHitterMarketValue` | Canonical hitter math, mirrors pitcher pattern |
+| `scripts/precompute-transfer-projections.ts` | Writes `o_war` + `market_value` + `projected_pa`; filters pred query by `season` | Stored derived values for hitters; deterministic class pickup |
+| `scripts/backfill-2027-hitter-returners.ts` | Writes `o_war` + `market_value`; resolves conference via Teams Table when `players.conference` is null | Stored derived values + conference fallback |
+| `scripts/precompute-pitchers.ts` | Filters pred query by `season` | Avoids 2026/2027 returner row race condition |
+| `src/pages/PlayerProfile.tsx` | Reads stored `o_war` / `market_value`; UI matches pitcher (always-visible dropdowns); class transition dropdown removed | Single source of truth; UI parity |
+| `src/pages/PitcherProfile.tsx` | Same — stored-only, no live recompute fallback | Single source of truth |
+| `src/pages/ReturningPlayers.tsx` | Pitcher tab reads stored `p_war` / `market_value` from `player_predictions` directly; team-scoped read precedence; no live fallback | Dashboard matches profile byte-for-byte |
+| `src/pages/HighFollowList.tsx` | Sort uses stored `market_value` + `o_war` | Consistent with new schema |
+| `src/hooks/usePitchingSeedData.ts` | Exposes `p_rv_plus` from Pitching Master | Canonical composite available downstream |
+
+### M6 — Watch-outs / known leftovers
+
+- **pWAR/market drift on transfer rows**: noticed that `p_rv_plus` updates correctly when class_transition changes, but `p_war` + `market_value` don't always re-derive cleanly from the new pRV+ (small drift, ~0.05 pWAR). The script writes `p_war` from a pre-postprocess pRV+ value. Worth fixing in the calibration pass; not blocking.
+- **`is_twp` flag on prod**: unflagged TWPs (like Dempsey on staging) won't get a pitcher row written → pitcher dashboard shows them with "—". Trevor noted prod's TWP flags are correct, so this should resolve naturally on prod cutover.
+- **Pitching Master `class_year` is null for many pitchers**: the precompute correctly falls back to `players.class_year`. No code change needed, just confirming the fallback works.
+
+---
+
+*Last updated: 2026-05-23. Pair with `docs/eager-precompute-session-log.md` for chronological detail and `docs/stored-derived-values-plan.md` for the architecture refactor.*

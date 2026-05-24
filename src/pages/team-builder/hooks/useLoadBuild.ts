@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import type { MutableRefObject } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
+import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { normalizeName } from "@/lib/nameUtils";
 import { scorePredictionLikeDashboard } from "./useTeamBuilderData";
 import {
@@ -146,6 +147,7 @@ export function useLoadBuild({
             .select(
               "id, player_id, customer_team_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at",
             )
+            .eq("season", PROJECTION_SEASON)
             .in("player_id", playerIds)
             .in("variant", ["regular", "precomputed"])
             .in("status", ["active", "departed"]);

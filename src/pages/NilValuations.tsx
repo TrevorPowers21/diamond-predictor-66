@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { DollarSign, ArrowUpDown, Search, TrendingUp, BarChart3 } from "lucide-react";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell } from "recharts";
@@ -87,6 +88,7 @@ export default function NilValuations() {
       const { data: predData } = await supabase
         .from("player_predictions")
         .select("player_id, p_avg, p_obp, p_slg, p_wrc_plus")
+        .eq("season", PROJECTION_SEASON)
         .eq("variant", "regular")
         .in("player_id", playerIds);
 

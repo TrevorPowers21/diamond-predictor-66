@@ -62,6 +62,7 @@ export type PitchingMasterSeedRow = {
   bb9_pr_plus: number | null;
   hr9_pr_plus: number | null;
   overall_pr_plus: number | null;
+  p_rv_plus: number | null;
   // JUCO data-reliability inputs (per-pitch TrackMan capture + batters faced).
   // null = field absent; 0 = explicitly no capture.
   trackman_pitches: number | null;
@@ -155,6 +156,7 @@ export function usePitchingSeedData(season = 2026) {
     bb9_pr_plus: r.bb9_pr_plus ?? null,
     hr9_pr_plus: r.hr9_pr_plus ?? null,
     overall_pr_plus: r.overall_pr_plus ?? null,
+    p_rv_plus: r.p_rv_plus ?? null,
     trackman_pitches: r.trackman_pitches ?? null,
     bf: r.bf ?? null,
   });

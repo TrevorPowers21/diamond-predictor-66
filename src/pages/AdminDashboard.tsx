@@ -725,7 +725,9 @@ function CreateStubPredictionsButton() {
           setResult(null);
           try {
             const { createStubPredictionsForAllPlayers } = await import("@/lib/createPredictionsFromMaster");
-            const r = await createStubPredictionsForAllPlayers(2026);
+            // Defaults: writes at PROJECTION_SEASON (next year). Was passing
+            // 2026 which mislabeled stubs as actuals-year — fixed 2026-05-23.
+            const r = await createStubPredictionsForAllPlayers();
             setResult(r);
           } catch (e: any) {
             setResult({ created: 0, errors: [e.message] });
@@ -759,7 +761,9 @@ function CreatePredictionsButton() {
           setLoading(true);
           setResult(null);
           try {
-            const r = await createPredictionsFromMaster(2026);
+            // Defaults: reads Master at CURRENT_SEASON, writes predictions at
+            // PROJECTION_SEASON. Was passing 2026 (both read+write) — fixed 2026-05-23.
+            const r = await createPredictionsFromMaster();
             setResult(r);
           } catch (e: any) {
             setResult({ predictionsCreated: 0, internalsCreated: 0, errors: [e.message] });

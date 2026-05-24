@@ -36,9 +36,14 @@ import { createInterface } from "node:readline/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
+import { CURRENT_SEASON, PROJECTION_SEASON } from "../src/lib/seasonConstants";
+
 const CONFIRM = "yes-add-presto-missing-pitchers";
 const IP_THRESHOLD = 20;
-const SEASON = 2026;
+// DATA season — reads from + writes to Pitching Master (actuals)
+const SEASON = CURRENT_SEASON;
+// PROJECTION season — writes player_predictions rows
+const PRED_SEASON = PROJECTION_SEASON;
 const FIP_CONST = 5.109; // JUCO 2026 league-derived (locked, see import-juco-presto-pitchers.ts)
 const COLOR = { reset: "\x1b[0m", bold: "\x1b[1m", green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m", cyan: "\x1b[36m" };
 const ok = (s: string) => console.log(`  ${COLOR.green}✓${COLOR.reset} ${s}`);
@@ -370,7 +375,7 @@ async function main() {
     const { data } = await sb.from("player_predictions")
       .select("id, player_id, from_era")
       .in("player_id", playerIds.slice(i, i + 100))
-      .eq("model_type", "returner").eq("variant", "regular").eq("season", SEASON);
+      .eq("model_type", "returner").eq("variant", "regular").eq("season", PRED_SEASON);
     for (const r of (data || [])) existingPred.set(r.player_id, { id: r.id, from_era: r.from_era });
   }
   for (const p of resolved) {
@@ -388,7 +393,7 @@ async function main() {
       updates.push({ id: existing.id, patch: pitcherFields });
     } else {
       inserts.push({
-        player_id: playerId, model_type: "returner", variant: "regular", season: SEASON,
+        player_id: playerId, model_type: "returner", variant: "regular", season: PRED_SEASON,
         status: "active", class_transition: null, dev_aggressiveness: 0, ...pitcherFields,
       });
     }

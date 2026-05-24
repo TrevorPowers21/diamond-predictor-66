@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { useHighFollow } from "@/hooks/useHighFollow";
 import { Link } from "react-router-dom";
@@ -81,6 +82,7 @@ export default function Dashboard() {
           .select(
             "id, player_id, customer_team_id, model_type, variant, status, p_wrc_plus, p_avg, p_obp, p_slg, players!inner(first_name, last_name, team, from_team, conference, position, pa, transfer_portal)",
           )
+          .eq("season", PROJECTION_SEASON)
           .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"])
           .in("model_type", ["returner", "transfer"])
@@ -135,6 +137,7 @@ export default function Dashboard() {
           .select(
             "id, player_id, customer_team_id, model_type, variant, status, p_rv_plus, p_era, p_fip, p_k9, players!inner(first_name, last_name, team, from_team, conference, position, ip, transfer_portal)",
           )
+          .eq("season", PROJECTION_SEASON)
           .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"])
           .in("model_type", ["returner", "transfer"])
@@ -203,6 +206,7 @@ export default function Dashboard() {
         supabase
           .from("player_predictions")
           .select("updated_at")
+          .eq("season", PROJECTION_SEASON)
           .order("updated_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
@@ -280,6 +284,7 @@ export default function Dashboard() {
             let q = (supabase as any)
               .from("player_predictions")
               .select("player_id, customer_team_id, p_wrc_plus, p_rv_plus, variant, status")
+              .eq("season", PROJECTION_SEASON)
               .in("player_id", playerIds)
               .in("variant", ["regular", "precomputed"])
               .in("status", ["active", "departed"]);

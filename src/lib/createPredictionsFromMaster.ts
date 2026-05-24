@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { classTransitionFromYearOrDefault } from "@/lib/classTransitionUtils";
+import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 
 const CHUNK = 200;
 
@@ -12,8 +13,23 @@ type Result = {
 /**
  * Create returner predictions + internals for all players in the players table
  * who don't have predictions yet. Uses Hitter Master for stats and power ratings.
+ *
+ * Season convention (locked 2026-05-23):
+ * - `dataSeason`       — which Hitter/Pitching Master snapshot to READ (actuals on the field, default CURRENT_SEASON)
+ * - `projectionSeason` — which year to WRITE predictions FOR (forward-looking, default PROJECTION_SEASON)
+ *
+ * Legacy callers that pass a single positional arg get treated as `dataSeason`
+ * — that matches their intent (they were passing the actuals year). The
+ * projectionSeason defaults forward to the next year automatically.
  */
-export async function createPredictionsFromMaster(season = 2026): Promise<Result> {
+export async function createPredictionsFromMaster(
+  dataSeason: number = CURRENT_SEASON,
+  projectionSeason: number = PROJECTION_SEASON,
+): Promise<Result> {
+  // `season` retained as a local name throughout the body to minimize diff;
+  // it now refers to the WRITE season (projection year). All Master-table
+  // reads explicitly use `dataSeason`.
+  const season = projectionSeason;
   const result: Result = { predictionsCreated: 0, internalsCreated: 0, errors: [] };
   console.time("[CreatePreds] TOTAL");
 
@@ -69,7 +85,7 @@ export async function createPredictionsFromMaster(season = 2026): Promise<Result
     const { data, error } = await supabase
       .from("Hitter Master")
       .select("source_player_id, playerFullName, Team, TeamID, AVG, OBP, SLG, ba_power_rating, obp_power_rating, iso_power_rating, overall_power_rating, combined_used, blended_avg, blended_obp, blended_slg, blended_from_team, blended_from_team_id")
-      .eq("Season", season)
+      .eq("Season", dataSeason)
       .range(from, from + 999);
     if (error) break;
     for (const r of data || []) {
@@ -92,7 +108,7 @@ export async function createPredictionsFromMaster(season = 2026): Promise<Result
     const { data, error } = await supabase
       .from("Pitching Master")
       .select("source_player_id, playerFullName, Team, TeamID, ERA, FIP, WHIP, K9, BB9, HR9, era_pr_plus, fip_pr_plus, whip_pr_plus, overall_pr_plus, combined_used, blended_era, blended_fip, blended_whip, blended_k9, blended_bb9, blended_hr9, blended_from_team, blended_from_team_id")
-      .eq("Season", season)
+      .eq("Season", dataSeason)
       .range(from, from + 999);
     if (error) break;
     for (const r of data || []) {
@@ -391,9 +407,16 @@ export async function createPredictionsFromMaster(season = 2026): Promise<Result
 /**
  * Create stub predictions for EVERY player (hitter or pitcher, current or
  * departed) so class_transition has a row to live on. Skips players who
- * already have a 2025 returner/regular prediction. Idempotent.
+ * already have a returner/regular prediction at the projection season.
+ * Idempotent.
+ *
+ * Single-season call (legacy callers): treat the arg as the WRITE season
+ * (projection year). Defaults to PROJECTION_SEASON.
  */
-export async function createStubPredictionsForAllPlayers(season = 2026): Promise<{ created: number; errors: string[] }> {
+export async function createStubPredictionsForAllPlayers(
+  projectionSeason: number = PROJECTION_SEASON,
+): Promise<{ created: number; errors: string[] }> {
+  const season = projectionSeason;
   const errors: string[] = [];
   let created = 0;
 

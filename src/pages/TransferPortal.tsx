@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from "react";
-import { CURRENT_SEASON, PRIOR_SEASON } from "@/lib/seasonConstants";
+import { CURRENT_SEASON, PRIOR_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -610,6 +610,7 @@ export default function TransferPortal() {
             class_transition,
             dev_aggressiveness
           `)
+          .eq("season", PROJECTION_SEASON)
           .in("model_type", ["returner", "transfer"])
           .range(predFrom, predFrom + PAGE_SIZE - 1);
         if (error) throw error;

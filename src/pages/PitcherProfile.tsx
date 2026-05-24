@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
+import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { projectPitchingRate } from "@/lib/pitcherProjection";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
@@ -35,6 +36,14 @@ import { computePrvPlus } from "@/savant/lib/prvPlus";
 import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
+import {
+  computePitcherWar,
+  computePitcherMarketValue,
+  pitcherExpectedIp,
+  pitcherRoleFromDepthRole,
+  type PitcherDepthRole,
+} from "@/lib/depthRoles";
+import { defaultPitcherDepthRoleFromIp } from "@/pages/team-builder/helpers";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
@@ -474,10 +483,14 @@ export default function PitcherProfile() {
     queryKey: ["pitcher-profile-predictions", id],
     enabled: !!id && isDbRoute,
     queryFn: async () => {
+      // Season filter pins to PROJECTION_SEASON so the read picks the
+      // current projection-year row, not any historical row from prior years
+      // (which we now preserve as research history). See docs/stored-derived-values-plan.md.
       const { data, error } = await supabase
         .from("player_predictions")
         .select("*")
         .eq("player_id", id!)
+        .eq("season", PROJECTION_SEASON)
         .eq("status", "active");
       if (error) throw error;
       return data || [];
@@ -1042,6 +1055,7 @@ export default function PitcherProfile() {
       bb9_pr_plus: row.bb9_pr_plus ?? null,
       hr9_pr_plus: row.hr9_pr_plus ?? null,
       overall_pr_plus: row.overall_pr_plus ?? null,
+      p_rv_plus: row.p_rv_plus ?? null,
       // Scouting metrics — always blended when combined_used so risk/scouting reports
       // anchor on the 2025 blended sample regardless of historical dropdown selection
       stuffPlus: combinedUsed ? (row.blended_stuff_plus ?? row.stuff_plus) : row.stuff_plus,
@@ -1082,11 +1096,12 @@ export default function PitcherProfile() {
   const supabaseRole = id ? getSupabaseRole(id) : null;
   const initialProjectedRole = supabaseRole || storageProjectionOverride?.pitcher_role || derivedRole || "SM";
   const effectiveRoleDisplay = supabaseRole || derivedRole;
-  // DB (activePrediction) is the authoritative source once a coach saves an
-  // edit; localStorage only fills gaps for storage-backed profile editing.
-  const initialProjectedClassTransition = (() => {
+  // Class transition is now auto-derived from class_year in createPredictionsFromMaster,
+  // so the stored row is the source of truth. No UI editor — read it from the
+  // active prediction (or fall back to SJ for the live-recompute fallback path).
+  const projectedClassTransition: "FS" | "SJ" | "JS" | "GR" = (() => {
     const raw = String(activePrediction?.class_transition || playerOverride?.class_transition || storageProjectionOverride?.class_transition || "SJ").toUpperCase();
-    return raw === "FS" || raw === "SJ" || raw === "JS" || raw === "GR" ? raw : "SJ";
+    return raw === "FS" || raw === "SJ" || raw === "JS" || raw === "GR" ? (raw as "FS" | "SJ" | "JS" | "GR") : "SJ";
   })();
   const initialProjectedDevAggressiveness = Number.isFinite(Number(activePrediction?.dev_aggressiveness))
     ? Number(activePrediction?.dev_aggressiveness)
@@ -1094,64 +1109,28 @@ export default function PitcherProfile() {
         ? Number(playerOverride?.dev_aggressiveness ?? storageProjectionOverride?.dev_aggressiveness)
         : 0);
   const [projectedRole, setProjectedRole] = useState<"SP" | "RP" | "SM">(initialProjectedRole as "SP" | "RP" | "SM");
-  const [projectedClassTransition, setProjectedClassTransition] = useState<"FS" | "SJ" | "JS" | "GR">(initialProjectedClassTransition as "FS" | "SJ" | "JS" | "GR");
   const [projectedDevAggressiveness, setProjectedDevAggressiveness] = useState<number>(initialProjectedDevAggressiveness);
+  // Session-only depth role overlay. Default derived from stored pitcher_role +
+  // sample IP — no DB writes, resets on navigation. Drives the displayed
+  // pWAR + market_value via the depthRoles helpers.
+  const initialDepthRole: PitcherDepthRole = defaultPitcherDepthRoleFromIp(
+    storageIp,
+    (effectiveRoleDisplay === "SP" || effectiveRoleDisplay === "RP") ? effectiveRoleDisplay : "RP",
+  );
+  const [depthRole, setDepthRole] = useState<PitcherDepthRole>(initialDepthRole);
   useEffect(() => {
     setProjectedRole(initialProjectedRole as "SP" | "RP" | "SM");
-    setProjectedClassTransition(initialProjectedClassTransition as "FS" | "SJ" | "JS" | "GR");
     setProjectedDevAggressiveness(initialProjectedDevAggressiveness);
-  }, [initialProjectedRole, initialProjectedClassTransition, initialProjectedDevAggressiveness]);
-  const updateProjectedInputs = async (updates: { pitcher_role?: "SP" | "RP" | "SM"; class_transition?: "FS" | "SJ" | "JS" | "GR"; dev_aggressiveness?: number }) => {
+    setDepthRole(initialDepthRole);
+  }, [initialProjectedRole, initialProjectedDevAggressiveness, initialDepthRole]);
+  // Session-only display overlay. Profile dropdowns (depth role, dev agg,
+  // pitcher role) are NEVER persisted — the coach can preview "what if this
+  // pitcher started weekends and was developed aggressively" without
+  // touching stored values. To make any of these stick, the coach uses Team
+  // Builder + target board.
+  const updateProjectedInputs = async (updates: { pitcher_role?: "SP" | "RP" | "SM"; dev_aggressiveness?: number }) => {
     if (updates.pitcher_role) setProjectedRole(updates.pitcher_role);
-    if (updates.class_transition) setProjectedClassTransition(updates.class_transition);
     if (Number.isFinite(Number(updates.dev_aggressiveness))) setProjectedDevAggressiveness(Number(updates.dev_aggressiveness));
-    // Persist pitcher role to Supabase (separate override table, read at display time)
-    if (updates.pitcher_role && id) {
-      setSupabaseRole(id, updates.pitcher_role);
-    }
-    // Route coach edits through the recalc engine so it re-runs the projection
-    // with the new inputs and writes fresh p_era/p_fip/p_whip/p_k9/p_bb9/p_hr9/
-    // p_rv_plus/pitcher_role to player_predictions. Every downstream surface
-    // (Returning Players, High Follow, Team Builder) picks up the updated
-    // values on next render without recomputing.
-    if (isDbRoute && id && (updates.class_transition !== undefined || updates.dev_aggressiveness !== undefined || updates.pitcher_role !== undefined)) {
-      const returnerPreds = (predictions as any[]).filter((p) => p.model_type === "returner");
-      if (returnerPreds.length > 0) {
-        const patch: Record<string, any> = {};
-        if (updates.class_transition !== undefined) patch.class_transition = updates.class_transition;
-        if (updates.dev_aggressiveness !== undefined) patch.dev_aggressiveness = Number(updates.dev_aggressiveness);
-        if (updates.pitcher_role !== undefined) patch.pitcher_role = updates.pitcher_role;
-        try {
-          for (const pred of returnerPreds) {
-            await recalculatePredictionById(pred.id, patch);
-          }
-          queryClient.invalidateQueries({ queryKey: ["pitcher-profile-predictions", id] });
-          queryClient.invalidateQueries({ queryKey: ["returning-pitcher-predictions-by-source-id"] });
-          queryClient.invalidateQueries({ queryKey: ["hf-predictions"] });
-        } catch (e: any) {
-          toast.error(`Save failed: ${e.message}`);
-        }
-      }
-    }
-    if (isDbRoute && id) {
-      // DB-route edits are persisted by the recalc engine + setSupabaseRole
-      // above. No additional localStorage write needed.
-      return;
-    }
-    // Legacy storage-only path: only reached when the route is non-UUID
-    // (e.g., /dashboard/pitcher/storage__name__team for custom-roster pitchers
-    // without a Supabase UUID). DB-backed pitchers save through the engine
-    // above and never reach this branch. Don't migrate edits made here to the
-    // DB — they belong to phantom pitchers that have no DB row.
-    try {
-      const raw = localStorage.getItem(PITCHER_PROFILE_STORAGE_OVERRIDE_KEY);
-      const parsed = raw ? (JSON.parse(raw) as Record<string, { pitcher_role?: "SP" | "RP" | "SM"; class_transition?: "FS" | "SJ" | "JS" | "GR"; dev_aggressiveness?: number }>) : {};
-      const prev = parsed[storageOverrideKey] || {};
-      parsed[storageOverrideKey] = { ...prev, ...updates };
-      localStorage.setItem(PITCHER_PROFILE_STORAGE_OVERRIDE_KEY, JSON.stringify(parsed));
-    } catch {
-      // ignore local storage failures
-    }
   };
   const cachedProjectionRef = useRef<any>(null);
   const projectedPitching = useMemo(() => {
@@ -1317,31 +1296,89 @@ export default function PitcherProfile() {
     const storedReturnerRow = (predictions as any[]).find((p) => p.model_type === "returner" && p.variant === "regular" && p.customer_team_id == null);
     const stored = storedTeamRow ?? storedReturnerRow ?? null;
 
-    const result = stored
-      ? {
-          pEra: stored.p_era ?? roleAdjustedEra,
-          pFip: stored.p_fip ?? roleAdjustedFip,
-          pWhip: stored.p_whip ?? roleAdjustedWhip,
-          pK9: stored.p_k9 ?? roleAdjustedK9,
-          pBb9: stored.p_bb9 ?? roleAdjustedBb9,
-          pHr9: stored.p_hr9 ?? roleAdjustedHr9,
-          pRvPlus: stored.p_rv_plus ?? pRvPlus,
-          pWar,
-          marketValue,
-          projectedIp,
-        }
-      : {
-          pEra: roleAdjustedEra,
-          pFip: roleAdjustedFip,
-          pWhip: roleAdjustedWhip,
-          pK9: roleAdjustedK9,
-          pBb9: roleAdjustedBb9,
-          pHr9: roleAdjustedHr9,
-          pRvPlus,
-          pWar,
-          marketValue,
-          projectedIp,
-        };
+    // Stored prediction values only. If no stored row exists, surface "—".
+    // Session overlays (depth role + dev_agg + role transition) are applied
+    // at display time — no DB writes, no recompute from raw inputs.
+    //
+    // Order of overlays:
+    //   1. Role transition (RP↔SP): apply applyRoleTransitionAdjustment to
+    //      each stored rate stat using exact same math as transferPitcherProjection.
+    //   2. Dev agg: each step ±6% scale on top of role-adjusted rates.
+    //   3. Depth role: drives projectedIp for pWAR; market value re-derived.
+    const overlayIp = pitcherExpectedIp(depthRole, eq);
+    const storedDevAgg = Number.isFinite(Number((stored as any)?.dev_aggressiveness)) ? Number((stored as any).dev_aggressiveness) : 0;
+    const sessionDevAggNum = Number.isFinite(Number(projectedDevAggressiveness)) ? Number(projectedDevAggressiveness) : 0;
+    const devAggDelta = (sessionDevAggNum - storedDevAgg) * 0.06;
+    const devAggUnchanged = sessionDevAggNum === storedDevAgg;
+
+    // Base role for transition math: prefer stored pitcher_role, fall back to
+    // derivedRole (Pitching Master Role + G/GS heuristic) so the transition
+    // fires even when the precompute didn't write pitcher_role.
+    const validRole = (r: any): "SP" | "RP" | "SM" | null =>
+      r === "SP" || r === "RP" || r === "SM" ? r : null;
+    const storedRole = validRole((stored as any)?.pitcher_role) ?? validRole(derivedRole) ?? null;
+    const sessionRole = validRole(projectedRole) ?? "RP";
+    const roleChanged = storedRole != null && storedRole !== sessionRole;
+    // Reuses the roleCurve declared above for the live-compute path.
+    // Apply role transition first (mirrors transferPitcherProjection.ts lines 399-404)
+    const rtEra = roleChanged ? applyRoleTransitionAdjustment(stored?.p_era ?? null, eq.sp_to_rp_reg_era_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_era ?? null);
+    const rtFip = roleChanged ? applyRoleTransitionAdjustment(stored?.p_fip ?? null, eq.sp_to_rp_reg_fip_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_fip ?? null);
+    const rtWhip = roleChanged ? applyRoleTransitionAdjustment(stored?.p_whip ?? null, eq.sp_to_rp_reg_whip_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_whip ?? null);
+    const rtK9 = roleChanged ? applyRoleTransitionAdjustment(stored?.p_k9 ?? null, eq.sp_to_rp_reg_k9_pct, storedRole, sessionRole, false, roleCurve) : (stored?.p_k9 ?? null);
+    const rtBb9 = roleChanged ? applyRoleTransitionAdjustment(stored?.p_bb9 ?? null, eq.sp_to_rp_reg_bb9_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_bb9 ?? null);
+    const rtHr9 = roleChanged ? applyRoleTransitionAdjustment(stored?.p_hr9 ?? null, eq.sp_to_rp_reg_hr9_pct, storedRole, sessionRole, true, roleCurve) : (stored?.p_hr9 ?? null);
+
+    // Re-derive pRV+ from role-adjusted rates (only when role changed; otherwise use stored)
+    const rolePRvPlus = roleChanged && [rtEra, rtFip, rtWhip, rtK9, rtBb9, rtHr9].every((v) => v != null)
+      ? (() => {
+          const eraPlusRA = calcPitchingPlus(rtEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
+          const fipPlusRA = calcPitchingPlus(rtFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
+          const whipPlusRA = calcPitchingPlus(rtWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
+          const k9PlusRA = calcPitchingPlus(rtK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
+          const bb9PlusRA = calcPitchingPlus(rtBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
+          const hr9PlusRA = calcPitchingPlus(rtHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
+          if ([eraPlusRA, fipPlusRA, whipPlusRA, k9PlusRA, bb9PlusRA, hr9PlusRA].some((v) => v == null)) return stored?.p_rv_plus ?? null;
+          return (Number(eraPlusRA) * eq.era_plus_weight)
+            + (Number(fipPlusRA) * eq.fip_plus_weight)
+            + (Number(whipPlusRA) * eq.whip_plus_weight)
+            + (Number(k9PlusRA) * eq.k9_plus_weight)
+            + (Number(bb9PlusRA) * eq.bb9_plus_weight)
+            + (Number(hr9PlusRA) * eq.hr9_plus_weight);
+        })()
+      : (stored?.p_rv_plus ?? null);
+
+    // Apply dev_agg scale on top of role-adjusted values
+    const overlayPRvPlus = rolePRvPlus == null
+      ? null
+      : devAggUnchanged
+        ? rolePRvPlus
+        : 100 + ((rolePRvPlus - 100) * (1 + devAggDelta));
+    const storedDefaultDepth = stored?.pitcher_role === pitcherRoleFromDepthRole(depthRole);
+    const noOverlay = storedDefaultDepth && devAggUnchanged && !roleChanged;
+    const overlayPWar = noOverlay
+      ? (stored?.p_war ?? null)
+      : computePitcherWar(overlayPRvPlus, overlayIp, eq);
+    const overlayMarketValue = noOverlay
+      ? (stored?.market_value ?? null)
+      : computePitcherMarketValue(overlayPWar, { conference: conferenceForMarket, role: pitcherRoleFromDepthRole(depthRole), team: teamForMarket }, eq);
+    // Rate stats also scale with dev_agg on top of role-adjusted values.
+    const scaleLow = (v: number | null | undefined) =>
+      v == null ? null : devAggUnchanged ? v : v * (1 - devAggDelta);
+    const scaleHigh = (v: number | null | undefined) =>
+      v == null ? null : devAggUnchanged ? v : v * (1 + devAggDelta);
+
+    const result = {
+      pEra: scaleLow(rtEra),
+      pFip: scaleLow(rtFip),
+      pWhip: scaleLow(rtWhip),
+      pK9: scaleHigh(rtK9),
+      pBb9: scaleLow(rtBb9),
+      pHr9: scaleLow(rtHr9),
+      pRvPlus: overlayPRvPlus,
+      pWar: overlayPWar,
+      marketValue: overlayMarketValue,
+      projectedIp: overlayIp,
+    };
     // Cache first valid projection so switching scouting year doesn't wipe it
     const hasData = result.pEra != null || result.pFip != null || result.pWar != null;
     if (hasData) cachedProjectionRef.current = result;
@@ -1349,6 +1386,7 @@ export default function PitcherProfile() {
   }, [
     projectedClassTransition,
     projectedDevAggressiveness,
+    depthRole,
     internalPowerRatings?.bb9Plus,
     internalPowerRatings?.eraPlus,
     internalPowerRatings?.fipPlus,
@@ -2137,21 +2175,42 @@ export default function PitcherProfile() {
                     <div className="flex items-center gap-3 flex-wrap">
                       <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2027 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
                       <div className="flex items-center gap-1.5">
-                        <Select value={projectedRole} onValueChange={(v) => updateProjectedInputs({ pitcher_role: v as "SP" | "RP" | "SM" })}>
+                        <Select value={projectedRole === "SM" ? "SP" : projectedRole} onValueChange={(v) => {
+                          const newRole = v as "SP" | "RP";
+                          updateProjectedInputs({ pitcher_role: newRole });
+                          // Snap depth role into the new role's allowed set
+                          const spDepths: PitcherDepthRole[] = ["weekend_starter", "weekday_starter", "swing_starter"];
+                          const rpDepths: PitcherDepthRole[] = ["swing_starter", "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever", "low_impact_reliever", "specialist_reliever"];
+                          const allowed = newRole === "SP" ? spDepths : rpDepths;
+                          if (!allowed.includes(depthRole)) {
+                            setDepthRole(newRole === "SP" ? "weekend_starter" : "high_leverage_reliever");
+                          }
+                        }}>
                           <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="SP">SP</SelectItem>
                             <SelectItem value="RP">RP</SelectItem>
-                            <SelectItem value="SM">SM</SelectItem>
                           </SelectContent>
                         </Select>
-                        <Select value={projectedClassTransition} onValueChange={(v) => updateProjectedInputs({ class_transition: v as "FS" | "SJ" | "JS" | "GR" })}>
-                          <SelectTrigger className="h-7 w-[65px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200"><SelectValue /></SelectTrigger>
+                        <Select value={depthRole} onValueChange={(v) => setDepthRole(v as PitcherDepthRole)}>
+                          <SelectTrigger className="h-7 w-[160px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200" title="Depth role — session-only display overlay; not saved"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="FS">FS</SelectItem>
-                            <SelectItem value="SJ">SJ</SelectItem>
-                            <SelectItem value="JS">JS</SelectItem>
-                            <SelectItem value="GR">GR</SelectItem>
+                            {projectedRole === "SP" ? (
+                              <>
+                                <SelectItem value="weekend_starter">Weekend Starter</SelectItem>
+                                <SelectItem value="weekday_starter">Weekday Starter</SelectItem>
+                                <SelectItem value="swing_starter">Swing Starter</SelectItem>
+                              </>
+                            ) : (
+                              <>
+                                <SelectItem value="swing_starter">Swing Starter</SelectItem>
+                                <SelectItem value="workhorse_reliever">Workhorse Reliever</SelectItem>
+                                <SelectItem value="high_leverage_reliever">High-Leverage Reliever</SelectItem>
+                                <SelectItem value="mid_leverage_reliever">Mid-Leverage Reliever</SelectItem>
+                                <SelectItem value="low_impact_reliever">Low-Impact Reliever</SelectItem>
+                                <SelectItem value="specialist_reliever">Specialist Reliever</SelectItem>
+                              </>
+                            )}
                           </SelectContent>
                         </Select>
                         <Select value={String(projectedDevAggressiveness)} onValueChange={(v) => updateProjectedInputs({ dev_aggressiveness: Number(v) })}>
