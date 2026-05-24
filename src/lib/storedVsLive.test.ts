@@ -203,21 +203,6 @@ describe("pitcher projection blend weight", () => {
 // once the stored-first read path is implemented, we can verify the numbers
 // match the expected stored values.
 //
-// To activate a test: remove the `.skip`, implement the read from stored row,
-// and verify the output matches.
-
-describe.skip("known regressions — activate as stored-first paths land", () => {
-  it("Rossow ERA: PitcherProfile and Dashboard show same value", () => {
-    // Rossow currently shows 2.13 ERA on PitcherProfile and 2.15 on Dashboard
-    // Root cause: PitcherProfile live-recomputes, Dashboard reads stored row
-    // Fix: both surfaces read player_predictions.p_era where customer_team_id IS NULL
-    // Expected value once fixed: the stored p_era (source of truth)
-    expect(true).toBe(false); // placeholder — implement after Phase 4a
-  });
-
-  it("TB Compare tab: transfer player projection matches target board projection", () => {
-    // TB Compare tab was computing projections with stale/missing inputs
-    // Fix: both surfaces read same stored row
-    expect(true).toBe(false); // placeholder — implement after Phase 4
-  });
-});
+// Phase 4d regressions (TB Compare tab, conference_id null bug) will land as
+// real fixture-based tests when those surfaces are migrated to stored-first.
+// Tracked on the post-launch punchlist; no placeholders here.
