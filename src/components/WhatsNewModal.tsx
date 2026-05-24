@@ -46,9 +46,9 @@ const RELEASES: Release[] = [
       },
     ],
     whatElse: [
-      "Two-way players: Dempsey, Franco, Ishikawa, Ward and every other TWP now show both their hitting and pitching projection on the right profile page.",
-      "Pitcher role: dropdown is SP or RP only. Depth options filter by role so you only see weekend / weekday / swing for starters, or workhorse / leverage tiers for relievers.",
-      "Conference resolution: every player now has their conference filled in correctly, so program tier multipliers on hitter market value land where they should.",
+      "Team Builder: faster load and snappier response when you change depth roles, dev tiers, and class adjustments. Big builds no longer lag when you swap players in and out.",
+      "Team Builder: cleaner depth chart with steadier sorting and fewer redraws as you drag players between tiers.",
+      "Team Builder: saved builds load reliably with all of your overrides and depth assignments intact.",
     ],
   },
   {
