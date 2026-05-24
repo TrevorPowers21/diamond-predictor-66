@@ -1490,10 +1490,10 @@ export default function PlayerProfile() {
                           <Select value={depthRole} onValueChange={(v) => setDepthRole(v as HitterDepthRole)}>
                             <SelectTrigger className="h-7 w-[150px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200" title="Depth role — session-only display overlay; not saved"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="cornerstone">Cornerstone (220 PA)</SelectItem>
-                              <SelectItem value="everyday_starter">Everyday Starter (190 PA)</SelectItem>
-                              <SelectItem value="platoon_starter">Platoon Starter (130 PA)</SelectItem>
-                              <SelectItem value="utility">Utility (75 PA)</SelectItem>
+                              <SelectItem value="cornerstone">Cornerstone (245 PA)</SelectItem>
+                              <SelectItem value="everyday_starter">Everyday Starter (215 PA)</SelectItem>
+                              <SelectItem value="platoon_starter">Platoon Starter (145 PA)</SelectItem>
+                              <SelectItem value="utility">Utility (85 PA)</SelectItem>
                               <SelectItem value="bench">Bench (25 PA)</SelectItem>
                             </SelectContent>
                           </Select>
