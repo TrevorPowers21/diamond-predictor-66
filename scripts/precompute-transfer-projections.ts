@@ -371,6 +371,10 @@ async function main() {
       o_war: oWar,
       market_value: marketValue,
       projected_pa: projectedPa,
+      // Keep precompute rows unlocked so subsequent runs can refresh them.
+      // The protect_locked_predictions trigger reverts rate columns when
+      // locked=true; we don't want that for system-managed precompute rows.
+      locked: false,
       updated_at: new Date().toISOString(),
     });
     computed++;

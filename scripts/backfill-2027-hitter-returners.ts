@@ -216,6 +216,8 @@ async function main() {
           o_war: oWar,
           market_value: marketValue,
           projected_pa: meta.pa,
+          // Unlock so future runs can refresh; trigger reverts rates when locked=true.
+          locked: false,
           updated_at: new Date().toISOString(),
         },
       });

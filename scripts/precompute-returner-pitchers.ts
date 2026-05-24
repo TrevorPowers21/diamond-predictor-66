@@ -369,6 +369,8 @@ async function main() {
       market_value: result.market_value,
       projected_ip: projectedIp,
       pitcher_role: result.projected_role,
+      // Unlock so future runs can refresh; trigger reverts rates when locked=true.
+      locked: false,
       updated_at: new Date().toISOString(),
     });
     computed++;

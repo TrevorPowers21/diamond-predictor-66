@@ -491,6 +491,9 @@ async function main() {
       market_value: final.market_value,
       projected_ip: projectedIp,
       pitcher_role: final.pitcher_role,
+      // Keep precompute rows unlocked so subsequent runs can refresh them.
+      // protect_locked_predictions trigger reverts rate columns when locked=true.
+      locked: false,
       updated_at: new Date().toISOString(),
     });
     computed++;
