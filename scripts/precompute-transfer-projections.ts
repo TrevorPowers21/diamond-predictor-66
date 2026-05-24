@@ -189,7 +189,7 @@ async function main() {
   const allPlayers = await loadAllPaged<any>(() =>
     supabase
       .from("players")
-      .select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, portal_status"),
+      .select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, portal_status, is_twp, pa"),
   );
   console.log(`  ${allPlayers.length} total players`);
   const isPitcher = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
@@ -200,7 +200,9 @@ async function main() {
     return div !== "NJCAA_D1";
   };
   const hitters = allPlayers.filter((p) => {
-    if (isPitcher(p.position)) return false;
+    // Include if NOT pitcher-primary OR flagged is_twp (TWPs appear in both
+    // pools regardless of which side is their primary position).
+    if (isPitcher(p.position) && !p.is_twp) return false;
     if (toSourceId && p.source_team_id === toSourceId) return false; // skip own roster
     if (!matchesDivision(p.division)) return false;
     return true;

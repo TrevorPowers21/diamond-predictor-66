@@ -154,12 +154,13 @@ async function main() {
   const allPlayers = await loadAllPaged<any>(() =>
     supabase
       .from("players")
-      .select("id, first_name, last_name, position, team, from_team, team_id, conference, division, source_player_id, source_team_id"),
+      .select("id, first_name, last_name, position, team, from_team, team_id, conference, division, source_player_id, source_team_id, is_twp"),
   );
   console.log(`  ${allPlayers.length} total players`);
   const pitcherTest = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP|SM)/i.test(String(pos || ""));
   const isJuco = (div: string | null | undefined) => div === "NJCAA_D1";
-  const pitchers = allPlayers.filter((p) => pitcherTest(p.position) && !isJuco(p.division));
+  // Include pitcher-primary OR is_twp (TWPs appear in both pools).
+  const pitchers = allPlayers.filter((p) => (pitcherTest(p.position) || p.is_twp) && !isJuco(p.division));
   console.log(`  ${pitchers.length} D1 pitchers after position + non-JUCO filter`);
 
   // 5. Pitching Master rows (with scouting + stored PR+ values)
