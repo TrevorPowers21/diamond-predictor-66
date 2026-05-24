@@ -100,7 +100,7 @@ async function main() {
 
   // Env-detection guard: refuse to write prod unless --prod explicitly passed.
   const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").toLowerCase();
-  const looksLikeProd = supabaseUrl.includes("ualmkgkdnoubccoieahf") || supabaseUrl.includes("prod");
+  const looksLikeProd = supabaseUrl.includes("ualmkgkdnoubccoieahf") || supabaseUrl.includes("trbvxuoliwrfowibatkm") || supabaseUrl.includes("prod");
   if (looksLikeProd && !isProd) {
     console.error(`${C.red}✗ SUPABASE_URL looks like PROD but --prod was not passed. Refusing to write.${C.reset}`);
     console.error(`  URL: ${supabaseUrl || "(unset)"}`);
