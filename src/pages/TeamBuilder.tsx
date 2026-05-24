@@ -30,6 +30,7 @@ import {
   teamMatchesSelectedTeam, splitFullNameExport as splitFullName, isPitcher,
 } from "./team-builder/helpers";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
+import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import {
   calcPlayerScore,
   DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE,
@@ -2000,7 +2001,9 @@ export default function TeamBuilder() {
         nil_value: 0,
         production_notes: null,
         roster_status: "target",
-        depth_role: "utility",
+        // Default to everyday_starter so displayed oWAR/market match the
+        // projection at the multiplier=1.0 baseline. Coach adjusts from there.
+        depth_role: "everyday_starter",
         class_transition: classTransitionFromYearOrDefault(row.class_year),
         dev_aggressiveness: 0,
         class_transition_overridden: false,
@@ -2299,28 +2302,30 @@ export default function TeamBuilder() {
 
     let transferSnapshot: TransferSnapshot | null = null;
     if (effectiveTeamId && row.id && !isPitcherRow) {
+      // Eager precompute path: read STORED projection for this customer team
+      // and use it directly — no live recompute. Includes o_war + market_value
+      // (PA carry-forward + program tier already baked in by the precompute).
       const { data: precomputedTeamRow } = await supabase
         .from("player_predictions")
-        .select("p_avg, p_obp, p_slg, p_wrc_plus")
+        .select("p_avg, p_obp, p_slg, p_wrc_plus, o_war, market_value")
         .eq("player_id", row.id)
         .eq("customer_team_id", effectiveTeamId)
         .eq("variant", "precomputed")
+        .eq("season", PROJECTION_SEASON)
         .eq("status", "active")
         .maybeSingle();
       if (precomputedTeamRow) {
         const fromTeamName = row.from_team || row.team;
         const fromTeamRow = fromTeamName ? teamByKey.get(normalizeKey(fromTeamName)) || null : null;
-        const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
-        const owar = computeOWarFromWrcPlus(precomputedTeamRow.p_wrc_plus ?? null);
-        const basePerOwar = eqNum("nil_base_per_owar", 25000);
-        const ptm = getProgramTierMultiplierByConference(toTeamRow?.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
-        const pvm = getPositionValueMultiplier(row.position);
-        const nilRaw = owar == null ? null : owar * basePerOwar * ptm * pvm;
         transferSnapshot = {
-          p_avg: precomputedTeamRow.p_avg ?? null, p_obp: precomputedTeamRow.p_obp ?? null,
-          p_slg: precomputedTeamRow.p_slg ?? null, p_wrc_plus: precomputedTeamRow.p_wrc_plus ?? null,
-          owar, nil_valuation: nilRaw == null ? null : Math.max(0, nilRaw),
-          from_team: fromTeamName || null, from_conference: fromTeamRow?.conference || row.conference || null,
+          p_avg: precomputedTeamRow.p_avg ?? null,
+          p_obp: precomputedTeamRow.p_obp ?? null,
+          p_slg: precomputedTeamRow.p_slg ?? null,
+          p_wrc_plus: precomputedTeamRow.p_wrc_plus ?? null,
+          owar: (precomputedTeamRow as any).o_war ?? null,
+          nil_valuation: (precomputedTeamRow as any).market_value ?? null,
+          from_team: fromTeamName || null,
+          from_conference: fromTeamRow?.conference || row.conference || null,
         } as any;
       }
     }
@@ -2469,7 +2474,10 @@ export default function TeamBuilder() {
             (row.source_player_id ? pitchingStatsByNameTeam.bySourceId.get(row.source_player_id)?.ip : null) ?? null,
             (inferredRole === "SP") ? "SP" : "RP",
           )
-        : "utility",
+        // Default hitters to everyday_starter so the displayed oWAR/market
+        // match the stored projection on add (multiplier = 1.0). Coach
+        // adjusts depth from there.
+        : "everyday_starter",
       class_transition: chosenPred?.class_transition ?? "SJ",
       dev_aggressiveness: chosenPred?.dev_aggressiveness ?? 0,
       transfer_snapshot: transferSnapshot,

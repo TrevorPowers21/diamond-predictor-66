@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 
 export interface PlayerPredictionRow {
   id: string;
@@ -41,7 +42,7 @@ export function usePlayerPrediction(sourcePlayerId: string | null | undefined) {
           "id, player_id, season, class_transition, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus",
         )
         .eq("player_id", (playerRow as any).id)
-        .eq("season", 2026)
+        .eq("season", PROJECTION_SEASON)
         .eq("model_type", "returner")
         .eq("variant", "regular")
         .maybeSingle();

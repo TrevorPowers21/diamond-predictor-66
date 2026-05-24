@@ -32,7 +32,7 @@ const toPitchingRole = (raw: string | null | undefined): "SP" | "RP" | "SM" | nu
   return null;
 };
 
-const calcPitchingPlus = (
+export const calcPitchingPlus = (
   value: number | null,
   ncaaAvg: number,
   ncaaSd: number,
@@ -45,7 +45,7 @@ const calcPitchingPlus = (
   return Number.isFinite(raw) ? raw : null;
 };
 
-const applyRoleTransitionAdjustment = (
+export const applyRoleTransitionAdjustment = (
   value: number | null,
   pct: number,
   fromRole: "SP" | "RP" | "SM" | null,

@@ -20,6 +20,38 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    date: "2026-05-24",
+    headline: "Fully customized projections for your program",
+    features: [
+      {
+        title: "Every Projection Now Reflects Your Program",
+        tagline:
+          "RSTR IQ now precomputes every player's projection for your specific destination. Walk in tomorrow and the player dashboard, profile pages, target board, and exportable PDFs all show what each player would do at your school. No simulator step. No filters to set. Just open and read.",
+        details: [
+          "Player dashboard market values and oWAR now scale to your conference tier, your park, and your program. SEC schools see SEC pricing. Mid majors see mid major pricing. Same player, the right number for you.",
+          "Profile pages pull stored projected stats instead of recomputing on the fly. Open the profile and the numbers match the dashboard exactly, every time.",
+          "Target board additions reflect the projection at your school the moment you add a player. No second click into the simulator.",
+          "PDF scouting reports export with your program's numbers baked in. Hand the coach a sheet that already speaks your program's language.",
+        ],
+      },
+      {
+        title: "Team Builder Stays Fully Live",
+        tagline:
+          "Team Builder still runs your roster simulations live. Adjust class transitions, dev aggressiveness, depth roles, or position slots and watch the build update in real time. Save the build and your changes persist for next time.",
+        details: [
+          "All knobs (class, dev agg, depth, position) keep working exactly as before in Team Builder.",
+          "Profile page knobs are session-only previews now. Change them to see how a depth shift or dev tier would look, leave the page, the original numbers are still there.",
+          "To persist a player's projection at a non-default role or dev level, save them in a Team Builder build.",
+        ],
+      },
+    ],
+    whatElse: [
+      "Team Builder: faster load and snappier response when you change depth roles, dev tiers, and class adjustments. Big builds no longer lag when you swap players in and out.",
+      "Team Builder: cleaner depth chart with steadier sorting and fewer redraws as you drag players between tiers.",
+      "Team Builder: saved builds load reliably with all of your overrides and depth assignments intact.",
+    ],
+  },
+  {
     date: "2026-05-20",
     headline: "Handedness-aware park factors, daily portal updates, sharper projections",
     features: [

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Link } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Search, X, ArrowUpDown, Star } from "lucide-react";
-import { CURRENT_SEASON } from "@/lib/seasonConstants";
+import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { cn } from "@/lib/utils";
 import { useHighFollow, type HighFollowRow } from "@/hooks/useHighFollow";
 import { useQuery } from "@tanstack/react-query";
@@ -78,6 +78,16 @@ export default function HighFollowList() {
   const [search, setSearch] = useState("");
   const [positionFilters, setPositionFilters] = useState<Set<string>>(new Set());
   const [typeFilter, setTypeFilter] = useState<"hitter" | "pitcher">("hitter");
+  // Auto-switch tab to whichever type has rows when only one type is present.
+  // Avoids the "1 player at top but list empty" UX where the user added a
+  // pitcher but the default Hitter tab hides them.
+  useEffect(() => {
+    if (list.length === 0) return;
+    const hasHitter = list.some((r) => r.player_type === "hitter");
+    const hasPitcher = list.some((r) => r.player_type === "pitcher");
+    if (typeFilter === "hitter" && !hasHitter && hasPitcher) setTypeFilter("pitcher");
+    else if (typeFilter === "pitcher" && !hasPitcher && hasHitter) setTypeFilter("hitter");
+  }, [list, typeFilter]);
   const [sortKey, setSortKey] = useState<SortKey>("added_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -115,7 +125,7 @@ export default function HighFollowList() {
     queryKey: ["hf-predictions", playerIds, effectiveTeamId],
     enabled: playerIds.length > 0,
     queryFn: async () => {
-      let q = supabase.from("player_predictions").select("*").in("player_id", playerIds).eq("status", "active");
+      let q = supabase.from("player_predictions").select("*").in("player_id", playerIds).eq("season", PROJECTION_SEASON).eq("status", "active");
       q = applyTeamScopeFilter(q as any, effectiveTeamId);
       const { data } = await q;
       // Prefer team-scoped precomputed row per player, fall back to global regular.
@@ -256,8 +266,8 @@ export default function HighFollowList() {
         case "p_ops": av = (a.pred?.p_obp ?? 0) + (a.pred?.p_slg ?? 0); bv = (b.pred?.p_obp ?? 0) + (b.pred?.p_slg ?? 0); break;
         case "p_iso": av = (a.pred?.p_slg ?? 0) - (a.pred?.p_avg ?? 0); bv = (b.pred?.p_slg ?? 0) - (b.pred?.p_avg ?? 0); break;
         case "p_wrc_plus": av = a.pred?.p_wrc_plus ?? -999; bv = b.pred?.p_wrc_plus ?? -999; break;
-        case "owar": av = a.pred?.p_wrc_plus ?? -999; bv = b.pred?.p_wrc_plus ?? -999; break;
-        case "nil": av = a.pred?.nil_value ?? -999; bv = b.pred?.nil_value ?? -999; break;
+        case "owar": av = a.pred?.o_war ?? a.pred?.p_wrc_plus ?? -999; bv = b.pred?.o_war ?? b.pred?.p_wrc_plus ?? -999; break;
+        case "nil": av = a.pred?.market_value ?? -999; bv = b.pred?.market_value ?? -999; break;
         case "p_era": av = a.pitcherProjection?.p_era ?? 999; bv = b.pitcherProjection?.p_era ?? 999; break;
         case "p_fip": av = a.pitcherProjection?.p_fip ?? 999; bv = b.pitcherProjection?.p_fip ?? 999; break;
         case "p_whip": av = a.pitcherProjection?.p_whip ?? 999; bv = b.pitcherProjection?.p_whip ?? 999; break;

@@ -27,6 +27,7 @@ import {
   applyTransferPostprocess,
   type ConferenceHittingStats,
 } from "@/lib/buildTransferProjectionInputs";
+import { computeHitterOWar, computeHitterMarketValue } from "@/lib/depthRoles";
 const C = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m", cyan: "\x1b[36m" };
 
 function arg(name: string): string | undefined {
@@ -188,7 +189,7 @@ async function main() {
   const allPlayers = await loadAllPaged<any>(() =>
     supabase
       .from("players")
-      .select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, portal_status"),
+      .select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, portal_status, is_twp, pa"),
   );
   console.log(`  ${allPlayers.length} total players`);
   const isPitcher = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
@@ -199,7 +200,9 @@ async function main() {
     return div !== "NJCAA_D1";
   };
   const hitters = allPlayers.filter((p) => {
-    if (isPitcher(p.position)) return false;
+    // Include if NOT pitcher-primary OR flagged is_twp (TWPs appear in both
+    // pools regardless of which side is their primary position).
+    if (isPitcher(p.position) && !p.is_twp) return false;
     if (toSourceId && p.source_team_id === toSourceId) return false; // skip own roster
     if (!matchesDivision(p.division)) return false;
     return true;
@@ -222,7 +225,8 @@ async function main() {
         .select("id, player_id, model_type, variant, status, updated_at, from_avg, from_obp, from_slg, class_transition, dev_aggressiveness")
         .in("player_id", idsChunk)
         .in("model_type", ["returner", "transfer"])
-        .is("customer_team_id", null),
+        .is("customer_team_id", null)
+        .eq("season", season),
     );
     predRows.push(...chunk);
   }
@@ -337,8 +341,15 @@ async function main() {
     const projected = computeTransferProjection(result.inputs);
     const final = applyTransferPostprocess(projected, result.inputs, result.transferMultiplier);
 
-    // oWAR + NIL are derived at read time from p_wrc_plus + position/conference,
-    // so we don't persist them here — same as the rest of the prediction engine.
+    // oWAR + market value at the destination program. PA carries forward from
+    // prior-season actuals so a fringe starter doesn't get a full-season WAR.
+    // No depth-role overlay here — that's a session-only display knob.
+    const projectedPa = (p as any).pa ?? null;
+    const oWar = computeHitterOWar(final.pWrcPlus, projectedPa, null);
+    const marketValue = computeHitterMarketValue(oWar, {
+      conference: toConference,
+      position: p.position,
+    });
 
     upserts.push({
       player_id: p.id,
@@ -359,6 +370,13 @@ async function main() {
       p_iso: final.pIso,
       p_wrc: final.pWrc,
       p_wrc_plus: final.pWrcPlus,
+      o_war: oWar,
+      market_value: marketValue,
+      projected_pa: projectedPa,
+      // Keep precompute rows unlocked so subsequent runs can refresh them.
+      // The protect_locked_predictions trigger reverts rate columns when
+      // locked=true; we don't want that for system-managed precompute rows.
+      locked: false,
       updated_at: new Date().toISOString(),
     });
     computed++;

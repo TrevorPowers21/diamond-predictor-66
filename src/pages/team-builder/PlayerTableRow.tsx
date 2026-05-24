@@ -445,11 +445,11 @@ function PlayerTableRow({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="cornerstone">Cornerstone (1.15x)</SelectItem>
-              <SelectItem value="everyday_starter">Everyday (1.0x)</SelectItem>
-              <SelectItem value="platoon_starter">Platoon (0.7x)</SelectItem>
-              <SelectItem value="utility">Utility (0.4x)</SelectItem>
-              <SelectItem value="bench">Bench (0.15x)</SelectItem>
+              <SelectItem value="cornerstone">Cornerstone (245 PA)</SelectItem>
+              <SelectItem value="everyday_starter">Everyday (215 PA)</SelectItem>
+              <SelectItem value="platoon_starter">Platoon (145 PA)</SelectItem>
+              <SelectItem value="utility">Utility (85 PA)</SelectItem>
+              <SelectItem value="bench">Bench (25 PA)</SelectItem>
             </SelectContent>
           </Select>
         )}

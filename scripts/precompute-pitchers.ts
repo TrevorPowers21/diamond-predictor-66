@@ -231,7 +231,7 @@ async function main() {
   const allPlayers = await loadAllPaged<any>(() =>
     supabase
       .from("players")
-      .select("id, first_name, last_name, position, team, from_team, team_id, conference, division, source_player_id, source_team_id, portal_status"),
+      .select("id, first_name, last_name, position, team, from_team, team_id, conference, division, source_player_id, source_team_id, portal_status, is_twp"),
   );
   console.log(`  ${allPlayers.length} total players`);
   const isPitcher = (pos: string | null | undefined) => {
@@ -247,7 +247,9 @@ async function main() {
     return div !== "NJCAA_D1";
   };
   const pitchers = allPlayers.filter((p) => {
-    if (!pitcherTest(p.position)) return false;
+    // Include if pitcher-primary OR flagged is_twp (two-way players appear in
+    // both pools regardless of which side is the primary position).
+    if (!pitcherTest(p.position) && !p.is_twp) return false;
     if (toSourceId && p.source_team_id === toSourceId) return false;
     if (!matchesDivision(p.division)) return false;
     return true;
@@ -337,7 +339,8 @@ async function main() {
         .select("id, player_id, model_type, variant, status, updated_at, class_transition, dev_aggressiveness")
         .in("player_id", idsChunk)
         .in("model_type", ["returner", "transfer"])
-        .is("customer_team_id", null),
+        .is("customer_team_id", null)
+        .eq("season", season),
     );
     predRows.push(...chunk);
   }
@@ -455,9 +458,20 @@ async function main() {
       devAggressiveness: pred?.dev_aggressiveness ?? null,
       isJucoSource: result.isJucoSource,
       pitchingEq,
+      toConference,
+      toTeam: toTeam.name,
     });
 
     bumpDiv(p.division, "computed");
+
+    // projected_ip drives pWAR — base SP/RP/SM lookup from equation weights.
+    // Display overlays (depth_role) modify this at read time; the stored
+    // value is the base-role IP estimate.
+    const projectedIp = final.pitcher_role === "SP"
+      ? pitchingEq.pwar_ip_sp
+      : final.pitcher_role === "RP"
+        ? pitchingEq.pwar_ip_rp
+        : pitchingEq.pwar_ip_sm;
 
     upserts.push({
       player_id: p.id,
@@ -475,7 +489,13 @@ async function main() {
       p_bb9: final.p_bb9,
       p_hr9: final.p_hr9,
       p_rv_plus: final.p_rv_plus,
+      p_war: final.p_war,
+      market_value: final.market_value,
+      projected_ip: projectedIp,
       pitcher_role: final.pitcher_role,
+      // Keep precompute rows unlocked so subsequent runs can refresh them.
+      // protect_locked_predictions trigger reverts rate columns when locked=true.
+      locked: false,
       updated_at: new Date().toISOString(),
     });
     computed++;

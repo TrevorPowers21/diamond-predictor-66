@@ -1,5 +1,6 @@
 import type { BuildPlayer, PitcherDepthRole, TransferSnapshot, TeamMetricInputs, TeamPowerPlus } from "./types";
-export { normalizeName } from "@/lib/nameUtils";
+import { normalizeName } from "@/lib/nameUtils";
+export { normalizeName };
 
 const LEGACY_PITCHING_ROLE_OVERRIDE_KEY = "pitching_role_overrides_v1";
 
