@@ -1311,7 +1311,10 @@ export default function PitcherProfile() {
     const devAggDelta = (sessionDevAggNum - storedDevAgg) * 0.06;
     const devAggUnchanged = sessionDevAggNum === storedDevAgg;
 
-    const storedRole = ((stored as any)?.pitcher_role as "SP" | "RP" | "SM" | null) ?? null;
+    // Base role for transition math: prefer stored pitcher_role, fall back to
+    // derivedRole (Pitching Master Role + G/GS heuristic) so the transition
+    // fires even when the precompute didn't write pitcher_role.
+    const storedRole = (((stored as any)?.pitcher_role as "SP" | "RP" | "SM" | null) ?? derivedRole ?? null);
     const sessionRole = projectedRole;
     const roleChanged = storedRole != null && storedRole !== sessionRole;
     const roleCurve = {
