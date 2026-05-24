@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Link } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -78,6 +78,16 @@ export default function HighFollowList() {
   const [search, setSearch] = useState("");
   const [positionFilters, setPositionFilters] = useState<Set<string>>(new Set());
   const [typeFilter, setTypeFilter] = useState<"hitter" | "pitcher">("hitter");
+  // Auto-switch tab to whichever type has rows when only one type is present.
+  // Avoids the "1 player at top but list empty" UX where the user added a
+  // pitcher but the default Hitter tab hides them.
+  useEffect(() => {
+    if (list.length === 0) return;
+    const hasHitter = list.some((r) => r.player_type === "hitter");
+    const hasPitcher = list.some((r) => r.player_type === "pitcher");
+    if (typeFilter === "hitter" && !hasHitter && hasPitcher) setTypeFilter("pitcher");
+    else if (typeFilter === "pitcher" && !hasPitcher && hasHitter) setTypeFilter("hitter");
+  }, [list, typeFilter]);
   const [sortKey, setSortKey] = useState<SortKey>("added_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 

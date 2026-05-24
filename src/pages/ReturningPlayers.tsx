@@ -2178,7 +2178,7 @@ export default function ReturningPlayers() {
   // Keyed by source_player_id so we can join against Pitching Master rows below.
   // These are the canonical values shown on PitcherProfile; live compute here is
   // a fallback for pitchers whose preds haven't been backfilled yet.
-  const { data: pitcherPredBySourceId } = useQuery({
+  const { data: pitcherPredBySourceId, isLoading: pitcherPredLoading } = useQuery({
     queryKey: ["returning-pitcher-predictions-by-source-id", effectiveTeamId],
     queryFn: async () => {
       const map = new Map<string, {
@@ -2275,6 +2275,9 @@ export default function ReturningPlayers() {
   });
 
   const pitchingRows = useMemo<PitchingDashboardRow[]>(() => {
+    // Gate on the pitcher prediction query so the table doesn't render with
+    // "—" placeholders during the brief window before stored preds resolve.
+    if (pitcherPredLoading) return [] as PitchingDashboardRow[];
     const eq = readPitchingWeights();
     const powerEq = pitchingPowerEq;
     let roleOverrides: Record<string, "SP" | "RP" | "SM"> = {};
@@ -2463,7 +2466,7 @@ export default function ReturningPlayers() {
         .filter((r) => !!r.playerName);
     }
     return [] as PitchingDashboardRow[];
-  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq, pitcherPredBySourceId, pitcherMetaBySourceId]);
+  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq, pitcherPredBySourceId, pitcherMetaBySourceId, pitcherPredLoading]);
   const filteredPitchingRows = useMemo(() => {
     // Qualification threshold: pitchers need at least 25 IP to show in the table
     // (parallel to hitters needing 75 PA). Profile pages are still searchable/accessible
