@@ -219,19 +219,26 @@ Full suite runs in ~2 seconds. **When to run:**
 
 ## Current Session State
 
-**Last Updated:** 2026-05-22 (session 4)
-**Session Status:** Refactor complete for this cycle — branch pushed to origin, ready for next session
+**Last Updated:** 2026-05-24 (session 5)
+**Session Status:** Phase 4a stored-first audit complete — commit `5d9b94f` on `feature/stored-vs-live-audit`
 
-### Next Session for Peyton — Live-Compute vs Stored-Values Audit
+### Stored-First Audit — Phase Status
+| Phase | Status | What |
+|---|---|---|
+| 4a | ✅ Done | PitcherProfile `projectedPitching` useMemo — stripped dead live-compute block (~155 lines), dep array 29→8, removed `cachedProjectionRef`, `toPitchingClassAdj`, `projectPitchingRate` import, `useRef` import |
+| 4b | ✅ Already done | PlayerProfile hitter rates (`projectedAvg/Obp/Slg/WrcPlus`) are pure stored reads via `applyDevScale(regularPred?.p_*)` |
+| 4c | ✅ Already done | Dashboard uses `dedupePreferredPerPlayer` with correct precedence (team precomputed → global regular) |
+| 4d | ⏳ Trevor sync | TB/TP simulator stored-first — needs Trevor |
 
-Trevor's directive: **stored player_predictions values come first and foremost.** Live engine only runs when a coach changes an interactive knob (dev aggressiveness, depth role, class transition, position slot). Full spec + bugs that will disappear + what needs to keep working: `docs/stored-derived-values-plan.md` — see "NOTE FOR PEYTON" at the top.
-
-Bugs in this branch that the audit will collapse (don't fix in isolation):
+### Remaining Bugs (resolve with Trevor)
 - TB add path passes only conference name, not conference_id, to resolveConferenceStats — causes wrong env+ for players whose `players.conference` is null (e.g. Rossow)
 - "From: Campbell (—)" display gap — same root cause
 - TB Compare tab shows wrong values
 - Dev aggressiveness change is slow (full sim re-cascade)
-- PitcherProfile vs Dashboard show different numbers for same pitcher
+- ~~PitcherProfile vs Dashboard show different numbers~~ — Phase 4a eliminates this
+
+### Activate `.skip` regression tests when stored-first lands for those surfaces
+`src/lib/storedVsLive.test.ts` has two `.skip` blocks: Rossow ERA mismatch, TB Compare values.
 
 ### Refactor Progress Summary
 | Phase | Lines removed | What moved |
@@ -239,12 +246,13 @@ Bugs in this branch that the audit will collapse (don't fix in isolation):
 | Session 1 | -2,082 | useTeamBuilderData hook, useTeamBuilderSimulation hook, CompareTab |
 | Session 2 | -166 | DepthTab render fns, renderPlayerRow → playerRowProps, slotMatchesPosition |
 | Session 3–4 | -521 | loadBuild → useLoadBuild; shared utils to lib/; useSeedDataMaps + useTransferPortalContext for PlayerProfile |
-| **Total** | **-2,769 (-46%)** | TeamBuilder: 5,973 → 3,204 lines |
+| Session 5 | -200 | PitcherProfile dead live-compute block + unused helpers |
+| **Total** | **-2,969** | — |
 
 ### Current Branch State
-- **`refactor/team-builder-split`** pushed to origin — Trevor can review on GitHub
-- Fully synced with staging `0cd3a5f` (cherry-picked Trevor's pitcher precompute + autofire PRs — zero conflicts)
-- tsc zero errors
+- **`feature/stored-vs-live-audit`** — latest commit `5d9b94f`
+- Built on top of `refactor/team-builder-split` which Trevor has reviewed
+- tsc zero errors, 237 tests pass
 
 ### New files this cycle
 | File | Purpose |
