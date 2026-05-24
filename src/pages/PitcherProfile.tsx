@@ -1314,8 +1314,10 @@ export default function PitcherProfile() {
     // Base role for transition math: prefer stored pitcher_role, fall back to
     // derivedRole (Pitching Master Role + G/GS heuristic) so the transition
     // fires even when the precompute didn't write pitcher_role.
-    const storedRole = (((stored as any)?.pitcher_role as "SP" | "RP" | "SM" | null) ?? derivedRole ?? null);
-    const sessionRole = projectedRole;
+    const validRole = (r: any): "SP" | "RP" | "SM" | null =>
+      r === "SP" || r === "RP" || r === "SM" ? r : null;
+    const storedRole = validRole((stored as any)?.pitcher_role) ?? validRole(derivedRole) ?? null;
+    const sessionRole = validRole(projectedRole) ?? "RP";
     const roleChanged = storedRole != null && storedRole !== sessionRole;
     const roleCurve = {
       tier1Max: eq.rp_to_sp_low_better_tier1_max,
