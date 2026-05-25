@@ -22,6 +22,7 @@ export interface TargetBoardRow {
   class_year: string | null;
   portal_status: PortalStatus;
   bats_hand: string | null;
+  division: string | null;
 }
 
 /**
@@ -41,7 +42,7 @@ export function useTargetBoard() {
     enabled: !!user?.id && !!effectiveTeamId,
     queryFn: async () => {
       const { data, error } = await tb()
-        .select("id, player_id, notes, added_at, players!inner(first_name, last_name, team, conference, position, class_year, portal_status, bats_hand)")
+        .select("id, player_id, notes, added_at, players!inner(first_name, last_name, team, conference, position, class_year, portal_status, bats_hand, division)")
         .eq("user_id", user!.id)
         .eq("customer_team_id", effectiveTeamId!)
         .order("added_at", { ascending: false });
@@ -61,6 +62,7 @@ export function useTargetBoard() {
         class_year: row.players.class_year,
         portal_status: row.players.portal_status || "NOT IN PORTAL",
         bats_hand: row.players.bats_hand ?? null,
+        division: row.players.division ?? null,
       })) as TargetBoardRow[];
     },
   });
