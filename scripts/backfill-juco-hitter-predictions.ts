@@ -37,9 +37,25 @@ async function main() {
   console.log(COLOR.bold + `\n══ Backfill JUCO Hitter Predictions ══` + COLOR.reset);
   console.log(apply ? COLOR.red + "MODE: APPLY (will write)" + COLOR.reset : "MODE: dry-run");
 
+  const isProd = process.argv.includes("--prod");
   const url = process.env.SUPABASE_URL ?? "";
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-  if (!url.includes("slrxowawbijbjrkozqlj")) { err("Expected staging URL"); process.exit(1); }
+  // Env-detection guard: refuse to write prod unless --prod explicitly passed.
+  const lowerUrl = url.toLowerCase();
+  const looksLikeProd = lowerUrl.includes("ualmkgkdnoubccoieahf") || lowerUrl.includes("trbvxuoliwrfowibatkm") || lowerUrl.includes("prod");
+  if (looksLikeProd && !isProd) {
+    err(`SUPABASE_URL looks like PROD but --prod was not passed. Refusing to write.`);
+    err(`  URL: ${lowerUrl || "(unset)"}`);
+    process.exit(1);
+  }
+  if (isProd && !looksLikeProd) {
+    err(`--prod passed but SUPABASE_URL doesn't look like prod. Refusing to write.`);
+    err(`  URL: ${lowerUrl || "(unset)"}`);
+    process.exit(1);
+  }
+  if (!looksLikeProd && !lowerUrl.includes("slrxowawbijbjrkozqlj")) {
+    err("Expected staging URL (slrxowawbijbjrkozqlj) or prod with --prod flag"); process.exit(1);
+  }
   const sb = createClient(url, key, { auth: { persistSession: false } });
 
   if (apply) {
