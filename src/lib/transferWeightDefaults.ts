@@ -197,20 +197,21 @@ export const JUCO_PITCHING_TRANSFER_WEIGHTS = {
   transfer_k9_conference_weight: 0.198,
   transfer_bb9_conference_weight: 0.215,
   transfer_hr9_conference_weight: 0.433,
-  // Competition (hitter-talent delta) — HTP is the dominant factor at
-  // ~5% per SD = 40% impact at typical JUCO→SEC gap. K/9 and HR/9
-  // partially shielded (peripheral, less hitter-quality dependent).
-  transfer_era_competition_weight: 0.706,
-  transfer_fip_competition_weight: 0.706,
+  // Competition (hitter-talent delta) — HTP is the dominant factor.
+  // 2026-05-24 recalibration: ERA + FIP bumped from 0.706 → 1.0 after
+  // Redmond (South Central, 2.29 ERA / 1.93 FIP) projected to 3.21 in
+  // SEC — coach gut said ~3.82 better reflects "elite JUCO ace still
+  // gets exposed by SEC bat depth." Better to under-project and have
+  // them outperform than over-project and disappoint.
+  transfer_era_competition_weight: 1.0,
+  transfer_fip_competition_weight: 1.0,
   transfer_whip_competition_weight: 0.706,
   transfer_k9_competition_weight: 0.40,
-  // BB/9 reduced from 0.706 → 0.45. Walks are primarily a pitcher
-  // command skill; hitter talent influences them modestly (better
-  // hitters work counts, draw more walks) but nowhere near the same
-  // multiplier as contact-quality stats. Sat between K/9 peripheral
-  // (0.40) and the heavy-comp stats. Connor Mitchell (6.31 BB/9
-  // JUCO Midwest → SEC) was projecting +43% at the old 0.706.
-  transfer_bb9_competition_weight: 0.45,
+  // BB/9 lowered 2026-05-24: 0.45 → 0.30. Walks are primarily pitcher
+  // command — hitter quality has only a modest pull. Coach feedback:
+  // "BB/9 was moving a little too much for my liking, walks are pretty
+  // consistent." Earlier history: 0.706 → 0.45 (2026-05-18) → 0.30.
+  transfer_bb9_competition_weight: 0.30,
   transfer_hr9_competition_weight: 0.40,
   // Park weights = 0 (JUCO has no park data)
   transfer_era_park_weight: 0,
