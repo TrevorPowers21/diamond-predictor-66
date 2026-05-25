@@ -28,6 +28,7 @@ import {
   type ConferenceHittingStats,
 } from "@/lib/buildTransferProjectionInputs";
 import { computeHitterOWar, computeHitterMarketValue } from "@/lib/depthRoles";
+import { JUCO_DISTRICT_CONFERENCE_ID, jucoDistrictNameFromConference } from "@/lib/transferWeightDefaults";
 const C = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m", cyan: "\x1b[36m" };
 
 function arg(name: string): string | undefined {
@@ -163,6 +164,12 @@ async function main() {
 
   const resolveConferenceHitting = (conference: string | null, conferenceId?: string | null) => {
     if (conferenceId && confById.has(conferenceId)) return confById.get(conferenceId)!;
+    // JUCO district fallback (mirrors TransferPortal.tsx + precompute-pitchers.ts)
+    const jucoName = jucoDistrictNameFromConference(conference);
+    if (jucoName) {
+      const jucoId = JUCO_DISTRICT_CONFERENCE_ID[jucoName];
+      if (jucoId && confById.has(jucoId)) return confById.get(jucoId)!;
+    }
     const k = normalizeKey(conference);
     return k ? (confByKey.get(k) ?? null) : null;
   };
@@ -213,12 +220,17 @@ async function main() {
     // D1 default: exclude JUCO; include null (legacy D1 rows without division tag)
     return div !== "NJCAA_D1";
   };
+  const JUCO_PA_THRESHOLD = 75;
   const hitters = allPlayers.filter((p) => {
     // Include if NOT pitcher-primary OR flagged is_twp (TWPs appear in both
     // pools regardless of which side is their primary position).
     if (isPitcher(p.position) && !p.is_twp) return false;
     if (toSourceId && p.source_team_id === toSourceId) return false; // skip own roster
     if (!matchesDivision(p.division)) return false;
+    // JUCO PA floor — tiny-sample JUCO hitters produce nonsense projections
+    // (e.g., 7-AB TWPs with .700 batting averages amplified by transfer math).
+    // Cross-team JUCO backfill enforces PA≥75; mirror it here for parity.
+    if (p.division === "NJCAA_D1" && (Number(p.pa) || 0) < JUCO_PA_THRESHOLD) return false;
     return true;
   });
   console.log(`  ${hitters.length} hitters after pitcher + own-team + division=${divisionArg} filter`);

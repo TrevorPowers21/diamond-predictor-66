@@ -24,6 +24,7 @@ import { fetchParkFactorsMap, resolveMetricParkFactor } from "@/lib/parkFactors"
 import { fetchConferenceStats } from "@/lib/supabaseQueries";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
+import { JUCO_DISTRICT_CONFERENCE_ID, jucoDistrictNameFromConference } from "@/lib/transferWeightDefaults";
 import {
   buildTransferPitcherInputs,
   applyTransferPitcherPostprocess,
@@ -189,6 +190,14 @@ async function main() {
 
   const resolvePitchingConfStats = (conf: string | null, confId?: string | null): PitchingConfStats => {
     if (confId && pitchingConfById.has(confId)) return pitchingConfById.get(confId)!;
+    // JUCO district fallback — players.conference is "NJCAA D1 <District>"
+    // but Conference Stats stores "NJCAA D1 <District> District". Resolve via
+    // the hardcoded district → UUID map (mirrors TransferPortal.tsx pattern).
+    const jucoName = jucoDistrictNameFromConference(conf);
+    if (jucoName) {
+      const jucoId = JUCO_DISTRICT_CONFERENCE_ID[jucoName];
+      if (jucoId && pitchingConfById.has(jucoId)) return pitchingConfById.get(jucoId)!;
+    }
     if (!conf) return null;
     for (const alias of getConferenceAliases(conf)) {
       const k = String(alias || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
@@ -245,7 +254,7 @@ async function main() {
   const allPlayers = await loadAllPaged<any>(() =>
     supabase
       .from("players")
-      .select("id, first_name, last_name, position, team, from_team, team_id, conference, division, source_player_id, source_team_id, portal_status, is_twp"),
+      .select("id, first_name, last_name, position, team, from_team, team_id, conference, division, source_player_id, source_team_id, portal_status, is_twp, ip"),
   );
   console.log(`  ${allPlayers.length} total players`);
   const isPitcher = (pos: string | null | undefined) => {
@@ -260,12 +269,16 @@ async function main() {
     if (divisionArg === "JUCO") return div === "NJCAA_D1";
     return div !== "NJCAA_D1";
   };
+  const JUCO_IP_THRESHOLD = 20;
   const pitchers = allPlayers.filter((p) => {
     // Include if pitcher-primary OR flagged is_twp (two-way players appear in
     // both pools regardless of which side is the primary position).
     if (!pitcherTest(p.position) && !p.is_twp) return false;
     if (toSourceId && p.source_team_id === toSourceId) return false;
     if (!matchesDivision(p.division)) return false;
+    // JUCO IP floor — tiny-sample JUCO pitchers produce noise projections.
+    // Cross-team JUCO backfill enforces IP≥20; mirror it here for parity.
+    if (p.division === "NJCAA_D1" && (Number(p.ip) || 0) < JUCO_IP_THRESHOLD) return false;
     return true;
   });
   void isPitcher;
