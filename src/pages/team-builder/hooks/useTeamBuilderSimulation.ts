@@ -1220,16 +1220,19 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   // ── Block O: playerProjection ────────────────────────────────────────────────
   const playerProjection = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
     const treatAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
-    const sim = p.roster_status === "target" ? simulateTransferProjection(p, side) : null;
-    // Stored values come first. For target players, prefer the team-scoped
-    // precomputed prediction (eager precompute output) over the live sim or
-    // raw transfer_snapshot. Sim/snapshot kept as fallbacks for edge cases
-    // (no precomputed row, player added before precompute ran, etc.).
+    const isJucoSrc = (p.player as any)?.division === "NJCAA_D1";
     const storedPrecomputed = p.roster_status === "target" && p.player_id
       ? liveTargetPredictionByPlayerId.get(p.player_id)
       : null;
+    // Stored values come first. For JUCO targets specifically: ONLY the
+    // stored precomputed (no live sim fallback) — the live JUCO sim can
+    // produce misleading numbers that look like 2026 actuals when inputs
+    // are missing. Display "—" if precomputed is absent.
+    // D1 targets keep the live sim fallback for portal-add flows where
+    // no precomputed row exists yet.
+    const sim = (p.roster_status === "target" && !isJucoSrc) ? simulateTransferProjection(p, side) : null;
     const shown = (p.roster_status === "target")
-      ? (storedPrecomputed ?? sim ?? p.transfer_snapshot ?? null)
+      ? (storedPrecomputed ?? (isJucoSrc ? null : (sim ?? p.transfer_snapshot ?? null)))
       : (treatAsPitcher ? (computeReturnerPitchingProjection(p) ?? p.prediction) : p.prediction);
     if (treatAsPitcher) {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
