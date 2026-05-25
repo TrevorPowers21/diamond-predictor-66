@@ -1,7 +1,12 @@
 /**
  * JUCO Player Dashboard — sister surface to the D1 Player Dashboard
- * (ReturningPlayers.tsx). Reads 2026 actuals directly from Hitter Master /
- * Pitching Master, qualified-only.
+ * (ReturningPlayers.tsx). Reads 2027 projections from player_predictions:
+ *   - When impersonating a customer team: reads precomputed (team-scoped
+ *     transfer projection from eager precompute).
+ *   - Otherwise: reads regular (cross-team returner row, Option A verbatim
+ *     copy of 2026 actuals → 2027 projection columns).
+ * Metadata (team, position, district, class, hand) comes from the joined
+ * players row. Qualified-only via Hitter PA ≥ 75 / Pitcher IP ≥ 20.
  *
  * Column set + spacing + filter shape + title banner all mirror D1, EXCEPT:
  *   - No Value / oWAR / Scouting columns (no projection pipeline outputs)
@@ -29,6 +34,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { cn } from "@/lib/utils";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
+import { useAuth } from "@/hooks/useAuth";
 
 const HITTER_PA_THRESHOLD = 75;
 const PITCHER_IP_THRESHOLD = 20;
@@ -233,103 +239,105 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
   };
 
   // ── Queries ──────────────────────────────────────────────────────────
+  // Reads from player_predictions (2027 projections), not Hitter/Pitching Master.
+  // - When impersonating a customer team: reads precomputed (team-scoped transfer projection)
+  // - Otherwise: reads regular (cross-team returner row = 2026 verbatim per Option A)
+  // Metadata (team / position / district / class / hand) comes from the joined players row.
+  const { effectiveTeamId } = useAuth();
+
   const { data: hitterRows = [], isLoading: hittersLoading } = useQuery({
-    queryKey: ["juco-hitter-dashboard", SEASON],
+    queryKey: ["juco-hitter-dashboard", SEASON, effectiveTeamId],
     enabled: view === "hitting",
     queryFn: async (): Promise<HitterRow[]> => {
-      const all: any[] = [];
+      const preds: any[] = [];
       let from = 0;
       while (true) {
-        const { data, error } = await (supabase as any)
-          .from("Hitter Master")
-          .select(`source_player_id, "playerFullName", Team, Conference, "Pos", "BatHand", pa, "AVG", "OBP", "SLG", "ISO", class_year, division`)
-          .eq("Season", SEASON)
-          .eq("division", "NJCAA_D1")
-          .gte("pa", HITTER_PA_THRESHOLD)
-          .range(from, from + 999);
+        let q: any = supabase
+          .from("player_predictions")
+          .select(`player_id, customer_team_id, model_type, variant, p_avg, p_obp, p_slg, p_iso, p_ops, p_wrc_plus, players!inner(id, source_player_id, first_name, last_name, team, position, conference, class_year, bats_hand, pa, division)`)
+          .eq("players.division", "NJCAA_D1")
+          .not("p_wrc_plus", "is", null)
+          .gte("players.pa", HITTER_PA_THRESHOLD);
+        if (effectiveTeamId) {
+          q = q.eq("customer_team_id", effectiveTeamId).eq("variant", "precomputed").eq("model_type", "transfer");
+        } else {
+          q = q.is("customer_team_id", null).eq("variant", "regular").eq("model_type", "returner");
+        }
+        const { data, error } = await q.range(from, from + 999);
         if (error) throw error;
-        all.push(...(data || []));
+        preds.push(...(data || []));
         if (!data || data.length < 1000) break;
         from += 1000;
       }
-      const sourceIds = Array.from(new Set(all.map((r) => r.source_player_id).filter(Boolean))) as string[];
-      const idMap = new Map<string, string>();
-      for (let i = 0; i < sourceIds.length; i += 200) {
-        const chunk = sourceIds.slice(i, i + 200);
-        const { data } = await supabase.from("players").select("id, source_player_id").in("source_player_id", chunk);
-        for (const r of (data || [])) if (r.source_player_id) idMap.set(r.source_player_id, r.id);
-      }
-      return all.map((r: any): HitterRow => {
-        const avg = r.AVG != null ? Number(r.AVG) : null;
-        const obp = r.OBP != null ? Number(r.OBP) : null;
-        const slg = r.SLG != null ? Number(r.SLG) : null;
-        const iso = r.ISO != null ? Number(r.ISO) : (avg != null && slg != null ? slg - avg : null);
-        const ops = obp != null && slg != null ? obp + slg : null;
+      return preds.map((r: any): HitterRow => {
+        const p = r.players;
+        const avg = r.p_avg != null ? Number(r.p_avg) : null;
+        const obp = r.p_obp != null ? Number(r.p_obp) : null;
+        const slg = r.p_slg != null ? Number(r.p_slg) : null;
+        const iso = r.p_iso != null ? Number(r.p_iso) : (avg != null && slg != null ? slg - avg : null);
+        const ops = r.p_ops != null ? Number(r.p_ops) : (obp != null && slg != null ? obp + slg : null);
+        const wrcPlus = r.p_wrc_plus != null ? Number(r.p_wrc_plus) : computeWrcPlus(avg, obp, slg, iso);
         return {
-          id: r.source_player_id ?? r.playerFullName ?? Math.random().toString(),
-          source_player_id: r.source_player_id ?? "",
-          name: r.playerFullName ?? "",
-          team: r.Team ?? null,
-          pos: r.Pos ?? null,
-          bats: r.BatHand ?? null,
-          classYear: r.class_year ?? null,
-          district: stripDistrictLabel(r.Conference) || null,
-          avg, obp, slg, ops, iso,
-          wrcPlus: computeWrcPlus(avg, obp, slg, iso),
-          player_id: idMap.get(r.source_player_id) ?? null,
+          id: p?.source_player_id ?? p?.id ?? Math.random().toString(),
+          source_player_id: p?.source_player_id ?? "",
+          name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim(),
+          team: p?.team ?? null,
+          pos: p?.position ?? null,
+          bats: p?.bats_hand ?? null,
+          classYear: p?.class_year ?? null,
+          district: stripDistrictLabel(p?.conference) || null,
+          avg, obp, slg, ops, iso, wrcPlus,
+          player_id: p?.id ?? null,
         };
       });
     },
   });
 
   const { data: pitcherRows = [], isLoading: pitchersLoading } = useQuery({
-    queryKey: ["juco-pitcher-dashboard", SEASON],
+    queryKey: ["juco-pitcher-dashboard", SEASON, effectiveTeamId],
     enabled: view === "pitching",
     queryFn: async (): Promise<PitcherRow[]> => {
-      const all: any[] = [];
+      const preds: any[] = [];
       let from = 0;
       while (true) {
-        const { data, error } = await (supabase as any)
-          .from("Pitching Master")
-          .select(`source_player_id, "playerFullName", Team, Conference, "ThrowHand", "Role", "IP", "ERA", "FIP", "WHIP", "K9", "BB9", "HR9", overall_pr_plus, class_year, division`)
-          .eq("Season", SEASON)
-          .eq("division", "NJCAA_D1")
-          .gte("IP", PITCHER_IP_THRESHOLD)
-          .range(from, from + 999);
+        let q: any = supabase
+          .from("player_predictions")
+          .select(`player_id, customer_team_id, model_type, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, projected_ip, pitcher_role, players!inner(id, source_player_id, first_name, last_name, team, position, conference, class_year, throws_hand, ip, division)`)
+          .eq("players.division", "NJCAA_D1")
+          .not("p_era", "is", null)
+          .gte("players.ip", PITCHER_IP_THRESHOLD);
+        if (effectiveTeamId) {
+          q = q.eq("customer_team_id", effectiveTeamId).eq("variant", "precomputed").eq("model_type", "transfer");
+        } else {
+          q = q.is("customer_team_id", null).eq("variant", "regular").eq("model_type", "returner");
+        }
+        const { data, error } = await q.range(from, from + 999);
         if (error) throw error;
-        all.push(...(data || []));
+        preds.push(...(data || []));
         if (!data || data.length < 1000) break;
         from += 1000;
       }
-      const sourceIds = Array.from(new Set(all.map((r) => r.source_player_id).filter(Boolean))) as string[];
-      const idMap = new Map<string, string>();
-      for (let i = 0; i < sourceIds.length; i += 200) {
-        const chunk = sourceIds.slice(i, i + 200);
-        const { data } = await supabase.from("players").select("id, source_player_id").in("source_player_id", chunk);
-        for (const r of (data || [])) if (r.source_player_id) idMap.set(r.source_player_id, r.id);
-      }
-      return all.map((r: any): PitcherRow => {
-        const era = r.ERA != null ? Number(r.ERA) : null;
-        const fip = r.FIP != null ? Number(r.FIP) : null;
-        const whip = r.WHIP != null ? Number(r.WHIP) : null;
-        const k9 = r.K9 != null ? Number(r.K9) : null;
-        const bb9 = r.BB9 != null ? Number(r.BB9) : null;
-        const hr9 = r.HR9 != null ? Number(r.HR9) : null;
+      return preds.map((r: any): PitcherRow => {
+        const p = r.players;
+        const era = r.p_era != null ? Number(r.p_era) : null;
+        const fip = r.p_fip != null ? Number(r.p_fip) : null;
+        const whip = r.p_whip != null ? Number(r.p_whip) : null;
+        const k9 = r.p_k9 != null ? Number(r.p_k9) : null;
+        const bb9 = r.p_bb9 != null ? Number(r.p_bb9) : null;
+        const hr9 = r.p_hr9 != null ? Number(r.p_hr9) : null;
+        const ip = r.projected_ip != null ? Number(r.projected_ip) : (p?.ip != null ? Number(p.ip) : null);
+        const prvPlus = r.p_rv_plus != null ? Number(r.p_rv_plus) : computePrvPlus(era, fip, whip, k9, bb9, hr9);
         return {
-          id: r.source_player_id ?? r.playerFullName ?? Math.random().toString(),
-          source_player_id: r.source_player_id ?? "",
-          name: r.playerFullName ?? "",
-          team: r.Team ?? null,
-          throws: r.ThrowHand ?? null,
-          role: r.Role ?? null,
-          classYear: r.class_year ?? null,
-          district: stripDistrictLabel(r.Conference) || null,
-          ip: r.IP != null ? Number(r.IP) : null,
-          era, fip, whip, k9, bb9, hr9,
-          // Computed on-the-fly via D1 pRV+ weights + JUCO 2026 averages.
-          // Replaces overall_pr_plus which was producing leader-order issues.
-          prvPlus: computePrvPlus(era, fip, whip, k9, bb9, hr9),
-          player_id: idMap.get(r.source_player_id) ?? null,
+          id: p?.source_player_id ?? p?.id ?? Math.random().toString(),
+          source_player_id: p?.source_player_id ?? "",
+          name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim(),
+          team: p?.team ?? null,
+          throws: p?.throws_hand ?? null,
+          role: r.pitcher_role ?? null,
+          classYear: p?.class_year ?? null,
+          district: stripDistrictLabel(p?.conference) || null,
+          ip, era, fip, whip, k9, bb9, hr9, prvPlus,
+          player_id: p?.id ?? null,
         };
       });
     },
@@ -543,7 +551,7 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
         </CardHeader>
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="flex items-center justify-center py-16 text-muted-foreground">Loading 2026 actuals…</div>
+            <div className="flex items-center justify-center py-16 text-muted-foreground">Loading 2027 projections…</div>
           ) : filtered.length === 0 ? (
             <div className="flex items-center justify-center py-16 text-muted-foreground">No qualified JUCO {view === "hitting" ? "hitters" : "pitchers"} match.</div>
           ) : (
