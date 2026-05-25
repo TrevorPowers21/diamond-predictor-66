@@ -1221,8 +1221,15 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   const playerProjection = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
     const treatAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
     const sim = p.roster_status === "target" ? simulateTransferProjection(p, side) : null;
+    // Stored values come first. For target players, prefer the team-scoped
+    // precomputed prediction (eager precompute output) over the live sim or
+    // raw transfer_snapshot. Sim/snapshot kept as fallbacks for edge cases
+    // (no precomputed row, player added before precompute ran, etc.).
+    const storedPrecomputed = p.roster_status === "target" && p.player_id
+      ? liveTargetPredictionByPlayerId.get(p.player_id)
+      : null;
     const shown = (p.roster_status === "target")
-      ? (sim ?? p.transfer_snapshot ?? null)
+      ? (storedPrecomputed ?? sim ?? p.transfer_snapshot ?? null)
       : (treatAsPitcher ? (computeReturnerPitchingProjection(p) ?? p.prediction) : p.prediction);
     if (treatAsPitcher) {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
