@@ -44,6 +44,18 @@ const RELEASES: Release[] = [
           "To persist a player's projection at a non-default role or dev level, save them in a Team Builder build.",
         ],
       },
+      {
+        title: "Full JUCO Precompute Live",
+        tagline:
+          "Every JUCO hitter and pitcher in the country now has a precomputed 2027 projection at your specific destination. Walk into the JUCO subtab, the leaderboard, the player profile, or a target board add and the numbers are already there. Powered by official NJCAA stats (Presto Sports) for accurate plate appearances, batting lines, and pitching peripherals.",
+        details: [
+          "JUCO Player Dashboard now reads stored 2027 projections instead of 2026 actuals, scaled to your program tier and impacted by district competition gap (NJCAA District → SEC tier delta).",
+          "JUCO player + pitcher profiles show the same 2027 projected numbers as the dashboard, no more separate '2026 actuals only' card for JUCO.",
+          "Target board additions populate immediately with the JUCO transfer projection for your school — no need to re-simulate.",
+          "Stats refreshed from official NJCAA Presto Sports feed: TruMedia was undercounting JUCO PA by 10-30% and missing home runs, which has now been corrected.",
+          "District-specific hitter talent calibration (NEC/SWAC tier through MWC tier) so JUCO pitcher projections reflect the real talent gap when moving up to D1.",
+        ],
+      },
     ],
     whatElse: [
       "Team Builder: faster load and snappier response when you change depth roles, dev tiers, and class adjustments. Big builds no longer lag when you swap players in and out.",
