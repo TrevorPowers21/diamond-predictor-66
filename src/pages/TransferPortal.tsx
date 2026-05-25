@@ -1215,9 +1215,18 @@ export default function TransferPortal() {
   const toConfStats = resolveConferenceStats(toConference, toConferenceId);
 
   const resolvePitchingConferenceStats = (conference: string | null | undefined, conferenceId?: string | null) => {
-    // UUID lookup first
+    // UUID lookup first (district ID for JUCO, conference UUID for D1)
     const byId = (pitchingConfByKey as any)?._byId as Map<string, any> | undefined;
     if (conferenceId && byId?.has(conferenceId)) return byId.get(conferenceId)!;
+    // JUCO district fallback — players.conference is "NJCAA D1 <District>"
+    // (no "District" suffix) but Conference Stats stores "NJCAA D1 <District>
+    // District". Resolve via the hardcoded district → UUID map (same pattern
+    // as resolveConferenceStats above).
+    const jucoName = jucoDistrictNameFromConference(conference);
+    if (jucoName) {
+      const jucoId = JUCO_DISTRICT_CONFERENCE_ID[jucoName];
+      if (jucoId && byId?.has(jucoId)) return byId.get(jucoId)!;
+    }
     // Name-based fallback
     const directKey = normalizeKey(conference || "");
     const canonicalKey = canonicalConferencePitching(conference || "");

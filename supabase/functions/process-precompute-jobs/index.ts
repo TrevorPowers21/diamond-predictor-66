@@ -72,8 +72,57 @@ const JUCO_REGRESSION_CONFIG = {
   iso: { mean: 0.162, threshold: 0.280, slope: 1.50, maxR: 0.15 },
 } as const;
 
+// JUCO pitcher transfer overrides — mirrors src/lib/transferWeightDefaults.ts
+// 2026-05-24 calibration: era/fip competition 0.706 → 1.0, bb9 0.45 → 0.30
+const JUCO_PITCHING_TRANSFER_WEIGHTS = {
+  transfer_era_power_weight: 0, transfer_fip_power_weight: 0, transfer_whip_power_weight: 0,
+  transfer_k9_power_weight: 0, transfer_bb9_power_weight: 0, transfer_hr9_power_weight: 0,
+  transfer_era_conference_weight: 0.235, transfer_fip_conference_weight: 0.155,
+  transfer_whip_conference_weight: 0.133, transfer_k9_conference_weight: 0.198,
+  transfer_bb9_conference_weight: 0.215, transfer_hr9_conference_weight: 0.433,
+  transfer_era_competition_weight: 1.0, transfer_fip_competition_weight: 1.0,
+  transfer_whip_competition_weight: 0.706, transfer_k9_competition_weight: 0.40,
+  transfer_bb9_competition_weight: 0.30, transfer_hr9_competition_weight: 0.40,
+  transfer_era_park_weight: 0, transfer_fip_park_weight: 0,
+  transfer_whip_park_weight: 0, transfer_hr9_park_weight: 0,
+} as const;
+
+// JUCO district → Conference Stats UUID. Player records store "NJCAA D1 <District>"
+// but Conference Stats key by "NJCAA D1 <District> District" — use this map to
+// bridge. Same UUIDs as src/lib/transferWeightDefaults.ts.
+const JUCO_DISTRICT_CONFERENCE_ID: Record<string, string> = {
+  "Appalachian": "c4e84625-014b-4043-ad18-ef6d633cb7ba",
+  "East": "2981eac4-b979-42a5-abba-9520bd5b34ff",
+  "Mid-South": "9b3228bc-1ebf-4b83-a626-d11b192912b3",
+  "Midwest": "95f8d637-dfc3-4dca-a6c4-dd23ec925fca",
+  "Plains": "53edabac-5a3f-44ef-a877-04d2eb99ef19",
+  "South": "0afebb9f-39a5-48ae-ae04-85a8e5212e7e",
+  "South Atlantic": "0ff9293a-1df2-41b3-ad9c-736b49cdd289",
+  "South Central": "e0e70823-79c5-4362-a33d-a80bfa82b97e",
+  "Southwest": "05f74671-1341-4ec6-aa2a-e7ae0f9c5e3f",
+  "West": "1516195f-ca3d-4e61-af05-354a1fd256a6",
+};
+
+// HTP override per district — replaces inflated raw JUCO HTP with realistic
+// D1-tier-equivalents (NEC to MWC range). Calibrated 2026-05-17, kept as-is.
+const JUCO_DISTRICT_HTP_OVERRIDE: Record<string, number> = {
+  "South Atlantic": 94, "Mid-South": 88, "Southwest": 85, "Plains": 82,
+  "Appalachian": 78, "Midwest": 75, "South": 73, "West": 71,
+  "South Central": 68, "East": 65,
+};
+
+function jucoDistrictNameFromConference(conference: string | null | undefined): string | null {
+  if (!conference) return null;
+  const stripped = String(conference).replace(/^NJCAA D1 /i, "").replace(/ District$/i, "").trim();
+  return stripped || null;
+}
+
 function transferWeightsForSource(division: string | null | undefined) {
   return division === "NJCAA_D1" ? JUCO_TRANSFER_WEIGHTS : TRANSFER_WEIGHT_DEFAULTS;
+}
+
+function pitcherTransferWeightsForSource(division: string | null | undefined) {
+  return division === "NJCAA_D1" ? JUCO_PITCHING_TRANSFER_WEIGHTS : null;
 }
 
 function applyJucoOutlierRegression(
