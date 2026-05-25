@@ -80,13 +80,14 @@ export default function Dashboard() {
         let q = supabase
           .from("player_predictions")
           .select(
-            "id, player_id, customer_team_id, model_type, variant, status, p_wrc_plus, p_avg, p_obp, p_slg, players!inner(first_name, last_name, team, from_team, conference, position, pa, transfer_portal)",
+            "id, player_id, customer_team_id, model_type, variant, status, p_wrc_plus, p_avg, p_obp, p_slg, players!inner(first_name, last_name, team, from_team, conference, position, pa, transfer_portal, division)",
           )
           .eq("season", PROJECTION_SEASON)
           .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"])
           .in("model_type", ["returner", "transfer"])
           .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
+          .not("players.division", "eq", "NJCAA_D1")
           .gte("players.pa", 75)
           .not("p_wrc_plus", "is", null);
         q = applyTeamScopeFilter(q as any, effectiveTeamId);
@@ -135,13 +136,14 @@ export default function Dashboard() {
         let q = supabase
           .from("player_predictions")
           .select(
-            "id, player_id, customer_team_id, model_type, variant, status, p_rv_plus, p_era, p_fip, p_k9, players!inner(first_name, last_name, team, from_team, conference, position, ip, transfer_portal)",
+            "id, player_id, customer_team_id, model_type, variant, status, p_rv_plus, p_era, p_fip, p_k9, players!inner(first_name, last_name, team, from_team, conference, position, ip, transfer_portal, division)",
           )
           .eq("season", PROJECTION_SEASON)
           .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"])
           .in("model_type", ["returner", "transfer"])
           .in("players.position", ["SP", "RP", "CL", "P", "LHP", "RHP"])
+          .not("players.division", "eq", "NJCAA_D1")
           .gte("players.ip", 20)
           .not("p_rv_plus", "is", null);
         q = applyTeamScopeFilter(q as any, effectiveTeamId);
