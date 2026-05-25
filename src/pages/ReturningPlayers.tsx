@@ -1586,7 +1586,7 @@ export default function ReturningPlayers() {
         const to = from + pageSize - 1;
         const { data: pageData, error: pageErr, count } = await supabase
           .from("player_predictions")
-          .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip)", { count: "exact" })
+          .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip, division)", { count: "exact" })
           .eq("season", PROJECTION_SEASON)
           .in("model_type", ["returner", "transfer"])
           .eq("variant", "regular")
@@ -1596,6 +1596,10 @@ export default function ReturningPlayers() {
           // dashboard, matching the new architecture where TWPs appear in BOTH
           // pools regardless of primary side.
           .or("position.not.in.(SP,RP,CL,P,LHP,RHP),is_twp.eq.true", { referencedTable: "players" })
+          // JUCO excluded — they live in the JUCO subtab. Without this filter
+          // JUCO returner-regular rows (Presto-corrected verbatim 2026)
+          // blend into the D1 leaderboard.
+          .not("players.division", "eq", "NJCAA_D1")
           .gte("players.pa", 75)
           .order(orderColumn, { ascending: sortDir === "asc", nullsFirst: false })
           .range(from, to);
@@ -1636,12 +1640,13 @@ export default function ReturningPlayers() {
         while (true) {
           let q = supabase
             .from("player_predictions")
-            .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip)")
+            .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip, division)")
             .eq("season", PROJECTION_SEASON)
             .in("model_type", ["returner", "transfer"])
             .in("variant", ["regular", "precomputed"])
             .in("status", ["active", "departed"])
             .or("position.not.in.(SP,RP,CL,P,LHP,RHP),is_twp.eq.true", { referencedTable: "players" })
+            .not("players.division", "eq", "NJCAA_D1")
             .gte("players.pa", 75);
           q = applyTeamScopeFilter(q as any, effectiveTeamId);
           const { data, error } = await q.range(predFrom, predFrom + PRED_PAGE_SIZE - 1);
