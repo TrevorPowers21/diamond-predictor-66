@@ -1937,46 +1937,11 @@ export default function PitcherProfile() {
             </div>
 
             {(() => {
-              const isJucoSrc = (masterRow as any)?.division === "NJCAA_D1";
-              if (isJucoSrc) {
-                // JUCO arms: display 2026 actuals only — no projection equation.
-                // The returner equation regresses missing-scouting arms toward
-                // a default 100 PR+ prior, which produces D1-flavored numbers
-                // that don't reflect the JUCO→D1 jump. Transfer projection
-                // is handled in the simulator (where a destination is picked);
-                // future customer-team users will see team-scoped projections
-                // via eager pre-compute (deferred).
-                const m = masterRow as any;
-                return (
-                  <Card className="border-[#162241] bg-[#0a1428]">
-                    <CardHeader className="pb-2 pt-3 px-4">
-                      <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}>
-                        <TrendingUp className="h-4 w-4" />2026 Season Stats
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-4 pb-4">
-                      <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                        {[
-                          ["ERA", fmt(m?.era ?? m?.ERA, 2)],
-                          ["FIP", fmt(m?.fip ?? m?.FIP, 2)],
-                          ["WHIP", fmt(m?.whip ?? m?.WHIP, 2)],
-                          ["K/9", fmt(m?.k9 ?? m?.K9, 2)],
-                          ["BB/9", fmt(m?.bb9 ?? m?.BB9, 2)],
-                          ["HR/9", fmt(m?.hr9 ?? m?.HR9, 2)],
-                        ].map(([label, val]) => (
-                          <div key={label} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3 text-center">
-                            <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
-                            <div className="text-xl font-bold mt-0.5 text-white tabular-nums">{val}</div>
-                          </div>
-                        ))}
-                      </div>
-                      <p className="mt-2 text-[10px] text-[#8a94a6]">2026 actuals. Use the Transfer Portal Simulator for cross-level projections.</p>
-                    </CardContent>
-                  </Card>
-                );
-              }
-
-              // D1 arms — keep the existing returner projection card.
+              // 2026-05-24: JUCO branch removed. JUCO arms now have populated
+              // player_predictions rows (returner-regular = 2026 verbatim per
+              // Option A, precomputed = team-scoped transfer projection from
+              // eager precompute). The D1 path below reads from `stored` via
+              // projectedPitching, which handles both correctly.
               return (
                 <Card className="border-[#162241] bg-[#0a1428]">
                   <CardHeader className="pb-2 pt-3 px-4">

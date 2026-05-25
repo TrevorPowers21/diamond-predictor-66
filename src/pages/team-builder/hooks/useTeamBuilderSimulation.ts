@@ -1220,9 +1220,18 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   // ── Block O: playerProjection ────────────────────────────────────────────────
   const playerProjection = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
     const treatAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
-    const sim = p.roster_status === "target" ? simulateTransferProjection(p, side) : null;
+    const storedPrecomputed = p.roster_status === "target" && p.player_id
+      ? liveTargetPredictionByPlayerId.get(p.player_id)
+      : null;
+    // Stored values are the only source of truth for target players. The
+    // eager precompute runs every player in the country through every
+    // customer team — if a player exists, they have a precomputed row.
+    // No live sim, no transfer_snapshot fallback. Missing = "—" (data gap
+    // signal, not a fallback to mask it).
+    const sim = null;
+    void simulateTransferProjection;
     const shown = (p.roster_status === "target")
-      ? (sim ?? p.transfer_snapshot ?? null)
+      ? (storedPrecomputed ?? null)
       : (treatAsPitcher ? (computeReturnerPitchingProjection(p) ?? p.prediction) : p.prediction);
     if (treatAsPitcher) {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
@@ -1337,7 +1346,8 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const renderAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
     if (renderAsPitcher) {
       const projection = playerProjection(p, "pitcher");
-      const source: any = projection.shown ?? projection.sim ?? p.transfer_snapshot ?? p.prediction ?? null;
+      // Stored values only — no fallback to sim/snapshot/raw prediction.
+      const source: any = projection.shown ?? null;
       const direct = Number(source?.nil_valuation);
       if (Number.isFinite(direct) && direct > 0) return direct;
       const pwar = projection.pwar;

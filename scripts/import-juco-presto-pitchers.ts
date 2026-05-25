@@ -120,9 +120,15 @@ async function main() {
   console.log(`Source: ${csvPath}`);
   console.log(apply ? COLOR.red + "MODE: APPLY (will write)" + COLOR.reset : "MODE: dry-run");
 
+  const isProd = process.argv.includes("--prod");
   const url = process.env.SUPABASE_URL ?? "";
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-  if (!url.includes("slrxowawbijbjrkozqlj")) { err("Expected staging URL"); process.exit(1); }
+  const lowerUrl = url.toLowerCase();
+  const looksLikeProd = lowerUrl.includes("trbvxuoliwrfowibatkm") || lowerUrl.includes("ualmkgkdnoubccoieahf");
+  if (looksLikeProd && !isProd) { err(`SUPABASE_URL looks like PROD but --prod was not passed. Refusing.`); process.exit(1); }
+  if (isProd && !looksLikeProd) { err(`--prod passed but SUPABASE_URL doesn't look like prod. Refusing.`); process.exit(1); }
+  if (!looksLikeProd && !lowerUrl.includes("slrxowawbijbjrkozqlj")) { err("Expected staging URL (slrxowawbijbjrkozqlj) or prod with --prod"); process.exit(1); }
+  console.log(`Target DB: ${looksLikeProd ? COLOR.red + "PROD" + COLOR.reset : "staging"}`);
   const sb = createClient(url, key, { auth: { persistSession: false } });
 
   // ── Parse pass 1: raw rows + league totals ─────────────────────────
@@ -341,6 +347,24 @@ async function main() {
     }));
   }
   ok(`Updated ${predDone} player_predictions rows`);
+
+  // ── Cascade IP to players table ────────────────────────────────────
+  // Precompute scripts filter JUCO pitchers by p.ip >= 20 — that column
+  // must be in sync with accurate IP. Without this, the precompute filter
+  // excludes every JUCO pitcher.
+  step("Cascading IP to players table");
+  let playersDone = 0;
+  for (let i = 0; i < high.length; i += CONC) {
+    const chunk = high.slice(i, i + CONC);
+    await Promise.all(chunk.map(async (r) => {
+      const playerId = idMap.get(r.pm.source_player_id);
+      if (!playerId) return;
+      const { error } = await sb.from("players").update({ ip: r.p.ip }).eq("id", playerId);
+      if (!error) playersDone++;
+    }));
+  }
+  ok(`Updated ${playersDone} players.ip`);
+
   console.log(`\n${COLOR.green}Done.${COLOR.reset}`);
 }
 
