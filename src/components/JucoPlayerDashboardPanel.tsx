@@ -249,6 +249,10 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
     queryKey: ["juco-hitter-dashboard", SEASON, effectiveTeamId],
     enabled: view === "hitting",
     queryFn: async (): Promise<HitterRow[]> => {
+      // Pull BOTH team-scoped precomputed (when impersonating) AND global
+      // regular-variant rows. Then prefer precomputed per player. This way a
+      // newly-onboarded customer team (autofire only runs D1 scope) still sees
+      // JUCO via the global rows until manual JUCO precompute runs.
       const preds: any[] = [];
       let from = 0;
       while (true) {
@@ -257,11 +261,13 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
           .select(`player_id, customer_team_id, model_type, variant, p_avg, p_obp, p_slg, p_iso, p_ops, p_wrc_plus, players!inner(id, source_player_id, first_name, last_name, team, position, conference, class_year, bats_hand, pa, division)`)
           .eq("players.division", "NJCAA_D1")
           .not("p_wrc_plus", "is", null)
-          .gte("players.pa", HITTER_PA_THRESHOLD);
+          .gte("players.pa", HITTER_PA_THRESHOLD)
+          .in("variant", ["regular", "precomputed"])
+          .in("model_type", ["returner", "transfer"]);
         if (effectiveTeamId) {
-          q = q.eq("customer_team_id", effectiveTeamId).eq("variant", "precomputed").eq("model_type", "transfer");
+          q = q.or(`customer_team_id.is.null,customer_team_id.eq.${effectiveTeamId}`);
         } else {
-          q = q.is("customer_team_id", null).eq("variant", "regular").eq("model_type", "returner");
+          q = q.is("customer_team_id", null);
         }
         const { data, error } = await q.range(from, from + 999);
         if (error) throw error;
@@ -269,7 +275,15 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
         if (!data || data.length < 1000) break;
         from += 1000;
       }
-      return preds.map((r: any): HitterRow => {
+      // Dedupe per player: prefer team-scoped precomputed over global regular.
+      const byPlayer = new Map<string, any>();
+      for (const r of preds) {
+        const key = r.player_id;
+        const existing = byPlayer.get(key);
+        const isTeamScoped = r.customer_team_id != null && r.variant === "precomputed";
+        if (!existing || isTeamScoped) byPlayer.set(key, r);
+      }
+      return Array.from(byPlayer.values()).map((r: any): HitterRow => {
         const p = r.players;
         const avg = r.p_avg != null ? Number(r.p_avg) : null;
         const obp = r.p_obp != null ? Number(r.p_obp) : null;
@@ -297,6 +311,9 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
     queryKey: ["juco-pitcher-dashboard", SEASON, effectiveTeamId],
     enabled: view === "pitching",
     queryFn: async (): Promise<PitcherRow[]> => {
+      // Pull BOTH team-scoped precomputed (when impersonating) AND global
+      // regular-variant rows. Prefer precomputed per player. Same pattern as
+      // hitter query — falls back to global when team has no precomputed JUCO.
       const preds: any[] = [];
       let from = 0;
       while (true) {
@@ -305,11 +322,13 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
           .select(`player_id, customer_team_id, model_type, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, projected_ip, pitcher_role, players!inner(id, source_player_id, first_name, last_name, team, position, conference, class_year, throws_hand, ip, division)`)
           .eq("players.division", "NJCAA_D1")
           .not("p_era", "is", null)
-          .gte("players.ip", PITCHER_IP_THRESHOLD);
+          .gte("players.ip", PITCHER_IP_THRESHOLD)
+          .in("variant", ["regular", "precomputed"])
+          .in("model_type", ["returner", "transfer"]);
         if (effectiveTeamId) {
-          q = q.eq("customer_team_id", effectiveTeamId).eq("variant", "precomputed").eq("model_type", "transfer");
+          q = q.or(`customer_team_id.is.null,customer_team_id.eq.${effectiveTeamId}`);
         } else {
-          q = q.is("customer_team_id", null).eq("variant", "regular").eq("model_type", "returner");
+          q = q.is("customer_team_id", null);
         }
         const { data, error } = await q.range(from, from + 999);
         if (error) throw error;
@@ -317,7 +336,14 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
         if (!data || data.length < 1000) break;
         from += 1000;
       }
-      return preds.map((r: any): PitcherRow => {
+      const byPlayer = new Map<string, any>();
+      for (const r of preds) {
+        const key = r.player_id;
+        const existing = byPlayer.get(key);
+        const isTeamScoped = r.customer_team_id != null && r.variant === "precomputed";
+        if (!existing || isTeamScoped) byPlayer.set(key, r);
+      }
+      return Array.from(byPlayer.values()).map((r: any): PitcherRow => {
         const p = r.players;
         const era = r.p_era != null ? Number(r.p_era) : null;
         const fip = r.p_fip != null ? Number(r.p_fip) : null;
