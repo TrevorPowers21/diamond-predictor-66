@@ -44,6 +44,8 @@
     "import-presto-pitchers": "tsx --env-file-if-exists=.env.local scripts/import-juco-presto-pitchers.ts",
     "add-presto-missing-pitchers": "tsx --env-file-if-exists=.env.local scripts/add-presto-missing-pitchers.ts",
     "import-juco-class-dob": "tsx --env-file-if-exists=.env.local scripts/import-juco-class-dob.ts",
+    "import-pull-air": "tsx --env-file-if-exists=.env.local scripts/import-pull-air.ts",
+    "import-pull-air:prod": "tsx --env-file-if-exists=.env.production.local scripts/import-pull-air.ts --prod",
     "db-migrate": "supabase db query --linked --file",
     "db-query": "supabase db query --linked --agent=no"
   },
