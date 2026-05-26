@@ -1083,7 +1083,15 @@ export default function PitcherProfile() {
     return null;
   })();
   const supabaseRole = id ? getSupabaseRole(id) : null;
-  const initialProjectedRole = supabaseRole || storageProjectionOverride?.pitcher_role || derivedRole || "SM";
+  // Role priority: manual override → stored prediction role (written by
+  // precompute) → legacy localStorage override → derived from GS/G ratio →
+  // SM fallback. Adding the stored prediction role keeps the profile in
+  // sync with the precomputed pitcher_role so coaches don't have to toggle.
+  const storedPredictionRole = (() => {
+    const raw = (activePrediction as any)?.pitcher_role;
+    return raw === "SP" || raw === "RP" || raw === "SM" ? (raw as "SP" | "RP" | "SM") : null;
+  })();
+  const initialProjectedRole = supabaseRole || storedPredictionRole || storageProjectionOverride?.pitcher_role || derivedRole || "SM";
   const effectiveRoleDisplay = supabaseRole || derivedRole;
   // Class transition is now auto-derived from class_year in createPredictionsFromMaster,
   // so the stored row is the source of truth. No UI editor — read it from the

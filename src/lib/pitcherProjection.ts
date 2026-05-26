@@ -488,6 +488,7 @@ export function computePitcherProjection(
     bigTen: eq.market_tier_big_ten,
     strongMid: eq.market_tier_strong_mid,
     lowMajor: eq.market_tier_low_major,
+    juco: 0.35, // mirror DEFAULT_NIL_TIER_MULTIPLIERS.juco; no eq.market_tier_juco yet
   };
   const conferenceForMarket = teamMatch?.name ? (input.conference ?? null) : input.conference;
   const ptm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
