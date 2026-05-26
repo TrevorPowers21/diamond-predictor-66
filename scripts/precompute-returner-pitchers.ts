@@ -35,6 +35,7 @@ import {
 } from "@/lib/pitcherProjection";
 import { pitcherExpectedIp } from "@/lib/depthRoles";
 import { PITCHING_EQ_DEFAULTS } from "@/hooks/usePitchingEquationWeights";
+import { projectJucoReturnerPitcher } from "@/lib/jucoReturnerPitcherProjection";
 
 const C = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m", cyan: "\x1b[36m" };
 
@@ -114,7 +115,7 @@ async function main() {
 
   console.log(`${C.bold}Returner Pitcher Pre-compute${C.reset} on ${isProd ? "PROD" : "STAGING"}${dryRun ? ` ${C.yellow}[DRY RUN]${C.reset}` : ""}`);
   console.log(`  season:   ${season} (data from ${CURRENT_SEASON})`);
-  console.log(`  scope:    D1 returners only (JUCO returner pitchers handled by a separate script)`);
+  console.log(`  scope:    D1 returners (full engine) + JUCO returners (passthrough)`);
 
   // 1. Load equation weights
   console.log(`${C.cyan}→${C.reset} loading equation weights...`);
@@ -160,8 +161,12 @@ async function main() {
   const pitcherTest = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP|SM)/i.test(String(pos || ""));
   const isJuco = (div: string | null | undefined) => div === "NJCAA_D1";
   // Include pitcher-primary OR is_twp (TWPs appear in both pools).
-  const pitchers = allPlayers.filter((p) => (pitcherTest(p.position) || p.is_twp) && !isJuco(p.division));
-  console.log(`  ${pitchers.length} D1 pitchers after position + non-JUCO filter`);
+  // JUCO included here too; the loop forks by division so JUCO bypasses the
+  // D1 engine and uses projectJucoReturnerPitcher (passthrough actuals).
+  const pitchers = allPlayers.filter((p) => (pitcherTest(p.position) || p.is_twp));
+  const d1Count = pitchers.filter((p) => !isJuco(p.division)).length;
+  const jucoCount = pitchers.filter((p) => isJuco(p.division)).length;
+  console.log(`  ${pitchers.length} pitchers total (${d1Count} D1, ${jucoCount} JUCO)`);
 
   // 5. Pitching Master rows (with scouting + stored PR+ values)
   const pmRows = await loadAllPaged<any>(() =>
@@ -255,6 +260,10 @@ async function main() {
   };
   void resolveParkFactor; // Park is intentionally not applied on returner path (see pitcherProjection.ts:437).
 
+  const JUCO_IP_THRESHOLD = 20;
+  let jucoComputed = 0;
+  let jucoNullPa = 0;
+
   for (const p of pitchers) {
     const pred = existingByPlayer.get(p.id);
     const pmRow = findPm(p);
@@ -263,6 +272,87 @@ async function main() {
       blocked++;
       blockReasons.set("no_pm_row", (blockReasons.get("no_pm_row") || 0) + 1);
       pushSample("no_pm", `${p.first_name} ${p.last_name}`, p.team || null, "no Pitching Master row");
+      continue;
+    }
+
+    // ── JUCO branch ─────────────────────────────────────────────────────
+    // JUCO returner pitcher rows DO NOT go through computePitcherProjection.
+    // The D1 equation references park, Stuff+ power weights, role-transition
+    // curves, and NCAA D1 calibration that doesn't make sense across JUCO
+    // districts. Instead, passthrough 2026 actuals + JUCO tier market scale.
+    // Sub-20 IP rows null out so tiny-sample noise drops off leaderboards
+    // (mirrors the JUCO_PA_THRESHOLD=75 floor on the hitter side).
+    if (isJuco(p.division)) {
+      const ip = Number(pmRow.IP) || 0;
+      if (ip < JUCO_IP_THRESHOLD) {
+        upserts.push({
+          player_id: p.id,
+          customer_team_id: null,
+          model_type: "returner",
+          variant: "regular",
+          season,
+          status: "active",
+          p_era: null, p_fip: null, p_whip: null, p_k9: null, p_bb9: null, p_hr9: null,
+          p_rv_plus: null, p_war: null, market_value: null,
+          projected_ip: null, pitcher_role: null,
+          locked: false,
+          updated_at: new Date().toISOString(),
+        });
+        jucoNullPa++;
+        continue;
+      }
+
+      // JUCO from_* on the returner regular row is the truth. If the pred row
+      // has refreshed from_* (we just SQL-refreshed JUCO pitcher preds from PM)
+      // use those; fall back to PM raw if missing.
+      const fromEra  = (pred?.from_era  ?? pmRow.ERA)  ?? null;
+      const fromFip  = (pred?.from_fip  ?? pmRow.FIP)  ?? null;
+      const fromWhip = (pred?.from_whip ?? pmRow.WHIP) ?? null;
+      const fromK9   = (pred?.from_k9   ?? pmRow.K9)   ?? null;
+      const fromBb9  = (pred?.from_bb9  ?? pmRow.BB9)  ?? null;
+      const fromHr9  = (pred?.from_hr9  ?? pmRow.HR9)  ?? null;
+
+      // Conference + team for market value tier
+      const jucoConference = (p.conference as string | null) ?? null;
+      const jucoTeam = (p.team as string | null) ?? null;
+
+      const result = projectJucoReturnerPitcher({
+        from_era: fromEra,
+        from_fip: fromFip,
+        from_whip: fromWhip,
+        from_k9: fromK9,
+        from_bb9: fromBb9,
+        from_hr9: fromHr9,
+        actualIp: ip,
+        inferredRole: null, // IP-threshold default inside the lib
+        conference: jucoConference,
+        team: jucoTeam,
+        eq: pitchingEq,
+      });
+
+      upserts.push({
+        player_id: p.id,
+        customer_team_id: null,
+        model_type: "returner",
+        variant: "regular",
+        season,
+        status: "active",
+        p_era: result.p_era,
+        p_fip: result.p_fip,
+        p_whip: result.p_whip,
+        p_k9: result.p_k9,
+        p_bb9: result.p_bb9,
+        p_hr9: result.p_hr9,
+        p_rv_plus: result.p_rv_plus,
+        p_war: result.p_war,
+        market_value: result.market_value,
+        projected_ip: result.projected_ip,
+        pitcher_role: result.pitcher_role,
+        locked: false,
+        updated_at: new Date().toISOString(),
+      });
+      jucoComputed++;
+      computed++;
       continue;
     }
 
@@ -377,7 +467,7 @@ async function main() {
     computed++;
   }
 
-  console.log(`${C.bold}Result:${C.reset} ${C.green}${computed} computed${C.reset}, ${C.yellow}${blocked} blocked${C.reset} (of ${pitchers.length} D1 pitchers)`);
+  console.log(`${C.bold}Result:${C.reset} ${C.green}${computed} computed${C.reset}, ${C.yellow}${blocked} blocked${C.reset} (of ${pitchers.length} total pitchers; ${C.cyan}${jucoComputed} JUCO computed${C.reset}, ${C.yellow}${jucoNullPa} JUCO nulled (sub-${JUCO_IP_THRESHOLD} IP)${C.reset})`);
   if (blocked > 0) {
     console.log(`${C.dim}Block reasons:${C.reset}`);
     const sorted = Array.from(blockReasons.entries()).sort((a, b) => b[1] - a[1]);
