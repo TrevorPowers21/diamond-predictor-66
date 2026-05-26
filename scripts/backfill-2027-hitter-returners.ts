@@ -40,6 +40,7 @@ import {
   type ReturnerPowerContext,
 } from "@/lib/predictionEngine";
 import { computeHitterOWar, computeHitterMarketValue, defaultHitterDepthRoleFromActualPa, paForHitterDepthRole } from "@/lib/depthRoles";
+import { projectJucoReturner } from "@/lib/jucoReturnerProjection";
 
 const C = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m", cyan: "\x1b[36m" };
 
@@ -123,14 +124,14 @@ async function main() {
   // mid-major market values regardless of where they actually play.
   console.log(`${C.cyan}→${C.reset} loading player meta (position + conference + pa)...`);
   const playerIds = Array.from(new Set(rows.map((r) => r.player_id as string)));
-  const playerMeta = new Map<string, { position: string | null; conference: string | null; pa: number | null }>();
+  const playerMeta = new Map<string, { position: string | null; conference: string | null; pa: number | null; division: string | null }>();
   const PLAYER_BATCH = 200;
-  const rawPlayers: Array<{ id: string; position: string | null; conference: string | null; pa: number | null; source_team_id: string | null; team: string | null }> = [];
+  const rawPlayers: Array<{ id: string; position: string | null; conference: string | null; pa: number | null; source_team_id: string | null; team: string | null; division: string | null }> = [];
   for (let i = 0; i < playerIds.length; i += PLAYER_BATCH) {
     const ids = playerIds.slice(i, i + PLAYER_BATCH);
     const { data, error } = await supabase
       .from("players")
-      .select("id, position, conference, pa, source_team_id, team")
+      .select("id, position, conference, pa, source_team_id, team, division")
       .in("id", ids);
     if (error) throw error;
     for (const p of (data || []) as any[]) rawPlayers.push(p);
@@ -166,7 +167,7 @@ async function main() {
     } else {
       confUnresolved++;
     }
-    playerMeta.set(p.id, { position: p.position, conference: conf, pa: p.pa });
+    playerMeta.set(p.id, { position: p.position, conference: conf, pa: p.pa, division: p.division ?? null });
   }
   console.log(`  conference resolution: ${confFromPlayer} from players.conference, ${confFromSourceId} from source_team_id, ${confFromName} from team name, ${confUnresolved} unresolved`);
 
@@ -190,6 +191,71 @@ async function main() {
     for (const it of internals || []) byId.set((it as any).prediction_id, it);
 
     for (const row of slice) {
+      const meta = playerMeta.get(row.player_id) ?? { position: null, conference: null, pa: null, division: null };
+
+      // ── JUCO branch ─────────────────────────────────────────────────────
+      // JUCO returner regular rows DO NOT go through recalcReturner. The D1
+      // equation references park factors + conference env+ + power-rating
+      // weights that don't exist for JUCO and produce nonsense when applied
+      // (Yearsley's .349/.461/.364 was a victim). Instead, passthrough 2026
+      // actuals + JUCO tier market scale.
+      if (meta.division === "NJCAA_D1") {
+        // PA floor: sub-75 PA JUCO rows are tiny-sample noise (1-6 PA guys
+        // with 1.000 AVG / 2.500 SLG) that pollute leaderboards. Mirror the
+        // JUCO_PA_THRESHOLD used by the initial backfill and the transfer
+        // precompute. Null all p_* so they drop out of ranking surfaces.
+        const JUCO_PA_THRESHOLD = 75;
+        const rawPa = Number(meta.pa) || 0;
+        if (rawPa < JUCO_PA_THRESHOLD) {
+          updates.push({
+            id: row.id,
+            patch: {
+              p_avg: null, p_obp: null, p_slg: null, p_ops: null, p_iso: null,
+              p_wrc: null, p_wrc_plus: null,
+              o_war: null, market_value: null,
+              projected_pa: null, hitter_depth_role: null,
+              locked: false,
+              updated_at: new Date().toISOString(),
+            },
+          });
+          nullProjected++;
+          continue;
+        }
+
+        const result = projectJucoReturner({
+          from_avg: row.from_avg,
+          from_obp: row.from_obp,
+          from_slg: row.from_slg,
+          actualPa: meta.pa,
+          conference: meta.conference,
+          position: meta.position,
+        });
+        if (result.p_avg == null && result.p_obp == null && result.p_slg == null) {
+          nullProjected++;
+        }
+        updates.push({
+          id: row.id,
+          patch: {
+            p_avg: result.p_avg,
+            p_obp: result.p_obp,
+            p_slg: result.p_slg,
+            p_ops: result.p_ops,
+            p_iso: result.p_iso,
+            p_wrc: result.p_wrc,
+            p_wrc_plus: result.p_wrc_plus,
+            o_war: result.o_war,
+            market_value: result.market_value,
+            projected_pa: result.projected_pa,
+            hitter_depth_role: result.hitter_depth_role,
+            locked: false,
+            updated_at: new Date().toISOString(),
+          },
+        });
+        computed++;
+        continue;
+      }
+
+      // ── D1 branch (unchanged) ───────────────────────────────────────────
       const internal = byId.get(row.id);
       if (!internal) missingInternals++;
       const powerContext: ReturnerPowerContext = {
@@ -201,7 +267,6 @@ async function main() {
       if (result.p_avg == null && result.p_obp == null && result.p_slg == null) {
         nullProjected++;
       }
-      const meta = playerMeta.get(row.player_id) ?? { position: null, conference: null, pa: null };
       // Auto-assign depth role from last-season PA; store tier-based PA
       // (cornerstone=245, everyday=215, etc.) so within-tier players don't
       // see jarring oWAR/market gaps.

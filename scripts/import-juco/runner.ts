@@ -189,7 +189,7 @@ async function extractAndUpsertPlayers(
   };
   const players = new Map<string, PlayerRecord>();
 
-  function ingest(files: { path: string; region: number }[]): void {
+  function ingest(files: { path: string; region: number }[], isHitterSource: boolean): void {
     for (const { path, region } of files) {
       const { rows } = parseCsvFile(path);
       for (const r of rows) {
@@ -198,6 +198,13 @@ async function extractAndUpsertPlayers(
         const { first, last } = splitName(r["playerFullName"] ?? "", r["playerFirstName"]);
         const tid = toStr(r["newestTeamId"]);
         if (!players.has(pid)) {
+          // JUCO Presto hitter CSV often carries `pos = "P"` for non-pitchers
+          // (source-data quirk — TruMedia hitter export defaults position to
+          // "P" for some JUCO rows). When ingesting from a HITTER file, treat
+          // any "P" as unknown and store "UTL" so a hitter never gets tagged
+          // as a pitcher in players.position. Pitcher-file ingest stays as-is.
+          const rawPos = toStr(r["pos"]);
+          const position = isHitterSource && rawPos === "P" ? "UTL" : rawPos;
           players.set(pid, {
             source_player_id: pid,
             first_name: first || "Unknown",
@@ -205,7 +212,7 @@ async function extractAndUpsertPlayers(
             source_team_id: tid,
             team: toStr(r["newestTeamName"]),
             conference: conferenceLabelForRegion(region),
-            position: toStr(r["pos"]),
+            position,
             bats_hand: toStr(r["batsHand"]),
             throws_hand: toStr(r["throwsHand"]),
             division: JUCO_DIVISION,
@@ -214,8 +221,8 @@ async function extractAndUpsertPlayers(
       }
     }
   }
-  ingest(hitterFiles);
-  ingest(pitcherFiles);
+  ingest(hitterFiles, true);
+  ingest(pitcherFiles, false);
 
   if (!write) return { count: players.size, errors: [] };
 

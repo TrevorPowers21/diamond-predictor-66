@@ -41,7 +41,7 @@ export async function createPredictionsFromMaster(
   while (true) {
     const { data, error } = await supabase
       .from("players")
-      .select("id, source_player_id, first_name, last_name, team, team_id, from_team, position, class_year")
+      .select("id, source_player_id, first_name, last_name, team, team_id, from_team, position, class_year, division")
       .range(from, from + 999);
     if (error) { result.errors.push(`Load players: ${error.message}`); return result; }
     allPlayers.push(...(data || []));
@@ -140,29 +140,40 @@ export async function createPredictionsFromMaster(
     if (!hitter) continue;
 
     const existing = existingPredByPlayerId.get(player.id);
-    const baPlus = (hitter as any).ba_power_rating ?? null;
-    const obpPlus = (hitter as any).obp_power_rating ?? null;
-    const isoPlus = (hitter as any).iso_power_rating ?? null;
-    const overallPlus = (hitter as any).overall_power_rating ?? null;
+    // JUCO hitters: Hitter Master PRs are computed but NOT usable inputs for
+    // the D1 returner equation. Skip writing them so recalcReturner has
+    // nothing to mistakenly multiply against; the JUCO returner branch in
+    // backfill-2027-hitter-returners.ts will passthrough actuals instead.
+    const isJuco = (player as any).division === "NJCAA_D1";
+    const baPlus = isJuco ? null : ((hitter as any).ba_power_rating ?? null);
+    const obpPlus = isJuco ? null : ((hitter as any).obp_power_rating ?? null);
+    const isoPlus = isJuco ? null : ((hitter as any).iso_power_rating ?? null);
+    const overallPlus = isJuco ? null : ((hitter as any).overall_power_rating ?? null);
 
     // If blended_from_team exists and differs from player's current from_team, queue update.
     // Note: blend math runs upstream (combineStats) and writes to blended_avg/blended_era/etc.
     // We propagate blended_from_team to players.from_team so the profile/UI can show prior school,
     // but we DO NOT flip the prediction to model_type="transfer" — every player stays a returner
     // by default. Transfer rows are created only by coach-triggered actions (target board / portal sim).
-    const blendedFromTeam = (hitter as any).blended_from_team as string | null;
+    // JUCO: blend columns are intentionally never populated for JUCO Hitter Master rows
+    // (no usable prior-school data), so this skip is a no-op for JUCO but explicit for safety.
+    const blendedFromTeam = isJuco ? null : ((hitter as any).blended_from_team as string | null);
     if (blendedFromTeam && blendedFromTeam !== player.from_team) {
       playerFromTeamUpdates.push({ id: player.id, from_team: blendedFromTeam });
     }
 
+    // JUCO: force useBlended=false unconditionally so we never pick up stale or
+    // garbage blended_* values. Also force from_* refresh every run so the raw
+    // 2026 actuals stay the source of truth.
     if (existing) {
-      const useBlended = !!(hitter as any).combined_used;
+      const useBlended = isJuco ? false : !!(hitter as any).combined_used;
       const targetAvg = useBlended ? ((hitter as any).blended_avg ?? hitter.AVG) : hitter.AVG;
       const targetObp = useBlended ? ((hitter as any).blended_obp ?? hitter.OBP) : hitter.OBP;
       const targetSlg = useBlended ? ((hitter as any).blended_slg ?? hitter.SLG) : hitter.SLG;
 
-      // Update from_avg/from_obp/from_slg if missing OR if blended stats differ from stored
-      const needsStatUpdate = existing.from_avg == null || useBlended;
+      // Update from_avg/from_obp/from_slg if missing OR if blended stats differ from stored.
+      // JUCO always refreshes so stale from_* from prior blended runs gets overwritten.
+      const needsStatUpdate = isJuco || existing.from_avg == null || useBlended;
       if (needsStatUpdate) {
         const patch: any = {
           from_avg: targetAvg,
@@ -181,7 +192,7 @@ export async function createPredictionsFromMaster(
       });
     } else {
       // No prediction at all — insert one as a returner.
-      const useBlended = !!(hitter as any).combined_used;
+      const useBlended = isJuco ? false : !!(hitter as any).combined_used;
       const newPred: any = {
         player_id: player.id,
         model_type: "returner",
