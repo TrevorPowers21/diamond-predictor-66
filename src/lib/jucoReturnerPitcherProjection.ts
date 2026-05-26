@@ -86,7 +86,11 @@ export function projectJucoReturnerPitcher(args: {
   from_bb9: number | null | undefined;
   from_hr9: number | null | undefined;
   actualIp: number | null | undefined;
+  /** Optional PM-supplied role override ("SP"/"RP"). Wins over GS/G + IP heuristics. */
   inferredRole: ProjectedPitcherRole | null;
+  /** Games + games started for GS/G ratio role inference. Pass when available. */
+  games?: number | null;
+  gamesStarted?: number | null;
   conference: string | null | undefined;
   team: string | null | undefined;
   eq: PitchingEquationWeights;
@@ -124,9 +128,22 @@ export function projectJucoReturnerPitcher(args: {
       : null;
 
   // Step 3: depth role + projected IP.
-  // Role hint priority: explicit inferredRole > IP threshold > RP default.
+  // Role hint priority:
+  //   1. explicit inferredRole (caller passed it in — e.g. PM Role column)
+  //   2. GS/G ratio (>= 0.5 = SP) — most reliable when both are populated
+  //   3. IP threshold (>= 35 = SP) — fallback for missing GS/G
+  //   4. RP default
+  // Note: a JUCO arm with 40+ IP across 18 relief appearances (1 start) is
+  // a reliever, not a starter. Sole-IP heuristic was tagging those as SP
+  // and skewing both the cross-team dashboard and the profile default.
   const ipNum = Number.isFinite(Number(args.actualIp)) ? Number(args.actualIp) : 0;
-  const role: ProjectedPitcherRole = args.inferredRole ?? (ipNum >= 35 ? "SP" : "RP");
+  const role: ProjectedPitcherRole = (() => {
+    if (args.inferredRole === "SP" || args.inferredRole === "RP") return args.inferredRole;
+    const g = Number(args.games) || 0;
+    const gs = Number(args.gamesStarted) || 0;
+    if (g > 0) return (gs / g) >= 0.5 ? "SP" : "RP";
+    return ipNum >= 35 ? "SP" : "RP";
+  })();
   const depthRole: PitcherDepthRole = (() => {
     if (role === "SP") {
       if (ipNum >= 65) return "weekend_starter";

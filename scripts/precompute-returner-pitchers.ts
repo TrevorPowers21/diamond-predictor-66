@@ -316,6 +316,12 @@ async function main() {
       const jucoConference = (p.conference as string | null) ?? null;
       const jucoTeam = (p.team as string | null) ?? null;
 
+      // Role hint: prefer PM Role column (explicit "SP"/"RP"), then let the
+      // lib derive from GS/G ratio + IP. Corbin Hamric case: 1 GS / 18 G with
+      // 41 IP needs the GS/G ratio to override the IP-only heuristic.
+      const pmRoleRaw = String((pmRow as any).Role || "").toUpperCase();
+      const pmRoleHint: "SP" | "RP" | null = pmRoleRaw === "SP" ? "SP" : pmRoleRaw === "RP" ? "RP" : null;
+
       const result = projectJucoReturnerPitcher({
         from_era: fromEra,
         from_fip: fromFip,
@@ -324,7 +330,9 @@ async function main() {
         from_bb9: fromBb9,
         from_hr9: fromHr9,
         actualIp: ip,
-        inferredRole: null, // IP-threshold default inside the lib
+        inferredRole: pmRoleHint,
+        games: pmRow.G ?? null,
+        gamesStarted: pmRow.GS ?? null,
         conference: jucoConference,
         team: jucoTeam,
         eq: pitchingEq,
