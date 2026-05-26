@@ -393,6 +393,7 @@ export function useLoadBuild({
                     : activePred?.dev_aggressiveness ?? 0,
                   class_transition_overridden: meta.classTransitionOverridden,
                   dev_aggressiveness_overridden: meta.devAggressivenessOverridden,
+                  projection_tier: meta.projectionTier ?? null,
                   transfer_snapshot: meta.transferSnapshot ?? null,
                   player: pd
                     ? {

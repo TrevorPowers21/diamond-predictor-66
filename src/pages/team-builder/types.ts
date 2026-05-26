@@ -53,6 +53,10 @@ export type BuildPlayer = {
   dev_aggressiveness?: number | null;
   class_transition_overridden?: boolean;
   dev_aggressiveness_overridden?: boolean;
+  // Coach-set projection tier for incoming freshman / no-stat additions.
+  // Doesn't drive WAR or other math — just a tag the coach can see on the
+  // roster row to ID expected role.
+  projection_tier?: "developmental" | "role_player" | "contributor" | "immediate_impact" | null;
   player?: {
     first_name: string;
     last_name: string;
