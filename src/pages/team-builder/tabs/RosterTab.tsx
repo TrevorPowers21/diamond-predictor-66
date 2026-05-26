@@ -32,6 +32,8 @@ type PitcherTotals = {
   totalPWar: number;
 };
 
+type ProjectionTier = "" | "developmental" | "role_player" | "contributor" | "immediate_impact";
+
 interface RosterTabProps {
   incomingName: string;
   setIncomingName: (name: string) => void;
@@ -39,6 +41,8 @@ interface RosterTabProps {
   setIncomingPosition: (pos: string) => void;
   incomingNil: number;
   setIncomingNil: (nil: number) => void;
+  incomingProjectionTier: ProjectionTier;
+  setIncomingProjectionTier: (t: ProjectionTier) => void;
   addIncomingFreshman: () => void;
   positionPlayers: BuildPlayer[];
   pitchers: BuildPlayer[];
@@ -65,6 +69,8 @@ export default function RosterTab({
   setIncomingPosition,
   incomingNil,
   setIncomingNil,
+  incomingProjectionTier,
+  setIncomingProjectionTier,
   addIncomingFreshman,
   positionPlayers,
   pitchers,
@@ -88,10 +94,10 @@ export default function RosterTab({
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={{ fontFamily: "'Oswald', sans-serif" }}>Add Incoming Freshman</CardTitle>
-          <CardDescription>Add a player with no projected stats; NIL can still be tracked.</CardDescription>
+          <CardDescription>Add a player with no projected stats. Value can still be tracked.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
             <div>
               <Label className="text-xs mb-1 block">Player Name</Label>
               <Input
@@ -111,11 +117,31 @@ export default function RosterTab({
                   {[...POSITION_SLOTS, "TWP"].map((p) => (
                     <SelectItem key={`incoming-${p}`} value={p}>{p}</SelectItem>
                   ))}
+                  <SelectItem value="SP">SP</SelectItem>
+                  <SelectItem value="RP">RP</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label className="text-xs mb-1 block">Initial NIL ($)</Label>
+              <Label className="text-xs mb-1 block">Projection Tier</Label>
+              <Select
+                value={incomingProjectionTier || "none"}
+                onValueChange={(v) => setIncomingProjectionTier(v === "none" ? "" : (v as "developmental" | "role_player" | "contributor" | "immediate_impact"))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select tier" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">—</SelectItem>
+                  <SelectItem value="developmental">Developmental</SelectItem>
+                  <SelectItem value="role_player">Role Player</SelectItem>
+                  <SelectItem value="contributor">Contributor</SelectItem>
+                  <SelectItem value="immediate_impact">Immediate Impact</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs mb-1 block">Initial Value ($)</Label>
               <Input
                 type="text"
                 inputMode="numeric"

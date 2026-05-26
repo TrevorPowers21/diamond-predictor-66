@@ -181,6 +181,14 @@ function PlayerTableRow({
             From: {p.transfer_snapshot?.from_team || p.player?.from_team || p.player?.team || "—"} ({p.transfer_snapshot?.from_conference || p.player?.conference || "—"})
           </div>
         )}
+        {p.projection_tier && (
+          <div className="text-[10px] uppercase tracking-[0.08em] font-semibold text-[#D4AF37]/90 mt-0.5">
+            {p.projection_tier === "developmental" ? "Developmental"
+              : p.projection_tier === "role_player" ? "Role Player"
+              : p.projection_tier === "contributor" ? "Contributor"
+              : "Immediate Impact"}
+          </div>
+        )}
       </TableCell>
 
       <TableCell>
