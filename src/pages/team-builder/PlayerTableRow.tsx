@@ -183,7 +183,7 @@ function PlayerTableRow({
         )}
         {p.projection_tier && (
           <div className="text-[10px] uppercase tracking-[0.08em] font-semibold text-[#D4AF37]/90 mt-0.5">
-            {p.projection_tier === "developmental" ? "Developmental"
+            Freshman · {p.projection_tier === "developmental" ? "Developmental"
               : p.projection_tier === "role_player" ? "Role Player"
               : p.projection_tier === "contributor" ? "Contributor"
               : "Immediate Impact"}
