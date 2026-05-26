@@ -117,8 +117,8 @@ export default function RosterTab({
                   {[...POSITION_SLOTS, "TWP"].map((p) => (
                     <SelectItem key={`incoming-${p}`} value={p}>{p}</SelectItem>
                   ))}
-                  <SelectItem value="SP">SP</SelectItem>
-                  <SelectItem value="RP">RP</SelectItem>
+                  <SelectItem value="RHP">RHP</SelectItem>
+                  <SelectItem value="LHP">LHP</SelectItem>
                 </SelectContent>
               </Select>
             </div>
