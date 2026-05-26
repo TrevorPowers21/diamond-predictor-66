@@ -796,9 +796,29 @@ function getPositionValueMultiplier(position: string | null | undefined): number
   if (["BENCH","BENCH UTILITY","BENCHUTILITY"].includes(pos)) return 0.8;
   return 1.0;
 }
-function computeHitterOWar(wrcPlus: number | null | undefined, projectedPa: number | null | undefined): number | null {
+// Auto-assign depth role from last-season PA (mirrors defaultHitterDepthRoleFromActualPa in src/lib/depthRoles.ts)
+type HitterDepthRoleAuto = "cornerstone" | "everyday_starter" | "platoon_starter" | "utility" | "bench";
+function defaultHitterDepthRoleFromActualPa(pa: number | null | undefined): HitterDepthRoleAuto {
+  const safePa = Number.isFinite(Number(pa)) ? Number(pa) : 0;
+  if (safePa >= 220) return "cornerstone";
+  if (safePa >= 130) return "everyday_starter";
+  if (safePa >= 50)  return "platoon_starter";
+  if (safePa >= 15)  return "utility";
+  return "bench";
+}
+// Canonical PA-per-depth-role (mirrors paForHitterDepthRole in src/lib/depthRoles.ts)
+function paForHitterDepthRole(role: HitterDepthRoleAuto): number {
+  switch (role) {
+    case "cornerstone":      return 245;
+    case "everyday_starter": return 215;
+    case "platoon_starter":  return 145;
+    case "utility":          return 85;
+    case "bench":            return 25;
+  }
+}
+function computeHitterOWar(wrcPlus: number | null | undefined, depthRole: HitterDepthRoleAuto): number | null {
   if (wrcPlus == null || !Number.isFinite(wrcPlus)) return null;
-  const pa = projectedPa != null && Number.isFinite(projectedPa) ? Number(projectedPa) : 260;
+  const pa = paForHitterDepthRole(depthRole);
   const replacementRuns = (pa / 600) * 25;
   const raa = ((wrcPlus - 100) / 100) * pa * 0.13;
   return (raa + replacementRuns) / 10;
@@ -1027,8 +1047,10 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     const projected = computeTransferProjection(result.inputs);
     const final = applyTransferPostprocess(projected, result.inputs, result.transferMultiplier);
 
-    const projectedPa = (p as any).pa ?? null;
-    const oWar = computeHitterOWar(final.pWrcPlus, projectedPa);
+    // Auto-assign depth role from raw PA; projected_pa is the tier value.
+    const hitterDepthRole = defaultHitterDepthRoleFromActualPa((p as any).pa ?? null);
+    const projectedPa = paForHitterDepthRole(hitterDepthRole);
+    const oWar = computeHitterOWar(final.pWrcPlus, hitterDepthRole);
     const marketValue = computeHitterMarketValue(oWar, toConference, p.position);
 
     upserts.push({
@@ -1053,6 +1075,7 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
       o_war: oWar,
       market_value: marketValue,
       projected_pa: projectedPa,
+      hitter_depth_role: hitterDepthRole,
       locked: false,
       updated_at: new Date().toISOString(),
     });

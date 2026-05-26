@@ -6,6 +6,7 @@ export const DEFAULT_NIL_TIER_MULTIPLIERS = {
   bigTen: 1.0,
   strongMid: 0.8,
   lowMajor: 0.5,
+  juco: 0.35,
 };
 
 type NilTierMultipliers = typeof DEFAULT_NIL_TIER_MULTIPLIERS;
@@ -31,6 +32,9 @@ export const getProgramTierMultiplierByConference = (
   const key = normalizeConferenceKey(conference);
   if (!key) return multipliers.lowMajor;
 
+  // JUCO districts: stored as "NJCAA D1 <District>" / "NJCAA D1 <District> District".
+  // Detect by the "njcaa" substring so we never fall through to a D1 tier.
+  if (key.includes("njcaa")) return multipliers.juco;
   if (key.includes("southeasternconference") || key === "sec") return multipliers.sec;
   if (key.includes("bigten")) return multipliers.bigTen;
   if (

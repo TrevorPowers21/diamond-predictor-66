@@ -37,7 +37,8 @@ import { normalizeName, nameTeamKey, normalizeTeamForKey, getNameVariants } from
 import { useSeedDataMaps } from "@/hooks/useSeedDataMaps";
 import { useTransferPortalContext } from "@/hooks/useTransferPortalContext";
 import {
-  hitterDepthRoleMultiplier,
+  paForHitterDepthRole,
+  defaultHitterDepthRoleFromActualPa,
   type HitterDepthRole,
 } from "@/lib/depthRoles";
 
@@ -533,6 +534,17 @@ export default function PlayerProfile() {
     const stored = regularPred?.dev_aggressiveness;
     setSessionDevAgg(Number.isFinite(Number(stored)) ? String(Number(stored)) : "0");
   }, [regularPred?.id, regularPred?.dev_aggressiveness]);
+  // Sync session depth role to the stored hitter_depth_role; fall back to
+  // auto-assignment from raw PA when no stored value (e.g. older rows pre-
+  // schema-migration, or sub-threshold players).
+  useEffect(() => {
+    const stored = (regularPred as any)?.hitter_depth_role as HitterDepthRole | null | undefined;
+    if (stored === "cornerstone" || stored === "everyday_starter" || stored === "platoon_starter" || stored === "utility" || stored === "bench") {
+      setDepthRole(stored);
+    } else {
+      setDepthRole(defaultHitterDepthRoleFromActualPa((player as any)?.pa ?? null));
+    }
+  }, [regularPred?.id, (regularPred as any)?.hitter_depth_role, (player as any)?.pa]);
   const { getOverride } = usePlayerOverrides();
   const playerOverride = id ? getOverride(id) : null;
   const effectivePosition = playerOverride?.position ?? player?.position ?? null;
@@ -767,11 +779,16 @@ export default function PlayerProfile() {
   // not a display fallback to paper over.
   const storedOWar = (regularPred as any)?.o_war as number | null | undefined;
   const storedMarketValue = (regularPred as any)?.market_value as number | null | undefined;
+  const storedHitterDepthRole = ((regularPred as any)?.hitter_depth_role as HitterDepthRole | null | undefined) ?? defaultHitterDepthRoleFromActualPa((player as any)?.pa ?? null);
   const historicalOWar = computeOWarFromWrcPlus(seedDerived?.wrcPlus ?? null, (player as any)?.pa ?? null);
   // Session-only depth role overlay scales the projected/displayed oWAR
-  // (and downstream market value) without touching the stored row.
-  const depthMultiplier = hitterDepthRoleMultiplier(depthRole);
-  const overlayScale = depthMultiplier * (devAggScale ?? 1);
+  // (and downstream market value) without touching the stored row. Math is
+  // PA-tier ratio: session_PA / stored_PA. oWAR + market_value are linear in
+  // PA so this gives the exact answer (not an approximation).
+  const sessionPa = paForHitterDepthRole(depthRole);
+  const storedPa = paForHitterDepthRole(storedHitterDepthRole);
+  const depthScale = storedPa > 0 ? sessionPa / storedPa : 1;
+  const overlayScale = depthScale * (devAggScale ?? 1);
   const projectedOWar = storedOWar != null ? storedOWar * overlayScale : null;
   const displayOWar = projectedOWar ?? (historicalOWar != null ? historicalOWar * overlayScale : null);
   const displayNilValuation = storedMarketValue != null ? storedMarketValue * overlayScale : null;
