@@ -39,7 +39,7 @@ import {
   readSpecificPlus,
   type ReturnerPowerContext,
 } from "@/lib/predictionEngine";
-import { computeHitterOWar, computeHitterMarketValue } from "@/lib/depthRoles";
+import { computeHitterOWar, computeHitterMarketValue, defaultHitterDepthRoleFromActualPa, paForHitterDepthRole } from "@/lib/depthRoles";
 
 const C = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m", cyan: "\x1b[36m" };
 
@@ -202,7 +202,12 @@ async function main() {
         nullProjected++;
       }
       const meta = playerMeta.get(row.player_id) ?? { position: null, conference: null, pa: null };
-      const oWar = computeHitterOWar(result.p_wrc_plus, meta.pa, null);
+      // Auto-assign depth role from last-season PA; store tier-based PA
+      // (cornerstone=245, everyday=215, etc.) so within-tier players don't
+      // see jarring oWAR/market gaps.
+      const hitterDepthRole = defaultHitterDepthRoleFromActualPa(meta.pa);
+      const projectedPa = paForHitterDepthRole(hitterDepthRole);
+      const oWar = computeHitterOWar(result.p_wrc_plus, null, hitterDepthRole);
       const marketValue = computeHitterMarketValue(oWar, {
         conference: meta.conference,
         position: meta.position,
@@ -219,7 +224,8 @@ async function main() {
           p_wrc_plus: result.p_wrc_plus,
           o_war: oWar,
           market_value: marketValue,
-          projected_pa: meta.pa,
+          projected_pa: projectedPa,
+          hitter_depth_role: hitterDepthRole,
           // Unlock so future runs can refresh; trigger reverts rates when locked=true.
           locked: false,
           updated_at: new Date().toISOString(),

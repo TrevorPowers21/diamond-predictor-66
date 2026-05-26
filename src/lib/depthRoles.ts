@@ -52,6 +52,50 @@ export function hitterDepthRoleMultiplier(role: AnyDepthRole): number {
   }
 }
 
+// ── Canonical PA-per-depth-role tier values ─────────────────────────────────
+//
+// THE source of truth for projected PA going forward. Replaces using raw
+// last-season PA, which created jarring within-tier oWAR/market_value gaps
+// (a top hitter with 230 PA looking weaker than another top hitter with
+// 270 PA when both should project as cornerstones). Every cornerstone uses
+// 245 PA, every everyday starter 215, etc.
+//
+// Tied to the dropdown labels on PlayerTableRow.
+
+export function paForHitterDepthRole(role: AnyDepthRole): number {
+  switch (role) {
+    case "cornerstone":      return 245;
+    case "everyday_starter": return 215;
+    case "starter":          return 215; // legacy alias
+    case "platoon_starter":  return 145;
+    case "utility":          return 85;
+    case "bench":            return 25;
+    // pitcher roles + nullish → everyday default (sensible neutral when role unknown)
+    default:                 return 215;
+  }
+}
+
+// ── Default depth role from last-season PA buckets ──────────────────────────
+//
+// Auto-assignment rule. Last year's actual PA buckets the player into a
+// depth tier; that tier then drives projected_pa going forward.
+
+export type HitterDepthRoleAuto =
+  | "cornerstone"
+  | "everyday_starter"
+  | "platoon_starter"
+  | "utility"
+  | "bench";
+
+export function defaultHitterDepthRoleFromActualPa(pa: number | null | undefined): HitterDepthRoleAuto {
+  const safePa = Number.isFinite(Number(pa)) ? Number(pa) : 0;
+  if (safePa >= 220) return "cornerstone";
+  if (safePa >= 130) return "everyday_starter";
+  if (safePa >= 50)  return "platoon_starter";
+  if (safePa >= 15)  return "utility";
+  return "bench";
+}
+
 // ── Pitcher depth role → expected IP ────────────────────────────────────────
 //
 // Drives the IP term inside the pWAR formula. SP roles use equation-weight
@@ -179,10 +223,14 @@ export function computePitcherMarketValue(
 
 // ── Hitter oWAR — single canonical formula ───────────────────────────────────
 //
-// oWAR scales offense (wRC+) by playing time (PA). Carries prior-season PA
-// forward for returners so a fringe starter with 100 PA doesn't get a full
-// season's WAR. Depth-role multiplier scales the playing-time slice (cornerstone
-// gets more PA, bench gets fewer) without re-deriving from the equation.
+// oWAR scales offense (wRC+) by playing time (PA). PA comes from the
+// depth-role tier (cornerstone=245, everyday=215, platoon=145, utility=85,
+// bench=25) — NOT raw last-season PA. Auto-assignment rule:
+// defaultHitterDepthRoleFromActualPa() maps last year's actual PA to a tier.
+//
+// projectedPa argument retained for legacy callers but only used as a tier
+// override when depthRole is null/undefined AND projectedPa is set; otherwise
+// the depth-role tier wins. New callers should pass depthRole and ignore PA.
 //
 // Returns null when wRC+ is missing — caller decides how to display.
 
@@ -192,14 +240,17 @@ export function computeHitterOWar(
   depthRole?: AnyDepthRole,
 ): number | null {
   if (wrcPlus == null || !Number.isFinite(wrcPlus)) return null;
-  const pa = projectedPa != null && Number.isFinite(projectedPa) ? Number(projectedPa) : 260;
+  // Depth role drives PA. Fall back to provided projectedPa only when no
+  // depth role given (legacy path); ultimately default everyday tier (215).
+  const pa = depthRole != null
+    ? paForHitterDepthRole(depthRole)
+    : (projectedPa != null && Number.isFinite(projectedPa) ? Number(projectedPa) : 215);
   const runsPerPa = 0.13;
   const replacementRuns = (pa / 600) * 25;
   const offValue = (wrcPlus - 100) / 100;
   const raa = offValue * pa * runsPerPa;
   const rar = raa + replacementRuns;
-  const base = rar / 10;
-  return base * hitterDepthRoleMultiplier(depthRole ?? null);
+  return rar / 10;
 }
 
 // ── Hitter market value — single canonical formula ───────────────────────────

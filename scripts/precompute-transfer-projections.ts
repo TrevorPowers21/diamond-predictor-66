@@ -27,7 +27,7 @@ import {
   applyTransferPostprocess,
   type ConferenceHittingStats,
 } from "@/lib/buildTransferProjectionInputs";
-import { computeHitterOWar, computeHitterMarketValue } from "@/lib/depthRoles";
+import { computeHitterOWar, computeHitterMarketValue, defaultHitterDepthRoleFromActualPa, paForHitterDepthRole } from "@/lib/depthRoles";
 import { JUCO_DISTRICT_CONFERENCE_ID, jucoDistrictNameFromConference } from "@/lib/transferWeightDefaults";
 const C = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m", green: "\x1b[32m", red: "\x1b[31m", yellow: "\x1b[33m", cyan: "\x1b[36m" };
 
@@ -367,11 +367,14 @@ async function main() {
     const projected = computeTransferProjection(result.inputs);
     const final = applyTransferPostprocess(projected, result.inputs, result.transferMultiplier);
 
-    // oWAR + market value at the destination program. PA carries forward from
-    // prior-season actuals so a fringe starter doesn't get a full-season WAR.
-    // No depth-role overlay here — that's a session-only display knob.
-    const projectedPa = (p as any).pa ?? null;
-    const oWar = computeHitterOWar(final.pWrcPlus, projectedPa, null);
+    // oWAR + market value at the destination program. Depth role is
+    // auto-assigned from last year's PA bucket; projected_pa stored is the
+    // tier value (cornerstone=245, everyday=215, etc.) — NOT raw PA — so
+    // within-tier players don't get jarring WAR gaps.
+    const rawPa = (p as any).pa ?? null;
+    const hitterDepthRole = defaultHitterDepthRoleFromActualPa(rawPa);
+    const projectedPa = paForHitterDepthRole(hitterDepthRole);
+    const oWar = computeHitterOWar(final.pWrcPlus, null, hitterDepthRole);
     const marketValue = computeHitterMarketValue(oWar, {
       conference: toConference,
       position: p.position,
@@ -399,6 +402,7 @@ async function main() {
       o_war: oWar,
       market_value: marketValue,
       projected_pa: projectedPa,
+      hitter_depth_role: hitterDepthRole,
       // Keep precompute rows unlocked so subsequent runs can refresh them.
       // The protect_locked_predictions trigger reverts rate columns when
       // locked=true; we don't want that for system-managed precompute rows.
