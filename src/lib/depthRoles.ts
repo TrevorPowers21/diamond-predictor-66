@@ -214,6 +214,10 @@ export function computePitcherMarketValue(
     bigTen: eq.market_tier_big_ten,
     strongMid: eq.market_tier_strong_mid,
     lowMajor: eq.market_tier_low_major,
+    // JUCO tier: pitcher equation weights don't have a market_tier_juco field
+    // yet (D1-era schema). Mirror DEFAULT_NIL_TIER_MULTIPLIERS.juco directly so
+    // JUCO pitchers don't fall through to undefined and produce NaN dollars.
+    juco: 0.35,
   };
   const ptm = getProgramTierMultiplierByConference(ctx.conference, tiers);
   const pvm = getPitchingPvfForRole(ctx.role, eq);
