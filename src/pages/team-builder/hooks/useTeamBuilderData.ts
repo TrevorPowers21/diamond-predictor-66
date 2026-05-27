@@ -138,7 +138,11 @@ export function useTeamBuilderData({
         if (!data || data.length < PAGE) break;
         from += PAGE;
       }
-      return all.filter((p) => p.first_name && p.last_name);
+      // Hide players with no team — 50%+ of the players table is legacy
+      // rows with null `team` (no Hitter Master backfill ran on them). They
+      // show up as ghost rows in the search dropdown with no team chip and
+      // confuse coaches. Backfill is a separate effort; filter for now.
+      return all.filter((p) => p.first_name && p.last_name && (p.team || "").trim() !== "");
     },
   });
 
