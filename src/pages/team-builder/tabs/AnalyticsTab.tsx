@@ -453,16 +453,24 @@ export default function AnalyticsTab({
                                 — None —
                               </CommandItem>
                               {allTeamSnapshots.map((t) => {
+                                const total = Number(t.prorated_total_owar) + Number(t.prorated_total_pwar);
                                 const label = `${t.team_name}${t.conference ? ` (${t.conference})` : ""}`;
+                                // Searchable value includes WAR number so users can also
+                                // filter by it if they want; visual layout puts name+conf
+                                // on the left and the WAR stat right-aligned, muted.
+                                const searchValue = `${label} ${total.toFixed(1)}`;
                                 return (
                                   <CommandItem
                                     key={t.source_team_id}
-                                    value={label}
+                                    value={searchValue}
                                     className="cursor-pointer"
                                     onSelect={() => { setEmulateTeamId(t.source_team_id); setEmulatePickerOpen(false); }}
                                   >
-                                    <Check className={cn("mr-2 h-3.5 w-3.5", emulateTeamId === t.source_team_id ? "opacity-100" : "opacity-0")} />
-                                    {label}
+                                    <Check className={cn("mr-2 h-3.5 w-3.5 shrink-0", emulateTeamId === t.source_team_id ? "opacity-100" : "opacity-0")} />
+                                    <span className="flex-1 truncate">{label}</span>
+                                    <span className="ml-2 text-[10px] tabular-nums text-muted-foreground font-mono shrink-0">
+                                      {total.toFixed(1)} WAR
+                                    </span>
                                   </CommandItem>
                                 );
                               })}

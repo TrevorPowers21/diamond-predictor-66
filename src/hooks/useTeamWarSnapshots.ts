@@ -215,8 +215,7 @@ export function useAllTeamSnapshots(season: number) {
       const { data, error } = await (supabase as any)
         .from("team_war_snapshots")
         .select("*")
-        .eq("season", season)
-        .order("prorated_total_owar", { ascending: false });
+        .eq("season", season);
       if (error) {
         console.warn("useAllTeamSnapshots fetch error", error);
         return [];
@@ -224,14 +223,20 @@ export function useAllTeamSnapshots(season: number) {
       // Drop JUCO / CC programs — emulate dropdown is D1-only. JUCO snapshots
       // live in the same table and would otherwise clutter the picker with
       // non-comparable rows. Conference strings: "NJCAA D1 <District>" / etc.
-      const rows = (data ?? []) as TeamWarSnapshot[];
-      return rows.filter((t) => {
+      const rows = ((data ?? []) as TeamWarSnapshot[]).filter((t) => {
         const conf = (t.conference || "").toLowerCase();
         if (!conf) return true; // keep unknown-conference D1 rows
         if (conf.startsWith("njcaa")) return false;
         if (conf.includes("junior college")) return false;
         if (conf.includes("community college")) return false;
         return true;
+      });
+      // Sort by total prorated WAR (offense + pitching). DB can't ORDER BY a
+      // computed sum cleanly without a generated column, so client-side here.
+      return rows.sort((a, b) => {
+        const aTotal = Number(a.prorated_total_owar) + Number(a.prorated_total_pwar);
+        const bTotal = Number(b.prorated_total_owar) + Number(b.prorated_total_pwar);
+        return bTotal - aTotal;
       });
     },
     staleTime: 30 * 60 * 1000,
