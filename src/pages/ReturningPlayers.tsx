@@ -526,6 +526,7 @@ interface PitchingDashboardRow {
   p_rv_plus: number | null;
   p_war: number | null;
   market_value: number | null;
+  portal_status: string | null;
 }
 
 interface PitchingDashboardFallbackRow {
@@ -1072,6 +1073,16 @@ export default function ReturningPlayers() {
       return next;
     });
   };
+  // Pitcher portal filter (parity with hitter dashboard). Empty set = show all.
+  const [pitcherPortalFilters, setPitcherPortalFilters] = useState<Set<string>>(new Set());
+  const togglePitcherPortalFilter = (s: string) => {
+    setPitcherPortalFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      return next;
+    });
+  };
   // Pitcher conference multi-select. Same canonical-name approach as hitters.
   const [pitcherConfFilters, setPitcherConfFilters] = useState<Set<string>>(new Set());
   const togglePitcherConfFilter = (c: string) => {
@@ -1242,6 +1253,7 @@ export default function ReturningPlayers() {
         pitcherClassFilters?: string[];
         pitcherThrowsFilters?: string[];
         pitcherConfFilters?: string[];
+        pitcherPortalFilters?: string[];
         scrollY?: number;
       };
       if (typeof parsed.search === "string") setSearch(parsed.search);
@@ -1288,6 +1300,9 @@ export default function ReturningPlayers() {
       if (Array.isArray(parsed.pitcherConfFilters)) {
         setPitcherConfFilters(new Set(parsed.pitcherConfFilters.filter((v) => typeof v === "string")));
       }
+      if (Array.isArray(parsed.pitcherPortalFilters)) {
+        setPitcherPortalFilters(new Set(parsed.pitcherPortalFilters.filter((v) => typeof v === "string")));
+      }
       skipNextHittingPageResetRef.current = true;
       skipNextPitchingPageResetRef.current = true;
       const y = Number(parsed.scrollY);
@@ -1329,6 +1344,7 @@ export default function ReturningPlayers() {
           pitcherClassFilters: Array.from(pitcherClassFilters),
           pitcherThrowsFilters: Array.from(pitcherThrowsFilters),
           pitcherConfFilters: Array.from(pitcherConfFilters),
+          pitcherPortalFilters: Array.from(pitcherPortalFilters),
           scrollY: window.scrollY,
         }),
       );
@@ -1349,6 +1365,7 @@ export default function ReturningPlayers() {
     pitcherClassFilters,
     pitcherThrowsFilters,
     pitcherConfFilters,
+    pitcherPortalFilters,
     positionFilters,
     classFilters,
     batsFilters,
@@ -2177,7 +2194,7 @@ export default function ReturningPlayers() {
     return alias || raw;
   }, []);
   // Pitching Master – single source for stats + power metrics
-  const { pitchers: pitchingMasterRows } = usePitchingSeedData();
+  const { pitchers: pitchingMasterRows, loading: pitchingMasterLoading } = usePitchingSeedData();
 
   // Pitcher projections from player_predictions (written by the recalc engine).
   // Keyed by source_player_id so we can join against Pitching Master rows below.
@@ -2252,13 +2269,13 @@ export default function ReturningPlayers() {
   const { data: pitcherMetaBySourceId } = useQuery({
     queryKey: ["returning-pitcher-meta-by-source-id"],
     queryFn: async () => {
-      const map = new Map<string, { class_year: string | null; is_twp: boolean; player_id: string | null }>();
+      const map = new Map<string, { class_year: string | null; is_twp: boolean; player_id: string | null; portal_status: string | null }>();
       let from = 0;
       const PAGE = 1000;
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, source_player_id, class_year, is_twp")
+          .select("id, source_player_id, class_year, is_twp, portal_status")
           .not("source_player_id", "is", null)
           .range(from, from + PAGE - 1);
         if (error) throw error;
@@ -2268,6 +2285,7 @@ export default function ReturningPlayers() {
               class_year: r.class_year ?? null,
               is_twp: !!r.is_twp,
               player_id: r.id ?? null,
+              portal_status: r.portal_status ?? null,
             });
           }
         }
@@ -2466,6 +2484,7 @@ export default function ReturningPlayers() {
             p_rv_plus: dbPRvPlus,
             p_war: dbPWar,
             market_value: dbMarketValue,
+            portal_status: pitcherMeta?.portal_status ?? null,
           } as PitchingDashboardRow;
         })
         .filter((r) => !!r.playerName);
@@ -2492,6 +2511,9 @@ export default function ReturningPlayers() {
         return canon != null && pitcherConfFilters.has(canon);
       });
     }
+    if (pitcherPortalFilters.size > 0) {
+      rows = rows.filter((r) => r.portal_status != null && pitcherPortalFilters.has(r.portal_status));
+    }
     const q = pitchingSearch.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((r) => {
@@ -2502,14 +2524,14 @@ export default function ReturningPlayers() {
         (r.handedness || "").toLowerCase().includes(q)
       );
     });
-  }, [pitchingRows, pitchingSearch, pitcherRoleFilters, pitcherClassFilters, pitcherThrowsFilters, pitcherConfFilters]);
+  }, [pitchingRows, pitchingSearch, pitcherRoleFilters, pitcherClassFilters, pitcherThrowsFilters, pitcherConfFilters, pitcherPortalFilters]);
   useEffect(() => {
     if (skipNextPitchingPageResetRef.current) {
       skipNextPitchingPageResetRef.current = false;
       return;
     }
     setPitchingPage(1);
-  }, [pitchingSearch, pitchingPageSize, pitcherRoleFilters, pitcherClassFilters, pitcherThrowsFilters, pitcherConfFilters]);
+  }, [pitchingSearch, pitchingPageSize, pitcherRoleFilters, pitcherClassFilters, pitcherThrowsFilters, pitcherConfFilters, pitcherPortalFilters]);
   const pitchingTotal = filteredPitchingRows.length;
   const pitchingTotalPages = Math.max(1, Math.ceil(pitchingTotal / pitchingPageSize));
   const pitchingCurrentPage = Math.min(pitchingPage, pitchingTotalPages);
@@ -3235,13 +3257,24 @@ export default function ReturningPlayers() {
               onToggleTier={togglePitcherConfTier}
               onClear={() => setPitcherConfFilters(new Set())}
             />
-            {(pitcherRoleFilters.size + pitcherClassFilters.size + pitcherThrowsFilters.size + pitcherConfFilters.size) > 0 && (
+            <MultiSelectFilter
+              label="Portal"
+              options={[
+                { value: "IN PORTAL", label: "In Portal" },
+                { value: "COMMITTED", label: "Committed" },
+              ]}
+              selected={pitcherPortalFilters}
+              onToggle={togglePitcherPortalFilter}
+              onClear={() => setPitcherPortalFilters(new Set())}
+            />
+            {(pitcherRoleFilters.size + pitcherClassFilters.size + pitcherThrowsFilters.size + pitcherConfFilters.size + pitcherPortalFilters.size) > 0 && (
               <button
                 onClick={() => {
                   setPitcherRoleFilters(new Set());
                   setPitcherClassFilters(new Set());
                   setPitcherThrowsFilters(new Set());
                   setPitcherConfFilters(new Set());
+                  setPitcherPortalFilters(new Set());
                 }}
                 className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground hover:text-foreground transition-colors cursor-pointer ml-1"
                 title="Reset pitcher filters"
@@ -3285,7 +3318,9 @@ export default function ReturningPlayers() {
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              {pagedPitchingRows.length === 0 ? (
+              {(pitchingMasterLoading || pitcherPredLoading) && pagedPitchingRows.length === 0 ? (
+                <div className="flex items-center justify-center py-16 text-muted-foreground">Loading pitchers…</div>
+              ) : pagedPitchingRows.length === 0 ? (
                 <div className="flex items-center justify-center py-16 text-muted-foreground">No pitchers found</div>
               ) : (
                 <>
