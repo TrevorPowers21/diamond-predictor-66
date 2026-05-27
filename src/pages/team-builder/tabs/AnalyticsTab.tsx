@@ -1,6 +1,11 @@
 import React, { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Button } from "@/components/ui/button";
+import { Check, ChevronsUpDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
   useTeamWarSnapshot,
   useWarBenchmarks,
@@ -53,6 +58,7 @@ export default function AnalyticsTab({
   // "Team you want to emulate" picker. Stored as source_team_id; null = none
   // selected. Persists for the session only — fresh nav resets.
   const [emulateTeamId, setEmulateTeamId] = useState<string | null>(null);
+  const [emulatePickerOpen, setEmulatePickerOpen] = useState(false);
   const emulateTeamSnapshot = useMemo(
     () => allTeamSnapshots.find((s) => s.source_team_id === emulateTeamId) ?? null,
     [allTeamSnapshots, emulateTeamId],
@@ -412,22 +418,67 @@ export default function AnalyticsTab({
                   </table>
                   <div className="text-[10px] text-muted-foreground mt-2 italic">Prorated to 56 games.</div>
 
-                  {/* Emulate dropdown — pick any team to add as a comparison row */}
+                  {/* Emulate picker — searchable combobox (Popover + Command).
+                      Searches name + conference inline; D1-only list. */}
                   <div className="mt-4 flex items-center gap-3 pt-3 border-t">
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Compare to team:</div>
-                    <Select value={emulateTeamId ?? "__none__"} onValueChange={(v) => setEmulateTeamId(v === "__none__" ? null : v)}>
-                      <SelectTrigger className="w-[280px] h-8">
-                        <SelectValue placeholder="Pick a team to emulate…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">— None —</SelectItem>
-                        {allTeamSnapshots.map((t) => (
-                          <SelectItem key={t.source_team_id} value={t.source_team_id}>
-                            {t.team_name}{t.conference ? ` (${t.conference})` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Popover open={emulatePickerOpen} onOpenChange={setEmulatePickerOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={emulatePickerOpen}
+                          className="w-[320px] h-8 justify-between font-normal cursor-pointer"
+                        >
+                          <span className="truncate">
+                            {emulateTeamSnapshot
+                              ? `${emulateTeamSnapshot.team_name}${emulateTeamSnapshot.conference ? ` (${emulateTeamSnapshot.conference})` : ""}`
+                              : "Pick a team to emulate…"}
+                          </span>
+                          <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[320px] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Search teams…" />
+                          <CommandList>
+                            <CommandEmpty>No matches.</CommandEmpty>
+                            <CommandGroup>
+                              <CommandItem
+                                value="__none__"
+                                className="cursor-pointer"
+                                onSelect={() => { setEmulateTeamId(null); setEmulatePickerOpen(false); }}
+                              >
+                                <Check className={cn("mr-2 h-3.5 w-3.5", emulateTeamId === null ? "opacity-100" : "opacity-0")} />
+                                — None —
+                              </CommandItem>
+                              {allTeamSnapshots.map((t) => {
+                                const total = Number(t.prorated_total_owar) + Number(t.prorated_total_pwar);
+                                const label = `${t.team_name}${t.conference ? ` (${t.conference})` : ""}`;
+                                // Searchable value includes WAR number so users can also
+                                // filter by it if they want; visual layout puts name+conf
+                                // on the left and the WAR stat right-aligned, muted.
+                                const searchValue = `${label} ${total.toFixed(1)}`;
+                                return (
+                                  <CommandItem
+                                    key={t.source_team_id}
+                                    value={searchValue}
+                                    className="cursor-pointer"
+                                    onSelect={() => { setEmulateTeamId(t.source_team_id); setEmulatePickerOpen(false); }}
+                                  >
+                                    <Check className={cn("mr-2 h-3.5 w-3.5 shrink-0", emulateTeamId === t.source_team_id ? "opacity-100" : "opacity-0")} />
+                                    <span className="flex-1 truncate">{label}</span>
+                                    <span className="ml-2 text-[10px] tabular-nums text-muted-foreground font-mono shrink-0">
+                                      {total.toFixed(1)} WAR
+                                    </span>
+                                  </CommandItem>
+                                );
+                              })}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
               )}

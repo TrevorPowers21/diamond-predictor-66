@@ -3,7 +3,7 @@ import { Sparkles, ArrowLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const STORAGE_KEY = "rstr_iq_whats_new_seen_v2";
+const STORAGE_KEY = "rstr_iq_whats_new_seen_v3";
 
 type Feature = {
   title: string;
@@ -19,6 +19,46 @@ type Release = {
 };
 
 const RELEASES: Release[] = [
+  {
+    date: "2026-05-27",
+    headline: "Budget control, program benchmarks, and a sharper team picker",
+    features: [
+      {
+        title: "Pay What You Want, Watch the Rest Shift",
+        tagline:
+          "Type any number into Actual Value, including $0, and the rest of your projected budget redistributes across the roster in real time. Pay your bench guy nothing, see exactly how much more lands on your top hitter without re-running anything.",
+        details: [
+          "Empty the input to return that player to the projected share. Type 0 to lock them in at zero and reallocate.",
+          "100% of your total budget always distributes. Sum of projected values stays inside what you've set, no more.",
+          "Overrides persist with the saved build, so a coach decision from yesterday is still there tomorrow.",
+        ],
+      },
+      {
+        title: "Program Analytics, Built Around Hosting a Super Regional",
+        tagline:
+          "Replaced the National Champion benchmark with the National Seed range (top 8). It's the regular-season number that actually answers, what does it take to host a Super Regional. Postseason bracket variance isn't a roster-build target, so it's out.",
+        details: [
+          "New comparison row shows the min and max WAR profile across this season's top 8 seeds, plus the median for context.",
+          "Conference Regular-Season Champion row stays, mapped to your conference automatically.",
+          "Emulate any program through the new searchable dropdown. Sorted by total WAR descending, with each program's WAR shown inline.",
+          "JUCO and community college programs are filtered out of the picker, so you only see your real D1 peers.",
+        ],
+      },
+      {
+        title: "Cleaner Exports for Sharing With Staff",
+        tagline:
+          "PDF scouting reports no longer include the 'assumes player returns to current school' footnote. The projection engine already runs the transfer portal scenario at your school, so the disclaimer was both misleading and unnecessary.",
+        details: [
+          "Hand the sheet to your HC or recruiting director and it speaks your program's numbers, no caveat needed.",
+        ],
+      },
+    ],
+    whatElse: [
+      "Sparse-PA returners now show the correct cross-team WAR floor on per-program views. Stale precomputed rows that lost the tier-PA assignment have been refreshed.",
+      "JUCO pitcher cross-team projections now populate. Earlier they showed dashes because the precompute path skipped JUCO arms.",
+      "Pitcher profile pages default the role display to the stored projection (SP vs RP), no more toggle needed.",
+    ],
+  },
   {
     date: "2026-05-24",
     headline: "Fully customized projections for your program",
@@ -51,7 +91,7 @@ const RELEASES: Release[] = [
         details: [
           "JUCO Player Dashboard now reads stored 2027 projections instead of 2026 actuals, scaled to your program tier and impacted by district competition gap (NJCAA District → SEC tier delta).",
           "JUCO player + pitcher profiles show the same 2027 projected numbers as the dashboard, no more separate '2026 actuals only' card for JUCO.",
-          "Target board additions populate immediately with the JUCO transfer projection for your school — no need to re-simulate.",
+          "Target board additions populate immediately with the JUCO transfer projection for your school, no need to re-simulate.",
           "Stats refreshed from official NJCAA Presto Sports feed: TruMedia was undercounting JUCO PA by 10-30% and missing home runs, which has now been corrected.",
           "District-specific hitter talent calibration (NEC/SWAC tier through MWC tier) so JUCO pitcher projections reflect the real talent gap when moving up to D1.",
         ],
