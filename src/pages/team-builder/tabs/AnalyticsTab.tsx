@@ -1,6 +1,14 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useTeamWarSnapshot, useWarBenchmarks, type TeamWarSnapshot } from "@/hooks/useTeamWarSnapshots";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  useTeamWarSnapshot,
+  useWarBenchmarks,
+  useNationalSeedBenchmark,
+  useAllTeamSnapshots,
+  type TeamWarSnapshot,
+  type WarStatRange,
+} from "@/hooks/useTeamWarSnapshots";
 import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { hitterEligible, pitcherEligible, effectivePitcherRoleForBuild } from "../helpers";
 import type { BuildPlayer } from "../types";
@@ -32,17 +40,23 @@ export default function AnalyticsTab({
 }: AnalyticsTabProps) {
   const { data: priorYearSnapshot } = useTeamWarSnapshot(selectedTeamSourceId, CURRENT_SEASON);
   const { data: warBenchmarks = [] } = useWarBenchmarks(CURRENT_SEASON);
+  const { data: nationalSeedBenchmark } = useNationalSeedBenchmark(CURRENT_SEASON, "1-8");
+  const { data: allTeamSnapshots = [] } = useAllTeamSnapshots(CURRENT_SEASON);
 
-  const nationalChampBenchmark = useMemo(
-    () => warBenchmarks.find((b) => b.is_national_champ) ?? null,
-    [warBenchmarks],
-  );
   const conferenceChampBenchmarks = useMemo(() => {
     if (!selectedTeamConference) return [];
     return warBenchmarks.filter(
       (b) => b.is_conference_champ && b.conference === selectedTeamConference,
     );
   }, [warBenchmarks, selectedTeamConference]);
+
+  // "Team you want to emulate" picker. Stored as source_team_id; null = none
+  // selected. Persists for the session only — fresh nav resets.
+  const [emulateTeamId, setEmulateTeamId] = useState<string | null>(null);
+  const emulateTeamSnapshot = useMemo(
+    () => allTeamSnapshots.find((s) => s.source_team_id === emulateTeamId) ?? null,
+    [allTeamSnapshots, emulateTeamId],
+  );
 
   // define depthKey locally — trivial: (slot, depth) => `${slot}:${depth}`
   const depthKey = (slot: string, depth: number) => `${slot}:${depth}`;
@@ -208,27 +222,52 @@ export default function AnalyticsTab({
       </div>
 
       {/* Consolidated WAR Comparison: your build (once) + each benchmark as a delta row.
-          Replaces the old 3-card stack where the same big numbers were repeated. */}
+          Replaces the old 3-card stack where the same big numbers were repeated.
+          National Champion was removed in favor of National Seed (1-8) since
+          postseason results are bracket-variance heavy and not a roster-build target. */}
       {(() => {
-        const benchRows: Array<{ label: string; sublabel?: string; bench: TeamWarSnapshot }> = [];
+        type BenchRow =
+          | { kind: "team"; label: string; sublabel?: string; bench: TeamWarSnapshot }
+          | { kind: "range"; label: string; sublabel?: string; range: {
+              total: WarStatRange | null; lineup: WarStatRange | null;
+              rotation: WarStatRange | null; bullpen: WarStatRange | null;
+            } };
+        const benchRows: BenchRow[] = [];
         if (benchTeam) {
           benchRows.push({
+            kind: "team",
             label: `${CURRENT_SEASON} Actual — ${benchTeam.team_name}`,
             sublabel: `${benchTeam.games_played_est ?? "?"} games · factor ${benchTeam.proration_factor?.toFixed(2) ?? "—"}`,
             bench: benchTeam,
           });
         }
-        if (nationalChampBenchmark) {
-          benchRows.push({
-            label: `${CURRENT_SEASON} National Champion — ${nationalChampBenchmark.team_name}`,
-            bench: nationalChampBenchmark,
-          });
-        }
         for (const c of conferenceChampBenchmarks) {
           benchRows.push({
-            label: `${CURRENT_SEASON} ${c.conference} Champion — ${c.team_name}`,
+            kind: "team",
+            label: `${CURRENT_SEASON} ${c.conference} Regular-Season Champion — ${c.team_name}`,
             sublabel: conferenceChampBenchmarks.length > 1 ? "split regular-season champ" : undefined,
             bench: c,
+          });
+        }
+        if (nationalSeedBenchmark?.totalWar) {
+          benchRows.push({
+            kind: "range",
+            label: `${CURRENT_SEASON} National Seed Range (1-8)`,
+            sublabel: `min – max across the top 8 seeded teams (host through Super Regional)`,
+            range: {
+              total: nationalSeedBenchmark.totalWar,
+              lineup: nationalSeedBenchmark.lineupOwar,
+              rotation: nationalSeedBenchmark.rotationPwar,
+              bullpen: nationalSeedBenchmark.bullpenPwar,
+            },
+          });
+        }
+        if (emulateTeamSnapshot) {
+          benchRows.push({
+            kind: "team",
+            label: `${CURRENT_SEASON} Emulate — ${emulateTeamSnapshot.team_name}`,
+            sublabel: emulateTeamSnapshot.conference ?? undefined,
+            bench: emulateTeamSnapshot,
           });
         }
 
@@ -303,7 +342,7 @@ export default function AnalyticsTab({
                     <thead>
                       <tr className="border-b text-[10px] uppercase tracking-wider text-muted-foreground">
                         <th className="text-left py-2 pr-4">Compare vs</th>
-                        <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Goal Total</th>
+                        <th className="text-center py-2 px-4 w-[140px] whitespace-nowrap">Goal Total</th>
                         <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Δ Total</th>
                         <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Δ Lineup</th>
                         <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Δ Rotation</th>
@@ -312,24 +351,84 @@ export default function AnalyticsTab({
                     </thead>
                     <tbody>
                       {benchRows.map((row, i) => {
-                        const benchTotal = Number(row.bench.prorated_total_owar) + Number(row.bench.prorated_total_pwar);
+                        if (row.kind === "team") {
+                          const benchTotal = Number(row.bench.prorated_total_owar) + Number(row.bench.prorated_total_pwar);
+                          return (
+                            <tr key={i} className="border-b last:border-0">
+                              <td className="py-2 pr-4">
+                                <div className="font-medium">{row.label}</div>
+                                {row.sublabel && <div className="text-[10px] text-muted-foreground italic">{row.sublabel}</div>}
+                              </td>
+                              <td className="text-center py-2 px-4 font-mono tabular-nums text-muted-foreground">{benchTotal.toFixed(2)}</td>
+                              <td className="text-center py-2 px-4 font-mono">{deltaText(buildTotalWar, benchTotal)}</td>
+                              <td className="text-center py-2 px-4 font-mono">{deltaText(buildLineupOwar, Number(row.bench.prorated_starting_lineup_owar))}</td>
+                              <td className="text-center py-2 px-4 font-mono">{deltaText(buildRotationPwar, Number(row.bench.prorated_rotation_pwar))}</td>
+                              <td className="text-center py-2 px-4 font-mono">{deltaText(buildBullpenPwar, Number(row.bench.prorated_bullpen_pwar))}</td>
+                            </tr>
+                          );
+                        }
+                        // range row — show min-max in Goal column, distance-to-median in deltas
+                        const rangeText = (r: WarStatRange | null) => {
+                          if (!r) return <span className="text-muted-foreground">—</span>;
+                          return (
+                            <div className="leading-tight">
+                              <div className="tabular-nums font-medium">{r.min.toFixed(2)}–{r.max.toFixed(2)}</div>
+                              <div className="text-[10px] text-muted-foreground tabular-nums">med {r.median.toFixed(2)}</div>
+                            </div>
+                          );
+                        };
+                        const rangeDelta = (build: number, r: WarStatRange | null) => {
+                          if (!r) return <span className="text-muted-foreground">—</span>;
+                          // In-range = success color; outside = neutral magnitude vs median
+                          if (build >= r.min && build <= r.max) {
+                            return <span className="tabular-nums font-semibold text-[hsl(var(--success))]">in range</span>;
+                          }
+                          const diff = build - r.median;
+                          const abs = Math.abs(diff);
+                          const color = diff > 0 ? "text-muted-foreground" : "text-destructive";
+                          const sign = diff > 0 ? "+" : "−";
+                          return (
+                            <div className="leading-tight">
+                              <div className={`tabular-nums font-semibold ${color}`}>{sign}{abs.toFixed(2)}</div>
+                              <div className="text-[10px] text-muted-foreground">vs med</div>
+                            </div>
+                          );
+                        };
                         return (
-                          <tr key={i} className="border-b last:border-0">
+                          <tr key={i} className="border-b last:border-0 bg-[#D4AF37]/[0.04]">
                             <td className="py-2 pr-4">
                               <div className="font-medium">{row.label}</div>
                               {row.sublabel && <div className="text-[10px] text-muted-foreground italic">{row.sublabel}</div>}
                             </td>
-                            <td className="text-center py-2 px-4 font-mono tabular-nums text-muted-foreground">{benchTotal.toFixed(2)}</td>
-                            <td className="text-center py-2 px-4 font-mono">{deltaText(buildTotalWar, benchTotal)}</td>
-                            <td className="text-center py-2 px-4 font-mono">{deltaText(buildLineupOwar, Number(row.bench.prorated_starting_lineup_owar))}</td>
-                            <td className="text-center py-2 px-4 font-mono">{deltaText(buildRotationPwar, Number(row.bench.prorated_rotation_pwar))}</td>
-                            <td className="text-center py-2 px-4 font-mono">{deltaText(buildBullpenPwar, Number(row.bench.prorated_bullpen_pwar))}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeText(row.range.total)}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeDelta(buildTotalWar, row.range.total)}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeDelta(buildLineupOwar, row.range.lineup)}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeDelta(buildRotationPwar, row.range.rotation)}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeDelta(buildBullpenPwar, row.range.bullpen)}</td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
                   <div className="text-[10px] text-muted-foreground mt-2 italic">Prorated to 56 games.</div>
+
+                  {/* Emulate dropdown — pick any team to add as a comparison row */}
+                  <div className="mt-4 flex items-center gap-3 pt-3 border-t">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Compare to team:</div>
+                    <Select value={emulateTeamId ?? "__none__"} onValueChange={(v) => setEmulateTeamId(v === "__none__" ? null : v)}>
+                      <SelectTrigger className="w-[280px] h-8">
+                        <SelectValue placeholder="Pick a team to emulate…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">— None —</SelectItem>
+                        {allTeamSnapshots.map((t) => (
+                          <SelectItem key={t.source_team_id} value={t.source_team_id}>
+                            {t.team_name}{t.conference ? ` (${t.conference})` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               )}
             </CardContent>
