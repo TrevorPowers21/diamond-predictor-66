@@ -9,6 +9,11 @@ export type TeamWarSnapshot = {
   conference: string | null;
   is_national_champ: boolean;
   is_conference_champ: boolean;
+  /**
+   * NCAA tournament seed rank. 1-8 = National seed, 9-16 = Regional host,
+   * NULL = unseeded. Drives the Program Analytics National Seed range row.
+   */
+  national_seed_rank: number | null;
   raw_total_owar: number;
   raw_total_pwar: number;
   raw_starting_lineup_owar: number;
@@ -23,6 +28,24 @@ export type TeamWarSnapshot = {
   proration_factor: number | null;
   n_hitters: number | null;
   n_pitchers: number | null;
+};
+
+/** Aggregated stat range across a band of teams (e.g., top-8 national seeds). */
+export type WarStatRange = {
+  min: number;
+  max: number;
+  median: number;
+  n: number;
+};
+
+export type NationalSeedBenchmark = {
+  season: number;
+  /** Bands present in the data — typically [{ band: "1-8", ... }, { band: "9-16", ... }]. */
+  totalWar: WarStatRange | null;
+  lineupOwar: WarStatRange | null;
+  rotationPwar: WarStatRange | null;
+  bullpenPwar: WarStatRange | null;
+  teams: TeamWarSnapshot[];
 };
 
 /**
@@ -117,6 +140,85 @@ export function useWarBenchmarks(season: number) {
         .order("prorated_total_owar", { ascending: false });
       if (error) {
         console.warn("useWarBenchmarks fetch error", error);
+        return [];
+      }
+      return (data ?? []) as TeamWarSnapshot[];
+    },
+    staleTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Aggregate the top-8 national seeds for a season into per-metric ranges
+ * (min / max / median). Backs the Program Analytics "National Seed (1-8)"
+ * row — a regular-season-driven benchmark answering "what does it take to
+ * host a Super Regional?"
+ *
+ * Postseason results (National Champion) are intentionally NOT shown as the
+ * default benchmark — too dependent on bracket variance to be a roster-build
+ * target. Use the team-picker dropdown to compare against a specific team.
+ */
+export function useNationalSeedBenchmark(season: number, range: "1-8" | "9-16" = "1-8") {
+  return useQuery({
+    queryKey: ["national-seed-benchmark", season, range],
+    queryFn: async (): Promise<NationalSeedBenchmark> => {
+      const [lo, hi] = range === "1-8" ? [1, 8] : [9, 16];
+      const { data, error } = await (supabase as any)
+        .from("team_war_snapshots")
+        .select("*")
+        .eq("season", season)
+        .gte("national_seed_rank", lo)
+        .lte("national_seed_rank", hi)
+        .order("national_seed_rank", { ascending: true });
+      if (error) {
+        console.warn("useNationalSeedBenchmark fetch error", error);
+        return { season, totalWar: null, lineupOwar: null, rotationPwar: null, bullpenPwar: null, teams: [] };
+      }
+      const teams = (data ?? []) as TeamWarSnapshot[];
+      const aggregate = (values: number[]): WarStatRange | null => {
+        if (values.length === 0) return null;
+        const sorted = [...values].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        const median = sorted.length % 2 === 0
+          ? (sorted[mid - 1] + sorted[mid]) / 2
+          : sorted[mid];
+        return {
+          min: sorted[0],
+          max: sorted[sorted.length - 1],
+          median,
+          n: sorted.length,
+        };
+      };
+      const totals = teams.map((t) => Number(t.prorated_total_owar) + Number(t.prorated_total_pwar));
+      return {
+        season,
+        totalWar: aggregate(totals),
+        lineupOwar: aggregate(teams.map((t) => Number(t.prorated_starting_lineup_owar))),
+        rotationPwar: aggregate(teams.map((t) => Number(t.prorated_rotation_pwar))),
+        bullpenPwar: aggregate(teams.map((t) => Number(t.prorated_bullpen_pwar))),
+        teams,
+      };
+    },
+    staleTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * All team snapshots for a season — backs the "team you want to emulate"
+ * dropdown picker. Returns lean shape (id + name + conference + WAR totals)
+ * sorted by total prorated WAR descending.
+ */
+export function useAllTeamSnapshots(season: number) {
+  return useQuery({
+    queryKey: ["all-team-snapshots", season],
+    queryFn: async (): Promise<TeamWarSnapshot[]> => {
+      const { data, error } = await (supabase as any)
+        .from("team_war_snapshots")
+        .select("*")
+        .eq("season", season)
+        .order("prorated_total_owar", { ascending: false });
+      if (error) {
+        console.warn("useAllTeamSnapshots fetch error", error);
         return [];
       }
       return (data ?? []) as TeamWarSnapshot[];
