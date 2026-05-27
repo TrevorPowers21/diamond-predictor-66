@@ -1847,6 +1847,7 @@ export default function TeamBuilder() {
                 }
               : null,
             rp.projection_tier ?? null,
+            rp.nil_value_overridden ?? false,
           ),
         }));
         const { error } = await supabase.from("team_build_players").insert(rows);
