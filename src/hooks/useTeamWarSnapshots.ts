@@ -221,7 +221,18 @@ export function useAllTeamSnapshots(season: number) {
         console.warn("useAllTeamSnapshots fetch error", error);
         return [];
       }
-      return (data ?? []) as TeamWarSnapshot[];
+      // Drop JUCO / CC programs — emulate dropdown is D1-only. JUCO snapshots
+      // live in the same table and would otherwise clutter the picker with
+      // non-comparable rows. Conference strings: "NJCAA D1 <District>" / etc.
+      const rows = (data ?? []) as TeamWarSnapshot[];
+      return rows.filter((t) => {
+        const conf = (t.conference || "").toLowerCase();
+        if (!conf) return true; // keep unknown-conference D1 rows
+        if (conf.startsWith("njcaa")) return false;
+        if (conf.includes("junior college")) return false;
+        if (conf.includes("community college")) return false;
+        return true;
+      });
     },
     staleTime: 30 * 60 * 1000,
   });
