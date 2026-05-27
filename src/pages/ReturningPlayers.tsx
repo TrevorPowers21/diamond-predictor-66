@@ -2266,7 +2266,7 @@ export default function ReturningPlayers() {
   // Fallback: pull class_year + is_twp directly from `players` so pitchers
   // without a prediction row still resolve their class (for the filter) and
   // surface the TWP badge in the pitcher table.
-  const { data: pitcherMetaBySourceId } = useQuery({
+  const { data: pitcherMetaBySourceId, isLoading: pitcherMetaLoading } = useQuery({
     queryKey: ["returning-pitcher-meta-by-source-id"],
     queryFn: async () => {
       const map = new Map<string, { class_year: string | null; is_twp: boolean; player_id: string | null; portal_status: string | null }>();
@@ -2301,6 +2301,12 @@ export default function ReturningPlayers() {
     // Gate on the pitcher prediction query so the table doesn't render with
     // "—" placeholders during the brief window before stored preds resolve.
     if (pitcherPredLoading) return [] as PitchingDashboardRow[];
+    // Also wait for the player meta map (source_player_id → players.id) to
+    // finish loading. Building rows before it resolves causes player_id to
+    // be null on every row, which makes the link generator fall back to
+    // /dashboard/pitcher/storage__Name__Team. The downstream profile fix
+    // recovers, but the URL is ugly and breaks back/forward nav consistency.
+    if (!pitcherMetaBySourceId) return [] as PitchingDashboardRow[];
     const eq = readPitchingWeights();
     const powerEq = pitchingPowerEq;
     let roleOverrides: Record<string, "SP" | "RP" | "SM"> = {};
@@ -3318,7 +3324,7 @@ export default function ReturningPlayers() {
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              {(pitchingMasterLoading || pitcherPredLoading) && pagedPitchingRows.length === 0 ? (
+              {(pitchingMasterLoading || pitcherPredLoading || pitcherMetaLoading) && pagedPitchingRows.length === 0 ? (
                 <div className="flex items-center justify-center py-16 text-muted-foreground">Loading pitchers…</div>
               ) : pagedPitchingRows.length === 0 ? (
                 <div className="flex items-center justify-center py-16 text-muted-foreground">No pitchers found</div>
