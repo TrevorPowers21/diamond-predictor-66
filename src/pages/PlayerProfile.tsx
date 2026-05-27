@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, Download, Pencil, Save, X, TrendingUp, TrendingDown, ShieldCheck, Target } from "lucide-react";
+import { ArrowLeft, Download, Pencil, Save, X, TrendingUp, TrendingDown, ShieldCheck, Target, Star } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useHitterSeedData } from "@/hooks/useHitterSeedData";
@@ -22,6 +22,7 @@ import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatu
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
+import { useHighFollow } from "@/hooks/useHighFollow";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
 import CoachNotes from "@/components/CoachNotes";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
@@ -170,6 +171,7 @@ export default function PlayerProfile() {
   const { hasRole, effectiveTeamId } = useAuth();
   const isAdmin = hasRole("admin");
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
+  const { isOnList: isOnHighFollow, addPlayer: addToHighFollow, removePlayer: removeFromHighFollow } = useHighFollow();
   const { notes: coachNotesForExport } = useCoachNotes(id ?? null);
   const { conferenceStatsByKey } = useConferenceStats(2026);
   const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
@@ -1037,6 +1039,7 @@ export default function PlayerProfile() {
               <Button
                 variant={isOnBoard(player.id) ? "default" : "outline"}
                 size="sm"
+                className="cursor-pointer"
                 onClick={() => {
                   if (isOnBoard(player.id)) {
                     removeFromBoard(player.id);
@@ -1047,6 +1050,21 @@ export default function PlayerProfile() {
               >
                 <Target className="mr-2 h-3.5 w-3.5" />
                 {isOnBoard(player.id) ? "On Board" : "Add to Target Board"}
+              </Button>
+              <Button
+                variant={isOnHighFollow(player.id) ? "default" : "outline"}
+                size="sm"
+                className="cursor-pointer"
+                onClick={() => {
+                  if (isOnHighFollow(player.id)) {
+                    removeFromHighFollow(player.id);
+                  } else {
+                    addToHighFollow({ playerId: player.id, playerType: "hitter" });
+                  }
+                }}
+              >
+                <Star className="mr-2 h-3.5 w-3.5" />
+                {isOnHighFollow(player.id) ? "On High Follow" : "Add to High Follow"}
               </Button>
               <Button
                 variant="outline"
