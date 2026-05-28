@@ -37,6 +37,7 @@ import {
   type HitterDetectionInput,
   type PitcherDetectionInput,
 } from "@/lib/scoutingArchetypes";
+import { getConfTier } from "@/lib/playerRisk";
 
 // ────────────────────────────────────────────────────────────────────────
 // Output shape — what the AI prompt builder / consumers read
@@ -47,6 +48,21 @@ export interface MetricSummary {
   value: number;
   tier: Tier;
   pctRank: number;
+}
+
+/**
+ * How the player's competition level shapes the read. Anchors the bottom-line
+ * "translates up / where it can grow" closer. confTier is the CONF_TIER bucket
+ * (1 = power conf, higher = weaker). talentPlus is the conference-level talent
+ * the player competed against — arm quality (conf Stuff+) for a hitter, bat
+ * quality (conf wRC+) for a pitcher — the comparable competition identifier.
+ */
+export interface CompetitionContext {
+  conference: string | null;
+  confTier: number;
+  isPowerTier: boolean;
+  talentPlus: number | null;
+  talentKind: "arms_faced" | "bats_faced";
 }
 
 export interface ScoutingContext {
@@ -66,6 +82,10 @@ export interface ScoutingContext {
   metrics: MetricSummary[];
   /** Compound conditions worth flagging in analysis (e.g., production gap). */
   flags: string[];
+  /** Competition level + how the data translates stepping up. Drives the closer. */
+  competition: CompetitionContext;
+  /** Competition-translation signals for the bottom-line closer. */
+  translationFlags: string[];
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -82,6 +102,33 @@ function summarize(metric: string, value: number | null | undefined, dist: Metri
   return { metric, value: Number(value), tier, pctRank };
 }
 
+// ── Tier predicates (shared) ──
+const isPlusTier = (t: Tier | null) => t === "elite" || t === "plus";
+const isEliteTier = (t: Tier | null) => t === "elite";
+const isAvgOrLower = (t: Tier | null) => t === "average" || t === "belowAvg" || t === "poor" || t === "bottom";
+const isWeakTier = (t: Tier | null) => t === "belowAvg" || t === "poor" || t === "bottom";
+
+/**
+ * Build the competition context for a player. talentPlus is the conference-level
+ * talent faced (conf Stuff+ for hitters = arm quality; conf wRC+ for pitchers =
+ * bat quality), passed in from the caller since it requires a Conference Stats
+ * lookup.
+ */
+function buildCompetition(
+  side: "hitter" | "pitcher",
+  conference: string | null | undefined,
+  talentPlus: number | null | undefined,
+): CompetitionContext {
+  const confTier = getConfTier(conference);
+  return {
+    conference: conference ?? null,
+    confTier,
+    isPowerTier: confTier <= 1,
+    talentPlus: talentPlus ?? null,
+    talentKind: side === "hitter" ? "arms_faced" : "bats_faced",
+  };
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // Hitter context builder
 // ────────────────────────────────────────────────────────────────────────
@@ -91,11 +138,31 @@ export interface HitterContextProfile {
   position?: string | null;
   batHand?: string | null;
   conference?: string | null;
+  /** Conference-level Stuff+ (arm quality the hitter faced). For competition context. */
+  confStuffPlus?: number | null;
+}
+
+/**
+ * Hitter competition-translation flags. Caveats fire only below the power tier
+ * (there's a level to step up to). See project_competition_translation_rules.
+ */
+function hitterTranslationFlags(metrics: MetricSummary[], comp: CompetitionContext): string[] {
+  const out: string[] = [];
+  if (comp.isPowerTier) return out; // power-conf data is the top reference; no step-up caveat
+  const tierOf = (m: string) => metrics.find((x) => x.metric === m)?.tier ?? null;
+  const chase = tierOf("chase");
+  const contact = tierOf("contact");
+  // Chase: a strong number earned vs weaker arms is most likely to be tested up.
+  if (isPlusTier(chase)) out.push("xlate_chase_inflated");
+  // Contact: good-to-great carries up; below-avg/poor more likely to erode.
+  if (isPlusTier(contact)) out.push("xlate_contact_carries");
+  else if (isWeakTier(contact)) out.push("xlate_contact_erosion");
+  return out;
 }
 
 export function buildHitterContext(
   input: HitterDetectionInput,
-  _profile?: HitterContextProfile,
+  profile?: HitterContextProfile,
 ): ScoutingContext {
   const archetypeId = detectHitterArchetype(input);
   const archetype = HITTER_ARCHETYPES[archetypeId];
@@ -137,6 +204,9 @@ export function buildHitterContext(
   if (isBad(tierOf("contact")) && isPlus(tierOf("chase"))) flags.push("swing_miss_with_discipline");
   if (isBad(tierOf("contact")) && isBad(tierOf("chase"))) flags.push("swing_miss_and_chase");
 
+  const competition = buildCompetition("hitter", profile?.conference, profile?.confStuffPlus);
+  const translationFlags = hitterTranslationFlags(metrics, competition);
+
   return {
     side: "hitter",
     archetypeId,
@@ -145,6 +215,8 @@ export function buildHitterContext(
     standouts,
     metrics,
     flags,
+    competition,
+    translationFlags,
   };
 }
 
@@ -158,11 +230,51 @@ export interface PitcherContextProfile {
   throwHand?: string | null;
   conference?: string | null;
   primaryPitchType?: string | null;
+  /** Conference-level wRC+ (bat quality the pitcher faced). For competition context. */
+  confWrcPlus?: number | null;
+}
+
+/**
+ * Pitcher competition-translation flags. Root cause threaded through most:
+ * elite chase vs weaker bats inflates whiff and suppresses walks. Stuff+ is the
+ * cross-D1 comparable anchor and is never caveated. See
+ * project_competition_translation_rules.
+ */
+function pitcherTranslationFlags(metrics: MetricSummary[], comp: CompetitionContext): string[] {
+  const out: string[] = [];
+  const tierOf = (m: string) => metrics.find((x) => x.metric === m)?.tier ?? null;
+  const stuff = tierOf("stuff_plus");
+  const izWhiff = tierOf("in_zone_whiff_pct");
+  const whiff = tierOf("miss_pct");
+  const chase = tierOf("chase_pct");
+  const bb = tierOf("bb_pct");
+  const hardHit = tierOf("hard_hit_pct");
+  const barrel = tierOf("barrel_pct");
+
+  // PRIMARY: high whiff (total or IZ) not matched by Stuff+ → may be missing
+  // something AND/OR (below power tier) a product of lesser competition.
+  const highWhiff = isPlusTier(whiff) || isPlusTier(izWhiff);
+  if (highWhiff && isAvgOrLower(stuff)) {
+    out.push(comp.isPowerTier ? "xlate_whiff_vs_stuff" : "xlate_whiff_vs_stuff_lowcomp");
+  }
+  // Stuff+ is real and comparable league-wide — affirmative anchor.
+  if (isPlusTier(stuff)) out.push("xlate_stuff_anchor");
+
+  // Caveats below the power tier only (step-up concern):
+  if (!comp.isPowerTier) {
+    // Chase-dependent: chase strong but IZ whiff weak = least translatable.
+    if (isPlusTier(chase) && isWeakTier(izWhiff)) out.push("xlate_chase_dependent");
+    // Soft contact earned vs weaker bats — hard-hit/barrel climb a level up.
+    if (isPlusTier(hardHit) || isPlusTier(barrel)) out.push("xlate_softcontact_vs_weak");
+    // Low walks partly chase-suppressed vs weaker bats.
+    if (isPlusTier(bb) && isEliteTier(chase)) out.push("xlate_walks_chase_suppressed");
+  }
+  return out;
 }
 
 export function buildPitcherContext(
   input: PitcherDetectionInput,
-  _profile?: PitcherContextProfile,
+  profile?: PitcherContextProfile,
 ): ScoutingContext {
   const archetypeId = detectPitcherArchetype(input);
   const archetype = PITCHER_ARCHETYPES[archetypeId];
@@ -191,6 +303,9 @@ export function buildPitcherContext(
   if (isPlus(tierOf("chase_pct")) && isBad(tierOf("in_zone_whiff_pct"))) flags.push("chase_dependent");
   if (isPlus(tierOf("in_zone_whiff_pct")) && isPlus(tierOf("miss_pct"))) flags.push("pure_swing_miss");
 
+  const competition = buildCompetition("pitcher", profile?.conference, profile?.confWrcPlus);
+  const translationFlags = pitcherTranslationFlags(metrics, competition);
+
   return {
     side: "pitcher",
     archetypeId,
@@ -199,5 +314,7 @@ export function buildPitcherContext(
     standouts,
     metrics,
     flags,
+    competition,
+    translationFlags,
   };
 }

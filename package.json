@@ -46,10 +46,13 @@
     "import-juco-class-dob": "tsx --env-file-if-exists=.env.local scripts/import-juco-class-dob.ts",
     "import-pull-air": "tsx --env-file-if-exists=.env.local scripts/import-pull-air.ts",
     "import-pull-air:prod": "tsx --env-file-if-exists=.env.production.local scripts/import-pull-air.ts --prod",
+    "gen-scouting": "tsx --env-file-if-exists=.env.local scripts/generate-scouting-reports.ts",
+    "gen-scouting:prod": "tsx --env-file-if-exists=.env.production.local scripts/generate-scouting-reports.ts --prod",
     "db-migrate": "supabase db query --linked --file",
     "db-query": "supabase db query --linked --agent=no"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.99.0",
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "^1.2.11",
     "@radix-ui/react-alert-dialog": "^1.1.14",
