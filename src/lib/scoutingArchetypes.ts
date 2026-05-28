@@ -28,10 +28,11 @@ import {
 // ────────────────────────────────────────────────────────────────────────
 
 export type HitterArchetypeId =
-  | "stevenson"      // Named: premium-position power bat with contact risk
+  | "stevenson"      // Named: premium-position power bat with contact risk + GOOD chase discipline
   | "amaral"         // Named: premium-position contact-first, capped ceiling
   | "gracia"         // Named: complete profile with data >> production gap
   | "shelton"        // Named: power bat, ultra-aggressive approach, YoY variance
+  | "bregman"        // Named: pull-air slugger, above-avg EV/barrel, lifts everything pulled
   | "feared"         // Catch-all: bad chase + bad contact (high-risk profile)
   | "complete"       // Catch-all: plus across the board (no premium-pos disconnect)
   | "powerFirst"     // Catch-all: power + barrel but contact concerns
@@ -70,6 +71,7 @@ export interface HitterDetectionInput {
   ev90: number | null;
   barrel: number | null;
   pull: number | null;
+  pullAir: number | null;       // pull_air % — modern power valuation translator
   laSweet: number | null;       // la_10_30
   popUp: number | null;
   bb: number | null;
@@ -98,8 +100,8 @@ export interface PitcherDetectionInput {
 export const HITTER_ARCHETYPES: Record<HitterArchetypeId, HitterArchetype> = {
   stevenson: {
     id: "stevenson",
-    tag: "elite raw power and an ultra-aggressive approach",
-    description: "High ceiling / high variance. Premium-position bat (C/SS/CF) with plus or elite raw power but contact concerns that raise the variance. Approach trends ultra-aggressive. Profiles as a top-of-draft type if contact ticks up; org depth if it doesn't.",
+    tag: "premium-position power with contact risk but disciplined approach",
+    description: "Power hitter with plus or elite raw power at a premium position (C/SS/CF). Contact concerns raise the variance, but plus chase discipline keeps the profile playable — the underlying hierarchy is that a swing-and-miss profile survives higher levels when the hitter doesn't expand on bad pitches. Top-of-draft type if contact ticks up; the chase discipline gives a floor against better stuff.",
   },
   amaral: {
     id: "amaral",
@@ -115,6 +117,11 @@ export const HITTER_ARCHETYPES: Record<HitterArchetypeId, HitterArchetype> = {
     id: "shelton",
     tag: "high-end power and an ultra-aggressive approach",
     description: "Plus power tools paired with ultra-aggressive approach. Big YoY swings — production fluctuates with the contact rate. Premium hitter when it clicks; can be exposed by upper-level pitching when it doesn't.",
+  },
+  bregman: {
+    id: "bregman",
+    tag: "pull-air slugger who lifts everything to his pull side",
+    description: "Not necessarily elite raw power, but a hitting savant — above-average EV and barrel rate, plus pull-air rate, and a swing geared to lift the ball to the pull side. Production exceeds raw tools because of how often the ball gets in the air the right way. Profile of a polished college bat who hits for power without needing top-of-scale exit velo.",
   },
   feared: {
     id: "feared",
@@ -203,6 +210,7 @@ export function detectHitterArchetype(input: HitterDetectionInput): HitterArchet
   const popUpTier = t("pop_up", input.popUp);
   const laSweetTier = t("la_10_30", input.laSweet);
   const bbTier = t("bb", input.bb);
+  const pullAirTier = t("pull_air", input.pullAir);
 
   const elitePower = isElite(evTier) || isElite(ev90Tier) || isElite(barrelTier);
   const plusPower = isPlus(evTier) || isPlus(ev90Tier) || isPlus(barrelTier);
@@ -219,11 +227,16 @@ export function detectHitterArchetype(input: HitterDetectionInput): HitterArchet
 
   const popUpFlag = isBad(popUpTier);
   const premium = isPremiumPos(input.position);
+  const plusPullAir = isPlus(pullAirTier);
 
   // Named archetypes first (specific to general)
 
-  // Stevenson — premium-pos power bat with contact concerns
-  if (premium && plusPower && badContact && (badChase || ultraAggressiveChase)) {
+  // Stevenson — premium-pos power bat with contact concerns BUT good chase
+  // discipline. Per Trevor's rule: "you can swing and miss but you can't
+  // chase" — Stevenson survives the next level because he doesn't expand
+  // against better stuff. Previous logic required badChase, which was
+  // backwards (corrected 2026-05-27).
+  if (premium && plusPower && badContact && plusChase) {
     return "stevenson";
   }
 
@@ -240,6 +253,14 @@ export function detectHitterArchetype(input: HitterDetectionInput): HitterArchet
   // Shelton — power + ultra-aggressive approach (variance bat)
   if (plusPower && ultraAggressiveChase && !badContact) {
     return "shelton";
+  }
+
+  // Bregman — pull-air slugger. Not elite raw power, but above-avg EV +
+  // above-avg barrel + plus pull_air translates the contact into above-avg
+  // production. Distinct from powerFirst (which requires plus raw power).
+  // Polished college bat profile that hits for power without top-of-scale EV.
+  if (plusPullAir && isAboveAvg(barrelTier) && isAboveAvg(evTier) && !plusPower) {
+    return "bregman";
   }
 
   // Catch-all buckets
