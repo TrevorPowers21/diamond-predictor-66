@@ -493,6 +493,8 @@ async function main() {
   const limit = limitArg ? parseInt(limitArg.split("=")[1], 10) : Infinity;
   const sideArg = process.argv.find((a) => a.startsWith("--side="));
   const side = (sideArg ? sideArg.split("=")[1] : "both") as "hitter" | "pitcher" | "both";
+  const tierArg = process.argv.find((a) => a.startsWith("--tier="));
+  const tierFilter = (tierArg ? tierArg.split("=")[1] : "both") as "full" | "brief" | "both";
 
   // Env guard — refuse to mismatch prod.
   const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").toLowerCase();
@@ -507,9 +509,10 @@ async function main() {
   }
 
   console.log(`${C.bold}Scouting Report Generation${C.reset} on ${isProd ? "PROD" : "STAGING"}${dryRun ? ` ${C.yellow}[DRY RUN — no API calls, no writes]${C.reset}` : ""}`);
-  console.log(`  model: ${MODEL} | prompt: ${PROMPT_VERSION} | side: ${side}${force ? " | FORCE regen" : ""}`);
+  console.log(`  model: ${MODEL} | prompt: ${PROMPT_VERSION} | side: ${side} | tier: ${tierFilter}${force ? " | FORCE regen" : ""}`);
 
-  const jobs = await buildJobs(side);
+  let jobs = await buildJobs(side);
+  if (tierFilter !== "both") jobs = jobs.filter((j) => j.mode === tierFilter);
   const nFull = jobs.filter((j) => j.mode === "full").length;
   const nBrief = jobs.filter((j) => j.mode === "brief").length;
   console.log(`${C.bold}${jobs.length} eligible reports${C.reset} (${jobs.filter((j) => j.side === "hitter").length} hitter, ${jobs.filter((j) => j.side === "pitcher").length} pitcher) — ${nFull} full, ${nBrief} brief`);

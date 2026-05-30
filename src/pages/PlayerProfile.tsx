@@ -23,6 +23,8 @@ import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
+import { AiScoutingReport } from "@/components/AiScoutingReport";
+import { useScoutingReport } from "@/hooks/useScoutingReport";
 import CoachNotes from "@/components/CoachNotes";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
 import { generateCoachNotesPdf, generateReportPdf } from "@/lib/pdfGenerator";
@@ -234,6 +236,8 @@ export default function PlayerProfile() {
     },
     enabled: !!id,
   });
+
+  const { data: aiScoutingReport } = useScoutingReport(player?.id, "hitter");
 
   const { data: predictions = [] } = useQuery({
     queryKey: ["player-predictions", id, effectiveTeamId],
@@ -885,6 +889,9 @@ export default function PlayerProfile() {
           </div>
           {
             <>
+              <div className="mb-4">
+                <AiScoutingReport playerId={player.id} side="hitter" />
+              </div>
               <CoachNotes
                 playerId={player.id}
                 playerName={`${player.first_name} ${player.last_name}`}
@@ -894,6 +901,7 @@ export default function PlayerProfile() {
                     const rp: ReportPlayer = {
                       id: player.id,
                       player_type: "hitter",
+                      ai_scouting_report: aiScoutingReport?.body ?? null,
                       name: `${player.first_name || ""} ${player.last_name || ""}`.trim(),
                       school: displayTeamCurrent || player.team,
                       position: effectivePosition,
@@ -1038,6 +1046,7 @@ export default function PlayerProfile() {
                   const rp: ReportPlayer = {
                     id: player.id,
                     player_type: "hitter",
+                    ai_scouting_report: aiScoutingReport?.body ?? null,
                     name: `${player.first_name || ""} ${player.last_name || ""}`.trim(),
                     school: displayTeamCurrent || player.team,
                     position: effectivePosition,

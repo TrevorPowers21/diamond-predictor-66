@@ -606,6 +606,61 @@ function drawFooter(doc: jsPDF, reportTitle?: string | null) {
   rightText(doc, disclaimer, MARGIN, CONTENT_W, footerY + 10);
 }
 
+// ── AI Scouting Report (own page, flows + paginates) ────────────────
+// The full AI report is far longer than the fixed 120pt notes box on the
+// main page, so it gets its own page(s) to render in full.
+function drawAiReportPages(doc: jsPDF, player: ReportPlayer, reportTitle?: string | null) {
+  const raw = player.ai_scouting_report;
+  if (!raw) return;
+  const body = raw.replace(/\*\*/g, "").trim(); // drop any markdown bold markers
+  if (!body) return;
+
+  const lineSpacing = 12;
+  const contentW = CONTENT_W - 16;
+  const bottomLimit = PAGE_H - 40;
+  const headerH = 18;
+
+  const drawHeader = (continued: boolean) => {
+    rect(doc, MARGIN, MARGIN, CONTENT_W, headerH, NAVY);
+    rect(doc, MARGIN, MARGIN, 3, headerH, GOLD);
+    doc.setTextColor(...GOLD);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    const label = `SCOUTING REPORT${continued ? " (CONT.)" : ""}`;
+    const name = player.name ? `  ·  ${player.name}` : "";
+    doc.text(`${label}${name}`, MARGIN + 10, MARGIN + 12);
+  };
+
+  doc.addPage();
+  drawHeader(false);
+  let y = MARGIN + headerH + 16;
+
+  const paragraphs = body.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean);
+  for (let pi = 0; pi < paragraphs.length; pi++) {
+    const isBanner = pi === 0;
+    const setStyle = () => {
+      doc.setTextColor(...DARKGRAY);
+      doc.setFont("helvetica", isBanner ? "bold" : "normal");
+      doc.setFontSize(isBanner ? 10.5 : 9);
+    };
+    setStyle();
+    const lines = doc.splitTextToSize(paragraphs[pi], contentW);
+    for (const ln of lines) {
+      if (y > bottomLimit) {
+        drawFooter(doc, reportTitle);
+        doc.addPage();
+        drawHeader(true);
+        y = MARGIN + headerH + 16;
+        setStyle();
+      }
+      doc.text(ln, MARGIN + 8, y);
+      y += lineSpacing;
+    }
+    y += 6; // paragraph gap
+  }
+  drawFooter(doc, reportTitle);
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // ── STITCH-DESIGN PITCHER REPORT (v2 layout, locked 2026-04-29) ──────
 // ─────────────────────────────────────────────────────────────────────
@@ -1458,6 +1513,8 @@ export function generateReportPdf(
       // Stitch v2 layout — hitter path
       generateHitterPageStitch(doc, players[i], reportTitle);
     }
+    // Full AI scouting report on its own page (if present).
+    drawAiReportPages(doc, players[i], reportTitle);
   }
 
   return doc.output("bloburl") as string;

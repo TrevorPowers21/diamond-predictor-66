@@ -22,6 +22,8 @@ import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
+import { AiScoutingReport } from "@/components/AiScoutingReport";
+import { useScoutingReport } from "@/hooks/useScoutingReport";
 import CoachNotes from "@/components/CoachNotes";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
 import { generateCoachNotesPdf, generateReportPdf } from "@/lib/pdfGenerator";
@@ -385,6 +387,8 @@ export default function PitcherProfile() {
       return null;
     },
   });
+
+  const { data: aiScoutingReport } = useScoutingReport(player?.id, "pitcher");
 
   const { data: seasonStats = [] } = useQuery({
     queryKey: ["pitcher-profile-season-stats", id],
@@ -1422,6 +1426,9 @@ export default function PitcherProfile() {
           </div>
           {player && (
             <>
+              <div className="mb-4">
+                <AiScoutingReport playerId={player.id} side="pitcher" />
+              </div>
               <CoachNotes
                 playerId={player.id}
                 playerName={`${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName}
@@ -1431,6 +1438,7 @@ export default function PitcherProfile() {
                     const rp: ReportPlayer = {
                       id: player.id,
                       player_type: "pitcher",
+                      ai_scouting_report: aiScoutingReport?.body ?? null,
                       pitcher_role: effectiveRoleDisplay || null,
                       name: `${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName,
                       school: displayTeam,
@@ -1538,6 +1546,7 @@ export default function PitcherProfile() {
                     const rp: ReportPlayer = {
                       id: player.id,
                       player_type: "pitcher",
+                      ai_scouting_report: aiScoutingReport?.body ?? null,
                       pitcher_role: effectiveRoleDisplay || null,
                       name: `${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName,
                       school: displayTeam,
@@ -1585,6 +1594,7 @@ export default function PitcherProfile() {
                   const rp: ReportPlayer = {
                     id: player.id,
                     player_type: "pitcher",
+                    ai_scouting_report: aiScoutingReport?.body ?? null,
                     name: `${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName,
                     school: displayTeam,
                     position: hand,
