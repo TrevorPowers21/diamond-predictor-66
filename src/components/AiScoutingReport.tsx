@@ -1,13 +1,14 @@
-import { FileText } from "lucide-react";
-import { useScoutingReport } from "@/hooks/useScoutingReport";
-
 /**
- * Read-only display of the bulk-generated AI scouting report for a (player, side).
- * Reports are stable until the next bulk run, so there is no refresh control.
- * Renders nothing when there is no report (e.g., player below the sample floor).
+ * Body-only renderer for an AI-generated scouting report. The hosting card
+ * (with its title/border) is provided by the profile page so this slots into
+ * the existing "Scouting Report" card on PlayerProfile / PitcherProfile.
+ *
+ * Splits the body into paragraphs, bolds the lead banner sentence, and
+ * converts inline **bold** markdown to <strong>. Renders nothing when body
+ * is empty — the caller is responsible for falling back to whatever else.
  */
+
 function renderInline(text: string, keyBase: string) {
-  // Convert **bold** spans to <strong>; leave the rest as plain text.
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((part, i) => {
     const m = part.match(/^\*\*([^*]+)\*\*$/);
@@ -16,51 +17,37 @@ function renderInline(text: string, keyBase: string) {
   });
 }
 
-export function AiScoutingReport({
-  playerId,
-  side,
+export function AiScoutingReportBody({
+  body,
+  generatedAt,
 }: {
-  playerId: string | null | undefined;
-  side: "hitter" | "pitcher";
+  body: string | null | undefined;
+  generatedAt?: string | null;
 }) {
-  const { data } = useScoutingReport(playerId, side);
-  if (!data?.body) return null;
-
-  const paragraphs = data.body.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
-  const generated = new Date(data.generated_at).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  if (!body) return null;
+  const paragraphs = body.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  if (paragraphs.length === 0) return null;
+  const generated = generatedAt
+    ? new Date(generatedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+    : null;
 
   return (
-    <div className="border-[#162241] bg-[#0a1428] rounded-lg border">
-      <div className="flex items-center justify-between px-4 pt-3 pb-2">
-        <h3
-          className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2"
-          style={{ fontFamily: "Oswald, sans-serif" }}
-        >
-          <FileText className="h-4 w-4 text-[#D4AF37]" />
-          Scouting Report
-        </h3>
-      </div>
-      <div className="px-4 pb-3 space-y-3">
+    <div>
+      <div className="space-y-2.5">
         {paragraphs.map((para, i) => (
           <p
             key={i}
             className={
               i === 0
-                ? "text-[13px] text-slate-100 leading-relaxed font-medium"
-                : "text-[13px] text-slate-300 leading-relaxed"
+                ? "text-xs text-slate-100 leading-relaxed font-medium"
+                : "text-xs text-slate-300 leading-relaxed"
             }
           >
             {renderInline(para, `p${i}`)}
           </p>
         ))}
       </div>
-      <div className="px-4 pb-3">
-        <p className="text-[10px] text-slate-500">Generated {generated}</p>
-      </div>
+      {generated && <p className="mt-3 text-[10px] text-slate-500">Generated {generated}</p>}
     </div>
   );
 }

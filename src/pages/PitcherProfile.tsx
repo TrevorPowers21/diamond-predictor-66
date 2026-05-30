@@ -22,7 +22,7 @@ import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
-import { AiScoutingReport } from "@/components/AiScoutingReport";
+import { AiScoutingReportBody } from "@/components/AiScoutingReport";
 import { useScoutingReport } from "@/hooks/useScoutingReport";
 import CoachNotes from "@/components/CoachNotes";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
@@ -1426,9 +1426,6 @@ export default function PitcherProfile() {
           </div>
           {player && (
             <>
-              <div className="mb-4">
-                <AiScoutingReport playerId={player.id} side="pitcher" />
-              </div>
               <CoachNotes
                 playerId={player.id}
                 playerName={`${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName}
@@ -2204,7 +2201,11 @@ export default function PitcherProfile() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
-                    <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{report}</p>
+                    {aiScoutingReport?.body ? (
+                      <AiScoutingReportBody body={aiScoutingReport.body} generatedAt={aiScoutingReport.generated_at} />
+                    ) : (
+                      <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{report}</p>
+                    )}
                   </CardContent>
                 </Card>
               );
