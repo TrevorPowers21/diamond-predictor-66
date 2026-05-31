@@ -1058,10 +1058,17 @@ function drawMarketValueNotesSplit(doc: jsPDF, player: ReportPlayer, y: number):
   const maxTotalH = footerTop - y - GAP - 4;
 
   // Prefer the AI-generated scouting report body when available; fall back to
-  // the rule-based notes otherwise. Strip markdown bold markers since jsPDF
-  // can't render them.
+  // the rule-based notes otherwise. For the PDF we condense long AI reports
+  // down to (banner) + (closer) — the opener and the bottom-line role read,
+  // dropping the middle paragraphs. The in-app card still shows the full body.
+  // Strip markdown bold markers since jsPDF can't render them.
   const rawAi = player.ai_scouting_report;
-  const notes = rawAi ? rawAi.replace(/\*\*/g, "").trim() : player.scouting_notes;
+  const condenseAi = (text: string): string => {
+    const paras = text.replace(/\*\*/g, "").split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+    if (paras.length <= 2) return paras.join("\n\n");
+    return `${paras[0]}\n\n${paras[paras.length - 1]}`;
+  };
+  const notes = rawAi ? condenseAi(rawAi) : player.scouting_notes;
   const contentW = rightW - 16;
   doc.setFontSize(8);
   let needed = minTotalH;
