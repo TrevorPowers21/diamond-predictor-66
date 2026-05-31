@@ -1070,7 +1070,11 @@ function drawMarketValueNotesSplit(doc: jsPDF, player: ReportPlayer, y: number):
     needed = titleH + 14 + lines.length * lineSpacing;
   }
   const totalH = Math.max(minTotalH, Math.min(needed, maxTotalH));
-  const tileH = (totalH - tileGap) / 2;
+  // The oWAR + Market Value tiles on the left stay at their original fixed
+  // size (≈53pt each, derived from the prior minTotalH=110 layout) regardless
+  // of how tall the scouting report card on the right grows. Otherwise the
+  // tiles stretch tall and lose the original visual weight.
+  const tileH = (minTotalH - tileGap) / 2;
 
   // Helper to draw a single navy value tile with gold left stripe + border
   const drawValueTile = (
