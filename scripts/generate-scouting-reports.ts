@@ -472,9 +472,18 @@ async function generateOne(client: Anthropic, job: Job): Promise<{ body: string;
     } catch (e: any) {
       attempt++;
       const status = e?.status ?? e?.response?.status;
-      if ((status === 429 || status === 529 || status >= 500) && attempt <= 5) {
+      // Retry on transient API issues (rate/server) AND network-level errors
+      // (wifi blip, DNS hiccup, dropped socket) which throw with no HTTP status.
+      const isRetryableStatus = status === 429 || status === 529 || (typeof status === "number" && status >= 500);
+      const isConnectionError = status == null && (
+        e?.name === "APIConnectionError" ||
+        e?.name === "APIConnectionTimeoutError" ||
+        /connection|network|fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(String(e?.message ?? ""))
+      );
+      if ((isRetryableStatus || isConnectionError) && attempt <= 5) {
         const wait = Math.min(2 ** attempt * 1000, 30_000);
-        console.log(`${C.yellow}  retry ${attempt} (status ${status}) in ${wait}ms${C.reset}`);
+        const reason = isConnectionError ? "connection" : `status ${status}`;
+        console.log(`${C.yellow}  retry ${attempt} (${reason}) in ${wait}ms${C.reset}`);
         await new Promise((r) => setTimeout(r, wait));
         continue;
       }

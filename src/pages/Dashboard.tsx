@@ -87,6 +87,7 @@ export default function Dashboard() {
           .in("status", ["active", "departed"])
           .in("model_type", ["returner", "transfer"])
           .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
+          .eq("players.division", "D1")
           .gte("players.pa", 75)
           .not("p_wrc_plus", "is", null);
         q = applyTeamScopeFilter(q as any, effectiveTeamId);
@@ -142,6 +143,7 @@ export default function Dashboard() {
           .in("status", ["active", "departed"])
           .in("model_type", ["returner", "transfer"])
           .in("players.position", ["SP", "RP", "CL", "P", "LHP", "RHP"])
+          .eq("players.division", "D1")
           .gte("players.ip", 20)
           .not("p_rv_plus", "is", null);
         q = applyTeamScopeFilter(q as any, effectiveTeamId);

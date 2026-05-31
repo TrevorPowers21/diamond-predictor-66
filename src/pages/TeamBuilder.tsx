@@ -2942,7 +2942,7 @@ export default function TeamBuilder() {
             >
               Team Builder
             </h2>
-            <p className="text-muted-foreground text-xs mt-1.5 tracking-wide">Build rosters · track NIL budget · manage depth charts</p>
+            <p className="text-muted-foreground text-xs mt-1.5 tracking-wide">Build rosters · track roster budget · manage depth charts</p>
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-[220px]">
