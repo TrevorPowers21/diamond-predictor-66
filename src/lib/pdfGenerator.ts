@@ -606,6 +606,61 @@ function drawFooter(doc: jsPDF, reportTitle?: string | null) {
   rightText(doc, disclaimer, MARGIN, CONTENT_W, footerY + 10);
 }
 
+// ── AI Scouting Report (own page, flows + paginates) ────────────────
+// The full AI report is far longer than the fixed 120pt notes box on the
+// main page, so it gets its own page(s) to render in full.
+function drawAiReportPages(doc: jsPDF, player: ReportPlayer, reportTitle?: string | null) {
+  const raw = player.ai_scouting_report;
+  if (!raw) return;
+  const body = raw.replace(/\*\*/g, "").trim(); // drop any markdown bold markers
+  if (!body) return;
+
+  const lineSpacing = 12;
+  const contentW = CONTENT_W - 16;
+  const bottomLimit = PAGE_H - 40;
+  const headerH = 18;
+
+  const drawHeader = (continued: boolean) => {
+    rect(doc, MARGIN, MARGIN, CONTENT_W, headerH, NAVY);
+    rect(doc, MARGIN, MARGIN, 3, headerH, GOLD);
+    doc.setTextColor(...GOLD);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    const label = `SCOUTING REPORT${continued ? " (CONT.)" : ""}`;
+    const name = player.name ? `  ·  ${player.name}` : "";
+    doc.text(`${label}${name}`, MARGIN + 10, MARGIN + 12);
+  };
+
+  doc.addPage();
+  drawHeader(false);
+  let y = MARGIN + headerH + 16;
+
+  const paragraphs = body.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean);
+  for (let pi = 0; pi < paragraphs.length; pi++) {
+    const isBanner = pi === 0;
+    const setStyle = () => {
+      doc.setTextColor(...DARKGRAY);
+      doc.setFont("helvetica", isBanner ? "bold" : "normal");
+      doc.setFontSize(isBanner ? 10.5 : 9);
+    };
+    setStyle();
+    const lines = doc.splitTextToSize(paragraphs[pi], contentW);
+    for (const ln of lines) {
+      if (y > bottomLimit) {
+        drawFooter(doc, reportTitle);
+        doc.addPage();
+        drawHeader(true);
+        y = MARGIN + headerH + 16;
+        setStyle();
+      }
+      doc.text(ln, MARGIN + 8, y);
+      y += lineSpacing;
+    }
+    y += 6; // paragraph gap
+  }
+  drawFooter(doc, reportTitle);
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // ── STITCH-DESIGN PITCHER REPORT (v2 layout, locked 2026-04-29) ──────
 // ─────────────────────────────────────────────────────────────────────
@@ -997,22 +1052,36 @@ function drawMarketValueNotesSplit(doc: jsPDF, player: ReportPlayer, y: number):
   const rightX = MARGIN + leftW + 6;
   const tileGap = 4;
   const titleH = 14;
-  const lineSpacing = 10;
+  const lineSpacing = 9;
   const minTotalH = 110;
   const footerTop = PAGE_H - 26;
   const maxTotalH = footerTop - y - GAP - 4;
 
-  // Measure scouting notes to size the section dynamically
-  const notes = player.scouting_notes;
+  // Prefer the AI-generated scouting report body when available; fall back to
+  // the rule-based notes otherwise. For the PDF we condense long AI reports
+  // down to (banner) + (closer) — the opener and the bottom-line role read,
+  // dropping the middle paragraphs. The in-app card still shows the full body.
+  // Strip markdown bold markers since jsPDF can't render them.
+  const rawAi = player.ai_scouting_report;
+  const condenseAi = (text: string): string => {
+    const paras = text.replace(/\*\*/g, "").split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+    if (paras.length <= 2) return paras.join("\n\n");
+    return `${paras[0]}\n\n${paras[paras.length - 1]}`;
+  };
+  const notes = rawAi ? condenseAi(rawAi) : player.scouting_notes;
   const contentW = rightW - 16;
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   let needed = minTotalH;
   if (notes) {
     const lines = doc.splitTextToSize(notes, contentW);
     needed = titleH + 14 + lines.length * lineSpacing;
   }
   const totalH = Math.max(minTotalH, Math.min(needed, maxTotalH));
-  const tileH = (totalH - tileGap) / 2;
+  // The oWAR + Market Value tiles on the left stay at their original fixed
+  // size (≈53pt each, derived from the prior minTotalH=110 layout) regardless
+  // of how tall the scouting report card on the right grows. Otherwise the
+  // tiles stretch tall and lose the original visual weight.
+  const tileH = (minTotalH - tileGap) / 2;
 
   // Helper to draw a single navy value tile with gold left stripe + border
   const drawValueTile = (
@@ -1101,10 +1170,10 @@ function drawMarketValueNotesSplit(doc: jsPDF, player: ReportPlayer, y: number):
   doc.setTextColor(...GOLD);
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "bold");
-  doc.text("SCOUTING NOTES", rightX + 10, y + 10);
+  doc.text("SCOUTING REPORT", rightX + 10, y + 10);
 
   const contentTop = y + titleH + 12;
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   if (notes) {
     doc.setTextColor(...DARKGRAY);
     doc.setFont("helvetica", "normal");
@@ -1114,7 +1183,7 @@ function drawMarketValueNotesSplit(doc: jsPDF, player: ReportPlayer, y: number):
   } else {
     doc.setTextColor(...MIDGRAY);
     doc.setFont("helvetica", "italic");
-    doc.text("Notes / analysis to be completed by staff.", rightX + 8, contentTop);
+    doc.text("Scouting report unavailable.", rightX + 8, contentTop);
   }
 
   return y + totalH + GAP;
@@ -1441,6 +1510,8 @@ export function generateReportPdf(
       // Stitch v2 layout — hitter path
       generateHitterPageStitch(doc, players[i], reportTitle);
     }
+    // The full AI scouting report is now rendered inline on page 1 inside the
+    // "SCOUTING REPORT" card (see drawMarketValueNotesSplit) — no separate page.
   }
 
   return doc.output("bloburl") as string;

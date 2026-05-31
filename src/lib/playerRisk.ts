@@ -71,7 +71,7 @@ const CONF_TIER: Record<string, number> = {
   "MAAC": 4, "MEAC": 4, "SWAC": 4,
 };
 
-function getConfTier(conference: string | null | undefined): number {
+export function getConfTier(conference: string | null | undefined): number {
   if (!conference) return 3; // default mid-tier if unknown
   // Try exact match first
   if (CONF_TIER[conference]) return CONF_TIER[conference];
