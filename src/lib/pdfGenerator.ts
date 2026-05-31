@@ -1061,15 +1061,18 @@ function drawMarketValueNotesSplit(doc: jsPDF, player: ReportPlayer, y: number):
   const rightX = MARGIN + leftW + 6;
   const tileGap = 4;
   const titleH = 14;
-  const lineSpacing = 10;
+  const lineSpacing = 9;
   const minTotalH = 110;
   const footerTop = PAGE_H - 26;
   const maxTotalH = footerTop - y - GAP - 4;
 
-  // Measure scouting notes to size the section dynamically
-  const notes = player.scouting_notes;
+  // Prefer the AI-generated scouting report body when available; fall back to
+  // the rule-based notes otherwise. Strip markdown bold markers since jsPDF
+  // can't render them.
+  const rawAi = player.ai_scouting_report;
+  const notes = rawAi ? rawAi.replace(/\*\*/g, "").trim() : player.scouting_notes;
   const contentW = rightW - 16;
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   let needed = minTotalH;
   if (notes) {
     const lines = doc.splitTextToSize(notes, contentW);
@@ -1165,10 +1168,10 @@ function drawMarketValueNotesSplit(doc: jsPDF, player: ReportPlayer, y: number):
   doc.setTextColor(...GOLD);
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "bold");
-  doc.text("SCOUTING NOTES", rightX + 10, y + 10);
+  doc.text("SCOUTING REPORT", rightX + 10, y + 10);
 
   const contentTop = y + titleH + 12;
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   if (notes) {
     doc.setTextColor(...DARKGRAY);
     doc.setFont("helvetica", "normal");
@@ -1178,7 +1181,7 @@ function drawMarketValueNotesSplit(doc: jsPDF, player: ReportPlayer, y: number):
   } else {
     doc.setTextColor(...MIDGRAY);
     doc.setFont("helvetica", "italic");
-    doc.text("Notes / analysis to be completed by staff.", rightX + 8, contentTop);
+    doc.text("Scouting report unavailable.", rightX + 8, contentTop);
   }
 
   return y + totalH + GAP;
@@ -1513,8 +1516,8 @@ export function generateReportPdf(
       // Stitch v2 layout — hitter path
       generateHitterPageStitch(doc, players[i], reportTitle);
     }
-    // Full AI scouting report on its own page (if present).
-    drawAiReportPages(doc, players[i], reportTitle);
+    // The full AI scouting report is now rendered inline on page 1 inside the
+    // "SCOUTING REPORT" card (see drawMarketValueNotesSplit) — no separate page.
   }
 
   return doc.output("bloburl") as string;
