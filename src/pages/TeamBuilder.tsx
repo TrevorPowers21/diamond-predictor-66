@@ -839,6 +839,7 @@ export default function TeamBuilder() {
   const [incomingName, setIncomingName] = useState("");
   const [incomingPosition, setIncomingPosition] = useState("");
   const [incomingNil, setIncomingNil] = useState<number>(0);
+  const [incomingProjectionTier, setIncomingProjectionTier] = useState<"" | "developmental" | "role_player" | "contributor" | "immediate_impact">("");
   const [teamSearchQuery, setTeamSearchQuery] = useState("");
   const [teamSearchOpen, setTeamSearchOpen] = useState(false);
   const [targetPlayerSearchQuery, setTargetPlayerSearchQuery] = useState("");
@@ -1845,6 +1846,8 @@ export default function TeamBuilder() {
                   conference: rp.player.conference ?? null,
                 }
               : null,
+            rp.projection_tier ?? null,
+            rp.nil_value_overridden ?? false,
           ),
         }));
         const { error } = await supabase.from("team_build_players").insert(rows);
@@ -1930,9 +1933,12 @@ export default function TeamBuilder() {
   const addIncomingFreshman = () => {
     const name = incomingName.trim();
     if (!name) {
-      toast({ title: "Name required", description: "Enter a player name for incoming freshman.", variant: "destructive" });
+      toast({ title: "Name required", description: "Enter a player name.", variant: "destructive" });
       return;
     }
+    // Pitcher position triggers the pitcher table on the roster view; default
+    // bench depth role for pitchers maps to specialist_reliever.
+    const isPitcherPos = /^(SP|RP|CL|P|LHP|RHP)$/i.test(incomingPosition);
     const newP: BuildPlayer = {
       player_id: null,
       source: "returner",
@@ -1942,11 +1948,12 @@ export default function TeamBuilder() {
       nil_value: Number(incomingNil) || 0,
       production_notes: null,
       roster_status: "returner",
-      depth_role: "bench",
+      depth_role: isPitcherPos ? "specialist_reliever" : "bench",
       class_transition: "FS",
       dev_aggressiveness: 0,
       class_transition_overridden: false,
       dev_aggressiveness_overridden: false,
+      projection_tier: incomingProjectionTier || null,
       transfer_snapshot: null,
       player: {
         first_name: name,
@@ -1966,6 +1973,7 @@ export default function TeamBuilder() {
     setIncomingName("");
     setIncomingPosition("");
     setIncomingNil(0);
+    setIncomingProjectionTier("");
     setDirty(true);
   };
 
@@ -3119,6 +3127,8 @@ export default function TeamBuilder() {
               setIncomingPosition={setIncomingPosition}
               incomingNil={incomingNil}
               setIncomingNil={setIncomingNil}
+              incomingProjectionTier={incomingProjectionTier}
+              setIncomingProjectionTier={setIncomingProjectionTier}
               addIncomingFreshman={addIncomingFreshman}
               positionPlayers={positionPlayers}
               pitchers={pitchers}

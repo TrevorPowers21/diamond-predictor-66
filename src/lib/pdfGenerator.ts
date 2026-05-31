@@ -739,7 +739,7 @@ function drawProjectedStatsPitcher2027(doc: jsPDF, player: ReportPlayer, y: numb
   doc.setTextColor(...GOLD);
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "bold");
-  doc.text("2027 PROJECTED STATISTICS*", MARGIN + 10, y + 11);
+  doc.text("2027 PROJECTED STATISTICS", MARGIN + 10, y + 11);
   y += titleH + 2;
 
   const cells = [
@@ -774,15 +774,6 @@ function drawProjectedStatsPitcher2027(doc: jsPDF, player: ReportPlayer, y: numb
     centeredText(doc, cells[i].value, x, cellW, y + 30);
   }
   y += boxH;
-
-  // Asterisk footnote — temporary until projections are auto-rerun against
-  // the assigned destination team (see post-demo punch list).
-  const teamLabel = (player.school || "their current team").toUpperCase();
-  doc.setTextColor(...MIDGRAY);
-  doc.setFontSize(5.5);
-  doc.setFont("helvetica", "italic");
-  doc.text(`* Assuming player returns to ${teamLabel}`, MARGIN, y + 7);
-  y += 9;
 
   return y + GAP;
 }
@@ -1236,7 +1227,7 @@ function drawProjectedStatsHitter2027(doc: jsPDF, player: ReportPlayer, y: numbe
   doc.setTextColor(...GOLD);
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "bold");
-  doc.text("2027 PROJECTED STATISTICS*", MARGIN + 10, y + 11);
+  doc.text("2027 PROJECTED STATISTICS", MARGIN + 10, y + 11);
   y += titleH + 2;
 
   const cells = [
@@ -1270,14 +1261,6 @@ function drawProjectedStatsHitter2027(doc: jsPDF, player: ReportPlayer, y: numbe
     centeredText(doc, cells[i].value, x, cellW, y + 30);
   }
   y += boxH;
-
-  // Asterisk footnote (mirrors pitcher path)
-  const teamLabel = (player.school || "their current team").toUpperCase();
-  doc.setTextColor(...MIDGRAY);
-  doc.setFontSize(5.5);
-  doc.setFont("helvetica", "italic");
-  doc.text(`* Assuming player returns to ${teamLabel}`, MARGIN, y + 7);
-  y += 9;
 
   return y + GAP;
 }

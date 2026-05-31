@@ -443,8 +443,14 @@ export default function HighFollowList() {
                         const pred = r.pred;
                         const pm = r.pitcher;
                         const hm = r.hitter;
+                        // High Follow rows always carry a real players.id (FK
+                        // in the high_follow table), so the UUID route works
+                        // for both sides. Earlier this branch generated a
+                        // storage__ URL for pitchers, which then leaked into
+                        // a different code path that couldn't load predictions
+                        // for them. profileRouteFor handles the side split.
                         const profileRoute = isP
-                          ? `/dashboard/pitcher/storage__${encodeURIComponent(r.hf.first_name + " " + r.hf.last_name)}__${encodeURIComponent(r.hf.team || "")}`
+                          ? `/dashboard/pitcher/${r.hf.player_id}`
                           : profileRouteFor(r.hf.player_id, r.hf.position);
 
                         // Resolve stats: projected first, then actual from master tables

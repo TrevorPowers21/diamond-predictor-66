@@ -1365,15 +1365,46 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     return projectedPlayerScore(p) * nilBasePerOWar;
   }, [nilBasePerOWar, pitchingEq, pitchingPvfForRole, pitchingTierMultipliers, projectedPlayerScore, playerProjection, selectedTeam, teamByKey, pitchingStatsByNameTeam]);
 
-  const effectiveNilForPlayer = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
-    if (!isProjectedStatus(p)) return 0;
-    const onPrimarySide = side == null || (side === "pitcher" ? isPitcher(p) : !isPitcher(p));
-    if (onPrimarySide) {
-      const actualNil = Number(p.nil_value) || 0;
-      if (actualNil > 0) return actualNil;
+  // Per-player projected budget share (proportional allocation of remaining
+  // budget after overrides). Defined here so effectiveNilForPlayer can use it
+  // as the canonical "not overridden" value — coaches think in budget share,
+  // not market value, when filling the Actual Value column.
+  const projectedBudgetShareForPlayer = useCallback((p: BuildPlayer): number => {
+    if (!isProjectedStatus(p) || totalBudget <= 0) return 0;
+    if (p.nil_value_overridden) {
+      const v = Number(p.nil_value);
+      return Number.isFinite(v) ? Math.max(0, v) : 0;
     }
-    return projectedNilForPlayer(p, side);
-  }, [projectedNilForPlayer]);
+    let overriddenTotal = 0;
+    let nonOverriddenScore = 0;
+    for (const rp of rosterPlayers) {
+      if (!isProjectedStatus(rp)) continue;
+      if (rp.nil_value_overridden) {
+        overriddenTotal += Math.max(0, Number(rp.nil_value) || 0);
+      } else {
+        nonOverriddenScore += projectedPlayerScore(rp);
+      }
+    }
+    const remainingBudget = Math.max(0, totalBudget - overriddenTotal);
+    if (nonOverriddenScore <= 0) return 0;
+    const score = projectedPlayerScore(p);
+    return (score / nonOverriddenScore) * remainingBudget;
+  }, [projectedPlayerScore, totalBudget, rosterPlayers]);
+
+  const effectiveNilForPlayer = useCallback((p: BuildPlayer, _side?: "hitter" | "pitcher") => {
+    if (!isProjectedStatus(p)) return 0;
+    // Coach override wins (incl. $0 — "pay this bench guy nothing"). When not
+    // overridden, fall back to the projected budget share — NOT the market
+    // value formula. Coach thinks "if I don't touch it, this is what they
+    // get from my budget", not "this is what the market would pay them."
+    // TWPs are split into separate hitter/pitcher rows upstream, so each
+    // row gets its own share — no special primary-side gating here.
+    if (p.nil_value_overridden) {
+      const v = Number(p.nil_value);
+      return Number.isFinite(v) ? v : 0;
+    }
+    return projectedBudgetShareForPlayer(p);
+  }, [projectedBudgetShareForPlayer]);
 
   // ── Block Q: isProjectedStatus, totalRosterPlayerScore, totalEffectiveNil, budgetRemaining
   // (isProjectedStatus defined above near projectedNilForPlayer)
@@ -1382,6 +1413,8 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     if (!isProjectedStatus(p)) return sum;
     return sum + projectedPlayerScore(p);
   }, 0);
+  // Per-side fan-out: each row's hitter + pitcher eligibility fires
+  // independently so each line counts toward the budget.
   const totalEffectiveNil = rosterPlayers.reduce((sum, p) => {
     let v = 0;
     if (hitterEligible(p)) v += effectiveNilForPlayer(p, "hitter");
@@ -1516,11 +1549,10 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
 
   const projectedBudgetValue = useCallback((p: BuildPlayer) => {
     if (!isProjectedStatus(p) || totalBudget <= 0) return null;
-    const score = projectedPlayerScore(p);
-    const total = fallbackRosterTotalPlayerScore;
-    if (total <= 0) return null;
-    return (score / total) * totalBudget;
-  }, [projectedPlayerScore, totalBudget, fallbackRosterTotalPlayerScore]);
+    // Display column wraps the shared budget-share helper so this column +
+    // effectiveNilForPlayer + totalEffectiveNil all read from the same math.
+    return projectedBudgetShareForPlayer(p);
+  }, [projectedBudgetShareForPlayer, totalBudget]);
 
   // ── Return ────────────────────────────────────────────────────────────────────
   return {

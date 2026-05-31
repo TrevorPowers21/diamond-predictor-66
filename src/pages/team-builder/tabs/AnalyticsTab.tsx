@@ -1,6 +1,19 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useTeamWarSnapshot, useWarBenchmarks, type TeamWarSnapshot } from "@/hooks/useTeamWarSnapshots";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Button } from "@/components/ui/button";
+import { Check, ChevronsUpDown } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  useTeamWarSnapshot,
+  useWarBenchmarks,
+  useNationalSeedBenchmark,
+  useAllTeamSnapshots,
+  type TeamWarSnapshot,
+  type WarStatRange,
+} from "@/hooks/useTeamWarSnapshots";
 import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { hitterEligible, pitcherEligible, effectivePitcherRoleForBuild } from "../helpers";
 import type { BuildPlayer } from "../types";
@@ -32,17 +45,24 @@ export default function AnalyticsTab({
 }: AnalyticsTabProps) {
   const { data: priorYearSnapshot } = useTeamWarSnapshot(selectedTeamSourceId, CURRENT_SEASON);
   const { data: warBenchmarks = [] } = useWarBenchmarks(CURRENT_SEASON);
+  const { data: nationalSeedBenchmark } = useNationalSeedBenchmark(CURRENT_SEASON, "1-8");
+  const { data: allTeamSnapshots = [] } = useAllTeamSnapshots(CURRENT_SEASON);
 
-  const nationalChampBenchmark = useMemo(
-    () => warBenchmarks.find((b) => b.is_national_champ) ?? null,
-    [warBenchmarks],
-  );
   const conferenceChampBenchmarks = useMemo(() => {
     if (!selectedTeamConference) return [];
     return warBenchmarks.filter(
       (b) => b.is_conference_champ && b.conference === selectedTeamConference,
     );
   }, [warBenchmarks, selectedTeamConference]);
+
+  // "Team you want to emulate" picker. Stored as source_team_id; null = none
+  // selected. Persists for the session only — fresh nav resets.
+  const [emulateTeamId, setEmulateTeamId] = useState<string | null>(null);
+  const [emulatePickerOpen, setEmulatePickerOpen] = useState(false);
+  const emulateTeamSnapshot = useMemo(
+    () => allTeamSnapshots.find((s) => s.source_team_id === emulateTeamId) ?? null,
+    [allTeamSnapshots, emulateTeamId],
+  );
 
   // define depthKey locally — trivial: (slot, depth) => `${slot}:${depth}`
   const depthKey = (slot: string, depth: number) => `${slot}:${depth}`;
@@ -208,27 +228,52 @@ export default function AnalyticsTab({
       </div>
 
       {/* Consolidated WAR Comparison: your build (once) + each benchmark as a delta row.
-          Replaces the old 3-card stack where the same big numbers were repeated. */}
+          Replaces the old 3-card stack where the same big numbers were repeated.
+          National Champion was removed in favor of National Seed (1-8) since
+          postseason results are bracket-variance heavy and not a roster-build target. */}
       {(() => {
-        const benchRows: Array<{ label: string; sublabel?: string; bench: TeamWarSnapshot }> = [];
+        type BenchRow =
+          | { kind: "team"; label: string; sublabel?: string; bench: TeamWarSnapshot }
+          | { kind: "range"; label: string; sublabel?: string; range: {
+              total: WarStatRange | null; lineup: WarStatRange | null;
+              rotation: WarStatRange | null; bullpen: WarStatRange | null;
+            } };
+        const benchRows: BenchRow[] = [];
         if (benchTeam) {
           benchRows.push({
+            kind: "team",
             label: `${CURRENT_SEASON} Actual — ${benchTeam.team_name}`,
             sublabel: `${benchTeam.games_played_est ?? "?"} games · factor ${benchTeam.proration_factor?.toFixed(2) ?? "—"}`,
             bench: benchTeam,
           });
         }
-        if (nationalChampBenchmark) {
-          benchRows.push({
-            label: `${CURRENT_SEASON} National Champion — ${nationalChampBenchmark.team_name}`,
-            bench: nationalChampBenchmark,
-          });
-        }
         for (const c of conferenceChampBenchmarks) {
           benchRows.push({
-            label: `${CURRENT_SEASON} ${c.conference} Champion — ${c.team_name}`,
+            kind: "team",
+            label: `${CURRENT_SEASON} ${c.conference} Regular-Season Champion — ${c.team_name}`,
             sublabel: conferenceChampBenchmarks.length > 1 ? "split regular-season champ" : undefined,
             bench: c,
+          });
+        }
+        if (nationalSeedBenchmark?.totalWar) {
+          benchRows.push({
+            kind: "range",
+            label: `${CURRENT_SEASON} National Seed Range (1-8)`,
+            sublabel: `min – max across the top 8 seeded teams (host through Super Regional)`,
+            range: {
+              total: nationalSeedBenchmark.totalWar,
+              lineup: nationalSeedBenchmark.lineupOwar,
+              rotation: nationalSeedBenchmark.rotationPwar,
+              bullpen: nationalSeedBenchmark.bullpenPwar,
+            },
+          });
+        }
+        if (emulateTeamSnapshot) {
+          benchRows.push({
+            kind: "team",
+            label: `${CURRENT_SEASON} Emulate — ${emulateTeamSnapshot.team_name}`,
+            sublabel: emulateTeamSnapshot.conference ?? undefined,
+            bench: emulateTeamSnapshot,
           });
         }
 
@@ -303,7 +348,7 @@ export default function AnalyticsTab({
                     <thead>
                       <tr className="border-b text-[10px] uppercase tracking-wider text-muted-foreground">
                         <th className="text-left py-2 pr-4">Compare vs</th>
-                        <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Goal Total</th>
+                        <th className="text-center py-2 px-4 w-[140px] whitespace-nowrap">Goal Total</th>
                         <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Δ Total</th>
                         <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Δ Lineup</th>
                         <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Δ Rotation</th>
@@ -312,24 +357,129 @@ export default function AnalyticsTab({
                     </thead>
                     <tbody>
                       {benchRows.map((row, i) => {
-                        const benchTotal = Number(row.bench.prorated_total_owar) + Number(row.bench.prorated_total_pwar);
+                        if (row.kind === "team") {
+                          const benchTotal = Number(row.bench.prorated_total_owar) + Number(row.bench.prorated_total_pwar);
+                          return (
+                            <tr key={i} className="border-b last:border-0">
+                              <td className="py-2 pr-4">
+                                <div className="font-medium">{row.label}</div>
+                                {row.sublabel && <div className="text-[10px] text-muted-foreground italic">{row.sublabel}</div>}
+                              </td>
+                              <td className="text-center py-2 px-4 font-mono tabular-nums text-muted-foreground">{benchTotal.toFixed(2)}</td>
+                              <td className="text-center py-2 px-4 font-mono">{deltaText(buildTotalWar, benchTotal)}</td>
+                              <td className="text-center py-2 px-4 font-mono">{deltaText(buildLineupOwar, Number(row.bench.prorated_starting_lineup_owar))}</td>
+                              <td className="text-center py-2 px-4 font-mono">{deltaText(buildRotationPwar, Number(row.bench.prorated_rotation_pwar))}</td>
+                              <td className="text-center py-2 px-4 font-mono">{deltaText(buildBullpenPwar, Number(row.bench.prorated_bullpen_pwar))}</td>
+                            </tr>
+                          );
+                        }
+                        // range row — show min-max in Goal column, distance-to-median in deltas
+                        const rangeText = (r: WarStatRange | null) => {
+                          if (!r) return <span className="text-muted-foreground">—</span>;
+                          return (
+                            <div className="leading-tight">
+                              <div className="tabular-nums font-medium">{r.min.toFixed(2)}–{r.max.toFixed(2)}</div>
+                              <div className="text-[10px] text-muted-foreground tabular-nums">med {r.median.toFixed(2)}</div>
+                            </div>
+                          );
+                        };
+                        const rangeDelta = (build: number, r: WarStatRange | null) => {
+                          if (!r) return <span className="text-muted-foreground">—</span>;
+                          // In-range = success color; outside = neutral magnitude vs median
+                          if (build >= r.min && build <= r.max) {
+                            return <span className="tabular-nums font-semibold text-[hsl(var(--success))]">in range</span>;
+                          }
+                          const diff = build - r.median;
+                          const abs = Math.abs(diff);
+                          const color = diff > 0 ? "text-muted-foreground" : "text-destructive";
+                          const sign = diff > 0 ? "+" : "−";
+                          return (
+                            <div className="leading-tight">
+                              <div className={`tabular-nums font-semibold ${color}`}>{sign}{abs.toFixed(2)}</div>
+                              <div className="text-[10px] text-muted-foreground">vs med</div>
+                            </div>
+                          );
+                        };
                         return (
-                          <tr key={i} className="border-b last:border-0">
+                          <tr key={i} className="border-b last:border-0 bg-[#D4AF37]/[0.04]">
                             <td className="py-2 pr-4">
                               <div className="font-medium">{row.label}</div>
                               {row.sublabel && <div className="text-[10px] text-muted-foreground italic">{row.sublabel}</div>}
                             </td>
-                            <td className="text-center py-2 px-4 font-mono tabular-nums text-muted-foreground">{benchTotal.toFixed(2)}</td>
-                            <td className="text-center py-2 px-4 font-mono">{deltaText(buildTotalWar, benchTotal)}</td>
-                            <td className="text-center py-2 px-4 font-mono">{deltaText(buildLineupOwar, Number(row.bench.prorated_starting_lineup_owar))}</td>
-                            <td className="text-center py-2 px-4 font-mono">{deltaText(buildRotationPwar, Number(row.bench.prorated_rotation_pwar))}</td>
-                            <td className="text-center py-2 px-4 font-mono">{deltaText(buildBullpenPwar, Number(row.bench.prorated_bullpen_pwar))}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeText(row.range.total)}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeDelta(buildTotalWar, row.range.total)}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeDelta(buildLineupOwar, row.range.lineup)}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeDelta(buildRotationPwar, row.range.rotation)}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeDelta(buildBullpenPwar, row.range.bullpen)}</td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
                   <div className="text-[10px] text-muted-foreground mt-2 italic">Prorated to 56 games.</div>
+
+                  {/* Emulate picker — searchable combobox (Popover + Command).
+                      Searches name + conference inline; D1-only list. */}
+                  <div className="mt-4 flex items-center gap-3 pt-3 border-t">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Compare to team:</div>
+                    <Popover open={emulatePickerOpen} onOpenChange={setEmulatePickerOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={emulatePickerOpen}
+                          className="w-[320px] h-8 justify-between font-normal cursor-pointer"
+                        >
+                          <span className="truncate">
+                            {emulateTeamSnapshot
+                              ? `${emulateTeamSnapshot.team_name}${emulateTeamSnapshot.conference ? ` (${emulateTeamSnapshot.conference})` : ""}`
+                              : "Pick a team to emulate…"}
+                          </span>
+                          <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[320px] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Search teams…" />
+                          <CommandList>
+                            <CommandEmpty>No matches.</CommandEmpty>
+                            <CommandGroup>
+                              <CommandItem
+                                value="__none__"
+                                className="cursor-pointer"
+                                onSelect={() => { setEmulateTeamId(null); setEmulatePickerOpen(false); }}
+                              >
+                                <Check className={cn("mr-2 h-3.5 w-3.5", emulateTeamId === null ? "opacity-100" : "opacity-0")} />
+                                — None —
+                              </CommandItem>
+                              {allTeamSnapshots.map((t) => {
+                                const total = Number(t.prorated_total_owar) + Number(t.prorated_total_pwar);
+                                const label = `${t.team_name}${t.conference ? ` (${t.conference})` : ""}`;
+                                // Searchable value includes WAR number so users can also
+                                // filter by it if they want; visual layout puts name+conf
+                                // on the left and the WAR stat right-aligned, muted.
+                                const searchValue = `${label} ${total.toFixed(1)}`;
+                                return (
+                                  <CommandItem
+                                    key={t.source_team_id}
+                                    value={searchValue}
+                                    className="cursor-pointer"
+                                    onSelect={() => { setEmulateTeamId(t.source_team_id); setEmulatePickerOpen(false); }}
+                                  >
+                                    <Check className={cn("mr-2 h-3.5 w-3.5 shrink-0", emulateTeamId === t.source_team_id ? "opacity-100" : "opacity-0")} />
+                                    <span className="flex-1 truncate">{label}</span>
+                                    <span className="ml-2 text-[10px] tabular-nums text-muted-foreground font-mono shrink-0">
+                                      {total.toFixed(1)} WAR
+                                    </span>
+                                  </CommandItem>
+                                );
+                              })}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
                 </div>
               )}
             </CardContent>

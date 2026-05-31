@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, Download, Pencil, Save, X, TrendingUp, TrendingDown, ShieldCheck, Target } from "lucide-react";
+import { ArrowLeft, Download, Pencil, Save, X, TrendingUp, TrendingDown, ShieldCheck, Target, Star } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useHitterSeedData } from "@/hooks/useHitterSeedData";
@@ -22,6 +22,7 @@ import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatu
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
+import { useHighFollow } from "@/hooks/useHighFollow";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
 import { AiScoutingReportBody } from "@/components/AiScoutingReport";
 import { useScoutingReport } from "@/hooks/useScoutingReport";
@@ -39,7 +40,8 @@ import { normalizeName, nameTeamKey, normalizeTeamForKey, getNameVariants } from
 import { useSeedDataMaps } from "@/hooks/useSeedDataMaps";
 import { useTransferPortalContext } from "@/hooks/useTransferPortalContext";
 import {
-  hitterDepthRoleMultiplier,
+  paForHitterDepthRole,
+  defaultHitterDepthRoleFromActualPa,
   type HitterDepthRole,
 } from "@/lib/depthRoles";
 
@@ -171,6 +173,7 @@ export default function PlayerProfile() {
   const { hasRole, effectiveTeamId } = useAuth();
   const isAdmin = hasRole("admin");
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
+  const { isOnList: isOnHighFollow, addPlayer: addToHighFollow, removePlayer: removeFromHighFollow } = useHighFollow();
   const { notes: coachNotesForExport } = useCoachNotes(id ?? null);
   const { conferenceStatsByKey } = useConferenceStats(2026);
   const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
@@ -537,6 +540,17 @@ export default function PlayerProfile() {
     const stored = regularPred?.dev_aggressiveness;
     setSessionDevAgg(Number.isFinite(Number(stored)) ? String(Number(stored)) : "0");
   }, [regularPred?.id, regularPred?.dev_aggressiveness]);
+  // Sync session depth role to the stored hitter_depth_role; fall back to
+  // auto-assignment from raw PA when no stored value (e.g. older rows pre-
+  // schema-migration, or sub-threshold players).
+  useEffect(() => {
+    const stored = (regularPred as any)?.hitter_depth_role as HitterDepthRole | null | undefined;
+    if (stored === "cornerstone" || stored === "everyday_starter" || stored === "platoon_starter" || stored === "utility" || stored === "bench") {
+      setDepthRole(stored);
+    } else {
+      setDepthRole(defaultHitterDepthRoleFromActualPa((player as any)?.pa ?? null));
+    }
+  }, [regularPred?.id, (regularPred as any)?.hitter_depth_role, (player as any)?.pa]);
   const { getOverride } = usePlayerOverrides();
   const playerOverride = id ? getOverride(id) : null;
   const effectivePosition = playerOverride?.position ?? player?.position ?? null;
@@ -771,11 +785,16 @@ export default function PlayerProfile() {
   // not a display fallback to paper over.
   const storedOWar = (regularPred as any)?.o_war as number | null | undefined;
   const storedMarketValue = (regularPred as any)?.market_value as number | null | undefined;
+  const storedHitterDepthRole = ((regularPred as any)?.hitter_depth_role as HitterDepthRole | null | undefined) ?? defaultHitterDepthRoleFromActualPa((player as any)?.pa ?? null);
   const historicalOWar = computeOWarFromWrcPlus(seedDerived?.wrcPlus ?? null, (player as any)?.pa ?? null);
   // Session-only depth role overlay scales the projected/displayed oWAR
-  // (and downstream market value) without touching the stored row.
-  const depthMultiplier = hitterDepthRoleMultiplier(depthRole);
-  const overlayScale = depthMultiplier * (devAggScale ?? 1);
+  // (and downstream market value) without touching the stored row. Math is
+  // PA-tier ratio: session_PA / stored_PA. oWAR + market_value are linear in
+  // PA so this gives the exact answer (not an approximation).
+  const sessionPa = paForHitterDepthRole(depthRole);
+  const storedPa = paForHitterDepthRole(storedHitterDepthRole);
+  const depthScale = storedPa > 0 ? sessionPa / storedPa : 1;
+  const overlayScale = depthScale * (devAggScale ?? 1);
   const projectedOWar = storedOWar != null ? storedOWar * overlayScale : null;
   const displayOWar = projectedOWar ?? (historicalOWar != null ? historicalOWar * overlayScale : null);
   const displayNilValuation = storedMarketValue != null ? storedMarketValue * overlayScale : null;
@@ -1025,6 +1044,7 @@ export default function PlayerProfile() {
               <Button
                 variant={isOnBoard(player.id) ? "default" : "outline"}
                 size="sm"
+                className="cursor-pointer"
                 onClick={() => {
                   if (isOnBoard(player.id)) {
                     removeFromBoard(player.id);
@@ -1035,6 +1055,21 @@ export default function PlayerProfile() {
               >
                 <Target className="mr-2 h-3.5 w-3.5" />
                 {isOnBoard(player.id) ? "On Board" : "Add to Target Board"}
+              </Button>
+              <Button
+                variant={isOnHighFollow(player.id) ? "default" : "outline"}
+                size="sm"
+                className="cursor-pointer"
+                onClick={() => {
+                  if (isOnHighFollow(player.id)) {
+                    removeFromHighFollow(player.id);
+                  } else {
+                    addToHighFollow({ playerId: player.id, playerType: "hitter" });
+                  }
+                }}
+              >
+                <Star className="mr-2 h-3.5 w-3.5" />
+                {isOnHighFollow(player.id) ? "On High Follow" : "Add to High Follow"}
               </Button>
               <Button
                 variant="outline"

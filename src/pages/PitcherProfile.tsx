@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Download, Target, TrendingUp } from "lucide-react";
+import { ArrowLeft, Download, Target, TrendingUp, Star } from "lucide-react";
 import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { supabase } from "@/integrations/supabase/client";
@@ -20,6 +20,7 @@ import { useParkFactors } from "@/hooks/useParkFactors";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
+import { useHighFollow } from "@/hooks/useHighFollow";
 import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
 import { AiScoutingReportBody } from "@/components/AiScoutingReport";
@@ -297,6 +298,7 @@ export default function PitcherProfile() {
   const isAdmin = hasRole("admin");
   const queryClient = useQueryClient();
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
+  const { isOnList: isOnHighFollow, addPlayer: addToHighFollow, removePlayer: removeFromHighFollow } = useHighFollow();
   const { notes: coachNotesForExport } = useCoachNotes(id ?? null);
 
   const updatePortalStatus = useMutation({
@@ -472,17 +474,22 @@ export default function PitcherProfile() {
   const combinedIp = (currentPitcherRow as any)?.combined_ip as number | null | undefined;
   const combinedSeasonsLabel = (currentPitcherRow as any)?.combined_seasons as string | null | undefined;
 
+  // Use the resolved player UUID when available, falling back to the URL id
+  // for direct UUID routes. Storage routes (`storage__Name__Team`) resolve the
+  // player via the player query above; this read must wait for that resolve
+  // and then query by the actual UUID, not the URL slug. Otherwise predictions
+  // never load and the profile shows "no stats" for legit storage-route hits.
+  const predictionLookupId: string | null = isDbRoute
+    ? (id ?? null)
+    : (typeof (player as any)?.id === "string" && isUuid((player as any).id) ? (player as any).id : null);
   const { data: predictions = [] } = useQuery({
-    queryKey: ["pitcher-profile-predictions", id],
-    enabled: !!id && isDbRoute,
+    queryKey: ["pitcher-profile-predictions", predictionLookupId],
+    enabled: !!predictionLookupId,
     queryFn: async () => {
-      // Season filter pins to PROJECTION_SEASON so the read picks the
-      // current projection-year row, not any historical row from prior years
-      // (which we now preserve as research history). See docs/stored-derived-values-plan.md.
       const { data, error } = await supabase
         .from("player_predictions")
         .select("*")
-        .eq("player_id", id!)
+        .eq("player_id", predictionLookupId!)
         .eq("season", PROJECTION_SEASON)
         .eq("status", "active");
       if (error) throw error;
@@ -1087,7 +1094,15 @@ export default function PitcherProfile() {
     return null;
   })();
   const supabaseRole = id ? getSupabaseRole(id) : null;
-  const initialProjectedRole = supabaseRole || storageProjectionOverride?.pitcher_role || derivedRole || "SM";
+  // Role priority: manual override → stored prediction role (written by
+  // precompute) → legacy localStorage override → derived from GS/G ratio →
+  // SM fallback. Adding the stored prediction role keeps the profile in
+  // sync with the precomputed pitcher_role so coaches don't have to toggle.
+  const storedPredictionRole = (() => {
+    const raw = (activePrediction as any)?.pitcher_role;
+    return raw === "SP" || raw === "RP" || raw === "SM" ? (raw as "SP" | "RP" | "SM") : null;
+  })();
+  const initialProjectedRole = supabaseRole || storedPredictionRole || storageProjectionOverride?.pitcher_role || derivedRole || "SM";
   const effectiveRoleDisplay = supabaseRole || derivedRole;
   // Class transition is now auto-derived from class_year in createPredictionsFromMaster,
   // so the stored row is the source of truth. No UI editor — read it from the
@@ -1572,6 +1587,7 @@ export default function PitcherProfile() {
               <Button
                 variant={isOnBoard(player.id) ? "default" : "outline"}
                 size="sm"
+                className="cursor-pointer"
                 onClick={() => {
                   if (isOnBoard(player.id)) {
                     removeFromBoard(player.id);
@@ -1582,6 +1598,21 @@ export default function PitcherProfile() {
               >
                 <Target className="mr-2 h-3.5 w-3.5" />
                 {isOnBoard(player.id) ? "On Board" : "Add to Target Board"}
+              </Button>
+              <Button
+                variant={isOnHighFollow(player.id) ? "default" : "outline"}
+                size="sm"
+                className="cursor-pointer"
+                onClick={() => {
+                  if (isOnHighFollow(player.id)) {
+                    removeFromHighFollow(player.id);
+                  } else {
+                    addToHighFollow({ playerId: player.id, playerType: "pitcher" });
+                  }
+                }}
+              >
+                <Star className="mr-2 h-3.5 w-3.5" />
+                {isOnHighFollow(player.id) ? "On High Follow" : "Add to High Follow"}
               </Button>
               <Button
                 variant="outline"

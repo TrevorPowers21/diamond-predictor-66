@@ -307,12 +307,15 @@ export const parseBuildPlayerMeta = (raw: string | null | undefined): {
     first_name: string; last_name: string; position: string | null;
     team: string | null; from_team: string | null; conference: string | null;
   } | null;
+  projectionTier: "developmental" | "role_player" | "contributor" | "immediate_impact" | null;
+  nilValueOverridden: boolean;
 } => {
   if (!raw) {
     return {
       notes: null, metrics: null, power: null, rosterStatus: null, depthRole: null,
       classTransition: null, devAggressiveness: null, classTransitionOverridden: false,
       devAggressivenessOverridden: false, transferSnapshot: null, localPlayer: null,
+      projectionTier: null, nilValueOverridden: false,
     };
   }
   try {
@@ -346,6 +349,9 @@ export const parseBuildPlayerMeta = (raw: string | null | undefined): {
               conference: obj.localPlayer.conference != null ? String(obj.localPlayer.conference) : null,
             }
           : null,
+        projectionTier: obj.projectionTier === "developmental" || obj.projectionTier === "role_player" || obj.projectionTier === "contributor" || obj.projectionTier === "immediate_impact"
+          ? obj.projectionTier : null,
+        nilValueOverridden: Boolean(obj.nilValueOverridden),
       };
     }
   } catch {
@@ -355,6 +361,7 @@ export const parseBuildPlayerMeta = (raw: string | null | undefined): {
     notes: raw, metrics: null, power: null, rosterStatus: null, depthRole: null,
     classTransition: null, devAggressiveness: null, classTransitionOverridden: false,
     devAggressivenessOverridden: false, transferSnapshot: null, localPlayer: null,
+    projectionTier: null, nilValueOverridden: false,
   };
 };
 
@@ -373,8 +380,10 @@ export const serializeBuildPlayerMeta = (
     first_name: string; last_name: string; position: string | null;
     team: string | null; from_team: string | null; conference: string | null;
   } | null | undefined,
+  projectionTier?: "developmental" | "role_player" | "contributor" | "immediate_impact" | null,
+  nilValueOverridden?: boolean,
 ): string | null => {
-  if (!notes && !metrics && !power && !rosterStatus && !depthRole && !classTransition && devAggressiveness == null && !transferSnapshot && !localPlayer) return null;
+  if (!notes && !metrics && !power && !rosterStatus && !depthRole && !classTransition && devAggressiveness == null && !transferSnapshot && !localPlayer && !projectionTier && !nilValueOverridden) return null;
   return JSON.stringify({
     __team_builder_metrics_v1: true,
     notes: notes ?? null,
@@ -388,5 +397,7 @@ export const serializeBuildPlayerMeta = (
     devAggressivenessOverridden: Boolean(devAggressivenessOverridden),
     transferSnapshot: transferSnapshot ?? null,
     localPlayer: localPlayer ?? null,
+    projectionTier: projectionTier ?? null,
+    nilValueOverridden: Boolean(nilValueOverridden),
   });
 };

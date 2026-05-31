@@ -181,6 +181,14 @@ function PlayerTableRow({
             From: {p.transfer_snapshot?.from_team || p.player?.from_team || p.player?.team || "—"} ({p.transfer_snapshot?.from_conference || p.player?.conference || "—"})
           </div>
         )}
+        {p.projection_tier && (
+          <div className="text-[10px] uppercase tracking-[0.08em] font-semibold text-[#D4AF37]/90 mt-0.5">
+            Freshman · {p.projection_tier === "developmental" ? "Developmental"
+              : p.projection_tier === "role_player" ? "Role Player"
+              : p.projection_tier === "contributor" ? "Contributor"
+              : "Immediate Impact"}
+          </div>
+        )}
       </TableCell>
 
       <TableCell>
@@ -561,8 +569,26 @@ function PlayerTableRow({
           type="text"
           inputMode="numeric"
           className="w-28 h-8 mx-auto text-center"
-          value={formatWithCommas(p.nil_value)}
-          onChange={(e) => updatePlayer(globalIdx, { nil_value: parseCommaNumber(e.target.value) })}
+          // When the override flag is on, show whatever was typed (incl. "0").
+          // formatWithCommas otherwise returns "" for 0, which hides the
+          // coach's explicit "pay this player $0" decision.
+          value={
+            p.nil_value_overridden
+              ? (Number.isFinite(Number(p.nil_value)) ? Number(p.nil_value).toLocaleString("en-US") : "")
+              : formatWithCommas(p.nil_value)
+          }
+          onChange={(e) => {
+            const raw = e.target.value.trim();
+            if (raw === "") {
+              // Empty input clears the override and falls back to projection.
+              updatePlayer(globalIdx, { nil_value: 0, nil_value_overridden: false });
+              return;
+            }
+            updatePlayer(globalIdx, {
+              nil_value: parseCommaNumber(raw),
+              nil_value_overridden: true,
+            });
+          }}
         />
       </TableCell>
 

@@ -46,6 +46,13 @@ export type BuildPlayer = {
   position_slot: string | null;
   depth_order: number;
   nil_value: number;
+  /**
+   * True when the coach has explicitly typed a value into the Actual Value input
+   * (including 0 — e.g. paying a bench player nothing to free up budget for the
+   * top of the roster). When false/undefined, the projected market_value is
+   * used instead. Persisted via serializeBuildPlayerMeta.
+   */
+  nil_value_overridden?: boolean;
   production_notes: string | null;
   roster_status?: "returner" | "leaving" | "target";
   depth_role?: "cornerstone" | "everyday_starter" | "platoon_starter" | "utility" | "bench" | "starter" | "weekend_starter" | "weekday_starter" | "swing_starter" | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever" | "low_impact_reliever" | "specialist_reliever";
@@ -53,6 +60,10 @@ export type BuildPlayer = {
   dev_aggressiveness?: number | null;
   class_transition_overridden?: boolean;
   dev_aggressiveness_overridden?: boolean;
+  // Coach-set projection tier for incoming freshman / no-stat additions.
+  // Doesn't drive WAR or other math — just a tag the coach can see on the
+  // roster row to ID expected role.
+  projection_tier?: "developmental" | "role_player" | "contributor" | "immediate_impact" | null;
   player?: {
     first_name: string;
     last_name: string;
