@@ -24,6 +24,8 @@ import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { useHighFollow } from "@/hooks/useHighFollow";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
+import { AiScoutingReportBody } from "@/components/AiScoutingReport";
+import { useScoutingReport } from "@/hooks/useScoutingReport";
 import CoachNotes from "@/components/CoachNotes";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
 import { generateCoachNotesPdf, generateReportPdf } from "@/lib/pdfGenerator";
@@ -237,6 +239,8 @@ export default function PlayerProfile() {
     },
     enabled: !!id,
   });
+
+  const { data: aiScoutingReport } = useScoutingReport(player?.id, "hitter");
 
   const { data: predictions = [] } = useQuery({
     queryKey: ["player-predictions", id, effectiveTeamId],
@@ -913,6 +917,7 @@ export default function PlayerProfile() {
                     const rp: ReportPlayer = {
                       id: player.id,
                       player_type: "hitter",
+                      ai_scouting_report: aiScoutingReport?.body ?? null,
                       name: `${player.first_name || ""} ${player.last_name || ""}`.trim(),
                       school: displayTeamCurrent || player.team,
                       position: effectivePosition,
@@ -1073,6 +1078,7 @@ export default function PlayerProfile() {
                   const rp: ReportPlayer = {
                     id: player.id,
                     player_type: "hitter",
+                    ai_scouting_report: aiScoutingReport?.body ?? null,
                     name: `${player.first_name || ""} ${player.last_name || ""}`.trim(),
                     school: displayTeamCurrent || player.team,
                     position: effectivePosition,
@@ -1657,7 +1663,11 @@ export default function PlayerProfile() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
-                    <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{report}</p>
+                    {aiScoutingReport?.body ? (
+                      <AiScoutingReportBody body={aiScoutingReport.body} generatedAt={aiScoutingReport.generated_at} />
+                    ) : (
+                      <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{report}</p>
+                    )}
                     {projectionSourceRow?.combined_used && (
                       <p className="mt-2 text-[10px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"} sample</p>
                     )}
