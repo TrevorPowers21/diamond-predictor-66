@@ -1464,11 +1464,17 @@ export default function PlayerProfile() {
                 <Card>
                   <CardContent className="pt-3 pb-2.5">
                     <div className="text-xs font-medium text-muted-foreground">2027 Team</div>
-                    <div className={`text-lg font-bold mt-1 ${(player as any).commit_school ? "" : "text-muted-foreground"}`}>{(player as any).commit_school || "TBD"}</div>
-                    {(player as any).commit_date && (
-                      <div className="text-xs text-muted-foreground">
-                        Committed {new Date((player as any).commit_date).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })}
-                      </div>
+                    {(player as any).commit_school ? (
+                      <>
+                        <div className="text-lg font-bold mt-1">{(player as any).commit_school}</div>
+                        {(player as any).commit_date && (
+                          <div className="text-xs text-muted-foreground">
+                            Committed {new Date((player as any).commit_date).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-lg font-bold mt-1 text-emerald-600">In Portal</div>
                     )}
                   </CardContent>
                 </Card>
