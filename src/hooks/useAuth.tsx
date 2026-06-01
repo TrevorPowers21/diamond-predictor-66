@@ -219,7 +219,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     clearImpersonation();
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      if (e instanceof Error && e.name !== "AbortError") throw e;
+    }
   };
 
   const hasRole = (role: AppRole) => {
