@@ -73,31 +73,28 @@ export default function Dashboard() {
     queryKey: ["overview-top-hitters", effectiveTeamId],
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
-      const all: any[] = [];
-      let from = 0;
-      const PAGE = 1000;
-      while (true) {
-        let q = supabase
-          .from("player_predictions")
-          .select(
-            "id, player_id, customer_team_id, model_type, variant, status, p_wrc_plus, p_avg, p_obp, p_slg, players!inner(first_name, last_name, team, from_team, conference, position, pa, transfer_portal, division)",
-          )
-          .eq("season", PROJECTION_SEASON)
-          .in("variant", ["regular", "precomputed"])
-          .in("status", ["active", "departed"])
-          .in("model_type", ["returner", "transfer"])
-          .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
-          .not("players.division", "eq", "NJCAA_D1")
-          .gte("players.pa", 75)
-          .not("p_wrc_plus", "is", null);
-        q = applyTeamScopeFilter(q as any, effectiveTeamId);
-        const { data, error } = await q.range(from, from + PAGE - 1);
-        if (error) throw error;
-        const rows = data || [];
-        all.push(...rows);
-        if (rows.length < PAGE) break;
-        from += PAGE;
-      }
+      // Pull the top 50 server-side, then dedup + slice top 5. 50 is plenty
+      // of headroom: each player has at most 2 rows (returner regular +
+      // team precomputed), so worst case dedup keeps 25 unique players.
+      let q = supabase
+        .from("player_predictions")
+        .select(
+          "id, player_id, customer_team_id, model_type, variant, status, p_wrc_plus, p_avg, p_obp, p_slg, players!inner(first_name, last_name, team, from_team, conference, position, pa, transfer_portal, division)",
+        )
+        .eq("season", PROJECTION_SEASON)
+        .in("variant", ["regular", "precomputed"])
+        .in("status", ["active", "departed"])
+        .in("model_type", ["returner", "transfer"])
+        .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
+        .not("players.division", "eq", "NJCAA_D1")
+        .gte("players.pa", 75)
+        .not("p_wrc_plus", "is", null)
+        .order("p_wrc_plus", { ascending: false })
+        .limit(50);
+      q = applyTeamScopeFilter(q as any, effectiveTeamId);
+      const { data, error } = await q;
+      if (error) throw error;
+      const all = data || [];
       // Per player: prefer team-scoped precomputed row, else global regular row.
       const deduped = dedupePreferredPerPlayer(all, effectiveTeamId);
       const rows: HitterRow[] = deduped
@@ -129,31 +126,25 @@ export default function Dashboard() {
       // Mirror topHitters: read PROJECTIONS from player_predictions, not raw
       // 2026 stats from Pitching Master. Sort by p_rv_plus (pitcher composite),
       // prefer team-scoped precomputed row per player.
-      const all: any[] = [];
-      let from = 0;
-      const PAGE = 1000;
-      while (true) {
-        let q = supabase
-          .from("player_predictions")
-          .select(
-            "id, player_id, customer_team_id, model_type, variant, status, p_rv_plus, p_era, p_fip, p_k9, players!inner(first_name, last_name, team, from_team, conference, position, ip, transfer_portal, division)",
-          )
-          .eq("season", PROJECTION_SEASON)
-          .in("variant", ["regular", "precomputed"])
-          .in("status", ["active", "departed"])
-          .in("model_type", ["returner", "transfer"])
-          .in("players.position", ["SP", "RP", "CL", "P", "LHP", "RHP"])
-          .not("players.division", "eq", "NJCAA_D1")
-          .gte("players.ip", 20)
-          .not("p_rv_plus", "is", null);
-        q = applyTeamScopeFilter(q as any, effectiveTeamId);
-        const { data, error } = await q.range(from, from + PAGE - 1);
-        if (error) throw error;
-        const rows = data || [];
-        all.push(...rows);
-        if (rows.length < PAGE) break;
-        from += PAGE;
-      }
+      let q = supabase
+        .from("player_predictions")
+        .select(
+          "id, player_id, customer_team_id, model_type, variant, status, p_rv_plus, p_era, p_fip, p_k9, players!inner(first_name, last_name, team, from_team, conference, position, ip, transfer_portal, division)",
+        )
+        .eq("season", PROJECTION_SEASON)
+        .in("variant", ["regular", "precomputed"])
+        .in("status", ["active", "departed"])
+        .in("model_type", ["returner", "transfer"])
+        .in("players.position", ["SP", "RP", "CL", "P", "LHP", "RHP"])
+        .not("players.division", "eq", "NJCAA_D1")
+        .gte("players.ip", 20)
+        .not("p_rv_plus", "is", null)
+        .order("p_rv_plus", { ascending: false })
+        .limit(50);
+      q = applyTeamScopeFilter(q as any, effectiveTeamId);
+      const { data, error } = await q;
+      if (error) throw error;
+      const all = data || [];
       const deduped = dedupePreferredPerPlayer(all, effectiveTeamId);
       const rows: PitcherRow[] = deduped
         .map((r) => ({
@@ -272,13 +263,23 @@ export default function Dashboard() {
       // 3-day floor — anything entered before this drops out of the feed.
       const floorDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
+      // Minimum sample to qualify for the feed — filters out 1-IP / 1-PA noise
+      // from the portal pull while still surfacing real early-season prospects.
+      const MIN_HITTER_PA = 25;
+      const MIN_PITCHER_IP = 10;
+      const pitcherPositions = "SP,RP,CL,P,LHP,RHP";
+      const minSampleFilter =
+        `and(position.in.(${pitcherPositions}),ip.gte.${MIN_PITCHER_IP}),` +
+        `and(position.not.in.(${pitcherPositions}),pa.gte.${MIN_HITTER_PA})`;
+
       const { data: playerRows } = await (supabase as any)
         .from("players")
         .select("id, first_name, last_name, team, from_team, position, portal_status, portal_entry_date, commit_school, commit_date, updated_at")
         .in("portal_status", ["IN PORTAL", "COMMITTED"])
         .gte("portal_entry_date", floorDate)
+        .or(minSampleFilter)
         .order("portal_entry_date", { ascending: false, nullsFirst: false })
-        .limit(400);
+        .limit(150);
       const playerIds = (playerRows || []).map((p: any) => p.id);
       const { data: predRows } = playerIds.length === 0
         ? { data: [] }

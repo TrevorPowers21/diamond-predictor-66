@@ -1213,12 +1213,22 @@ export default function PitcherProfile() {
       : devAggUnchanged
         ? rolePRvPlus
         : 100 + ((rolePRvPlus - 100) * (1 + devAggDelta));
-    // Compare the actual depth role against the derived default, not the
-    // bucketed SP/RP/SM that pitcherRoleFromDepthRole returns. The bucket
-    // collapses weekend_starter + weekday_starter both to SP (and 5 RP
-    // variants all to RP), so the old check silently dropped depth changes
-    // within a bucket — market value never recomputed.
-    const storedDefaultDepth = depthRole === initialDepthRole;
+    // Use stored values only when the chosen depth's projected IP matches
+    // the IP the stored value was computed at. The precompute uses a single
+    // baseline IP per role bucket (pwar_ip_sp / pwar_ip_rp / pwar_ip_sm).
+    // If the depth's IP differs (e.g. specialist_reliever's 6 IP vs RP's
+    // ~33 IP baseline), the stored market value is for a different role
+    // size and must be recomputed. This catches both user depth changes
+    // AND auto-assigned defaults (e.g. 1-IP pitchers auto-defaulting to
+    // specialist_reliever despite stored being computed at RP baseline).
+    const storedBaselineIp =
+      storedRole === "SP" ? eq.pwar_ip_sp
+      : storedRole === "SM" ? eq.pwar_ip_sm
+      : eq.pwar_ip_rp;
+    const depthIp = overlayIp;
+    const storedDefaultDepth = stored != null
+      && storedBaselineIp != null
+      && Math.abs(depthIp - storedBaselineIp) < 1;
     const noOverlay = storedDefaultDepth && devAggUnchanged && !roleChanged;
     const overlayPWar = noOverlay
       ? (stored?.p_war ?? null)
@@ -1248,7 +1258,6 @@ export default function PitcherProfile() {
   }, [
     projectedDevAggressiveness,
     depthRole,
-    initialDepthRole,
     displayConference,
     derivedRole,
     projectedRole,
