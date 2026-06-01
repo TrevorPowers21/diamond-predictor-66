@@ -21,8 +21,17 @@ export function useTransferPortalContext(
   predictions: Prediction[],
   effectiveTeamId: string | null,
 ) {
+  // A player is "in the portal" as soon as their players.transfer_portal flag
+  // is set OR the dashboard portal feed picks them up via portal_status. The
+  // old check ALSO required a transfer-model prediction, but the precompute
+  // doesn't fire instantly for new portal entries — so freshly imported
+  // portal players had transfer_portal=true but no transfer prediction yet,
+  // and the dual-team cards never rendered.
+  const portalStatus = (player as any)?.portal_status as string | null | undefined;
   const isTransferPortal = !!(
-    player?.transfer_portal && predictions.some((p) => p.model_type === "transfer")
+    player?.transfer_portal ||
+    portalStatus === "IN PORTAL" ||
+    portalStatus === "COMMITTED"
   );
   const isReturner = predictions.some((p) => p.model_type === "returner");
 
