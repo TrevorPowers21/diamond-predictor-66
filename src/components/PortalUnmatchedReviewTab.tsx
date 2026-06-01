@@ -31,6 +31,9 @@ interface UnmatchedRow {
   reason: Reason;
   candidate_player_ids: string[] | null;
   ingested_at: string;
+  gp: number | null;
+  ab: number | null;
+  ip: number | null;
 }
 
 interface CandidatePlayer {
@@ -136,10 +139,15 @@ export function PortalUnmatchedReviewTab() {
     onError: (e: any) => toast.error(`Failed: ${e.message ?? e}`),
   });
 
+  // Sort by sample size first — IP for pitchers, AB for hitters. Bigger sample = more
+  // useful to triage. Pitchers identified by position regex.
+  const isPitcherPos = (p: string | null) => !!p && /^(SP|RP|CL|P|LHP|RHP)$/i.test(p);
+  const sampleVal = (r: UnmatchedRow) => (isPitcherPos(r.position) ? r.ip : r.ab) ?? -1;
+  const sortBySample = (a: UnmatchedRow, b: UnmatchedRow) => sampleVal(b) - sampleVal(a);
   const grouped = {
-    ambiguous: rows.filter((r) => r.reason === "ambiguous"),
-    no_match:  rows.filter((r) => r.reason === "no_match"),
-    no_stats:  rows.filter((r) => r.reason === "no_stats"),
+    ambiguous: rows.filter((r) => r.reason === "ambiguous").sort(sortBySample),
+    no_match:  rows.filter((r) => r.reason === "no_match").sort(sortBySample),
+    no_stats:  rows.filter((r) => r.reason === "no_stats").sort(sortBySample),
   };
   const active = grouped[activeReason];
 
@@ -200,6 +208,13 @@ export function PortalUnmatchedReviewTab() {
                   <div className="flex items-center gap-3 flex-wrap text-[12px] text-muted-foreground">
                     {row.current_school && <span>{row.current_school}</span>}
                     {row.conference && <span>· {row.conference}</span>}
+                    {(() => {
+                      const isPitcher = !!row.position && /^(SP|RP|CL|P|LHP|RHP)$/i.test(row.position);
+                      const sample = isPitcher ? row.ip : row.ab;
+                      const unit = isPitcher ? "IP" : "AB";
+                      if (sample == null) return null;
+                      return <span className="font-mono tabular-nums">· {sample} {unit}</span>;
+                    })()}
                     {row.portal_entry_date && <span>· entered {row.portal_entry_date}</span>}
                   </div>
                   {(row.contact_cell || row.contact_email || row.va_roster_link) && (

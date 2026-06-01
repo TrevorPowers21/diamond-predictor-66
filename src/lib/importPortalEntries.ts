@@ -54,6 +54,9 @@ interface PortalRow {
   rosterLink: string | null;
   /** True if GP/AB/IP are all empty/zero — player on roster but no stats accumulated. */
   hasNoStats: boolean;
+  gp: number | null;
+  ab: number | null;
+  ip: number | null;
 }
 
 function nameKey(s: string): string {
@@ -183,6 +186,9 @@ function parseRows(csvText: string): PortalRow[] {
       gpa: parseGpa(c[cols.gpa]),
       rosterLink: (c[cols.rosterLink] ?? "").trim() || null,
       hasNoStats: isBlankOrZero(c[cols.gp]) && isBlankOrZero(c[cols.ab]) && isBlankOrZero(c[cols.ip]),
+      gp: (() => { const n = Number((c[cols.gp] ?? "").trim()); return Number.isFinite(n) && n > 0 ? n : null; })(),
+      ab: (() => { const n = Number((c[cols.ab] ?? "").trim()); return Number.isFinite(n) && n > 0 ? n : null; })(),
+      ip: (() => { const n = Number((c[cols.ip] ?? "").trim()); return Number.isFinite(n) && n > 0 ? n : null; })(),
     });
   }
   return out;
@@ -563,6 +569,9 @@ async function insertUnmatched(row: PortalRow, reason: "ambiguous" | "no_match" 
       va_roster_link: row.rosterLink,
       reason,
       candidate_player_ids: candidateIds.length > 0 ? candidateIds : null,
+      gp: row.gp,
+      ab: row.ab,
+      ip: row.ip,
     });
   if (error) throw new Error(`Insert unmatched: ${error.message}`);
 }
