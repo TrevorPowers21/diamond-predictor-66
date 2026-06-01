@@ -192,7 +192,7 @@ const canShowPitchingMarketValue = (team: string | null | undefined, conference:
 
 // pitcher PVF lookup (Position-Value Factor) — RP gets reliever weight,
 // SM (swingman) gets weekday-SP weight, SP gets weekend-SP weight
-const getPitchingPvfForRole = (
+export const getPitchingPvfForRole = (
   role: ProjectedPitcherRole,
   eq: PitchingEquationWeights,
 ) => (role === "RP" ? eq.market_pvf_reliever : role === "SM" ? eq.market_pvf_weekday_sp : eq.market_pvf_weekend_sp);

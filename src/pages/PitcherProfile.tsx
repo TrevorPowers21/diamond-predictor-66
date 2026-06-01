@@ -43,6 +43,7 @@ import {
   computePitcherMarketValue,
   pitcherExpectedIp,
   pitcherRoleFromDepthRole,
+  getPitchingPvfForRole,
   type PitcherDepthRole,
 } from "@/lib/depthRoles";
 import { defaultPitcherDepthRoleFromIp } from "@/pages/team-builder/helpers";
@@ -1213,21 +1214,47 @@ export default function PitcherProfile() {
       : devAggUnchanged
         ? rolePRvPlus
         : 100 + ((rolePRvPlus - 100) * (1 + devAggDelta));
-    // Compare the actual depth role against the derived default, not the
-    // bucketed SP/RP/SM that pitcherRoleFromDepthRole returns. The bucket
-    // collapses weekend_starter + weekday_starter both to SP (and 5 RP
-    // variants all to RP), so the old check silently dropped depth changes
-    // within a bucket — market value never recomputed.
-    const storedDefaultDepth = depthRole === initialDepthRole;
+    // Use stored values only when the chosen depth's projected IP matches
+    // the IP the stored value was computed at. The precompute uses a single
+    // baseline IP per role bucket (pwar_ip_sp / pwar_ip_rp / pwar_ip_sm).
+    // If the depth's IP differs (e.g. specialist_reliever's 6 IP vs RP's
+    // ~33 IP baseline), the stored market value is for a different role
+    // size and must be recomputed. This catches both user depth changes
+    // AND auto-assigned defaults (e.g. 1-IP pitchers auto-defaulting to
+    // specialist_reliever despite stored being computed at RP baseline).
+    const storedBaselineIp =
+      storedRole === "SP" ? eq.pwar_ip_sp
+      : storedRole === "SM" ? eq.pwar_ip_sm
+      : eq.pwar_ip_rp;
+    const depthIp = overlayIp;
+    const storedDefaultDepth = stored != null
+      && storedBaselineIp != null
+      && Math.abs(depthIp - storedBaselineIp) < 1;
     const noOverlay = storedDefaultDepth && devAggUnchanged && !roleChanged;
     const overlayPWar = noOverlay
       ? (stored?.p_war ?? null)
       : computePitcherWar(overlayPRvPlus, overlayIp, eq);
     const teamForMarket = displayTeam || null;
     const conferenceForMarket = displayConference === "—" ? null : displayConference;
+    // When recomputing live (depth or dev_agg changed) BUT stored exists,
+    // scale the stored market value by the pWAR ratio (and PVF ratio if the
+    // role bucket changed). This preserves the customer team's conference
+    // tier baked into stored.market_value — otherwise we'd be mixing the
+    // tier the precompute used with the tier displayConference resolves to,
+    // which produces nonsense when stored is precomputed for one team and
+    // the profile renders at the player's current conference.
+    const newRoleBucket = pitcherRoleFromDepthRole(depthRole);
+    const storedRoleBucket = (storedRole as "SP" | "RP" | "SM" | null) ?? newRoleBucket;
     const overlayMarketValue = noOverlay
       ? (stored?.market_value ?? null)
-      : computePitcherMarketValue(overlayPWar, { conference: conferenceForMarket, role: pitcherRoleFromDepthRole(depthRole), team: teamForMarket }, eq);
+      : stored?.market_value != null && stored?.p_war != null && stored.p_war > 0 && overlayPWar != null && Number.isFinite(overlayPWar)
+        ? (() => {
+            const pvfStored = getPitchingPvfForRole(storedRoleBucket, eq);
+            const pvfNew = getPitchingPvfForRole(newRoleBucket, eq);
+            const pvfRatio = pvfStored > 0 ? pvfNew / pvfStored : 1;
+            return stored.market_value * (overlayPWar / stored.p_war) * pvfRatio;
+          })()
+        : computePitcherMarketValue(overlayPWar, { conference: conferenceForMarket, role: newRoleBucket, team: teamForMarket }, eq);
     const scaleLow = (v: number | null | undefined) =>
       v == null ? null : devAggUnchanged ? v : v * (1 - devAggDelta);
     const scaleHigh = (v: number | null | undefined) =>
@@ -1248,7 +1275,6 @@ export default function PitcherProfile() {
   }, [
     projectedDevAggressiveness,
     depthRole,
-    initialDepthRole,
     displayConference,
     derivedRole,
     projectedRole,
