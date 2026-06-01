@@ -33,10 +33,11 @@ interface PortalPlayerRow {
   commit_date: string | null;
   transfer_portal: boolean | null;
   source_player_id: string | null;
+  portal_manual_override: boolean | null;
 }
 
 const PORTAL_SELECT =
-  "id, first_name, last_name, position, team, conference, portal_status, portal_entry_date, commit_school, commit_date, transfer_portal, source_player_id";
+  "id, first_name, last_name, position, team, conference, portal_status, portal_entry_date, commit_school, commit_date, transfer_portal, source_player_id, portal_manual_override";
 
 function formatDate(d: string | null | undefined): string {
   if (!d) return "—";
@@ -106,14 +107,14 @@ export default function PortalOverrideTab() {
         portal_entry_date: fields.portal_entry_date,
         commit_school: fields.commit_school,
         commit_date: fields.commit_date,
+        portal_manual_override: true,
       } as any)
       .eq("id", playerId);
     if (error) {
       toast.error(`Save failed: ${error.message}`);
       throw error;
     }
-    toast.success("Portal status updated");
-    // Patch in place so the badge reflects new state immediately
+    toast.success("Portal status updated (manual override held)");
     const patch = (rows: PortalPlayerRow[]) =>
       rows.map((r) =>
         r.id === playerId
@@ -124,6 +125,7 @@ export default function PortalOverrideTab() {
               commit_school: fields.commit_school,
               commit_date: fields.commit_date,
               transfer_portal: fields.portal_status === "IN PORTAL",
+              portal_manual_override: true,
             }
           : r,
       );
@@ -131,6 +133,22 @@ export default function PortalOverrideTab() {
     setRecent(patch);
     queryClient.invalidateQueries({ queryKey: ["target-board"] });
     queryClient.invalidateQueries({ queryKey: ["player-profile", playerId] });
+  };
+
+  const clearOverride = async (playerId: string) => {
+    const { error } = await supabase
+      .from("players")
+      .update({ portal_manual_override: false } as any)
+      .eq("id", playerId);
+    if (error) {
+      toast.error(`Clear failed: ${error.message}`);
+      return;
+    }
+    toast.success("Manual override cleared — VA imports will manage this player");
+    const patch = (rows: PortalPlayerRow[]) =>
+      rows.map((r) => (r.id === playerId ? { ...r, portal_manual_override: false } : r));
+    setResults(patch);
+    setRecent(patch);
   };
 
   const renderRow = (p: PortalPlayerRow) => (
@@ -144,7 +162,19 @@ export default function PortalOverrideTab() {
       <TableCell className="text-xs">{p.team || "—"}</TableCell>
       <TableCell className="text-xs text-muted-foreground">{p.position || "—"}</TableCell>
       <TableCell>
-        <PortalStatusEditor player={p} onSave={(f) => saveFields(p.id, f)} />
+        <div className="flex items-center gap-1.5">
+          <PortalStatusEditor player={p} onSave={(f) => saveFields(p.id, f)} />
+          {p.portal_manual_override && (
+            <button
+              type="button"
+              onClick={() => clearOverride(p.id)}
+              title="Clear manual override — let VA imports manage this player again"
+              className="text-[9px] uppercase tracking-wider text-muted-foreground hover:text-[#D4AF37] underline-offset-2 hover:underline cursor-pointer"
+            >
+              held
+            </button>
+          )}
+        </div>
       </TableCell>
       <TableCell className="text-xs">{formatDate(p.portal_entry_date)}</TableCell>
       <TableCell className="text-xs">
@@ -168,10 +198,11 @@ export default function PortalOverrideTab() {
           Portal Override
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          Set portal status, entry date, and commit destination for any player. Writes go to{" "}
-          <code className="text-[10px]">players.portal_status</code> and keep{" "}
-          <code className="text-[10px]">transfer_portal</code> in sync so the Dashboard portal feed
-          and Transfer Portal simulator both reflect the change.
+          Set portal status, entry date, and commit destination for any player. Saves set a{" "}
+          <code className="text-[10px]">portal_manual_override</code> flag — the next VA import
+          preserves your status edits but still fills in fresh contact / GPA / aid data. Click{" "}
+          <span className="text-[10px] uppercase tracking-wider">held</span> next to the badge to
+          release a player back to VA control.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">

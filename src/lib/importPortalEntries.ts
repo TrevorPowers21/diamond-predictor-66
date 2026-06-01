@@ -28,6 +28,9 @@ export interface PortalImportResult {
    *  (most-recent passed Jan 15 / Sep 15). VA exports keep historical entries
    *  visible for ranking purposes — we don't want to re-tag those as active. */
   staleSkipped: number;
+  /** Matched rows where players.portal_manual_override = true. Status/dates
+   *  are preserved from the manual edit; bio + contact fields still update. */
+  manualOverrideHeld: number;
   errors: string[];
 }
 
@@ -193,6 +196,7 @@ type PlayerLite = {
   position: string | null;
   class_year: string | null;
   division: string;
+  portal_manual_override: boolean | null;
 };
 
 async function fetchD1Players(): Promise<PlayerLite[]> {
@@ -202,7 +206,7 @@ async function fetchD1Players(): Promise<PlayerLite[]> {
   while (true) {
     const { data, error } = await (supabase as any)
       .from("players")
-      .select("id, first_name, last_name, team, position, class_year, division")
+      .select("id, first_name, last_name, team, position, class_year, division, portal_manual_override")
       .eq("division", "D1")
       .range(from, from + PAGE - 1);
     if (error) throw new Error(`Fetch players: ${error.message}`);
@@ -331,7 +335,7 @@ export async function importPortalEntriesCsv(
   mode: PortalImportMode = "entries",
 ): Promise<PortalImportResult> {
   const result: PortalImportResult = {
-    totalRows: 0, d1Rows: 0, matched: 0, committed: 0, unmatched: 0, withdrawn: 0, arrived: 0, staleSkipped: 0, errors: [],
+    totalRows: 0, d1Rows: 0, matched: 0, committed: 0, unmatched: 0, withdrawn: 0, arrived: 0, staleSkipped: 0, manualOverrideHeld: 0, errors: [],
   };
 
   // Stale-row cutoff: skip any CSV row whose portal_entry_date predates the
@@ -404,16 +408,26 @@ export async function importPortalEntriesCsv(
       const isWithdrawn = mode === "withdrawals";
       const status = isWithdrawn ? "WITHDRAWN" : isCommitted ? "COMMITTED" : "IN PORTAL";
 
+      // Manual-override hold: if an admin has hand-set this player's portal
+      // status, preserve those columns. Bio + contact fields from VA still
+      // flow in so cell/email/GPA/aid/roster link stay fresh.
+      const holdManual = player.portal_manual_override === true;
+
       const payload: Record<string, unknown> = {
-        portal_status: status,
-        transfer_portal: !isWithdrawn,
-        portal_entry_date: row.portalEntryDate,
         portal_last_seen_at: nowIso,
+        ...(holdManual ? {} : {
+          portal_status: status,
+          transfer_portal: !isWithdrawn,
+          portal_entry_date: row.portalEntryDate,
+        }),
         // Don't clobber commit info for withdrawal rows — leave whatever was
-        // there. For entries + commits, write the row's commit details.
+        // there. For entries + commits, write the row's commit details (unless
+        // manual override holds them).
         ...(isWithdrawn ? {} : {
-          commit_school: row.commitSchool,
-          commit_date: row.commitDate,
+          ...(holdManual ? {} : {
+            commit_school: row.commitSchool,
+            commit_date: row.commitDate,
+          }),
           athletic_aid: row.athleticAid,
           contact_cell: row.contactCell,
           contact_email: row.contactEmail,
@@ -437,8 +451,9 @@ export async function importPortalEntriesCsv(
 
       seenPlayerIds.add(player.id);
       result.matched++;
-      if (isCommitted) result.committed++;
-      if (isWithdrawn) result.withdrawn++;
+      if (holdManual) result.manualOverrideHeld++;
+      if (isCommitted && !holdManual) result.committed++;
+      if (isWithdrawn && !holdManual) result.withdrawn++;
     } catch (e) {
       result.errors.push(`${row.firstName} ${row.lastName}: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -507,7 +522,8 @@ async function resetArrivedCommittedPlayers(result: PortalImportResult): Promise
     .select("id, portal_entry_date")
     .in("portal_status", ["IN PORTAL", "COMMITTED"])
     .not("portal_entry_date", "is", null)
-    .lt("portal_entry_date", cutoff);
+    .lt("portal_entry_date", cutoff)
+    .or("portal_manual_override.is.null,portal_manual_override.eq.false");
   if (error || !data || data.length === 0) return;
   const staleIds = (data as Array<{ id: string }>).map((p) => p.id);
   const { error: updErr } = await (supabase as any)
