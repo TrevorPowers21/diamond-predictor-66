@@ -169,15 +169,22 @@ async function main(): Promise<void> {
 
   if (args.prod) {
     // Production confirmation guard: explicit typed phrase, --yes does NOT bypass.
-    const url = process.env.SUPABASE_URL || "(unset)";
-    console.log("");
-    console.log("⚠️  PRODUCTION MODE — this will write to your live Supabase.");
-    console.log(`   Target URL: ${url}`);
-    console.log("");
-    const ok = await confirmExactPhrase(`Type "${PROD_CONFIRM_PHRASE}" to proceed (anything else aborts): `, PROD_CONFIRM_PHRASE);
-    if (!ok) {
-      console.log("Aborted — production write not confirmed.");
-      process.exit(0);
+    // Unattended runs (launchd / cron) skip the prompt ONLY when the env var
+    // is set to the expected token — keeps a normal shell from accidentally
+    // bypassing it via `--yes`.
+    if (process.env.RSTR_AUTOMATION_TOKEN === PROD_CONFIRM_PHRASE) {
+      console.log("Unattended prod run (RSTR_AUTOMATION_TOKEN matched).");
+    } else {
+      const url = process.env.SUPABASE_URL || "(unset)";
+      console.log("");
+      console.log("⚠️  PRODUCTION MODE — this will write to your live Supabase.");
+      console.log(`   Target URL: ${url}`);
+      console.log("");
+      const ok = await confirmExactPhrase(`Type "${PROD_CONFIRM_PHRASE}" to proceed (anything else aborts): `, PROD_CONFIRM_PHRASE);
+      if (!ok) {
+        console.log("Aborted — production write not confirmed.");
+        process.exit(0);
+      }
     }
   } else if (!args.yes) {
     const ok = await confirm("Proceed? [y/N] ");
