@@ -1277,7 +1277,7 @@ export default function ReturningPlayers() {
         setPortalFilters(new Set(parsed.portalFilters.filter((v) => typeof v === "string")));
       }
       if (Number.isFinite(parsed.page) && Number(parsed.page) >= 1) setPage(Number(parsed.page));
-      if (Number.isFinite(parsed.pageSize) && Number(parsed.pageSize) > 0) setPageSize(Number(parsed.pageSize));
+      if (Number.isFinite(parsed.pageSize) && Number(parsed.pageSize) > 0) setPageSize(Math.min(Number(parsed.pageSize), 100));
       if (parsed.sortKey) setSortKey(parsed.sortKey);
       if (parsed.sortDir) setSortDir(parsed.sortDir);
       if (typeof parsed.showMissingOnly === "boolean") setShowMissingOnly(parsed.showMissingOnly);
@@ -2260,7 +2260,8 @@ export default function ReturningPlayers() {
       }
       return map;
     },
-    staleTime: 30 * 60 * 1000,
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   // Fallback: pull class_year + is_twp directly from `players` so pitchers
@@ -2294,7 +2295,8 @@ export default function ReturningPlayers() {
       }
       return map;
     },
-    staleTime: 30 * 60 * 1000,
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const pitchingRows = useMemo<PitchingDashboardRow[]>(() => {

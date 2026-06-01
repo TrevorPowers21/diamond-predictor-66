@@ -106,8 +106,12 @@ export default function HighFollowList() {
   const { data: hitterRows = [] } = useQuery({
     queryKey: ["hf-hitter-master", sourceIds],
     enabled: sourceIds.length > 0,
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
-      const { data } = await supabase.from("Hitter Master").select("*").in("source_player_id", sourceIds).eq("Season", CURRENT_SEASON);
+      const { data } = await supabase.from("Hitter Master")
+        .select("source_player_id, playerFullName, Team, Pos, BatHand, ThrowHand, AVG, OBP, SLG, HR, BB, K, PA, ab, Season")
+        .in("source_player_id", sourceIds).eq("Season", CURRENT_SEASON);
       return data || [];
     },
   });
@@ -115,8 +119,12 @@ export default function HighFollowList() {
   const { data: pitcherRows = [] } = useQuery({
     queryKey: ["hf-pitcher-master", sourceIds],
     enabled: sourceIds.length > 0,
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
-      const { data } = await supabase.from("Pitching Master").select("*").in("source_player_id", sourceIds).eq("Season", CURRENT_SEASON);
+      const { data } = await supabase.from("Pitching Master")
+        .select("source_player_id, playerFullName, Team, Pos, ERA, FIP, WHIP, K9, BB9, IP, HR9, Season")
+        .in("source_player_id", sourceIds).eq("Season", CURRENT_SEASON);
       return data || [];
     },
   });
@@ -124,11 +132,14 @@ export default function HighFollowList() {
   const { data: predictions = [] } = useQuery({
     queryKey: ["hf-predictions", playerIds, effectiveTeamId],
     enabled: playerIds.length > 0,
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
-      let q = supabase.from("player_predictions").select("*").in("player_id", playerIds).eq("season", PROJECTION_SEASON).eq("status", "active");
+      let q = supabase.from("player_predictions")
+        .select("id, player_id, customer_team_id, season, status, p_avg, p_obp, p_slg, p_iso, p_wrc_plus, p_hr, p_bb, p_k, pa, owar, market_value, dev_aggressiveness, depth_role, type")
+        .in("player_id", playerIds).eq("season", PROJECTION_SEASON).eq("status", "active");
       q = applyTeamScopeFilter(q as any, effectiveTeamId);
       const { data } = await q;
-      // Prefer team-scoped precomputed row per player, fall back to global regular.
       return dedupePreferredPerPlayer(data || [], effectiveTeamId);
     },
   });

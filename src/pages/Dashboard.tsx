@@ -72,6 +72,7 @@ export default function Dashboard() {
   const { data: topHitters = [] } = useQuery({
     queryKey: ["overview-top-hitters", effectiveTeamId],
     staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       // Pull the top 50 server-side, then dedup + slice top 5. 50 is plenty
       // of headroom: each player has at most 2 rows (returner regular +
@@ -122,6 +123,7 @@ export default function Dashboard() {
   const { data: topPitchers = [] } = useQuery({
     queryKey: ["overview-top-pitchers", effectiveTeamId],
     staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       // Mirror topHitters: read PROJECTIONS from player_predictions, not raw
       // 2026 stats from Pitching Master. Sort by p_rv_plus (pitcher composite),
@@ -172,6 +174,7 @@ export default function Dashboard() {
   const { data: briefingStats } = useQuery({
     queryKey: ["overview-briefing-stats", schoolName ?? "", schoolFullName ?? ""],
     staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       // "Committed" tile counts commits TO the user's school only — not every
       // commit globally. commit_school strings come from Verified Athletics and
@@ -259,6 +262,7 @@ export default function Dashboard() {
   const { data: portalActivity = [] } = useQuery({
     queryKey: ["overview-portal-activity-v4", watchedIdsKey, effectiveTeamId],
     staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       // 3-day floor — anything entered before this drops out of the feed.
       const floorDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);

@@ -29,7 +29,8 @@ import { AiScoutingReportBody } from "@/components/AiScoutingReport";
 import { useScoutingReport } from "@/hooks/useScoutingReport";
 import CoachNotes from "@/components/CoachNotes";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
-import { generateCoachNotesPdf, generateReportPdf } from "@/lib/pdfGenerator";
+// pdfGenerator is loaded on demand — jspdf (350KB) excluded from initial bundle
+const getPdfGenerator = () => import("@/lib/pdfGenerator");
 import { assessHitterRisk } from "@/lib/playerRisk";
 import { generateHitterReport } from "@/lib/scoutingReportGenerator";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
@@ -45,6 +46,7 @@ import {
   defaultHitterDepthRoleFromActualPa,
   type HitterDepthRole,
 } from "@/lib/depthRoles";
+import { useNilValuation } from "@/hooks/useNilValuation";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -389,21 +391,7 @@ export default function PlayerProfile() {
     return hit || name;
   };
 
-  const { data: nilValuation } = useQuery({
-    queryKey: ["player-nil", id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("nil_valuations")
-        .select("*")
-        .eq("player_id", id!)
-        .order("season", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!id,
-  });
+  const { data: nilValuation } = useNilValuation(id);
 
   // Admin-only: fetch internal power ratings
   const { data: internalRatings } = useQuery({
@@ -923,7 +911,7 @@ export default function PlayerProfile() {
               <CoachNotes
                 playerId={player!.id}
                 playerName={`${player.first_name} ${player.last_name}`}
-                onExportPdf={(notes, format, mode = "download") => {
+                onExportPdf={async (notes, format, mode = "download") => {
                   if (format === "full") {
                     // Build same rich rp as Export Report button, plus coach notes
                     const rp: ReportPlayer = {
@@ -1016,6 +1004,7 @@ export default function PlayerProfile() {
                     rp.risk_trajectory = riskResult.trajectory;
                     rp.risk_summary = riskResult.summary;
                     rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
+                    const { generateReportPdf } = await getPdfGenerator();
                     const url = generateReportPdf([rp]);
                     if (mode === "preview") {
                       window.open(url, "_blank");
@@ -1041,6 +1030,7 @@ export default function PlayerProfile() {
                       power_rating_plus: (projectionSourceRow as any)?.overall_power_rating ?? seedPowerDerived?.overallPlus,
                       coach_notes: notes,
                     };
+                    const { generateCoachNotesPdf } = await getPdfGenerator();
                     const url = generateCoachNotesPdf(rp, notes);
                     if (mode === "preview") {
                       window.open(url, "_blank");
