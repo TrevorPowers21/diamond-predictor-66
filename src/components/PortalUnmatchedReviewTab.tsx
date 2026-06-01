@@ -54,9 +54,17 @@ const REASON_CONFIG: Record<Reason, { label: string; color: string; bg: string; 
 };
 
 /**
- * Search-and-link popover for an unmatched row. Lets the coach type a name,
- * pick any D1 player from the players table, and apply the VA fields to it.
- * Used on no_match / no_stats rows (the ambiguous flow uses its own
+ * Search-and-link popover for an unmatched row.
+ *
+ * Two-tier strategy to catch name variations (Chris vs Christopher etc.):
+ *
+ *  1. Pre-load the full D1 roster of the unmatched row's `current_school`
+ *     on open. Coach scans the list and spots the canonical-name variant.
+ *  2. As the coach types, fall back to a server-side ilike search across
+ *     all D1 — for cases where the school name itself didn't fuzzy-match
+ *     (Long Island vs Long Island University, etc.).
+ *
+ * Used on no_match / no_stats rows (ambiguous rows have their own
  * candidate-button UI above).
  */
 function LinkPlayerPopover({
@@ -71,9 +79,29 @@ function LinkPlayerPopover({
   isPending: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState(defaultQuery);
+  const [query, setQuery] = useState("");
 
-  const { data: results = [], isFetching } = useQuery<CandidatePlayer[]>({
+  // Pre-load the unmatched row's school roster on open
+  const schoolKey = (row.current_school || "").trim();
+  const { data: schoolRoster = [] } = useQuery<CandidatePlayer[]>({
+    queryKey: ["link-school-roster", schoolKey],
+    enabled: open && !!schoolKey,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      // ilike against the full school name + a normalized variant (strip "University", "of", etc.)
+      const norm = schoolKey.replace(/\buniversity\b/gi, "").replace(/\bof\b/gi, "").replace(/\bthe\b/gi, "").trim();
+      const { data } = await (supabase as any)
+        .from("players")
+        .select("id, first_name, last_name, team, position, class_year")
+        .eq("division", "D1")
+        .or(`team.ilike.%${schoolKey}%,team.ilike.%${norm}%`)
+        .limit(60);
+      return (data as CandidatePlayer[]) ?? [];
+    },
+  });
+
+  // Server search across all D1 when coach starts typing
+  const { data: serverResults = [], isFetching: serverLoading } = useQuery<CandidatePlayer[]>({
     queryKey: ["link-player-search", query],
     enabled: open && query.trim().length >= 2,
     staleTime: 30_000,
@@ -88,13 +116,28 @@ function LinkPlayerPopover({
       } else {
         q = q.or(`first_name.ilike.%${terms[0]}%,last_name.ilike.%${terms[0]}%`);
       }
-      const { data } = await q.limit(15);
+      const { data } = await q.limit(20);
       return (data as CandidatePlayer[]) ?? [];
     },
   });
 
+  // Client-side filter the school roster against the typed query so the
+  // coach can narrow Monmouth's 30 players down to "Walsh" in one keystroke.
+  const filterRoster = (list: CandidatePlayer[]) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((p) =>
+      `${p.first_name ?? ""} ${p.last_name ?? ""}`.toLowerCase().includes(q),
+    );
+  };
+  const filteredRoster = filterRoster(schoolRoster);
+  // Merge: school roster first (deduped), then server matches not already in roster.
+  const seen = new Set(filteredRoster.map((p) => p.id));
+  const extra = serverResults.filter((p) => !seen.has(p.id));
+  const isFetching = serverLoading;
+
   return (
-    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (v) setQuery(defaultQuery); }}>
+    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (v) setQuery(""); }}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
@@ -106,47 +149,88 @@ function LinkPlayerPopover({
           Link
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={6} className="w-[360px] p-0 overflow-hidden border-l-[3px] border-l-[#D4AF37]">
-        <div className="bg-[#0D1B3E] px-4 py-2.5 flex items-center gap-2">
-          <Search className="w-3 h-3 text-[#D4AF37]" />
-          <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>
-            Find Player
+      <PopoverContent align="end" sideOffset={6} className="w-[380px] p-0 overflow-hidden border-l-[3px] border-l-[#D4AF37]">
+        <div className="bg-[#0D1B3E] px-4 py-2.5 flex items-center justify-between gap-2">
+          <span className="flex items-center gap-2">
+            <Search className="w-3 h-3 text-[#D4AF37]" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>
+              Find Player
+            </span>
           </span>
+          {row.current_school && (
+            <span className="text-[9px] text-[#D4AF37]/70 truncate max-w-[180px]">{row.current_school}</span>
+          )}
         </div>
         <div className="px-3 py-3 space-y-2">
           <Input
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="First Last"
+            placeholder={`Filter ${schoolKey || "D1 players"}…`}
             className="h-8 text-xs"
           />
-          <div className="max-h-[260px] overflow-y-auto space-y-1">
-            {query.trim().length < 2 ? (
-              <p className="text-[11px] text-muted-foreground px-1 py-2">Type at least 2 characters to search.</p>
-            ) : isFetching ? (
-              <p className="text-[11px] text-muted-foreground px-1 py-2">Searching…</p>
-            ) : results.length === 0 ? (
-              <p className="text-[11px] text-muted-foreground px-1 py-2">No matching D1 players.</p>
+          <div className="max-h-[280px] overflow-y-auto space-y-1">
+            {filteredRoster.length === 0 && extra.length === 0 ? (
+              query.trim().length === 0 && schoolRoster.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground px-1 py-2">Loading school roster…</p>
+              ) : query.trim().length >= 2 && isFetching ? (
+                <p className="text-[11px] text-muted-foreground px-1 py-2">Searching…</p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground px-1 py-2">No matches. Try a different name or check the search box for typos.</p>
+              )
             ) : (
-              results.map((p) => (
-                <div key={p.id} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-muted/60 transition-colors">
-                  <div className="text-[11px] min-w-0 flex-1">
-                    <div className="font-medium text-foreground truncate">{p.first_name} {p.last_name}</div>
-                    <div className="text-muted-foreground text-[10px] truncate">
-                      {[p.team, p.position, p.class_year].filter(Boolean).join(" · ")}
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    onClick={() => { onLink(p.id); setOpen(false); }}
-                    disabled={isPending}
-                    className="h-7 text-[10px] bg-[#D4AF37] text-black hover:bg-[#A08820] font-semibold uppercase tracking-wider cursor-pointer"
-                  >
-                    Link
-                  </Button>
-                </div>
-              ))
+              <>
+                {filteredRoster.length > 0 && (
+                  <>
+                    <p className="text-[9px] uppercase tracking-wider text-muted-foreground px-1 pt-1 pb-1">
+                      {schoolKey ? `${schoolKey} roster` : "Roster"} ({filteredRoster.length})
+                    </p>
+                    {filteredRoster.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-muted/60 transition-colors">
+                        <div className="text-[11px] min-w-0 flex-1">
+                          <div className="font-medium text-foreground truncate">{p.first_name} {p.last_name}</div>
+                          <div className="text-muted-foreground text-[10px] truncate">
+                            {[p.team, p.position, p.class_year].filter(Boolean).join(" · ")}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => { onLink(p.id); setOpen(false); }}
+                          disabled={isPending}
+                          className="h-7 text-[10px] bg-[#D4AF37] text-black hover:bg-[#A08820] font-semibold uppercase tracking-wider cursor-pointer"
+                        >
+                          Link
+                        </Button>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {extra.length > 0 && (
+                  <>
+                    <p className="text-[9px] uppercase tracking-wider text-muted-foreground px-1 pt-2 pb-1">
+                      Other D1 ({extra.length})
+                    </p>
+                    {extra.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-muted/60 transition-colors">
+                        <div className="text-[11px] min-w-0 flex-1">
+                          <div className="font-medium text-foreground truncate">{p.first_name} {p.last_name}</div>
+                          <div className="text-muted-foreground text-[10px] truncate">
+                            {[p.team, p.position, p.class_year].filter(Boolean).join(" · ")}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => { onLink(p.id); setOpen(false); }}
+                          disabled={isPending}
+                          className="h-7 text-[10px] bg-[#D4AF37] text-black hover:bg-[#A08820] font-semibold uppercase tracking-wider cursor-pointer"
+                        >
+                          Link
+                        </Button>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </>
             )}
           </div>
         </div>
