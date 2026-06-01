@@ -577,15 +577,25 @@ export function assessPitcherCompetitionRisk(
 }
 
 // ── Factor 4: Trajectory ────────────────────────────────────────────
-// Data-driven trajectory using underlying skill metrics (not production).
-// 3 tiers with a wider neutral middle. Skip factor when <2 prior seasons.
+// Trajectory: wRC+ / pRV+ delta is the headline. Underlying skill metrics
+// validate the read — they can soften or harden the wRC+ direction by one
+// tier, but not flip it. Examples:
+//   wRC+ up + skills up   → Progressing (clean)
+//   wRC+ up + skills down → Plateau (production up but unsustainable)
+//   wRC+ flat + skills up → Progressing (quietly improving foundation)
+//   wRC+ down + skills up → Plateau (foundation intact — bounce candidate)
+//   wRC+ down + skills down → Regressing (clean decline)
 //
-// Hitter metrics: Contact% (±3.2), Chase% inverted (±3.2), Barrel% (±4)
-// Pitcher metrics: Stuff+ (±2.5), BB% inverted (±2.5), Whiff% (±4)
-// "Meaningful change" thresholds match the empirical P25/P75 YoY delta.
+// Meaningful-change thresholds:
+//   wRC+ ±10  (≈ half a standard deviation of meaningful skill change)
+//   pRV+ ±10
+//   Hitter skills: Contact ±3.2, Chase ±3.2, Barrel ±4 (empirical P25/P75 YoY)
+//   Pitcher skills: Stuff+ ±2.5, BB% ±2.5, Whiff% ±4
 
-const HIT_TRAJ_THRESHOLDS = { contact: 3.2, chase: 3.2, barrel: 4 };
-const PIT_TRAJ_THRESHOLDS = { stuffPlus: 2.5, bbPct: 2.5, whiffPct: 4 };
+const WRC_DELTA_THRESHOLD = 10;
+const PRV_DELTA_THRESHOLD = 10;
+const HIT_SKILL_THRESHOLDS = { contact: 3.2, chase: 3.2, barrel: 4 };
+const PIT_SKILL_THRESHOLDS = { stuffPlus: 2.5, bbPct: 2.5, whiffPct: 4 };
 
 type SeasonRow = Record<string, any> & { Season?: number | null };
 
@@ -602,7 +612,57 @@ function direction(delta: number, threshold: number, betterIsHigher: boolean): "
   if (Math.abs(delta) < threshold) return "flat";
   const positive = delta > 0;
   if (betterIsHigher) return positive ? "up" : "down";
-  return positive ? "down" : "up"; // inverted (e.g. chase)
+  return positive ? "down" : "up"; // inverted (e.g. chase, BB%)
+}
+
+/**
+ * Compute wRC+ from raw slash stats per the locked formula:
+ *   wRC+ = ((0.45·OBP + 0.30·SLG + 0.15·AVG + 0.10·ISO) / 0.364) · 100
+ * Returns null if any required input is missing.
+ */
+function deriveWrcPlus(row: SeasonRow): number | null {
+  const avg = row.AVG, obp = row.OBP, slg = row.SLG;
+  if (!isNum(avg) || !isNum(obp) || !isNum(slg)) return null;
+  const iso = slg - avg;
+  return ((0.45 * obp + 0.30 * slg + 0.15 * avg + 0.10 * iso) / 0.364) * 100;
+}
+
+function classifySkills(
+  reads: { dir: "up" | "flat" | "down" }[],
+): "up" | "flat" | "down" {
+  if (reads.length === 0) return "flat";
+  const ups = reads.filter((r) => r.dir === "up").length;
+  const downs = reads.filter((r) => r.dir === "down").length;
+  if (ups >= 2 && downs === 0) return "up";
+  if (downs >= 2 && ups === 0) return "down";
+  return "flat";
+}
+
+/**
+ * Combine headline (wRC+ or pRV+) direction with skills direction into a
+ * single trajectory tier. wRC+ direction sets the base; skills shift it by
+ * at most one tier in either direction.
+ */
+function combineTrajectory(
+  headline: "up" | "flat" | "down",
+  skills: "up" | "flat" | "down",
+  headlineLabel: string,
+): { trajectory: Trajectory; score: number; detail: string } {
+  // Build a 3×3 lookup of (headline, skills) → trajectory
+  const matrix: Record<string, { trajectory: Trajectory; score: number; note: string }> = {
+    "up|up":     { trajectory: "Progressing", score: 20, note: `${headlineLabel} up; underlying skills validate it` },
+    "up|flat":   { trajectory: "Progressing", score: 25, note: `${headlineLabel} up; skills steady` },
+    "up|down":   { trajectory: "Plateau",     score: 45, note: `${headlineLabel} up but underlying skills regressed — unsustainable` },
+    "flat|up":   { trajectory: "Progressing", score: 30, note: `${headlineLabel} steady; skills quietly improving` },
+    "flat|flat": { trajectory: "Plateau",     score: 40, note: `${headlineLabel} steady; skills steady` },
+    "flat|down": { trajectory: "Regressing",  score: 55, note: `${headlineLabel} steady but skills declining — caution` },
+    "down|up":   { trajectory: "Plateau",     score: 45, note: `${headlineLabel} down but skills intact — bounce candidate` },
+    "down|flat": { trajectory: "Regressing",  score: 60, note: `${headlineLabel} down; skills not improving` },
+    "down|down": { trajectory: "Regressing",  score: 65, note: `${headlineLabel} down; skills also declining` },
+  };
+  const key = `${headline}|${skills}`;
+  const entry = matrix[key] || matrix["flat|flat"];
+  return { trajectory: entry.trajectory, score: entry.score, detail: entry.note };
 }
 
 function assessHitterTrajectory(seasons: SeasonRow[] | undefined): { factor: RiskFactor; trajectory: Trajectory } {
@@ -615,40 +675,31 @@ function assessHitterTrajectory(seasons: SeasonRow[] | undefined): { factor: Ris
   }
   const [curr, prior] = pair;
 
-  const reads: { metric: string; dir: "up" | "flat" | "down" }[] = [];
-  if (isNum(curr.contact) && isNum(prior.contact)) {
-    reads.push({ metric: "Contact%", dir: direction(curr.contact - prior.contact, HIT_TRAJ_THRESHOLDS.contact, true) });
-  }
-  if (isNum(curr.chase) && isNum(prior.chase)) {
-    reads.push({ metric: "Chase%", dir: direction(curr.chase - prior.chase, HIT_TRAJ_THRESHOLDS.chase, false) });
-  }
-  if (isNum(curr.barrel) && isNum(prior.barrel)) {
-    reads.push({ metric: "Barrel%", dir: direction(curr.barrel - prior.barrel, HIT_TRAJ_THRESHOLDS.barrel, true) });
-  }
-
-  if (reads.length < 2) {
+  // Headline: derived wRC+ direction
+  const currWrc = deriveWrcPlus(curr);
+  const priorWrc = deriveWrcPlus(prior);
+  if (currWrc == null || priorWrc == null) {
     return {
-      factor: { label: "Trajectory", score: null, grade: "Unknown", detail: "Insufficient scouting data across seasons" },
+      factor: { label: "Trajectory", score: null, grade: "Unknown", detail: "Insufficient slash data across seasons" },
       trajectory: "Unknown",
     };
   }
+  const headlineDir = direction(currWrc - priorWrc, WRC_DELTA_THRESHOLD, true);
 
-  const ups = reads.filter((r) => r.dir === "up").length;
-  const downs = reads.filter((r) => r.dir === "down").length;
-
-  let trajectory: Trajectory;
-  let score: number;
-  let detail: string;
-  if (ups >= 2 && downs === 0) {
-    trajectory = "Progressing"; score = 25;
-    detail = `${ups} of ${reads.length} skill metrics improving YoY`;
-  } else if (downs >= 2 && ups === 0) {
-    trajectory = "Regressing"; score = 65;
-    detail = `${downs} of ${reads.length} skill metrics declining YoY`;
-  } else {
-    trajectory = "Plateau"; score = 40;
-    detail = `Skill metrics stable / mixed YoY`;
+  // Validators: skills direction (Contact / Chase / Barrel)
+  const skillReads: { dir: "up" | "flat" | "down" }[] = [];
+  if (isNum(curr.contact) && isNum(prior.contact)) {
+    skillReads.push({ dir: direction(curr.contact - prior.contact, HIT_SKILL_THRESHOLDS.contact, true) });
   }
+  if (isNum(curr.chase) && isNum(prior.chase)) {
+    skillReads.push({ dir: direction(curr.chase - prior.chase, HIT_SKILL_THRESHOLDS.chase, false) });
+  }
+  if (isNum(curr.barrel) && isNum(prior.barrel)) {
+    skillReads.push({ dir: direction(curr.barrel - prior.barrel, HIT_SKILL_THRESHOLDS.barrel, true) });
+  }
+  const skillsDir = classifySkills(skillReads);
+
+  const { trajectory, score, detail } = combineTrajectory(headlineDir, skillsDir, "wRC+");
   return {
     factor: { label: "Trajectory", score, grade: toGrade(score), detail },
     trajectory,
@@ -665,40 +716,31 @@ function assessPitcherTrajectory(seasons: SeasonRow[] | undefined): { factor: Ri
   }
   const [curr, prior] = pair;
 
-  const reads: { metric: string; dir: "up" | "flat" | "down" }[] = [];
-  if (isNum(curr.stuff_plus) && isNum(prior.stuff_plus)) {
-    reads.push({ metric: "Stuff+", dir: direction(curr.stuff_plus - prior.stuff_plus, PIT_TRAJ_THRESHOLDS.stuffPlus, true) });
-  }
-  if (isNum(curr.bb_pct) && isNum(prior.bb_pct)) {
-    reads.push({ metric: "BB%", dir: direction(curr.bb_pct - prior.bb_pct, PIT_TRAJ_THRESHOLDS.bbPct, false) });
-  }
-  if (isNum(curr.miss_pct) && isNum(prior.miss_pct)) {
-    reads.push({ metric: "Whiff%", dir: direction(curr.miss_pct - prior.miss_pct, PIT_TRAJ_THRESHOLDS.whiffPct, true) });
-  }
-
-  if (reads.length < 2) {
+  // Headline: overall_pr_plus (= pRV+) direction. Higher is better.
+  const currPrv = isNum(curr.overall_pr_plus) ? curr.overall_pr_plus : null;
+  const priorPrv = isNum(prior.overall_pr_plus) ? prior.overall_pr_plus : null;
+  if (currPrv == null || priorPrv == null) {
     return {
-      factor: { label: "Trajectory", score: null, grade: "Unknown", detail: "Insufficient scouting data across seasons" },
+      factor: { label: "Trajectory", score: null, grade: "Unknown", detail: "Insufficient pRV+ data across seasons" },
       trajectory: "Unknown",
     };
   }
+  const headlineDir = direction(currPrv - priorPrv, PRV_DELTA_THRESHOLD, true);
 
-  const ups = reads.filter((r) => r.dir === "up").length;
-  const downs = reads.filter((r) => r.dir === "down").length;
-
-  let trajectory: Trajectory;
-  let score: number;
-  let detail: string;
-  if (ups >= 2 && downs === 0) {
-    trajectory = "Progressing"; score = 25;
-    detail = `${ups} of ${reads.length} skill metrics improving YoY`;
-  } else if (downs >= 2 && ups === 0) {
-    trajectory = "Regressing"; score = 65;
-    detail = `${downs} of ${reads.length} skill metrics declining YoY`;
-  } else {
-    trajectory = "Plateau"; score = 40;
-    detail = `Skill metrics stable / mixed YoY`;
+  // Validators: Stuff+ + BB% + Whiff% directions
+  const skillReads: { dir: "up" | "flat" | "down" }[] = [];
+  if (isNum(curr.stuff_plus) && isNum(prior.stuff_plus)) {
+    skillReads.push({ dir: direction(curr.stuff_plus - prior.stuff_plus, PIT_SKILL_THRESHOLDS.stuffPlus, true) });
   }
+  if (isNum(curr.bb_pct) && isNum(prior.bb_pct)) {
+    skillReads.push({ dir: direction(curr.bb_pct - prior.bb_pct, PIT_SKILL_THRESHOLDS.bbPct, false) });
+  }
+  if (isNum(curr.miss_pct) && isNum(prior.miss_pct)) {
+    skillReads.push({ dir: direction(curr.miss_pct - prior.miss_pct, PIT_SKILL_THRESHOLDS.whiffPct, true) });
+  }
+  const skillsDir = classifySkills(skillReads);
+
+  const { trajectory, score, detail } = combineTrajectory(headlineDir, skillsDir, "pRV+");
   return {
     factor: { label: "Trajectory", score, grade: toGrade(score), detail },
     trajectory,
