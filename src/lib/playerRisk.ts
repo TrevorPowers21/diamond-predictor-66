@@ -130,13 +130,16 @@ export function getConfTier(conference: string | null | undefined): number {
 // wRC+ (hitters) and pRV+ (pitchers) distributions on 2026 prod.
 
 // Empirical hitter projection anchors (2026 D1, P5..P95).
+// Median anchored at 35 (high Low) per the locked principle: average
+// inputs shouldn't carry "Moderate" risk by default. Risk grades up only
+// when projection actually drops below average.
 const HITTER_PROJ_ANCHORS: readonly Anchor[] = [
   { value: 65,  score: 90 },  // bottom 5%
-  { value: 73,  score: 80 },  // poor (P10)
-  { value: 85,  score: 65 },  // below avg (P25)
-  { value: 97,  score: 50 },  // average (P50)
-  { value: 108, score: 25 },  // plus (P75)
-  { value: 118, score: 10 },  // elite (P90)
+  { value: 73,  score: 78 },  // poor (P10)
+  { value: 85,  score: 55 },  // below avg (P25)
+  { value: 97,  score: 35 },  // average (P50) — top of Low band
+  { value: 108, score: 15 },  // plus (P75)
+  { value: 118, score: 5  },  // elite (P90)
 ] as const;
 
 function tierLabelFromScore(score: number, kind: "projection" | "competition"): string {
@@ -170,11 +173,11 @@ export function assessHitterProjection(pWrcPlus: number | null | undefined): Ris
 // Empirical pitcher projection anchors (2026 D1, P5..P95).
 const PITCHER_PROJ_ANCHORS: readonly Anchor[] = [
   { value: 50,  score: 90 },
-  { value: 64,  score: 80 },
-  { value: 82,  score: 65 },
-  { value: 97,  score: 50 },
-  { value: 111, score: 25 },
-  { value: 123, score: 10 },
+  { value: 64,  score: 78 },
+  { value: 82,  score: 55 },
+  { value: 97,  score: 35 },  // average (P50)
+  { value: 111, score: 15 },
+  { value: 123, score: 5  },
 ] as const;
 
 export function assessPitcherProjection(prvPlus: number | null | undefined): RiskFactor {
@@ -252,6 +255,10 @@ const HIT_GB_ANCHORS: readonly Anchor[] = [
   { value: 57.0, score: 6 },
 ] as const;
 
+// Baseline: average inputs net to 35 (top of Low). Below-average inputs
+// push toward Moderate / Elevated; elite inputs reach the floor.
+const HITTER_SKILLSET_BASELINE = 35;
+
 export function assessHitterTypeRisk(m: HitterSkillsetMetrics): RiskFactor {
   const hasAny = [m.contact, m.chase, m.avgEv, m.ev90, m.barrel, m.lineDrive, m.gb]
     .some((v) => isNum(v));
@@ -259,7 +266,7 @@ export function assessHitterTypeRisk(m: HitterSkillsetMetrics): RiskFactor {
     return { label: "Skillset", score: null, grade: "Unknown", detail: "Scouting data unavailable" };
   }
 
-  let risk = 50;
+  let risk = HITTER_SKILLSET_BASELINE;
   const reasons: string[] = [];
 
   // ── Individual metrics (smooth) ──
@@ -419,13 +426,15 @@ const PIT_HARDHIT_ANCHORS: readonly Anchor[] = [
   { value: 47, score: 12 },
 ] as const;
 
+const PITCHER_SKILLSET_BASELINE = 35;
+
 export function assessPitcherTypeRisk(m: PitcherSkillsetMetrics): RiskFactor {
   const hasAny = [m.stuffPlus, m.whiffPct, m.izWhiff, m.bbPct, m.hardHit].some((v) => isNum(v));
   if (!hasAny) {
     return { label: "Skillset", score: null, grade: "Unknown", detail: "Scouting data unavailable" };
   }
 
-  let risk = 50;
+  let risk = PITCHER_SKILLSET_BASELINE;
   const reasons: string[] = [];
 
   // Stuff+ (anchor)
@@ -751,23 +760,25 @@ function assessPitcherTrajectory(seasons: SeasonRow[] | undefined): { factor: Ri
 // Empirical hitter PA: P10≈95, P25≈130, P50≈184, P75≈224
 // Empirical pitcher IP: P10≈23, P25≈28, P50≈37, P75≈52
 
-// Sample-size anchors. Hitter PA P10≈95 / P50≈184 / P75≈224. Pitcher IP P10≈23 / P50≈37 / P75≈52.
+// Sample-size anchors. Median sample (P50) anchored at 15 — at the median
+// PA / IP we have plenty of data to evaluate, so risk should be very low
+// by default. Risk only spikes when the sample is genuinely short.
 const HIT_PA_ANCHORS: readonly Anchor[] = [
   { value: 50,  score: 80 },
-  { value: 95,  score: 65 },
-  { value: 130, score: 45 },
-  { value: 184, score: 25 },
-  { value: 225, score: 10 },
-  { value: 260, score: 10 },
+  { value: 95,  score: 55 },
+  { value: 130, score: 30 },
+  { value: 184, score: 15 },  // median — plenty of data
+  { value: 225, score: 5 },
+  { value: 260, score: 5 },
 ] as const;
 
 const PIT_IP_ANCHORS: readonly Anchor[] = [
   { value: 15, score: 80 },
-  { value: 23, score: 65 },
-  { value: 28, score: 45 },
-  { value: 37, score: 25 },
-  { value: 52, score: 10 },
-  { value: 80, score: 10 },
+  { value: 23, score: 55 },
+  { value: 28, score: 30 },
+  { value: 37, score: 15 },
+  { value: 52, score: 5 },
+  { value: 80, score: 5 },
 ] as const;
 
 function sampleLabel(score: number): string {
