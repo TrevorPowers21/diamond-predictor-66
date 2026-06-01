@@ -38,6 +38,7 @@ import { computePrvPlus } from "@/savant/lib/prvPlus";
 import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
+import { PortalTeamCards } from "@/components/PortalTeamCards";
 import {
   computePitcherWar,
   computePitcherMarketValue,
@@ -1480,6 +1481,9 @@ export default function PitcherProfile() {
           </div>
           {player && (
             <>
+              {(player.transfer_portal || ["IN PORTAL", "COMMITTED", "WITHDRAWN"].includes(String((player as any).portal_status || "").toUpperCase())) && (
+                <PortalTeamCards player={player as any} />
+              )}
               <CoachNotes
                 playerId={player.id}
                 playerName={`${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName}
