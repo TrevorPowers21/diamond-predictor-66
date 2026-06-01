@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { PortalTeamCards } from "@/components/PortalTeamCards";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1379,6 +1380,9 @@ export default function PlayerProfile() {
               </Card>
             )}
 
+            {/* Portal Move — shows under Career Stats for any portal-active player */}
+            {isTransferPortal && <PortalTeamCards player={player as any} />}
+
             {/* Internal Power Ratings — admin only, fills left column space */}
             {isAdmin && seedPowerDerived && (
               <Card className="border-[#162241] bg-[#0a1428]">
@@ -1452,24 +1456,6 @@ export default function PlayerProfile() {
               </div>
             </div>
 
-            {isTransferPortal && (
-              <div className="grid grid-cols-2 gap-3">
-                <Card>
-                  <CardContent className="pt-3 pb-2.5">
-                    <div className="text-xs font-medium text-muted-foreground">2025 Team</div>
-                    <div className={`text-lg font-bold mt-1 ${displayTeamCurrent ? "" : "text-muted-foreground"}`}>{displayTeamCurrent || "TBD"}</div>
-                    {fromTeamData?.conference && <div className="text-xs text-muted-foreground">{fromTeamData.conference}</div>}
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-3 pb-2.5">
-                    <div className="text-xs font-medium text-muted-foreground">2026 Team</div>
-                    <div className="text-lg font-bold mt-1">{player.team || "Unknown"}</div>
-                    {player.conference && <div className="text-xs text-muted-foreground">{player.conference}</div>}
-                  </CardContent>
-                </Card>
-              </div>
-            )}
 
               {(() => {
                 // 2026-05-24: JUCO branch removed. JUCO hitters now have populated
