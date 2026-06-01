@@ -432,6 +432,7 @@ export default function PlayerProfile() {
           portal_entry_date: fields.portal_entry_date,
           commit_school: fields.commit_school,
           commit_date: fields.commit_date,
+          portal_manual_override: true,
         } as any)
         .eq("id", id!);
       if (error) throw error;

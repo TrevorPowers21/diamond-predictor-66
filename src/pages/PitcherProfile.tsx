@@ -311,6 +311,7 @@ export default function PitcherProfile() {
           portal_entry_date: args.portal_entry_date,
           commit_school: args.commit_school,
           commit_date: args.commit_date,
+          portal_manual_override: true,
         } as any)
         .eq("id", args.playerId);
       if (error) throw error;
