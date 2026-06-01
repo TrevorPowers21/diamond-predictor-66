@@ -1,13 +1,15 @@
 /**
- * Dual-team cards for portal-active players. Shown on both PlayerProfile
- * (hitters) and PitcherProfile (pitchers). Left = where they played in 2026,
- * right = where they're going for 2027 based on portal_status:
- *   IN PORTAL  → "In Portal" (emerald)
- *   COMMITTED  → commit_school + commit_date
- *   WITHDRAWN  → same as 2026 team, labeled "Returning"
+ * Compact portal-move display for the left sidebar of player profiles.
+ * Two rows stacked inside one card, matching the Career Stats / Internal
+ * Power Ratings card style (navy bg, gold title, Inter/Oswald).
+ *
+ *   2026 Team line  → player.team + conference
+ *   2027 Team line  → COMMITTED  = commit_school + commit_date
+ *                     IN PORTAL  = "In Portal" (emerald)
+ *                     WITHDRAWN  = player.team + "Withdrew — returning"
  */
 
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface PortalTeamCardsPlayer {
   team?: string | null;
@@ -22,37 +24,31 @@ export function PortalTeamCards({ player }: { player: PortalTeamCardsPlayer }) {
   const isCommitted = status === "COMMITTED" && !!player.commit_school;
   const isWithdrawn = status === "WITHDRAWN";
 
+  const next = isCommitted
+    ? { label: player.commit_school as string, sub: player.commit_date ? `Committed ${new Date(player.commit_date).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })}` : null, color: "text-white" }
+    : isWithdrawn
+      ? { label: player.team || "Returning", sub: "Withdrew — returning", color: "text-white" }
+      : { label: "In Portal", sub: null as string | null, color: "text-emerald-600" };
+
   return (
-    <div className="grid grid-cols-2 gap-3">
-      <Card>
-        <CardContent className="pt-3 pb-2.5">
-          <div className="text-xs font-medium text-muted-foreground">2026 Team</div>
-          <div className="text-lg font-bold mt-1">{player.team || "Unknown"}</div>
-          {player.conference && <div className="text-xs text-muted-foreground">{player.conference}</div>}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="pt-3 pb-2.5">
-          <div className="text-xs font-medium text-muted-foreground">2027 Team</div>
-          {isCommitted ? (
-            <>
-              <div className="text-lg font-bold mt-1">{player.commit_school}</div>
-              {player.commit_date && (
-                <div className="text-xs text-muted-foreground">
-                  Committed {new Date(player.commit_date).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })}
-                </div>
-              )}
-            </>
-          ) : isWithdrawn ? (
-            <>
-              <div className="text-lg font-bold mt-1">{player.team || "Returning"}</div>
-              <div className="text-xs text-muted-foreground">Withdrew — returning</div>
-            </>
-          ) : (
-            <div className="text-lg font-bold mt-1 text-emerald-600">In Portal</div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+    <Card className="border-[#162241] bg-[#0a1428]">
+      <CardHeader className="pb-1 pt-3 px-4">
+        <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>
+          Portal Move
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="px-4 pb-3 space-y-2.5" style={{ fontFamily: "Inter, sans-serif" }}>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">2026 Team</div>
+          <div className="text-sm font-semibold text-white mt-0.5">{player.team || "Unknown"}</div>
+          {player.conference && <div className="text-[10px] text-[#8a94a6]">{player.conference}</div>}
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider font-semibold text-[#8a94a6]">2027 Team</div>
+          <div className={`text-sm font-semibold mt-0.5 ${next.color}`}>{next.label}</div>
+          {next.sub && <div className="text-[10px] text-[#8a94a6]">{next.sub}</div>}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

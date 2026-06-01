@@ -1380,6 +1380,9 @@ export default function PlayerProfile() {
               </Card>
             )}
 
+            {/* Portal Move — shows under Career Stats for any portal-active player */}
+            {isTransferPortal && <PortalTeamCards player={player as any} />}
+
             {/* Internal Power Ratings — admin only, fills left column space */}
             {isAdmin && seedPowerDerived && (
               <Card className="border-[#162241] bg-[#0a1428]">
@@ -1453,7 +1456,6 @@ export default function PlayerProfile() {
               </div>
             </div>
 
-            {isTransferPortal && <PortalTeamCards player={player as any} />}
 
               {(() => {
                 // 2026-05-24: JUCO branch removed. JUCO hitters now have populated

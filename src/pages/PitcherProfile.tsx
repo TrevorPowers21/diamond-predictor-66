@@ -1481,9 +1481,6 @@ export default function PitcherProfile() {
           </div>
           {player && (
             <>
-              {(player.transfer_portal || ["IN PORTAL", "COMMITTED", "WITHDRAWN"].includes(String((player as any).portal_status || "").toUpperCase())) && (
-                <PortalTeamCards player={player as any} />
-              )}
               <CoachNotes
                 playerId={player.id}
                 playerName={`${player.first_name || ""} ${player.last_name || ""}`.trim() || lookupPlayerName}
@@ -1943,6 +1940,11 @@ export default function PitcherProfile() {
                   </table>
               </CardContent>
             </Card>
+
+            {/* Portal Move — same compact card style as Career Stats */}
+            {player && (player.transfer_portal || ["IN PORTAL", "COMMITTED", "WITHDRAWN"].includes(String((player as any).portal_status || "").toUpperCase())) && (
+              <PortalTeamCards player={player as any} />
+            )}
 
             {isAdmin && internalPowerRatings ? (
               <Card className="border-[#162241] bg-[#0a1428]">
