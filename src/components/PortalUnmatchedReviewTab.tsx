@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, X, Users, ExternalLink, Mail, Phone } from "lucide-react";
+import { AlertTriangle, CheckCircle2, X, Users, ExternalLink, Mail, Phone, Link2, Search } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 
 type Reason = "ambiguous" | "no_match" | "no_stats";
@@ -50,6 +52,108 @@ const REASON_CONFIG: Record<Reason, { label: string; color: string; bg: string; 
   no_match:   { label: "No Match",   color: "text-rose-600",    bg: "bg-rose-500/10",   description: "Not found in RSTR IQ — likely a roster gap" },
   no_stats:   { label: "No Stats",   color: "text-slate-500",   bg: "bg-slate-500/10",  description: "Portal player without 2026 stats — informational only" },
 };
+
+/**
+ * Search-and-link popover for an unmatched row. Lets the coach type a name,
+ * pick any D1 player from the players table, and apply the VA fields to it.
+ * Used on no_match / no_stats rows (the ambiguous flow uses its own
+ * candidate-button UI above).
+ */
+function LinkPlayerPopover({
+  row,
+  defaultQuery,
+  onLink,
+  isPending,
+}: {
+  row: UnmatchedRow;
+  defaultQuery: string;
+  onLink: (playerId: string) => void;
+  isPending: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState(defaultQuery);
+
+  const { data: results = [], isFetching } = useQuery<CandidatePlayer[]>({
+    queryKey: ["link-player-search", query],
+    enabled: open && query.trim().length >= 2,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const terms = query.trim().split(/\s+/);
+      let q = (supabase as any)
+        .from("players")
+        .select("id, first_name, last_name, team, position, class_year")
+        .eq("division", "D1");
+      if (terms.length >= 2) {
+        q = q.ilike("first_name", `%${terms[0]}%`).ilike("last_name", `%${terms.slice(1).join(" ")}%`);
+      } else {
+        q = q.or(`first_name.ilike.%${terms[0]}%,last_name.ilike.%${terms[0]}%`);
+      }
+      const { data } = await q.limit(15);
+      return (data as CandidatePlayer[]) ?? [];
+    },
+  });
+
+  return (
+    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (v) setQuery(defaultQuery); }}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-[11px] cursor-pointer"
+          title="Search and link to a player profile"
+        >
+          <Link2 className="w-3.5 h-3.5 mr-1" />
+          Link
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={6} className="w-[360px] p-0 overflow-hidden border-l-[3px] border-l-[#D4AF37]">
+        <div className="bg-[#0D1B3E] px-4 py-2.5 flex items-center gap-2">
+          <Search className="w-3 h-3 text-[#D4AF37]" />
+          <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>
+            Find Player
+          </span>
+        </div>
+        <div className="px-3 py-3 space-y-2">
+          <Input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="First Last"
+            className="h-8 text-xs"
+          />
+          <div className="max-h-[260px] overflow-y-auto space-y-1">
+            {query.trim().length < 2 ? (
+              <p className="text-[11px] text-muted-foreground px-1 py-2">Type at least 2 characters to search.</p>
+            ) : isFetching ? (
+              <p className="text-[11px] text-muted-foreground px-1 py-2">Searching…</p>
+            ) : results.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground px-1 py-2">No matching D1 players.</p>
+            ) : (
+              results.map((p) => (
+                <div key={p.id} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-muted/60 transition-colors">
+                  <div className="text-[11px] min-w-0 flex-1">
+                    <div className="font-medium text-foreground truncate">{p.first_name} {p.last_name}</div>
+                    <div className="text-muted-foreground text-[10px] truncate">
+                      {[p.team, p.position, p.class_year].filter(Boolean).join(" · ")}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => { onLink(p.id); setOpen(false); }}
+                    disabled={isPending}
+                    className="h-7 text-[10px] bg-[#D4AF37] text-black hover:bg-[#A08820] font-semibold uppercase tracking-wider cursor-pointer"
+                  >
+                    Link
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export function PortalUnmatchedReviewTab() {
   const queryClient = useQueryClient();
@@ -239,17 +343,25 @@ export function PortalUnmatchedReviewTab() {
                   )}
                 </div>
 
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => dismissMutation.mutate(row.id)}
-                  disabled={dismissMutation.isPending}
-                  className="h-8 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
-                  title="Mark resolved without linking"
-                >
-                  <X className="w-3.5 h-3.5 mr-1" />
-                  Dismiss
-                </Button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <LinkPlayerPopover
+                    row={row}
+                    defaultQuery={`${row.first_name} ${row.last_name}`.trim()}
+                    onLink={(playerId) => linkMutation.mutate({ unmatched: row, playerId })}
+                    isPending={linkMutation.isPending}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => dismissMutation.mutate(row.id)}
+                    disabled={dismissMutation.isPending}
+                    className="h-8 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
+                    title="Mark resolved without linking"
+                  >
+                    <X className="w-3.5 h-3.5 mr-1" />
+                    Dismiss
+                  </Button>
+                </div>
               </div>
 
               {row.reason === "ambiguous" && row.candidate_player_ids && row.candidate_player_ids.length > 0 && (
