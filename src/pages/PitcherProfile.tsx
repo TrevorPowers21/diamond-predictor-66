@@ -1213,7 +1213,12 @@ export default function PitcherProfile() {
       : devAggUnchanged
         ? rolePRvPlus
         : 100 + ((rolePRvPlus - 100) * (1 + devAggDelta));
-    const storedDefaultDepth = stored?.pitcher_role === pitcherRoleFromDepthRole(depthRole);
+    // Compare the actual depth role against the derived default, not the
+    // bucketed SP/RP/SM that pitcherRoleFromDepthRole returns. The bucket
+    // collapses weekend_starter + weekday_starter both to SP (and 5 RP
+    // variants all to RP), so the old check silently dropped depth changes
+    // within a bucket — market value never recomputed.
+    const storedDefaultDepth = depthRole === initialDepthRole;
     const noOverlay = storedDefaultDepth && devAggUnchanged && !roleChanged;
     const overlayPWar = noOverlay
       ? (stored?.p_war ?? null)
@@ -1243,6 +1248,7 @@ export default function PitcherProfile() {
   }, [
     projectedDevAggressiveness,
     depthRole,
+    initialDepthRole,
     displayConference,
     derivedRole,
     projectedRole,
