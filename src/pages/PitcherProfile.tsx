@@ -38,6 +38,7 @@ import { computePrvPlus } from "@/savant/lib/prvPlus";
 import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
+import { PortalTeamCards } from "@/components/PortalTeamCards";
 import {
   computePitcherWar,
   computePitcherMarketValue,
@@ -1939,6 +1940,11 @@ export default function PitcherProfile() {
                   </table>
               </CardContent>
             </Card>
+
+            {/* Portal Move — same compact card style as Career Stats */}
+            {player && (player.transfer_portal || ["IN PORTAL", "COMMITTED", "WITHDRAWN"].includes(String((player as any).portal_status || "").toUpperCase())) && (
+              <PortalTeamCards player={player as any} />
+            )}
 
             {isAdmin && internalPowerRatings ? (
               <Card className="border-[#162241] bg-[#0a1428]">
