@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  RSTR IQ — Verified Athletics portal auto-pull
+  Fires every hour at :00. Dial back to a sparser schedule once the
+  portal calms down — see docs/PORTAL_AUTO_PULL.md.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.rstriq.portal-pull</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>$HOME/dev-main/diamond-predictor-66/scripts/auto_pull_portal.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/rstr-iq-portal-pull.out</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/rstr-iq-portal-pull.err</string>
+</dict>
+</plist>
