@@ -243,7 +243,7 @@ export default function PlayerProfile() {
 
   const { data: aiScoutingReport } = useScoutingReport(player?.id, "hitter");
 
-  const { data: predictions = [], isLoading: isPredictionsLoading } = useQuery({
+  const { data: predictions = [] } = useQuery({
     queryKey: ["player-predictions", id, effectiveTeamId],
     queryFn: async () => {
       // Load global rows (customer_team_id IS NULL) plus team-scoped rows
@@ -629,7 +629,15 @@ export default function PlayerProfile() {
 
   const isThinSample = isThinSampleHitter(projectionSourceRow);
 
-  if (!isLoading && !player) {
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center py-20 text-muted-foreground">Loading player…</div>
+      </DashboardLayout>
+    );
+  }
+
+  if (!player) {
     return (
       <DashboardLayout>
         <div className="flex flex-col items-center justify-center py-20 gap-4">
@@ -646,8 +654,8 @@ export default function PlayerProfile() {
     if (!inches) return "—";
     return `${Math.floor(inches / 12)}'${inches % 12}"`;
   };
-  const fullName = normalizeName(`${player?.first_name ?? ""} ${player?.last_name ?? ""}`);
-  const fullNameRaw = `${player?.first_name ?? ""} ${player?.last_name ?? ""}`;
+  const fullName = normalizeName(`${player.first_name} ${player.last_name}`);
+  const fullNameRaw = `${player.first_name} ${player.last_name}`;
   const statCandidates = storageByName.get(fullName) || [];
   const round3 = (v: number | null | undefined) => (v == null ? null : Math.round(v * 1000) / 1000);
   const resolvedSeedStatRow = (() => {
@@ -858,17 +866,8 @@ export default function PlayerProfile() {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex-1">
-            {isLoading ? (
-              <div className="space-y-2">
-                <div className="h-7 w-48 rounded bg-muted animate-pulse" />
-                <div className="flex gap-2">
-                  <div className="h-5 w-16 rounded bg-muted animate-pulse" />
-                  <div className="h-5 w-24 rounded bg-muted animate-pulse" />
-                </div>
-              </div>
-            ) : (
             <h2 className="text-2xl font-bold tracking-tight">
-              {player!.first_name} {player!.last_name}
+              {player.first_name} {player.last_name}
             </h2>
             {hasPitchingData && (
               <Button
@@ -914,12 +913,11 @@ export default function PlayerProfile() {
                 </Badge>
               )}
             </div>
-            )}
           </div>
-          {!isLoading &&
+          {
             <>
               <CoachNotes
-                playerId={player!.id}
+                playerId={player.id}
                 playerName={`${player.first_name} ${player.last_name}`}
                 onExportPdf={(notes, format, mode = "download") => {
                   if (format === "full") {
@@ -1196,36 +1194,7 @@ export default function PlayerProfile() {
           }
         </div>
 
-        {(isLoading || isPredictionsLoading) && (
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div className="lg:col-span-1 space-y-4">
-              <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 space-y-3">
-                <div className="h-4 w-24 rounded bg-muted animate-pulse" />
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="flex justify-between">
-                    <div className="h-3 w-20 rounded bg-muted animate-pulse" />
-                    <div className="h-3 w-16 rounded bg-muted animate-pulse" />
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="lg:col-span-2 space-y-4">
-              <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 space-y-3">
-                <div className="h-4 w-32 rounded bg-muted animate-pulse" />
-                <div className="grid grid-cols-3 gap-3">
-                  {[...Array(6)].map((_, i) => (
-                    <div key={i} className="rounded bg-muted/30 p-3 space-y-2">
-                      <div className="h-3 w-12 rounded bg-muted animate-pulse" />
-                      <div className="h-6 w-16 rounded bg-muted animate-pulse" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!isLoading && !isPredictionsLoading && <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-4 lg:grid-cols-3">
           <div className="lg:col-span-1 space-y-4">
             {/* Player Info Card */}
             <Card className="border-[#162241] bg-[#0a1428]">
@@ -1743,7 +1712,7 @@ export default function PlayerProfile() {
               </Card>
             )}
           </div>
-        </div>}
+        </div>
 
       </div>
     </DashboardLayout>
