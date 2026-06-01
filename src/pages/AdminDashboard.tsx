@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import { Pencil, RefreshCw, Scale, Sliders, Trophy, Plus, Trash2, Check, Edit2, Save, X, Upload, LogIn, UserPlus, AlertTriangle } from "lucide-react";
 import { PortalUnmatchedReviewTab } from "@/components/PortalUnmatchedReviewTab";
 import RosterOverrideTab from "@/components/RosterOverrideTab";
+import PortalOverrideTab from "@/components/PortalOverrideTab";
 import { useAuth } from "@/hooks/useAuth";
 import { bulkRecalculatePredictionsLocal } from "@/lib/predictionEngine";
 // TODO: Seed JSON files are static local data — migrate to Supabase tables for live updates.
@@ -4437,6 +4438,10 @@ export default function AdminDashboard() {
               <UserPlus className="h-4 w-4" />
               Roster
             </TabsTrigger>
+            <TabsTrigger value="portal-override" className="gap-1.5">
+              <Pencil className="h-4 w-4" />
+              Portal Override
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="equations">
@@ -4470,6 +4475,9 @@ export default function AdminDashboard() {
           </TabsContent>
           <TabsContent value="roster-override">
             <RosterOverrideTab />
+          </TabsContent>
+          <TabsContent value="portal-override">
+            <PortalOverrideTab />
           </TabsContent>
         </Tabs>
       </div>
