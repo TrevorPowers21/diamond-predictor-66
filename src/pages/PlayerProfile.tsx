@@ -423,10 +423,16 @@ export default function PlayerProfile() {
   });
 
   const updatePortalStatus = useMutation({
-    mutationFn: async ({ value }: { value: string }) => {
+    mutationFn: async (fields: { portal_status: string; portal_entry_date: string | null; commit_school: string | null; commit_date: string | null }) => {
       const { error } = await supabase
         .from("players")
-        .update({ portal_status: value, transfer_portal: value === "IN PORTAL" } as any)
+        .update({
+          portal_status: fields.portal_status,
+          transfer_portal: fields.portal_status === "IN PORTAL",
+          portal_entry_date: fields.portal_entry_date,
+          commit_school: fields.commit_school,
+          commit_date: fields.commit_date,
+        } as any)
         .eq("id", id!);
       if (error) throw error;
     },
@@ -892,7 +898,7 @@ export default function PlayerProfile() {
               <PortalStatusBadge
                 player={player as any}
                 isAdmin={isAdmin}
-                onChange={(v) => updatePortalStatus.mutate({ value: v })}
+                onSave={(fields) => updatePortalStatus.mutateAsync(fields)}
               />
               <PortalContactButton player={player as any} />
               {combinedUsed && (
