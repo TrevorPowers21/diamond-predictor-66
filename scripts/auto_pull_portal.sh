@@ -40,11 +40,20 @@ fi
 
 # Run the importer unattended. The RSTR_AUTOMATION_TOKEN env var unlocks the
 # --prod confirm bypass; if it's not set, the importer will hang on the prompt.
-npm run import:prod -- --yes >> "$LOG" 2>&1 || {
+IMPORT_TMP=$(mktemp /tmp/rstr-iq-portal-import.XXXXXX)
+if ! npm run import:prod -- --yes > "$IMPORT_TMP" 2>&1; then
+  cat "$IMPORT_TMP" >> "$LOG"
   /usr/bin/osascript -e 'display notification "Import failed — see ~/Library/Logs/rstr-iq-portal-pull.log" with title "RSTR IQ portal pull" sound name "Basso"' || true
   echo "Import failed." >> "$LOG"
+  rm -f "$IMPORT_TMP"
   exit 1
-}
+fi
+cat "$IMPORT_TMP" >> "$LOG"
 
-echo "Done." >> "$LOG"
+# Parse the Portal Entries result line for a success notification.
+SUMMARY=$(grep -aE "→ Portal Entries" -A 2 "$IMPORT_TMP" 2>/dev/null | grep -aoE "[0-9]+ matched \([^)]*\), [0-9]+ unmatched" | head -1 || echo "Portal pull done")
+/usr/bin/osascript -e "display notification \"$SUMMARY\" with title \"RSTR IQ portal pull\"" || true
+rm -f "$IMPORT_TMP"
+
+echo "Done. $SUMMARY" >> "$LOG"
 exit 0
