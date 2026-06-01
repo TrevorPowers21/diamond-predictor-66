@@ -2,7 +2,7 @@
 
 Hourly-ish automated pull of the Verified Athletics portal entries CSV, with auto-import to prod.
 
-**Cadence:** every 4 hours (2am, 6am, 10am, 2pm, 6pm, 10pm).
+**Cadence:** hourly at :00. Dial back to a sparser schedule once portal activity calms — edit `StartCalendarInterval` in `scripts/com.rstriq.portal-pull.plist`, then re-copy + `launchctl unload && launchctl load`.
 **Host:** local Mac via `launchd`. Only runs while your Mac is awake.
 
 ## First-time setup
