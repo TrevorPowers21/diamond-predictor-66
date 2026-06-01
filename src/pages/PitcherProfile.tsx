@@ -1591,7 +1591,7 @@ export default function PitcherProfile() {
                     } else {
                       const link = document.createElement("a");
                       link.href = url;
-                      link.download = `${player.first_name}-${player.last_name}-scouting-report.pdf`.toLowerCase().replace(/\s+/g, "-");
+                      link.download = `${(player.first_name || "").replace(/\s+/g, "")}_${(player.last_name || "").replace(/\s+/g, "")}_Scouting_Report.pdf`;
                       link.click();
                     }
                   } else {
@@ -1618,7 +1618,7 @@ export default function PitcherProfile() {
                     } else {
                       const link = document.createElement("a");
                       link.href = url;
-                      link.download = `${player.first_name}-${player.last_name}-coach-notes.pdf`.toLowerCase().replace(/\s+/g, "-");
+                      link.download = `${(player.first_name || "").replace(/\s+/g, "")}_${(player.last_name || "").replace(/\s+/g, "")}_Coach_Notes.pdf`;
                       link.click();
                     }
                   }
