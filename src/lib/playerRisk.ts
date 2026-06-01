@@ -1,17 +1,21 @@
 /**
- * RSTR IQ — Player Risk Assessment Engine
+ * RSTR IQ — Player Risk Assessment Engine (rebuilt 2026-06-01)
  *
- * Answers five questions in order of importance:
- *  1. How good is this player?              → Projection (wRC+ / pRV+)
- *  2. How reliable is the skillset?          → Skillset (profile variance)
- *  3. How reliable is the competition?       → Competition (testing level)
- *  4. How is he trending?                    → Trajectory (YoY)
- *  5. Is the sample size large enough?       → Sample Size
- *  6. (Pitchers) How heavy is the workload?  → Workload
+ * Five factors, identical weights for hitters and pitchers:
+ *   Projection  35% — "How good is the projected output?" (quality risk)
+ *   Skillset    25% — "How likely is the projection to hold at higher levels?"
+ *   Competition 20% — "How tested is the projection by the conference faced?"
+ *   Trajectory  12% — "Direction of the underlying skill metrics YoY"
+ *   Sample Size  8% — "Is the underlying sample large enough to trust?"
  *
- * Each factor produces a 0–100 risk score (higher = riskier).
- * When a factor has no data (null score), its weight redistributes across remaining factors.
- * Overall risk = weighted composite → grade (Low / Moderate / Elevated / High).
+ * Locked principles:
+ *   • Risk = quality risk + variance risk for a roster spot.
+ *   • Penalties for bad signals ≈ 2× the rewards for elite signals.
+ *   • All thresholds empirically anchored on 2026 D1 distributions
+ *     (see docs/RISK_BUCKETS_2026_06_01.md for derivation).
+ *
+ * Null-data handling: any factor whose data is missing returns score=null;
+ * remaining factor weights renormalize. If all five are null, fallback to 50.
  */
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -21,17 +25,17 @@ export type Trajectory = "Progressing" | "Plateau" | "Regressing" | "Unknown";
 
 export interface RiskFactor {
   label: string;
-  score: number | null;   // 0–100, or null when data is unavailable
+  score: number | null;
   grade: RiskGrade | "Unknown";
-  detail: string;         // one-line explanation
+  detail: string;
 }
 
 export interface RiskAssessment {
-  overall: number;     // 0–100
+  overall: number;
   grade: RiskGrade;
   trajectory: Trajectory;
   factors: RiskFactor[];
-  summary: string;     // 2-3 sentence narrative
+  summary: string;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -47,35 +51,73 @@ function clamp(v: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, v));
 }
 
-function avg(...vals: (number | null | undefined)[]): number | null {
-  const valid = vals.filter((v) => v != null && Number.isFinite(v)) as number[];
-  return valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
+function isNum(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
 }
 
-// ── Conference Strength Tiers ───────────────────────────────────────
-// Conferences ranked by overall competition level.
-// Higher tier = stronger competition = lower risk discount.
-// This is a baseline — can be refined with actual conference stats data.
+// ── Smooth scoring helpers ──────────────────────────────────────────
+// Risk factors are anchored on empirical percentile values. Risk between
+// anchors interpolates linearly, so a player on the boundary of a tier
+// doesn't get a cliff effect (e.g. contact 81.6 vs 82.0 used to mean the
+// difference between 0 and -4 risk — now it scales smoothly).
+
+interface Anchor {
+  /** Empirical value (must be sorted ascending across an anchor table) */
+  value: number;
+  /** Risk score or delta at this value */
+  score: number;
+}
+
+/** Linear interpolation across an anchor table. Out-of-range values clamp. */
+function interpolate(value: number, anchors: readonly Anchor[]): number {
+  if (anchors.length === 0) return 0;
+  if (value <= anchors[0].value) return anchors[0].score;
+  if (value >= anchors[anchors.length - 1].value) return anchors[anchors.length - 1].score;
+  for (let i = 0; i < anchors.length - 1; i++) {
+    const lo = anchors[i];
+    const hi = anchors[i + 1];
+    if (value >= lo.value && value <= hi.value) {
+      const t = hi.value === lo.value ? 0 : (value - lo.value) / (hi.value - lo.value);
+      return lo.score + t * (hi.score - lo.score);
+    }
+  }
+  return anchors[anchors.length - 1].score;
+}
+
+/**
+ * Combo strength on 0..1 — how far the value sits between a "trigger floor"
+ * (no contribution) and a "full ceiling" (full contribution). Linear scaling
+ * inside the range. Used by hitter Skillset combos so a player who is just
+ * below the binary plus cutoff still earns partial combo credit.
+ */
+function comboStrength(value: number, floor: number, ceiling: number, higherIsBetter: boolean): number {
+  if (higherIsBetter) {
+    if (value <= floor) return 0;
+    if (value >= ceiling) return 1;
+    return (value - floor) / (ceiling - floor);
+  } else {
+    if (value >= floor) return 0;
+    if (value <= ceiling) return 1;
+    return (floor - value) / (floor - ceiling);
+  }
+}
+
+// ── Conference Tier Fallback ────────────────────────────────────────
+// Used when Stuff+ / OPR for the conference isn't available.
 
 const CONF_TIER: Record<string, number> = {
-  // Power conferences — low competition risk
-  "SEC": 1, "ACC": 1, "Big 12": 1, "Big Ten": 1, "Pac-12": 1,
-  // Strong mid-majors
-  "AAC": 2, "Big East": 2, "Mountain West": 2, "WCC": 2, "Colonial": 2,
+  SEC: 1, ACC: 1, "Big 12": 1, "Big Ten": 1, "Pac-12": 1,
+  AAC: 2, "Big East": 2, "Mountain West": 2, WCC: 2, Colonial: 2,
   "Sun Belt": 2, "Conference USA": 2, "Missouri Valley": 2, "A-10": 2,
-  // Mid-tier
-  "MAC": 3, "WAC": 3, "ASUN": 3, "SoCon": 3, "CAA": 3, "Horizon": 3,
-  "Big West": 3, "Ivy": 3, "Patriot": 3, "America East": 3,
-  // Lower division / small conference
-  "OVC": 4, "Big South": 4, "Summit": 4, "Southland": 4, "NEC": 4,
-  "MAAC": 4, "MEAC": 4, "SWAC": 4,
+  MAC: 3, WAC: 3, ASUN: 3, SoCon: 3, CAA: 3, Horizon: 3,
+  "Big West": 3, Ivy: 3, Patriot: 3, "America East": 3,
+  OVC: 4, "Big South": 4, Summit: 4, Southland: 4, NEC: 4,
+  MAAC: 4, MEAC: 4, SWAC: 4,
 };
 
 export function getConfTier(conference: string | null | undefined): number {
-  if (!conference) return 3; // default mid-tier if unknown
-  // Try exact match first
+  if (!conference) return 3;
   if (CONF_TIER[conference]) return CONF_TIER[conference];
-  // Fuzzy match
   const norm = conference.toLowerCase().trim();
   for (const [key, tier] of Object.entries(CONF_TIER)) {
     if (norm.includes(key.toLowerCase()) || key.toLowerCase().includes(norm)) return tier;
@@ -83,782 +125,725 @@ export function getConfTier(conference: string | null | undefined): number {
   return 3;
 }
 
-// ── Factor 1: Projection (PRIMARY) ──────────────────────────────────
-// "How good is this player?" — anchored by projected wRC+ (hitters) or pRV+ (pitchers).
-// Higher projection = lower risk of being a non-contributor.
+// ── Factor 1: Projection ────────────────────────────────────────────
+// Empirically-anchored buckets (P5/P10/P25/P50/P75/P90/P95) for the projected
+// wRC+ (hitters) and pRV+ (pitchers) distributions on 2026 prod.
+
+// Empirical hitter projection anchors (2026 D1, P5..P95).
+// Median anchored at 35 (high Low) per the locked principle: average
+// inputs shouldn't carry "Moderate" risk by default. Risk grades up only
+// when projection actually drops below average.
+const HITTER_PROJ_ANCHORS: readonly Anchor[] = [
+  { value: 65,  score: 90 },  // bottom 5%
+  { value: 73,  score: 78 },  // poor (P10)
+  { value: 85,  score: 55 },  // below avg (P25)
+  { value: 97,  score: 35 },  // average (P50) — top of Low band
+  { value: 108, score: 15 },  // plus (P75)
+  { value: 118, score: 5  },  // elite (P90)
+] as const;
+
+function tierLabelFromScore(score: number, kind: "projection" | "competition"): string {
+  if (kind === "projection") {
+    if (score <= 15) return "elite projected output";
+    if (score <= 30) return "plus projected output";
+    if (score <= 55) return "average starter projection";
+    if (score <= 75) return "below-average projection";
+    return "bench/depth projection";
+  }
+  if (score <= 15) return "elite competition";
+  if (score <= 30) return "above-average competition";
+  if (score <= 55) return "average D1 competition";
+  if (score <= 75) return "below-average competition — stats may inflate";
+  return "weak competition — significant inflation risk";
+}
 
 export function assessHitterProjection(pWrcPlus: number | null | undefined): RiskFactor {
-  if (pWrcPlus == null || !Number.isFinite(pWrcPlus)) {
+  if (!isNum(pWrcPlus)) {
     return { label: "Projection", score: null, grade: "Unknown", detail: "Projection unavailable" };
   }
-  const v = pWrcPlus;
-  let risk: number;
-  let tier: string;
-  if (v >= 150) { risk = 5;  tier = "elite projected output"; }
-  else if (v >= 130) { risk = 15; tier = "All-American caliber projection"; }
-  else if (v >= 115) { risk = 25; tier = "All-Conference+ projection"; }
-  else if (v >= 105) { risk = 35; tier = "above-average starter projection"; }
-  else if (v >= 95)  { risk = 45; tier = "average starter projection"; }
-  else if (v >= 85)  { risk = 60; tier = "below-average projection"; }
-  else if (v >= 75)  { risk = 75; tier = "bench/depth projection"; }
-  else               { risk = 88; tier = "org depth projection"; }
+  const score = clamp(Math.round(interpolate(pWrcPlus, HITTER_PROJ_ANCHORS)));
   return {
     label: "Projection",
-    score: risk,
-    grade: toGrade(risk),
-    detail: `Proj ${Math.round(v)} wRC+; ${tier}`,
+    score,
+    grade: toGrade(score),
+    detail: `Proj ${Math.round(pWrcPlus)} wRC+; ${tierLabelFromScore(score, "projection")}`,
   };
 }
+
+// Empirical pitcher projection anchors (2026 D1, P5..P95).
+const PITCHER_PROJ_ANCHORS: readonly Anchor[] = [
+  { value: 50,  score: 90 },
+  { value: 64,  score: 78 },
+  { value: 82,  score: 55 },
+  { value: 97,  score: 35 },  // average (P50)
+  { value: 111, score: 15 },
+  { value: 123, score: 5  },
+] as const;
 
 export function assessPitcherProjection(prvPlus: number | null | undefined): RiskFactor {
-  if (prvPlus == null || !Number.isFinite(prvPlus)) {
+  if (!isNum(prvPlus)) {
     return { label: "Projection", score: null, grade: "Unknown", detail: "Projection unavailable" };
   }
-  const v = prvPlus;
-  let risk: number;
-  let tier: string;
-  if (v >= 160) { risk = 5;  tier = "elite projected output"; }
-  else if (v >= 140) { risk = 15; tier = "All-American caliber projection"; }
-  else if (v >= 120) { risk = 25; tier = "All-Conference+ projection"; }
-  else if (v >= 110) { risk = 35; tier = "above-average starter projection"; }
-  else if (v >= 95)  { risk = 45; tier = "average starter projection"; }
-  else if (v >= 85)  { risk = 60; tier = "below-average projection"; }
-  else if (v >= 75)  { risk = 75; tier = "bench/depth projection"; }
-  else               { risk = 88; tier = "org depth projection"; }
+  const score = clamp(Math.round(interpolate(prvPlus, PITCHER_PROJ_ANCHORS)));
   return {
     label: "Projection",
-    score: risk,
-    grade: toGrade(risk),
-    detail: `Proj ${Math.round(v)} pRV+; ${tier}`,
+    score,
+    grade: toGrade(score),
+    detail: `Proj ${Math.round(prvPlus)} pRV+; ${tierLabelFromScore(score, "projection")}`,
   };
 }
 
-// ── Factor 2: Skillset Reliability ──────────────────────────────────
-// "How reliable is this player's skillset?" — profile variance driver.
+// ── Factor 2: Skillset (Hitter) ─────────────────────────────────────
+// Starts at neutral 50, applies asymmetric deltas. Penalties ≈ 2× rewards.
 
-export function assessHitterTypeRisk(metrics: {
-  chase?: number | null;
+export interface HitterSkillsetMetrics {
   contact?: number | null;
-  whiff?: number | null;
-  barrel?: number | null;
-  lineDrive?: number | null;
+  chase?: number | null;
   avgEv?: number | null;
   ev90?: number | null;
-  pull?: number | null;
-  gb?: number | null;
-  bb?: number | null;
-  // Peripheral fallback inputs — used when no TrackMan metrics are present.
-  // AVG / ISO / (OBP-AVG) is the slash-line backbone: low AVG = poor contact,
-  // low ISO = no power, narrow OBP-AVG gap = no plate discipline. Mirrors
-  // the K9/BB9/HR9 peripheral fallback on the pitcher side.
-  avg?: number | null;
-  obp?: number | null;
-  iso?: number | null;
-}): RiskFactor {
-  // If every TrackMan input is null, fall back to slash-line peripherals.
-  const trackmanInputs = [metrics.chase, metrics.contact, metrics.whiff, metrics.barrel, metrics.lineDrive, metrics.avgEv, metrics.ev90, metrics.pull, metrics.gb, metrics.bb];
-  const anyTrackman = trackmanInputs.some((v) => v != null && Number.isFinite(Number(v)));
-  if (!anyTrackman) {
-    const avg = metrics.avg;
-    const obp = metrics.obp;
-    const iso = metrics.iso;
-    const anyPeripheral = [avg, obp, iso].some((v) => v != null && Number.isFinite(Number(v)));
-    if (!anyPeripheral) {
-      return { label: "Skillset", score: null, grade: "Unknown", detail: "No skillset metrics available" };
-    }
-    let r = 50; const why: string[] = [];
-    if (avg != null) {
-      if (avg < 0.220)      { r += 18; why.push("very poor contact"); }
-      else if (avg < 0.250) { r += 8; why.push("below-avg contact"); }
-      else if (avg >= 0.340){ r -= 14; why.push("elite contact rate"); }
-      else if (avg >= 0.310){ r -= 8; why.push("plus contact rate"); }
-    }
-    if (iso != null) {
-      if (iso < 0.060)      { r += 12; why.push("no power"); }
-      else if (iso < 0.090) { r += 6; why.push("limited power"); }
-      else if (iso >= 0.220){ r -= 12; why.push("elite power"); }
-      else if (iso >= 0.170){ r -= 6; why.push("plus power"); }
-    }
-    if (avg != null && obp != null) {
-      const walkProxy = obp - avg;
-      if (walkProxy < 0.040)      { r += 10; why.push("poor plate discipline (no walks)"); }
-      else if (walkProxy < 0.060) { r += 4; }
-      else if (walkProxy >= 0.110){ r -= 8; why.push("strong walk rate"); }
-      else if (walkProxy >= 0.090){ r -= 4; }
-    }
-    r = clamp(r);
-    return { label: "Skillset", score: r, grade: toGrade(r), detail: why.length ? why.slice(0, 3).join("; ") : "Average peripheral profile" };
-  }
-
-  let risk = 50; // start neutral
-  let reasons: string[] = [];
-
-  // ── Chase & Contact are the PRIMARY risk drivers ──
-  // A hitter can survive with bad chase IF contact is good (can recover from bad swings).
-  // A hitter can survive with low contact IF chase is good (selective, makes pitchers work).
-  // BOTH below average = highest risk — the profile that gets exposed at higher levels.
-  const chase = metrics.chase;
-  const contact = metrics.contact;
-  const whiff = metrics.whiff;
-  const barrel = metrics.barrel;
-  const ld = metrics.lineDrive;
-  const ev = metrics.avgEv;
-
-  // ── CONTACT% is the #1 risk driver. CHASE% is #2. EV is a distant #3. ──
-  //
-  // Contact below ~65% is a major red flag regardless of anything else.
-  // You can have elite chase and still be high risk if you can't put the bat on the ball.
-  // Chase discipline helps but cannot fully compensate for truly poor contact.
-  //
-  const goodChase = chase != null && chase < 22;
-  const eliteChase = chase != null && chase < 19;
-  const badChase = chase != null && chase > 28;
-  const veryBadChase = chase != null && chase > 32;
-  const goodContact = contact != null && contact > 80;
-  const eliteContact = contact != null && contact > 85;
-  const badContact = contact != null && contact < 70;
-  const veryBadContact = contact != null && contact < 65;
-
-  // ── Step 1: Contact% — always evaluated first, largest impact ──
-  if (contact != null) {
-    if (contact < 66.7) {
-      risk += 28; reasons.push("bottom 5% contact rate — major swing-and-miss risk");
-    } else if (contact < 68) {
-      risk += 18; reasons.push("very low contact — vulnerable to better pitching");
-    } else if (contact < 70) {
-      risk += 8;
-    } else if (eliteContact) {
-      risk -= 18; reasons.push("elite contact — carries at any level");
-    } else if (goodContact) {
-      risk -= 10; reasons.push("plus contact");
-    }
-  }
-
-  // ── Step 2: Chase% — #2 factor, mitigates or compounds contact ──
-  if (chase != null) {
-    if (chase > 34) {
-      risk += 16; reasons.push("very high chase rate");
-    } else if (chase > 30) {
-      risk += 12; reasons.push("high chase rate");
-    } else if (chase > 28) {
-      risk += 8; reasons.push("above-avg chase rate");
-    } else if (chase > 25) {
-      risk += 4;
-    } else if (eliteChase) {
-      risk -= 10; reasons.push("elite plate discipline");
-    } else if (goodChase) {
-      risk -= 5; reasons.push("plus discipline");
-    }
-  }
-
-  // ── Chase/Contact interaction bonuses ──
-  // Both bad = compounding penalty (on top of individual penalties above)
-  if (badChase && badContact) {
-    risk += 12;
-    reasons.push("chase + contact combination most exposed at higher competition");
-  }
-  // Both elite = compounding bonus
-  if (eliteChase && eliteContact) {
-    risk -= 10;
-    reasons.push("elite approach — top-tier chase + contact floor");
-  } else if (goodChase && goodContact) {
-    risk -= 6;
-    reasons.push("plus approach — low chase + good contact floor");
-  }
-  // Good chase partially compensates very bad contact — but NOT fully
-  if (veryBadContact && goodChase) {
-    risk -= 5; // small offset, NOT a full rescue
-    reasons.push("chase discipline helps but does not fully offset contact concerns");
-  }
-
-  if (whiff != null) {
-    if (whiff > 30) { risk += 6; reasons.push("high whiff rate"); }
-    else if (whiff < 15) { risk -= 4; reasons.push("plus bat-to-ball"); }
-  }
-
-  // ── Step 3: Exit Velocity / EV90 — distant #3 factor ──
-  // Weak contact gets exposed but this is less predictive than chase/contact.
-  const ev90 = metrics.ev90;
-  if (ev != null) {
-    if (ev < 83) { risk += 5; reasons.push("below-avg exit velo — weak contact quality"); }
-    else if (ev < 85) { risk += 3; }
-    else if (ev > 92) { risk -= 4; reasons.push("elite exit velocity"); }
-    else if (ev > 89) { risk -= 2; reasons.push("plus exit velocity"); }
-  }
-  if (ev90 != null) {
-    if (ev90 < 95) { risk += 4; reasons.push("low EV90 — ceiling concern"); }
-    else if (ev90 > 104) { risk -= 3; reasons.push("elite top-end power"); }
-    else if (ev90 > 100) { risk -= 1; reasons.push("plus top-end power"); }
-  }
-
-  // High contact + high LD = safer floor profile
-  if (ld != null && ld > 22 && goodContact) {
-    risk -= 8;
-    reasons.push("high line drive, contact-oriented");
-  }
-
-  // Low EV but high contact = safe floor (contact compensates for lack of power)
-  if (ev != null && ev < 85 && goodContact) {
-    risk -= 4;
-    reasons.push("contact-over-power profile");
-  }
-
-  // High barrel + high EV = premium bat, lower risk
-  // BUT NOT when both contact and chase are bad — power can't rescue a feared profile
-  if (barrel != null && barrel > 10 && ev != null && ev > 88) {
-    if (badContact && badChase) {
-      // No bonus — power doesn't rescue when both safety valves are gone
-      reasons.push("power present but can't offset contact + chase concerns");
-    } else {
-      risk -= 10;
-      reasons.push("premium hard-hit profile");
-    }
-  }
-
-  // High barrel but high chase = boom-or-bust
-  if (barrel != null && barrel > 8 && badChase) {
-    risk += 12;
-    reasons.push("boom-or-bust — power undermined by chase");
-  }
-
-  // Walk rate as indicator of approach quality
-  if (metrics.bb != null) {
-    if (metrics.bb > 12) { risk -= 6; reasons.push("strong walk rate"); }
-    else if (metrics.bb < 5) { risk += 6; reasons.push("low walk rate"); }
-  }
-
-  risk = clamp(risk);
-  const detail = reasons.length > 0 ? reasons.slice(0, 3).join("; ") : "Standard profile";
-  return { label: "Skillset", score: risk, grade: toGrade(risk), detail };
-}
-
-export function assessPitcherTypeRisk(metrics: {
-  stuffPlus?: number | null;
-  whiffPct?: number | null;
-  bbPct?: number | null;
-  chase?: number | null;
   barrel?: number | null;
-  hardHit?: number | null;
+  lineDrive?: number | null;
   gb?: number | null;
-  izWhiff?: number | null;
-  // Peripheral fallback — used when no TrackMan metrics are present.
-  // K/9 + BB/9 + HR/9 is effectively the FIP backbone and is a reasonable
-  // skillset proxy: lots of walks + HRs + no Ks = high-risk skillset; the
-  // inverse is low-risk. Anchors expressed in per-9 units (NCAA averages
-  // ~9.0 K/9, ~4.3 BB/9, ~1.0 HR/9).
-  k9?: number | null;
-  bb9?: number | null;
-  hr9?: number | null;
-}): RiskFactor {
-  let risk = 50;
-  let reasons: string[] = [];
+}
 
-  const stuff = metrics.stuffPlus;
-  const whiff = metrics.whiffPct;
-  const bb = metrics.bbPct;
-  const chase = metrics.chase;
-  const barrel = metrics.barrel;
-  const hh = metrics.hardHit;
-  const gb = metrics.gb;
-  const izWhiff = metrics.izWhiff;
+// ── Hitter Skillset anchor tables (smooth interpolation) ────────────
+// Each anchor's `score` is the risk DELTA applied at that empirical value.
+// Penalty side ≈ 2× reward side per the asymmetry principle.
 
-  const anyTrackman = [stuff, whiff, bb, chase, barrel, hh, gb, izWhiff].some((v) => v != null && Number.isFinite(Number(v)));
+const HIT_CONTACT_ANCHORS: readonly Anchor[] = [
+  { value: 64.6, score: 28 },
+  { value: 67.5, score: 22 },
+  { value: 72.3, score: 12 },
+  { value: 77.3, score: 0 },
+  { value: 82.0, score: -4 },
+  { value: 85.8, score: -8 },
+] as const;
 
-  if (!anyTrackman) {
-    // ── Peripheral fallback: K/9, BB/9, HR/9 (FIP backbone) ──
-    // The framing: high K's = stuff plays, low BB's = command, low HR's =
-    // contact suppression. Walks weighted hardest because the user flagged
-    // them as the primary skillset reliability tell across levels (Connor
-    // Mitchell case: high K + low HR + high BB = elevated risk because the
-    // walks are what doesn't translate).
-    const k9 = metrics.k9;
-    const bb9 = metrics.bb9;
-    const hr9 = metrics.hr9;
-    const anyPeripheral = [k9, bb9, hr9].some((v) => v != null && Number.isFinite(Number(v)));
-    if (!anyPeripheral) {
-      return { label: "Skillset", score: null, grade: "Unknown", detail: "No skillset metrics available" };
+const HIT_CHASE_ANCHORS: readonly Anchor[] = [
+  { value: 14.6, score: -6 },
+  { value: 16.5, score: -6 },
+  { value: 19.3, score: -3 },
+  { value: 23.0, score: 0 },
+  { value: 27.0, score: 10 },
+  { value: 31.0, score: 18 },
+  { value: 33.5, score: 25 },
+] as const;
+
+const HIT_AVG_EV_ANCHORS: readonly Anchor[] = [
+  { value: 78.1, score: 10 },
+  { value: 80.0, score: 10 },
+  { value: 83.1, score: 5 },
+  { value: 86.0, score: 0 },
+  { value: 90.9, score: -2 },
+  { value: 92.3, score: -2 },
+] as const;
+
+const HIT_EV90_ANCHORS: readonly Anchor[] = [
+  { value: 95.0, score: 8 },
+  { value: 96.6, score: 8 },
+  { value: 99.0, score: 5 },
+  { value: 101.6, score: 0 },
+  { value: 106.1, score: -4 },
+  { value: 107.5, score: -4 },
+] as const;
+
+const HIT_GB_ANCHORS: readonly Anchor[] = [
+  { value: 28.5, score: -4 },
+  { value: 32.0, score: 0 },
+  { value: 48.0, score: 3 },
+  { value: 53.0, score: 6 },
+  { value: 57.0, score: 6 },
+] as const;
+
+// Baseline: average inputs net to 35 (top of Low). Below-average inputs
+// push toward Moderate / Elevated; elite inputs reach the floor.
+const HITTER_SKILLSET_BASELINE = 35;
+
+export function assessHitterTypeRisk(m: HitterSkillsetMetrics): RiskFactor {
+  const hasAny = [m.contact, m.chase, m.avgEv, m.ev90, m.barrel, m.lineDrive, m.gb]
+    .some((v) => isNum(v));
+  if (!hasAny) {
+    return { label: "Skillset", score: null, grade: "Unknown", detail: "Scouting data unavailable" };
+  }
+
+  let risk = HITTER_SKILLSET_BASELINE;
+  const reasons: string[] = [];
+
+  // ── Individual metrics (smooth) ──
+  if (isNum(m.contact)) {
+    const d = interpolate(m.contact, HIT_CONTACT_ANCHORS);
+    risk += d;
+    if (d <= -6) reasons.push("elite contact — carries at any level");
+    else if (d <= -2) reasons.push("plus contact");
+    else if (d >= 22) reasons.push("very low contact — major swing-and-miss risk");
+    else if (d >= 10) reasons.push("below-average contact");
+  }
+
+  if (isNum(m.chase)) {
+    const d = interpolate(m.chase, HIT_CHASE_ANCHORS);
+    risk += d;
+    if (d <= -5) reasons.push("elite plate discipline");
+    else if (d <= -2) reasons.push("plus discipline");
+    else if (d >= 18) reasons.push("very high chase rate");
+    else if (d >= 8) reasons.push("above-average chase rate");
+  }
+
+  if (isNum(m.avgEv)) {
+    const d = interpolate(m.avgEv, HIT_AVG_EV_ANCHORS);
+    risk += d;
+    if (d <= -1.5) reasons.push("plus exit velocity");
+    else if (d >= 8) reasons.push("weak exit velocity");
+  }
+
+  if (isNum(m.ev90)) {
+    const d = interpolate(m.ev90, HIT_EV90_ANCHORS);
+    risk += d;
+    if (d <= -3) reasons.push("elite top-end power");
+    else if (d >= 7) reasons.push("low EV90 — ceiling concern");
+  }
+
+  if (isNum(m.gb)) {
+    const d = interpolate(m.gb, HIT_GB_ANCHORS);
+    risk += d;
+    if (d >= 5) reasons.push("high ground-ball rate — power output capped");
+    else if (d <= -3) reasons.push("low ground-ball rate — feel for hitting in the air");
+  }
+
+  // ── Combo bonuses & penalties (smooth strength scaling) ──
+  // Strength floors at P50 (no contribution) and ceil at the "elite" / "very bad" end
+  // (full contribution). min(strengthA, strengthB) gates the combo magnitude.
+
+  // Chase × Contact (locked rule: both bad compounds; both good rewards)
+  if (isNum(m.chase) && isNum(m.contact)) {
+    const chaseGoodStrength = comboStrength(m.chase, 23, 16.5, false);
+    const contactGoodStrength = comboStrength(m.contact, 77.3, 85.8, true);
+    const goodStrength = Math.min(chaseGoodStrength, contactGoodStrength);
+    if (goodStrength > 0) {
+      const delta = -6 * goodStrength;
+      risk += delta;
+      if (goodStrength >= 0.7) reasons.push("elite chase + contact floor");
+      else if (goodStrength >= 0.3) reasons.push("plus approach — low chase + good contact");
     }
 
-    if (k9 != null) {
-      if (k9 >= 12)      { risk -= 16; reasons.push("elite K rate"); }
-      else if (k9 >= 10) { risk -= 10; reasons.push("plus K rate"); }
-      else if (k9 >= 8.5){ risk -= 5; }
-      else if (k9 < 6)   { risk += 10; reasons.push("poor K rate"); }
-      else if (k9 < 7.5) { risk += 5; }
-    }
-    if (bb9 != null) {
-      if (bb9 >= 6)      { risk += 20; reasons.push("very poor command — primary skillset risk"); }
-      else if (bb9 >= 5) { risk += 12; reasons.push("below-avg command"); }
-      else if (bb9 >= 4.5){ risk += 6; }
-      else if (bb9 <= 2) { risk -= 14; reasons.push("elite command"); }
-      else if (bb9 <= 3) { risk -= 10; reasons.push("plus command"); }
-      else if (bb9 <= 4) { risk -= 3; }
-    }
-    if (hr9 != null) {
-      if (hr9 >= 1.5)    { risk += 12; reasons.push("HR-prone"); }
-      else if (hr9 >= 1.2){ risk += 6; }
-      else if (hr9 <= 0.6){ risk -= 10; reasons.push("HR suppression"); }
-      else if (hr9 <= 0.9){ risk -= 3; }
-    }
-
-    risk = clamp(risk);
-    const detail = reasons.length > 0 ? reasons.slice(0, 3).join("; ") : "Average peripheral profile";
-    return { label: "Skillset", score: risk, grade: toGrade(risk), detail };
-  }
-
-  // ── #1: Stuff+ — dominant anchor. Stuff is stuff regardless of competition. ──
-  // NCAA Stuff+ distribution is tight — 108+ is ~99th percentile.
-  if (stuff != null) {
-    if (stuff >= 115) { risk -= 24; reasons.push("elite Stuff+"); }
-    else if (stuff >= 108) { risk -= 18; reasons.push("plus Stuff+"); }
-    else if (stuff >= 103) { risk -= 10; reasons.push("above-avg Stuff+"); }
-    else if (stuff >= 100) { risk -= 4; }
-    else if (stuff < 85) { risk += 20; reasons.push("well below-avg Stuff+"); }
-    else if (stuff < 90) { risk += 14; reasons.push("below-avg Stuff+"); }
-    else if (stuff < 95) { risk += 7; }
-  }
-
-  // ── #2: BB% — close second, biggest variance driver. Command is command. ──
-  // NCAA BB% distribution: <5% ~90th pctl, <6% ~85th, <7% ~75th, >10% ~25th, >13% ~10th
-  if (bb != null) {
-    if (bb > 14) { risk += 18; reasons.push("very high walk rate — major command concern"); }
-    else if (bb > 12) { risk += 14; reasons.push("high walk rate"); }
-    else if (bb > 10) { risk += 8; reasons.push("elevated walk rate"); }
-    else if (bb > 8) { risk += 4; }
-    else if (bb < 4) { risk -= 16; reasons.push("elite command"); }
-    else if (bb < 5.5) { risk -= 12; reasons.push("plus command"); }
-    else if (bb < 7) { risk -= 6; reasons.push("above-avg command"); }
-  }
-
-  // ── Stuff + BB% interaction — the core risk combos ──
-  // Average stuff + below-avg command = nothing to lean on
-  if (stuff != null && stuff < 100 && bb != null && bb > 10) {
-    risk += 10;
-    reasons.push("average stuff + poor command — high-risk combination");
-  }
-  // Elite stuff + elite command = very low risk, period
-  if (stuff != null && stuff >= 108 && bb != null && bb < 6) {
-    risk -= 10;
-    reasons.push("elite stuff + elite command");
-  }
-  // Plus stuff + plus command = low risk
-  if (stuff != null && stuff >= 103 && stuff < 108 && bb != null && bb < 7) {
-    risk -= 5;
-    reasons.push("plus stuff + plus command");
-  }
-
-  // ── #3: Hard Hit% / Barrel% — red flag when elevated, gets worse at higher levels ──
-  // CONTEXT: 4-seam FB pitchers with high whiff will naturally give up harder contact
-  // when the ball IS hit — that's the profile, not a red flag. Only penalize hard hit
-  // when the pitcher lacks swing-and-miss to justify it.
-  const hasWhiff = whiff != null && whiff >= 25; // high-whiff pitcher — hard hit is expected
-  if (hh != null) {
-    if (hasWhiff) {
-      // High-whiff pitcher: hard hit is part of the profile — minimal penalty
-      if (hh > 45) { risk += 5; reasons.push("very high hard hit — elevated even for a swing-and-miss profile"); }
-      else if (hh < 25) { risk -= 4; reasons.push("suppresses contact and misses bats"); }
-    } else {
-      // Low-whiff pitcher: hard hit is a real problem — can't miss bats AND gets hit hard
-      if (hh > 40) { risk += 14; reasons.push("gets hit hard without swing-and-miss — red flag"); }
-      else if (hh > 36) { risk += 8; reasons.push("elevated hard contact without whiff to offset"); }
-      else if (hh < 25) { risk -= 6; reasons.push("elite contact suppression"); }
-      else if (hh < 30) { risk -= 3; }
-    }
-  }
-  if (barrel != null) {
-    if (hasWhiff) {
-      // High-whiff: barrel is less alarming — only flag extremes
-      if (barrel > 12) { risk += 5; reasons.push("barrel rate elevated even with swing-and-miss"); }
-      else if (barrel < 4) { risk -= 4; reasons.push("plus barrel suppression + whiff"); }
-    } else {
-      // Low-whiff: barrel is a major concern
-      if (barrel > 10) { risk += 12; reasons.push("barrel-prone — gets worse against better hitters"); }
-      else if (barrel > 7) { risk += 6; reasons.push("elevated barrel rate allowed"); }
-      else if (barrel < 3) { risk -= 6; reasons.push("elite barrel suppression"); }
-      else if (barrel < 5) { risk -= 3; }
+    const chaseBadStrength = comboStrength(m.chase, 23, 31, true);
+    const contactBadStrength = comboStrength(m.contact, 77.3, 67.5, false);
+    const badStrength = Math.min(chaseBadStrength, contactBadStrength);
+    if (badStrength > 0) {
+      const delta = 12 * badStrength;
+      risk += delta;
+      if (badStrength >= 0.5) reasons.push("chase + contact combo most exposed at higher competition");
     }
   }
 
-  // ── High barrel + low whiff = bad recipe at higher levels ──
-  if (barrel != null && barrel > 7 && whiff != null && whiff < 20) {
-    risk += 10;
-    reasons.push("gets barreled without swing-and-miss to compensate");
-  }
-
-  // ── #4: IZ Whiff% — stuff confirmation / challenge ──
-  if (izWhiff != null) {
-    // IZ whiff confirms Stuff+ — high IZ whiff with high Stuff+ = real deal
-    if (izWhiff >= 20) { risk -= 6; reasons.push("elite in-zone whiff — stuff confirmed"); }
-    else if (izWhiff >= 16) { risk -= 3; }
-    // Low IZ whiff challenges Stuff+ — model says good stuff but hitters aren't missing in zone
-    else if (izWhiff < 10) { risk += 6; reasons.push("low IZ whiff — stuff not generating misses in zone"); }
-    else if (izWhiff < 12) { risk += 3; }
-  }
-  // Stuff+ high but IZ whiff low = flag
-  if (stuff != null && stuff >= 105 && izWhiff != null && izWhiff < 12) {
-    risk += 5;
-    reasons.push("Stuff+ doesn't match in-zone swing-and-miss");
-  }
-
-  // ── #5: Chase% — flags BB% instability. High chase = BB% artificially low. ──
-  // Chase fluctuates most with competition — at higher levels chase drops, BB% rises.
-  if (chase != null) {
-    if (chase > 35) { risk += 5; reasons.push("high chase rate — BB% may rise against better hitters"); }
-    else if (chase > 30) { risk += 3; }
-    else if (chase < 18) { risk -= 3; }
-  }
-  // High chase + low BB% = unstable command picture
-  if (chase != null && chase > 30 && bb != null && bb < 6) {
-    risk += 4;
-    reasons.push("low BB% may be masked by undisciplined opposing lineups");
-  }
-
-  // ── #6: Whiff% — only meaningful relative to IZ whiff and chase context ──
-  // Discounted — whiff is polluted by chase. High whiff + high chase = inflated.
-  if (whiff != null) {
-    if (whiff >= 30 && izWhiff != null && izWhiff >= 16) { risk -= 4; reasons.push("legitimate swing-and-miss"); }
-    else if (whiff < 16) { risk += 4; reasons.push("limited swing-and-miss"); }
-  }
-  // Whiff high but IZ whiff low = chase-driven, not stuff-driven
-  if (whiff != null && whiff >= 25 && izWhiff != null && izWhiff < 12) {
-    risk += 5;
-    reasons.push("whiff rate inflated by chase — not real swing-and-miss");
-  }
-
-  // ── GB% — translatable floor note, not a risk weight. ──
-  // High GB% from a good sinker translates. Noted positively but minimal risk impact.
-  if (gb != null) {
-    if (gb > 55) { risk -= 3; reasons.push("elite ground ball rate — translatable floor"); }
-    else if (gb > 50) { risk -= 1; }
-    // Low GB% is not penalized — fly ball pitchers with good stuff are fine
-  }
-
-  risk = clamp(risk);
-  const detail = reasons.length > 0 ? reasons.slice(0, 3).join("; ") : "Standard profile";
-  return { label: "Skillset", score: risk, grade: toGrade(risk), detail };
-}
-
-// ── Factor 2: Competition Factor ────────────────────────────────────
-
-/**
-/**
- * Tier fallback — used by both hitter & pitcher when no metric is available.
- */
-function tierFallbackRisk(conference: string | null | undefined): { risk: number; tierDetail: string } {
-  const tier = getConfTier(conference);
-  if (tier === 1) return { risk: 15, tierDetail: "Power conference (no metric data)" };
-  if (tier === 2) return { risk: 35, tierDetail: "Strong conference (no metric data)" };
-  if (tier === 3) return { risk: 55, tierDetail: "Mid-tier conference (no metric data)" };
-  return { risk: 75, tierDetail: "Lower conference (no metric data)" };
-}
-
-function buildCompetitionFactor(
-  conference: string | null | undefined,
-  metric: number | null | undefined,
-  metricLabel: string,
-  riskFromMetric: (m: number) => { risk: number; gradeText: string },
-): RiskFactor {
-  let risk: number;
-  const detailParts: string[] = [];
-
-  if (metric != null && Number.isFinite(metric)) {
-    const { risk: r, gradeText } = riskFromMetric(metric);
-    risk = r;
-    if (conference) detailParts.push(conference);
-    detailParts.push(`${metricLabel} ${Math.round(metric)}`);
-    detailParts.push(gradeText);
-  } else {
-    const fallback = tierFallbackRisk(conference);
-    risk = fallback.risk;
-    if (conference) detailParts.push(conference);
-    detailParts.push(fallback.tierDetail);
-  }
-
-  return { label: "Competition", score: clamp(risk), grade: toGrade(clamp(risk)), detail: detailParts.join("; ") };
-}
-
-/**
- * Hitter competition risk — uses Stuff+ (pitching quality faced).
- * Calibrated against the realistic D1 range (~92–108).
- * NEC / SWAC at the bottom (~92) land in High (red).
- */
-export function assessHitterCompetitionRisk(conference: string | null | undefined, confStuffPlus?: number | null): RiskFactor {
-  return buildCompetitionFactor(conference, confStuffPlus, "Stuff+", (m) => {
-    if (m >= 108) return { risk: 5,  gradeText: "elite competition" };
-    if (m >= 105) return { risk: 12, gradeText: "top-tier competition" };
-    if (m >= 102) return { risk: 22, gradeText: "above-avg competition" };
-    if (m >= 100) return { risk: 32, gradeText: "solid competition" };
-    if (m >= 98)  return { risk: 45, gradeText: "average competition" };
-    if (m >= 96)  return { risk: 58, gradeText: "below-avg competition" };
-    if (m >= 94)  return { risk: 70, gradeText: "weak competition — stats may be inflated" };
-    if (m >= 92)  return { risk: 80, gradeText: "bottom-tier competition — significant inflation risk" };
-    return { risk: 90, gradeText: "very weak competition — stats unreliable" };
-  });
-}
-
-/**
- * Pitcher competition risk — uses Hitter Talent+ (hitting quality faced).
- * Wider range than Stuff+ (~70–117) since HT+ aggregates OPR + Stuff+ + wRC+.
- * NCAA average is ~103.
- */
-export function assessPitcherCompetitionRisk(conference: string | null | undefined, confHitterTalentPlus?: number | null): RiskFactor {
-  return buildCompetitionFactor(conference, confHitterTalentPlus, "Hitter Talent+", (m) => {
-    if (m >= 115) return { risk: 5,  gradeText: "elite competition" };
-    if (m >= 110) return { risk: 12, gradeText: "top-tier competition" };
-    if (m >= 105) return { risk: 22, gradeText: "above-avg competition" };
-    if (m >= 100) return { risk: 35, gradeText: "solid competition" };
-    if (m >= 95)  return { risk: 50, gradeText: "average competition" };
-    if (m >= 90)  return { risk: 62, gradeText: "below-avg competition" };
-    if (m >= 85)  return { risk: 73, gradeText: "weak competition — stats may be inflated" };
-    if (m >= 78)  return { risk: 82, gradeText: "bottom-tier competition — significant inflation risk" };
-    return { risk: 90, gradeText: "very weak competition — stats unreliable" };
-  });
-}
-
-// ── Factor 3: Performance Trajectory ────────────────────────────────
-
-function assessTrajectory(seasons: any[], playerType: "hitter" | "pitcher"): { factor: RiskFactor; trajectory: Trajectory } {
-  if (!seasons || seasons.length === 0) {
-    return {
-      factor: { label: "Trajectory", score: null, grade: "Unknown", detail: "No multi-year data" },
-      trajectory: "Unknown",
-    };
-  }
-  if (seasons.length < 2) {
-    return {
-      factor: { label: "Trajectory", score: 40, grade: "Moderate", detail: "Insufficient multi-year data" },
-      trajectory: "Unknown",
-    };
-  }
-
-  // Sort ascending by season
-  const sorted = [...seasons].sort((a, b) => Number(a.Season) - Number(b.Season));
-  const recent = sorted[sorted.length - 1];
-  const prior = sorted[sorted.length - 2];
-
-  let trajectory: Trajectory;
-  let risk: number;
-  let detail: string;
-
-  if (playerType === "hitter") {
-    const recentOps = (Number(recent.OBP || 0) + Number(recent.SLG || 0)) || null;
-    const priorOps = (Number(prior.OBP || 0) + Number(prior.SLG || 0)) || null;
-
-    if (recentOps == null || priorOps == null) {
-      trajectory = "Unknown";
-      risk = 40;
-      detail = "Cannot compare seasons";
-    } else {
-      const delta = recentOps - priorOps;
-      if (delta > 0.040) { trajectory = "Progressing"; risk = 15; detail = `OPS improved ${delta > 0 ? "+" : ""}${delta.toFixed(3)} year-over-year`; }
-      else if (delta > -0.020) { trajectory = "Plateau"; risk = 35; detail = `OPS steady (${delta >= 0 ? "+" : ""}${delta.toFixed(3)} YoY)`; }
-      else { trajectory = "Regressing"; risk = 65; detail = `OPS declined ${delta.toFixed(3)} year-over-year`; }
-    }
-  } else {
-    const recentEra = Number(recent.ERA);
-    const priorEra = Number(prior.ERA);
-
-    if (!Number.isFinite(recentEra) || !Number.isFinite(priorEra)) {
-      trajectory = "Unknown";
-      risk = 40;
-      detail = "Cannot compare seasons";
-    } else {
-      const delta = recentEra - priorEra; // negative = improvement for pitchers
-      if (delta < -0.30) { trajectory = "Progressing"; risk = 15; detail = `ERA improved ${Math.abs(delta).toFixed(2)} year-over-year`; }
-      else if (delta < 0.30) { trajectory = "Plateau"; risk = 35; detail = `ERA steady (${delta >= 0 ? "+" : ""}${delta.toFixed(2)} YoY)`; }
-      else { trajectory = "Regressing"; risk = 65; detail = `ERA rose ${delta.toFixed(2)} year-over-year`; }
+  // LD × Contact bonus — high-floor contact-oriented archetype
+  if (isNum(m.lineDrive) && isNum(m.contact)) {
+    const ldStrength = comboStrength(m.lineDrive, 21.8, 25, true);
+    const contactStrength = comboStrength(m.contact, 77.3, 82, true);
+    const s = Math.min(ldStrength, contactStrength);
+    if (s > 0) {
+      const delta = -6 * s;
+      risk += delta;
+      if (s >= 0.5) reasons.push("line-drive contact profile — stable floor");
     }
   }
 
-  return { factor: { label: "Trajectory", score: clamp(risk), grade: toGrade(clamp(risk)), detail }, trajectory };
-}
-
-// ── Factor 4: Sample Size Risk ──────────────────────────────────────
-
-function assessSampleSize(pa: number | null | undefined, ip: number | null | undefined, playerType: "hitter" | "pitcher"): RiskFactor {
-  // When PA/IP is not provided at all (undefined), skip the factor entirely
-  if (playerType === "hitter" && pa == null) {
-    return { label: "Sample Size", score: null, grade: "Unknown", detail: "Sample size unavailable" };
-  }
-  if (playerType === "pitcher" && ip == null) {
-    return { label: "Sample Size", score: null, grade: "Unknown", detail: "Sample size unavailable" };
-  }
-  if (playerType === "hitter") {
-    const n = pa ?? 0;
-    let risk: number;
-    let detail: string;
-    if (n >= 200) { risk = 10; detail = `${n} PA — reliable sample`; }
-    else if (n >= 150) { risk = 25; detail = `${n} PA — adequate sample`; }
-    else if (n >= 100) { risk = 50; detail = `${n} PA — limited sample`; }
-    else if (n >= 50) { risk = 70; detail = `${n} PA — small sample, proceed with caution`; }
-    else { risk = 90; detail = `${n || 0} PA — very small sample`; }
-    return { label: "Sample Size", score: risk, grade: toGrade(risk), detail };
-  } else {
-    const n = ip ?? 0;
-    let risk: number;
-    let detail: string;
-    if (n >= 80) { risk = 10; detail = `${n.toFixed(0)} IP — reliable sample`; }
-    else if (n >= 50) { risk = 25; detail = `${n.toFixed(0)} IP — adequate sample`; }
-    else if (n >= 30) { risk = 50; detail = `${n.toFixed(0)} IP — limited sample`; }
-    else if (n >= 15) { risk = 70; detail = `${n.toFixed(0)} IP — small sample`; }
-    else { risk = 90; detail = `${(n || 0).toFixed(0)} IP — very small sample`; }
-    return { label: "Sample Size", score: risk, grade: toGrade(risk), detail };
-  }
-}
-
-// ── Factor 5: Workload Risk (Pitchers Only) ─────────────────────────
-
-function assessWorkload(ip: number | null | undefined, classYear: string | null | undefined): RiskFactor {
-  const innings = ip ?? 0;
-  const cls = (classYear || "").toLowerCase();
-
-  // Thresholds by class year
-  let highThreshold: number;
-  let moderateThreshold: number;
-  if (cls.includes("fr")) { highThreshold = 60; moderateThreshold = 40; }
-  else if (cls.includes("so")) { highThreshold = 85; moderateThreshold = 65; }
-  else if (cls.includes("jr")) { highThreshold = 100; moderateThreshold = 80; }
-  else { highThreshold = 110; moderateThreshold = 90; } // Sr/Gr
-
-  let risk: number;
-  let detail: string;
-  if (innings >= highThreshold) {
-    risk = 70;
-    detail = `${innings.toFixed(0)} IP — heavy workload for ${classYear || "class year"}`;
-  } else if (innings >= moderateThreshold) {
-    risk = 40;
-    detail = `${innings.toFixed(0)} IP — moderate workload`;
-  } else {
-    risk = 15;
-    detail = `${innings.toFixed(0)} IP — manageable workload`;
+  // Barrel × Contact bonus — premium contact + power (new)
+  if (isNum(m.barrel) && isNum(m.contact)) {
+    const barrelStrength = comboStrength(m.barrel, 16.8, 22, true);
+    const contactStrength = comboStrength(m.contact, 77.3, 82, true);
+    const s = Math.min(barrelStrength, contactStrength);
+    if (s > 0) {
+      const delta = -8 * s;
+      risk += delta;
+      if (s >= 0.5) reasons.push("premium contact + power — stable high-floor profile");
+    }
   }
 
-  return { label: "Workload", score: clamp(risk), grade: toGrade(clamp(risk)), detail };
-}
-
-// ── Factor 6: Durability (Pitchers Only) ────────────────────────────
-
-/**
- * Assess durability / availability risk based on career IP patterns across seasons.
- * Flags pitchers with low cumulative innings over multiple years (injury history or
- * limited role) or dramatic workload dropoffs (likely injury or role loss).
- *
- * Returns null if < 2 seasons of data (can't assess pattern).
- */
-function assessPitcherDurability(seasons: any[] | undefined): RiskFactor | null {
-  if (!seasons || seasons.length < 2) return null;
-
-  const seasonsWithData = seasons
-    .map((s) => ({ season: Number(s.Season ?? s.season), ip: Number(s.IP ?? s.ip) || 0 }))
-    .filter((s) => s.ip > 0);
-
-  if (seasonsWithData.length < 2) return null;
-
-  const totalIp = seasonsWithData.reduce((sum, s) => sum + s.ip, 0);
-  const avgPerSeason = totalIp / seasonsWithData.length;
-
-  // Detect dropoff: most recent season vs prior peak
-  const sorted = [...seasonsWithData].sort((a, b) => b.season - a.season);
-  const recentIp = sorted[0].ip;
-  const priorPeak = Math.max(...sorted.slice(1).map((s) => s.ip));
-
-  // Severe dropoff: was at a real workload, now minimal. Likely injury / role loss.
-  if (priorPeak >= 30 && recentIp < 10) {
-    const risk = 80;
-    return {
-      label: "Durability",
-      score: risk,
-      grade: toGrade(risk),
-      detail: `Workload crashed from ${priorPeak.toFixed(0)} IP to ${recentIp.toFixed(0)} IP — injury or role loss concern`,
-    };
+  // Barrel + bad chase — boom-or-bust penalty
+  if (isNum(m.barrel) && isNum(m.chase)) {
+    const barrelStrength = comboStrength(m.barrel, 16.8, 22, true);
+    const chaseBadStrength = comboStrength(m.chase, 23, 31, true);
+    const s = Math.min(barrelStrength, chaseBadStrength);
+    if (s > 0) {
+      const delta = 12 * s;
+      risk += delta;
+      if (s >= 0.5) reasons.push("boom-or-bust — power undermined by chase");
+    }
   }
 
-  // Chronic low availability: multi-season but never builds volume
-  if (seasonsWithData.length >= 2 && avgPerSeason < 15) {
-    const risk = 70;
-    return {
-      label: "Durability",
-      score: risk,
-      grade: toGrade(risk),
-      detail: `Only ${totalIp.toFixed(0)} IP across ${seasonsWithData.length} seasons — limited availability history`,
-    };
-  }
-
-  // Moderate dropoff
-  if (priorPeak >= 40 && recentIp < priorPeak * 0.4) {
-    const risk = 55;
-    return {
-      label: "Durability",
-      score: risk,
-      grade: toGrade(risk),
-      detail: `Workload dropped from ${priorPeak.toFixed(0)} IP to ${recentIp.toFixed(0)} IP — possible injury or role change`,
-    };
-  }
-
-  // Healthy pattern
-  const risk = 20;
+  const final = clamp(Math.round(risk));
   return {
-    label: "Durability",
-    score: risk,
-    grade: toGrade(risk),
-    detail: `${totalIp.toFixed(0)} IP across ${seasonsWithData.length} seasons — healthy workload history`,
+    label: "Skillset",
+    score: final,
+    grade: toGrade(final),
+    detail: reasons.slice(0, 3).join("; ") || "Balanced scouting profile",
   };
 }
 
-// ── Summary Generator ───────────────────────────────────────────────
+// ── Factor 2: Skillset (Pitcher) ────────────────────────────────────
 
-function buildSummary(grade: RiskGrade, trajectory: Trajectory, factors: RiskFactor[], playerType: "hitter" | "pitcher"): string {
-  const projection = factors.find((f) => f.label === "Projection");
-  const skillset = factors.find((f) => f.label === "Skillset");
-  const compRisk = factors.find((f) => f.label === "Competition");
+export interface PitcherSkillsetMetrics {
+  stuffPlus?: number | null;
+  whiffPct?: number | null;
+  izWhiff?: number | null;
+  bbPct?: number | null;
+  hardHit?: number | null;
+}
+
+// ── Pitcher Skillset anchor tables ──────────────────────────────────
+
+const PIT_STUFF_ANCHORS: readonly Anchor[] = [
+  { value: 91.6,  score: 22 },
+  { value: 94.1,  score: 12 },
+  { value: 97.5,  score: 0 },
+  { value: 101.4, score: 0 },
+  { value: 105.4, score: -5 },
+  { value: 109.3, score: -10 },
+] as const;
+
+const PIT_WHIFF_ANCHORS: readonly Anchor[] = [
+  { value: 15.2, score: 14 },
+  { value: 16.7, score: 14 },
+  { value: 19.5, score: 8 },
+  { value: 22.9, score: 0 },
+  { value: 27.0, score: -2 },
+  { value: 31.1, score: -4 },
+] as const;
+
+const PIT_BB_ANCHORS: readonly Anchor[] = [
+  { value: 6.0,  score: -6 },
+  { value: 8.0,  score: -3 },
+  { value: 10.2, score: 0 },
+  { value: 12.8, score: 12 },
+  { value: 15.5, score: 22 },
+] as const;
+
+const PIT_HARDHIT_ANCHORS: readonly Anchor[] = [
+  // Penalty-only per Trevor's locked rule. No reward for low hard hit.
+  { value: 30, score: 0 },
+  { value: 40, score: 6 },
+  { value: 44, score: 12 },
+  { value: 47, score: 12 },
+] as const;
+
+const PITCHER_SKILLSET_BASELINE = 35;
+
+export function assessPitcherTypeRisk(m: PitcherSkillsetMetrics): RiskFactor {
+  const hasAny = [m.stuffPlus, m.whiffPct, m.izWhiff, m.bbPct, m.hardHit].some((v) => isNum(v));
+  if (!hasAny) {
+    return { label: "Skillset", score: null, grade: "Unknown", detail: "Scouting data unavailable" };
+  }
+
+  let risk = PITCHER_SKILLSET_BASELINE;
+  const reasons: string[] = [];
+
+  // Stuff+ (anchor)
+  if (isNum(m.stuffPlus)) {
+    const d = interpolate(m.stuffPlus, PIT_STUFF_ANCHORS);
+    risk += d;
+    if (d <= -8) reasons.push("elite Stuff+");
+    else if (d <= -3) reasons.push("plus Stuff+");
+    else if (d >= 18) reasons.push("well below-average Stuff+");
+    else if (d >= 8) reasons.push("below-average Stuff+");
+  }
+
+  // Whiff% with IZ Whiff% validation. The bonus side (negative delta) is
+  // scaled by how strongly the in-zone whiff rate confirms the stuff is
+  // playing. Low IZ + high whiff = chase-inflated; we suppress the reward.
+  if (isNum(m.whiffPct)) {
+    let d = interpolate(m.whiffPct, PIT_WHIFF_ANCHORS);
+    if (d < 0 && isNum(m.izWhiff)) {
+      // IZ Whiff validation strength — 0 below 13, 1 at 16+
+      const izStrength = comboStrength(m.izWhiff, 13, 16, true);
+      d = d * izStrength;
+      if (izStrength < 0.5 && m.whiffPct >= 27) {
+        reasons.push("whiff inflated by chase — not real swing-and-miss");
+      }
+    }
+    risk += d;
+    if (d <= -3) reasons.push("legitimate swing-and-miss — high whiff confirmed in zone");
+    else if (d <= -1) reasons.push("plus swing-and-miss");
+    else if (d >= 10) reasons.push("very limited swing-and-miss");
+    else if (d >= 5) reasons.push("limited swing-and-miss");
+  }
+
+  // BB% (close 2nd to Stuff+, asymmetric)
+  if (isNum(m.bbPct)) {
+    const d = interpolate(m.bbPct, PIT_BB_ANCHORS);
+    risk += d;
+    if (d <= -5) reasons.push("elite command");
+    else if (d <= -2) reasons.push("plus command");
+    else if (d >= 18) reasons.push("very high walk rate — major command risk");
+    else if (d >= 8) reasons.push("above-average walk rate");
+  }
+
+  // Stuff × BB interactions (smoothed combo strength)
+  if (isNum(m.stuffPlus) && isNum(m.bbPct)) {
+    const stuffBadStrength = comboStrength(m.stuffPlus, 101.4, 94.1, false);
+    const bbBadStrength = comboStrength(m.bbPct, 10.2, 15.5, true);
+    const badStrength = Math.min(stuffBadStrength, bbBadStrength);
+    if (badStrength > 0) {
+      const delta = 10 * badStrength;
+      risk += delta;
+      if (badStrength >= 0.5) reasons.push("below-avg stuff + poor command — compounding risk");
+    }
+
+    const stuffGoodStrength = comboStrength(m.stuffPlus, 101.4, 109.3, true);
+    const bbGoodStrength = comboStrength(m.bbPct, 10.2, 6, false);
+    const goodStrength = Math.min(stuffGoodStrength, bbGoodStrength);
+    if (goodStrength > 0) {
+      const delta = -4 * goodStrength;
+      risk += delta;
+      if (goodStrength >= 0.7) reasons.push("elite stuff + elite command");
+    }
+  }
+
+  // Hard Hit% (penalty-only)
+  if (isNum(m.hardHit)) {
+    const d = interpolate(m.hardHit, PIT_HARDHIT_ANCHORS);
+    risk += d;
+    if (d >= 10) reasons.push("very high hard-hit rate — luck-dependent");
+    else if (d >= 4) reasons.push("above-average hard-hit rate");
+  }
+
+  const final = clamp(Math.round(risk));
+  return {
+    label: "Skillset",
+    score: final,
+    grade: toGrade(final),
+    detail: reasons.slice(0, 3).join("; ") || "Balanced scouting profile",
+  };
+}
+
+// ── Factor 3: Competition ───────────────────────────────────────────
+// Empirical: Conf Stuff+ P10≈94.6, P25≈97.9, P50≈100, P75≈101.5, P90≈104.1
+//            Conf OPR    P10≈55.8, P25≈89.3, P50≈95.3, P75≈101.3, P90≈108.3
+
+// Conference Stuff+ (hitter's competition) — P5 ≈ 93, P50 ≈ 100, P90 ≈ 104
+const CONF_STUFF_ANCHORS: readonly Anchor[] = [
+  { value: 93,  score: 85 },
+  { value: 97.9, score: 60 },
+  { value: 101.5, score: 35 },
+  { value: 104, score: 10 },
+  { value: 105, score: 10 },
+] as const;
+
+// Conference Overall Power Rating (pitcher's competition) — wider spread:
+// P10 ≈ 56, P50 ≈ 95, P90 ≈ 108
+const CONF_OPR_ANCHORS: readonly Anchor[] = [
+  { value: 44, score: 85 },
+  { value: 56, score: 75 },
+  { value: 89, score: 50 },
+  { value: 101, score: 25 },
+  { value: 108, score: 10 },
+  { value: 115, score: 10 },
+] as const;
+
+export function assessHitterCompetitionRisk(
+  conference: string | null | undefined,
+  confStuffPlus?: number | null,
+): RiskFactor {
+  if (isNum(confStuffPlus)) {
+    const score = clamp(Math.round(interpolate(confStuffPlus, CONF_STUFF_ANCHORS)));
+    return {
+      label: "Competition",
+      score,
+      grade: toGrade(score),
+      detail: `${conference || "—"}; Stuff+ ${confStuffPlus.toFixed(1)}; ${tierLabelFromScore(score, "competition")}`,
+    };
+  }
+  const tier = getConfTier(conference);
+  const score = tier === 1 ? 20 : tier === 2 ? 40 : tier === 3 ? 60 : 75;
+  return {
+    label: "Competition",
+    score,
+    grade: toGrade(score),
+    detail: `${conference || "Unknown"} (Tier ${tier})`,
+  };
+}
+
+export function assessPitcherCompetitionRisk(
+  conference: string | null | undefined,
+  confHitterTalentPlus?: number | null,
+): RiskFactor {
+  if (isNum(confHitterTalentPlus)) {
+    const score = clamp(Math.round(interpolate(confHitterTalentPlus, CONF_OPR_ANCHORS)));
+    return {
+      label: "Competition",
+      score,
+      grade: toGrade(score),
+      detail: `${conference || "—"}; OPR ${confHitterTalentPlus.toFixed(1)}; ${tierLabelFromScore(score, "competition")}`,
+    };
+  }
+  const tier = getConfTier(conference);
+  const score = tier === 1 ? 20 : tier === 2 ? 40 : tier === 3 ? 60 : 75;
+  return {
+    label: "Competition",
+    score,
+    grade: toGrade(score),
+    detail: `${conference || "Unknown"} (Tier ${tier})`,
+  };
+}
+
+// ── Factor 4: Trajectory ────────────────────────────────────────────
+// Trajectory: wRC+ / pRV+ delta is the headline. Underlying skill metrics
+// validate the read — they can soften or harden the wRC+ direction by one
+// tier, but not flip it. Examples:
+//   wRC+ up + skills up   → Progressing (clean)
+//   wRC+ up + skills down → Plateau (production up but unsustainable)
+//   wRC+ flat + skills up → Progressing (quietly improving foundation)
+//   wRC+ down + skills up → Plateau (foundation intact — bounce candidate)
+//   wRC+ down + skills down → Regressing (clean decline)
+//
+// Meaningful-change thresholds:
+//   wRC+ ±10  (≈ half a standard deviation of meaningful skill change)
+//   pRV+ ±10
+//   Hitter skills: Contact ±3.2, Chase ±3.2, Barrel ±4 (empirical P25/P75 YoY)
+//   Pitcher skills: Stuff+ ±2.5, BB% ±2.5, Whiff% ±4
+
+const WRC_DELTA_THRESHOLD = 10;
+const PRV_DELTA_THRESHOLD = 10;
+const HIT_SKILL_THRESHOLDS = { contact: 3.2, chase: 3.2, barrel: 4 };
+const PIT_SKILL_THRESHOLDS = { stuffPlus: 2.5, bbPct: 2.5, whiffPct: 4 };
+
+type SeasonRow = Record<string, any> & { Season?: number | null };
+
+function pickLastTwo(seasons: SeasonRow[] | undefined): [SeasonRow, SeasonRow] | null {
+  if (!Array.isArray(seasons) || seasons.length < 2) return null;
+  const withSeason = seasons
+    .filter((s) => isNum(s.Season))
+    .sort((a, b) => (b.Season as number) - (a.Season as number));
+  if (withSeason.length < 2) return null;
+  return [withSeason[0], withSeason[1]];
+}
+
+function direction(delta: number, threshold: number, betterIsHigher: boolean): "up" | "flat" | "down" {
+  if (Math.abs(delta) < threshold) return "flat";
+  const positive = delta > 0;
+  if (betterIsHigher) return positive ? "up" : "down";
+  return positive ? "down" : "up"; // inverted (e.g. chase, BB%)
+}
+
+/**
+ * Compute wRC+ from raw slash stats per the locked formula:
+ *   wRC+ = ((0.45·OBP + 0.30·SLG + 0.15·AVG + 0.10·ISO) / 0.364) · 100
+ * Returns null if any required input is missing.
+ */
+function deriveWrcPlus(row: SeasonRow): number | null {
+  const avg = row.AVG, obp = row.OBP, slg = row.SLG;
+  if (!isNum(avg) || !isNum(obp) || !isNum(slg)) return null;
+  const iso = slg - avg;
+  return ((0.45 * obp + 0.30 * slg + 0.15 * avg + 0.10 * iso) / 0.364) * 100;
+}
+
+function classifySkills(
+  reads: { dir: "up" | "flat" | "down" }[],
+): "up" | "flat" | "down" {
+  if (reads.length === 0) return "flat";
+  const ups = reads.filter((r) => r.dir === "up").length;
+  const downs = reads.filter((r) => r.dir === "down").length;
+  if (ups >= 2 && downs === 0) return "up";
+  if (downs >= 2 && ups === 0) return "down";
+  return "flat";
+}
+
+/**
+ * Combine headline (wRC+ or pRV+) direction with skills direction into a
+ * single trajectory tier. wRC+ direction sets the base; skills shift it by
+ * at most one tier in either direction.
+ */
+function combineTrajectory(
+  headline: "up" | "flat" | "down",
+  skills: "up" | "flat" | "down",
+  headlineLabel: string,
+): { trajectory: Trajectory; score: number; detail: string } {
+  // Build a 3×3 lookup of (headline, skills) → trajectory
+  const matrix: Record<string, { trajectory: Trajectory; score: number; note: string }> = {
+    "up|up":     { trajectory: "Progressing", score: 20, note: `${headlineLabel} up; underlying skills validate it` },
+    "up|flat":   { trajectory: "Progressing", score: 25, note: `${headlineLabel} up; skills steady` },
+    "up|down":   { trajectory: "Plateau",     score: 45, note: `${headlineLabel} up but underlying skills regressed — unsustainable` },
+    "flat|up":   { trajectory: "Progressing", score: 30, note: `${headlineLabel} steady; skills quietly improving` },
+    "flat|flat": { trajectory: "Plateau",     score: 40, note: `${headlineLabel} steady; skills steady` },
+    "flat|down": { trajectory: "Regressing",  score: 55, note: `${headlineLabel} steady but skills declining — caution` },
+    "down|up":   { trajectory: "Plateau",     score: 45, note: `${headlineLabel} down but skills intact — bounce candidate` },
+    "down|flat": { trajectory: "Regressing",  score: 60, note: `${headlineLabel} down; skills not improving` },
+    "down|down": { trajectory: "Regressing",  score: 65, note: `${headlineLabel} down; skills also declining` },
+  };
+  const key = `${headline}|${skills}`;
+  const entry = matrix[key] || matrix["flat|flat"];
+  return { trajectory: entry.trajectory, score: entry.score, detail: entry.note };
+}
+
+function assessHitterTrajectory(seasons: SeasonRow[] | undefined): { factor: RiskFactor; trajectory: Trajectory } {
+  const pair = pickLastTwo(seasons);
+  if (!pair) {
+    return {
+      factor: { label: "Trajectory", score: null, grade: "Unknown", detail: "Insufficient career data" },
+      trajectory: "Unknown",
+    };
+  }
+  const [curr, prior] = pair;
+
+  // Headline: derived wRC+ direction
+  const currWrc = deriveWrcPlus(curr);
+  const priorWrc = deriveWrcPlus(prior);
+  if (currWrc == null || priorWrc == null) {
+    return {
+      factor: { label: "Trajectory", score: null, grade: "Unknown", detail: "Insufficient slash data across seasons" },
+      trajectory: "Unknown",
+    };
+  }
+  const headlineDir = direction(currWrc - priorWrc, WRC_DELTA_THRESHOLD, true);
+
+  // Validators: skills direction (Contact / Chase / Barrel)
+  const skillReads: { dir: "up" | "flat" | "down" }[] = [];
+  if (isNum(curr.contact) && isNum(prior.contact)) {
+    skillReads.push({ dir: direction(curr.contact - prior.contact, HIT_SKILL_THRESHOLDS.contact, true) });
+  }
+  if (isNum(curr.chase) && isNum(prior.chase)) {
+    skillReads.push({ dir: direction(curr.chase - prior.chase, HIT_SKILL_THRESHOLDS.chase, false) });
+  }
+  if (isNum(curr.barrel) && isNum(prior.barrel)) {
+    skillReads.push({ dir: direction(curr.barrel - prior.barrel, HIT_SKILL_THRESHOLDS.barrel, true) });
+  }
+  const skillsDir = classifySkills(skillReads);
+
+  const { trajectory, score, detail } = combineTrajectory(headlineDir, skillsDir, "wRC+");
+  return {
+    factor: { label: "Trajectory", score, grade: toGrade(score), detail },
+    trajectory,
+  };
+}
+
+function assessPitcherTrajectory(seasons: SeasonRow[] | undefined): { factor: RiskFactor; trajectory: Trajectory } {
+  const pair = pickLastTwo(seasons);
+  if (!pair) {
+    return {
+      factor: { label: "Trajectory", score: null, grade: "Unknown", detail: "Insufficient career data" },
+      trajectory: "Unknown",
+    };
+  }
+  const [curr, prior] = pair;
+
+  // Headline: overall_pr_plus (= pRV+) direction. Higher is better.
+  const currPrv = isNum(curr.overall_pr_plus) ? curr.overall_pr_plus : null;
+  const priorPrv = isNum(prior.overall_pr_plus) ? prior.overall_pr_plus : null;
+  if (currPrv == null || priorPrv == null) {
+    return {
+      factor: { label: "Trajectory", score: null, grade: "Unknown", detail: "Insufficient pRV+ data across seasons" },
+      trajectory: "Unknown",
+    };
+  }
+  const headlineDir = direction(currPrv - priorPrv, PRV_DELTA_THRESHOLD, true);
+
+  // Validators: Stuff+ + BB% + Whiff% directions
+  const skillReads: { dir: "up" | "flat" | "down" }[] = [];
+  if (isNum(curr.stuff_plus) && isNum(prior.stuff_plus)) {
+    skillReads.push({ dir: direction(curr.stuff_plus - prior.stuff_plus, PIT_SKILL_THRESHOLDS.stuffPlus, true) });
+  }
+  if (isNum(curr.bb_pct) && isNum(prior.bb_pct)) {
+    skillReads.push({ dir: direction(curr.bb_pct - prior.bb_pct, PIT_SKILL_THRESHOLDS.bbPct, false) });
+  }
+  if (isNum(curr.miss_pct) && isNum(prior.miss_pct)) {
+    skillReads.push({ dir: direction(curr.miss_pct - prior.miss_pct, PIT_SKILL_THRESHOLDS.whiffPct, true) });
+  }
+  const skillsDir = classifySkills(skillReads);
+
+  const { trajectory, score, detail } = combineTrajectory(headlineDir, skillsDir, "pRV+");
+  return {
+    factor: { label: "Trajectory", score, grade: toGrade(score), detail },
+    trajectory,
+  };
+}
+
+// ── Factor 5: Sample Size ───────────────────────────────────────────
+// Empirical hitter PA: P10≈95, P25≈130, P50≈184, P75≈224
+// Empirical pitcher IP: P10≈23, P25≈28, P50≈37, P75≈52
+
+// Sample-size anchors. Median sample (P50) anchored at 15 — at the median
+// PA / IP we have plenty of data to evaluate, so risk should be very low
+// by default. Risk only spikes when the sample is genuinely short.
+const HIT_PA_ANCHORS: readonly Anchor[] = [
+  { value: 50,  score: 80 },
+  { value: 95,  score: 55 },
+  { value: 130, score: 30 },
+  { value: 184, score: 15 },  // median — plenty of data
+  { value: 225, score: 5 },
+  { value: 260, score: 5 },
+] as const;
+
+const PIT_IP_ANCHORS: readonly Anchor[] = [
+  { value: 15, score: 80 },
+  { value: 23, score: 55 },
+  { value: 28, score: 30 },
+  { value: 37, score: 15 },
+  { value: 52, score: 5 },
+  { value: 80, score: 5 },
+] as const;
+
+function sampleLabel(score: number): string {
+  if (score <= 15) return "reliable sample";
+  if (score <= 30) return "adequate sample";
+  if (score <= 50) return "limited sample";
+  if (score <= 70) return "small sample";
+  return "very small sample";
+}
+
+function assessSampleSize(
+  pa: number | null | undefined,
+  ip: number | null | undefined,
+  playerType: "hitter" | "pitcher",
+): RiskFactor {
+  const n = playerType === "hitter" ? pa : ip;
+  if (!isNum(n)) {
+    return { label: "Sample Size", score: null, grade: "Unknown", detail: "Sample size unavailable" };
+  }
+  const unit = playerType === "hitter" ? "PA" : "IP";
+  const anchors = playerType === "hitter" ? HIT_PA_ANCHORS : PIT_IP_ANCHORS;
+  const score = clamp(Math.round(interpolate(n, anchors)));
+  return {
+    label: "Sample Size",
+    score,
+    grade: toGrade(score),
+    detail: `${Math.round(n)} ${unit} — ${sampleLabel(score)}`,
+  };
+}
+
+// ── Composite + Summary ─────────────────────────────────────────────
+
+function computeComposite(factors: RiskFactor[], weights: number[]): number {
+  const usable: Array<{ score: number; weight: number }> = [];
+  for (let i = 0; i < factors.length; i++) {
+    if (factors[i].score != null) usable.push({ score: factors[i].score as number, weight: weights[i] ?? 0 });
+  }
+  if (usable.length === 0) return 50;
+  const totalWeight = usable.reduce((s, f) => s + f.weight, 0);
+  if (totalWeight === 0) return 50;
+  const weighted = usable.reduce((s, f) => s + (f.score * f.weight), 0) / totalWeight;
+  return clamp(Math.round(weighted));
+}
+
+function buildSummary(
+  grade: RiskGrade,
+  trajectory: Trajectory,
+  factors: RiskFactor[],
+  playerType: "hitter" | "pitcher",
+): string {
+  const role = playerType === "hitter" ? "bat" : "arm";
+  const proj = factors.find((f) => f.label === "Projection");
+  const skill = factors.find((f) => f.label === "Skillset");
+  const comp = factors.find((f) => f.label === "Competition");
+
   const parts: string[] = [];
-
-  // Lead with overall assessment
-  if (grade === "Low") parts.push("Low-risk profile with a stable floor.");
-  else if (grade === "Moderate") parts.push("Moderate risk profile — solid but with some variance factors.");
-  else if (grade === "Elevated") parts.push("Elevated risk — multiple concerns present.");
-  else parts.push("High-risk profile — significant concerns across multiple factors.");
-
-  // Projection headline
-  if (projection && projection.score != null && projection.detail !== "Projection unavailable") {
-    parts.push(projection.detail.charAt(0).toUpperCase() + projection.detail.slice(1) + ".");
-  }
-
-  // Trajectory
-  if (trajectory === "Progressing") parts.push("Performance trending upward.");
-  else if (trajectory === "Regressing") parts.push("Performance has declined year-over-year.");
-
-  // Skillset detail
-  if (skillset && skillset.detail !== "Standard profile") {
-    parts.push(skillset.detail.charAt(0).toUpperCase() + skillset.detail.slice(1) + ".");
-  }
-
-  // Competition flag
-  if (compRisk && compRisk.score != null && compRisk.score >= 55) {
-    parts.push("Competition level suggests stats may be inflated or skillset under-tested.");
-  }
-
+  parts.push(`${grade} risk ${role}.`);
+  if (proj?.detail && proj.score != null) parts.push(`${proj.detail}.`);
+  if (trajectory !== "Unknown") parts.push(`Trajectory: ${trajectory}.`);
+  if (skill?.detail && skill.score != null && skill.score >= 55) parts.push(`${skill.detail}.`);
+  if (comp?.score != null && comp.score >= 55) parts.push(`${comp.detail}.`);
   return parts.join(" ");
 }
 
 // ── Public API ──────────────────────────────────────────────────────
-
-/**
- * Composite weighted-average helper that safely skips null-scored factors.
- * Remaining factor weights are renormalized so the overall still sums to 100%.
- */
-function computeComposite(factors: RiskFactor[], weights: number[]): number {
-  let weightedSum = 0;
-  let activeWeight = 0;
-  factors.forEach((f, i) => {
-    if (f.score != null && Number.isFinite(f.score)) {
-      weightedSum += f.score * weights[i];
-      activeWeight += weights[i];
-    }
-  });
-  if (activeWeight <= 0) return 50; // no data at all — neutral fallback
-  return clamp(Math.round(weightedSum / activeWeight));
-}
 
 export interface HitterRiskInput {
   conference?: string | null;
@@ -866,18 +851,19 @@ export interface HitterRiskInput {
   projectedWrcPlus?: number | null;
   /** Stuff+ — the pitching quality hitters face in this conference */
   confStuffPlus?: number | null;
-  careerSeasons?: any[];
+  careerSeasons?: SeasonRow[];
   pa?: number | null;
-  // Scouting metrics
+  // Skillset metrics (current season)
   chase?: number | null;
   contact?: number | null;
-  whiff?: number | null;
-  barrel?: number | null;
-  lineDrive?: number | null;
   avgEv?: number | null;
   ev90?: number | null;
-  pull?: number | null;
+  barrel?: number | null;
+  lineDrive?: number | null;
   gb?: number | null;
+  // Back-compat (no longer scored, callers may still pass these — ignored)
+  whiff?: number | null;
+  pull?: number | null;
   bb?: number | null;
 }
 
@@ -887,94 +873,60 @@ export interface PitcherRiskInput {
   projectedPrvPlus?: number | null;
   /** Hitter Talent+ — computed: PR+ + 1.25*(Stuff+-100) + 0.75*(100-wRC+) */
   confHitterTalentPlus?: number | null;
-  careerSeasons?: any[];
+  careerSeasons?: SeasonRow[];
   ip?: number | null;
-  classYear?: string | null;
-  // Scouting metrics
+  // Skillset metrics (current season)
   stuffPlus?: number | null;
   whiffPct?: number | null;
+  izWhiff?: number | null;
   bbPct?: number | null;
+  hardHit?: number | null;
+  // Back-compat (no longer scored — ignored)
   chase?: number | null;
   barrel?: number | null;
-  hardHit?: number | null;
   gb?: number | null;
-  izWhiff?: number | null;
-  // Peripheral fallback inputs — FIP backbone, used by Skillset when no TrackMan
+  classYear?: string | null;
   k9?: number | null;
   bb9?: number | null;
   hr9?: number | null;
 }
 
+const HITTER_WEIGHTS = [0.35, 0.25, 0.20, 0.12, 0.08];
+const PITCHER_WEIGHTS = [0.35, 0.25, 0.20, 0.12, 0.08];
+
 export function assessHitterRisk(input: HitterRiskInput): RiskAssessment {
   const factors: RiskFactor[] = [];
-
-  // 1. Projection — "How good is he?" (weight: 35%)
   factors.push(assessHitterProjection(input.projectedWrcPlus));
-
-  // 2. Skillset — "How reliable is the skillset?" (weight: 25%)
   factors.push(assessHitterTypeRisk({
-    chase: input.chase, contact: input.contact, whiff: input.whiff,
-    barrel: input.barrel, lineDrive: input.lineDrive, avgEv: input.avgEv,
-    ev90: input.ev90, pull: input.pull, gb: input.gb, bb: input.bb,
+    contact: input.contact, chase: input.chase, avgEv: input.avgEv,
+    ev90: input.ev90, barrel: input.barrel, lineDrive: input.lineDrive,
+    gb: input.gb,
   }));
-
-  // 3. Competition — "How reliable is the competition?" (weight: 20%)
   factors.push(assessHitterCompetitionRisk(input.conference, input.confStuffPlus));
-
-  // 4. Trajectory — "How is he trending?" (weight: 12%)
-  const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "hitter");
+  const { factor: trajFactor, trajectory } = assessHitterTrajectory(input.careerSeasons);
   factors.push(trajFactor);
-
-  // 5. Sample Size — "Is the sample large enough?" (weight: 8%)
   factors.push(assessSampleSize(input.pa, null, "hitter"));
 
-  const weights = [0.35, 0.25, 0.20, 0.12, 0.08];
-  const overall = computeComposite(factors, weights);
+  const overall = computeComposite(factors, HITTER_WEIGHTS);
   const grade = toGrade(overall);
   const summary = buildSummary(grade, trajectory, factors, "hitter");
-
   return { overall, grade, trajectory, factors, summary };
 }
 
 export function assessPitcherRisk(input: PitcherRiskInput): RiskAssessment {
   const factors: RiskFactor[] = [];
-
-  // 1. Projection — "How good is he?" (weight: 30%)
   factors.push(assessPitcherProjection(input.projectedPrvPlus));
-
-  // 2. Skillset — "How reliable is the skillset?" (weight: 22%)
   factors.push(assessPitcherTypeRisk({
-    stuffPlus: input.stuffPlus, whiffPct: input.whiffPct, bbPct: input.bbPct,
-    chase: input.chase, barrel: input.barrel, hardHit: input.hardHit,
-    gb: input.gb, izWhiff: input.izWhiff,
-    k9: input.k9, bb9: input.bb9, hr9: input.hr9,
+    stuffPlus: input.stuffPlus, whiffPct: input.whiffPct, izWhiff: input.izWhiff,
+    bbPct: input.bbPct, hardHit: input.hardHit,
   }));
-
-  // 3. Competition — "How reliable is the competition?" (weight: 18%)
   factors.push(assessPitcherCompetitionRisk(input.conference, input.confHitterTalentPlus));
-
-  // 4. Trajectory — "How is he trending?" (weight: 12%)
-  const { factor: trajFactor, trajectory } = assessTrajectory(input.careerSeasons || [], "pitcher");
+  const { factor: trajFactor, trajectory } = assessPitcherTrajectory(input.careerSeasons);
   factors.push(trajFactor);
-
-  // 5. Sample Size — "Is the sample large enough?" (weight: 6%)
   factors.push(assessSampleSize(null, input.ip, "pitcher"));
 
-  // 6. Workload — current-season workload vs class (weight: 8%)
-  factors.push(assessWorkload(input.ip, input.classYear));
-
-  // 7. Durability — multi-season availability pattern (weight: 10%)
-  //    Catches chronic low availability and workload crashes that Sample Size
-  //    alone can't see (a pitcher with 60 IP as a Jr then 4 IP as a Sr).
-  const durability = assessPitcherDurability(input.careerSeasons);
-  if (durability) factors.push(durability);
-
-  const weights = durability
-    ? [0.28, 0.20, 0.16, 0.12, 0.06, 0.08, 0.10]
-    : [0.30, 0.22, 0.18, 0.12, 0.08, 0.10];
-  const overall = computeComposite(factors, weights);
+  const overall = computeComposite(factors, PITCHER_WEIGHTS);
   const grade = toGrade(overall);
   const summary = buildSummary(grade, trajectory, factors, "pitcher");
-
   return { overall, grade, trajectory, factors, summary };
 }
