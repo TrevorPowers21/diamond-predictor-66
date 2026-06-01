@@ -108,9 +108,6 @@ export function RiskAssessmentCardRSTR({ risk }: { risk: RiskAssessment }) {
                 />
               )}
             </div>
-            <div className="w-7 text-right text-[10px] tabular-nums text-slate-400 font-semibold">
-              {f.score != null ? f.score : "N/A"}
-            </div>
           </div>
         ))}
       </div>
@@ -166,9 +163,6 @@ export function RiskAssessmentCardSavant({
               ) : (
                 <div className="h-full rounded-full bg-white/15" style={{ width: "12%" }} />
               )}
-            </div>
-            <div className="w-6 text-right text-[9px] tabular-nums text-[#8a94a6]">
-              {f.score != null ? f.score : "N/A"}
             </div>
           </div>
         ))}
