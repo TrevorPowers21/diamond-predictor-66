@@ -31,6 +31,7 @@ import CoachNotes from "@/components/CoachNotes";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
 // pdfGenerator is loaded on demand — jspdf (350KB) excluded from initial bundle
 const getPdfGenerator = () => import("@/lib/pdfGenerator");
+import { trackEvent } from "@/lib/posthog";
 import { assessHitterRisk } from "@/lib/playerRisk";
 import { generateHitterReport } from "@/lib/scoutingReportGenerator";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
@@ -1040,6 +1041,7 @@ export default function PlayerProfile() {
                     rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
                     const { generateReportPdf } = await getPdfGenerator();
                     const url = generateReportPdf([rp]);
+                    trackEvent("pdf_exported", { type: "scouting_report", player: fullNameRaw, mode });
                     if (mode === "preview") {
                       window.open(url, "_blank");
                     } else {
@@ -1066,6 +1068,7 @@ export default function PlayerProfile() {
                     };
                     const { generateCoachNotesPdf } = await getPdfGenerator();
                     const url = generateCoachNotesPdf(rp, notes);
+                    trackEvent("pdf_exported", { type: "coach_notes", player: fullNameRaw, mode });
                     if (mode === "preview") {
                       window.open(url, "_blank");
                     } else {
@@ -1086,6 +1089,7 @@ export default function PlayerProfile() {
                     removeFromBoard(player.id);
                   } else {
                     addToBoard({ playerId: player.id });
+                    trackEvent("player_added_to_board", { player: fullNameRaw, team: displayTeamCurrent });
                   }
                 }}
               >
@@ -1101,6 +1105,7 @@ export default function PlayerProfile() {
                     removeFromHighFollow(player.id);
                   } else {
                     addToHighFollow({ playerId: player.id, playerType: "hitter" });
+                    trackEvent("player_added_to_high_follow", { player: fullNameRaw, team: displayTeamCurrent });
                   }
                 }}
               >

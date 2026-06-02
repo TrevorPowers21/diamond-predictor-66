@@ -1,6 +1,7 @@
 import { useState, useEffect, createContext, useContext, ReactNode } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { identifyUser, resetPostHog } from "@/lib/posthog";
 
 // Legacy global roles. 'superadmin' is the only one that matters going
 // forward — it grants cross-team (NewtForce-internal) access. Team-level
@@ -106,6 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     // 3. Available teams: superadmins see all active, others see their own.
+    let teamName: string | null = null;
     if (isSuper) {
       const { data: allTeams } = await supabase
         .from("customer_teams")
@@ -120,9 +122,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq("id", accessRow.customer_team_id)
         .maybeSingle();
       setAvailableTeams(oneTeam ? [oneTeam] : []);
+      teamName = oneTeam?.name ?? null;
     } else {
       setAvailableTeams([]);
     }
+
+    // Identify user in PostHog so every event is tied to their email + team.
+    identifyUser({
+      id: userId,
+      email: (await supabase.auth.getUser()).data.user?.email ?? null,
+      teamName,
+      teamRole: accessRow?.role ?? null,
+      isSuperadmin: isSuper,
+    });
   };
 
   const clearUserContext = () => {
@@ -213,6 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     clearImpersonation();
+    resetPostHog();
     try {
       await supabase.auth.signOut();
     } catch (e) {
