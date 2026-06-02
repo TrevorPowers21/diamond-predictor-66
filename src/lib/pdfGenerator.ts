@@ -1116,7 +1116,10 @@ function drawMarketValueNotesSplit(doc: jsPDF, player: ReportPlayer, y: number):
   if (isPitcher) {
     // pRV+ tier thresholds calibrated 2026-05-01 from actual NCAA pitcher
     // distribution (n=4097, median=98.1, p70=109, p85=118, p90=122).
-    const prv = player.overall_pr_plus ?? player.power_rating_plus ?? null;
+    // Prefer p_rv_plus (team-scoped + overlay-adjusted, matches profile page).
+    // overall_pr_plus / power_rating_plus are legacy fallbacks for callers
+    // that haven't populated p_rv_plus yet.
+    const prv = player.p_rv_plus ?? player.overall_pr_plus ?? player.power_rating_plus ?? null;
     const prvNum = prv == null ? null : Number(prv);
     const prvTier = prvNum == null ? "—" :
       prvNum >= 120 ? "Elite" :        // ~top 13%
@@ -1535,7 +1538,7 @@ function drawCoachNotesSnapshot(doc: jsPDF, player: ReportPlayer, y: number): nu
         { label: "pFIP", value: fmtStat(player.p_fip, 2) },
         { label: "pWHIP", value: fmtStat(player.p_whip, 2) },
         { label: "pK/9", value: fmtStat(player.p_k9, 1) },
-        { label: "pRV+", value: player.overall_pr_plus == null ? "—" : String(Math.round(Number(player.overall_pr_plus))) },
+        { label: "pRV+", value: (player.p_rv_plus ?? player.overall_pr_plus) == null ? "—" : String(Math.round(Number(player.p_rv_plus ?? player.overall_pr_plus))) },
         { label: "Stuff+", value: player.stuff_plus == null ? "—" : String(Math.round(Number(player.stuff_plus))) },
       ]
     : [
