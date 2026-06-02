@@ -54,6 +54,9 @@ interface PortalRow {
   rosterLink: string | null;
   /** True if GP/AB/IP are all empty/zero — player on roster but no stats accumulated. */
   hasNoStats: boolean;
+  gp: number | null;
+  ab: number | null;
+  ip: number | null;
 }
 
 function nameKey(s: string): string {
@@ -183,6 +186,9 @@ function parseRows(csvText: string): PortalRow[] {
       gpa: parseGpa(c[cols.gpa]),
       rosterLink: (c[cols.rosterLink] ?? "").trim() || null,
       hasNoStats: isBlankOrZero(c[cols.gp]) && isBlankOrZero(c[cols.ab]) && isBlankOrZero(c[cols.ip]),
+      gp: (() => { const n = Number((c[cols.gp] ?? "").trim()); return Number.isFinite(n) && n > 0 ? n : null; })(),
+      ab: (() => { const n = Number((c[cols.ab] ?? "").trim()); return Number.isFinite(n) && n > 0 ? n : null; })(),
+      ip: (() => { const n = Number((c[cols.ip] ?? "").trim()); return Number.isFinite(n) && n > 0 ? n : null; })(),
     });
   }
   return out;
@@ -359,20 +365,14 @@ export async function importPortalEntriesCsv(
   const seenPlayerIds = new Set<string>();
   const nowIso = new Date().toISOString();
 
-  // Idempotency: clear unresolved unmatched rows ONLY when running the full
-  // "entries" pass (which is supposed to be the authoritative snapshot of
-  // who's currently in the portal). Commits + withdrawals CSVs are filtered
-  // subsets and would falsely clear the entries-pass review queue.
-  // Admin-resolved rows (resolved=true) always persist — audit log.
-  if (mode === "entries") {
-    const { error: clearErr } = await (supabase as any)
-      .from("portal_entries_unmatched")
-      .delete()
-      .eq("resolved", false);
-    if (clearErr) {
-      console.warn(`[importPortalEntries] Failed to clear unresolved rows: ${clearErr.message}`);
-    }
-  }
+  // Idempotency: do NOT auto-clear the unresolved queue. The "entries" CSV is
+  // capped at 500 rows by VA, so once portal activity exceeds the cap, the
+  // queue legitimately needs to be assembled across multiple position-split
+  // exports. Auto-clearing at the start of an entries pass wipes any rows
+  // discovered via those split imports as soon as the next hourly entries
+  // run fires. Trade-off: stale rows that VA stops reporting linger in the
+  // queue and need manual dismissal — acceptable since the resolved=true
+  // path already handles intentional clears.
 
   for (const row of rows) {
     try {
@@ -569,6 +569,9 @@ async function insertUnmatched(row: PortalRow, reason: "ambiguous" | "no_match" 
       va_roster_link: row.rosterLink,
       reason,
       candidate_player_ids: candidateIds.length > 0 ? candidateIds : null,
+      gp: row.gp,
+      ab: row.ab,
+      ip: row.ip,
     });
   if (error) throw new Error(`Insert unmatched: ${error.message}`);
 }

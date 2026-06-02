@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, X, Users, ExternalLink, Mail, Phone } from "lucide-react";
+import { AlertTriangle, CheckCircle2, X, Users, ExternalLink, Mail, Phone, Link2, Search } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 
 type Reason = "ambiguous" | "no_match" | "no_stats";
@@ -31,6 +33,9 @@ interface UnmatchedRow {
   reason: Reason;
   candidate_player_ids: string[] | null;
   ingested_at: string;
+  gp: number | null;
+  ab: number | null;
+  ip: number | null;
 }
 
 interface CandidatePlayer {
@@ -47,6 +52,192 @@ const REASON_CONFIG: Record<Reason, { label: string; color: string; bg: string; 
   no_match:   { label: "No Match",   color: "text-rose-600",    bg: "bg-rose-500/10",   description: "Not found in RSTR IQ — likely a roster gap" },
   no_stats:   { label: "No Stats",   color: "text-slate-500",   bg: "bg-slate-500/10",  description: "Portal player without 2026 stats — informational only" },
 };
+
+/**
+ * Search-and-link popover for an unmatched row.
+ *
+ * Two-tier strategy to catch name variations (Chris vs Christopher etc.):
+ *
+ *  1. Pre-load the full D1 roster of the unmatched row's `current_school`
+ *     on open. Coach scans the list and spots the canonical-name variant.
+ *  2. As the coach types, fall back to a server-side ilike search across
+ *     all D1 — for cases where the school name itself didn't fuzzy-match
+ *     (Long Island vs Long Island University, etc.).
+ *
+ * Used on no_match / no_stats rows (ambiguous rows have their own
+ * candidate-button UI above).
+ */
+function LinkPlayerPopover({
+  row,
+  defaultQuery,
+  onLink,
+  isPending,
+}: {
+  row: UnmatchedRow;
+  defaultQuery: string;
+  onLink: (playerId: string) => void;
+  isPending: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  // Pre-load the unmatched row's school roster on open
+  const schoolKey = (row.current_school || "").trim();
+  const { data: schoolRoster = [] } = useQuery<CandidatePlayer[]>({
+    queryKey: ["link-school-roster", schoolKey],
+    enabled: open && !!schoolKey,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      // ilike against the full school name + a normalized variant (strip "University", "of", etc.)
+      const norm = schoolKey.replace(/\buniversity\b/gi, "").replace(/\bof\b/gi, "").replace(/\bthe\b/gi, "").trim();
+      const { data } = await (supabase as any)
+        .from("players")
+        .select("id, first_name, last_name, team, position, class_year")
+        .eq("division", "D1")
+        .or(`team.ilike.%${schoolKey}%,team.ilike.%${norm}%`)
+        .limit(60);
+      return (data as CandidatePlayer[]) ?? [];
+    },
+  });
+
+  // Server search across all D1 when coach starts typing
+  const { data: serverResults = [], isFetching: serverLoading } = useQuery<CandidatePlayer[]>({
+    queryKey: ["link-player-search", query],
+    enabled: open && query.trim().length >= 2,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const terms = query.trim().split(/\s+/);
+      let q = (supabase as any)
+        .from("players")
+        .select("id, first_name, last_name, team, position, class_year")
+        .eq("division", "D1");
+      if (terms.length >= 2) {
+        q = q.ilike("first_name", `%${terms[0]}%`).ilike("last_name", `%${terms.slice(1).join(" ")}%`);
+      } else {
+        q = q.or(`first_name.ilike.%${terms[0]}%,last_name.ilike.%${terms[0]}%`);
+      }
+      const { data } = await q.limit(20);
+      return (data as CandidatePlayer[]) ?? [];
+    },
+  });
+
+  // Client-side filter the school roster against the typed query so the
+  // coach can narrow Monmouth's 30 players down to "Walsh" in one keystroke.
+  const filterRoster = (list: CandidatePlayer[]) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((p) =>
+      `${p.first_name ?? ""} ${p.last_name ?? ""}`.toLowerCase().includes(q),
+    );
+  };
+  const filteredRoster = filterRoster(schoolRoster);
+  // Merge: school roster first (deduped), then server matches not already in roster.
+  const seen = new Set(filteredRoster.map((p) => p.id));
+  const extra = serverResults.filter((p) => !seen.has(p.id));
+  const isFetching = serverLoading;
+
+  return (
+    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (v) setQuery(""); }}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-[11px] cursor-pointer"
+          title="Search and link to a player profile"
+        >
+          <Link2 className="w-3.5 h-3.5 mr-1" />
+          Link
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={6} className="w-[380px] p-0 overflow-hidden border-l-[3px] border-l-[#D4AF37]">
+        <div className="bg-[#0D1B3E] px-4 py-2.5 flex items-center justify-between gap-2">
+          <span className="flex items-center gap-2">
+            <Search className="w-3 h-3 text-[#D4AF37]" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>
+              Find Player
+            </span>
+          </span>
+          {row.current_school && (
+            <span className="text-[9px] text-[#D4AF37]/70 truncate max-w-[180px]">{row.current_school}</span>
+          )}
+        </div>
+        <div className="px-3 py-3 space-y-2">
+          <Input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={`Filter ${schoolKey || "D1 players"}…`}
+            className="h-8 text-xs"
+          />
+          <div className="max-h-[280px] overflow-y-auto space-y-1">
+            {filteredRoster.length === 0 && extra.length === 0 ? (
+              query.trim().length === 0 && schoolRoster.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground px-1 py-2">Loading school roster…</p>
+              ) : query.trim().length >= 2 && isFetching ? (
+                <p className="text-[11px] text-muted-foreground px-1 py-2">Searching…</p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground px-1 py-2">No matches. Try a different name or check the search box for typos.</p>
+              )
+            ) : (
+              <>
+                {filteredRoster.length > 0 && (
+                  <>
+                    <p className="text-[9px] uppercase tracking-wider text-muted-foreground px-1 pt-1 pb-1">
+                      {schoolKey ? `${schoolKey} roster` : "Roster"} ({filteredRoster.length})
+                    </p>
+                    {filteredRoster.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-muted/60 transition-colors">
+                        <div className="text-[11px] min-w-0 flex-1">
+                          <div className="font-medium text-foreground truncate">{p.first_name} {p.last_name}</div>
+                          <div className="text-muted-foreground text-[10px] truncate">
+                            {[p.team, p.position, p.class_year].filter(Boolean).join(" · ")}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => { onLink(p.id); setOpen(false); }}
+                          disabled={isPending}
+                          className="h-7 text-[10px] bg-[#D4AF37] text-black hover:bg-[#A08820] font-semibold uppercase tracking-wider cursor-pointer"
+                        >
+                          Link
+                        </Button>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {extra.length > 0 && (
+                  <>
+                    <p className="text-[9px] uppercase tracking-wider text-muted-foreground px-1 pt-2 pb-1">
+                      Other D1 ({extra.length})
+                    </p>
+                    {extra.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-muted/60 transition-colors">
+                        <div className="text-[11px] min-w-0 flex-1">
+                          <div className="font-medium text-foreground truncate">{p.first_name} {p.last_name}</div>
+                          <div className="text-muted-foreground text-[10px] truncate">
+                            {[p.team, p.position, p.class_year].filter(Boolean).join(" · ")}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => { onLink(p.id); setOpen(false); }}
+                          disabled={isPending}
+                          className="h-7 text-[10px] bg-[#D4AF37] text-black hover:bg-[#A08820] font-semibold uppercase tracking-wider cursor-pointer"
+                        >
+                          Link
+                        </Button>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export function PortalUnmatchedReviewTab() {
   const queryClient = useQueryClient();
@@ -136,10 +327,15 @@ export function PortalUnmatchedReviewTab() {
     onError: (e: any) => toast.error(`Failed: ${e.message ?? e}`),
   });
 
+  // Sort by sample size first — IP for pitchers, AB for hitters. Bigger sample = more
+  // useful to triage. Pitchers identified by position regex.
+  const isPitcherPos = (p: string | null) => !!p && /^(SP|RP|CL|P|LHP|RHP)$/i.test(p);
+  const sampleVal = (r: UnmatchedRow) => (isPitcherPos(r.position) ? r.ip : r.ab) ?? -1;
+  const sortBySample = (a: UnmatchedRow, b: UnmatchedRow) => sampleVal(b) - sampleVal(a);
   const grouped = {
-    ambiguous: rows.filter((r) => r.reason === "ambiguous"),
-    no_match:  rows.filter((r) => r.reason === "no_match"),
-    no_stats:  rows.filter((r) => r.reason === "no_stats"),
+    ambiguous: rows.filter((r) => r.reason === "ambiguous").sort(sortBySample),
+    no_match:  rows.filter((r) => r.reason === "no_match").sort(sortBySample),
+    no_stats:  rows.filter((r) => r.reason === "no_stats").sort(sortBySample),
   };
   const active = grouped[activeReason];
 
@@ -200,6 +396,13 @@ export function PortalUnmatchedReviewTab() {
                   <div className="flex items-center gap-3 flex-wrap text-[12px] text-muted-foreground">
                     {row.current_school && <span>{row.current_school}</span>}
                     {row.conference && <span>· {row.conference}</span>}
+                    {(() => {
+                      const isPitcher = !!row.position && /^(SP|RP|CL|P|LHP|RHP)$/i.test(row.position);
+                      const sample = isPitcher ? row.ip : row.ab;
+                      const unit = isPitcher ? "IP" : "AB";
+                      if (sample == null) return null;
+                      return <span className="font-mono tabular-nums">· {sample} {unit}</span>;
+                    })()}
                     {row.portal_entry_date && <span>· entered {row.portal_entry_date}</span>}
                   </div>
                   {(row.contact_cell || row.contact_email || row.va_roster_link) && (
@@ -224,17 +427,25 @@ export function PortalUnmatchedReviewTab() {
                   )}
                 </div>
 
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => dismissMutation.mutate(row.id)}
-                  disabled={dismissMutation.isPending}
-                  className="h-8 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
-                  title="Mark resolved without linking"
-                >
-                  <X className="w-3.5 h-3.5 mr-1" />
-                  Dismiss
-                </Button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <LinkPlayerPopover
+                    row={row}
+                    defaultQuery={`${row.first_name} ${row.last_name}`.trim()}
+                    onLink={(playerId) => linkMutation.mutate({ unmatched: row, playerId })}
+                    isPending={linkMutation.isPending}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => dismissMutation.mutate(row.id)}
+                    disabled={dismissMutation.isPending}
+                    className="h-8 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
+                    title="Mark resolved without linking"
+                  >
+                    <X className="w-3.5 h-3.5 mr-1" />
+                    Dismiss
+                  </Button>
+                </div>
               </div>
 
               {row.reason === "ambiguous" && row.candidate_player_ids && row.candidate_player_ids.length > 0 && (
