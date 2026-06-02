@@ -54,14 +54,16 @@ export function useHitterSeedData(season = 2026) {
       let from = 0;
       const pageSize = 1000;
       while (true) {
-        // Narrowed select: Player Dashboard scouting scores now come from
-        // player_predictions (1=1 via propagate_hitter_scores_to_predictions).
-        // Raw stats (contact, line_drive, etc.) and stored scores (contact_score,
-        // avg_ev_score, barrel_score, chase_score) were inputs to the now-stripped
-        // client-side scoreFromNormal fallback — no longer read. Cuts payload ~50%.
+        // Reverted from the earlier narrowed select. The narrow dropped raw
+        // stat columns (contact, line_drive, etc.) + stored scores that
+        // downstream code conditionally reads via seedPowerRow. The display
+        // switch to pred.X scores was meant to make the narrow safe, but
+        // hitter dashboard values went non-deterministic in cross-team /
+        // impersonation states after the narrow — reverted to the wide select
+        // until we can isolate which downstream lookups still need these.
         const { data, error } = await supabase
           .from("Hitter Master")
-          .select("source_player_id, playerFullName, Team, TeamID, Conference, conference_id, Season, Pos, BatHand, ThrowHand, AVG, OBP, SLG, ISO, ab")
+          .select("*")
           .eq("Season", season)
           .range(from, from + pageSize - 1);
         if (error) throw error;
