@@ -1,4 +1,5 @@
 import { onCLS, onINP, onLCP, onFCP, onTTFB } from "web-vitals";
+import { captureWebVital } from "@/lib/posthog";
 
 type VitalEntry = {
   name: string;
@@ -11,7 +12,6 @@ type VitalEntry = {
 function logVital(entry: VitalEntry) {
   const { name, value, rating, delta } = entry;
   const ms = (n: number) => `${n.toFixed(1)} ms`;
-  const score = (n: number) => n.toFixed(0);
 
   const formatted =
     name === "CLS" ? `${value.toFixed(4)} (delta ${value.toFixed(4)})` : `${ms(value)} (delta ${ms(delta)})`;
@@ -24,6 +24,7 @@ function logVital(entry: VitalEntry) {
       : "color: #f87171";
 
   console.log(`%c[Web Vitals] ${name}: ${formatted} — ${rating.toUpperCase()}`, style);
+  captureWebVital(name, value, rating);
 }
 
 /**

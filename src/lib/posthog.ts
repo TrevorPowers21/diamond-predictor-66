@@ -1,20 +1,23 @@
 import posthog from "posthog-js";
 
-export function initPostHog() {
-  const key = import.meta.env.VITE_POSTHOG_KEY;
-  const host = import.meta.env.VITE_POSTHOG_HOST;
-  if (!key) return;
+const KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined;
+const HOST = import.meta.env.VITE_POSTHOG_HOST as string | undefined;
 
-  posthog.init(key, {
-    api_host: host,
+export function initPostHog() {
+  if (!KEY) return;
+  posthog.init(KEY, {
+    api_host: HOST,
     defaults: "2026-05-30",
     person_profiles: "identified_only",
-    capture_pageview: true,       // auto page view on every route change
-    capture_pageleave: true,      // time on page
+    // We fire $pageview/$pageleave manually in PostHogPageView (App.tsx)
+    // so SPA route changes are tracked correctly.
+    capture_pageview: false,
+    capture_pageleave: false,
     session_recording: {
-      maskAllInputs: true,        // mask password fields in recordings
+      maskAllInputs: true,
       maskInputOptions: { password: true },
     },
+    autocapture: true, // capture clicks, form submits, etc.
   });
 }
 
@@ -25,7 +28,7 @@ export function identifyUser(user: {
   teamRole?: string | null;
   isSuperadmin?: boolean;
 }) {
-  if (!import.meta.env.VITE_POSTHOG_KEY) return;
+  if (!KEY) return;
   posthog.identify(user.id, {
     email: user.email,
     team: user.teamName,
@@ -35,11 +38,35 @@ export function identifyUser(user: {
 }
 
 export function resetPostHog() {
-  if (!import.meta.env.VITE_POSTHOG_KEY) return;
+  if (!KEY) return;
   posthog.reset();
 }
 
 export function trackEvent(event: string, properties?: Record<string, unknown>) {
-  if (!import.meta.env.VITE_POSTHOG_KEY) return;
+  if (!KEY) return;
   posthog.capture(event, properties);
+}
+
+export function capturePageView(path: string) {
+  if (!KEY) return;
+  posthog.capture("$pageview", {
+    $current_url: window.location.origin + path,
+    $pathname: path,
+  });
+}
+
+export function capturePageLeave(path: string) {
+  if (!KEY) return;
+  posthog.capture("$pageleave", {
+    $current_url: window.location.origin + path,
+    $pathname: path,
+  });
+}
+
+export function captureWebVital(name: string, value: number, rating: string) {
+  if (!KEY) return;
+  posthog.capture("$web_vitals", {
+    [`$web_vitals_${name.toLowerCase()}_value`]: value,
+    [`$web_vitals_${name.toLowerCase()}_rating`]: rating,
+  });
 }

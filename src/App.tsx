@@ -4,8 +4,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
-import { lazy, Suspense, useEffect } from "react";
-import posthog from "posthog-js";
+import { lazy, Suspense, useEffect, useRef } from "react";
+import { capturePageView, capturePageLeave } from "@/lib/posthog";
 import Index from "./pages/Index";
 
 // Savant — internal-only, gated, lazy-loaded so RSTR IQ users never download it.
@@ -38,13 +38,21 @@ import HighFollowList from "./pages/HighFollowList";
 
 const queryClient = new QueryClient();
 
-// Fires $pageview on every React Router navigation — required for SPAs
-// because PostHog's auto capture_pageview only fires on initial load.
+// Fires $pageleave → $pageview on every React Router navigation.
+// Required for SPAs: PostHog's auto capture only fires on browser load/unload,
+// not on client-side route changes. prevPath ref gives accurate time-on-page.
 function PostHogPageView() {
   const location = useLocation();
+  const prevPath = useRef<string | null>(null);
+
   useEffect(() => {
-    posthog.capture("$pageview", { $current_url: window.location.href });
+    if (prevPath.current !== null) {
+      capturePageLeave(prevPath.current);
+    }
+    capturePageView(location.pathname);
+    prevPath.current = location.pathname;
   }, [location.pathname]);
+
   return null;
 }
 
