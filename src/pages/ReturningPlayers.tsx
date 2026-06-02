@@ -2217,13 +2217,16 @@ export default function ReturningPlayers() {
         projected_ip: number | null;
         pitcher_role: string | null;
         class_year: string | null;
+        whiff_score: number | null;
+        bb_score: number | null;
+        barrel_score: number | null;
       }>();
       let from = 0;
       const PAGE = 1000;
       while (true) {
         const { data, error } = await supabase
           .from("player_predictions")
-          .select("player_id, customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, projected_ip, pitcher_role, players!inner(source_player_id, class_year)")
+          .select("player_id, customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, projected_ip, pitcher_role, whiff_score, bb_score, barrel_score, players!inner(source_player_id, class_year)")
           .eq("season", PROJECTION_SEASON)
           .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"])
@@ -2254,6 +2257,9 @@ export default function ReturningPlayers() {
             projected_ip: r.projected_ip ?? null,
             pitcher_role: r.pitcher_role,
             class_year: r.players?.class_year ?? null,
+            whiff_score: r.whiff_score ?? null,
+            bb_score: r.bb_score ?? null,
+            barrel_score: r.barrel_score ?? null,
           });
         }
         if (!data || data.length < PAGE) break;
@@ -2472,10 +2478,12 @@ export default function ReturningPlayers() {
             is_twp: pitcherIsTwp,
             class_transition: classTransition,
             dev_aggressiveness: devAggressiveness,
+            // Stuff+ stays on client-computed until next computeAndStoreScores
+            // run populates stuff_score. Other 3 read from predictions (1=1).
             stuff_score: scoreObj.stuff,
-            whiff_score: scoreObj.whiff,
-            bb_score: scoreObj.bb,
-            barrel_score: scoreObj.barrel,
+            whiff_score: dbPred?.whiff_score ?? null,
+            bb_score: dbPred?.bb_score ?? null,
+            barrel_score: dbPred?.barrel_score ?? null,
             era_pr_plus: scoreObj.eraPrPlus,
             fip_pr_plus: scoreObj.fipPrPlus,
             whip_pr_plus: scoreObj.whipPrPlus,
