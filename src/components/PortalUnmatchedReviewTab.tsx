@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
+import { profileRouteFor } from "@/lib/profileRoutes";
 
 type Reason = "ambiguous" | "no_match" | "no_stats";
 
@@ -459,19 +460,26 @@ export function PortalUnmatchedReviewTab() {
                       if (!cand) return null;
                       return (
                         <div key={cid} className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-muted/40 hover:bg-muted transition-colors">
-                          <div className="text-[12px] text-foreground">
-                            <span className="font-medium">{cand.first_name} {cand.last_name}</span>
-                            <span className="text-muted-foreground">
+                          <a
+                            href={profileRouteFor(cand.id, cand.position)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[12px] text-foreground hover:text-[#D4AF37] cursor-pointer flex items-center gap-1.5 min-w-0 flex-1"
+                            title="Open profile in new tab to verify"
+                          >
+                            <span className="font-medium truncate">{cand.first_name} {cand.last_name}</span>
+                            <span className="text-muted-foreground truncate">
                               {cand.team ? ` · ${cand.team}` : ""}
                               {cand.position ? ` · ${cand.position}` : ""}
                               {cand.class_year ? ` · ${cand.class_year}` : ""}
                             </span>
-                          </div>
+                            <ExternalLink className="w-3 h-3 shrink-0 opacity-60" />
+                          </a>
                           <Button
                             size="sm"
                             onClick={() => linkMutation.mutate({ unmatched: row, playerId: cid })}
                             disabled={linkMutation.isPending}
-                            className="h-7 text-[11px] bg-[#D4AF37] text-black hover:bg-[#A08820] font-semibold uppercase tracking-wider cursor-pointer"
+                            className="h-7 text-[11px] bg-[#D4AF37] text-black hover:bg-[#A08820] font-semibold uppercase tracking-wider cursor-pointer shrink-0"
                           >
                             Link
                           </Button>
