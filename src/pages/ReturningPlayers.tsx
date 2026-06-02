@@ -2158,7 +2158,7 @@ export default function ReturningPlayers() {
       while (true) {
         const { data, error } = await supabase
           .from("player_predictions")
-          .select("player_id, customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, projected_ip, pitcher_role, whiff_score, bb_score, barrel_score, players!inner(source_player_id, class_year)")
+          .select("player_id, customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, projected_ip, pitcher_role, whiff_score, bb_score, pitcher_barrel_score, players!inner(source_player_id, class_year)")
           .eq("season", PROJECTION_SEASON)
           .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"])
@@ -2227,7 +2227,10 @@ export default function ReturningPlayers() {
         class_year: pick.players?.class_year ?? null,
         whiff_score: pick.whiff_score ?? null,
         bb_score: pick.bb_score ?? null,
-        barrel_score: pick.barrel_score ?? null,
+        // Read domain-scoped pitcher_barrel_score so two-way players' hitter
+        // values can't bleed into the pitcher card. See migration
+        // 20260603120000_split_hitter_pitcher_scouting_scores.sql.
+        barrel_score: pick.pitcher_barrel_score ?? null,
       });
     }
     return map;
