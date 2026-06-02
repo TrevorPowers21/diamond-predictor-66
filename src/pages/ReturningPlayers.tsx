@@ -25,7 +25,6 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
-import { useHitterSeedData } from "@/hooks/useHitterSeedData";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
 import {
   DEFAULT_NIL_TIER_MULTIPLIERS,
@@ -44,7 +43,7 @@ import { resolveMetricParkFactor } from "@/lib/parkFactors";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { useAuth } from "@/hooks/useAuth";
-import { applyTeamScopeFilter, dedupePreferredPerPlayer } from "@/lib/teamScopedPredictions";
+import { applyTeamScopeFilter, dedupePreferredPerPlayer, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { HistoricalPlayerTable, HistoricalPitcherTable } from "@/components/HistoricalPlayerTable";
 import {
   ScoutingReportProvider,
@@ -954,24 +953,6 @@ export default function ReturningPlayers() {
       },
     );
   }, [queryClient]);
-  const { hitterStats, powerRatings: powerRatingsData } = useHitterSeedData();
-  const seedSource = powerRatingsData.length > 0 && (powerRatingsData[0] as any).source === "supabase" ? "supabase" : "seed";
-
-  const [powerSeedByName, powerSeedByNameTeam, powerSeedByPlayerId] = useMemo(() => {
-    const byName = new Map<string, Array<any>>();
-    const byNameTeam = new Map<string, any>();
-    const byPlayerId = new Map<string, any>();
-    for (const row of powerRatingsData) {
-      const key = normalizeName(row.playerName);
-      const arr = byName.get(key) || [];
-      arr.push(row);
-      byName.set(key, arr);
-      const ntKey = nameTeamKey(row.playerName, row.team);
-      if (!byNameTeam.has(ntKey)) byNameTeam.set(ntKey, row);
-      if (row.player_id) byPlayerId.set(row.player_id, row);
-    }
-    return [byName, byNameTeam, byPlayerId];
-  }, [powerRatingsData]);
 
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
@@ -1105,7 +1086,7 @@ export default function ReturningPlayers() {
   };
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(100);
-  const { hasRole, effectiveTeamId } = useAuth();
+  const { hasRole, effectiveTeamId, loading: authLoading } = useAuth();
   const isAdmin = hasRole("admin");
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
   const { addPlayers: addToHighFollow } = useHighFollow();
@@ -1461,86 +1442,24 @@ export default function ReturningPlayers() {
         showMissingOnly,
         sortKey,
         sortDir,
-        seedSource,
         teamScope: effectiveTeamId ?? null,
       },
     ],
     queryFn: async () => {
-      const nameTeamKey = (name: string, team: string | null | undefined) => `${normalize(name)}|${normalizeTeamForKey(team)}`;
-      const statSeedRows = hitterStats as Array<{
-        playerName: string;
-        team: string | null;
-        player_id: string | null;
-        avg: number | null;
-        obp: number | null;
-        slg: number | null;
-      }>;
-      const statsByName = new Map<string, typeof statSeedRows>();
-      const statsByNameTeam = new Map<string, (typeof statSeedRows)[number]>();
-      const statsByPlayerId = new Map<string, (typeof statSeedRows)[number]>();
-      for (const row of statSeedRows) {
-        const nk = normalize(row.playerName);
-        const arr = statsByName.get(nk) || [];
-        arr.push(row);
-        statsByName.set(nk, arr);
-        statsByNameTeam.set(nameTeamKey(row.playerName, row.team), row);
-        if (row.player_id) statsByPlayerId.set(row.player_id, row);
-      }
-
+      // Pure stored-row read: every displayed value comes from player_predictions
+      // (populated by the eager precompute + propagation functions). No seed,
+      // no name fuzzy match, no client-side fallback. Null → "—".
       const toReturnerRow = (
         row: any,
         player: any,
         nilByPlayer: Map<string, number | null>,
       ): ReturnerPlayer => {
-        const fullName = `${player.first_name} ${player.last_name}`;
-        const seedPowerRow = (() => {
-          // Fast path: source_player_id match (links player UUID chain to Hitter Master)
-          const sourceId = player.source_player_id;
-          const bySourceId = sourceId ? powerSeedByPlayerId.get(sourceId) : undefined;
-          if (bySourceId) return bySourceId;
-          const direct = powerSeedByNameTeam.get(nameTeamKey(fullName, player.team));
-          if (direct) return direct;
-
-          const directByName = powerSeedByName.get(normalizeName(fullName)) || [];
-          if (directByName.length === 1) return directByName[0];
-
-          // Fallback for common first-name variants (e.g., Christopher -> Chris).
-          const variantCandidates = getNameVariants(fullName)
-            .flatMap((v) => powerSeedByName.get(v) || []);
-          if (variantCandidates.length === 0) return null;
-
-          const byTeam = variantCandidates.filter(
-            (c) => normalizeName(c.team) === normalizeName(player.team),
-          );
-          if (byTeam.length === 1) return byTeam[0];
-          if (variantCandidates.length === 1) return variantCandidates[0];
-          return null;
-        })();
-        // Read scouting scores directly from player_predictions. Propagated 1=1
-        // from Hitter Master by propagate_hitter_scores_to_predictions() via
-        // computeAndStoreScores.ts. No client-side fallback — null displays
-        // as "—" rather than risking divergence from the precomputed value.
-        const seedEvScore = row.ev_score ?? null;
-        const seedBarrelScore = row.barrel_score ?? null;
-        const seedContactScore = row.contact_score ?? null;
-        const seedChaseScore = row.chase_score ?? null;
-        // ID-first: try source_player_id, then name|team, then name-only
-        const bySourceIdStats = player.source_player_id ? statsByPlayerId.get(player.source_player_id) : undefined;
-        const candidates = statsByName.get(normalize(fullName)) || [];
-        const byTeam = bySourceIdStats ?? statsByNameTeam.get(nameTeamKey(fullName, player.team));
-        const exactByStats = candidates.find((r) =>
-          (r.avg == null || row.from_avg == null || Math.round(r.avg * 1000) === Math.round(Number(row.from_avg) * 1000)) &&
-          (r.obp == null || row.from_obp == null || Math.round(r.obp * 1000) === Math.round(Number(row.from_obp) * 1000)) &&
-          (r.slg == null || row.from_slg == null || Math.round(r.slg * 1000) === Math.round(Number(row.from_slg) * 1000))
-        );
-        const resolvedTeam2025 = byTeam?.team || exactByStats?.team || (candidates.length === 1 ? candidates[0].team : null) || player.team;
-
         return {
           id: player.id,
           prediction_id: row.id,
           first_name: player.first_name,
           last_name: player.last_name,
-          team: resolvedTeam2025,
+          team: player.team,
           conference: player.conference,
           position: player.position,
           is_twp: (player as any).is_twp ?? null,
@@ -1551,9 +1470,6 @@ export default function ReturningPlayers() {
           model_type: row.model_type,
           status: row.status,
           pa: player.pa ?? null,
-          // Prefer stored market_value from player_predictions (single source of
-          // truth, matches profile). Falls back to legacy nil_valuations only
-          // when the prediction row has no market_value yet (pre-backfill data).
           nil_value: (row.market_value ?? nilByPlayer.get(player.id)) ?? null,
           prediction: {
             from_avg: row.from_avg,
@@ -1569,10 +1485,10 @@ export default function ReturningPlayers() {
             p_wrc_plus: row.p_wrc_plus,
             o_war: row.o_war ?? null,
             power_rating_plus: row.power_rating_plus,
-            ev_score: seedEvScore ?? null,
-            barrel_score: seedBarrelScore ?? null,
-            contact_score: seedContactScore ?? null,
-            chase_score: seedChaseScore ?? null,
+            ev_score: row.ev_score ?? null,
+            barrel_score: row.barrel_score ?? null,
+            contact_score: row.contact_score ?? null,
+            chase_score: row.chase_score ?? null,
           },
         };
       };
@@ -1620,6 +1536,11 @@ export default function ReturningPlayers() {
           .not("players.division", "eq", "NJCAA_D1")
           .gte("players.pa", 75)
           .order(orderColumn, { ascending: sortDir === "asc", nullsFirst: false })
+          // Stable secondary tiebreaker. Without this, PostgreSQL returns
+          // tied rows in arbitrary order — different on every request — so
+          // page→page navigation visibly reshuffles names whenever the
+          // primary sort has nulls or duplicate values.
+          .order("id", { ascending: true })
           .range(from, to);
         if (pageErr) throw pageErr;
 
@@ -1760,10 +1681,10 @@ export default function ReturningPlayers() {
           if (sortKey === "p_avg") return p.prediction.p_avg ?? -999;
           if (sortKey === "p_obp") return p.prediction.p_obp ?? -999;
           if (sortKey === "p_slg") return p.prediction.p_slg ?? -999;
-          if (sortKey === "p_ops") return p.prediction.p_ops ?? computeDerived(p.prediction.p_avg, p.prediction.p_obp, p.prediction.p_slg).ops ?? -999;
-          if (sortKey === "p_iso") return p.prediction.p_iso ?? computeDerived(p.prediction.p_avg, p.prediction.p_obp, p.prediction.p_slg).iso ?? -999;
+          if (sortKey === "p_ops") return p.prediction.p_ops ?? -999;
+          if (sortKey === "p_iso") return p.prediction.p_iso ?? -999;
           if (sortKey === "p_wrc_plus") return p.prediction.p_wrc_plus ?? -999;
-          if (sortKey === "p_war") return p.prediction.o_war ?? computeOWarFromWrcPlus(p.prediction.p_wrc_plus, p.pa) ?? -999;
+          if (sortKey === "p_war") return p.prediction.o_war ?? -999;
           if (sortKey === "p_nil") return computeNilFallback({ storedNil: p.nil_value, wrcPlus: p.prediction.p_wrc_plus, conference: p.conference, position: p.position }) ?? -999;
           return -999;
         };
@@ -1966,6 +1887,19 @@ export default function ReturningPlayers() {
 
       return { rows, total: count ?? 0 };
     },
+    // Gate until auth finishes so effectiveTeamId is stable on first fire.
+    // Without this the query runs once with effectiveTeamId=null, hydrates an
+    // empty/global view, then refires with the resolved team — the second
+    // fire is the source of the dashboard's reorder/flicker bug.
+    enabled: !authLoading,
+    // No background refetches. The displayed data is sourced from the eager
+    // precompute + propagation pipeline, refreshed on the server. Re-firing
+    // this query on window focus or reconnect repeats the exact race we just
+    // killed — the cached result is the right answer until the user changes
+    // a filter or page.
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
   const players = playersResult?.rows ?? [];
   const totalCount = playersResult?.total ?? 0;
@@ -2197,40 +2131,16 @@ export default function ReturningPlayers() {
   // Pitching Master – single source for stats + power metrics
   const { pitchers: pitchingMasterRows, loading: pitchingMasterLoading } = usePitchingSeedData();
 
-  // Pitcher projections from player_predictions (written by the recalc engine).
-  // Keyed by source_player_id so we can join against Pitching Master rows below.
-  // These are the canonical values shown on PitcherProfile; live compute here is
-  // a fallback for pitchers whose preds haven't been backfilled yet.
-  const { data: pitcherPredBySourceId, isLoading: pitcherPredLoading } = useQuery({
-    queryKey: ["returning-pitcher-predictions-by-source-id", effectiveTeamId],
+  // Pitcher predictions: raw fetch grouped by source_player_id, with effectiveTeamId
+  // intentionally NOT in the queryKey. Auth resolves null → real team on first
+  // mount; if the key included effectiveTeamId, the query would refire from
+  // loading state, return [], collapse pitchingTotalPages to 1, and the
+  // useEffect at the bottom would clobber pagination state. Team scoping now
+  // happens in the downstream useMemo so a team change is a fast re-derive,
+  // never a refetch.
+  const { data: pitcherAllRowsBySrcId, isLoading: pitcherPredLoading } = useQuery({
+    queryKey: ["returning-pitcher-predictions-raw"],
     queryFn: async () => {
-      const map = new Map<string, {
-        p_era: number | null;
-        p_fip: number | null;
-        p_whip: number | null;
-        p_k9: number | null;
-        p_bb9: number | null;
-        p_hr9: number | null;
-        p_rv_plus: number | null;
-        p_war: number | null;
-        market_value: number | null;
-        projected_ip: number | null;
-        pitcher_role: string | null;
-        class_year: string | null;
-        whiff_score: number | null;
-        bb_score: number | null;
-        barrel_score: number | null;
-      }>();
-      // Pull global + all customer-team-precomputed rows, then let
-      // dedupePreferredPerPlayer pick the right one per player. Cannot use
-      // applyTeamScopeFilter here because pitchers without a global returner-
-      // regular row (mostly JUCO + transfer-only) need to fall back to ANY
-      // precomputed row — pickPreferredPrediction handles that, but only if
-      // the rows are in the response.
-      //
-      // Replaces the prior inline shouldSet logic which had a subtle dedup
-      // bug (Mason Edwards displayed Stetson's row in cross-team view despite
-      // having a global row available).
       const all: any[] = [];
       let from = 0;
       const PAGE = 1000;
@@ -2248,33 +2158,65 @@ export default function ReturningPlayers() {
         if (!data || data.length < PAGE) break;
         from += PAGE;
       }
-      const deduped = dedupePreferredPerPlayer(all, effectiveTeamId);
-      for (const r of deduped as any[]) {
-        const srcId = r.players?.source_player_id;
+      const bySrcId = new Map<string, any[]>();
+      for (const r of all as any[]) {
+        const srcId = (r.players as any)?.source_player_id;
         if (!srcId) continue;
-        map.set(srcId, {
-          p_era: r.p_era,
-          p_fip: r.p_fip,
-          p_whip: r.p_whip,
-          p_k9: r.p_k9,
-          p_bb9: r.p_bb9,
-          p_hr9: r.p_hr9,
-          p_rv_plus: r.p_rv_plus,
-          p_war: r.p_war ?? null,
-          market_value: r.market_value ?? null,
-          projected_ip: r.projected_ip ?? null,
-          pitcher_role: r.pitcher_role,
-          class_year: r.players?.class_year ?? null,
-          whiff_score: r.whiff_score ?? null,
-          bb_score: r.bb_score ?? null,
-          barrel_score: r.barrel_score ?? null,
-        });
+        const arr = bySrcId.get(srcId) || [];
+        arr.push(r);
+        bySrcId.set(srcId, arr);
       }
-      return map;
+      return bySrcId;
     },
     staleTime: 60 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
+
+  // Team-scoped projection map, derived from the stable raw fetch. Changing
+  // teams (or auth resolving from null → real) only re-runs this memo — no
+  // refetch, no loading state, no pagination clobber.
+  const pitcherPredBySourceId = useMemo(() => {
+    if (!pitcherAllRowsBySrcId) return undefined;
+    const map = new Map<string, {
+      p_era: number | null;
+      p_fip: number | null;
+      p_whip: number | null;
+      p_k9: number | null;
+      p_bb9: number | null;
+      p_hr9: number | null;
+      p_rv_plus: number | null;
+      p_war: number | null;
+      market_value: number | null;
+      projected_ip: number | null;
+      pitcher_role: string | null;
+      class_year: string | null;
+      whiff_score: number | null;
+      bb_score: number | null;
+      barrel_score: number | null;
+    }>();
+    for (const [srcId, rows] of pitcherAllRowsBySrcId.entries()) {
+      const pick = pickPreferredPrediction(rows, effectiveTeamId) as any;
+      if (!pick) continue;
+      map.set(srcId, {
+        p_era: pick.p_era,
+        p_fip: pick.p_fip,
+        p_whip: pick.p_whip,
+        p_k9: pick.p_k9,
+        p_bb9: pick.p_bb9,
+        p_hr9: pick.p_hr9,
+        p_rv_plus: pick.p_rv_plus,
+        p_war: pick.p_war ?? null,
+        market_value: pick.market_value ?? null,
+        projected_ip: pick.projected_ip ?? null,
+        pitcher_role: pick.pitcher_role,
+        class_year: pick.players?.class_year ?? null,
+        whiff_score: pick.whiff_score ?? null,
+        bb_score: pick.bb_score ?? null,
+        barrel_score: pick.barrel_score ?? null,
+      });
+    }
+    return map;
+  }, [pitcherAllRowsBySrcId, effectiveTeamId]);
 
   // Fallback: pull class_year + is_twp directly from `players` so pitchers
   // without a prediction row still resolve their class (for the filter) and
@@ -3005,7 +2947,7 @@ export default function ReturningPlayers() {
                                 class_year: p.class_year,
                                 p_avg: pred.p_avg, p_obp: pred.p_obp, p_slg: pred.p_slg,
                                 p_ops: pred.p_ops, p_iso: pred.p_iso, p_wrc_plus: pred.p_wrc_plus,
-                                owar: pred.o_war ?? computeOWarFromWrcPlus(pred.p_wrc_plus, p.pa),
+                                owar: pred.o_war ?? null,
                                 nil_value: p.nil_value,
                                 power_rating_plus: pred.power_rating_plus,
                                 barrel_score: pred.barrel_score, ev_score: pred.ev_score,
@@ -3081,16 +3023,16 @@ export default function ReturningPlayers() {
                             <TableCell className="text-right text-sm tabular-nums">{statFormat(pred.p_obp)}</TableCell>
                             <TableCell className="text-right text-sm tabular-nums">{statFormat(pred.p_slg)}</TableCell>
                             <TableCell className="text-right text-sm tabular-nums">
-                              {statFormat(pred.p_ops ?? computeDerived(pred.p_avg, pred.p_obp, pred.p_slg).ops)}
+                              {statFormat(pred.p_ops)}
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">
-                              {statFormat(pred.p_iso ?? computeDerived(pred.p_avg, pred.p_obp, pred.p_slg).iso)}
+                              {statFormat(pred.p_iso)}
                             </TableCell>
                             <TableCell className="text-right text-sm font-semibold tabular-nums">
                               {pctFormat(pred.p_wrc_plus)}
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">
-                              {statFormat(pred.o_war ?? computeOWarFromWrcPlus(pred.p_wrc_plus, p.pa), 2)}
+                              {statFormat(pred.o_war, 2)}
                             </TableCell>
                             <TableCell className="text-right text-sm tabular-nums">
                               {moneyFormat(
