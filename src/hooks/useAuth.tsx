@@ -87,21 +87,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isSuperadmin = roles.includes("superadmin");
 
   const fetchUserContext = async (userId: string) => {
-    // 1. Global roles
-    const { data: roleRows } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", userId);
+    // Queries 1 + 2 are independent — run in parallel to save one round trip.
+    const [{ data: roleRows }, { data: accessRow }] = await Promise.all([
+      supabase.from("user_roles").select("role").eq("user_id", userId),
+      supabase.from("user_team_access").select("customer_team_id, role").eq("user_id", userId).maybeSingle(),
+    ]);
+
     const fetchedRoles = (roleRows || []).map((r) => r.role as AppRole);
     setRoles(fetchedRoles);
     const isSuper = fetchedRoles.includes("superadmin");
-
-    // 2. Team membership (one row per user in v1)
-    const { data: accessRow } = await supabase
-      .from("user_team_access")
-      .select("customer_team_id, role")
-      .eq("user_id", userId)
-      .maybeSingle();
 
     if (accessRow) {
       setUserTeamId(accessRow.customer_team_id);

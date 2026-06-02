@@ -29,7 +29,8 @@ import { AiScoutingReportBody } from "@/components/AiScoutingReport";
 import { useScoutingReport } from "@/hooks/useScoutingReport";
 import CoachNotes from "@/components/CoachNotes";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
-import { generateCoachNotesPdf, generateReportPdf } from "@/lib/pdfGenerator";
+// pdfGenerator is loaded on demand — jspdf (350KB) excluded from initial bundle
+const getPdfGenerator = () => import("@/lib/pdfGenerator");
 import { assessHitterRisk } from "@/lib/playerRisk";
 import { generateHitterReport } from "@/lib/scoutingReportGenerator";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
@@ -45,6 +46,7 @@ import {
   defaultHitterDepthRoleFromActualPa,
   type HitterDepthRole,
 } from "@/lib/depthRoles";
+import { useNilValuation } from "@/hooks/useNilValuation";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -243,7 +245,7 @@ export default function PlayerProfile() {
 
   const { data: aiScoutingReport } = useScoutingReport(player?.id, "hitter");
 
-  const { data: predictions = [] } = useQuery({
+  const { data: predictions = [], isLoading: isPredictionsLoading } = useQuery({
     queryKey: ["player-predictions", id, effectiveTeamId],
     queryFn: async () => {
       // Load global rows (customer_team_id IS NULL) plus team-scoped rows
@@ -389,21 +391,7 @@ export default function PlayerProfile() {
     return hit || name;
   };
 
-  const { data: nilValuation } = useQuery({
-    queryKey: ["player-nil", id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("nil_valuations")
-        .select("*")
-        .eq("player_id", id!)
-        .order("season", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!id,
-  });
+  const { data: nilValuation } = useNilValuation(id);
 
   // Admin-only: fetch internal power ratings
   const { data: internalRatings } = useQuery({
@@ -629,15 +617,41 @@ export default function PlayerProfile() {
 
   const isThinSample = isThinSampleHitter(projectionSourceRow);
 
-  if (isLoading) {
-    return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center py-20 text-muted-foreground">Loading player…</div>
-      </DashboardLayout>
-    );
-  }
-
+  // Early bail when player is undefined. Two cases:
+  //   1. Still loading the player query → render page shell + skeleton.
+  //      Avoids running the rest of the component body (76+ player.* accesses
+  //      below would crash on undefined).
+  //   2. Query resolved with no player → render "Player not found".
   if (!player) {
+    if (isLoading) {
+      return (
+        <DashboardLayout>
+          <div className="px-4 py-6 max-w-7xl mx-auto">
+            <Button variant="ghost" onClick={() => navigate(-1)} className="mb-4 cursor-pointer">
+              <ArrowLeft className="mr-2 h-4 w-4" /> Back
+            </Button>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="h-7 w-48 rounded bg-muted" />
+                <div className="flex gap-2">
+                  <div className="h-5 w-16 rounded bg-muted" />
+                  <div className="h-5 w-24 rounded bg-muted" />
+                  <div className="h-5 w-32 rounded bg-muted" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[0, 1, 2, 3].map((i) => (
+                  <Card key={i} className="p-4">
+                    <div className="h-4 w-24 rounded bg-muted mb-2" />
+                    <div className="h-7 w-16 rounded bg-muted" />
+                  </Card>
+                ))}
+              </div>
+            </div>
+          </div>
+        </DashboardLayout>
+      );
+    }
     return (
       <DashboardLayout>
         <div className="flex flex-col items-center justify-center py-20 gap-4">
@@ -654,8 +668,8 @@ export default function PlayerProfile() {
     if (!inches) return "—";
     return `${Math.floor(inches / 12)}'${inches % 12}"`;
   };
-  const fullName = normalizeName(`${player.first_name} ${player.last_name}`);
-  const fullNameRaw = `${player.first_name} ${player.last_name}`;
+  const fullName = normalizeName(`${player?.first_name ?? ""} ${player?.last_name ?? ""}`);
+  const fullNameRaw = `${player?.first_name ?? ""} ${player?.last_name ?? ""}`;
   const statCandidates = storageByName.get(fullName) || [];
   const round3 = (v: number | null | undefined) => (v == null ? null : Math.round(v * 1000) / 1000);
   const resolvedSeedStatRow = (() => {
@@ -866,60 +880,72 @@ export default function PlayerProfile() {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex-1">
-            <h2 className="text-2xl font-bold tracking-tight">
-              {player.first_name} {player.last_name}
-            </h2>
-            {hasPitchingData && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-1"
-                onClick={() => navigate(`/dashboard/pitcher/${id}`)}
-              >
-                View Pitching Profile →
-              </Button>
-            )}
+            {isLoading ? (
+              <div className="space-y-2">
+                <div className="h-7 w-48 rounded bg-muted animate-pulse" />
+                <div className="flex gap-2">
+                  <div className="h-5 w-16 rounded bg-muted animate-pulse" />
+                  <div className="h-5 w-24 rounded bg-muted animate-pulse" />
+                </div>
+              </div>
+            ) : (
+            <>
+              <h2 className="text-2xl font-bold tracking-tight">
+                {player!.first_name} {player!.last_name}
+              </h2>
+              {hasPitchingData && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-1"
+                  onClick={() => navigate(`/dashboard/pitcher/${id}`)}
+                >
+                  View Pitching Profile →
+                </Button>
+              )}
               <div className="flex items-center gap-2 mt-1 flex-wrap">
-              {effectivePosition && <Badge variant="secondary">{effectivePosition}</Badge>}
-              {(player as any).is_twp && (
-                <Badge
-                  variant="outline"
-                  className="text-[10px] font-semibold uppercase tracking-wider border-[#D4AF37]/40 bg-[#D4AF37]/10 text-[#D4AF37]"
-                  title="Two-way player — also appears in the pitcher pool"
-                >
-                  TWP
-                </Badge>
-              )}
-              {displayTeamCurrent && <Badge variant="outline">{displayTeamCurrent}</Badge>}
-              {(() => {
-                const norm = (v: string) => (v || "").trim().toLowerCase().replace(/\b(university|college|of)\b/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-                const teamConf = teamsForConference.find(t => norm(t.name) === norm(player.team || ""))?.conference;
-                const conf = player.conference || teamConf || null;
-                return conf ? <Badge variant="outline" className="text-muted-foreground">{conf}</Badge> : null;
-              })()}
-              <PortalStatusBadge
-                player={player as any}
-                isAdmin={isAdmin}
-                onSave={(fields) => updatePortalStatus.mutateAsync(fields)}
-              />
-              <PortalContactButton player={player as any} />
-              {combinedUsed && (
-                <Badge
-                  variant="outline"
-                  className="text-[10px] font-semibold uppercase tracking-wider"
-                  title={`Projection blends ${combinedSeasonsLabel} (${combinedPa} PA total)`}
-                >
-                  Combined: {combinedSeasonsLabel} ({combinedPa} PA)
-                </Badge>
-              )}
-            </div>
+                {effectivePosition && <Badge variant="secondary">{effectivePosition}</Badge>}
+                {(player as any).is_twp && (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] font-semibold uppercase tracking-wider border-[#D4AF37]/40 bg-[#D4AF37]/10 text-[#D4AF37]"
+                    title="Two-way player — also appears in the pitcher pool"
+                  >
+                    TWP
+                  </Badge>
+                )}
+                {displayTeamCurrent && <Badge variant="outline">{displayTeamCurrent}</Badge>}
+                {(() => {
+                  const norm = (v: string) => (v || "").trim().toLowerCase().replace(/\b(university|college|of)\b/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+                  const teamConf = teamsForConference.find(t => norm(t.name) === norm(player!.team || ""))?.conference;
+                  const conf = player!.conference || teamConf || null;
+                  return conf ? <Badge variant="outline" className="text-muted-foreground">{conf}</Badge> : null;
+                })()}
+                <PortalStatusBadge
+                  player={player as any}
+                  isAdmin={isAdmin}
+                  onSave={(fields) => updatePortalStatus.mutateAsync(fields)}
+                />
+                <PortalContactButton player={player as any} />
+                {combinedUsed && (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] font-semibold uppercase tracking-wider"
+                    title={`Projection blends ${combinedSeasonsLabel} (${combinedPa} PA total)`}
+                  >
+                    Combined: {combinedSeasonsLabel} ({combinedPa} PA)
+                  </Badge>
+                )}
+              </div>
+            </>
+            )}
           </div>
-          {
+          {!isLoading &&
             <>
               <CoachNotes
-                playerId={player.id}
+                playerId={player!.id}
                 playerName={`${player.first_name} ${player.last_name}`}
-                onExportPdf={(notes, format, mode = "download") => {
+                onExportPdf={async (notes, format, mode = "download") => {
                   if (format === "full") {
                     // Build same rich rp as Export Report button, plus coach notes
                     const rp: ReportPlayer = {
@@ -1012,6 +1038,7 @@ export default function PlayerProfile() {
                     rp.risk_trajectory = riskResult.trajectory;
                     rp.risk_summary = riskResult.summary;
                     rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
+                    const { generateReportPdf } = await getPdfGenerator();
                     const url = generateReportPdf([rp]);
                     if (mode === "preview") {
                       window.open(url, "_blank");
@@ -1037,6 +1064,7 @@ export default function PlayerProfile() {
                       power_rating_plus: (projectionSourceRow as any)?.overall_power_rating ?? seedPowerDerived?.overallPlus,
                       coach_notes: notes,
                     };
+                    const { generateCoachNotesPdf } = await getPdfGenerator();
                     const url = generateCoachNotesPdf(rp, notes);
                     if (mode === "preview") {
                       window.open(url, "_blank");
@@ -1194,7 +1222,36 @@ export default function PlayerProfile() {
           }
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
+        {(isLoading || isPredictionsLoading) && (
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div className="lg:col-span-1 space-y-4">
+              <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 space-y-3">
+                <div className="h-4 w-24 rounded bg-muted animate-pulse" />
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="flex justify-between">
+                    <div className="h-3 w-20 rounded bg-muted animate-pulse" />
+                    <div className="h-3 w-16 rounded bg-muted animate-pulse" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="lg:col-span-2 space-y-4">
+              <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 space-y-3">
+                <div className="h-4 w-32 rounded bg-muted animate-pulse" />
+                <div className="grid grid-cols-3 gap-3">
+                  {[...Array(6)].map((_, i) => (
+                    <div key={i} className="rounded bg-muted/30 p-3 space-y-2">
+                      <div className="h-3 w-12 rounded bg-muted animate-pulse" />
+                      <div className="h-6 w-16 rounded bg-muted animate-pulse" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isLoading && !isPredictionsLoading && <div className="grid gap-4 lg:grid-cols-3">
           <div className="lg:col-span-1 space-y-4">
             {/* Player Info Card */}
             <Card className="border-[#162241] bg-[#0a1428]">
@@ -1712,7 +1769,7 @@ export default function PlayerProfile() {
               </Card>
             )}
           </div>
-        </div>
+        </div>}
 
       </div>
     </DashboardLayout>

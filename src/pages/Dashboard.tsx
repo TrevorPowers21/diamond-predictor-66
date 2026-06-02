@@ -72,17 +72,20 @@ export default function Dashboard() {
   const { data: topHitters = [] } = useQuery({
     queryKey: ["overview-top-hitters", effectiveTeamId],
     staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
-      // Pull the top 50 server-side, then dedup + slice top 5. 50 is plenty
-      // of headroom: each player has at most 2 rows (returner regular +
-      // team precomputed), so worst case dedup keeps 25 unique players.
-      let q = supabase
+      // Two-pool strategy: global top-50 + team-scoped top-50 (when active).
+      // The previous "single combined query ordered by p_wrc_plus" shortcut
+      // dropped team-scoped rows that ranked below position 50 in the global
+      // pool — so a player whose team-scoped p_wrc_plus diverged downward
+      // (e.g., Georgia's park projects Overbeek 133 vs global 141) lost the
+      // team-scoped row and Dashboard displayed the global value while
+      // Profile correctly showed the team-scoped one.
+      const select = "id, player_id, customer_team_id, model_type, variant, status, p_wrc_plus, p_avg, p_obp, p_slg, players!inner(first_name, last_name, team, from_team, conference, position, pa, transfer_portal, division)";
+      const buildBase = () => supabase
         .from("player_predictions")
-        .select(
-          "id, player_id, customer_team_id, model_type, variant, status, p_wrc_plus, p_avg, p_obp, p_slg, players!inner(first_name, last_name, team, from_team, conference, position, pa, transfer_portal, division)",
-        )
+        .select(select)
         .eq("season", PROJECTION_SEASON)
-        .in("variant", ["regular", "precomputed"])
         .in("status", ["active", "departed"])
         .in("model_type", ["returner", "transfer"])
         .not("players.position", "in", "(SP,RP,CL,P,LHP,RHP)")
@@ -91,13 +94,44 @@ export default function Dashboard() {
         .not("p_wrc_plus", "is", null)
         .order("p_wrc_plus", { ascending: false })
         .limit(50);
-      q = applyTeamScopeFilter(q as any, effectiveTeamId);
-      const { data, error } = await q;
-      if (error) throw error;
-      const all = data || [];
-      // Per player: prefer team-scoped precomputed row, else global regular row.
-      const deduped = dedupePreferredPerPlayer(all, effectiveTeamId);
-      const rows: HitterRow[] = deduped
+
+      const globalQ = buildBase().eq("variant", "regular").is("customer_team_id", null);
+      const teamQ = effectiveTeamId
+        ? buildBase().eq("variant", "precomputed").eq("customer_team_id", effectiveTeamId)
+        : null;
+      const [globalRes, teamRes] = await Promise.all([
+        globalQ,
+        teamQ ?? Promise.resolve({ data: [], error: null } as any),
+      ]);
+      if (globalRes.error) throw globalRes.error;
+      if (teamRes.error) throw teamRes.error;
+      const globalRows = (globalRes.data ?? []) as any[];
+      const teamRows = (teamRes.data ?? []) as any[];
+
+      // Fill in team-scoped rows for any global candidate not yet covered.
+      // Handles "global top-50 but team-scoped below 50" edge case.
+      const teamByPlayer = new Map<string, any>(teamRows.map((r) => [r.player_id, r]));
+      if (effectiveTeamId) {
+        const missing = globalRows.map((r) => r.player_id).filter((id) => id && !teamByPlayer.has(id));
+        if (missing.length > 0) {
+          const { data: fill, error: fillErr } = await supabase
+            .from("player_predictions")
+            .select(select)
+            .eq("season", PROJECTION_SEASON)
+            .eq("variant", "precomputed")
+            .eq("customer_team_id", effectiveTeamId)
+            .in("player_id", missing);
+          if (fillErr) throw fillErr;
+          for (const r of (fill ?? []) as any[]) teamByPlayer.set(r.player_id, r);
+        }
+      }
+
+      // Merge: team-scoped beats global per player_id; sort, slice top 5.
+      const byPlayer = new Map<string, any>();
+      for (const r of globalRows) byPlayer.set(r.player_id, r);
+      for (const [pid, r] of teamByPlayer) byPlayer.set(pid, r);
+
+      const rows: HitterRow[] = [...byPlayer.values()]
         .map((r) => ({
           player_id: r.player_id,
           first_name: r.players.first_name,
@@ -122,17 +156,14 @@ export default function Dashboard() {
   const { data: topPitchers = [] } = useQuery({
     queryKey: ["overview-top-pitchers", effectiveTeamId],
     staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
-      // Mirror topHitters: read PROJECTIONS from player_predictions, not raw
-      // 2026 stats from Pitching Master. Sort by p_rv_plus (pitcher composite),
-      // prefer team-scoped precomputed row per player.
-      let q = supabase
+      // Same two-pool merge pattern as topHitters. See note there.
+      const select = "id, player_id, customer_team_id, model_type, variant, status, p_rv_plus, p_era, p_fip, p_k9, players!inner(first_name, last_name, team, from_team, conference, position, ip, transfer_portal, division)";
+      const buildBase = () => supabase
         .from("player_predictions")
-        .select(
-          "id, player_id, customer_team_id, model_type, variant, status, p_rv_plus, p_era, p_fip, p_k9, players!inner(first_name, last_name, team, from_team, conference, position, ip, transfer_portal, division)",
-        )
+        .select(select)
         .eq("season", PROJECTION_SEASON)
-        .in("variant", ["regular", "precomputed"])
         .in("status", ["active", "departed"])
         .in("model_type", ["returner", "transfer"])
         .in("players.position", ["SP", "RP", "CL", "P", "LHP", "RHP"])
@@ -141,12 +172,41 @@ export default function Dashboard() {
         .not("p_rv_plus", "is", null)
         .order("p_rv_plus", { ascending: false })
         .limit(50);
-      q = applyTeamScopeFilter(q as any, effectiveTeamId);
-      const { data, error } = await q;
-      if (error) throw error;
-      const all = data || [];
-      const deduped = dedupePreferredPerPlayer(all, effectiveTeamId);
-      const rows: PitcherRow[] = deduped
+
+      const globalQ = buildBase().eq("variant", "regular").is("customer_team_id", null);
+      const teamQ = effectiveTeamId
+        ? buildBase().eq("variant", "precomputed").eq("customer_team_id", effectiveTeamId)
+        : null;
+      const [globalRes, teamRes] = await Promise.all([
+        globalQ,
+        teamQ ?? Promise.resolve({ data: [], error: null } as any),
+      ]);
+      if (globalRes.error) throw globalRes.error;
+      if (teamRes.error) throw teamRes.error;
+      const globalRows = (globalRes.data ?? []) as any[];
+      const teamRows = (teamRes.data ?? []) as any[];
+
+      const teamByPlayer = new Map<string, any>(teamRows.map((r) => [r.player_id, r]));
+      if (effectiveTeamId) {
+        const missing = globalRows.map((r) => r.player_id).filter((id) => id && !teamByPlayer.has(id));
+        if (missing.length > 0) {
+          const { data: fill, error: fillErr } = await supabase
+            .from("player_predictions")
+            .select(select)
+            .eq("season", PROJECTION_SEASON)
+            .eq("variant", "precomputed")
+            .eq("customer_team_id", effectiveTeamId)
+            .in("player_id", missing);
+          if (fillErr) throw fillErr;
+          for (const r of (fill ?? []) as any[]) teamByPlayer.set(r.player_id, r);
+        }
+      }
+
+      const byPlayer = new Map<string, any>();
+      for (const r of globalRows) byPlayer.set(r.player_id, r);
+      for (const [pid, r] of teamByPlayer) byPlayer.set(pid, r);
+
+      const rows: PitcherRow[] = [...byPlayer.values()]
         .map((r) => ({
           player_id: r.player_id,
           first_name: r.players.first_name,
@@ -172,6 +232,7 @@ export default function Dashboard() {
   const { data: briefingStats } = useQuery({
     queryKey: ["overview-briefing-stats", schoolName ?? "", schoolFullName ?? ""],
     staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       // "Committed" tile counts commits TO the user's school only — not every
       // commit globally. commit_school strings come from Verified Athletics and
@@ -259,6 +320,7 @@ export default function Dashboard() {
   const { data: portalActivity = [] } = useQuery({
     queryKey: ["overview-portal-activity-v4", watchedIdsKey, effectiveTeamId],
     staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       // 3-day floor — anything entered before this drops out of the feed.
       const floorDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
