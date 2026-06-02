@@ -2221,19 +2221,21 @@ export default function ReturningPlayers() {
         bb_score: number | null;
         barrel_score: number | null;
       }>();
-      // Match the hitter pattern: filter the DB query so only global rows come
-      // back when not impersonating, or global + this-team-precomputed when
-      // impersonating. Then dedupePreferredPerPlayer picks the right one per
-      // player. The old inline shouldSet logic pulled EVERY customer team's
-      // rows and dedupe-by-iteration order, which silently broke for some
-      // pitchers (e.g., Mason Edwards displaying Stetson's row in cross-team
-      // view despite my analysis saying global should win). Use the proven
-      // helper used by hitters instead.
+      // Pull global + all customer-team-precomputed rows, then let
+      // dedupePreferredPerPlayer pick the right one per player. Cannot use
+      // applyTeamScopeFilter here because pitchers without a global returner-
+      // regular row (mostly JUCO + transfer-only) need to fall back to ANY
+      // precomputed row — pickPreferredPrediction handles that, but only if
+      // the rows are in the response.
+      //
+      // Replaces the prior inline shouldSet logic which had a subtle dedup
+      // bug (Mason Edwards displayed Stetson's row in cross-team view despite
+      // having a global row available).
       const all: any[] = [];
       let from = 0;
       const PAGE = 1000;
       while (true) {
-        let q = supabase
+        const { data, error } = await supabase
           .from("player_predictions")
           .select("player_id, customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, projected_ip, pitcher_role, whiff_score, bb_score, barrel_score, players!inner(source_player_id, class_year)")
           .eq("season", PROJECTION_SEASON)
@@ -2241,8 +2243,6 @@ export default function ReturningPlayers() {
           .in("status", ["active", "departed"])
           .not("p_era", "is", null)
           .range(from, from + PAGE - 1);
-        q = applyTeamScopeFilter(q as any, effectiveTeamId);
-        const { data, error } = await q;
         if (error) throw error;
         all.push(...(data || []));
         if (!data || data.length < PAGE) break;
