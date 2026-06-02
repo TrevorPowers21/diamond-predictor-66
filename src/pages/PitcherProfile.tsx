@@ -1505,6 +1505,7 @@ export default function PitcherProfile() {
                       p_whip: projectedPitching.pWhip, p_k9: projectedPitching.pK9,
                       p_bb9: projectedPitching.pBb9, p_hr9: projectedPitching.pHr9,
                       p_war: projectedPitching.pWar,
+                      p_rv_plus: projectedPitching.pRvPlus,
                       market_value: projectedPitching.marketValue,
                       nil_value: projectedPitching.marketValue,
                       overall_pr_plus: internalPowerRatings?.overallPlus,
@@ -1609,6 +1610,7 @@ export default function PitcherProfile() {
                       p_whip: projectedPitching.pWhip, p_k9: projectedPitching.pK9,
                       p_bb9: projectedPitching.pBb9, p_hr9: projectedPitching.pHr9,
                       p_war: projectedPitching.pWar,
+                      p_rv_plus: projectedPitching.pRvPlus,
                       overall_pr_plus: internalPowerRatings?.overallPlus,
                       coach_notes: notes,
                     };
@@ -1678,6 +1680,7 @@ export default function PitcherProfile() {
                     p_whip: projectedPitching.pWhip, p_k9: projectedPitching.pK9,
                     p_bb9: projectedPitching.pBb9, p_hr9: projectedPitching.pHr9,
                     p_war: projectedPitching.pWar,
+                    p_rv_plus: projectedPitching.pRvPlus,
                     // Valuation
                     market_value: projectedPitching.marketValue,
                     nil_value: projectedPitching.marketValue,

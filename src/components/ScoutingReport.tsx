@@ -53,6 +53,12 @@ export interface ReportPlayer {
   p_bb9?: number | null;
   p_hr9?: number | null;
   p_war?: number | null;
+  // Pitcher headline composite (matches PitcherProfile's overlayPRvPlus).
+  // Read first by the PDF for the top pRV+ tile + the pRV+ table cell so the
+  // PDF matches what coaches see on the team-scoped profile page. Falls back
+  // to overall_pr_plus / power_rating_plus for legacy callers that didn't
+  // populate this field yet.
+  p_rv_plus?: number | null;
   // Shared valuation
   nil_value?: number | null;
   nil_tier?: string | null;
