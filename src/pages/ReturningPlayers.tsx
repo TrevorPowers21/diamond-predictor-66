@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import {
@@ -1905,6 +1905,12 @@ export default function ReturningPlayers() {
     staleTime: 60 * 60 * 1000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    // Keep the previous page visible while React Query fetches the new one.
+    // Without this, queryKey changes (page click, sort, filter) drop `data`
+    // to undefined mid-fetch → totalCount = 0 → totalPages = 1 → the clamp
+    // useEffect below fires and yanks the user back to page 1. That was the
+    // "kicks me to page 1" complaint.
+    placeholderData: keepPreviousData,
   });
   const players = playersResult?.rows ?? [];
   const totalCount = playersResult?.total ?? 0;
@@ -2548,7 +2554,7 @@ export default function ReturningPlayers() {
       setPitchingSortKey(key);
       setPitchingSortDir("desc");
     }
-    setPitchingCurrentPage(1);
+    setPitchingPage(1);
   };
   const pagedPitchingRows = useMemo(() => {
     const from = (pitchingCurrentPage - 1) * pitchingPageSize;
