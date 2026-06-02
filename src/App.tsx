@@ -45,6 +45,19 @@ function PostHogPageView() {
   const location = useLocation();
   const prevPath = useRef<string | null>(null);
 
+  // Fire pageleave on tab close / visibility change so session duration is accurate
+  useEffect(() => {
+    const handleLeave = () => {
+      if (prevPath.current) capturePageLeave(prevPath.current);
+    };
+    window.addEventListener("beforeunload", handleLeave);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") handleLeave();
+    });
+    return () => window.removeEventListener("beforeunload", handleLeave);
+  }, []);
+
+  // Fire pageleave for previous route, then pageview for new route
   useEffect(() => {
     if (prevPath.current !== null) {
       capturePageLeave(prevPath.current);

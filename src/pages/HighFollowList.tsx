@@ -323,7 +323,7 @@ export default function HighFollowList() {
       name: `${r.hf.first_name} ${r.hf.last_name}`, school: r.hf.team,
       position: r.hf.position, class_year: r.hf.class_year,
       ...(!isP && r.pred ? { p_avg: r.pred.p_avg, p_obp: r.pred.p_obp, p_slg: r.pred.p_slg, p_ops: r.pred.p_ops, p_iso: r.pred.p_iso, p_wrc_plus: r.pred.p_wrc_plus, barrel_score: r.pred.barrel_score, ev_score: r.pred.ev_score, contact_score: r.pred.contact_score, chase_score: r.pred.chase_score } : {}),
-      ...(isP ? { p_era: r.pitcherProjection?.p_era, p_fip: r.pitcherProjection?.p_fip, p_whip: r.pitcherProjection?.p_whip, p_k9: r.pitcherProjection?.p_k9, p_bb9: r.pitcherProjection?.p_bb9, p_hr9: r.pitcherProjection?.p_hr9, stuff_score: r.pitcherProjection?.scores.stuff, whiff_score: r.pitcherProjection?.scores.whiff, bb_score: r.pitcherProjection?.scores.bb, barrel_score: r.pitcherProjection?.scores.barrel } : {}),
+      ...(isP ? { p_era: r.pitcherProjection?.p_era, p_fip: r.pitcherProjection?.p_fip, p_whip: r.pitcherProjection?.p_whip, p_k9: r.pitcherProjection?.p_k9, p_bb9: r.pitcherProjection?.p_bb9, p_hr9: r.pitcherProjection?.p_hr9, stuff_score: r.pitcherProjection?.scores.stuff, whiff_score: r.pred?.whiff_score ?? null, bb_score: r.pred?.bb_score ?? null, barrel_score: r.pred?.barrel_score ?? null } : {}),
     };
   };
 
@@ -522,10 +522,12 @@ export default function HighFollowList() {
                               <div className="flex gap-0.5 justify-center flex-wrap">
                                 {isP ? (
                                   <>
+                                    {/* Stf+ stays client-computed until next computeAndStoreScores
+                                        run populates stuff_score. Other 3 read from pred (1=1). */}
                                     <ScoutMini label="Stf+" value={r.pitcherProjection?.scores.stuff} />
-                                    <ScoutMini label="Whf" value={r.pitcherProjection?.scores.whiff} />
-                                    <ScoutMini label="BB" value={r.pitcherProjection?.scores.bb} />
-                                    <ScoutMini label="Brl" value={r.pitcherProjection?.scores.barrel} />
+                                    <ScoutMini label="Whf" value={pred?.whiff_score} />
+                                    <ScoutMini label="BB" value={pred?.bb_score} />
+                                    <ScoutMini label="Brl" value={pred?.barrel_score} />
                                   </>
                                 ) : (
                                   <>

@@ -50,16 +50,24 @@ export function trackEvent(event: string, properties?: Record<string, unknown>) 
 export function capturePageView(path: string) {
   if (!KEY) return;
   posthog.capture("$pageview", {
-    $current_url: window.location.origin + path,
+    $current_url: window.location.href,
     $pathname: path,
+    $host: window.location.host,
+    $referrer: document.referrer || "$direct",
+    $referring_domain: document.referrer ? new URL(document.referrer).hostname : "$direct",
+    $screen_height: window.screen.height,
+    $screen_width: window.screen.width,
+    $viewport_height: window.innerHeight,
+    $viewport_width: window.innerWidth,
   });
 }
 
 export function capturePageLeave(path: string) {
   if (!KEY) return;
   posthog.capture("$pageleave", {
-    $current_url: window.location.origin + path,
+    $current_url: window.location.href,
     $pathname: path,
+    $host: window.location.host,
   });
 }
 
