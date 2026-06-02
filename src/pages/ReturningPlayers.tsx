@@ -1536,6 +1536,11 @@ export default function ReturningPlayers() {
           .not("players.division", "eq", "NJCAA_D1")
           .gte("players.pa", 75)
           .order(orderColumn, { ascending: sortDir === "asc", nullsFirst: false })
+          // Stable secondary tiebreaker. Without this, PostgreSQL returns
+          // tied rows in arbitrary order — different on every request — so
+          // page→page navigation visibly reshuffles names whenever the
+          // primary sort has nulls or duplicate values.
+          .order("id", { ascending: true })
           .range(from, to);
         if (pageErr) throw pageErr;
 
