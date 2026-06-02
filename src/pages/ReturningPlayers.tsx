@@ -1892,6 +1892,14 @@ export default function ReturningPlayers() {
     // empty/global view, then refires with the resolved team — the second
     // fire is the source of the dashboard's reorder/flicker bug.
     enabled: !authLoading,
+    // No background refetches. The displayed data is sourced from the eager
+    // precompute + propagation pipeline, refreshed on the server. Re-firing
+    // this query on window focus or reconnect repeats the exact race we just
+    // killed — the cached result is the right answer until the user changes
+    // a filter or page.
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
   const players = playersResult?.rows ?? [];
   const totalCount = playersResult?.total ?? 0;

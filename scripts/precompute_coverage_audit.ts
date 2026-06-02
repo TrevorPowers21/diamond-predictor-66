@@ -1,0 +1,37 @@
+import { createClient } from "@supabase/supabase-js";
+const sb = createClient(process.env.VITE_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
+
+// Audit precomputed rows for completeness of display columns
+const cols = ["p_avg","p_obp","p_slg","p_ops","p_iso","p_wrc_plus","o_war","contact_score","chase_score","barrel_score","ev_score","p_era","p_fip","p_whip","p_k9","p_bb9","p_rv_plus","p_war","whiff_score","iz_whiff_score","stuff_score","bb_score","power_rating_plus","hitter_depth_role","pitcher_role"];
+
+// Get all variant=precomputed rows for season 2026
+let total = 0;
+let from = 0;
+const pageSize = 1000;
+const nullCount: Record<string, number> = {};
+for (const c of cols) nullCount[c] = 0;
+const byTeam: Record<string, number> = {};
+
+while (true) {
+  const { data, error } = await (sb as any).from("player_predictions").select(cols.join(",") + ",customer_team_id").eq("variant", "precomputed").eq("season", 2027).range(from, from + pageSize - 1);
+  if (error) { console.error(error); break; }
+  if (!data || data.length === 0) break;
+  total += data.length;
+  for (const r of data) {
+    byTeam[r.customer_team_id ?? "null"] = (byTeam[r.customer_team_id ?? "null"] ?? 0) + 1;
+    for (const c of cols) if (r[c] == null) nullCount[c]++;
+  }
+  if (data.length < pageSize) break;
+  from += pageSize;
+}
+
+console.log(`Total precomputed rows (season 2026): ${total}\n`);
+console.log("Per-team row counts:");
+for (const [t, n] of Object.entries(byTeam)) console.log(`  ${t}: ${n}`);
+console.log("\nNull counts per column (out of " + total + "):");
+const sorted = Object.entries(nullCount).sort((a,b) => b[1]-a[1]);
+for (const [c, n] of sorted) {
+  const pct = total > 0 ? ((n/total)*100).toFixed(1) : "0.0";
+  const flag = n === 0 ? "✓" : n === total ? "✗ ALL NULL" : `${pct}% null`;
+  console.log(`  ${c.padEnd(22)} ${flag}`);
+}
