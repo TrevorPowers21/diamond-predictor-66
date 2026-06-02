@@ -2221,10 +2221,19 @@ export default function ReturningPlayers() {
         bb_score: number | null;
         barrel_score: number | null;
       }>();
+      // Match the hitter pattern: filter the DB query so only global rows come
+      // back when not impersonating, or global + this-team-precomputed when
+      // impersonating. Then dedupePreferredPerPlayer picks the right one per
+      // player. The old inline shouldSet logic pulled EVERY customer team's
+      // rows and dedupe-by-iteration order, which silently broke for some
+      // pitchers (e.g., Mason Edwards displaying Stetson's row in cross-team
+      // view despite my analysis saying global should win). Use the proven
+      // helper used by hitters instead.
+      const all: any[] = [];
       let from = 0;
       const PAGE = 1000;
       while (true) {
-        const { data, error } = await supabase
+        let q = supabase
           .from("player_predictions")
           .select("player_id, customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, projected_ip, pitcher_role, whiff_score, bb_score, barrel_score, players!inner(source_player_id, class_year)")
           .eq("season", PROJECTION_SEASON)
@@ -2232,38 +2241,34 @@ export default function ReturningPlayers() {
           .in("status", ["active", "departed"])
           .not("p_era", "is", null)
           .range(from, from + PAGE - 1);
+        q = applyTeamScopeFilter(q as any, effectiveTeamId);
+        const { data, error } = await q;
         if (error) throw error;
-        for (const r of (data || []) as any[]) {
-          const srcId = r.players?.source_player_id;
-          if (!srcId) continue;
-          const existing = map.get(srcId);
-          // Prefer team-scoped precomputed row when impersonating a customer
-          // team. Otherwise prefer the global returner regular row.
-          const wantsTeamRow = effectiveTeamId && r.customer_team_id === effectiveTeamId && r.variant === "precomputed";
-          const wantsGlobalRow = !effectiveTeamId && r.variant === "regular" && r.customer_team_id == null;
-          const fallback = r.variant === "regular" && r.customer_team_id == null;
-          const shouldSet = wantsTeamRow || wantsGlobalRow || (!existing && fallback);
-          if (!shouldSet && existing) continue;
-          map.set(srcId, {
-            p_era: r.p_era,
-            p_fip: r.p_fip,
-            p_whip: r.p_whip,
-            p_k9: r.p_k9,
-            p_bb9: r.p_bb9,
-            p_hr9: r.p_hr9,
-            p_rv_plus: r.p_rv_plus,
-            p_war: r.p_war ?? null,
-            market_value: r.market_value ?? null,
-            projected_ip: r.projected_ip ?? null,
-            pitcher_role: r.pitcher_role,
-            class_year: r.players?.class_year ?? null,
-            whiff_score: r.whiff_score ?? null,
-            bb_score: r.bb_score ?? null,
-            barrel_score: r.barrel_score ?? null,
-          });
-        }
+        all.push(...(data || []));
         if (!data || data.length < PAGE) break;
         from += PAGE;
+      }
+      const deduped = dedupePreferredPerPlayer(all, effectiveTeamId);
+      for (const r of deduped as any[]) {
+        const srcId = r.players?.source_player_id;
+        if (!srcId) continue;
+        map.set(srcId, {
+          p_era: r.p_era,
+          p_fip: r.p_fip,
+          p_whip: r.p_whip,
+          p_k9: r.p_k9,
+          p_bb9: r.p_bb9,
+          p_hr9: r.p_hr9,
+          p_rv_plus: r.p_rv_plus,
+          p_war: r.p_war ?? null,
+          market_value: r.market_value ?? null,
+          projected_ip: r.projected_ip ?? null,
+          pitcher_role: r.pitcher_role,
+          class_year: r.players?.class_year ?? null,
+          whiff_score: r.whiff_score ?? null,
+          bb_score: r.bb_score ?? null,
+          barrel_score: r.barrel_score ?? null,
+        });
       }
       return map;
     },
