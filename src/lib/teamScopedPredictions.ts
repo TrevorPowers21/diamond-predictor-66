@@ -28,7 +28,8 @@ export function applyTeamScopeFilter<T extends { or: any; is: any }>(
 
 /**
  * From the rows for ONE player, pick the preferred prediction:
- *   team-scoped precomputed (if active team has one) → global regular → null
+ *   team-scoped precomputed (if active team has one) → global regular →
+ *   any precomputed (last-resort fallback) → null
  */
 export function pickPreferredPrediction<T extends PredRow>(
   rows: T[],
@@ -40,7 +41,12 @@ export function pickPreferredPrediction<T extends PredRow>(
     );
     if (teamRow) return teamRow;
   }
-  return rows.find((r) => r.customer_team_id == null && r.variant === "regular") ?? null;
+  const global = rows.find((r) => r.customer_team_id == null && r.variant === "regular");
+  if (global) return global;
+  // Last-resort fallback for players without a baseline global returner-regular
+  // row (mostly JUCO + transfer-only pitchers). Use any precomputed row so
+  // they at least appear on the dashboard instead of vanishing.
+  return rows.find((r) => r.variant === "precomputed") ?? null;
 }
 
 /**

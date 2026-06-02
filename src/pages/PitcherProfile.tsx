@@ -1272,6 +1272,11 @@ export default function PitcherProfile() {
       pWar: overlayPWar,
       marketValue: overlayMarketValue,
       projectedIp: overlayIp,
+      // Stored scouting scores from the picked prediction row — 1=1 with
+      // Pitching Master via propagate_pitcher_scores_to_predictions().
+      whiffScore: (stored as any)?.whiff_score ?? null,
+      bbScore: (stored as any)?.bb_score ?? null,
+      barrelScore: (stored as any)?.barrel_score ?? null,
     };
   }, [
     projectedDevAggressiveness,
@@ -1511,10 +1516,12 @@ export default function PitcherProfile() {
                       overall_pr_plus: internalPowerRatings?.overallPlus,
                       stuff_plus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
                       whiff_pct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                      // Stf+ stays client-computed until next computeAndStoreScores
+                      // populates stuff_score. Other 3 read from pred (1=1).
                       stuff_score: internalPowerRatings?.scores?.stuff,
-                      whiff_score: internalPowerRatings?.scores?.whiff,
-                      bb_score: internalPowerRatings?.scores?.bb,
-                      barrel_score: internalPowerRatings?.scores?.barrel,
+                      whiff_score: projectedPitching.whiffScore ?? null,
+                      bb_score: projectedPitching.bbScore ?? null,
+                      barrel_score: projectedPitching.barrelScore ?? null,
                       career_seasons: pitcherMasterSeasons as any[],
                       pitches: pitchArsenal.rows.map((r) => ({
                         pitch_name: r.pitchType, usage: r.usagePct,
@@ -1688,10 +1695,12 @@ export default function PitcherProfile() {
                     // Scouting scores
                     stuff_plus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
                     whiff_pct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                    // Stf+ stays client-computed until next computeAndStoreScores
+                    // populates stuff_score. Other 3 read from pred (1=1).
                     stuff_score: internalPowerRatings?.scores?.stuff,
-                    whiff_score: internalPowerRatings?.scores?.whiff,
-                    bb_score: internalPowerRatings?.scores?.bb,
-                    barrel_score: internalPowerRatings?.scores?.barrel,
+                    whiff_score: projectedPitching.whiffScore ?? null,
+                    bb_score: projectedPitching.bbScore ?? null,
+                    barrel_score: projectedPitching.barrelScore ?? null,
                     // Scouting grades (20-80 for PDF) — derive from scores
                     grade_fb: internalPowerRatings?.scores?.stuff != null ? Math.min(80, Math.max(20, Math.round(internalPowerRatings.scores.stuff))) : undefined,
                     grade_ctrl: internalPowerRatings?.scores?.bb != null ? Math.min(80, Math.max(20, Math.round(internalPowerRatings.scores.bb))) : undefined,

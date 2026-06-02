@@ -477,6 +477,9 @@ export async function computeAndStorePitchingScores(season = 2026): Promise<{ up
     return {
       id: row.id,
       patch: {
+        // stuff_score: percentile-normalized stuff_plus, stored so the Stf+
+        // display tile can read it from a single source (1=1 with predictions).
+        stuff_score: round2(ratings.stuffScore),
         whiff_score: round2(ratings.whiffScore),
         bb_score: round2(ratings.bbScore),
         hh_score: round2(ratings.hhScore),

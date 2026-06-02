@@ -347,6 +347,7 @@ export function computePitchingPowerRatings(
 
   return {
     ...scores,
+    stuffScore,
     eraPrPlus, fipPrPlus, whipPrPlus, k9PrPlus, bb9PrPlus, hr9PrPlus, overallPrPlus,
   };
 }

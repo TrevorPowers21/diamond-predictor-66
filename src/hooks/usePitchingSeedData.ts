@@ -81,6 +81,10 @@ export function usePitchingSeedData(season = 2026) {
       let from = 0;
       const pageSize = 1000;
       while (true) {
+        // Leaving as select("*") for safety — narrow attempted but hit issues
+        // with special-char column names (90th_vel) and broke pitcher rendering.
+        // The big perf wins here are staleTime + dropped loading gate, not
+        // payload size. Revisit narrow in a focused follow-up if needed.
         const { data, error } = await supabase
           .from("Pitching Master")
           .select("*")
@@ -95,8 +99,11 @@ export function usePitchingSeedData(season = 2026) {
       }
       return all;
     },
-    staleTime: 30 * 60 * 1000,
-    gcTime: 60 * 60 * 1000,
+    // Pitching Master changes weekly during season, monthly off-season.
+    // 30min staleTime was overcautious. Bumped to 12h so warm-load returns
+    // are instant. Cold loads still hit the DB.
+    staleTime: 12 * 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
 
