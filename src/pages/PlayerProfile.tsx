@@ -29,7 +29,8 @@ import { AiScoutingReportBody } from "@/components/AiScoutingReport";
 import { useScoutingReport } from "@/hooks/useScoutingReport";
 import CoachNotes from "@/components/CoachNotes";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
-import { generateCoachNotesPdf, generateReportPdf } from "@/lib/pdfGenerator";
+// pdfGenerator is loaded on demand — jspdf (350KB) excluded from initial bundle
+const getPdfGenerator = () => import("@/lib/pdfGenerator");
 import { assessHitterRisk } from "@/lib/playerRisk";
 import { generateHitterReport } from "@/lib/scoutingReportGenerator";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
@@ -203,14 +204,14 @@ export default function PlayerProfile() {
       // Try players table first
       const { data, error } = await supabase
         .from("players")
-        .select("id, first_name, last_name, team, from_team, conference, position, bats_hand, throws_hand, class_year, transfer_portal, source_player_id, source_team_id, division, age, height_inches, weight, high_school, home_state, headshot_url, notes, portal_entry_date, handedness, team_id, is_twp, portal_status, created_at, updated_at")
+        .select("*")
         .eq("id", id!)
         .maybeSingle();
       if (data) return data;
       // Fallback: look up in Hitter Master by source_player_id
       const { data: hmRow } = await supabase
         .from("Hitter Master")
-        .select("source_player_id, id, playerFullName, Team, Conference, Pos, BatHand, ThrowHand, TeamID, division")
+        .select("*")
         .eq("source_player_id", id!)
         .limit(1)
         .maybeSingle();
@@ -254,7 +255,7 @@ export default function PlayerProfile() {
       // (preserved as research material) don't leak into display.
       let query = supabase
         .from("player_predictions")
-        .select("id, player_id, customer_team_id, season, status, type, p_avg, p_obp, p_slg, p_iso, p_wrc_plus, p_hr, p_bb, p_k, pa, owar, market_value, dev_aggressiveness, depth_role, locked, from_avg, from_obp, from_slg, from_team, from_conference, from_division, class_year, position")
+        .select("*")
         .eq("player_id", id!)
         .eq("season", PROJECTION_SEASON)
         .eq("status", "active");
@@ -273,7 +274,7 @@ export default function PlayerProfile() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("season_stats")
-        .select("id, player_id, season, team, conference, avg, obp, slg, hr, bb, k, pa, ab, iso, wrc_plus, owar, sb, hbp, sf")
+        .select("*")
         .eq("player_id", id!)
         .order("season", { ascending: false });
       if (error) throw error;
@@ -292,7 +293,7 @@ export default function PlayerProfile() {
       if (!sourceId) return [];
       const { data, error } = await supabase
         .from("Hitter Master")
-        .select("source_player_id, Season, Team, Pos, AVG, OBP, SLG, HR, BB, K, PA, ab, ISO, playerFullName, barrel_score, avg_ev_score, contact_score, chase_score, bb_score, line_drive_score, pop_up_score, ev90_score, pull_score, la_score, gb_score, ba_power_rating, obp_power_rating, iso_power_rating, overall_power_rating")
+        .select("*")
         .eq("source_player_id", sourceId)
         .order("Season", { ascending: false });
       if (error) throw error;
@@ -400,7 +401,7 @@ export default function PlayerProfile() {
       if (predIds.length === 0) return null;
       const { data, error } = await supabase
         .from("player_prediction_internals" as any)
-        .select("prediction_id, avg_power_rating, obp_power_rating, slg_power_rating")
+        .select("*")
         .in("prediction_id", predIds)
         .limit(1)
         .maybeSingle();
@@ -616,7 +617,41 @@ export default function PlayerProfile() {
 
   const isThinSample = isThinSampleHitter(projectionSourceRow);
 
-  if (!isLoading && !player) {
+  // Early bail when player is undefined. Two cases:
+  //   1. Still loading the player query → render page shell + skeleton.
+  //      Avoids running the rest of the component body (76+ player.* accesses
+  //      below would crash on undefined).
+  //   2. Query resolved with no player → render "Player not found".
+  if (!player) {
+    if (isLoading) {
+      return (
+        <DashboardLayout>
+          <div className="px-4 py-6 max-w-7xl mx-auto">
+            <Button variant="ghost" onClick={() => navigate(-1)} className="mb-4 cursor-pointer">
+              <ArrowLeft className="mr-2 h-4 w-4" /> Back
+            </Button>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="h-7 w-48 rounded bg-muted" />
+                <div className="flex gap-2">
+                  <div className="h-5 w-16 rounded bg-muted" />
+                  <div className="h-5 w-24 rounded bg-muted" />
+                  <div className="h-5 w-32 rounded bg-muted" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[0, 1, 2, 3].map((i) => (
+                  <Card key={i} className="p-4">
+                    <div className="h-4 w-24 rounded bg-muted mb-2" />
+                    <div className="h-7 w-16 rounded bg-muted" />
+                  </Card>
+                ))}
+              </div>
+            </div>
+          </div>
+        </DashboardLayout>
+      );
+    }
     return (
       <DashboardLayout>
         <div className="flex flex-col items-center justify-center py-20 gap-4">
@@ -910,7 +945,7 @@ export default function PlayerProfile() {
               <CoachNotes
                 playerId={player!.id}
                 playerName={`${player.first_name} ${player.last_name}`}
-                onExportPdf={(notes, format, mode = "download") => {
+                onExportPdf={async (notes, format, mode = "download") => {
                   if (format === "full") {
                     // Build same rich rp as Export Report button, plus coach notes
                     const rp: ReportPlayer = {
@@ -1003,6 +1038,7 @@ export default function PlayerProfile() {
                     rp.risk_trajectory = riskResult.trajectory;
                     rp.risk_summary = riskResult.summary;
                     rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
+                    const { generateReportPdf } = await getPdfGenerator();
                     const url = generateReportPdf([rp]);
                     if (mode === "preview") {
                       window.open(url, "_blank");
@@ -1028,6 +1064,7 @@ export default function PlayerProfile() {
                       power_rating_plus: (projectionSourceRow as any)?.overall_power_rating ?? seedPowerDerived?.overallPlus,
                       coach_notes: notes,
                     };
+                    const { generateCoachNotesPdf } = await getPdfGenerator();
                     const url = generateCoachNotesPdf(rp, notes);
                     if (mode === "preview") {
                       window.open(url, "_blank");
