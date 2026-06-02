@@ -4,6 +4,9 @@ import { Analytics } from "@vercel/analytics/react";
 import App from "./App.tsx";
 import "./index.css";
 import { reportWebVitals } from "./lib/reportWebVitals";
+import { initPostHog } from "./lib/posthog";
+
+initPostHog();
 
 class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message: string }> {
   constructor(props: { children: React.ReactNode }) {

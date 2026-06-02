@@ -2,9 +2,10 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
+import { capturePageView, capturePageLeave } from "@/lib/posthog";
 import Index from "./pages/Index";
 
 // Savant — internal-only, gated, lazy-loaded so RSTR IQ users never download it.
@@ -37,6 +38,24 @@ import HighFollowList from "./pages/HighFollowList";
 
 const queryClient = new QueryClient();
 
+// Fires $pageleave → $pageview on every React Router navigation.
+// Required for SPAs: PostHog's auto capture only fires on browser load/unload,
+// not on client-side route changes. prevPath ref gives accurate time-on-page.
+function PostHogPageView() {
+  const location = useLocation();
+  const prevPath = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (prevPath.current !== null) {
+      capturePageLeave(prevPath.current);
+    }
+    capturePageView(location.pathname);
+    prevPath.current = location.pathname;
+  }, [location.pathname]);
+
+  return null;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
@@ -44,6 +63,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <PostHogPageView />
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/auth" element={<Auth />} />

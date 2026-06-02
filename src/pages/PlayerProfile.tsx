@@ -31,6 +31,7 @@ import CoachNotes from "@/components/CoachNotes";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
 // pdfGenerator is loaded on demand — jspdf (350KB) excluded from initial bundle
 const getPdfGenerator = () => import("@/lib/pdfGenerator");
+import { trackEvent } from "@/lib/posthog";
 import { assessHitterRisk } from "@/lib/playerRisk";
 import { generateHitterReport } from "@/lib/scoutingReportGenerator";
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
@@ -755,10 +756,13 @@ export default function PlayerProfile() {
   const activeSeasonRow = (hitterMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason) || null;
 
   const activeSeasonScoutingGrades = activeSeasonRow ? {
-    barrelScore: activeSeasonRow.barrel_score ?? seedPowerDerived?.barrelScore ?? null,
-    avgEVScore: activeSeasonRow.avg_ev_score ?? seedPowerDerived?.avgEVScore ?? null,
-    contactScore: activeSeasonRow.contact_score ?? seedPowerDerived?.contactScore ?? null,
-    chaseScore: activeSeasonRow.chase_score ?? seedPowerDerived?.chaseScore ?? null,
+    // Trust the stored Hitter Master.X_score (populated by computeAndStoreScores).
+    // No client-side derivation fallback — null displays as "—" instead of risking
+    // divergence from the canonical precomputed value.
+    barrelScore: activeSeasonRow.barrel_score ?? null,
+    avgEVScore: activeSeasonRow.avg_ev_score ?? null,
+    contactScore: activeSeasonRow.contact_score ?? null,
+    chaseScore: activeSeasonRow.chase_score ?? null,
     bbScore: activeSeasonRow.bb_score ?? seedPowerDerived?.bbScore ?? null,
     lineDriveScore: activeSeasonRow.line_drive_score ?? seedPowerDerived?.lineDriveScore ?? null,
     popUpScore: activeSeasonRow.pop_up_score ?? seedPowerDerived?.popUpScore ?? null,
@@ -967,12 +971,12 @@ export default function PlayerProfile() {
                       owar: displayOWar,
                       nil_value: displayNilValuation,
                       power_rating_plus: (projectionSourceRow as any)?.overall_power_rating ?? seedPowerDerived?.overallPlus,
-                      // Prefer stored Hitter Master scores (match UI scouting grades);
-                      // fall back to derived only if the stored value is null.
-                      barrel_score: (projectionSourceRow as any)?.barrel_score ?? (seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined),
-                      ev_score: (projectionSourceRow as any)?.avg_ev_score ?? (seedPowerDerived?.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : undefined),
-                      contact_score: (projectionSourceRow as any)?.contact_score ?? (seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined),
-                      chase_score: (projectionSourceRow as any)?.chase_score ?? (seedPowerDerived?.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : undefined),
+                      // Stored Hitter Master scores only; no client-side derivation
+                      // fallback (consistent with display tiles).
+                      barrel_score: (projectionSourceRow as any)?.barrel_score ?? undefined,
+                      ev_score: (projectionSourceRow as any)?.avg_ev_score ?? undefined,
+                      contact_score: (projectionSourceRow as any)?.contact_score ?? undefined,
+                      chase_score: (projectionSourceRow as any)?.chase_score ?? undefined,
                       // Raw rates for the IQ Hitting Metrics 3-column grid
                       contact_pct: projectionSourceRow?.contact ?? seedPowerRow?.contact ?? undefined,
                       bb_pct: projectionSourceRow?.bb ?? seedPowerRow?.bb ?? undefined,
@@ -1040,6 +1044,7 @@ export default function PlayerProfile() {
                     rp.risk_factors = riskResult.factors.map((f) => ({ label: f.label, score: f.score, detail: f.detail }));
                     const { generateReportPdf } = await getPdfGenerator();
                     const url = generateReportPdf([rp]);
+                    trackEvent("pdf_exported", { type: "scouting_report", player: fullNameRaw, mode });
                     if (mode === "preview") {
                       window.open(url, "_blank");
                     } else {
@@ -1066,6 +1071,7 @@ export default function PlayerProfile() {
                     };
                     const { generateCoachNotesPdf } = await getPdfGenerator();
                     const url = generateCoachNotesPdf(rp, notes);
+                    trackEvent("pdf_exported", { type: "coach_notes", player: fullNameRaw, mode });
                     if (mode === "preview") {
                       window.open(url, "_blank");
                     } else {
@@ -1086,6 +1092,7 @@ export default function PlayerProfile() {
                     removeFromBoard(player.id);
                   } else {
                     addToBoard({ playerId: player.id });
+                    trackEvent("player_added_to_board", { player: fullNameRaw, team: displayTeamCurrent });
                   }
                 }}
               >
@@ -1101,6 +1108,7 @@ export default function PlayerProfile() {
                     removeFromHighFollow(player.id);
                   } else {
                     addToHighFollow({ playerId: player.id, playerType: "hitter" });
+                    trackEvent("player_added_to_high_follow", { player: fullNameRaw, team: displayTeamCurrent });
                   }
                 }}
               >
@@ -1133,13 +1141,12 @@ export default function PlayerProfile() {
                     // Valuation
                     nil_value: displayNilValuation,
                     power_rating_plus: (projectionSourceRow as any)?.overall_power_rating ?? seedPowerDerived?.overallPlus,
-                    // Scouting scores (for tables)
-                    // Prefer stored Hitter Master scores (match UI scouting grades);
-                    // fall back to derived only if the stored value is null.
-                    barrel_score: (projectionSourceRow as any)?.barrel_score ?? (seedPowerDerived?.barrelScore != null ? Math.round(seedPowerDerived.barrelScore) : undefined),
-                    ev_score: (projectionSourceRow as any)?.avg_ev_score ?? (seedPowerDerived?.avgEVScore != null ? Math.round(seedPowerDerived.avgEVScore) : undefined),
-                    contact_score: (projectionSourceRow as any)?.contact_score ?? (seedPowerDerived?.contactScore != null ? Math.round(seedPowerDerived.contactScore) : undefined),
-                    chase_score: (projectionSourceRow as any)?.chase_score ?? (seedPowerDerived?.chaseScore != null ? Math.round(seedPowerDerived.chaseScore) : undefined),
+                    // Scouting scores (for tables) — stored Hitter Master only,
+                    // no client-side derivation fallback.
+                    barrel_score: (projectionSourceRow as any)?.barrel_score ?? undefined,
+                    ev_score: (projectionSourceRow as any)?.avg_ev_score ?? undefined,
+                    contact_score: (projectionSourceRow as any)?.contact_score ?? undefined,
+                    chase_score: (projectionSourceRow as any)?.chase_score ?? undefined,
                     // Raw rates for the IQ Hitting Metrics 3-column grid
                     contact_pct: projectionSourceRow?.contact ?? seedPowerRow?.contact ?? undefined,
                     bb_pct: projectionSourceRow?.bb ?? seedPowerRow?.bb ?? undefined,
