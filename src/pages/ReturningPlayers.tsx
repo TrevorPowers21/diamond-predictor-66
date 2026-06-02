@@ -1588,7 +1588,12 @@ export default function ReturningPlayers() {
             .not("players.division", "eq", "NJCAA_D1")
             .gte("players.pa", 75);
           q = applyTeamScopeFilter(q as any, effectiveTeamId);
-          const { data, error } = await q.range(predFrom, predFrom + PRED_PAGE_SIZE - 1);
+          // Stable ORDER BY for deterministic pagination. Without this,
+          // PostgREST returns rows in arbitrary order, so adjacent .range()
+          // calls overlap or skip rows — same query on the same data yields
+          // different distinct-player counts each run. That's the source of
+          // the "33 pages → 23 pages" flicker users saw on prod.
+          const { data, error } = await q.order("id", { ascending: true }).range(predFrom, predFrom + PRED_PAGE_SIZE - 1);
           if (error) throw error;
           allData = allData.concat(data || []);
           if (!data || data.length < PRED_PAGE_SIZE) break;
@@ -2152,6 +2157,10 @@ export default function ReturningPlayers() {
           .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"])
           .not("p_era", "is", null)
+          // Stable ORDER BY — same fix as the hitter pred fetch. Without
+          // it, paginated .range() calls overlap/skip rows non-determin-
+          // istically and the dedup downstream shrinks the row count.
+          .order("id", { ascending: true })
           .range(from, from + PAGE - 1);
         if (error) throw error;
         all.push(...(data || []));
@@ -2232,6 +2241,8 @@ export default function ReturningPlayers() {
           .from("players")
           .select("id, source_player_id, class_year, is_twp, portal_status")
           .not("source_player_id", "is", null)
+          // Stable ORDER BY for deterministic pagination.
+          .order("id", { ascending: true })
           .range(from, from + PAGE - 1);
         if (error) throw error;
         for (const r of (data || []) as any[]) {
