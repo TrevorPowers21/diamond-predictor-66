@@ -2221,6 +2221,17 @@ export default function ReturningPlayers() {
         bb_score: number | null;
         barrel_score: number | null;
       }>();
+      // Pull global + all customer-team-precomputed rows, then let
+      // dedupePreferredPerPlayer pick the right one per player. Cannot use
+      // applyTeamScopeFilter here because pitchers without a global returner-
+      // regular row (mostly JUCO + transfer-only) need to fall back to ANY
+      // precomputed row — pickPreferredPrediction handles that, but only if
+      // the rows are in the response.
+      //
+      // Replaces the prior inline shouldSet logic which had a subtle dedup
+      // bug (Mason Edwards displayed Stetson's row in cross-team view despite
+      // having a global row available).
+      const all: any[] = [];
       let from = 0;
       const PAGE = 1000;
       while (true) {
@@ -2233,37 +2244,31 @@ export default function ReturningPlayers() {
           .not("p_era", "is", null)
           .range(from, from + PAGE - 1);
         if (error) throw error;
-        for (const r of (data || []) as any[]) {
-          const srcId = r.players?.source_player_id;
-          if (!srcId) continue;
-          const existing = map.get(srcId);
-          // Prefer team-scoped precomputed row when impersonating a customer
-          // team. Otherwise prefer the global returner regular row.
-          const wantsTeamRow = effectiveTeamId && r.customer_team_id === effectiveTeamId && r.variant === "precomputed";
-          const wantsGlobalRow = !effectiveTeamId && r.variant === "regular" && r.customer_team_id == null;
-          const fallback = r.variant === "regular" && r.customer_team_id == null;
-          const shouldSet = wantsTeamRow || wantsGlobalRow || (!existing && fallback);
-          if (!shouldSet && existing) continue;
-          map.set(srcId, {
-            p_era: r.p_era,
-            p_fip: r.p_fip,
-            p_whip: r.p_whip,
-            p_k9: r.p_k9,
-            p_bb9: r.p_bb9,
-            p_hr9: r.p_hr9,
-            p_rv_plus: r.p_rv_plus,
-            p_war: r.p_war ?? null,
-            market_value: r.market_value ?? null,
-            projected_ip: r.projected_ip ?? null,
-            pitcher_role: r.pitcher_role,
-            class_year: r.players?.class_year ?? null,
-            whiff_score: r.whiff_score ?? null,
-            bb_score: r.bb_score ?? null,
-            barrel_score: r.barrel_score ?? null,
-          });
-        }
+        all.push(...(data || []));
         if (!data || data.length < PAGE) break;
         from += PAGE;
+      }
+      const deduped = dedupePreferredPerPlayer(all, effectiveTeamId);
+      for (const r of deduped as any[]) {
+        const srcId = r.players?.source_player_id;
+        if (!srcId) continue;
+        map.set(srcId, {
+          p_era: r.p_era,
+          p_fip: r.p_fip,
+          p_whip: r.p_whip,
+          p_k9: r.p_k9,
+          p_bb9: r.p_bb9,
+          p_hr9: r.p_hr9,
+          p_rv_plus: r.p_rv_plus,
+          p_war: r.p_war ?? null,
+          market_value: r.market_value ?? null,
+          projected_ip: r.projected_ip ?? null,
+          pitcher_role: r.pitcher_role,
+          class_year: r.players?.class_year ?? null,
+          whiff_score: r.whiff_score ?? null,
+          bb_score: r.bb_score ?? null,
+          barrel_score: r.barrel_score ?? null,
+        });
       }
       return map;
     },
