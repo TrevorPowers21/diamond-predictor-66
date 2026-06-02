@@ -1516,14 +1516,13 @@ export default function ReturningPlayers() {
           if (variantCandidates.length === 1) return variantCandidates[0];
           return null;
         })();
-        // Read scouting scores directly from player_predictions. Propagated 1=1
-        // from Hitter Master by propagate_hitter_scores_to_predictions() via
-        // computeAndStoreScores.ts. No client-side fallback — null displays
-        // as "—" rather than risking divergence from the precomputed value.
-        const seedEvScore = row.ev_score ?? null;
-        const seedBarrelScore = row.barrel_score ?? null;
-        const seedContactScore = row.contact_score ?? null;
-        const seedChaseScore = row.chase_score ?? null;
+        // Prefer stored scores from Hitter Master (computed against current-season
+        // NCAA mean/sd by Compute Scores). Fall back to client-side scoring only
+        // if a row is unscored — but those constants are stale and will be wrong.
+        const seedEvScore = seedPowerRow?.evScore ?? scoreFromNormal(seedPowerRow?.avgExitVelo ?? null, 86.2, 4.28);
+        const seedBarrelScore = seedPowerRow?.barrelScore ?? scoreFromNormal(seedPowerRow?.barrel ?? null, 17.3, 7.89);
+        const seedContactScore = seedPowerRow?.contactScore ?? scoreFromNormal(seedPowerRow?.contact ?? null, 77.1, 6.6);
+        const seedChaseScore = seedPowerRow?.chaseScore ?? scoreFromNormal(seedPowerRow?.chase ?? null, 23.1, 5.58, true);
         // ID-first: try source_player_id, then name|team, then name-only
         const bySourceIdStats = player.source_player_id ? statsByPlayerId.get(player.source_player_id) : undefined;
         const candidates = statsByName.get(normalize(fullName)) || [];

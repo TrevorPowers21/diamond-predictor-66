@@ -54,14 +54,9 @@ export function useHitterSeedData(season = 2026) {
       let from = 0;
       const pageSize = 1000;
       while (true) {
-        // Narrowed select: Player Dashboard scouting scores now come from
-        // player_predictions (1=1 via propagate_hitter_scores_to_predictions).
-        // Raw stats (contact, line_drive, etc.) and stored scores (contact_score,
-        // avg_ev_score, barrel_score, chase_score) were inputs to the now-stripped
-        // client-side scoreFromNormal fallback — no longer read. Cuts payload ~50%.
         const { data, error } = await supabase
           .from("Hitter Master")
-          .select("source_player_id, playerFullName, Team, TeamID, Conference, conference_id, Season, Pos, BatHand, ThrowHand, AVG, OBP, SLG, ISO, ab")
+          .select("source_player_id, playerFullName, Team, TeamID, Conference, conference_id, Season, Pos, BatHand, ThrowHand, AVG, OBP, SLG, ISO, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb, ab, contact_score, avg_ev_score, barrel_score, chase_score")
           .eq("Season", season)
           .range(from, from + pageSize - 1);
         if (error) throw error;
@@ -71,12 +66,8 @@ export function useHitterSeedData(season = 2026) {
       }
       return all;
     },
-    // Hitter Master is now only used for team-name resolution (fuzzy match
-    // against from_avg/from_obp/from_slg). The table changes weekly during
-    // season, monthly off-season — 30min staleTime was overcautious. Bumped
-    // to 12h so warm-load returns are instant.
-    staleTime: 12 * 60 * 60 * 1000,
-    gcTime: 24 * 60 * 60 * 1000,
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
 
