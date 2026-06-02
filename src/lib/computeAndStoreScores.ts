@@ -558,6 +558,25 @@ export async function computeAndStorePitchingScores(season = 2026): Promise<{ up
     }
   });
   console.timeEnd("[ComputePitching] 5. write updates (50-concurrent)");
+
+  // 6. Propagate scouting scores (whiff / iz_whiff / barrel / chase / ev) from
+  //    Pitching Master into player_predictions for every prediction row whose
+  //    player matches this season. Same 1=1 pattern as hitters — keeps the
+  //    dashboard / profile / high-follow displays in lockstep with the
+  //    freshly-recomputed Pitching Master values.
+  console.time("[ComputePitching] 6. propagate scores to predictions");
+  const { data: propagatedRows, error: propErr } = await supabase.rpc(
+    "propagate_pitcher_scores_to_predictions",
+    { target_season: season },
+  );
+  if (propErr) {
+    console.error("[ComputePitching] propagation rpc failed:", propErr);
+    errors++;
+  } else {
+    console.log(`[ComputePitching] propagated scores to ${propagatedRows ?? 0} prediction rows`);
+  }
+  console.timeEnd("[ComputePitching] 6. propagate scores to predictions");
+
   console.timeEnd("[ComputePitching] TOTAL");
 
   return { updated, errors };

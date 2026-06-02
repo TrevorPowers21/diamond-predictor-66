@@ -17,9 +17,9 @@ ALTER TABLE player_predictions
 COMMENT ON COLUMN player_predictions.contact_score IS
   'Percentile-normalized contact-rate score. Copy of Hitter Master.contact_score for the player''s source season. Display-only; ba_power / obp_power equations are unaffected.';
 
--- Propagation function: after computeAndStoreScores writes scores to Hitter
--- Master, this copies all 4 scouting scores to every player_predictions row
--- (regular + every team-scoped precomputed variant) for the matching player.
+-- Hitter propagation function: after computeAndStoreScores writes scores to
+-- Hitter Master, this copies all 4 scouting scores to every player_predictions
+-- row (regular + every team-scoped precomputed variant) for the matching player.
 CREATE OR REPLACE FUNCTION propagate_hitter_scores_to_predictions(target_season int)
 RETURNS int LANGUAGE plpgsql AS $$
 DECLARE
@@ -40,6 +40,46 @@ BEGIN
       OR hm.barrel_score IS NOT NULL
       OR hm.avg_ev_score IS NOT NULL
       OR hm.chase_score IS NOT NULL
+    );
+  GET DIAGNOSTICS rows_updated = ROW_COUNT;
+  RETURN rows_updated;
+END;
+$$;
+
+-- Add iz_whiff_score to player_predictions (mirrors Pitching Master.iz_whiff_score).
+-- Other pitcher scores (whiff_score, barrel_score, chase_score, ev_score) already
+-- exist as columns on player_predictions.
+ALTER TABLE player_predictions
+  ADD COLUMN IF NOT EXISTS iz_whiff_score numeric;
+
+COMMENT ON COLUMN player_predictions.iz_whiff_score IS
+  'In-zone whiff percentile score. Copy of Pitching Master.iz_whiff_score. Display-only; equations unaffected.';
+
+-- Pitcher propagation function: after computeAndStoreScores writes scores to
+-- Pitching Master, this copies all 5 pitcher scouting scores to every
+-- player_predictions row for the matching player.
+CREATE OR REPLACE FUNCTION propagate_pitcher_scores_to_predictions(target_season int)
+RETURNS int LANGUAGE plpgsql AS $$
+DECLARE
+  rows_updated int;
+BEGIN
+  UPDATE player_predictions pp
+  SET
+    whiff_score    = pm.whiff_score,
+    iz_whiff_score = pm.iz_whiff_score,
+    barrel_score   = pm.barrel_score,
+    chase_score    = pm.chase_score,
+    ev_score       = pm.ev_score
+  FROM players p, "Pitching Master" pm
+  WHERE pp.player_id = p.id
+    AND pm.source_player_id = p.source_player_id
+    AND pm."Season" = target_season
+    AND (
+      pm.whiff_score IS NOT NULL
+      OR pm.iz_whiff_score IS NOT NULL
+      OR pm.barrel_score IS NOT NULL
+      OR pm.chase_score IS NOT NULL
+      OR pm.ev_score IS NOT NULL
     );
   GET DIAGNOSTICS rows_updated = ROW_COUNT;
   RETURN rows_updated;
