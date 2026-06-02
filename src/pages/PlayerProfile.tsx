@@ -616,7 +616,41 @@ export default function PlayerProfile() {
 
   const isThinSample = isThinSampleHitter(projectionSourceRow);
 
-  if (!isLoading && !player) {
+  // Early bail when player is undefined. Two cases:
+  //   1. Still loading the player query → render page shell + skeleton.
+  //      Avoids running the rest of the component body (76+ player.* accesses
+  //      below would crash on undefined).
+  //   2. Query resolved with no player → render "Player not found".
+  if (!player) {
+    if (isLoading) {
+      return (
+        <DashboardLayout>
+          <div className="px-4 py-6 max-w-7xl mx-auto">
+            <Button variant="ghost" onClick={() => navigate(-1)} className="mb-4 cursor-pointer">
+              <ArrowLeft className="mr-2 h-4 w-4" /> Back
+            </Button>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="h-7 w-48 rounded bg-muted" />
+                <div className="flex gap-2">
+                  <div className="h-5 w-16 rounded bg-muted" />
+                  <div className="h-5 w-24 rounded bg-muted" />
+                  <div className="h-5 w-32 rounded bg-muted" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[0, 1, 2, 3].map((i) => (
+                  <Card key={i} className="p-4">
+                    <div className="h-4 w-24 rounded bg-muted mb-2" />
+                    <div className="h-7 w-16 rounded bg-muted" />
+                  </Card>
+                ))}
+              </div>
+            </div>
+          </div>
+        </DashboardLayout>
+      );
+    }
     return (
       <DashboardLayout>
         <div className="flex flex-col items-center justify-center py-20 gap-4">
