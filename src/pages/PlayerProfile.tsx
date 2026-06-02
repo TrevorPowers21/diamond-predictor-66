@@ -847,10 +847,10 @@ export default function PlayerProfile() {
           <div className="flex-1">
             {isLoading ? (
               <div className="space-y-2">
-                <div className="h-7 w-48 rounded bg-muted animate-pulse" />
+                <div className="h-7 w-48 rounded bg-muted" />
                 <div className="flex gap-2">
-                  <div className="h-5 w-16 rounded bg-muted animate-pulse" />
-                  <div className="h-5 w-24 rounded bg-muted animate-pulse" />
+                  <div className="h-5 w-16 rounded bg-muted" />
+                  <div className="h-5 w-24 rounded bg-muted" />
                 </div>
               </div>
             ) : (
@@ -1189,23 +1189,23 @@ export default function PlayerProfile() {
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="lg:col-span-1 space-y-4">
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 space-y-3">
-                <div className="h-4 w-24 rounded bg-muted animate-pulse" />
+                <div className="h-4 w-24 rounded bg-muted" />
                 {[...Array(5)].map((_, i) => (
                   <div key={i} className="flex justify-between">
-                    <div className="h-3 w-20 rounded bg-muted animate-pulse" />
-                    <div className="h-3 w-16 rounded bg-muted animate-pulse" />
+                    <div className="h-3 w-20 rounded bg-muted" />
+                    <div className="h-3 w-16 rounded bg-muted" />
                   </div>
                 ))}
               </div>
             </div>
             <div className="lg:col-span-2 space-y-4">
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 space-y-3">
-                <div className="h-4 w-32 rounded bg-muted animate-pulse" />
+                <div className="h-4 w-32 rounded bg-muted" />
                 <div className="grid grid-cols-3 gap-3">
                   {[...Array(6)].map((_, i) => (
                     <div key={i} className="rounded bg-muted/30 p-3 space-y-2">
-                      <div className="h-3 w-12 rounded bg-muted animate-pulse" />
-                      <div className="h-6 w-16 rounded bg-muted animate-pulse" />
+                      <div className="h-3 w-12 rounded bg-muted" />
+                      <div className="h-6 w-16 rounded bg-muted" />
                     </div>
                   ))}
                 </div>
