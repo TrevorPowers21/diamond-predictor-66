@@ -110,7 +110,7 @@ export default function HighFollowList() {
     refetchOnWindowFocus: false,
     queryFn: async () => {
       const { data } = await supabase.from("Hitter Master")
-        .select("source_player_id, playerFullName, Team, Pos, BatHand, ThrowHand, AVG, OBP, SLG, HR, BB, K, PA, ab, Season")
+        .select("*")
         .in("source_player_id", sourceIds).eq("Season", CURRENT_SEASON);
       return data || [];
     },
@@ -123,7 +123,7 @@ export default function HighFollowList() {
     refetchOnWindowFocus: false,
     queryFn: async () => {
       const { data } = await supabase.from("Pitching Master")
-        .select("source_player_id, playerFullName, Team, Pos, ERA, FIP, WHIP, K9, BB9, IP, HR9, Season")
+        .select("*")
         .in("source_player_id", sourceIds).eq("Season", CURRENT_SEASON);
       return data || [];
     },
@@ -136,7 +136,7 @@ export default function HighFollowList() {
     refetchOnWindowFocus: false,
     queryFn: async () => {
       let q = supabase.from("player_predictions")
-        .select("id, player_id, customer_team_id, season, status, p_avg, p_obp, p_slg, p_iso, p_wrc_plus, p_hr, p_bb, p_k, pa, owar, market_value, dev_aggressiveness, depth_role, type")
+        .select("*")
         .in("player_id", playerIds).eq("season", PROJECTION_SEASON).eq("status", "active");
       q = applyTeamScopeFilter(q as any, effectiveTeamId);
       const { data } = await q;
@@ -529,10 +529,12 @@ export default function HighFollowList() {
                                   </>
                                 ) : (
                                   <>
-                                    <ScoutMini label="Brl" value={pred?.barrel_score ?? hm?.barrel_score} />
-                                    <ScoutMini label="EV" value={pred?.ev_score ?? hm?.avg_ev_score} />
-                                    <ScoutMini label="Con" value={pred?.contact_score ?? hm?.contact_score} />
-                                    <ScoutMini label="Chs" value={pred?.chase_score ?? hm?.chase_score} />
+                                    {/* Stored prediction scores only — 1=1 with Hitter Master via
+                                        propagate_hitter_scores_to_predictions(). No HM fallback. */}
+                                    <ScoutMini label="Brl" value={pred?.barrel_score} />
+                                    <ScoutMini label="EV" value={pred?.ev_score} />
+                                    <ScoutMini label="Con" value={pred?.contact_score} />
+                                    <ScoutMini label="Chs" value={pred?.chase_score} />
                                   </>
                                 )}
                               </div>
