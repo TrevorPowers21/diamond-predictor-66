@@ -38,6 +38,7 @@ import { JucoPitcherRiskCard, JucoHitterRiskCard } from "@/components/JucoRiskCa
 import { RiskAssessmentCardRSTR } from "@/components/RiskAssessmentCard";
 import { TRANSFER_WEIGHT_DEFAULTS, transferWeightsForSource, JUCO_PITCHING_TRANSFER_WEIGHTS, JUCO_DISTRICT_HTP_OVERRIDE, JUCO_DISTRICT_CONFERENCE_ID, jucoDistrictNameFromConference, applyJucoOutlierRegression, JUCO_REGRESSION_CONFIG } from "@/lib/transferWeightDefaults";
 import { computeDataReliability } from "@/lib/jucoDataReliability";
+import { pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 
 type SimPlayer = {
   prediction_id: string | null;
@@ -1012,6 +1013,60 @@ export default function TransferPortal() {
     },
   });
 
+  // Stored prediction rows for the selected hitter. pickPreferredPrediction
+  // (called downstream) picks: precomputed transfer row for the active
+  // customer team → fallback to global returner. Same shape Compare and
+  // PlayerProfile use; numbers across all three surfaces stay in lockstep.
+  const { data: selectedHitterPredictions = [] } = useQuery({
+    queryKey: ["tps-hitter-pred-rows", selectedPlayer?.player_id ?? null],
+    enabled: !!selectedPlayer?.player_id && !authLoading,
+    staleTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    queryFn: async () => {
+      if (!selectedPlayer?.player_id) return [];
+      const { data, error } = await supabase
+        .from("player_predictions")
+        .select("id, player_id, customer_team_id, variant, model_type, status, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, o_war, market_value")
+        .eq("player_id", selectedPlayer.player_id)
+        .eq("season", PROJECTION_SEASON)
+        .in("status", ["active", "departed"])
+        .in("variant", ["regular", "precomputed"]);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  // Stored prediction rows for the selected pitcher. selectedPitcher comes
+  // from Pitching Master so we resolve players.id via source_player_id from
+  // the already-loaded players list.
+  const selectedPitcherPlayerId = useMemo(() => {
+    const srcId = (selectedPitcher as any)?.source_player_id;
+    if (!srcId) return null;
+    const match = players.find((p) => p.source_player_id === srcId);
+    return match?.player_id ?? null;
+  }, [selectedPitcher, players]);
+
+  const { data: selectedPitcherPredictions = [] } = useQuery({
+    queryKey: ["tps-pitcher-pred-rows", selectedPitcherPlayerId],
+    enabled: !!selectedPitcherPlayerId && !authLoading,
+    staleTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    queryFn: async () => {
+      if (!selectedPitcherPlayerId) return [];
+      const { data, error } = await supabase
+        .from("player_predictions")
+        .select("id, player_id, customer_team_id, variant, model_type, status, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, pitcher_role")
+        .eq("player_id", selectedPitcherPlayerId)
+        .eq("season", PROJECTION_SEASON)
+        .in("status", ["active", "departed"])
+        .in("variant", ["regular", "precomputed"]);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
   const teamByKey = useMemo(() => {
     const map = new Map<string, TeamRow>();
     for (const t of teams) {
@@ -1343,664 +1398,82 @@ export default function TransferPortal() {
 
   const simulation = useMemo(() => {
     if (!selectedPlayer) return null;
-    if (!toTeamRow) return null;
-
-    const missingInputs: string[] = [];
-    const rawLastAvg = selectedPlayer.from_avg;
-    const rawLastObp = selectedPlayer.from_obp;
-    const rawLastSlg = selectedPlayer.from_slg;
-    if (rawLastAvg == null) missingInputs.push("Last AVG");
-    if (rawLastObp == null) missingInputs.push("Last OBP");
-    if (rawLastSlg == null) missingInputs.push("Last SLG");
-
-    // JUCO outlier regression — mirrors D1's natural regression through
-    // the power-rating blend (disabled for JUCO). Only pulls down stats
-    // above the outlier threshold; .300 JUCO regulars unaffected. See
-    // JUCO_REGRESSION_CONFIG for thresholds + max-r values.
-    const isJucoSrcEarly = selectedPlayer.division === "NJCAA_D1";
-    const lastAvg = isJucoSrcEarly && rawLastAvg != null
-      ? applyJucoOutlierRegression(rawLastAvg, JUCO_REGRESSION_CONFIG.avg.mean, JUCO_REGRESSION_CONFIG.avg.threshold, JUCO_REGRESSION_CONFIG.avg.slope, JUCO_REGRESSION_CONFIG.avg.maxR)
-      : rawLastAvg;
-    const lastObp = isJucoSrcEarly && rawLastObp != null
-      ? applyJucoOutlierRegression(rawLastObp, JUCO_REGRESSION_CONFIG.obp.mean, JUCO_REGRESSION_CONFIG.obp.threshold, JUCO_REGRESSION_CONFIG.obp.slope, JUCO_REGRESSION_CONFIG.obp.maxR)
-      : rawLastObp;
-    // Regress ISO separately, then reconstruct SLG = AVG + ISO.
-    // (The lib derives lastIso internally as lastSlg - lastAvg; passing
-    // adjusted SLG preserves that calculation against adjusted ISO.)
-    const lastSlg = (() => {
-      if (!isJucoSrcEarly || rawLastAvg == null || rawLastSlg == null) return rawLastSlg;
-      const rawIso = rawLastSlg - rawLastAvg;
-      const adjIso = applyJucoOutlierRegression(rawIso, JUCO_REGRESSION_CONFIG.iso.mean, JUCO_REGRESSION_CONFIG.iso.threshold, JUCO_REGRESSION_CONFIG.iso.slope, JUCO_REGRESSION_CONFIG.iso.maxR);
-      return (lastAvg ?? rawLastAvg) + adjIso;
-    })();
-
-    // Use stat-specific power rating+ from internals first, then compute from seed data
-    let baPR = internals?.avg_power_rating ?? null;
-    let obpPR = internals?.obp_power_rating ?? null;
-    let isoPR = internals?.slg_power_rating ?? null;
-
-    if (baPR == null || obpPR == null || isoPR == null) {
-      const fullName = `${selectedPlayer.first_name} ${selectedPlayer.last_name}`;
-      const nameTeamKey = `${normalizeKey(fullName)}|${normalizeKey(fromTeam)}`;
-      const seedPower = powerByNameTeam.get(nameTeamKey) ?? powerByNameTeam.get(normalizeKey(fullName));
-      if (seedPower) {
-        const computed = computeHitterPowerRatings({
-          contact: seedPower.contact, lineDrive: seedPower.lineDrive,
-          avgExitVelo: seedPower.avgExitVelo, popUp: seedPower.popUp,
-          bb: seedPower.bb, chase: seedPower.chase,
-          barrel: seedPower.barrel, ev90: seedPower.ev90,
-          pull: seedPower.pull, la10_30: seedPower.la10_30, gb: seedPower.gb,
-        });
-        if (baPR == null) baPR = computed.baPlus;
-        if (obpPR == null) obpPR = computed.obpPlus;
-        if (isoPR == null) isoPR = computed.isoPlus;
-      }
-    }
-
-    // JUCO source: PRs are not used (power weights = 0), nulls are fine.
-    const isJucoSource = selectedPlayer.division === "NJCAA_D1";
-    if (!isJucoSource) {
-      if (baPR == null) missingInputs.push("BA Power Rating+");
-      if (obpPR == null) missingInputs.push("OBP Power Rating+");
-      if (isoPR == null) missingInputs.push("ISO Power Rating+");
-    }
-
-    const fromAvgPlus = fromConfStats?.avg_plus ?? null;
-    const toAvgPlus = toConfStats?.avg_plus ?? null;
-    const fromObpPlus = fromConfStats?.obp_plus ?? null;
-    const toObpPlus = toConfStats?.obp_plus ?? null;
-    const fromIsoPlus = fromConfStats?.iso_plus ?? null;
-    const toIsoPlus = toConfStats?.iso_plus ?? null;
-
-    const fromStuff = fromConfStats?.stuff_plus ?? null;
-    const toStuff = toConfStats?.stuff_plus ?? null;
-
-    // Park factors are handedness-aware for hitters. LHB hitters apply LHB
-    // park factors (which capture how the park plays for left-handed bats);
-    // RHB applies RHB; switch and unknown fall back to combined.
-    const playerHand = batsHandToHandedness((selectedPlayer as any).bats_hand);
-    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name, undefined, undefined, playerHand);
-    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name, undefined, undefined, playerHand);
-    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name, undefined, undefined, playerHand);
-    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name, undefined, undefined, playerHand);
-    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name, undefined, undefined, playerHand);
-    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name, undefined, undefined, playerHand);
-    if (fromAvgPlus == null) missingInputs.push("From AVG+");
-    if (toAvgPlus == null) missingInputs.push("To AVG+");
-    if (fromObpPlus == null) missingInputs.push("From OBP+");
-    if (toObpPlus == null) missingInputs.push("To OBP+");
-    if (fromIsoPlus == null) missingInputs.push("From ISO+");
-    if (toIsoPlus == null) missingInputs.push("To ISO+");
-    if (fromStuff == null) missingInputs.push("From Stuff+");
-    if (toStuff == null) missingInputs.push("To Stuff+");
-    // JUCO source: park weights = 0, no park data exists. Skip park checks.
-    if (!isJucoSource) {
-      if (fromParkAvgRaw == null) missingInputs.push("From AVG Park Factor");
-      if (toParkAvgRaw == null) missingInputs.push("To AVG Park Factor");
-      if (fromParkObpRaw == null) missingInputs.push("From OBP Park Factor");
-      if (toParkObpRaw == null) missingInputs.push("To OBP Park Factor");
-      if (fromParkIsoRaw == null) missingInputs.push("From ISO Park Factor");
-      if (toParkIsoRaw == null) missingInputs.push("To ISO Park Factor");
-    }
-    if (missingInputs.length > 0) {
-      return {
-        blocked: true as const,
-        missingInputs,
-        pAvg: null,
-        pObp: null,
-        pSlg: null,
-        pOps: null,
-        pIso: null,
-        pWrc: null,
-        pWrcPlus: null,
-        owar: null,
-        nilValuation: null,
-        fromAvgPlus,
-        toAvgPlus,
-        fromObpPlus,
-        toObpPlus,
-        fromIsoPlus,
-        toIsoPlus,
-        fromStuff,
-        toStuff,
-        fromPark: null,
-        toPark: null,
-        fromParkRaw: fromParkAvgRaw,
-        toParkRaw: toParkAvgRaw,
-        fromObpParkRaw: fromParkObpRaw,
-        toObpParkRaw: toParkObpRaw,
-        fromIsoParkRaw: fromParkIsoRaw,
-        toIsoParkRaw: toParkIsoRaw,
-        ptm: null,
-        pvm: null,
-      };
-    }
-    const fromBaPark = normalizeParkToIndex(fromParkAvgRaw);
-    const toBaPark = normalizeParkToIndex(toParkAvgRaw);
-    const fromObpPark = normalizeParkToIndex(fromParkObpRaw);
-    const toObpPark = normalizeParkToIndex(toParkObpRaw);
-    const fromIsoPark = normalizeParkToIndex(fromParkIsoRaw);
-    const toIsoPark = normalizeParkToIndex(toParkIsoRaw);
-
-    const ncaaAvgBA = toRate(readLocalNum("t_ba_ncaa_avg", 0.280, remoteEquationValues));
-    const ncaaAvgOBP = toRate(readLocalNum("t_obp_ncaa_avg", 0.385, remoteEquationValues));
-    const ncaaAvgISO = toRate(readLocalNum("t_iso_ncaa_avg", 0.162, remoteEquationValues));
-    const ncaaAvgWrc = toRate(readLocalNum("t_wrc_ncaa_avg", 0.364, remoteEquationValues));
-    const baStdPower = readLocalNum("t_ba_std_pr", 31.297, remoteEquationValues);
-    const baStdNcaa = toRate(readLocalNum("t_ba_std_ncaa", 0.043455, remoteEquationValues));
-    const obpStdPower = readLocalNum("t_obp_std_pr", 28.889, remoteEquationValues);
-    const obpStdNcaa = toRate(readLocalNum("t_obp_std_ncaa", 0.046781, remoteEquationValues));
-
-    // Division-aware weight defaults: NJCAA_D1 sources route through
-    // JUCO_TRANSFER_WEIGHTS (park=0, power=0, conf+pitching uplifted).
-    // readLocalNum is bypassed for JUCO because TRANSFER_WEIGHT_DEFAULTS
-    // (D1 canonical) outranks the JUCO fallback. We want JUCO source to use
-    // the JUCO set verbatim — no localStorage / model_config override path.
-    const srcW = transferWeightsForSource(selectedPlayer.division);
-    const jucoWeight = (k: keyof typeof srcW, d1: number) => isJucoSource ? srcW[k] : d1;
-    const baPowerWeight = toRate(jucoWeight("t_ba_power_weight", readLocalNum("t_ba_power_weight", 0.70, remoteEquationValues)));
-    const obpPowerWeight = toRate(jucoWeight("t_obp_power_weight", readLocalNum("t_obp_power_weight", 0.70, remoteEquationValues)));
-    const baConferenceWeight = toWeight(jucoWeight("t_ba_conference_weight", readLocalNum("t_ba_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight, remoteEquationValues)));
-    const obpConferenceWeight = toWeight(jucoWeight("t_obp_conference_weight", readLocalNum("t_obp_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight, remoteEquationValues)));
-    const isoConferenceWeight = toWeight(jucoWeight("t_iso_conference_weight", readLocalNum("t_iso_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight, remoteEquationValues)));
-
-    const baPitchingWeight = toWeight(jucoWeight("t_ba_pitching_weight", readLocalNum("t_ba_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight, remoteEquationValues)));
-    const obpPitchingWeight = toWeight(jucoWeight("t_obp_pitching_weight", readLocalNum("t_obp_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight, remoteEquationValues)));
-    const isoPitchingWeight = toWeight(jucoWeight("t_iso_pitching_weight", readLocalNum("t_iso_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight, remoteEquationValues)));
-
-    const baParkWeight = toWeight(jucoWeight("t_ba_park_weight", readLocalNum("t_ba_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight, remoteEquationValues)));
-    const obpParkWeight = toWeight(jucoWeight("t_obp_park_weight", readLocalNum("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight, remoteEquationValues)));
-    const isoParkWeight = toWeight(jucoWeight("t_iso_park_weight", readLocalNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight, remoteEquationValues)));
-
-    const isoStdPower = readLocalNum("t_iso_std_power", 45.423, remoteEquationValues);
-    const isoStdNcaa = toRate(readLocalNum("t_iso_std_ncaa", 0.07849797197, remoteEquationValues));
-
-    const wObp = toRate(readLocalNum("r_w_obp", 0.45, remoteEquationValues));
-    const wSlg = toRate(readLocalNum("r_w_slg", 0.30, remoteEquationValues));
-    const wAvg = toRate(readLocalNum("r_w_avg", 0.15, remoteEquationValues));
-    const wIso = toRate(readLocalNum("r_w_iso", 0.10, remoteEquationValues));
-
-    // JUCO sources: PRs aren't used (power weight=0). Coerce nulls to 100
-    // (NCAA avg) so the math doesn't NaN out — gets multiplied by 0 anyway.
-    // Park nulls already become 100 inside normalizeParkToIndex above.
-    const safePR = (v: number | null) => v ?? 100;
-    const projected = computeTransferProjection({
-      lastAvg,
-      lastObp,
-      lastSlg,
-      baPR: safePR(baPR),
-      obpPR: safePR(obpPR),
-      isoPR: safePR(isoPR),
-      fromAvgPlus,
-      toAvgPlus,
-      fromObpPlus,
-      toObpPlus,
-      fromIsoPlus,
-      toIsoPlus,
-      fromStuff,
-      toStuff,
-      fromPark: fromBaPark,
-      toPark: toBaPark,
-      fromBaPark,
-      toBaPark,
-      fromObpPark,
-      toObpPark,
-      fromIsoPark,
-      toIsoPark,
-      ncaaAvgBA,
-      ncaaAvgOBP,
-      ncaaAvgISO,
-      ncaaAvgWrc,
-      baStdPower,
-      baStdNcaa,
-      obpStdPower,
-      obpStdNcaa,
-      baPowerWeight,
-      obpPowerWeight,
-      baConferenceWeight,
-      obpConferenceWeight,
-      isoConferenceWeight,
-      baPitchingWeight,
-      obpPitchingWeight,
-      isoPitchingWeight,
-      baParkWeight,
-      obpParkWeight,
-      isoParkWeight,
-      isoStdPower,
-      isoStdNcaa,
-      wObp,
-      wSlg,
-      wAvg,
-      wIso,
-    });
-
-    // JUCO sources use 2026 stats verbatim — no class adjustment.
-    // (Class adj kept for D1→D1 transfers where prior-year stats need
-    // forward-translating to the player's projected age/development.)
-    // isJucoSource declared above with the validation skip.
-    const classKey = String(selectedPlayer.class_transition || "SJ").toUpperCase();
-    const classAdj = isJucoSource ? 0 :
-      classKey === "FS" ? 0.03 :
-      classKey === "SJ" ? 0.02 :
-      classKey === "JS" ? 0.015 :
-      classKey === "GR" ? 0.01 : 0.02;
-    const devAgg = Number.isFinite(Number(selectedPlayer.dev_aggressiveness))
-      ? Number(selectedPlayer.dev_aggressiveness)
-      : 0;
-    const transferMult = 1 + classAdj + (devAgg * 0.06);
-    const pAvgAdj = projected.pAvg * transferMult;
-    const pObpAdj = projected.pObp * transferMult;
-    const pIsoAdj = projected.pIso * transferMult;
-    const pSlgAdj = pAvgAdj + pIsoAdj;
-    const pOpsAdj = pObpAdj + pSlgAdj;
-    const pWrcAdj = (wObp * pObpAdj) + (wSlg * pSlgAdj) + (wAvg * pAvgAdj) + (wIso * pIsoAdj);
-    const pWrcPlusAdj = ncaaAvgWrc === 0 ? null : Math.round((pWrcAdj / ncaaAvgWrc) * 100);
-    const offValueAdj = pWrcPlusAdj == null ? null : (pWrcPlusAdj - 100) / 100;
-    const pa = 260;
-    const runsPerPa = 0.13;
-    const replacementRuns = (pa / 600) * 25;
-    const raaAdj = offValueAdj == null ? null : offValueAdj * pa * runsPerPa;
-    const rarAdj = raaAdj == null ? null : raaAdj + replacementRuns;
-    const owarAdj = rarAdj == null ? null : rarAdj / 10;
-
-    const basePerOwar = readLocalNum("nil_base_per_owar", 25000, remoteEquationValues);
-    const ptm = getProgramTierMultiplierByConference(toConference, DEFAULT_NIL_TIER_MULTIPLIERS);
-    const pvm = getPositionValueMultiplier(selectedPlayer.position);
-    // Market value floors at $0 — negative oWAR shouldn't produce a negative dollar projection.
-    const nilValuationRaw = owarAdj == null ? null : owarAdj * basePerOwar * ptm * pvm;
-    const nilValuation = nilValuationRaw == null ? null : Math.max(0, nilValuationRaw);
-    const safeBaStdPower = baStdPower === 0 ? 1 : baStdPower;
-    const baScaled = ncaaAvgBA + (((baPR - 100) / safeBaStdPower) * baStdNcaa);
-    const baBlended = (lastAvg * (1 - baPowerWeight)) + (baScaled * baPowerWeight);
-    const baConfTerm = baConferenceWeight * ((toAvgPlus - fromAvgPlus) / 100);
-    const baPitchTerm = baPitchingWeight * ((toStuff - fromStuff) / 100);
-    const baParkTerm = baParkWeight * ((toBaPark - fromBaPark) / 100);
-    const baMultiplier = 1 + baConfTerm - baPitchTerm + baParkTerm;
-    const safeObpStdPower = obpStdPower === 0 ? 1 : obpStdPower;
-    const obpScaled = ncaaAvgOBP + (((obpPR - 100) / safeObpStdPower) * obpStdNcaa);
-    const obpBlended = (lastObp * (1 - obpPowerWeight)) + (obpScaled * obpPowerWeight);
-    const obpConfTerm = obpConferenceWeight * ((toObpPlus - fromObpPlus) / 100);
-    const obpPitchTerm = obpPitchingWeight * ((toStuff - fromStuff) / 100);
-    const obpParkTerm = obpParkWeight * ((toObpPark - fromObpPark) / 100);
-    const obpMultiplier = 1 + obpConfTerm - obpPitchTerm + obpParkTerm;
-    const lastIso = lastSlg - lastAvg;
-    const isoRatingZ = isoStdPower > 0 ? (isoPR - 100) / isoStdPower : 0;
-    const isoScaled = ncaaAvgISO + (isoRatingZ * isoStdNcaa);
-    // Power-heavy blend (0.7) — matches the canonical lib in transferProjection.ts
-    // and BA/OBP weights. Was hardcoded 0.3 (inverted), made the "Show Work"
-    // section display a different ISO than the projected.pIso shown elsewhere
-    // on the page. Fixed 2026-05-06.
-    const isoBlended = (lastIso * 0.3) + (isoScaled * 0.7);
-    const isoConfTerm = isoConferenceWeight * ((toIsoPlus - fromIsoPlus) / 100);
-    const isoPitchTerm = isoPitchingWeight * ((toStuff - fromStuff) / 100);
-    const isoParkTerm = isoParkWeight * ((toIsoPark - fromIsoPark) / 100);
-    const isoMultiplier = 1 + isoConfTerm - isoPitchTerm + isoParkTerm;
-
+    // STORED-ROW READ. Same data path as Compare + PlayerProfile:
+    // pickPreferredPrediction → precomputed transfer row for the active
+    // customer team, fallback to global returner row. No live recompute,
+    // no equation drift. If no stored row exists for this player at this
+    // team, return a blocked state — the UI shows the "no projection"
+    // message instead of guessing with client-side math.
+    const row = pickPreferredPrediction(selectedHitterPredictions, effectiveTeamId);
+    const ok = row && row.p_wrc_plus != null;
     return {
-      blocked: false as const,
-      missingInputs: [] as string[],
-      pAvg: pAvgAdj,
-      pObp: pObpAdj,
-      pSlg: pSlgAdj,
-      pOps: pOpsAdj,
-      pIso: pIsoAdj,
-      pWrc: pWrcAdj,
-      pWrcPlus: pWrcPlusAdj,
-      owar: owarAdj,
-      nilValuation,
-      fromAvgPlus,
-      toAvgPlus,
-      fromObpPlus,
-      toObpPlus,
-      fromIsoPlus,
-      toIsoPlus,
-      fromStuff,
-      toStuff,
-      fromPark: fromBaPark,
-      toPark: toBaPark,
-      fromParkRaw: fromParkAvgRaw,
-      toParkRaw: toParkAvgRaw,
-      fromObpParkRaw: fromParkObpRaw,
-      toObpParkRaw: toParkObpRaw,
-      fromIsoParkRaw: fromParkIsoRaw,
-      toIsoParkRaw: toParkIsoRaw,
-      ptm,
-      pvm,
-      baWork: {
-        lastStat: lastAvg,
-        baPR,
-        ncaaAvgBA,
-        baStdPower,
-        baStdNcaa,
-        baPowerWeight,
-        baConferenceWeight,
-        baPitchingWeight,
-        baParkWeight,
-        fromAvgPlus,
-        toAvgPlus,
-        fromStuff,
-        toStuff,
-        fromPark: fromBaPark,
-        toPark: toBaPark,
-        powerAdj: baScaled,
-        blended: baBlended,
-        confTerm: baConfTerm,
-        pitchTerm: baPitchTerm,
-        parkTerm: baParkTerm,
-        multiplier: baMultiplier,
-      },
-      obpWork: {
-        lastStat: lastObp,
-        obpPR,
-        ncaaAvgOBP,
-        obpStdPower,
-        obpStdNcaa,
-        obpPowerWeight,
-        obpConferenceWeight,
-        obpPitchingWeight,
-        obpParkWeight,
-        fromObpPlus,
-        toObpPlus,
-        fromStuff,
-        toStuff,
-        fromPark: fromObpPark,
-        toPark: toObpPark,
-        powerAdj: obpScaled,
-        blended: obpBlended,
-        confTerm: obpConfTerm,
-        pitchTerm: obpPitchTerm,
-        parkTerm: obpParkTerm,
-        multiplier: obpMultiplier,
-      },
-      isoWork: {
-        lastIso,
-        isoPR,
-        ncaaAvgISO,
-        isoStdPower,
-        isoStdNcaa,
-        isoPowerWeight: isJucoSource ? srcW.t_iso_power_weight : 0.3,
-        isoConferenceWeight,
-        isoPitchingWeight,
-        isoParkWeight,
-        fromIsoPlus,
-        toIsoPlus,
-        fromStuff,
-        toStuff,
-        fromPark: fromIsoPark,
-        toPark: toIsoPark,
-        ratingZ: isoRatingZ,
-        powerAdj: isoScaled,
-        blended: isoBlended,
-        confTerm: isoConfTerm,
-        pitchTerm: isoPitchTerm,
-        parkTerm: isoParkTerm,
-        multiplier: isoMultiplier,
-      },
+      blocked: !ok,
+      missingInputs: ok ? [] : ["No stored projection for this player at this team"],
+      pAvg: row?.p_avg ?? null,
+      pObp: row?.p_obp ?? null,
+      pSlg: row?.p_slg ?? null,
+      pOps: row?.p_ops ?? null,
+      pIso: row?.p_iso ?? null,
+      pWrc: null,
+      pWrcPlus: row?.p_wrc_plus ?? null,
+      owar: row?.o_war ?? null,
+      nilValuation: row?.market_value ?? null,
+      // Live-compute breakdowns dropped (Context+Multipliers + Show Work
+      // sections removed). Stored predictions don't carry the per-factor
+      // equation breakdown.
+      fromAvgPlus: null, toAvgPlus: null,
+      fromObpPlus: null, toObpPlus: null,
+      fromIsoPlus: null, toIsoPlus: null,
+      fromStuff: null, toStuff: null,
+      fromPark: null, toPark: null,
+      fromParkRaw: null, toParkRaw: null,
+      fromObpParkRaw: null, toObpParkRaw: null,
+      fromIsoParkRaw: null, toIsoParkRaw: null,
+      ptm: null, pvm: null,
+      baWork: null, obpWork: null, isoWork: null,
     };
-  }, [selectedPlayer, toTeamRow, internals, fromConfStats, toConfStats, fromTeamRow, toConference, remoteEquationValues, teamParkComponents, powerByNameTeam]);
+  }, [selectedPlayer, selectedHitterPredictions, effectiveTeamId]);
 
   const pitchingSimulation = useMemo<PitchingSim | null>(() => {
     if (!selectedPitcher) return null;
-    if (!selectedDestinationTeam) return null;
-    // JUCO source pitchers swap in JUCO_PITCHING_TRANSFER_WEIGHTS (power=0,
-    // park=0, conf moderate, competition heavier on Stuff+).
-    const isJucoPitcherSrc = selectedPitcher.division === "NJCAA_D1";
-    const baseEq = readPitchingWeights();
-    const eq = isJucoPitcherSrc ? { ...baseEq, ...JUCO_PITCHING_TRANSFER_WEIGHTS } : baseEq;
-    const toPitchTeamRow = resolveTeamRowFromCandidates([selectedDestinationTeam], teamByKey, teams);
-    if (!toPitchTeamRow) return null;
-    // Resolve from-team by UUID first, then name fallback
-    const fromPitchTeamRow = selectedPitcher.teamId
-      ? (teams.find((t) => t.id === selectedPitcher.teamId) ?? resolveTeamRowFromCandidates([selectedPitcher.team], teamByKey, teams))
-      : resolveTeamRowFromCandidates([selectedPitcher.team], teamByKey, teams);
-    const fromPitchConference = selectedPitcher.conference || fromPitchTeamRow?.conference || null;
-    const toPitchConference = toPitchTeamRow?.conference || null;
-    const fromPitchConfStats = resolvePitchingConferenceStats(fromPitchConference, selectedPitcher.conferenceId);
-    const toPitchConfStats = resolvePitchingConferenceStats(toPitchConference, toPitchTeamRow?.conference_id);
-
-
-    const missing: string[] = [];
-    const requireNum = (label: string, value: number | null | undefined) => {
-      if (value == null || !Number.isFinite(value)) missing.push(label);
-    };
-
-    requireNum("Last ERA", selectedPitcher.era);
-    requireNum("Last FIP", selectedPitcher.fip);
-    requireNum("Last WHIP", selectedPitcher.whip);
-    requireNum("Last K/9", selectedPitcher.k9);
-    requireNum("Last BB/9", selectedPitcher.bb9);
-    requireNum("Last HR/9", selectedPitcher.hr9);
-
-    const fromEraPlus = fromPitchConfStats?.era_plus ?? null;
-    const toEraPlus = toPitchConfStats?.era_plus ?? null;
-    const fromFipPlus = fromPitchConfStats?.fip_plus ?? null;
-    const toFipPlus = toPitchConfStats?.fip_plus ?? null;
-    const fromWhipPlus = fromPitchConfStats?.whip_plus ?? null;
-    const toWhipPlus = toPitchConfStats?.whip_plus ?? null;
-    const fromK9Plus = fromPitchConfStats?.k9_plus ?? null;
-    const toK9Plus = toPitchConfStats?.k9_plus ?? null;
-    const fromBb9Plus = fromPitchConfStats?.bb9_plus ?? null;
-    const toBb9Plus = toPitchConfStats?.bb9_plus ?? null;
-    const fromHr9Plus = fromPitchConfStats?.hr9_plus ?? null;
-    const toHr9Plus = toPitchConfStats?.hr9_plus ?? null;
-    // JUCO source: override raw conference hitter_talent_plus (inflated 107-123
-    // because JUCO hitters mash each other in soft envs) with the per-district
-    // override (72-95) that reflects true hitter quality faced. District name
-    // derived from conference string ("NJCAA D1 Appalachian" → "Appalachian").
-    const jucoDistrict = isJucoPitcherSrc
-      ? (fromPitchConference ?? "").replace(/^NJCAA D1 /, "").replace(/ District$/, "")
-      : null;
-    const fromHitterTalent = isJucoPitcherSrc
-      ? (JUCO_DISTRICT_HTP_OVERRIDE[jucoDistrict ?? ""] ?? null)
-      : (fromPitchConfStats?.hitter_talent_plus ?? null);
-    const toHitterTalent = toPitchConfStats?.hitter_talent_plus ?? null;
-
-    // env+ values are computed at runtime from raw conf rates via
-    // calcPitchingPlus() in pitchingConfByKey — JUCO districts have ERA/FIP/
-    // WHIP/K9/BB9/HR9 stored, so these should resolve. fromHitterTalent is
-    // overridden per-district for JUCO; toHitterTalent from D1 Conf Stats.
-    requireNum("From ERA+", fromEraPlus);
-    requireNum("To ERA+", toEraPlus);
-    requireNum("From FIP+", fromFipPlus);
-    requireNum("To FIP+", toFipPlus);
-    requireNum("From WHIP+", fromWhipPlus);
-    requireNum("To WHIP+", toWhipPlus);
-    requireNum("From K/9+", fromK9Plus);
-    requireNum("To K/9+", toK9Plus);
-    requireNum("From BB/9+", fromBb9Plus);
-    requireNum("To BB/9+", toBb9Plus);
-    requireNum("From HR/9+", fromHr9Plus);
-    requireNum("To HR/9+", toHr9Plus);
-    requireNum("From Hitter Talent+", fromHitterTalent);
-    requireNum("To Hitter Talent+", toHitterTalent);
-
-    // Pitching transfer must use pitching-specific park factors only (R/G, WHIP, HR/9).
-    // Do not fallback to generic park_factor so bad mappings are exposed instead of silently masked.
-    const fromEraParkRaw = resolveParkFactorFromCandidates(fromPitchTeamRow?.id, [selectedPitcher.team, fromPitchTeamRow?.name], "era", teamParkComponents);
-    const toEraParkRaw = resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "era", teamParkComponents);
-    const fromWhipParkRaw = resolveParkFactorFromCandidates(fromPitchTeamRow?.id, [selectedPitcher.team, fromPitchTeamRow?.name], "whip", teamParkComponents);
-    const toWhipParkRaw = resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "whip", teamParkComponents);
-    const fromHr9ParkRaw = resolveParkFactorFromCandidates(fromPitchTeamRow?.id, [selectedPitcher.team, fromPitchTeamRow?.name], "hr9", teamParkComponents);
-    const toHr9ParkRaw = resolveParkFactorFromCandidates(toPitchTeamRow?.id, [selectedDestinationTeam, toPitchTeamRow?.name], "hr9", teamParkComponents);
-    // JUCO source: no park data; weights are 0 so the math no-ops.
-    if (!isJucoPitcherSrc) {
-      requireNum("From R/G Park Factor", fromEraParkRaw);
-      requireNum("From WHIP Park Factor", fromWhipParkRaw);
-      requireNum("From HR/9 Park Factor", fromHr9ParkRaw);
-    }
-    requireNum("To R/G Park Factor", toEraParkRaw);
-    requireNum("To WHIP Park Factor", toWhipParkRaw);
-    requireNum("To HR/9 Park Factor", toHr9ParkRaw);
-
-    if (missing.length > 0) {
-      return {
-        blocked: true,
-        missingInputs: missing,
-        pEra: null, pFip: null, pWhip: null, pK9: null, pBb9: null, pHr9: null, pRvPlus: null, pWar: null, marketValue: null, projectedRole: "RP", showWork: null,
-        fromConference: fromPitchConference, toConference: toPitchConference,
-        fromEraPlus, toEraPlus, fromFipPlus, toFipPlus, fromWhipPlus, toWhipPlus,
-        fromK9Plus, toK9Plus, fromBb9Plus, toBb9Plus, fromHr9Plus, toHr9Plus,
-        fromHitterTalent, toHitterTalent,
-        fromEraParkRaw, toEraParkRaw, fromWhipParkRaw, toWhipParkRaw, fromHr9ParkRaw, toHr9ParkRaw,
-        weights: null,
-      };
-    }
-
-    // Pull stored PR+ values from the pitcher power-ratings lookup; surface
-    // any that are missing so the user sees an actionable "missing input"
-    // message rather than a silently-broken projection.
-    const eraPr = selectedPitcherPower?.eraPrPlus ?? null;
-    const fipPr = selectedPitcherPower?.fipPrPlus ?? null;
-    const whipPr = selectedPitcherPower?.whipPrPlus ?? null;
-    const k9Pr = selectedPitcherPower?.k9PrPlus ?? null;
-    const bb9Pr = selectedPitcherPower?.bb9PrPlus ?? null;
-    const hr9Pr = selectedPitcherPower?.hr9PrPlus ?? null;
-    // JUCO source: PRs aren't used (power weights = 0), nulls fine.
-    if (!isJucoPitcherSrc) {
-      requireNum("ERA Power Rating+", eraPr);
-      requireNum("FIP Power Rating+", fipPr);
-      requireNum("WHIP Power Rating+", whipPr);
-      requireNum("K/9 Power Rating+", k9Pr);
-      requireNum("BB/9 Power Rating+", bb9Pr);
-      requireNum("HR/9 Power Rating+", hr9Pr);
-    }
-    if (missing.length > 0) {
-      return {
-        blocked: true,
-        missingInputs: missing,
-        pEra: null, pFip: null, pWhip: null, pK9: null, pBb9: null, pHr9: null, pRvPlus: null, pWar: null, marketValue: null, projectedRole: "RP", showWork: null,
-        fromConference: fromPitchConference, toConference: toPitchConference,
-        fromEraPlus, toEraPlus, fromFipPlus, toFipPlus, fromWhipPlus, toWhipPlus,
-        fromK9Plus, toK9Plus, fromBb9Plus, toBb9Plus, fromHr9Plus, toHr9Plus,
-        fromHitterTalent, toHitterTalent,
-        fromEraParkRaw, toEraParkRaw, fromWhipParkRaw, toWhipParkRaw, fromHr9ParkRaw, toHr9ParkRaw,
-        weights: null,
-      };
-    }
-
-    // Delegate to the canonical transfer pitcher projection. Same code TB
-    // simulateTransferProjection / TB add-target / PlayerComparison use, so
-    // numbers match exactly across surfaces (no math drift).
-    const baseRole: "SP" | "RP" = selectedPitcher.role === "SP" ? "SP" : "RP";
-    const projectedRole: "SP" | "RP" = pitchingRoleOverride;
-    const libResult = computeTransferPitcherProjection(
-      {
-        era: selectedPitcher.era,
-        fip: selectedPitcher.fip,
-        whip: selectedPitcher.whip,
-        k9: selectedPitcher.k9,
-        bb9: selectedPitcher.bb9,
-        hr9: selectedPitcher.hr9,
-        storedPrPlus: { era: eraPr, fip: fipPr, whip: whipPr, k9: k9Pr, bb9: bb9Pr, hr9: hr9Pr },
-        baseRole,
-        fromEraPlus, toEraPlus,
-        fromFipPlus, toFipPlus,
-        fromWhipPlus, toWhipPlus,
-        fromK9Plus, toK9Plus,
-        fromBb9Plus, toBb9Plus,
-        fromHr9Plus, toHr9Plus,
-        fromHitterTalent, toHitterTalent,
-        fromEraParkRaw, toEraParkRaw,
-        fromWhipParkRaw, toWhipParkRaw,
-        fromHr9ParkRaw, toHr9ParkRaw,
-        toTeam: selectedDestinationTeam || null,
-        toConference: toPitchConference,
-      },
-      { eq, roleOverride: projectedRole },
-    );
-
-    // Apply class transition + dev aggressiveness adjustment on top of the
-    // base transfer projection. Mirrors the hitter pattern: TP and TB both
-    // layer the class bump over the raw transfer math. Pitcher dropdown
-    // doesn't carry per-player class transition, so default to SJ + 0 dev
-    // (same default TB uses for newly added portal targets).
-    const classTransitionRaw = String((selectedPitcher as any).class_transition || "SJ").toUpperCase();
-    const classTransition: "FS" | "SJ" | "JS" | "GR" =
-      classTransitionRaw === "FS" || classTransitionRaw === "SJ" || classTransitionRaw === "JS" || classTransitionRaw === "GR"
-        ? classTransitionRaw
-        : "SJ";
-    const devAgg = Number.isFinite(Number((selectedPitcher as any).dev_aggressiveness))
-      ? Number((selectedPitcher as any).dev_aggressiveness)
-      : 0;
-    const classEraAdj = toPitchingClassAdj(classTransition, eq.class_era_fs, eq.class_era_sj, eq.class_era_js, eq.class_era_gr);
-    const classFipAdj = toPitchingClassAdj(classTransition, eq.class_fip_fs, eq.class_fip_sj, eq.class_fip_js, eq.class_fip_gr);
-    const classWhipAdj = toPitchingClassAdj(classTransition, eq.class_whip_fs, eq.class_whip_sj, eq.class_whip_js, eq.class_whip_gr);
-    const classK9Adj = toPitchingClassAdj(classTransition, eq.class_k9_fs, eq.class_k9_sj, eq.class_k9_js, eq.class_k9_gr);
-    const classBb9Adj = toPitchingClassAdj(classTransition, eq.class_bb9_fs, eq.class_bb9_sj, eq.class_bb9_js, eq.class_bb9_gr);
-    const classHr9Adj = toPitchingClassAdj(classTransition, eq.class_hr9_fs, eq.class_hr9_sj, eq.class_hr9_js, eq.class_hr9_gr);
-    const lowBetterMult = (adj: number) => 1 - adj - (devAgg * 0.06);
-    const highBetterMult = (adj: number) => 1 + adj + (devAgg * 0.06);
-
-    const adjEra = libResult.p_era == null ? null : libResult.p_era * lowBetterMult(classEraAdj);
-    const adjFip = libResult.p_fip == null ? null : libResult.p_fip * lowBetterMult(classFipAdj);
-    const adjWhip = libResult.p_whip == null ? null : libResult.p_whip * lowBetterMult(classWhipAdj);
-    const adjK9 = libResult.p_k9 == null ? null : libResult.p_k9 * highBetterMult(classK9Adj);
-    const adjBb9 = libResult.p_bb9 == null ? null : libResult.p_bb9 * lowBetterMult(classBb9Adj);
-    const adjHr9 = libResult.p_hr9 == null ? null : libResult.p_hr9 * lowBetterMult(classHr9Adj);
-
-    const eraPlusAdj = calcPitchingPlus(adjEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
-    const fipPlusAdj = calcPitchingPlus(adjFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
-    const whipPlusAdj = calcPitchingPlus(adjWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
-    const k9PlusAdj = calcPitchingPlus(adjK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
-    const bb9PlusAdj = calcPitchingPlus(adjBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
-    const hr9PlusAdj = calcPitchingPlus(adjHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
-
-    const pRvPlusAdj = [eraPlusAdj, fipPlusAdj, whipPlusAdj, k9PlusAdj, bb9PlusAdj, hr9PlusAdj].every((v) => v != null)
-      ? (Number(eraPlusAdj) * eq.era_plus_weight) +
-        (Number(fipPlusAdj) * eq.fip_plus_weight) +
-        (Number(whipPlusAdj) * eq.whip_plus_weight) +
-        (Number(k9PlusAdj) * eq.k9_plus_weight) +
-        (Number(bb9PlusAdj) * eq.bb9_plus_weight) +
-        (Number(hr9PlusAdj) * eq.hr9_plus_weight)
-      : libResult.p_rv_plus;
-
+    // STORED-ROW READ — mirror of the hitter side. pickPreferredPrediction
+    // selects: precomputed transfer row for active customer team → fallback
+    // global returner row. No live recompute.
+    const row = pickPreferredPrediction(selectedPitcherPredictions, effectiveTeamId);
+    const ok = row && row.p_rv_plus != null;
+    const role = ((row?.pitcher_role === "SP" || row?.pitcher_role === "RP")
+      ? row.pitcher_role
+      : pitchingRoleOverride) as "SP" | "RP";
     return {
-      blocked: false,
-      missingInputs: [],
-      pEra: adjEra,
-      pFip: adjFip,
-      pWhip: adjWhip,
-      pK9: adjK9,
-      pBb9: adjBb9,
-      pHr9: adjHr9,
-      pRvPlus: pRvPlusAdj,
-      pWar: libResult.p_war,
-      marketValue: libResult.market_value,
-      projectedRole: projectedRole,
-      fromConference: fromPitchConference,
-      toConference: toPitchConference,
-      fromEraPlus, toEraPlus, fromFipPlus, toFipPlus, fromWhipPlus, toWhipPlus,
-      fromK9Plus, toK9Plus, fromBb9Plus, toBb9Plus, fromHr9Plus, toHr9Plus,
-      fromHitterTalent, toHitterTalent,
-      fromEraParkRaw, toEraParkRaw, fromWhipParkRaw, toWhipParkRaw, fromHr9ParkRaw, toHr9ParkRaw,
-      weights: {
-        eraPower: eq.transfer_era_power_weight,
-        eraConference: eq.transfer_era_conference_weight,
-        eraCompetition: eq.transfer_era_competition_weight,
-        eraPark: eq.transfer_era_park_weight,
-        fipPower: eq.transfer_fip_power_weight,
-        fipConference: eq.transfer_fip_conference_weight,
-        fipCompetition: eq.transfer_fip_competition_weight,
-        fipPark: eq.transfer_fip_park_weight,
-        whipPower: eq.transfer_whip_power_weight,
-        whipConference: eq.transfer_whip_conference_weight,
-        whipCompetition: eq.transfer_whip_competition_weight,
-        whipPark: eq.transfer_whip_park_weight,
-        k9Power: eq.transfer_k9_power_weight,
-        k9Conference: eq.transfer_k9_conference_weight,
-        k9Competition: eq.transfer_k9_competition_weight,
-        bb9Power: eq.transfer_bb9_power_weight,
-        bb9Conference: eq.transfer_bb9_conference_weight,
-        bb9Competition: eq.transfer_bb9_competition_weight,
-        hr9Power: eq.transfer_hr9_power_weight,
-        hr9Conference: eq.transfer_hr9_conference_weight,
-        hr9Competition: eq.transfer_hr9_competition_weight,
-        hr9Park: eq.transfer_hr9_park_weight,
-      },
-      showWork: libResult.showWork,
+      blocked: !ok,
+      missingInputs: ok ? [] : ["No stored projection for this pitcher at this team"],
+      pEra: row?.p_era ?? null,
+      pFip: row?.p_fip ?? null,
+      pWhip: row?.p_whip ?? null,
+      pK9: row?.p_k9 ?? null,
+      pBb9: row?.p_bb9 ?? null,
+      pHr9: row?.p_hr9 ?? null,
+      pRvPlus: row?.p_rv_plus ?? null,
+      pWar: row?.p_war ?? null,
+      marketValue: row?.market_value ?? null,
+      projectedRole: role,
+      fromConference: selectedPitcher.conference ?? null,
+      toConference: null,
+      // Live-compute breakdowns dropped (Context+Multipliers + Show Work
+      // removed). Stored predictions don't carry per-factor breakdowns.
+      fromEraPlus: null, toEraPlus: null,
+      fromFipPlus: null, toFipPlus: null,
+      fromWhipPlus: null, toWhipPlus: null,
+      fromK9Plus: null, toK9Plus: null,
+      fromBb9Plus: null, toBb9Plus: null,
+      fromHr9Plus: null, toHr9Plus: null,
+      fromHitterTalent: null, toHitterTalent: null,
+      fromEraParkRaw: null, toEraParkRaw: null,
+      fromWhipParkRaw: null, toWhipParkRaw: null,
+      fromHr9ParkRaw: null, toHr9ParkRaw: null,
+      weights: null,
     };
-
-  }, [selectedPitcher, selectedPitcherPower, selectedDestinationTeam, teamByKey, teamParkComponents, pitchingConfByKey, pitchingRoleOverride, teams, resolvePitchingConferenceStats]);
+  }, [selectedPitcher, selectedPitcherPredictions, effectiveTeamId, pitchingRoleOverride]);
 
   const addToTargetBoard = () => {
     if (!selectedPlayer || !selectedDestinationTeam) return;
@@ -2288,51 +1761,6 @@ export default function TransferPortal() {
               return <RiskAssessmentCardRSTR risk={risk} />;
             })()}
 
-            {/* ─── Context (collapsible) ─── */}
-            <details className="rounded-lg border p-3">
-              <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-muted-foreground">Context + Multipliers</summary>
-              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1.5 text-xs">
-                <div><span className="text-muted-foreground">From:</span> {fromTeam || "-"}</div>
-                <div><span className="text-muted-foreground">To:</span> {selectedDestinationTeam || "-"}</div>
-                <div><span className="text-muted-foreground">From Conf:</span> {fromConference || "-"}</div>
-                <div><span className="text-muted-foreground">To Conf:</span> {toConference || "-"}</div>
-                <div><span className="text-muted-foreground">Park (AVG):</span> {simulation ? `${formatPark(simulation.fromParkRaw)} → ${formatPark(simulation.toParkRaw)}` : "-"}</div>
-                <div><span className="text-muted-foreground">Park (OBP):</span> {simulation ? `${formatPark(simulation.fromObpParkRaw)} → ${formatPark(simulation.toObpParkRaw)}` : "-"}</div>
-                <div><span className="text-muted-foreground">Park (ISO):</span> {simulation ? `${formatPark(simulation.fromIsoParkRaw)} → ${formatPark(simulation.toIsoParkRaw)}` : "-"}</div>
-                <div><span className="text-muted-foreground">Stuff+:</span> {simulation ? `${whole(simulation.fromStuff)} → ${whole(simulation.toStuff)}` : "-"}</div>
-                <div><span className="text-muted-foreground">AVG+:</span> {simulation ? `${whole(simulation.fromAvgPlus)} → ${whole(simulation.toAvgPlus)}` : "-"}</div>
-                <div><span className="text-muted-foreground">OBP+:</span> {simulation ? `${whole(simulation.fromObpPlus)} → ${whole(simulation.toObpPlus)}` : "-"}</div>
-                <div><span className="text-muted-foreground">ISO+:</span> {simulation ? `${whole(simulation.fromIsoPlus)} → ${whole(simulation.toIsoPlus)}` : "-"}</div>
-                <div><span className="text-muted-foreground">NIL PTM/PVM:</span> {simulation && simulation.ptm != null && simulation.pvm != null ? `${simulation.ptm.toFixed(2)} / ${simulation.pvm.toFixed(2)}` : "-"}</div>
-              </div>
-            </details>
-
-            {/* ─── Show Work (admin) ─── */}
-            {isAdmin && (
-              <details className="rounded-lg border p-3">
-                <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-muted-foreground">Show Work</summary>
-                <div className="mt-3 space-y-2 text-sm font-mono">
-                  {!simulation || simulation.blocked || !simulation.baWork ? (
-                    <div className="text-muted-foreground">Select player + destination with all required inputs.</div>
-                  ) : (
-                    <>
-                      <div className="font-semibold">pAVG</div>
-                      <div>LastStat = {stat(simulation.baWork.lastStat)}</div>
-                      <div>PowerAdj = {stat(simulation.baWork.ncaaAvgBA)} + ((({stat(simulation.baWork.baPR, 2)} - 100) / {stat(simulation.baWork.baStdPower, 3)}) x {stat(simulation.baWork.baStdNcaa, 5)}) = {stat(simulation.baWork.powerAdj)}</div>
-                      <div>Blended = ({stat(simulation.baWork.lastStat)} x (1 - {stat(simulation.baWork.baPowerWeight, 2)})) + ({stat(simulation.baWork.powerAdj)} x {stat(simulation.baWork.baPowerWeight, 2)}) = {stat(simulation.baWork.blended)}</div>
-                      <div>Multiplier = {stat(simulation.baWork.multiplier, 4)}</div>
-                      <div className="font-semibold">ProjectedBA = {stat(simulation.baWork.blended)} x {stat(simulation.baWork.multiplier, 4)} = {stat(simulation.pAvg)}</div>
-                      <div className="pt-2 font-semibold">pOBP</div>
-                      <div>PowerAdj = {stat(simulation.obpWork.powerAdj)} | Blended = {stat(simulation.obpWork.blended)} | Mult = {stat(simulation.obpWork.multiplier, 4)}</div>
-                      <div className="font-semibold">ProjectedOBP = {stat(simulation.pObp)}</div>
-                      <div className="pt-2 font-semibold">pISO</div>
-                      <div>RatingZ = {stat(simulation.isoWork.ratingZ, 4)} | PowerAdj = {stat(simulation.isoWork.powerAdj)} | Blended = {stat(simulation.isoWork.blended)} | Mult = {stat(simulation.isoWork.multiplier, 4)}</div>
-                      <div className="font-semibold">ProjectedISO = {stat(simulation.pIso)}</div>
-                    </>
-                  )}
-                </div>
-              </details>
-            )}
           </>
         )}
 
@@ -2492,46 +1920,6 @@ export default function TransferPortal() {
               return <RiskAssessmentCardRSTR risk={risk} />;
             })()}
 
-            {/* ─── Context (collapsible) ─── */}
-            <details className="rounded-lg border p-3">
-              <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-muted-foreground">Context + Multipliers</summary>
-              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1.5 text-xs">
-                <div><span className="text-muted-foreground">From:</span> {selectedPitcher?.team || "-"}</div>
-                <div><span className="text-muted-foreground">To:</span> {selectedDestinationTeam || "-"}</div>
-                <div><span className="text-muted-foreground">From Conf:</span> {pitchingSimulation?.fromConference || "-"}</div>
-                <div><span className="text-muted-foreground">To Conf:</span> {pitchingSimulation?.toConference || "-"}</div>
-                <div><span className="text-muted-foreground">Park (R/G):</span> {pitchingSimulation ? `${formatPark(pitchingSimulation.fromEraParkRaw)} → ${formatPark(pitchingSimulation.toEraParkRaw)}` : "-"}</div>
-                <div><span className="text-muted-foreground">Park (WHIP):</span> {pitchingSimulation ? `${formatPark(pitchingSimulation.fromWhipParkRaw)} → ${formatPark(pitchingSimulation.toWhipParkRaw)}` : "-"}</div>
-                <div><span className="text-muted-foreground">Park (HR/9):</span> {pitchingSimulation ? `${formatPark(pitchingSimulation.fromHr9ParkRaw)} → ${formatPark(pitchingSimulation.toHr9ParkRaw)}` : "-"}</div>
-                <div><span className="text-muted-foreground">Hitter Talent+:</span> {pitchingSimulation ? `${stat(pitchingSimulation.fromHitterTalent, 1)} → ${stat(pitchingSimulation.toHitterTalent, 1)}` : "-"}</div>
-                <div><span className="text-muted-foreground">ERA+:</span> {pitchingSimulation ? `${whole(pitchingSimulation.fromEraPlus)} → ${whole(pitchingSimulation.toEraPlus)}` : "-"}</div>
-                <div><span className="text-muted-foreground">FIP+:</span> {pitchingSimulation ? `${whole(pitchingSimulation.fromFipPlus)} → ${whole(pitchingSimulation.toFipPlus)}` : "-"}</div>
-                <div><span className="text-muted-foreground">K/9+:</span> {pitchingSimulation ? `${whole(pitchingSimulation.fromK9Plus)} → ${whole(pitchingSimulation.toK9Plus)}` : "-"}</div>
-                <div><span className="text-muted-foreground">BB/9+:</span> {pitchingSimulation ? `${whole(pitchingSimulation.fromBb9Plus)} → ${whole(pitchingSimulation.toBb9Plus)}` : "-"}</div>
-              </div>
-            </details>
-
-            {/* ─── Show Work (admin) ─── */}
-            {isAdmin && pitchingSimulation?.showWork && (
-              <details className="rounded-lg border p-3">
-                <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-muted-foreground">Show Work (Pitching)</summary>
-                <div className="mt-3 rounded-md bg-muted/20 p-3 font-mono text-sm space-y-4">
-                  {(["era", "fip", "whip", "k9", "bb9", "hr9"] as const).map((key) => {
-                    const w = pitchingSimulation.showWork?.[key];
-                    if (!w) return null;
-                    const labels: Record<string, string> = { era: "pERA", fip: "pFIP", whip: "pWHIP", k9: "pK/9", bb9: "pBB/9", hr9: "pHR/9" };
-                    const lower = key !== "k9";
-                    return (
-                      <div key={key} className="space-y-1">
-                        <div className="font-semibold">{labels[key]}</div>
-                        <div>Last = {stat(w.last, 2)} | PowerAdj = {stat(w.powerAdj, 2)} | Blended = {stat(w.blended, 2)} | Mult = {stat(w.mult, 4)}</div>
-                        <div className="font-semibold">Projected = {stat(w.projected, 2)} | RoleAdj = {stat(w.roleAdjusted, 2)}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </details>
-            )}
           </>
         )}
       </div>
