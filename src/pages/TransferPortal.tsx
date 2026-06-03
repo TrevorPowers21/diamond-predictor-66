@@ -979,15 +979,16 @@ export default function TransferPortal() {
     },
   });
 
-  // Career seasons for the selected PITCHER — same purpose.
+  // Career seasons for the selected PITCHER. selectedPitcher.id IS the
+  // source_player_id (see usePitchingSeedData mapping).
   const { data: pitcherCareerSeasons = [] } = useQuery({
-    queryKey: ["transfer-sim-pitcher-career", (selectedPitcher as any)?.source_player_id ?? null],
-    enabled: !!(selectedPitcher as any)?.source_player_id,
+    queryKey: ["transfer-sim-pitcher-career", selectedPitcher?.id ?? null],
+    enabled: !!selectedPitcher?.id && !selectedPitcher.id.startsWith("pitching-cmp-") && !selectedPitcher.id.startsWith("pm-"),
     staleTime: 60 * 60 * 1000,
     refetchOnWindowFocus: false,
     queryFn: async () => {
-      const srcId = (selectedPitcher as any)?.source_player_id;
-      if (!srcId) return [];
+      const srcId = selectedPitcher?.id;
+      if (!srcId || srcId.startsWith("pitching-cmp-") || srcId.startsWith("pm-")) return [];
       const { data, error } = await (supabase as any)
         .from("Pitching Master")
         .select("*")
@@ -1037,12 +1038,12 @@ export default function TransferPortal() {
     },
   });
 
-  // Stored prediction rows for the selected pitcher. selectedPitcher comes
-  // from Pitching Master so we resolve players.id via source_player_id from
-  // the already-loaded players list.
+  // Stored prediction rows for the selected pitcher. The PitchingStorageRow
+  // shape stores source_player_id as the `id` field (line 113 of
+  // usePitchingSeedData), so we resolve players.id by that.
   const selectedPitcherPlayerId = useMemo(() => {
-    const srcId = (selectedPitcher as any)?.source_player_id;
-    if (!srcId) return null;
+    const srcId = selectedPitcher?.id;
+    if (!srcId || srcId.startsWith("pitching-cmp-") || srcId.startsWith("pm-")) return null;
     const match = players.find((p) => p.source_player_id === srcId);
     return match?.player_id ?? null;
   }, [selectedPitcher, players]);
@@ -1878,52 +1879,80 @@ export default function TransferPortal() {
             {pitchingSimulation && !pitchingSimulation.blocked && selectedPitcher && (() => {
               const isJucoSrc = selectedPitcher.division === "NJCAA_D1";
 
+              // Match PitcherProfile's projectionSourceRow shape — read the
+              // 2026 Pitching Master row with blended_* fallbacks for thin-
+              // sample pitchers. TPS's selectedPitcher.* fields skip the
+              // blended handling, so risk diverged on combined-sample
+              // pitchers. pitcherCareerSeasons (select *) carries the
+              // blended_* columns.
+              const pitcherProjRow = (() => {
+                const row = (pitcherCareerSeasons as any[]).find((r) => Number(r.Season) === 2026);
+                if (!row) return null;
+                const cu = !!row.combined_used;
+                return {
+                  stuffPlus: cu ? (row.blended_stuff_plus ?? row.stuff_plus) : row.stuff_plus,
+                  miss_pct: cu ? (row.blended_miss_pct ?? row.miss_pct) : row.miss_pct,
+                  bb_pct: cu ? (row.blended_bb_pct ?? row.bb_pct) : row.bb_pct,
+                  chase_pct: cu ? (row.blended_chase_pct ?? row.chase_pct) : row.chase_pct,
+                  barrel_pct: cu ? (row.blended_barrel_pct ?? row.barrel_pct) : row.barrel_pct,
+                  hard_hit_pct: cu ? (row.blended_hard_hit_pct ?? row.hard_hit_pct) : row.hard_hit_pct,
+                  ground_pct: cu ? (row.blended_ground_pct ?? row.ground_pct) : row.ground_pct,
+                  in_zone_whiff_pct: cu ? (row.blended_in_zone_whiff_pct ?? row.in_zone_whiff_pct) : row.in_zone_whiff_pct,
+                  k9: cu ? (row.blended_k9 ?? row.K9 ?? row.k9) : (row.K9 ?? row.k9),
+                  bb9: cu ? (row.blended_bb9 ?? row.BB9 ?? row.bb9) : (row.BB9 ?? row.bb9),
+                  hr9: cu ? (row.blended_hr9 ?? row.HR9 ?? row.hr9) : (row.HR9 ?? row.hr9),
+                  ip: cu ? (row.combined_ip ?? row.IP) : row.IP,
+                  trackman_pitches: row.trackman_pitches ?? 0,
+                  bf: row.bf ?? null,
+                };
+              })();
+
               if (isJucoSrc) {
                 // JUCO sim — slimmed 5-factor panel (Projection / Skillset /
                 // Data Reliability / Competition with SOURCE HTP / Stuff+).
-                // Trajectory / Sample Size / Workload / Durability dropped.
+                // Same pitcherProjRow source as the D1 path below — gives
+                // thin-sample JUCO pitchers their blended values.
                 return <JucoPitcherRiskCard input={{
                   projectedPrvPlus: pitchingSimulation.pRvPlus,
-                  stuffPlus: selectedPitcher.stuffPlus,
-                  missPct: selectedPitcher.missPct,
-                  bbPct: selectedPitcher.bbPct,
-                  chasePct: selectedPitcher.chasePct,
-                  barrelPct: selectedPitcher.barrelPct,
-                  hardHitPct: selectedPitcher.hardHitPct,
-                  groundPct: selectedPitcher.groundPct,
-                  inZoneWhiffPct: selectedPitcher.inZoneWhiffPct,
-                  k9: selectedPitcher.k9,
-                  bb9: selectedPitcher.bb9,
-                  hr9: selectedPitcher.hr9,
-                  trackmanPitches: selectedPitcher.trackmanPitches,
-                  bf: selectedPitcher.bf,
+                  stuffPlus: pitcherProjRow?.stuffPlus ?? selectedPitcher.stuffPlus,
+                  missPct: pitcherProjRow?.miss_pct ?? selectedPitcher.missPct,
+                  bbPct: pitcherProjRow?.bb_pct ?? selectedPitcher.bbPct,
+                  chasePct: pitcherProjRow?.chase_pct ?? selectedPitcher.chasePct,
+                  barrelPct: pitcherProjRow?.barrel_pct ?? selectedPitcher.barrelPct,
+                  hardHitPct: pitcherProjRow?.hard_hit_pct ?? selectedPitcher.hardHitPct,
+                  groundPct: pitcherProjRow?.ground_pct ?? selectedPitcher.groundPct,
+                  inZoneWhiffPct: pitcherProjRow?.in_zone_whiff_pct ?? selectedPitcher.inZoneWhiffPct,
+                  k9: pitcherProjRow?.k9 ?? selectedPitcher.k9,
+                  bb9: pitcherProjRow?.bb9 ?? selectedPitcher.bb9,
+                  hr9: pitcherProjRow?.hr9 ?? selectedPitcher.hr9,
+                  trackmanPitches: pitcherProjRow?.trackman_pitches ?? selectedPitcher.trackmanPitches,
+                  bf: pitcherProjRow?.bf ?? selectedPitcher.bf,
                   sourceConference: pitchingSimulation.fromConference ?? null,
                   sourceHitterTalentPlus: pitchingSimulation.fromHitterTalent,
                 }} />;
               }
 
               // D1 sim — match PitcherProfile's risk inputs so the same
-              // pitcher shows the same grade on both surfaces. PitcherProfile
-              // uses ORIGIN conference + origin hitter-talent (current
-              // context), not destination. Destination effect on projection
-              // is already captured by pitchingSimulation.pRvPlus.
+              // pitcher shows the same grade on both surfaces. Skillset
+              // fields come from pitcherProjRow (2026 Pitching Master with
+              // blended_* fallback) just like PitcherProfile does.
               const risk = assessPitcherRisk({
                 conference: pitchingSimulation.fromConference ?? null,
                 projectedPrvPlus: pitchingSimulation.pRvPlus,
                 confHitterTalentPlus: pitchingSimulation.fromHitterTalent,
                 careerSeasons: pitcherCareerSeasons as any[],
-                ip: (selectedPitcher as any).ip ?? null,
-                stuffPlus: selectedPitcher.stuffPlus,
-                whiffPct: selectedPitcher.missPct,
-                bbPct: selectedPitcher.bbPct,
-                chase: selectedPitcher.chasePct,
-                barrel: selectedPitcher.barrelPct,
-                hardHit: selectedPitcher.hardHitPct,
-                gb: selectedPitcher.groundPct,
-                izWhiff: selectedPitcher.inZoneWhiffPct,
-                k9: selectedPitcher.k9,
-                bb9: selectedPitcher.bb9,
-                hr9: selectedPitcher.hr9,
+                ip: pitcherProjRow?.ip ?? (selectedPitcher as any).ip ?? null,
+                stuffPlus: pitcherProjRow?.stuffPlus ?? selectedPitcher.stuffPlus,
+                whiffPct: pitcherProjRow?.miss_pct ?? selectedPitcher.missPct,
+                bbPct: pitcherProjRow?.bb_pct ?? selectedPitcher.bbPct,
+                chase: pitcherProjRow?.chase_pct ?? selectedPitcher.chasePct,
+                barrel: pitcherProjRow?.barrel_pct ?? selectedPitcher.barrelPct,
+                hardHit: pitcherProjRow?.hard_hit_pct ?? selectedPitcher.hardHitPct,
+                gb: pitcherProjRow?.ground_pct ?? selectedPitcher.groundPct,
+                izWhiff: pitcherProjRow?.in_zone_whiff_pct ?? selectedPitcher.inZoneWhiffPct,
+                k9: pitcherProjRow?.k9 ?? selectedPitcher.k9,
+                bb9: pitcherProjRow?.bb9 ?? selectedPitcher.bb9,
+                hr9: pitcherProjRow?.hr9 ?? selectedPitcher.hr9,
               });
               return <RiskAssessmentCardRSTR risk={risk} />;
             })()}
