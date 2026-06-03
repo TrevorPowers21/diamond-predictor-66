@@ -1274,9 +1274,12 @@ export default function PitcherProfile() {
       projectedIp: overlayIp,
       // Stored scouting scores from the picked prediction row — 1=1 with
       // Pitching Master via propagate_pitcher_scores_to_predictions().
+      // Use pitcher_barrel_score (domain-scoped column added 2026-06-03)
+      // so two-way players' hitter values can't bleed in. Legacy
+      // whiff_score / bb_score are pitcher-domain only — no collision.
       whiffScore: (stored as any)?.whiff_score ?? null,
       bbScore: (stored as any)?.bb_score ?? null,
-      barrelScore: (stored as any)?.barrel_score ?? null,
+      barrelScore: (stored as any)?.pitcher_barrel_score ?? null,
     };
   }, [
     projectedDevAggressiveness,
