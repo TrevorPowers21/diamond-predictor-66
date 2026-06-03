@@ -452,7 +452,20 @@ function buildHitterTransferInputs(args: {
   };
 
   // class-transition + dev_aggressiveness multiplier (D1 → D1 only)
-  const classKey = String(player.class_transition || "SJ").toUpperCase();
+  // Prefer pred's class_transition. Derive from class_year (FR→FS / SO→SJ /
+  // JR→JS / SR→GR) when class_transition is null. Default-to-SJ on the bare
+  // string fallback mislabels freshmen as sophomores and produces wrong
+  // class adjustment + bad p_wrc_plus on their first precompute.
+  const classFromYear = (cy: string | null | undefined) => {
+    if (!cy) return "SJ";
+    const c = String(cy).toUpperCase();
+    if (c === "FR") return "FS";
+    if (c === "SO") return "SJ";
+    if (c === "JR") return "JS";
+    if (c === "SR") return "GR";
+    return "SJ";
+  };
+  const classKey = String(player.class_transition || classFromYear(player.class_year)).toUpperCase();
   const classAdj = isJucoSource ? 0
     : classKey === "FS" ? 0.03
     : classKey === "SJ" ? 0.02
@@ -694,10 +707,22 @@ function computeTransferPitcherProjection(input: TransferPitcherInputDeno, eq: P
 
 function applyPitcherPostprocess(
   result: ReturnType<typeof computeTransferPitcherProjection>,
-  args: { classTransition: string | null; devAggressiveness: number | null; isJucoSource: boolean; eq: PitchingEq; toConference: string | null; toTeam: string | null },
+  args: { classTransition: string | null; classYear: string | null; devAggressiveness: number | null; isJucoSource: boolean; eq: PitchingEq; toConference: string | null; toTeam: string | null },
 ) {
   const eq = args.eq;
-  const classKey = String(args.classTransition || "SJ").toUpperCase();
+  // Prefer pred's class_transition. Derive from class_year (FR→FS / SO→SJ /
+  // JR→JS / SR→GR) when class_transition is null. Default-to-SJ on the bare
+  // string fallback mislabels freshmen and produces wrong adjustment.
+  const classFromYear = (cy: string | null | undefined) => {
+    if (!cy) return "SJ";
+    const c = String(cy).toUpperCase();
+    if (c === "FR") return "FS";
+    if (c === "SO") return "SJ";
+    if (c === "JR") return "JS";
+    if (c === "SR") return "GR";
+    return "SJ";
+  };
+  const classKey = String(args.classTransition || classFromYear(args.classYear)).toUpperCase();
   const ct = (args.isJucoSource ? "SJ" : ((["FS", "SJ", "JS", "GR"].includes(classKey) ? classKey : "SJ") as "FS" | "SJ" | "JS" | "GR"));
   const devAgg = args.isJucoSource ? 0 : (Number.isFinite(Number(args.devAggressiveness)) ? Number(args.devAggressiveness) : 0);
   const cAdj = (fs: number, sj: number, js: number, gr: number) => {
@@ -949,7 +974,7 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
 
   // Players — D1 hitters only, exclude own roster
   const allPlayers = await loadAllPaged(() =>
-    supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, pa, is_twp"),
+    supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, pa, is_twp, class_year"),
   );
   const isPitcher = (p: string | null) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(p || ""));
   const matchesDivision = (d: string | null) => {
@@ -1029,6 +1054,7 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
         first_name: p.first_name, last_name: p.last_name,
         position: p.position, bats_hand: p.bats_hand, division: p.division,
         class_transition: pred?.class_transition ?? null,
+        class_year: (p as any).class_year ?? null,
         dev_aggressiveness: Number.isFinite(Number(pred?.dev_aggressiveness)) ? Number(pred?.dev_aggressiveness) : null,
         from_avg: pred?.from_avg ?? null, from_obp: pred?.from_obp ?? null, from_slg: pred?.from_slg ?? null,
       },
@@ -1189,7 +1215,7 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string) {
 
   // Players — pitcher-primary OR is_twp, exclude own roster, exclude JUCO
   const allPlayers = await loadAllPaged(() =>
-    supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, division, source_player_id, source_team_id, is_twp"),
+    supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, division, source_player_id, source_team_id, is_twp, class_year"),
   );
   const pitcherTest = (p: string | null) => /^(SP|RP|CL|P|LHP|RHP|SM)/i.test(String(p || ""));
   const pitchers = allPlayers.filter((p: any) =>
@@ -1296,6 +1322,7 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string) {
     const projected = computeTransferPitcherProjection(input, eq);
     const final = applyPitcherPostprocess(projected, {
       classTransition: pred?.class_transition ?? null,
+      classYear: (p as any).class_year ?? null,
       devAggressiveness: pred?.dev_aggressiveness ?? null,
       isJucoSource: false,
       eq,
