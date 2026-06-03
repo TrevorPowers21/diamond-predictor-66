@@ -73,35 +73,43 @@ export type PitchingMasterSeedRow = {
  * Returns pitching seed data from the unified "Pitching Master" Supabase table.
  * Combines what was previously split across pitching_stats_storage and pitching_power_ratings_storage.
  */
-export function usePitchingSeedData(season = 2026) {
+export function usePitchingSeedData(season = 2026, enabled = true) {
   const { data: dbRows = [], isLoading } = useQuery({
     queryKey: ["pitching_master", season],
+    enabled,
     queryFn: async () => {
       const all: any[] = [];
-      let from = 0;
       const pageSize = 1000;
-      while (true) {
-        // Leaving as select("*") for safety — narrow attempted but hit issues
-        // with special-char column names (90th_vel) and broke pitcher rendering.
-        // The big perf wins here are staleTime + dropped loading gate, not
-        // payload size. Revisit narrow in a focused follow-up if needed.
-        const { data, error } = await supabase
+      // select("*") kept for safety — narrow attempted but special-char column
+      // names (90th_vel) broke pitcher rendering. Revisit if payload size matters.
+      const CONCURRENT = 5;
+      let from = 0;
+      const fetchPage = (offset: number) =>
+        supabase
           .from("Pitching Master")
           .select("*")
           .eq("Season", season)
           .gte("IP", 1)
           .not("Role", "in", "(C,1B,2B,3B,SS,OF,LF,CF,RF,DH,IF,UT)")
-          .range(from, from + pageSize - 1);
-        if (error) throw error;
-        all.push(...(data || []));
-        if (!data || data.length < pageSize) break;
-        from += pageSize;
+          .range(offset, offset + pageSize - 1);
+
+      const t0 = performance.now();
+      while (true) {
+        const batch = await Promise.all(
+          Array.from({ length: CONCURRENT }, (_, i) => fetchPage(from + i * pageSize))
+        );
+        let anyFull = false;
+        for (const { data, error } of batch) {
+          if (error) throw error;
+          if (data && data.length > 0) all.push(...data);
+          if (data && data.length === pageSize) anyFull = true;
+        }
+        from += CONCURRENT * pageSize;
+        if (!anyFull) break;
       }
+      console.log(`[PitchingMaster] loaded ${all.length} rows in ${Math.round(performance.now() - t0)}ms`);
       return all;
     },
-    // Pitching Master changes weekly during season, monthly off-season.
-    // 30min staleTime was overcautious. Bumped to 12h so warm-load returns
-    // are instant. Cold loads still hit the DB.
     staleTime: 12 * 60 * 60 * 1000,
     gcTime: 24 * 60 * 60 * 1000,
     refetchOnWindowFocus: false,

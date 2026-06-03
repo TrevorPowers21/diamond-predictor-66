@@ -41,11 +41,14 @@ export function pickPreferredPrediction<T extends PredRow>(
     );
     if (teamRow) return teamRow;
   }
-  const global = rows.find((r) => r.customer_team_id == null && r.variant === "regular");
+  const globals = rows.filter((r) => r.customer_team_id == null && r.variant === "regular");
+  // When a player has both a hitter-model row (pitcher_role IS NULL) and a
+  // pitcher-model row (pitcher_role = "RP"/"SP"), prefer the hitter row so
+  // scouting scores come from the hitter propagation path.
+  const global = globals.find((r) => r.pitcher_role == null) ?? globals[0] ?? null;
   if (global) return global;
   // Last-resort fallback for players without a baseline global returner-regular
-  // row (mostly JUCO + transfer-only pitchers). Use any precomputed row so
-  // they at least appear on the dashboard instead of vanishing.
+  // row (mostly JUCO + transfer-only pitchers).
   return rows.find((r) => r.variant === "precomputed") ?? null;
 }
 

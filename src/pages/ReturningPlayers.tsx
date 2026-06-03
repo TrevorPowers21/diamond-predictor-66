@@ -1084,7 +1084,10 @@ export default function ReturningPlayers() {
       return next;
     });
   };
-  const [page, setPage] = useState(1);
+  const [page, setPageState] = useState(() => {
+    const p = parseInt(new URLSearchParams(window.location.search).get("page") ?? "1", 10);
+    return p >= 1 ? p : 1;
+  });
   const [pageSize, setPageSize] = useState<number>(100);
   const { hasRole, effectiveTeamId, loading: authLoading } = useAuth();
   const isAdmin = hasRole("admin");
@@ -1151,6 +1154,22 @@ export default function ReturningPlayers() {
     },
     [setSearchParams],
   );
+  const setPage = useCallback(
+    (next: number) => {
+      setPageState(next);
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next <= 1) params.delete("page");
+          else params.set("page", String(next));
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
   const [pitchingSearch, setPitchingSearch] = useState("");
   const [pitchingPage, setPitchingPage] = useState(1);
   const [pitchingPageSize, setPitchingPageSize] = useState<number>(100);
@@ -1427,6 +1446,9 @@ export default function ReturningPlayers() {
   }, []);
 
   const { data: playersResult, isLoading } = useQuery({
+    enabled: !authLoading,
+    retry: 2,
+    retryDelay: 100,
     queryKey: [
       "returning-players-2025-unified",
       {
@@ -1446,14 +1468,21 @@ export default function ReturningPlayers() {
       },
     ],
     queryFn: async () => {
-      // Pure stored-row read: every displayed value comes from player_predictions
-      // (populated by the eager precompute + propagation functions). No seed,
-      // no name fuzzy match, no client-side fallback. Null → "—".
+      const _qt0 = performance.now();
+      const _qlog = (label: string) => console.log(`[Dashboard] ${label}: +${Math.round(performance.now() - _qt0)}ms`);
+      _qlog(`start (sort=${sortKey}, teamScope=${effectiveTeamId ? "yes" : "no"})`);
+
       const toReturnerRow = (
         row: any,
         player: any,
         nilByPlayer: Map<string, number | null>,
       ): ReturnerPlayer => {
+        // Read scouting scores directly from player_predictions.
+        const seedEvScore = row.ev_score ?? null;
+        const seedBarrelScore = row.barrel_score ?? null;
+        const seedContactScore = row.contact_score ?? null;
+        const seedChaseScore = row.chase_score ?? null;
+
         return {
           id: player.id,
           prediction_id: row.id,
@@ -1499,9 +1528,10 @@ export default function ReturningPlayers() {
       // engaged so we can apply them server-side via the standard players query
       // (or, for conference, post-fetch client-side over the full dataset).
       //
-      // Team-scoped: skip the fast path when an effective customer team is set
-      // — the team-scoped row + global row both match server-side sorts and
-      // would yield duplicates; the slow path handles dedupe in JS.
+      // Fast path: server-side sort + paginate. Works for both global view
+      // (variant=regular, customer_team_id=null) and team-scoped view
+      // (variant=precomputed, customer_team_id=team). One row per player in
+      // both cases — no dedup needed, no full table scan.
       if (
         FAST_DB_SORT_KEYS.includes(sortKey) &&
         positionFilter === "all" &&
@@ -1509,22 +1539,26 @@ export default function ReturningPlayers() {
         batsFilters.size === 0 &&
         confFilters.size === 0 &&
         portalFilters.size === 0 &&
-        !showMissingOnly &&
-        !effectiveTeamId
+        !showMissingOnly
       ) {
         const orderColumn =
           sortKey === "p_war"
-            ? "p_wrc_plus" // pWAR is monotonic from pWRC+ in current model
+            ? "p_wrc_plus"
             : sortKey;
         const from = (page - 1) * pageSize;
         const to = from + pageSize - 1;
-        const { data: pageData, error: pageErr, count } = await supabase
+        let fastQ = supabase
           .from("player_predictions")
           .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip, division)", { count: "exact" })
           .eq("season", PROJECTION_SEASON)
           .in("model_type", ["returner", "transfer"])
-          .eq("variant", "regular")
-          .in("status", ["active", "departed"])
+          .in("status", ["active", "departed"]);
+        if (effectiveTeamId) {
+          fastQ = fastQ.eq("variant", "precomputed").eq("customer_team_id", effectiveTeamId);
+        } else {
+          fastQ = fastQ.eq("variant", "regular").is("customer_team_id", null);
+        }
+        const { data: pageData, error: pageErr, count } = await fastQ
           // Hitter pool = non-pitcher primary OR flagged two-way. The is_twp
           // branch surfaces pitcher-primary TWPs (position='P') in the hitter
           // dashboard, matching the new architecture where TWPs appear in BOTH
@@ -1544,13 +1578,20 @@ export default function ReturningPlayers() {
           .range(from, to);
         if (pageErr) throw pageErr;
 
-        const playerIds = (pageData || []).map((r: any) => r.player_id).filter(Boolean);
+
+        // Only fetch nil_valuations for the rare players missing market_value on
+        // their prediction row. Most have it populated by the precompute pipeline
+        // so this query is usually skipped entirely.
         const nilByPlayer = new Map<string, number | null>();
-        if (playerIds.length > 0) {
+        const playerIdsWithoutMarketValue = (pageData || [])
+          .filter((r: any) => r.market_value == null)
+          .map((r: any) => r.player_id)
+          .filter(Boolean);
+        if (playerIdsWithoutMarketValue.length > 0) {
           const NIL_BATCH = 300;
           const nilRowsAll: Array<{ player_id: string; estimated_value: number | null; season: number | null }> = [];
-          for (let i = 0; i < playerIds.length; i += NIL_BATCH) {
-            const ids = playerIds.slice(i, i + NIL_BATCH);
+          for (let i = 0; i < playerIdsWithoutMarketValue.length; i += NIL_BATCH) {
+            const ids = playerIdsWithoutMarketValue.slice(i, i + NIL_BATCH);
             const { data: nilRows, error: nilErr } = await supabase
               .from("nil_valuations")
               .select("player_id, estimated_value, season")
@@ -1568,15 +1609,17 @@ export default function ReturningPlayers() {
         }
 
         const rows = (pageData || []).map((row: any) => toReturnerRow(row, row.players, nilByPlayer));
+        _qlog(`fast-path done (${rows.length} rows, total=${count})`);
         return { rows, total: count ?? rows.length };
       }
 
-      // For other stat-column sorts, compute sort globally, then page that sorted set.
+      // For other stat-column sorts (and all team-scoped views), load all rows
+      // then sort client-side. Uses bounded concurrent fetching (5 pages at a time,
+      // no count query needed) to avoid both sequential slowness and DB overload.
       if (sortKey !== "name") {
-        let allData: any[] = [];
-        let predFrom = 0;
         const PRED_PAGE_SIZE = 1000;
-        while (true) {
+        const CONCURRENT = 5;
+        const buildSlowQ = (from: number) => {
           let q = supabase
             .from("player_predictions")
             .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip, division)")
@@ -1588,19 +1631,27 @@ export default function ReturningPlayers() {
             .not("players.division", "eq", "NJCAA_D1")
             .gte("players.pa", 75);
           q = applyTeamScopeFilter(q as any, effectiveTeamId);
-          // Stable ORDER BY for deterministic pagination. Without this,
-          // PostgREST returns rows in arbitrary order, so adjacent .range()
-          // calls overlap or skip rows — same query on the same data yields
-          // different distinct-player counts each run. That's the source of
-          // the "33 pages → 23 pages" flicker users saw on prod.
-          const { data, error } = await q.order("id", { ascending: true }).range(predFrom, predFrom + PRED_PAGE_SIZE - 1);
-          if (error) throw error;
-          allData = allData.concat(data || []);
-          if (!data || data.length < PRED_PAGE_SIZE) break;
-          predFrom += PRED_PAGE_SIZE;
+          return q.order("id", { ascending: true }).range(from, from + PRED_PAGE_SIZE - 1);
+        };
+
+        // Fetch 5 pages at a time without a count query.
+        let allData: any[] = [];
+        let from = 0;
+        while (true) {
+          const batch = await Promise.all(
+            Array.from({ length: CONCURRENT }, (_, i) => buildSlowQ(from + i * PRED_PAGE_SIZE))
+          );
+          let anyFull = false;
+          for (const { data, error } of batch) {
+            if (error) throw error;
+            if (data && data.length > 0) allData = allData.concat(data);
+            if (data && data.length === PRED_PAGE_SIZE) anyFull = true;
+          }
+          from += CONCURRENT * PRED_PAGE_SIZE;
+          if (!anyFull) break;
         }
-        // Prefer team-scoped precomputed row per player before existing
-        // best-of-multiple-regular picker runs.
+        _qlog(`slow-path fetch done (${allData.length} rows)`);
+
         allData = dedupePreferredPerPlayer(allData, effectiveTeamId);
 
         const byPlayer = new Map<string, any>();
@@ -1646,13 +1697,16 @@ export default function ReturningPlayers() {
         }
 
         const dedupedRows = Array.from(byPlayer.values());
-        const playerIds = dedupedRows.map((r: any) => r.player_id).filter(Boolean);
         const nilByPlayer = new Map<string, number | null>();
-        if (playerIds.length > 0) {
+        const playerIdsWithoutMarketValue = dedupedRows
+          .filter((r: any) => r.market_value == null)
+          .map((r: any) => r.player_id)
+          .filter(Boolean);
+        if (playerIdsWithoutMarketValue.length > 0) {
           const NIL_BATCH = 300;
           const nilRowsAll: Array<{ player_id: string; estimated_value: number | null; season: number | null }> = [];
-          for (let i = 0; i < playerIds.length; i += NIL_BATCH) {
-            const ids = playerIds.slice(i, i + NIL_BATCH);
+          for (let i = 0; i < playerIdsWithoutMarketValue.length; i += NIL_BATCH) {
+            const ids = playerIdsWithoutMarketValue.slice(i, i + NIL_BATCH);
             const { data: nilRows, error: nilErr } = await supabase
               .from("nil_valuations")
               .select("player_id, estimated_value, season")
@@ -2100,8 +2154,8 @@ export default function ReturningPlayers() {
   }, [sortKey, sortedRows, currentPage, pageSize]);
 
   useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
+    if (!isLoading && page > totalPages) setPage(totalPages);
+  }, [page, totalPages, isLoading]);
 
   const visiblePages = useMemo(() => {
     if (totalPages <= 11) return Array.from({ length: totalPages }, (_, i) => i + 1);
@@ -2140,149 +2194,121 @@ export default function ReturningPlayers() {
     return alias || raw;
   }, []);
   // Pitching Master – single source for stats + power metrics
-  const { pitchers: pitchingMasterRows, loading: pitchingMasterLoading } = usePitchingSeedData();
+  // Load pitcher data when on the pitching tab OR when the user has started
+  // typing (they may be searching for a pitcher from the hitting tab).
+  const pitcherDataEnabled = !authLoading && (dashboardView === "pitching" || search.trim().length > 0);
+  const { pitchers: pitchingMasterRows, loading: pitchingMasterLoading } = usePitchingSeedData(2026, pitcherDataEnabled);
 
-  // Pitcher predictions: raw fetch grouped by source_player_id, with effectiveTeamId
-  // intentionally NOT in the queryKey. Auth resolves null → real team on first
-  // mount; if the key included effectiveTeamId, the query would refire from
-  // loading state, return [], collapse pitchingTotalPages to 1, and the
-  // useEffect at the bottom would clobber pagination state. Team scoping now
-  // happens in the downstream useMemo so a team change is a fast re-derive,
-  // never a refetch.
-  const { data: pitcherAllRowsBySrcId, isLoading: pitcherPredLoading } = useQuery({
-    queryKey: ["returning-pitcher-predictions-raw"],
+  // Pitcher projections: team-scoped fetch keyed by effectiveTeamId so only
+  // relevant rows load (global regular + this team's precomputed). Includes
+  // player metadata (is_twp, portal_status) so the 31K pitcherMeta query is
+  // no longer needed. Also includes domain-scoped scouting scores (whiff_score,
+  // bb_score, pitcher_barrel_score) from PR #101.
+  const { data: pitcherPredBySourceId, isLoading: pitcherPredLoading } = useQuery({
+    queryKey: ["returning-pitcher-predictions-by-source-id", effectiveTeamId],
+    enabled: pitcherDataEnabled,
+    retry: 2,
+    retryDelay: 100,
     queryFn: async () => {
-      const all: any[] = [];
-      let from = 0;
+      const _t0 = performance.now();
       const PAGE = 1000;
-      while (true) {
-        const { data, error } = await supabase
+      const map = new Map<string, {
+        p_era: number | null;
+        p_fip: number | null;
+        p_whip: number | null;
+        p_k9: number | null;
+        p_bb9: number | null;
+        p_hr9: number | null;
+        p_rv_plus: number | null;
+        p_war: number | null;
+        market_value: number | null;
+        projected_ip: number | null;
+        pitcher_role: string | null;
+        class_year: string | null;
+        player_id: string | null;
+        is_twp: boolean;
+        portal_status: string | null;
+        whiff_score: number | null;
+        bb_score: number | null;
+        barrel_score: number | null;
+      }>();
+      const buildPitcherPredQ = (from: number, withCount: boolean) => {
+        let q = supabase
           .from("player_predictions")
-          .select("player_id, customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, projected_ip, pitcher_role, whiff_score, bb_score, pitcher_barrel_score, players!inner(source_player_id, class_year)")
+          .select(
+            "player_id, customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, projected_ip, pitcher_role, whiff_score, bb_score, pitcher_barrel_score, players!inner(source_player_id, class_year, is_twp, portal_status)",
+            withCount ? { count: "exact" } : undefined,
+          )
           .eq("season", PROJECTION_SEASON)
-          .in("variant", ["regular", "precomputed"])
           .in("status", ["active", "departed"])
-          .not("p_era", "is", null)
-          // Stable ORDER BY — same fix as the hitter pred fetch. Without
-          // it, paginated .range() calls overlap/skip rows non-determin-
-          // istically and the dedup downstream shrinks the row count.
-          .order("id", { ascending: true })
-          .range(from, from + PAGE - 1);
-        if (error) throw error;
-        all.push(...(data || []));
-        if (!data || data.length < PAGE) break;
-        from += PAGE;
-      }
-      const bySrcId = new Map<string, any[]>();
-      for (const r of all as any[]) {
-        const srcId = (r.players as any)?.source_player_id;
-        if (!srcId) continue;
-        const arr = bySrcId.get(srcId) || [];
-        arr.push(r);
-        bySrcId.set(srcId, arr);
-      }
-      return bySrcId;
-    },
-    staleTime: 60 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
+          .not("p_era", "is", null);
+        q = applyTeamScopeFilter(q as any, effectiveTeamId);
+        return q.range(from, from + PAGE - 1);
+      };
 
-  // Team-scoped projection map, derived from the stable raw fetch. Changing
-  // teams (or auth resolving from null → real) only re-runs this memo — no
-  // refetch, no loading state, no pagination clobber.
-  const pitcherPredBySourceId = useMemo(() => {
-    if (!pitcherAllRowsBySrcId) return undefined;
-    const map = new Map<string, {
-      p_era: number | null;
-      p_fip: number | null;
-      p_whip: number | null;
-      p_k9: number | null;
-      p_bb9: number | null;
-      p_hr9: number | null;
-      p_rv_plus: number | null;
-      p_war: number | null;
-      market_value: number | null;
-      projected_ip: number | null;
-      pitcher_role: string | null;
-      class_year: string | null;
-      whiff_score: number | null;
-      bb_score: number | null;
-      barrel_score: number | null;
-    }>();
-    for (const [srcId, rows] of pitcherAllRowsBySrcId.entries()) {
-      const pick = pickPreferredPrediction(rows, effectiveTeamId) as any;
-      if (!pick) continue;
-      map.set(srcId, {
-        p_era: pick.p_era,
-        p_fip: pick.p_fip,
-        p_whip: pick.p_whip,
-        p_k9: pick.p_k9,
-        p_bb9: pick.p_bb9,
-        p_hr9: pick.p_hr9,
-        p_rv_plus: pick.p_rv_plus,
-        p_war: pick.p_war ?? null,
-        market_value: pick.market_value ?? null,
-        projected_ip: pick.projected_ip ?? null,
-        pitcher_role: pick.pitcher_role,
-        class_year: pick.players?.class_year ?? null,
-        whiff_score: pick.whiff_score ?? null,
-        bb_score: pick.bb_score ?? null,
-        // Read domain-scoped pitcher_barrel_score so two-way players' hitter
-        // values can't bleed into the pitcher card. See migration
-        // 20260603120000_split_hitter_pitcher_scouting_scores.sql.
-        barrel_score: pick.pitcher_barrel_score ?? null,
-      });
-    }
-    return map;
-  }, [pitcherAllRowsBySrcId, effectiveTeamId]);
+      const { data: firstPred, error: firstPredErr, count: predCount } = await buildPitcherPredQ(0, true);
+      if (firstPredErr) throw firstPredErr;
+      const allPredRows: any[] = [...(firstPred || [])];
 
-  // Fallback: pull class_year + is_twp directly from `players` so pitchers
-  // without a prediction row still resolve their class (for the filter) and
-  // surface the TWP badge in the pitcher table.
-  const { data: pitcherMetaBySourceId, isLoading: pitcherMetaLoading } = useQuery({
-    queryKey: ["returning-pitcher-meta-by-source-id"],
-    queryFn: async () => {
-      const map = new Map<string, { class_year: string | null; is_twp: boolean; player_id: string | null; portal_status: string | null }>();
-      let from = 0;
-      const PAGE = 1000;
-      while (true) {
-        const { data, error } = await supabase
-          .from("players")
-          .select("id, source_player_id, class_year, is_twp, portal_status")
-          .not("source_player_id", "is", null)
-          // Stable ORDER BY for deterministic pagination.
-          .order("id", { ascending: true })
-          .range(from, from + PAGE - 1);
-        if (error) throw error;
-        for (const r of (data || []) as any[]) {
-          if (r.source_player_id) {
-            map.set(r.source_player_id, {
-              class_year: r.class_year ?? null,
-              is_twp: !!r.is_twp,
-              player_id: r.id ?? null,
-              portal_status: r.portal_status ?? null,
-            });
+      if (predCount && predCount > PAGE) {
+        const totalPages = Math.ceil((predCount - PAGE) / PAGE);
+        for (let i = 0; i < totalPages; i += 5) {
+          const batch = Array.from(
+            { length: Math.min(5, totalPages - i) },
+            (_, j) => buildPitcherPredQ((i + j + 1) * PAGE, false)
+          );
+          const pages = await Promise.all(batch);
+          for (const { data, error } of pages) {
+            if (error) throw error;
+            allPredRows.push(...(data || []));
           }
         }
-        if (!data || data.length < PAGE) break;
-        from += PAGE;
       }
+
+      for (const r of allPredRows) {
+        const srcId = r.players?.source_player_id;
+        if (!srcId) continue;
+        const existing = map.get(srcId);
+        const wantsTeamRow = effectiveTeamId && r.customer_team_id === effectiveTeamId && r.variant === "precomputed";
+        const wantsGlobalRow = !effectiveTeamId && r.variant === "regular" && r.customer_team_id == null;
+        const fallback = r.variant === "regular" && r.customer_team_id == null;
+        const shouldSet = wantsTeamRow || wantsGlobalRow || (!existing && fallback);
+        if (!shouldSet && existing) continue;
+        map.set(srcId, {
+          p_era: r.p_era,
+          p_fip: r.p_fip,
+          p_whip: r.p_whip,
+          p_k9: r.p_k9,
+          p_bb9: r.p_bb9,
+          p_hr9: r.p_hr9,
+          p_rv_plus: r.p_rv_plus,
+          p_war: r.p_war ?? null,
+          market_value: r.market_value ?? null,
+          projected_ip: r.projected_ip ?? null,
+          pitcher_role: r.pitcher_role,
+          class_year: r.players?.class_year ?? null,
+          player_id: r.player_id ?? null,
+          is_twp: !!(r.players as any)?.is_twp,
+          portal_status: (r.players as any)?.portal_status ?? null,
+          whiff_score: r.whiff_score ?? null,
+          bb_score: r.bb_score ?? null,
+          barrel_score: r.pitcher_barrel_score ?? null,
+        });
+      }
+      console.log(`[PitcherPreds] loaded ${map.size} pitchers in ${Math.round(performance.now() - _t0)}ms`);
       return map;
     },
     staleTime: 60 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
 
+  // pitcherMetaBySourceId removed — player_id, is_twp, portal_status now come
+  // from the players!inner join inside pitcherPredBySourceId.
+
   const pitchingRows = useMemo<PitchingDashboardRow[]>(() => {
     // Gate on the pitcher prediction query so the table doesn't render with
     // "—" placeholders during the brief window before stored preds resolve.
     if (pitcherPredLoading) return [] as PitchingDashboardRow[];
-    // Also wait for the player meta map (source_player_id → players.id) to
-    // finish loading. Building rows before it resolves causes player_id to
-    // be null on every row, which makes the link generator fall back to
-    // /dashboard/pitcher/storage__Name__Team. The downstream profile fix
-    // recovers, but the URL is ugly and breaks back/forward nav consistency.
-    if (!pitcherMetaBySourceId) return [] as PitchingDashboardRow[];
     const eq = readPitchingWeights();
     const powerEq = pitchingPowerEq;
     let roleOverrides: Record<string, "SP" | "RP" | "SM"> = {};
@@ -2422,20 +2448,15 @@ export default function ReturningPlayers() {
           // prediction (canonical, came from the recalc engine's player join);
           // fall back to the players-table direct read for pitchers who don't
           // yet have a prediction row.
-          const pitcherMeta = r.source_player_id ? pitcherMetaBySourceId?.get(r.source_player_id) : undefined;
-          const pitcherClassYear: string | null = (
-            (dbPred?.class_year as string | null | undefined) ??
-            pitcherMeta?.class_year ??
-            null
-          );
-          const pitcherIsTwp = !!pitcherMeta?.is_twp;
+          const pitcherClassYear: string | null = (dbPred?.class_year as string | null | undefined) ?? null;
+          const pitcherIsTwp = !!(dbPred as any)?.is_twp;
           // Stored-values only: if no precompute row exists for this pitcher,
           // surface them with null projections (display as "—") rather than
           // live-computing from raw stats. Live compute drifts from stored —
           // misleading info is worse than no info.
           return {
             id: r.id || `pitching-master-${idx}`,
-            player_id: pitcherMeta?.player_id ?? null,
+            player_id: (dbPred as any)?.player_id ?? null,
             playerName,
             team: normalizedTeam || null,
             conference: teamMatch?.conference ?? r.conference ?? null,
@@ -2468,13 +2489,13 @@ export default function ReturningPlayers() {
             p_rv_plus: dbPRvPlus,
             p_war: dbPWar,
             market_value: dbMarketValue,
-            portal_status: pitcherMeta?.portal_status ?? null,
+            portal_status: (dbPred as any)?.portal_status ?? null,
           } as PitchingDashboardRow;
         })
         .filter((r) => !!r.playerName);
     }
     return [] as PitchingDashboardRow[];
-  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq, pitcherPredBySourceId, pitcherMetaBySourceId, pitcherPredLoading]);
+  }, [normalizePitchingTeam, teamParkComponents, teamsByNorm, pitchingMasterRows, pitchingPowerEq, pitcherPredBySourceId, pitcherPredLoading]);
   const filteredPitchingRows = useMemo(() => {
     // Qualification threshold: pitchers need at least 25 IP to show in the table
     // (parallel to hitters needing 75 PA). Profile pages are still searchable/accessible
@@ -3302,7 +3323,7 @@ export default function ReturningPlayers() {
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              {(pitchingMasterLoading || pitcherPredLoading || pitcherMetaLoading) && pagedPitchingRows.length === 0 ? (
+              {(pitchingMasterLoading || pitcherPredLoading) && pagedPitchingRows.length === 0 ? (
                 <div className="flex items-center justify-center py-16 text-muted-foreground">Loading pitchers…</div>
               ) : pagedPitchingRows.length === 0 ? (
                 <div className="flex items-center justify-center py-16 text-muted-foreground">No pitchers found</div>
