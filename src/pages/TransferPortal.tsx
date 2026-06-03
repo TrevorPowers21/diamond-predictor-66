@@ -2237,12 +2237,36 @@ export default function TransferPortal() {
               }
 
               // D1 sim — match PlayerProfile's risk inputs so the same player
-              // shows the same risk grade on both surfaces. PlayerProfile
-              // passes the player's ORIGIN conference (current context), not
-              // the destination conference. Destination effect on projection
-              // is already captured by simulation.pWrcPlus (and matches the
-              // team-scoped precomputed projection when destination is a
-              // customer team).
+              // shows the same risk grade on both surfaces.
+              //
+              // PlayerProfile reads scouting fields from projectionSourceRow,
+              // a 2026 Hitter Master row with blended-sample handling.
+              // useHitterSeedData was stripped to identity-only columns, so
+              // the powerByPlayerId/powerByNameTeam path is missing all the
+              // scouting fields — that was the skillset divergence.
+              //
+              // hitterCareerSeasons (the trajectory query) DOES select * from
+              // Hitter Master, so we derive projectionSourceRow from it and
+              // honour the same blended_* fallbacks PlayerProfile uses for
+              // thin-sample players.
+              const projectionSourceRow = (() => {
+                const row = (hitterCareerSeasons as any[]).find((r) => Number(r.Season) === 2026);
+                if (!row) return null;
+                const cu = !!row.combined_used;
+                return {
+                  contact: cu ? (row.blended_contact ?? row.contact) : row.contact,
+                  line_drive: cu ? (row.blended_line_drive ?? row.line_drive) : row.line_drive,
+                  avg_exit_velo: cu ? (row.blended_avg_exit_velo ?? row.avg_exit_velo) : row.avg_exit_velo,
+                  bb: cu ? (row.blended_bb ?? row.bb) : row.bb,
+                  chase: cu ? (row.blended_chase ?? row.chase) : row.chase,
+                  barrel: cu ? (row.blended_barrel ?? row.barrel) : row.barrel,
+                  ev90: cu ? (row.blended_ev90 ?? row.ev90) : row.ev90,
+                  pull: cu ? (row.blended_pull ?? row.pull) : row.pull,
+                  gb: cu ? (row.blended_gb ?? row.gb) : row.gb,
+                  pa: row.pa ?? null,
+                };
+              })();
+
               const originConference = selectedPlayer?.conference ?? null;
               const originConfRow = originConference ? confByKey.get(originConference.toLowerCase().trim()) ?? null : null;
               const risk = assessHitterRisk({
@@ -2250,11 +2274,16 @@ export default function TransferPortal() {
                 projectedWrcPlus: simulation.pWrcPlus,
                 confStuffPlus: originConfRow?.stuff_plus ?? null,
                 careerSeasons: hitterCareerSeasons as any[],
-                pa: resolvedPa,
-                chase: sp?.chase, contact: sp?.contact,
-                barrel: sp?.barrel, lineDrive: sp?.lineDrive,
-                avgEv: sp?.avgExitVelo, ev90: sp?.ev90,
-                pull: sp?.pull, gb: sp?.gb, bb: sp?.bb,
+                pa: projectionSourceRow?.pa ?? resolvedPa,
+                chase: projectionSourceRow?.chase ?? sp?.chase,
+                contact: projectionSourceRow?.contact ?? sp?.contact,
+                barrel: projectionSourceRow?.barrel ?? sp?.barrel,
+                lineDrive: projectionSourceRow?.line_drive ?? sp?.lineDrive,
+                avgEv: projectionSourceRow?.avg_exit_velo ?? sp?.avgExitVelo,
+                ev90: projectionSourceRow?.ev90 ?? sp?.ev90,
+                pull: projectionSourceRow?.pull ?? sp?.pull,
+                gb: projectionSourceRow?.gb ?? sp?.gb,
+                bb: projectionSourceRow?.bb ?? sp?.bb,
               });
               return <RiskAssessmentCardRSTR risk={risk} />;
             })()}
