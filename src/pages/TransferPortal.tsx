@@ -2215,11 +2215,19 @@ export default function TransferPortal() {
                 }} />;
               }
 
-              // D1 sim — full assessor with destination-conference competition.
+              // D1 sim — match PlayerProfile's risk inputs so the same player
+              // shows the same risk grade on both surfaces. PlayerProfile
+              // passes the player's ORIGIN conference (current context), not
+              // the destination conference. Destination effect on projection
+              // is already captured by simulation.pWrcPlus (and matches the
+              // team-scoped precomputed projection when destination is a
+              // customer team).
+              const originConference = selectedPlayer?.conference ?? null;
+              const originConfRow = originConference ? confByKey.get(originConference.toLowerCase().trim()) ?? null : null;
               const risk = assessHitterRisk({
-                conference: toConference,
+                conference: originConference,
                 projectedWrcPlus: simulation.pWrcPlus,
-                confStuffPlus: toConfRow?.stuff_plus ?? null,
+                confStuffPlus: originConfRow?.stuff_plus ?? null,
                 careerSeasons: hitterCareerSeasons as any[],
                 pa: resolvedPa,
                 chase: sp?.chase, contact: sp?.contact,
@@ -2408,11 +2416,15 @@ export default function TransferPortal() {
                 }} />;
               }
 
-              // D1 sim — keep the full assessor.
+              // D1 sim — match PitcherProfile's risk inputs so the same
+              // pitcher shows the same grade on both surfaces. PitcherProfile
+              // uses ORIGIN conference + origin hitter-talent (current
+              // context), not destination. Destination effect on projection
+              // is already captured by pitchingSimulation.pRvPlus.
               const risk = assessPitcherRisk({
-                conference: pitchingSimulation.toConference ?? null,
+                conference: pitchingSimulation.fromConference ?? null,
                 projectedPrvPlus: pitchingSimulation.pRvPlus,
-                confHitterTalentPlus: pitchingSimulation.toHitterTalent,
+                confHitterTalentPlus: pitchingSimulation.fromHitterTalent,
                 careerSeasons: pitcherCareerSeasons as any[],
                 ip: (selectedPitcher as any).ip ?? null,
                 stuffPlus: selectedPitcher.stuffPlus,
