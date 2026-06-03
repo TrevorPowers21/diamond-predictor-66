@@ -513,7 +513,7 @@ function readLocalNum(key: string, fallback: number, remoteValues?: Record<strin
 export default function TransferPortal() {
   const location = useLocation();
   const { toast } = useToast();
-  const { hasRole, effectiveTeamId } = useAuth();
+  const { hasRole, effectiveTeamId, loading: authLoading } = useAuth();
   const { hitterStats, powerRatings } = useHitterSeedData();
   const { addPlayer: addToSupabaseBoard, isOnBoard: isOnSupabaseBoard } = useTargetBoard();
   const isAdmin = hasRole("admin");
@@ -576,6 +576,12 @@ export default function TransferPortal() {
 
   const { data: players = [], isLoading: playersLoading } = useQuery({
     queryKey: ["transfer-sim-players"],
+    // Heavy query: ~32K players + ~100K prediction rows. Cache aggressively
+    // — data only changes when an admin imports or a precompute runs, not
+    // mid-session. Without this the page re-fetched on every tab focus.
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     queryFn: async () => {
       let allPlayers: any[] = [];
       let from = 0;
@@ -584,6 +590,10 @@ export default function TransferPortal() {
         const { data, error } = await supabase
           .from("players")
           .select("id, first_name, last_name, position, team, from_team, conference, division, transfer_portal, team_id, source_team_id, bats_hand")
+          // Stable ORDER BY for deterministic pagination — without it,
+          // adjacent .range() calls overlap or skip rows non-determin-
+          // istically and the downstream dedup shrinks the player set.
+          .order("id", { ascending: true })
           .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
         allPlayers = allPlayers.concat(data || []);
@@ -612,6 +622,7 @@ export default function TransferPortal() {
           `)
           .eq("season", PROJECTION_SEASON)
           .in("model_type", ["returner", "transfer"])
+          .order("id", { ascending: true })
           .range(predFrom, predFrom + PAGE_SIZE - 1);
         if (error) throw error;
         allPredRows = allPredRows.concat(data || []);
@@ -723,6 +734,12 @@ export default function TransferPortal() {
 
   const { data: remoteEquationValues = {} } = useQuery({
     queryKey: ["admin-ui-equation-values", CURRENT_SEASON, effectiveTeamId],
+    // Gate on auth so effectiveTeamId is stable on first fire — same race
+    // we killed in ReturningPlayers.
+    enabled: !authLoading,
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("model_config")
@@ -977,6 +994,9 @@ export default function TransferPortal() {
   // in-progress current season would falsely flag every player as thin sample.
   const { data: hitterPaMap = new Map<string, number>() } = useQuery({
     queryKey: ["transfer-portal-pa-lookup", PRIOR_SEASON],
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     queryFn: async () => {
       const map = new Map<string, number>();
       const { data: hmRows } = await (supabase as any)
@@ -989,17 +1009,29 @@ export default function TransferPortal() {
         const pa = r.pa ?? r.ab ?? null;
         if (pa != null && r.source_player_id) sourceIdToPa.set(r.source_player_id, pa);
       }
-      const { data: playerRows } = await supabase
-        .from("players")
-        .select("id, source_player_id");
-      for (const p of (playerRows || [])) {
+      // Paginated: prod has ~32K players, default PostgREST limit truncates
+      // at 1000 → risk assessment silently misses ~97% of players.
+      const playerRows: Array<{ id: string; source_player_id: string | null }> = [];
+      let from = 0;
+      const PAGE = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("players")
+          .select("id, source_player_id")
+          .order("id", { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        playerRows.push(...((data ?? []) as any));
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+      }
+      for (const p of playerRows) {
         if (p.source_player_id && sourceIdToPa.has(p.source_player_id)) {
           map.set(p.id, sourceIdToPa.get(p.source_player_id)!);
         }
       }
       return map;
     },
-    staleTime: 30 * 60 * 1000,
   });
 
   // JUCO TrackMan-pitch lookup for the data-reliability badge.
@@ -1022,18 +1054,33 @@ export default function TransferPortal() {
           pa: r.pa != null ? Number(r.pa) : null,
         });
       }
-      const { data: playerRows } = await supabase
-        .from("players")
-        .select("id, source_player_id")
-        .eq("division", "NJCAA_D1");
-      for (const p of (playerRows || [])) {
+      // Paginated for the same reason as hitterPaMap above. JUCO subset is
+      // smaller (~5K) so usually fits in one page, but keep it safe.
+      const playerRows: Array<{ id: string; source_player_id: string | null }> = [];
+      let from = 0;
+      const PAGE = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("players")
+          .select("id, source_player_id")
+          .eq("division", "NJCAA_D1")
+          .order("id", { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        playerRows.push(...((data ?? []) as any));
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+      }
+      for (const p of playerRows) {
         if (p.source_player_id && bySource.has(p.source_player_id)) {
           map.set(p.id, bySource.get(p.source_player_id)!);
         }
       }
       return map;
     },
-    staleTime: 30 * 60 * 1000,
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   const confByKey = useMemo(() => {
