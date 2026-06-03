@@ -118,6 +118,11 @@ const toWeight = (n: number) => (Math.abs(n) >= 10 ? n / 100 : n);
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 const statKey = (v: number | null | undefined) => (v == null ? "na" : round3(v).toFixed(3));
 
+// Stable empty defaults — prevents useMemos from recalculating every render
+// when queries are loading ([] / {} literals create new references each time).
+const EMPTY_LIVE_PREDS: any[] = [];
+const EMPTY_INTERNALS: any[] = [];
+const EMPTY_EQUATION_VALUES: Record<string, number> = {};
 
 const selectTransferPortalPreferredPrediction = (predictions: any[] | null | undefined) => {
   const list = (predictions || []).filter(Boolean);
@@ -467,7 +472,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     [rosterPlayers],
   );
 
-  const { data: liveTargetPredictions = [] } = useQuery({
+  const { data: liveTargetPredictions = EMPTY_LIVE_PREDS } = useQuery({
     queryKey: ["team-builder-live-target-predictions", targetPlayerIds, effectiveTeamId],
     enabled: targetPlayerIds.length > 0,
     queryFn: async () => {
@@ -530,9 +535,11 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     return Array.from(ids);
   }, [targetPredictionIds, liveTargetPredictions]);
 
-  const { data: predictionInternalsRows = [] } = useQuery({
+  const { data: predictionInternalsRows = EMPTY_INTERNALS } = useQuery({
     queryKey: ["team-builder-prediction-internals", internalsPredictionIds],
     enabled: internalsPredictionIds.length > 0,
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("player_prediction_internals")
@@ -620,15 +627,18 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
 
     if (!treatAsPitcher && effectiveTeamId && (livePred as any)?.variant === "precomputed" && (livePred as any)?.customer_team_id === effectiveTeamId) {
       const lp = livePred as any;
-      // Stored o_war + market_value reflect the canonical precompute
-      // (PA carry-forward + program tier baked in). Scale by depth role
-      // multiplier so changing the depth dropdown moves the row's oWAR + market
-      // alongside the team totals (which use the same depth multiplier).
-      const depthMult = depthRoleMultiplier(p.depth_role);
+      // Stored o_war + market_value are the canonical precomputed values —
+      // hitter_depth_role and projected_pa were already factored in by the
+      // precompute pipeline. Do NOT apply depthMult here; the stored values
+      // are final and team-specific. depthMult only applies to the client-
+      // computed fallback path (when no precomputed row exists).
       const storedOwar = lp.o_war as number | null | undefined;
       const storedMarket = lp.market_value as number | null | undefined;
-      const owar = storedOwar != null ? storedOwar * depthMult : computeOWarFromWrcPlus(lp.p_wrc_plus ?? null);
-      const nil_valuation = storedMarket != null ? storedMarket * depthMult : null;
+      const owar = storedOwar != null ? storedOwar : computeOWarFromWrcPlus(lp.p_wrc_plus ?? null) * depthRoleMultiplier(p.depth_role);
+      // market_value may be absent from p.prediction (saved build data doesn't
+      // include it in its schema). Fall back to transfer_snapshot.nil_valuation
+      // which IS populated from the load-build query.
+      const nil_valuation = storedMarket ?? p.transfer_snapshot?.nil_valuation ?? null;
       return {
         p_avg: lp.p_avg ?? null,
         p_obp: lp.p_obp ?? null,

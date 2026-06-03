@@ -43,6 +43,10 @@ export type SeasonUsage = {
   pitcherG: Map<string, number>;
 };
 
+// Stable empty default — {} literal creates a new reference each render,
+// causing simulateTransferProjection useCallback to recreate on every render.
+const EMPTY_EQUATION_VALUES: Record<string, number> = {};
+
 const SEASON_USAGE_FALLBACK: SeasonUsage = {
   thinSample: new Map(),
   hitterAb: new Map(),
@@ -66,7 +70,10 @@ export function useTeamBuilderData({
 }) {
   // ── External seed / config hooks ────────────────────────────────────────────
   const { hitterStats, powerRatings: powerRatingsData, exitPositions } = useHitterSeedData();
-  const { pitchers: pitchingMasterRows } = usePitchingSeedData();
+  // Gate behind effectiveTeamId — it's null until auth resolves, so this
+  // prevents the concurrent page fetches from firing before the JWT is ready
+  // (which causes 500s on the Pitching Master concurrent batch requests).
+  const { pitchers: pitchingMasterRows } = usePitchingSeedData(2026, !!effectiveTeamId);
   const pitchingPowerEq = usePitchingEquationWeights();
   const { conferenceStats: newConfStats } = useConferenceStats(2026);
   const { overrides: playerOverrideMap, updateOverride: updatePlayerOverrideFn } = usePlayerOverrides();
@@ -75,6 +82,7 @@ export function useTeamBuilderData({
   const { parkMap: teamParkComponents } = useParkFactors();
   const {
     board: supabaseTargetBoard,
+    isLoading: targetBoardLoading,
     removePlayer: removeFromSupabaseBoard,
     addPlayer: addToSupabaseBoard,
     isOnBoard: isOnSupabaseBoard,
@@ -107,8 +115,10 @@ export function useTeamBuilderData({
 
   // ── Static Supabase queries ──────────────────────────────────────────────────
 
-  const { data: remoteEquationValues = {} } = useQuery({
+  const { data: remoteEquationValues = EMPTY_EQUATION_VALUES } = useQuery({
     queryKey: ["admin-ui-equation-values", CURRENT_SEASON],
+    staleTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("model_config")
@@ -377,6 +387,7 @@ export function useTeamBuilderData({
     teamsByName,
     teamParkComponents,
     supabaseTargetBoard,
+    targetBoardLoading,
     removeFromSupabaseBoard,
     addToSupabaseBoard,
     isOnSupabaseBoard,

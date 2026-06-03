@@ -75,37 +75,26 @@ export type PitchingMasterSeedRow = {
  */
 export function usePitchingSeedData(season = 2026, enabled = true) {
   const { data: dbRows = [], isLoading } = useQuery({
-    queryKey: ["pitching_master", season],
+    queryKey: ["pitching_master", season, "ip10"],
     enabled,
     queryFn: async () => {
       const all: any[] = [];
-      const pageSize = 1000;
-      // select("*") kept for safety — narrow attempted but special-char column
-      // names (90th_vel) broke pitcher rendering. Revisit if payload size matters.
-      const CONCURRENT = 5;
       let from = 0;
-      const fetchPage = (offset: number) =>
-        supabase
+      const pageSize = 1000;
+      // select("*") kept — 90th_vel column name breaks narrow selects.
+      const t0 = performance.now();
+      while (true) {
+        const { data, error } = await supabase
           .from("Pitching Master")
           .select("*")
           .eq("Season", season)
-          .gte("IP", 1)
+          .gte("IP", 10)
           .not("Role", "in", "(C,1B,2B,3B,SS,OF,LF,CF,RF,DH,IF,UT)")
-          .range(offset, offset + pageSize - 1);
-
-      const t0 = performance.now();
-      while (true) {
-        const batch = await Promise.all(
-          Array.from({ length: CONCURRENT }, (_, i) => fetchPage(from + i * pageSize))
-        );
-        let anyFull = false;
-        for (const { data, error } of batch) {
-          if (error) throw error;
-          if (data && data.length > 0) all.push(...data);
-          if (data && data.length === pageSize) anyFull = true;
-        }
-        from += CONCURRENT * pageSize;
-        if (!anyFull) break;
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        all.push(...(data || []));
+        if (!data || data.length < pageSize) break;
+        from += pageSize;
       }
       console.log(`[PitchingMaster] loaded ${all.length} rows in ${Math.round(performance.now() - t0)}ms`);
       return all;
