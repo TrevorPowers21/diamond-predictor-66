@@ -1207,6 +1207,19 @@ export default function TransferPortal() {
     return map;
   }, [powerRatings]);
 
+  // Same fast-path resolver PlayerProfile uses. Lookup by source_player_id is
+  // unambiguous — eliminates the name+team-fuzzy-match drift that was making
+  // TPS show different scouting (chase / barrel / EV) than PlayerProfile for
+  // players with common names or slightly mismatched team strings.
+  const powerByPlayerId = useMemo(() => {
+    const map = new Map<string, typeof powerRatings[0]>();
+    for (const row of powerRatings) {
+      const sid = (row as any).player_id;
+      if (sid) map.set(String(sid), row);
+    }
+    return map;
+  }, [powerRatings]);
+
   const inferredFromTeam = useMemo(() => {
     if (!selectedPlayer) return null;
     // Fast path: UUID match
@@ -2187,7 +2200,15 @@ export default function TransferPortal() {
             {simulation && !simulation.blocked && (() => {
               const fullName = selectedPlayer ? `${selectedPlayer.first_name} ${selectedPlayer.last_name}` : "";
               const spKey = `${normalizeKey(fullName)}|${normalizeKey(fromTeam)}`;
-              const sp = powerByNameTeam.get(spKey) ?? powerByNameTeam.get(normalizeKey(fullName)) ?? null;
+              // Fast path: source_player_id direct lookup (same as
+              // PlayerProfile). Falls back to name+team fuzzy match for
+              // players whose seed row isn't keyed by source_player_id yet.
+              const sp = (
+                (selectedPlayer?.source_player_id ? powerByPlayerId.get(String(selectedPlayer.source_player_id)) : null)
+                ?? powerByNameTeam.get(spKey)
+                ?? powerByNameTeam.get(normalizeKey(fullName))
+                ?? null
+              );
               const toConfRow = toConference ? confByKey.get(toConference.toLowerCase().trim()) ?? null : null;
               const resolvedPa = selectedPlayer?.player_id ? (hitterPaMap.get(selectedPlayer.player_id) ?? null) : null;
               const isJucoSrc = selectedPlayer?.division === "NJCAA_D1";
