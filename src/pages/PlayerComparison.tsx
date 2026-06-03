@@ -113,7 +113,8 @@ const pitcherStatTier = (
 export default function PlayerComparison() {
   const location = useLocation();
   const { effectiveTeamId, loading: authLoading } = useAuth();
-  const { effectiveSchoolName } = useEffectiveSchool();
+  const { schoolFullName, schoolName } = useEffectiveSchool();
+  const destTeamLabel = schoolFullName ?? schoolName ?? "";
 
   const [simType, setSimType] = useState<"hitting" | "pitching">("hitting");
   const [roleA, setRoleA] = useState<"SP" | "RP">("SP");
@@ -327,7 +328,7 @@ export default function PlayerComparison() {
             </div>
             <div>
               <Label className="text-xs mb-1 block">To Team</Label>
-              <Input className="h-8 text-sm cursor-not-allowed" value={effectiveSchoolName ?? ""} disabled readOnly />
+              <Input className="h-8 text-sm cursor-not-allowed" value={destTeamLabel} disabled readOnly />
             </div>
           </div>
 
@@ -438,7 +439,7 @@ export default function PlayerComparison() {
             </div>
             <div className="col-span-2">
               <Label className="text-xs mb-1 block">To Team</Label>
-              <Input className="h-8 text-sm cursor-not-allowed" value={effectiveSchoolName ?? ""} disabled readOnly />
+              <Input className="h-8 text-sm cursor-not-allowed" value={destTeamLabel} disabled readOnly />
             </div>
             <div>
               <Label className="text-xs mb-1 block">Role</Label>
