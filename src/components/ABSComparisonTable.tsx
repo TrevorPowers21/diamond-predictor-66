@@ -18,6 +18,7 @@
  *     the component hides itself entirely (no half-baked panel).
  */
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
@@ -66,6 +67,12 @@ export function ABSComparisonTable(props: {
   const { schoolName } = useEffectiveSchool();
   const isGeorgia = schoolName === GEORGIA_SCHOOL_NAME;
 
+  // TEMP layout preview — append ?abs_preview=1 to any profile URL to
+  // bypass the Georgia gate AND the empty-data gate, rendering the table
+  // with placeholder numbers. Remove before merging the data-load CSV.
+  const [searchParams] = useSearchParams();
+  const previewMode = searchParams.get("abs_preview") === "1";
+
   const { data, isLoading } = useQuery({
     queryKey: ["abs-stats", playerType, sourcePlayerId, season],
     enabled: isGeorgia && !!sourcePlayerId,
@@ -90,46 +97,61 @@ export function ABSComparisonTable(props: {
     },
   });
 
-  // Hard gates — render nothing if any of these fail.
-  if (!isGeorgia) return null;
-  if (!sourcePlayerId) return null;
-  if (isLoading) return null;
-  if (!data) return null;
+  // Hard gates — render nothing if any of these fail. Preview mode skips
+  // all of them so designers can review the layout without a seeded DB.
+  if (!previewMode) {
+    if (!isGeorgia) return null;
+    if (!sourcePlayerId) return null;
+    if (isLoading) return null;
+    if (!data) return null;
+  }
 
-  const rows: Row[] = playerType === "hitter" ? hitterRows(data as HitterRow) : pitcherRows(data as PitcherRow);
+  const sourceData = previewMode
+    ? (playerType === "hitter" ? PREVIEW_HITTER : PREVIEW_PITCHER)
+    : data;
+  const rows: Row[] = playerType === "hitter"
+    ? hitterRows(sourceData as HitterRow)
+    : pitcherRows(sourceData as PitcherRow);
   // Suppress the card entirely if every row has both sides null.
   const anyData = rows.some((r) => r.current != null || r.abs != null);
   if (!anyData) return null;
 
   return (
-    <Card className="overflow-visible border-border/70 shadow-sm bg-card">
+    <Card className="overflow-visible border-l-[3px] border-l-[#D4AF37] border-t border-r border-b border-border/60 shadow-sm bg-card">
       <CardHeader className="pb-2 border-b bg-muted/20">
-        <CardTitle
-          className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]"
-          style={{ fontFamily: "'Oswald', sans-serif" }}
-        >
-          ABS Strike Zone Comparison
-        </CardTitle>
-        <p className="text-[10px] text-muted-foreground mt-1">
+        <div className="flex items-baseline justify-between gap-3">
+          <CardTitle
+            className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]"
+            style={{ fontFamily: "'Oswald', sans-serif" }}
+          >
+            ABS Strike Zone Comparison
+          </CardTitle>
+          <span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground">
+            SEC · Georgia
+          </span>
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-1 leading-snug">
           Current NCAA zone vs the larger Automated Ball-Strike zone coming to the SEC.
         </p>
       </CardHeader>
-      <CardContent className="pt-3">
-        <table className="w-full text-sm">
-          <thead className="text-[10px] uppercase tracking-wide text-muted-foreground">
-            <tr className="border-b">
-              <th className="text-left font-semibold py-2">Stat</th>
-              <th className="text-right font-semibold py-2">Current</th>
-              <th className="text-right font-semibold py-2">ABS</th>
-              <th className="text-right font-semibold py-2">Δ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <ComparisonRow key={r.label} row={r} />
-            ))}
-          </tbody>
-        </table>
+      <CardContent className="pt-2 pb-2">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-[9px] uppercase tracking-[0.08em] text-muted-foreground">
+              <tr className="border-b">
+                <th className="text-left font-semibold py-1.5 pr-2">Stat</th>
+                <th className="text-right font-semibold py-1.5 px-2 w-[80px]">Current</th>
+                <th className="text-right font-semibold py-1.5 px-2 w-[80px]">ABS</th>
+                <th className="text-right font-semibold py-1.5 pl-2 w-[64px]">Δ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <ComparisonRow key={r.label} row={r} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       </CardContent>
     </Card>
   );
@@ -151,11 +173,11 @@ function ComparisonRow({ row }: { row: Row }) {
         ? "text-rose-600 dark:text-rose-400"
         : "text-muted-foreground";
   return (
-    <tr className="border-b last:border-b-0 hover:bg-muted/30">
-      <td className="py-1.5 text-xs">{row.label}</td>
-      <td className="py-1.5 text-right tabular-nums text-xs">{fmt(row.current)}</td>
-      <td className="py-1.5 text-right tabular-nums text-xs font-semibold">{fmt(row.abs)}</td>
-      <td className={`py-1.5 text-right tabular-nums text-xs ${deltaColor}`}>{deltaStr}</td>
+    <tr className="border-b last:border-b-0 hover:bg-muted/30 transition-colors duration-150">
+      <td className="py-1.5 pr-2 text-xs">{row.label}</td>
+      <td className="py-1.5 px-2 text-right tabular-nums text-xs text-muted-foreground">{fmt(row.current)}</td>
+      <td className="py-1.5 px-2 text-right tabular-nums text-xs font-semibold">{fmt(row.abs)}</td>
+      <td className={`py-1.5 pl-2 text-right tabular-nums text-xs font-medium ${deltaColor}`}>{deltaStr}</td>
     </tr>
   );
 }
@@ -172,6 +194,19 @@ function hitterRows(d: HitterRow): Row[] {
     { label: "EV Outskirts", current: d.ev_outskirts, abs: d.abs_ev_outskirts, suffix: " mph" },
   ];
 }
+
+// Placeholder values for ?abs_preview=1 — for design review only.
+const PREVIEW_HITTER: HitterRow = {
+  chase_pct: 22.5, csw_pct: 28.5, contact_pct: 78.2, in_zone_contact_pct: 84.1,
+  abs_chase_pct: 25.1, abs_csw_pct: 31.2, abs_contact_pct: 76.8, abs_in_zone_contact_pct: 81.3,
+  avg_exit_velo: 88.4, ev_in_zone: 90.1, ev_outskirts: 84.2, barrel_pct: 12.5,
+  abs_avg_exit_velo: 88.4, abs_ev_in_zone: 90.1, abs_ev_outskirts: 84.2, abs_barrel_pct: 12.5,
+};
+
+const PREVIEW_PITCHER: PitcherRow = {
+  csw_pct: 28.5, strike_pct: 64.2, in_zone_pct: 48.7,
+  abs_csw_pct: 31.8, abs_strike_pct: 66.9, abs_in_zone_pct: 53.1,
+};
 
 function pitcherRows(d: PitcherRow): Row[] {
   return [
