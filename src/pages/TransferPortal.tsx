@@ -1686,42 +1686,11 @@ export default function TransferPortal() {
               const resolvedPa = selectedPlayer?.player_id ? (hitterPaMap.get(selectedPlayer.player_id) ?? null) : null;
               const isJucoSrc = selectedPlayer?.division === "NJCAA_D1";
 
-              if (isJucoSrc) {
-                // JUCO hitter sim — slimmed 4-factor panel mirroring the
-                // pitcher JUCO card philosophy (Projection / Skillset /
-                // Data Reliability / Competition with SOURCE stuff+).
-                const tm = selectedPlayer?.player_id ? jucoTrackmanMap.get(selectedPlayer.player_id) : undefined;
-                const fromAvg = selectedPlayer?.from_avg ?? null;
-                const fromObp = selectedPlayer?.from_obp ?? null;
-                const fromSlg = selectedPlayer?.from_slg ?? null;
-                const iso = fromAvg != null && fromSlg != null ? fromSlg - fromAvg : null;
-                return <JucoHitterRiskCard input={{
-                  projectedWrcPlus: simulation.pWrcPlus,
-                  chase: sp?.chase ?? null, contact: sp?.contact ?? null,
-                  whiff: (sp as any)?.whiff ?? null,
-                  barrel: sp?.barrel ?? null, lineDrive: sp?.lineDrive ?? null,
-                  avgEv: sp?.avgExitVelo ?? null, ev90: sp?.ev90 ?? null,
-                  pull: sp?.pull ?? null, gb: sp?.gb ?? null, bb: sp?.bb ?? null,
-                  avg: fromAvg, obp: fromObp, iso,
-                  trackmanPitches: tm?.tm ?? 0, pa: tm?.pa ?? resolvedPa,
-                  sourceConference: fromConference,
-                  sourceConfStuffPlus: fromConfStats?.stuff_plus ?? null,
-                }} />;
-              }
-
-              // D1 sim — match PlayerProfile's risk inputs so the same player
-              // shows the same risk grade on both surfaces.
-              //
-              // PlayerProfile reads scouting fields from projectionSourceRow,
-              // a 2026 Hitter Master row with blended-sample handling.
-              // useHitterSeedData was stripped to identity-only columns, so
-              // the powerByPlayerId/powerByNameTeam path is missing all the
-              // scouting fields — that was the skillset divergence.
-              //
-              // hitterCareerSeasons (the trajectory query) DOES select * from
-              // Hitter Master, so we derive projectionSourceRow from it and
-              // honour the same blended_* fallbacks PlayerProfile uses for
-              // thin-sample players.
+              // Scouting fields come from the 2026 Hitter Master row (with
+              // blended_* fallbacks for thin samples) — same shape PlayerProfile
+              // uses. useHitterSeedData was stripped to identity-only cols so
+              // the sp lookup has no scouting; hitterCareerSeasons does select *
+              // so it carries the real values.
               const projectionSourceRow = (() => {
                 const row = (hitterCareerSeasons as any[]).find((r) => Number(r.Season) === 2026);
                 if (!row) return null;
@@ -1740,6 +1709,45 @@ export default function TransferPortal() {
                 };
               })();
 
+              if (isJucoSrc) {
+                // JUCO hitter sim — slimmed 4-factor panel mirroring the
+                // pitcher JUCO card philosophy (Projection / Skillset /
+                // Data Reliability / Competition with SOURCE stuff+).
+                const tm = selectedPlayer?.player_id ? jucoTrackmanMap.get(selectedPlayer.player_id) : undefined;
+                const fromAvg = selectedPlayer?.from_avg ?? null;
+                const fromObp = selectedPlayer?.from_obp ?? null;
+                const fromSlg = selectedPlayer?.from_slg ?? null;
+                const iso = fromAvg != null && fromSlg != null ? fromSlg - fromAvg : null;
+                return <JucoHitterRiskCard input={{
+                  projectedWrcPlus: simulation.pWrcPlus,
+                  chase: projectionSourceRow?.chase ?? sp?.chase ?? null,
+                  contact: projectionSourceRow?.contact ?? sp?.contact ?? null,
+                  whiff: (sp as any)?.whiff ?? null,
+                  barrel: projectionSourceRow?.barrel ?? sp?.barrel ?? null,
+                  lineDrive: projectionSourceRow?.line_drive ?? sp?.lineDrive ?? null,
+                  avgEv: projectionSourceRow?.avg_exit_velo ?? sp?.avgExitVelo ?? null,
+                  ev90: projectionSourceRow?.ev90 ?? sp?.ev90 ?? null,
+                  pull: projectionSourceRow?.pull ?? sp?.pull ?? null,
+                  gb: projectionSourceRow?.gb ?? sp?.gb ?? null,
+                  bb: projectionSourceRow?.bb ?? sp?.bb ?? null,
+                  avg: fromAvg, obp: fromObp, iso,
+                  trackmanPitches: tm?.tm ?? 0, pa: tm?.pa ?? projectionSourceRow?.pa ?? resolvedPa,
+                  sourceConference: fromConference,
+                  sourceConfStuffPlus: fromConfStats?.stuff_plus ?? null,
+                }} />;
+              }
+
+              // D1 sim — match PlayerProfile's risk inputs so the same player
+              // shows the same risk grade on both surfaces.
+              //
+              // PlayerProfile reads scouting fields from projectionSourceRow,
+              // a 2026 Hitter Master row with blended-sample handling.
+              // useHitterSeedData was stripped to identity-only columns, so
+              // the powerByPlayerId/powerByNameTeam path is missing all the
+              // scouting fields — that was the skillset divergence.
+              //
+              // projectionSourceRow already constructed above (used by both
+              // JUCO and D1 branches).
               const originConference = selectedPlayer?.conference ?? null;
               const originConfRow = originConference ? confByKey.get(originConference.toLowerCase().trim()) ?? null : null;
               const risk = assessHitterRisk({
