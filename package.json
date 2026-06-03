@@ -33,6 +33,8 @@
     "precompute-transfers:prod": "tsx --env-file-if-exists=.env.production.local scripts/precompute-transfer-projections.ts --prod",
     "precompute-pitchers": "tsx --env-file-if-exists=.env.local scripts/precompute-pitchers.ts",
     "precompute-pitchers:prod": "tsx --env-file-if-exists=.env.production.local scripts/precompute-pitchers.ts --prod",
+    "juco-precompute-all": "tsx --env-file-if-exists=.env.local scripts/juco_precompute_all_teams.ts",
+    "juco-precompute-all:prod": "tsx --env-file-if-exists=.env.production.local scripts/juco_precompute_all_teams.ts",
     "precompute-returner-pitchers": "tsx --env-file-if-exists=.env.local scripts/precompute-returner-pitchers.ts",
     "precompute-returner-pitchers:prod": "tsx --env-file-if-exists=.env.production.local scripts/precompute-returner-pitchers.ts --prod",
     "backfill-2027-hitter-returners": "tsx --env-file-if-exists=.env.local scripts/backfill-2027-hitter-returners.ts",
