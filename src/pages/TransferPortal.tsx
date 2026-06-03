@@ -589,7 +589,7 @@ export default function TransferPortal() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, team, from_team, conference, division, transfer_portal, team_id, source_team_id, bats_hand")
+          .select("id, first_name, last_name, position, team, from_team, conference, division, transfer_portal, team_id, source_team_id, source_player_id, bats_hand")
           // Stable ORDER BY for deterministic pagination — without it,
           // adjacent .range() calls overlap or skip rows non-determin-
           // istically and the downstream dedup shrinks the player set.
@@ -683,6 +683,7 @@ export default function TransferPortal() {
             division: (p.division as string | null) ?? null,
             team_id: (p.team_id as string | null) ?? null,
             source_team_id: (p.source_team_id as string | null) ?? null,
+            source_player_id: (p.source_player_id as string | null) ?? null,
             bats_hand: (p.bats_hand as string | null) ?? null,
             from_avg: (row?.from_avg as number | undefined) ?? null,
             from_obp: (row?.from_obp as number | undefined) ?? null,
@@ -956,6 +957,45 @@ export default function TransferPortal() {
       : divPool;
     return pool.slice(0, 25);
   }, [pitchingPlayers, pitcherSearch, divisionFilter]);
+
+  // Career seasons for the selected HITTER — fuels the trajectory risk
+  // factor (PlayerProfile / TeamBuilder already pass this; TPS was missing
+  // it, so trajectory always showed "Unknown" here).
+  const { data: hitterCareerSeasons = [] } = useQuery({
+    queryKey: ["transfer-sim-hitter-career", selectedPlayer?.source_player_id ?? null],
+    enabled: !!selectedPlayer?.source_player_id,
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      if (!selectedPlayer?.source_player_id) return [];
+      const { data, error } = await (supabase as any)
+        .from("Hitter Master")
+        .select("*")
+        .eq("source_player_id", selectedPlayer.source_player_id)
+        .order("Season", { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Career seasons for the selected PITCHER — same purpose.
+  const { data: pitcherCareerSeasons = [] } = useQuery({
+    queryKey: ["transfer-sim-pitcher-career", (selectedPitcher as any)?.source_player_id ?? null],
+    enabled: !!(selectedPitcher as any)?.source_player_id,
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const srcId = (selectedPitcher as any)?.source_player_id;
+      if (!srcId) return [];
+      const { data, error } = await (supabase as any)
+        .from("Pitching Master")
+        .select("*")
+        .eq("source_player_id", srcId)
+        .order("Season", { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+  });
 
   const { data: internals } = useQuery({
     queryKey: ["transfer-sim-internals", selectedPlayer?.prediction_id],
@@ -2180,6 +2220,7 @@ export default function TransferPortal() {
                 conference: toConference,
                 projectedWrcPlus: simulation.pWrcPlus,
                 confStuffPlus: toConfRow?.stuff_plus ?? null,
+                careerSeasons: hitterCareerSeasons as any[],
                 pa: resolvedPa,
                 chase: sp?.chase, contact: sp?.contact,
                 barrel: sp?.barrel, lineDrive: sp?.lineDrive,
@@ -2372,6 +2413,7 @@ export default function TransferPortal() {
                 conference: pitchingSimulation.toConference ?? null,
                 projectedPrvPlus: pitchingSimulation.pRvPlus,
                 confHitterTalentPlus: pitchingSimulation.toHitterTalent,
+                careerSeasons: pitcherCareerSeasons as any[],
                 ip: (selectedPitcher as any).ip ?? null,
                 stuffPlus: selectedPitcher.stuffPlus,
                 whiffPct: selectedPitcher.missPct,
