@@ -6,6 +6,7 @@ import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { PortalTeamCards } from "@/components/PortalTeamCards";
+import { ABSComparisonTable } from "@/components/ABSComparisonTable";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1777,6 +1778,12 @@ export default function PlayerProfile() {
             )}
           </div>
         </div>}
+
+        {/* ABS strike-zone comparison — Georgia-only, hides when no row exists. */}
+        <ABSComparisonTable
+          sourcePlayerId={(player as any)?.source_player_id || (id && /^\d+$/.test(id) ? id : null)}
+          playerType="hitter"
+        />
 
       </div>
     </DashboardLayout>

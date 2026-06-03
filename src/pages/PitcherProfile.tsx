@@ -5,6 +5,7 @@ import { ArrowLeft, Download, Target, TrendingUp, Star } from "lucide-react";
 import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { supabase } from "@/integrations/supabase/client";
+import { ABSComparisonTable } from "@/components/ABSComparisonTable";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -2304,6 +2305,12 @@ export default function PitcherProfile() {
 
           </div>
         </div>
+
+        {/* ABS strike-zone comparison — Georgia-only, hides when no row exists. */}
+        <ABSComparisonTable
+          sourcePlayerId={(player as any)?.source_player_id || (id && /^\d+$/.test(id) ? id : null)}
+          playerType="pitcher"
+        />
 
       </div>
     </DashboardLayout>
