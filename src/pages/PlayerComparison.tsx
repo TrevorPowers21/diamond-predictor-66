@@ -18,8 +18,6 @@ import { cn } from "@/lib/utils";
 const PROJECTION_SEASON = 2027;
 
 /* ─── types ─── */
-type CustomerTeam = { id: string; name: string; school_team_id: string | null };
-
 type PlayerLite = {
   id: string;
   first_name: string;
@@ -114,7 +112,7 @@ const pitcherStatTier = (
 /* ─── page ─── */
 export default function PlayerComparison() {
   const location = useLocation();
-  const { isSuperadmin, loading: authLoading } = useAuth();
+  const { effectiveTeamId, loading: authLoading } = useAuth();
   const { effectiveSchoolName } = useEffectiveSchool();
 
   const [simType, setSimType] = useState<"hitting" | "pitching">("hitting");
@@ -125,29 +123,15 @@ export default function PlayerComparison() {
   const [aPlayerId, setAPlayerId] = useState<string | null>(null);
   const [aPlayerSearch, setAPlayerSearch] = useState("");
   const [aPlayerOpen, setAPlayerOpen] = useState(false);
-  const [aDestTeamId, setADestTeamId] = useState<string | null>(null);
 
   // Player B state
   const [bPlayerId, setBPlayerId] = useState<string | null>(null);
   const [bPlayerSearch, setBPlayerSearch] = useState("");
   const [bPlayerOpen, setBPlayerOpen] = useState(false);
-  const [bDestTeamId, setBDestTeamId] = useState<string | null>(null);
 
-  /* ─── customer teams (destination dropdown) ─── */
-  const { data: customerTeams = [] } = useQuery({
-    queryKey: ["compare-customer-teams"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("customer_teams")
-        .select("id, name, school_team_id")
-        .eq("active", true)
-        .order("name");
-      if (error) throw error;
-      return (data ?? []) as CustomerTeam[];
-    },
-    staleTime: 60 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
+  // Destination is always the active customer team (impersonation-aware).
+  // No dropdown — the Compare page projects both players AT the coach's team.
+  const destTeamId = effectiveTeamId;
 
   /* ─── players (search source) ─── */
   // For hitters: non-pitchers with active rows. For pitchers: pitcher-primary or TWP.
@@ -210,8 +194,8 @@ export default function PlayerComparison() {
     return pickPreferredPrediction(rows, destTeamId) as PredictionRow | null;
   };
 
-  const aRow = useMemo(() => pickRow(aPlayerId, aDestTeamId), [aPlayerId, aDestTeamId, predictions]);
-  const bRow = useMemo(() => pickRow(bPlayerId, bDestTeamId), [bPlayerId, bDestTeamId, predictions]);
+  const aRow = useMemo(() => pickRow(aPlayerId, destTeamId), [aPlayerId, destTeamId, predictions]);
+  const bRow = useMemo(() => pickRow(bPlayerId, destTeamId), [bPlayerId, destTeamId, predictions]);
 
   /* ─── player search filters ─── */
   const filterPlayersForMode = (q: string): PlayerLite[] => {
@@ -227,12 +211,6 @@ export default function PlayerComparison() {
         return !isPitcherPos(p.position);
       })
       .slice(0, 15);
-  };
-
-  const filterCustomerTeams = (q: string): CustomerTeam[] => {
-    const term = q.trim().toLowerCase();
-    if (!term) return customerTeams;
-    return customerTeams.filter((t) => t.name.toLowerCase().includes(term));
   };
 
   /* ─── source badge text ─── */
@@ -278,19 +256,25 @@ export default function PlayerComparison() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          {simType === "hitting" ? (
-            <>
-              {renderHitterPanel("Player A", aPlayerSearch, setAPlayerSearch, aPlayerOpen, setAPlayerOpen, aDestTeamId, setADestTeamId, (p) => { setAPlayerId(p.id); setAPlayerSearch(`${p.first_name} ${p.last_name}`); setAPlayerOpen(false); }, aPlayer, aRow)}
-              {renderHitterPanel("Player B", bPlayerSearch, setBPlayerSearch, bPlayerOpen, setBPlayerOpen, bDestTeamId, setBDestTeamId, (p) => { setBPlayerId(p.id); setBPlayerSearch(`${p.first_name} ${p.last_name}`); setBPlayerOpen(false); }, bPlayer, bRow)}
-            </>
-          ) : (
-            <>
-              {renderPitcherPanel("Pitcher A", aPlayerSearch, setAPlayerSearch, aPlayerOpen, setAPlayerOpen, aDestTeamId, setADestTeamId, roleA, setRoleA, (p) => { setAPlayerId(p.id); setAPlayerSearch(`${p.first_name} ${p.last_name}`); setAPlayerOpen(false); }, aPlayer, aRow)}
-              {renderPitcherPanel("Pitcher B", bPlayerSearch, setBPlayerSearch, bPlayerOpen, setBPlayerOpen, bDestTeamId, setBDestTeamId, roleB, setRoleB, (p) => { setBPlayerId(p.id); setBPlayerSearch(`${p.first_name} ${p.last_name}`); setBPlayerOpen(false); }, bPlayer, bRow)}
-            </>
-          )}
-        </div>
+        {!destTeamId && !authLoading ? (
+          <div className="rounded-lg border border-dashed border-border/60 p-8 text-center text-sm text-muted-foreground">
+            Compare requires an active customer team. Pick a team from the sidebar impersonation dropdown.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            {simType === "hitting" ? (
+              <>
+                {renderHitterPanel("Player A", aPlayerSearch, setAPlayerSearch, aPlayerOpen, setAPlayerOpen, (p) => { setAPlayerId(p.id); setAPlayerSearch(`${p.first_name} ${p.last_name}`); setAPlayerOpen(false); }, aPlayer, aRow)}
+                {renderHitterPanel("Player B", bPlayerSearch, setBPlayerSearch, bPlayerOpen, setBPlayerOpen, (p) => { setBPlayerId(p.id); setBPlayerSearch(`${p.first_name} ${p.last_name}`); setBPlayerOpen(false); }, bPlayer, bRow)}
+              </>
+            ) : (
+              <>
+                {renderPitcherPanel("Pitcher A", aPlayerSearch, setAPlayerSearch, aPlayerOpen, setAPlayerOpen, roleA, setRoleA, (p) => { setAPlayerId(p.id); setAPlayerSearch(`${p.first_name} ${p.last_name}`); setAPlayerOpen(false); }, aPlayer, aRow)}
+                {renderPitcherPanel("Pitcher B", bPlayerSearch, setBPlayerSearch, bPlayerOpen, setBPlayerOpen, roleB, setRoleB, (p) => { setBPlayerId(p.id); setBPlayerSearch(`${p.first_name} ${p.last_name}`); setBPlayerOpen(false); }, bPlayer, bRow)}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );
@@ -303,8 +287,6 @@ export default function PlayerComparison() {
     setPlayerSearch: (v: string) => void,
     playerOpen: boolean,
     setPlayerOpen: (v: boolean) => void,
-    destTeamId: string | null,
-    setDestTeamId: (v: string | null) => void,
     onPickPlayer: (p: PlayerLite) => void,
     player: PlayerLite | null,
     row: PredictionRow | null,
@@ -345,18 +327,7 @@ export default function PlayerComparison() {
             </div>
             <div>
               <Label className="text-xs mb-1 block">To Team</Label>
-              {isSuperadmin ? (
-                <Select value={destTeamId ?? ""} onValueChange={(v) => setDestTeamId(v || null)}>
-                  <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Destination customer team..." /></SelectTrigger>
-                  <SelectContent>
-                    {customerTeams.map((t) => (
-                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input className="h-8 text-sm opacity-100 cursor-not-allowed" value={effectiveSchoolName ?? ""} disabled readOnly />
-              )}
+              <Input className="h-8 text-sm cursor-not-allowed" value={effectiveSchoolName ?? ""} disabled readOnly />
             </div>
           </div>
 
@@ -411,7 +382,7 @@ export default function PlayerComparison() {
             </>
           ) : (
             <div className="rounded-md border border-dashed p-4 text-xs text-muted-foreground text-center">
-              {!player ? "Select a hitter and destination." : !destTeamId ? "Select a destination team." : "No stored projection for this player at this team."}
+              {!player ? "Select a hitter." : "No stored projection for this player at this team."}
             </div>
           )}
         </CardContent>
@@ -425,8 +396,6 @@ export default function PlayerComparison() {
     setPlayerSearch: (v: string) => void,
     playerOpen: boolean,
     setPlayerOpen: (v: boolean) => void,
-    destTeamId: string | null,
-    setDestTeamId: (v: string | null) => void,
     roleOverride: "SP" | "RP",
     setRoleOverride: (v: "SP" | "RP") => void,
     onPickPlayer: (p: PlayerLite) => void,
@@ -469,18 +438,7 @@ export default function PlayerComparison() {
             </div>
             <div className="col-span-2">
               <Label className="text-xs mb-1 block">To Team</Label>
-              {isSuperadmin ? (
-                <Select value={destTeamId ?? ""} onValueChange={(v) => setDestTeamId(v || null)}>
-                  <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Destination customer team..." /></SelectTrigger>
-                  <SelectContent>
-                    {customerTeams.map((t) => (
-                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input className="h-8 text-sm opacity-100 cursor-not-allowed" value={effectiveSchoolName ?? ""} disabled readOnly />
-              )}
+              <Input className="h-8 text-sm cursor-not-allowed" value={effectiveSchoolName ?? ""} disabled readOnly />
             </div>
             <div>
               <Label className="text-xs mb-1 block">Role</Label>
@@ -555,7 +513,7 @@ export default function PlayerComparison() {
             </>
           ) : (
             <div className="rounded-md border border-dashed p-4 text-xs text-muted-foreground text-center">
-              {!player ? "Select a pitcher and destination." : !destTeamId ? "Select a destination team." : "No stored projection for this pitcher at this team."}
+              {!player ? "Select a pitcher." : "No stored projection for this pitcher at this team."}
             </div>
           )}
         </CardContent>
