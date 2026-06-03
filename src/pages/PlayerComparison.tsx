@@ -113,8 +113,8 @@ const pitcherStatTier = (
 export default function PlayerComparison() {
   const location = useLocation();
   const { effectiveTeamId, loading: authLoading } = useAuth();
-  const { schoolFullName, schoolName } = useEffectiveSchool();
-  const destTeamLabel = schoolFullName ?? schoolName ?? "";
+  const { schoolName, schoolFullName } = useEffectiveSchool();
+  const destTeamLabel = schoolName ?? schoolFullName ?? "";
 
   const [simType, setSimType] = useState<"hitting" | "pitching">("hitting");
   const [roleA, setRoleA] = useState<"SP" | "RP">("SP");
