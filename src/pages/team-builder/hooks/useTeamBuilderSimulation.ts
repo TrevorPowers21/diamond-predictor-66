@@ -632,9 +632,10 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       // precompute pipeline. Do NOT apply depthMult here; the stored values
       // are final and team-specific. depthMult only applies to the client-
       // computed fallback path (when no precomputed row exists).
-      const storedOwar = lp.o_war as number | null | undefined;
+      // Stored o_war is the ONLY source. Number() coerces Supabase's string-typed
+      // numeric columns correctly. No depthMult, no fallback.
+      const owar = lp.o_war != null ? Number(lp.o_war) : null;
       const storedMarket = lp.market_value as number | null | undefined;
-      const owar = storedOwar != null ? storedOwar : computeOWarFromWrcPlus(lp.p_wrc_plus ?? null) * depthRoleMultiplier(p.depth_role);
       // market_value may be absent from p.prediction (saved build data doesn't
       // include it in its schema). Fall back to transfer_snapshot.nil_valuation
       // which IS populated from the load-build query.
@@ -1319,8 +1320,11 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const pWrc = (wObp * pObp) + (wSlg * pSlg) + (wAvg * pAvg) + (wIso * pIso);
       return Math.round((pWrc / ncaaWrc) * 100);
     })();
-    const baseOwar = computeOWarFromWrcPlus(shownWrc) ?? p.nil_owar ?? 0;
-    const owar = baseOwar * depthRoleMultiplier(p.depth_role);
+    // Read stored o_war directly — depth is already baked in by the precompute.
+    // Supabase returns numeric columns as strings; Number() coerces correctly.
+    // No fallback: if null, display shows "—" until precompute runs for this team.
+    const rawOwar = (shown as any)?.o_war;
+    const owar = rawOwar != null ? Number(rawOwar) : null;
     return { sim, shown, shownWrc, owar, pwar: null };
   }, [computePitcherPwar, computeReturnerPitchingProjection, simulateTransferProjection, pitchingEq, liveTargetPredictionByPlayerId, remoteEquationValues]);
 
