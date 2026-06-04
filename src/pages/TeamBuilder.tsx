@@ -1363,9 +1363,13 @@ export default function TeamBuilder() {
   const livePredsRef = useRef(liveTargetPredictionByPlayerId);
   const playerProjectionRef = useRef(playerProjection);
   const projectedNilRef = useRef(projectedNilForPlayer);
+  const rosterPlayersRef = useRef(rosterPlayers);
+  const selectedBuildIdRef = useRef(selectedBuildId);
   useEffect(() => { livePredsRef.current = liveTargetPredictionByPlayerId; }, [liveTargetPredictionByPlayerId]);
   useEffect(() => { playerProjectionRef.current = playerProjection; }, [playerProjection]);
   useEffect(() => { projectedNilRef.current = projectedNilForPlayer; }, [projectedNilForPlayer]);
+  useEffect(() => { rosterPlayersRef.current = rosterPlayers; }, [rosterPlayers]);
+  useEffect(() => { selectedBuildIdRef.current = selectedBuildId; }, [selectedBuildId]);
 
   const storagePitchersForSelectedTeam = useMemo(() => {
     if (!selectedTeam) return [] as BuildPlayer[];
@@ -2060,6 +2064,25 @@ export default function TeamBuilder() {
       });
     }, 2500);
   }, [selectedBuildId, savePlayerRowFn]);
+
+  // Flush any pending per-player saves immediately on unmount so navigating
+  // away before the 2.5s debounce fires doesn't silently drop changes.
+  useEffect(() => {
+    return () => {
+      const buildId = selectedBuildIdRef.current;
+      const players = rosterPlayersRef.current;
+      if (!buildId) return;
+      const pendingIdxs = Object.keys(playerSaveTimers.current).map(Number);
+      if (pendingIdxs.length === 0) return;
+      pendingIdxs.forEach((idx) => {
+        clearTimeout(playerSaveTimers.current[idx]);
+        delete playerSaveTimers.current[idx];
+        const rp = players[idx];
+        if (rp?.id) void savePlayerRowFn(rp, buildId);
+      });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // refs are stable — no deps needed
 
   // Clear row highlight on the next click anywhere after an adjustment.
   // setTimeout(0) defers past React's own click handler so the dropdown click
