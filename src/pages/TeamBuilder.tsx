@@ -1365,6 +1365,9 @@ export default function TeamBuilder() {
   const projectedNilRef = useRef(projectedNilForPlayer);
   const rosterPlayersRef = useRef(rosterPlayers);
   const selectedBuildIdRef = useRef(selectedBuildId);
+  // Tracks which buildId has been loaded this session so the load effect
+  // doesn't fire twice for the same build (e.g. when builds query refetches).
+  const loadedBuildIdRef = useRef<string | null>(null);
   useEffect(() => { livePredsRef.current = liveTargetPredictionByPlayerId; }, [liveTargetPredictionByPlayerId]);
   useEffect(() => { playerProjectionRef.current = playerProjection; }, [playerProjection]);
   useEffect(() => { projectedNilRef.current = projectedNilForPlayer; }, [projectedNilForPlayer]);
@@ -1725,6 +1728,7 @@ export default function TeamBuilder() {
     setDepthPlaceholders({});
     autoSeededTeamRef.current = "";
     restoredFromDraftRef.current = false;
+    loadedBuildIdRef.current = null; // reset so the load effect fires for the new team
 
     try {
       const draftKey = getDraftKey(effectiveTeamId);
@@ -1735,7 +1739,6 @@ export default function TeamBuilder() {
           buildName: string;
           selectedTeam: string;
           totalBudget: number;
-          rosterPlayers: BuildPlayer[];
           programTierMultiplier: number;
           programTierConference: string;
           fallbackRosterTotalPlayerScore: number;
@@ -1745,24 +1748,22 @@ export default function TeamBuilder() {
         };
         if (draft) {
           if (!draft.selectedTeam) {
-            // Empty draft (written before the persist guard was added). Purge
-            // it so the auto-load effect can default to the most-recent build.
             if (draftKey) localStorage.removeItem(draftKey);
           } else {
+            // Restore build identity + UI metadata. rosterPlayers is NOT
+            // restored here — the load effect always fetches from the DB
+            // (via player_snapshot) so the DB is the source of truth and
+            // stale localStorage player data can never overwrite saved values.
             setSelectedBuildId(draft.selectedBuildId ?? null);
             setBuildName(draft.buildName ?? "My Team Build");
             setSelectedTeam(draft.selectedTeam ?? "");
             setTotalBudget(Number(draft.totalBudget) || 0);
-            const draft33 = Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers[33] : null;
-            console.log("[Draft] restoring from localStorage — player33 depth_role:", (draft33 as any)?.depth_role, "id:", (draft33 as any)?.id);
-            setRosterPlayers(Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers : []);
             setProgramTierMultiplier(Number(draft.programTierMultiplier) || 1.2);
             setProgramTierConference(draft.programTierConference ?? "");
             setFallbackRosterTotalPlayerScore(Number(draft.fallbackRosterTotalPlayerScore) || DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
             setDirty(false);
             if (draft.depthAssignments) setDepthAssignments(draft.depthAssignments);
             if (draft.depthPlaceholders) setDepthPlaceholders(draft.depthPlaceholders);
-            skipAutoSeedOnceRef.current = true;
             autoSeededTeamRef.current = normalizeName(draft.selectedTeam);
             restoredFromDraftRef.current = true;
           }
@@ -1776,18 +1777,28 @@ export default function TeamBuilder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveTeamId]);
 
-  // Default to most-recent saved build for the current team when no draft
-  // was restored. Trevor's ask: "default to last build specific to that
-  // team if they have one." Only runs after the restore effect (gated by
-  // stateTeamRef catching up) and only when there's no draft to honor.
+  // Load the selected build from the DB whenever selectedBuildId is known
+  // and builds have loaded. The DB (player_snapshot) is always the source
+  // of truth — this replaces the old localStorage-first restore.
+  // Also defaults to the most-recent build when no selectedBuildId is set.
   useEffect(() => {
     if (!effectiveTeamId) return;
     if (stateTeamRef.current !== effectiveTeamId) return;
-    if (restoredFromDraftRef.current) return;
-    if (selectedBuildId) return;
     if (builds.length === 0) return;
-    const latest = builds[0] as { id: string };
-    loadBuild(latest.id);
+
+    // Determine which build to load
+    const targetId = selectedBuildId ?? ((builds[0] as any)?.id ?? null);
+    if (!targetId) return;
+
+    // Gate: only load once per build ID per session
+    if (loadedBuildIdRef.current === targetId) return;
+
+    // Confirm the build exists in the list before loading
+    const exists = (builds as any[]).find((b) => b.id === targetId);
+    if (!exists) return;
+
+    loadedBuildIdRef.current = targetId;
+    loadBuild(targetId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveTeamId, selectedBuildId, builds.length]);
 
@@ -1804,12 +1815,14 @@ export default function TeamBuilder() {
     const draftKey = getDraftKey(effectiveTeamId);
     if (!draftKey) return;
     try {
+      // rosterPlayers is intentionally excluded — the DB snapshot is the
+      // source of truth for player data. Only metadata is persisted here
+      // so stale localStorage player state can never override a DB save.
       const payload = {
         selectedBuildId,
         buildName,
         selectedTeam,
         totalBudget,
-        rosterPlayers,
         programTierMultiplier,
         programTierConference,
         fallbackRosterTotalPlayerScore,
@@ -1817,8 +1830,6 @@ export default function TeamBuilder() {
         depthAssignments,
         depthPlaceholders,
       };
-      const p33 = rosterPlayers[33];
-      console.log("[Draft] saving to localStorage — player33 depth_role:", (p33 as any)?.depth_role, "id:", (p33 as any)?.id);
       localStorage.setItem(draftKey, JSON.stringify(payload));
     } catch {
       // ignore storage quota/access errors
@@ -1829,7 +1840,6 @@ export default function TeamBuilder() {
     buildName,
     selectedTeam,
     totalBudget,
-    rosterPlayers,
     programTierMultiplier,
     programTierConference,
     fallbackRosterTotalPlayerScore,
@@ -3121,7 +3131,7 @@ export default function TeamBuilder() {
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-[220px]">
               <Label className="text-xs mb-1 block">Load Saved Build</Label>
-              <Select value={selectedBuildId || "new"} onValueChange={(v) => v === "new" ? newBuild() : loadBuild(v)}>
+              <Select value={selectedBuildId || "new"} onValueChange={(v) => { if (v === "new") { newBuild(); return; } loadedBuildIdRef.current = null; setSelectedBuildId(v); }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select build…" />
                 </SelectTrigger>
