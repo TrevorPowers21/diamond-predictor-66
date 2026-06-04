@@ -73,23 +73,22 @@ export type PitchingMasterSeedRow = {
  * Returns pitching seed data from the unified "Pitching Master" Supabase table.
  * Combines what was previously split across pitching_stats_storage and pitching_power_ratings_storage.
  */
-export function usePitchingSeedData(season = 2026) {
+export function usePitchingSeedData(season = 2026, enabled = true) {
   const { data: dbRows = [], isLoading } = useQuery({
-    queryKey: ["pitching_master", season],
+    queryKey: ["pitching_master", season, "ip10"],
+    enabled,
     queryFn: async () => {
       const all: any[] = [];
       let from = 0;
       const pageSize = 1000;
+      // select("*") kept — 90th_vel column name breaks narrow selects.
+      const t0 = performance.now();
       while (true) {
-        // Leaving as select("*") for safety — narrow attempted but hit issues
-        // with special-char column names (90th_vel) and broke pitcher rendering.
-        // The big perf wins here are staleTime + dropped loading gate, not
-        // payload size. Revisit narrow in a focused follow-up if needed.
         const { data, error } = await supabase
           .from("Pitching Master")
           .select("*")
           .eq("Season", season)
-          .gte("IP", 1)
+          .gte("IP", 10)
           .not("Role", "in", "(C,1B,2B,3B,SS,OF,LF,CF,RF,DH,IF,UT)")
           .range(from, from + pageSize - 1);
         if (error) throw error;
@@ -97,11 +96,9 @@ export function usePitchingSeedData(season = 2026) {
         if (!data || data.length < pageSize) break;
         from += pageSize;
       }
+      console.log(`[PitchingMaster] loaded ${all.length} rows in ${Math.round(performance.now() - t0)}ms`);
       return all;
     },
-    // Pitching Master changes weekly during season, monthly off-season.
-    // 30min staleTime was overcautious. Bumped to 12h so warm-load returns
-    // are instant. Cold loads still hit the DB.
     staleTime: 12 * 60 * 60 * 1000,
     gcTime: 24 * 60 * 60 * 1000,
     refetchOnWindowFocus: false,

@@ -740,7 +740,7 @@ export default function TeamBuilder() {
     playerOverrideMap, playerOverrides, updatePlayerOverrideFn,
     getSupabaseRole, setSupabaseRole,
     teams, teamsByName, teamParkComponents,
-    supabaseTargetBoard, removeFromSupabaseBoard, addToSupabaseBoard, isOnSupabaseBoard,
+    supabaseTargetBoard, targetBoardLoading, removeFromSupabaseBoard, addToSupabaseBoard, isOnSupabaseBoard,
     selectedTeamRow, selectedTeamId,
     remoteEquationValues, allPlayersForSearch, hitterMasterPaMap,
     seasonUsage, builds, returners, returnersUpdatedAt,
@@ -2537,6 +2537,10 @@ export default function TeamBuilder() {
   const pushedPlayerIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (targetSyncedRef.current) return;
+    // Don't push until the board query has resolved — while loading,
+    // isOnSupabaseBoard returns false for everyone, causing duplicate-insert
+    // errors ("Already on Target Board") for players already in the DB.
+    if (targetBoardLoading) return;
     const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 
     // Push roster targets → Supabase (deduped against in-session push history)
@@ -2611,7 +2615,7 @@ export default function TeamBuilder() {
     // Intentionally not depending on rosterPlayers — this is a one-shot sync
     // (gated by targetSyncedRef). Re-running on every roster edit churned the
     // effect needlessly and caused position-shuffle glitches.
-  }, [supabaseTargetBoard]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [supabaseTargetBoard, targetBoardLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
 

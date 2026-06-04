@@ -118,6 +118,11 @@ const toWeight = (n: number) => (Math.abs(n) >= 10 ? n / 100 : n);
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 const statKey = (v: number | null | undefined) => (v == null ? "na" : round3(v).toFixed(3));
 
+// Stable empty defaults — prevents useMemos from recalculating every render
+// when queries are loading ([] / {} literals create new references each time).
+const EMPTY_LIVE_PREDS: any[] = [];
+const EMPTY_INTERNALS: any[] = [];
+const EMPTY_EQUATION_VALUES: Record<string, number> = {};
 
 const selectTransferPortalPreferredPrediction = (predictions: any[] | null | undefined) => {
   const list = (predictions || []).filter(Boolean);
@@ -467,7 +472,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     [rosterPlayers],
   );
 
-  const { data: liveTargetPredictions = [] } = useQuery({
+  const { data: liveTargetPredictions = EMPTY_LIVE_PREDS } = useQuery({
     queryKey: ["team-builder-live-target-predictions", targetPlayerIds, effectiveTeamId],
     enabled: targetPlayerIds.length > 0,
     queryFn: async () => {
@@ -530,9 +535,11 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     return Array.from(ids);
   }, [targetPredictionIds, liveTargetPredictions]);
 
-  const { data: predictionInternalsRows = [] } = useQuery({
+  const { data: predictionInternalsRows = EMPTY_INTERNALS } = useQuery({
     queryKey: ["team-builder-prediction-internals", internalsPredictionIds],
     enabled: internalsPredictionIds.length > 0,
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("player_prediction_internals")
@@ -620,15 +627,19 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
 
     if (!treatAsPitcher && effectiveTeamId && (livePred as any)?.variant === "precomputed" && (livePred as any)?.customer_team_id === effectiveTeamId) {
       const lp = livePred as any;
-      // Stored o_war + market_value reflect the canonical precompute
-      // (PA carry-forward + program tier baked in). Scale by depth role
-      // multiplier so changing the depth dropdown moves the row's oWAR + market
-      // alongside the team totals (which use the same depth multiplier).
-      const depthMult = depthRoleMultiplier(p.depth_role);
-      const storedOwar = lp.o_war as number | null | undefined;
+      // Stored o_war + market_value are the canonical precomputed values —
+      // hitter_depth_role and projected_pa were already factored in by the
+      // precompute pipeline. Do NOT apply depthMult here; the stored values
+      // are final and team-specific. depthMult only applies to the client-
+      // computed fallback path (when no precomputed row exists).
+      // Stored o_war is the ONLY source. Number() coerces Supabase's string-typed
+      // numeric columns correctly. No depthMult, no fallback.
+      const owar = lp.o_war != null ? Number(lp.o_war) : null;
       const storedMarket = lp.market_value as number | null | undefined;
-      const owar = storedOwar != null ? storedOwar * depthMult : computeOWarFromWrcPlus(lp.p_wrc_plus ?? null);
-      const nil_valuation = storedMarket != null ? storedMarket * depthMult : null;
+      // market_value may be absent from p.prediction (saved build data doesn't
+      // include it in its schema). Fall back to transfer_snapshot.nil_valuation
+      // which IS populated from the load-build query.
+      const nil_valuation = storedMarket ?? p.transfer_snapshot?.nil_valuation ?? null;
       return {
         p_avg: lp.p_avg ?? null,
         p_obp: lp.p_obp ?? null,
@@ -1309,8 +1320,11 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const pWrc = (wObp * pObp) + (wSlg * pSlg) + (wAvg * pAvg) + (wIso * pIso);
       return Math.round((pWrc / ncaaWrc) * 100);
     })();
-    const baseOwar = computeOWarFromWrcPlus(shownWrc) ?? p.nil_owar ?? 0;
-    const owar = baseOwar * depthRoleMultiplier(p.depth_role);
+    // Read stored o_war directly — depth is already baked in by the precompute.
+    // Supabase returns numeric columns as strings; Number() coerces correctly.
+    // No fallback: if null, display shows "—" until precompute runs for this team.
+    const rawOwar = (shown as any)?.o_war;
+    const owar = rawOwar != null ? Number(rawOwar) : null;
     return { sim, shown, shownWrc, owar, pwar: null };
   }, [computePitcherPwar, computeReturnerPitchingProjection, simulateTransferProjection, pitchingEq, liveTargetPredictionByPlayerId, remoteEquationValues]);
 
