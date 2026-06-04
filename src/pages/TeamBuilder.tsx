@@ -1363,7 +1363,7 @@ export default function TeamBuilder() {
   useEffect(() => { livePredsRef.current = liveTargetPredictionByPlayerId; }, [liveTargetPredictionByPlayerId]);
   useEffect(() => { playerProjectionRef.current = playerProjection; }, [playerProjection]);
   useEffect(() => { projectedNilRef.current = projectedNilForPlayer; }, [projectedNilForPlayer]);
-  useEffect(() => { rosterPlayersRef.current = rosterPlayers; }, [rosterPlayers]);
+  // rosterPlayersRef is kept current inside setRosterPlayers functional updates (sync)
   useEffect(() => { selectedBuildIdRef.current = selectedBuildId; }, [selectedBuildId]);
 
   const storagePitchersForSelectedTeam = useMemo(() => {
@@ -2034,7 +2034,11 @@ export default function TeamBuilder() {
   }, [highlightedPlayerIdx]);
 
   const updatePlayer = useCallback((idx: number, updates: Partial<BuildPlayer>) => {
-    setRosterPlayers((prev) => prev.map((p, i) => (i === idx ? { ...p, ...updates } : p)));
+    setRosterPlayers((prev) => {
+      const next = prev.map((p, i) => (i === idx ? { ...p, ...updates } : p));
+      rosterPlayersRef.current = next; // sync — unmount flush always reads latest
+      return next;
+    });
     setDirty(true);
     if ("depth_role" in updates || "dev_aggressiveness" in updates) {
       setHighlightedPlayerIdx(idx);
@@ -2044,11 +2048,16 @@ export default function TeamBuilder() {
 
   const updatePlayerWithRecalc = useCallback(async (idx: number, updates: Partial<BuildPlayer>) => {
     const current = rosterPlayers[idx];
-    setRosterPlayers((prev) => prev.map((p, i) => (i === idx ? { ...p, ...updates } : p)));
+    setRosterPlayers((prev) => {
+      const next = prev.map((p, i) => (i === idx ? { ...p, ...updates } : p));
+      rosterPlayersRef.current = next; // sync — unmount flush always reads latest
+      return next;
+    });
     setDirty(true);
     if ("depth_role" in updates || "dev_aggressiveness" in updates) {
       setHighlightedPlayerIdx(idx);
     }
+    debouncedSavePlayer(idx); // fire for ALL players before any early return
     if (!current || (current.roster_status || "returner") === "target") return;
     const predictionId = current.prediction?.id;
     if (!predictionId) return;
@@ -2069,7 +2078,6 @@ export default function TeamBuilder() {
     } catch (e: any) {
       toast({ title: "Recalc failed", description: e?.message || "Could not recalculate player outputs.", variant: "destructive" });
     }
-    debouncedSavePlayer(idx);
   }, [rosterPlayers, toast, debouncedSavePlayer]);
 
   const markPlayerLeaving = useCallback((idx: number, name: string) => {
