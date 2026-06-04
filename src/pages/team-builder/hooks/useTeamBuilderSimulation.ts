@@ -473,9 +473,19 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     [rosterPlayers],
   );
 
+  // Only fetch live predictions for target players that don't already have a
+  // snapshot loaded as p.prediction. When all targets have snapshots the query
+  // is skipped entirely — the build IS the data source, no extra round-trips.
+  const targetsMissingPrediction = useMemo(
+    () => rosterPlayers.some(
+      (p) => (p.roster_status || "returner") === "target" && !!p.player_id && !p.prediction,
+    ),
+    [rosterPlayers],
+  );
+
   const { data: liveTargetPredictions = EMPTY_LIVE_PREDS } = useQuery({
     queryKey: ["team-builder-live-target-predictions", targetPlayerIds, effectiveTeamId],
-    enabled: targetPlayerIds.length > 0,
+    enabled: targetPlayerIds.length > 0 && targetsMissingPrediction,
     queryFn: async () => {
       let q = supabase
         .from("player_predictions")
