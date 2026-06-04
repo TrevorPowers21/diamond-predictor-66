@@ -74,6 +74,7 @@ export interface PlayerTableRowSharedProps {
   markPlayerLeaving: (idx: number, name: string) => void;
   updatePlayerOverrideFn: (playerId: string, overrides: { position?: string | null }) => void;
   setSupabaseRole: (playerId: string, role: "SP" | "RP" | null) => void;
+  highlightedPlayerIdx: number | null;
 }
 
 interface Props extends PlayerTableRowSharedProps {
@@ -109,8 +110,10 @@ function PlayerTableRow({
   markPlayerLeaving,
   updatePlayerOverrideFn,
   setSupabaseRole,
+  highlightedPlayerIdx,
 }: Props) {
   const side: "hitter" | "pitcher" = pool ?? (isPitcher(p) ? "pitcher" : "hitter");
+  const isHighlighted = highlightedPlayerIdx !== null && highlightedPlayerIdx === globalIdx;
   const projection = playerProjection(p, side);
   const isTarget = (p.roster_status || "returner") === "target";
   const isPitcherRow = side === "pitcher";
@@ -147,7 +150,7 @@ function PlayerTableRow({
   })();
 
   return (
-    <TableRow key={globalIdx}>
+    <TableRow key={globalIdx} className={isHighlighted ? "bg-[#D4AF37]/10 transition-colors" : undefined}>
       <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] min-w-[180px]">
         <div className="flex items-center gap-2">
           {linkedPlayerId ? (

@@ -126,6 +126,20 @@ export function useLoadBuild({
         let playerMap: Record<string, any> = {};
         let predictionMap: Record<string, any> = {};
 
+        // Build a snapshot map from the already-loaded team_build_players rows.
+        // player_snapshot is the precomputed prediction captured at save time —
+        // use it as p.prediction so load requires no extra player_predictions query
+        // for players that have a snapshot (the common case after one save).
+        const snapshotMap: Record<string, any> = {};
+        for (const bp of players) {
+          const pid = typeof bp.player_id === "string" ? bp.player_id.trim() : bp.player_id;
+          if (pid && bp.player_snapshot) snapshotMap[pid] = bp.player_snapshot;
+        }
+
+        // Only fetch player_predictions for players WITHOUT a snapshot (new adds,
+        // pre-migration builds). This eliminates the heavy query on the happy path.
+        const idsNeedingPred = playerIds.filter((id) => !snapshotMap[id]);
+
         if (playerIds.length > 0) {
           const { data: pData, error: pErr } = await supabase
             .from("players")
@@ -142,59 +156,56 @@ export function useLoadBuild({
             playerMap[p.id] = p;
           });
 
-          let predQuery = supabase
-            .from("player_predictions")
-            .select(
-              "id, player_id, customer_team_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at, o_war, market_value, hitter_depth_role",
-            )
-            .eq("season", PROJECTION_SEASON)
-            .in("player_id", playerIds)
-            .in("variant", ["regular", "precomputed"])
-            .in("status", ["active", "departed"]);
-          predQuery = applyTeamScopeFilter(predQuery as any, effectiveTeamId);
-          const { data: predData, error: predErr } = await predQuery;
-          if (predErr) {
-            console.error("TeamBuilder loadBuild predictions fetch failed:", predErr);
-          }
-
-          const grouped = new Map<string, any[]>();
-          for (const row of predData || []) {
-            const pid = String(row.player_id || "");
-            if (!pid) continue;
-            const list = grouped.get(pid) || [];
-            list.push(row);
-            grouped.set(pid, list);
-          }
-          for (const [pid, rows] of grouped.entries()) {
-            const player = playerMap[pid];
-            if (!player) continue;
-            // Prefer team-scoped precomputed row when active team has one so
-            // saved builds reflect the customer team's tuned equation.
-            const teamScoped = pickPreferredPrediction(rows as any[], effectiveTeamId);
-            if (teamScoped && (teamScoped as any).customer_team_id === effectiveTeamId) {
-              predictionMap[pid] = teamScoped;
-              continue;
+          if (idsNeedingPred.length > 0) {
+            let predQuery = supabase
+              .from("player_predictions")
+              .select(
+                "id, player_id, customer_team_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at, o_war, market_value, hitter_depth_role",
+              )
+              .eq("season", PROJECTION_SEASON)
+              .in("player_id", idsNeedingPred)
+              .in("variant", ["regular", "precomputed"])
+              .in("status", ["active", "departed"]);
+            predQuery = applyTeamScopeFilter(predQuery as any, effectiveTeamId);
+            const { data: predData, error: predErr } = await predQuery;
+            if (predErr) {
+              console.error("TeamBuilder loadBuild predictions fetch failed:", predErr);
             }
-            const preds = rows.filter(
-              (r: any) => r.variant === "regular" && (r.status === "active" || r.status === "departed"),
-            );
-            if (preds.length === 0) continue;
-            let best = preds[0];
-            for (const row of preds) {
-              if (!best) { best = row; continue; }
-              const rowScore = scorePredictionLikeDashboard(row, false);
-              const bestScore = scorePredictionLikeDashboard(best, false);
-              if (rowScore > bestScore) best = row;
-              else if (rowScore === bestScore) {
-                if (
-                  new Date(row.updated_at || 0).getTime() >
-                  new Date(best.updated_at || 0).getTime()
-                ) {
-                  best = row;
+
+            const grouped = new Map<string, any[]>();
+            for (const row of predData || []) {
+              const pid = String(row.player_id || "");
+              if (!pid) continue;
+              const list = grouped.get(pid) || [];
+              list.push(row);
+              grouped.set(pid, list);
+            }
+            for (const [pid, rows] of grouped.entries()) {
+              const player = playerMap[pid];
+              if (!player) continue;
+              const teamScoped = pickPreferredPrediction(rows as any[], effectiveTeamId);
+              if (teamScoped && (teamScoped as any).customer_team_id === effectiveTeamId) {
+                predictionMap[pid] = teamScoped;
+                continue;
+              }
+              const preds = rows.filter(
+                (r: any) => r.variant === "regular" && (r.status === "active" || r.status === "departed"),
+              );
+              if (preds.length === 0) continue;
+              let best = preds[0];
+              for (const row of preds) {
+                if (!best) { best = row; continue; }
+                const rowScore = scorePredictionLikeDashboard(row, false);
+                const bestScore = scorePredictionLikeDashboard(best, false);
+                if (rowScore > bestScore) best = row;
+                else if (rowScore === bestScore) {
+                  if (new Date(row.updated_at || 0).getTime() > new Date(best.updated_at || 0).getTime()) {
+                    best = row;
+                  }
                 }
               }
+              predictionMap[pid] = best;
             }
-            predictionMap[pid] = best;
           }
         }
 
@@ -278,9 +289,11 @@ export function useLoadBuild({
                 const pd = normalizedPlayerId
                   ? playerMap[normalizedPlayerId] || recoveredPlayer || null
                   : null;
-                const activePred = normalizedPlayerId
-                  ? predictionMap[normalizedPlayerId] ?? null
-                  : null;
+                // Snapshot is the primary source (captured at last save, refreshed
+                // by precompute). Falls back to live predictionMap for new adds
+                // or pre-migration builds that don't have a snapshot yet.
+                const snapshot = normalizedPlayerId ? snapshotMap[normalizedPlayerId] ?? null : null;
+                const activePred = snapshot ?? (normalizedPlayerId ? predictionMap[normalizedPlayerId] ?? null : null);
                 const localPlayerRaw =
                   !pd && meta.localPlayer
                     ? {
@@ -353,26 +366,23 @@ export function useLoadBuild({
                   roster_status:
                     meta.rosterStatus ??
                     ((bp.source as string) === "portal" ? "target" : "returner"),
-                  // depth_role recomputed from current PA/IP. Saved builds from
-                  // before 2026-05-20 baked in "bench" for hitters when seasonUsage
-                  // was empty at save time; PA-based recompute fixes that.
                   depth_role: (() => {
+                    // Coach override always wins
+                    if (meta.depthRole) return meta.depthRole;
                     if (isPitcherRow) {
                       const ip =
                         pd?.source_player_id
                           ? pitchingStatsByNameTeam.bySourceId.get(pd.source_player_id)?.ip ?? null
                           : null;
-                      if (ip != null) {
-                        return defaultPitcherDepthRoleFromIp(
-                          ip,
-                          inferredRole === "SP" ? "SP" : "RP",
-                        );
-                      }
-                      return (
-                        meta.depthRole ??
-                        defaultPitcherDepthRoleFromIp(null, inferredRole === "SP" ? "SP" : "RP")
+                      return defaultPitcherDepthRoleFromIp(
+                        ip,
+                        inferredRole === "SP" ? "SP" : "RP",
                       );
                     }
+                    // For hitters: prefer hitter_depth_role from snapshot — it reflects
+                    // the tier the precompute used and matches the stored o_war baseline,
+                    // so the overlay starts at 1× with no PA mismatch.
+                    if (snapshot?.hitter_depth_role) return snapshot.hitter_depth_role;
                     const hNameKey = pd
                       ? `${normalizeName(`${pd.first_name || ""} ${pd.last_name || ""}`.trim())}|${normalizeName(pd.team || "")}`
                       : null;
@@ -380,10 +390,8 @@ export function useLoadBuild({
                       (pd?.id ? seasonUsage.hitterAb?.get(pd.id) : null) ??
                       (hNameKey ? seasonUsage.hitterAbByNameTeam?.get(hNameKey) : null) ??
                       null;
-                    if (hitterAb != null && hitterAb > 0) {
-                      return defaultHitterDepthRoleFromPa(hitterAb);
-                    }
-                    return meta.depthRole ?? "everyday_starter";
+                    if (hitterAb != null && hitterAb > 0) return defaultHitterDepthRoleFromPa(hitterAb);
+                    return "everyday_starter";
                   })(),
                   class_transition: meta.classTransitionOverridden
                     ? meta.classTransition ?? "SJ"

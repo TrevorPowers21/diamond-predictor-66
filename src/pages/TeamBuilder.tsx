@@ -26,7 +26,7 @@ import { useLoadBuild } from "./team-builder/hooks/useLoadBuild";
 import {
   getPlayerName, depthKey, slotMatchesPosition, asPitcherRole, pitcherRoleFromSlot,
   normalizeName, isUuid, readStoragePitcherLocalPlayers, parseBuildPlayerMeta,
-  serializeBuildPlayerMeta, defaultHitterDepthRoleFromPa, defaultPitcherDepthRoleFromIp,
+  serializeBuildPlayerMeta, buildPlayerSnapshot, defaultHitterDepthRoleFromPa, defaultPitcherDepthRoleFromIp,
   teamMatchesSelectedTeam, splitFullNameExport as splitFullName, isPitcher,
 } from "./team-builder/helpers";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
@@ -825,6 +825,7 @@ export default function TeamBuilder() {
   const [totalBudget, setTotalBudget] = useState<number>(0);
   const [rosterPlayers, setRosterPlayers] = useState<BuildPlayer[]>([]);
   const [dirty, setDirty] = useState(false);
+  const [highlightedPlayerIdx, setHighlightedPlayerIdx] = useState<number | null>(null);
   const [programTierMultiplier, setProgramTierMultiplier] = useState<number>(1.2);
   const [programTierConference, setProgramTierConference] = useState<string>("");
   const [fallbackRosterTotalPlayerScore, setFallbackRosterTotalPlayerScore] = useState<number>(DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
@@ -1825,6 +1826,9 @@ export default function TeamBuilder() {
           position_slot: rp.position_slot,
           depth_order: rp.depth_order,
           nil_value: rp.nil_value,
+          player_snapshot: buildPlayerSnapshot(
+            (rp.player_id ? liveTargetPredictionByPlayerId.get(rp.player_id) : null) ?? rp.prediction ?? null,
+          ),
           production_notes: serializeBuildPlayerMeta(
             rp.production_notes,
             rp.team_metrics ?? null,
@@ -1893,15 +1897,31 @@ export default function TeamBuilder() {
     }
   }, [rosterPlayers, removeFromSupabaseBoard]);
 
+  // Clear row highlight on the next click anywhere after an adjustment.
+  // setTimeout(0) defers past React's own click handler so the dropdown click
+  // that triggered the highlight doesn't immediately clear it.
+  useEffect(() => {
+    if (highlightedPlayerIdx === null) return;
+    const clear = () => setTimeout(() => setHighlightedPlayerIdx(null), 0);
+    document.addEventListener("click", clear, { once: true });
+    return () => document.removeEventListener("click", clear);
+  }, [highlightedPlayerIdx]);
+
   const updatePlayer = useCallback((idx: number, updates: Partial<BuildPlayer>) => {
     setRosterPlayers((prev) => prev.map((p, i) => (i === idx ? { ...p, ...updates } : p)));
     setDirty(true);
+    if ("depth_role" in updates || "dev_aggressiveness" in updates) {
+      setHighlightedPlayerIdx(idx);
+    }
   }, []);
 
   const updatePlayerWithRecalc = useCallback(async (idx: number, updates: Partial<BuildPlayer>) => {
     const current = rosterPlayers[idx];
     setRosterPlayers((prev) => prev.map((p, i) => (i === idx ? { ...p, ...updates } : p)));
     setDirty(true);
+    if ("depth_role" in updates || "dev_aggressiveness" in updates) {
+      setHighlightedPlayerIdx(idx);
+    }
     if (!current || (current.roster_status || "returner") === "target") return;
     const predictionId = current.prediction?.id;
     if (!predictionId) return;
@@ -2926,6 +2946,7 @@ export default function TeamBuilder() {
     markPlayerLeaving,
     updatePlayerOverrideFn,
     setSupabaseRole,
+    highlightedPlayerIdx,
   }), [
     allPlayersById,
     pitchingStatsByNameTeam,
@@ -2949,6 +2970,7 @@ export default function TeamBuilder() {
     markPlayerLeaving,
     updatePlayerOverrideFn,
     setSupabaseRole,
+    highlightedPlayerIdx,
   ]);
 
   return (

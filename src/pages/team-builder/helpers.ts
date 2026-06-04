@@ -401,3 +401,44 @@ export const serializeBuildPlayerMeta = (
     nilValueOverridden: Boolean(nilValueOverridden),
   });
 };
+
+// ── buildPlayerSnapshot ─────────────────────────────────────────────────────
+//
+// Captures the BASE precomputed prediction row into the player_snapshot JSONB
+// column on team_build_players. Stores raw stored values only — no depth or
+// devAgg overlay applied. Overlays re-apply client-side from production_notes
+// so the precompute can safely overwrite the snapshot without needing to know
+// about each coach's adjustments.
+
+export const buildPlayerSnapshot = (pred: Record<string, unknown> | null | undefined): Record<string, unknown> | null => {
+  if (!pred) return null;
+  const p = pred as any;
+  return {
+    // identity — lets playerProjection verify team scope + precomputed status
+    variant:           p.variant           ?? null,
+    model_type:        p.model_type        ?? null,
+    customer_team_id:  p.customer_team_id  ?? null,
+    class_transition:  p.class_transition  ?? null,
+    dev_aggressiveness: p.dev_aggressiveness ?? null,
+    // hitter stats
+    p_avg:             p.p_avg             ?? null,
+    p_obp:             p.p_obp             ?? null,
+    p_slg:             p.p_slg             ?? null,
+    p_iso:             p.p_iso             ?? null,
+    p_wrc_plus:        p.p_wrc_plus        ?? null,
+    o_war:             p.o_war             ?? null,
+    hitter_depth_role: p.hitter_depth_role ?? null,
+    // pitcher stats
+    p_rv_plus:         p.p_rv_plus         ?? null,
+    p_era:             p.p_era             ?? null,
+    p_fip:             p.p_fip             ?? null,
+    p_whip:            p.p_whip            ?? null,
+    p_k9:              p.p_k9              ?? null,
+    p_bb9:             p.p_bb9             ?? null,
+    p_hr9:             p.p_hr9             ?? null,
+    p_war:             p.p_war             ?? null,
+    pitcher_role:      p.pitcher_role      ?? null,
+    // shared
+    market_value:      p.market_value      ?? null,
+  };
+};

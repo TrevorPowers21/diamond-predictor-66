@@ -1433,6 +1433,15 @@ Deno.serve(async (req: Request) => {
       })
       .eq("id", job.id);
 
+    // Refresh player_snapshot on all active builds for this team so coaches
+    // see fresh precomputed values on next load without needing to re-save.
+    // Joins team_build_players → player_predictions on player_id + team scope.
+    await supabase.rpc("refresh_build_snapshots_for_team", {
+      p_customer_team_id: job.customer_team_id,
+    }).then(({ error }) => {
+      if (error) console.error("[precompute] refresh_build_snapshots_for_team failed:", error.message);
+    });
+
     return new Response(JSON.stringify({ ok: true, jobId: job.id, ...result }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
