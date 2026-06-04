@@ -404,41 +404,65 @@ export const serializeBuildPlayerMeta = (
 
 // ── buildPlayerSnapshot ─────────────────────────────────────────────────────
 //
-// Captures the BASE precomputed prediction row into the player_snapshot JSONB
-// column on team_build_players. Stores raw stored values only — no depth or
-// devAgg overlay applied. Overlays re-apply client-side from production_notes
-// so the precompute can safely overwrite the snapshot without needing to know
-// about each coach's adjustments.
+// Stores FINAL display values into player_snapshot — the numbers the coach
+// currently sees, after depth-role and devAgg overlays are applied.
+//
+// Critically, hitter_depth_role and dev_aggressiveness are stored as the
+// COACH's current settings (not the precompute baseline). This means on next
+// load playerProjection computes overlay ratio = 1 (session == stored) and
+// uses the values as-is — zero client-side computation for the summary.
+//
+// When precompute refreshes snapshots it reads these settings from
+// production_notes and re-applies them to produce new final values.
 
-export const buildPlayerSnapshot = (pred: Record<string, unknown> | null | undefined): Record<string, unknown> | null => {
-  if (!pred) return null;
-  const p = pred as any;
+export type BuildPlayerSnapshotInput = {
+  // Final display values (post-overlay)
+  shown: Record<string, unknown> | null | undefined;
+  owar: number | null;
+  pwar: number | null;
+  marketValue: number | null;
+  // Coach's current settings — stored as the baseline so overlay = 1 on load
+  coachDepthRole: BuildPlayer["depth_role"] | null | undefined;
+  coachDevAgg: number | null | undefined;
+};
+
+export const buildPlayerSnapshot = ({
+  shown,
+  owar,
+  pwar,
+  marketValue,
+  coachDepthRole,
+  coachDevAgg,
+}: BuildPlayerSnapshotInput): Record<string, unknown> | null => {
+  if (!shown && owar == null && pwar == null) return null;
+  const s = (shown ?? {}) as any;
   return {
-    // identity — lets playerProjection verify team scope + precomputed status
-    variant:           p.variant           ?? null,
-    model_type:        p.model_type        ?? null,
-    customer_team_id:  p.customer_team_id  ?? null,
-    class_transition:  p.class_transition  ?? null,
-    dev_aggressiveness: p.dev_aggressiveness ?? null,
-    // hitter stats
-    p_avg:             p.p_avg             ?? null,
-    p_obp:             p.p_obp             ?? null,
-    p_slg:             p.p_slg             ?? null,
-    p_iso:             p.p_iso             ?? null,
-    p_wrc_plus:        p.p_wrc_plus        ?? null,
-    o_war:             p.o_war             ?? null,
-    hitter_depth_role: p.hitter_depth_role ?? null,
-    // pitcher stats
-    p_rv_plus:         p.p_rv_plus         ?? null,
-    p_era:             p.p_era             ?? null,
-    p_fip:             p.p_fip             ?? null,
-    p_whip:            p.p_whip            ?? null,
-    p_k9:              p.p_k9              ?? null,
-    p_bb9:             p.p_bb9             ?? null,
-    p_hr9:             p.p_hr9             ?? null,
-    p_war:             p.p_war             ?? null,
-    pitcher_role:      p.pitcher_role      ?? null,
-    // shared
-    market_value:      p.market_value      ?? null,
+    // Hitter stats (devAgg-scaled)
+    p_avg:       s.p_avg       ?? null,
+    p_obp:       s.p_obp       ?? null,
+    p_slg:       s.p_slg       ?? null,
+    p_iso:       s.p_iso       ?? null,
+    p_wrc_plus:  s.p_wrc_plus  ?? null,
+    o_war:       owar          ?? null,
+    // Pitcher stats (devAgg + role applied)
+    p_rv_plus:   s.p_rv_plus   ?? null,
+    p_era:       s.p_era       ?? null,
+    p_fip:       s.p_fip       ?? null,
+    p_whip:      s.p_whip      ?? null,
+    p_k9:        s.p_k9        ?? null,
+    p_bb9:       s.p_bb9       ?? null,
+    p_hr9:       s.p_hr9       ?? null,
+    p_war:       pwar          ?? null,
+    pitcher_role: s.pitcher_role ?? null,
+    // Market value (final, includes PTM + PVF)
+    market_value: marketValue   ?? null,
+    // Coach settings stored AS the baseline — overlay = 1 on next load
+    hitter_depth_role:  coachDepthRole  ?? s.hitter_depth_role  ?? null,
+    dev_aggressiveness: coachDevAgg     ?? s.dev_aggressiveness  ?? 0,
+    // Identity metadata
+    variant:          s.variant          ?? null,
+    model_type:       s.model_type       ?? null,
+    customer_team_id: s.customer_team_id ?? null,
+    class_transition: s.class_transition ?? null,
   };
 };
