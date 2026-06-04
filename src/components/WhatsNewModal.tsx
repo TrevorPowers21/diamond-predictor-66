@@ -20,6 +20,47 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    date: "2026-06-04",
+    headline: "Smarter Team Builder hitter controls, faster Transfer Portal, expanded pitcher coverage",
+    features: [
+      {
+        title: "Team Builder Hitter Controls Now Drive Projections in Real Time",
+        tagline:
+          "Slide a hitter's depth role, dev aggressiveness, or position and their oWAR and Market Value update on the spot. Stored projections stay the foundation, and your adjustments layer cleanly on top.",
+        details: [
+          "Depth changes scale oWAR and Market Value using the same PA-ratio math the Player Profile uses, so the numbers stay consistent across both surfaces.",
+          "Dev aggressiveness flows through the slash stats (pAVG/pOBP/pSLG/pWRC+) and on into oWAR and Market Value together.",
+          "Position changes adjust Market Value while leaving oWAR steady.",
+          "Every player loads with their stored projection by default, so a coach who doesn't touch the knobs sees the pipeline's numbers as is.",
+        ],
+      },
+      {
+        title: "Transfer Portal Simulator: Instant Search, Full Pitcher Pool",
+        tagline:
+          "The Transfer Portal page is ready the moment it opens. The pitcher search now surfaces every D1 arm on file across the country.",
+        details: [
+          "Search results render immediately on page load, with the full pool available the second you start typing.",
+          "Picking a player streams in their projection with a clean \"Loading projection...\" indicator.",
+          "\"Previous\" season stats and projection numbers share the same stored-row source that powers the Player Compare page, keeping numbers consistent across surfaces.",
+        ],
+      },
+      {
+        title: "Refined Pricing for Swing-Role Pitchers",
+        tagline:
+          "Pitchers slotted into the Swing role on the rotation depth chart now price against the right role baseline, reflecting how versatile arms get used across a season.",
+        details: [
+          "Swing-role pitchers use the SM (swing-man) Position Value Factor, giving the depth chart the right shape from cornerstone weekend starter down through the rest of the rotation.",
+        ],
+      },
+    ],
+    whatElse: [
+      "Team Builder: more precise precomputed pitcher projections for target players.",
+      "Team Builder: target hitter stats appear instantly on add, no flash while the projection catches up.",
+      "Team Builder: smoother depth-chart interactions on larger builds.",
+      "Player Dashboard, Pitcher Profile, Team Builder pitcher search: expanded pitcher coverage across every surface that lists arms.",
+    ],
+  },
+  {
     date: "2026-05-27",
     headline: "Budget control, program benchmarks, and a sharper team picker",
     features: [
