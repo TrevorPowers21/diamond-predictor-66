@@ -881,12 +881,20 @@ export default function TransferPortal() {
   });
 
   // Picked stored row for the selected hitter (team-scoped → global fallback).
-  // Used for "Previous" display + team-name disambiguation + risk inputs;
-  // previously these read from selectedPlayer.from_avg/obp/slg bundled at
-  // mount, but the mount query is now lightweight and those fields are null.
+  // Drives projection cards (p_*, oWAR, market_value) and risk inputs.
   const hitterStoredRow = useMemo(
     () => pickPreferredPrediction(selectedHitterPredictions, effectiveTeamId) as any,
     [selectedHitterPredictions, effectiveTeamId],
+  );
+  // Global regular row (variant='regular', customer_team_id IS NULL). The
+  // from_* fields live only on the global row — precomputed team-scoped
+  // rows leave them null. Used for the "Previous" display so the comparison
+  // stays consistent regardless of which team-scoped row was picked above.
+  const hitterGlobalRow = useMemo(
+    () => (selectedHitterPredictions as any[]).find(
+      (r) => r.variant === "regular" && r.customer_team_id == null,
+    ),
+    [selectedHitterPredictions],
   );
 
   // Stored prediction rows for the selected pitcher. The PitchingStorageRow
@@ -923,6 +931,14 @@ export default function TransferPortal() {
   const pitcherStoredRow = useMemo(
     () => pickPreferredPrediction(selectedPitcherPredictions, effectiveTeamId) as any,
     [selectedPitcherPredictions, effectiveTeamId],
+  );
+  // Global regular row for the pitcher — same role as hitterGlobalRow.
+  // from_era/fip/whip/k9/bb9/hr9 live only on the global row.
+  const pitcherGlobalRow = useMemo(
+    () => (selectedPitcherPredictions as any[]).find(
+      (r) => r.variant === "regular" && r.customer_team_id == null,
+    ),
+    [selectedPitcherPredictions],
   );
 
   const teamByKey = useMemo(() => {
@@ -1142,7 +1158,7 @@ export default function TransferPortal() {
     const candidates = seedByName.get(normalizeKey(fullName)) || [];
     if (candidates.length === 0) return null;
     if (candidates.length === 1) return candidates[0].team;
-    const key = `${statKey(hitterStoredRow?.from_avg ?? null)}|${statKey(hitterStoredRow?.from_obp ?? null)}|${statKey(hitterStoredRow?.from_slg ?? null)}`;
+    const key = `${statKey(hitterGlobalRow?.from_avg ?? null)}|${statKey(hitterGlobalRow?.from_obp ?? null)}|${statKey(hitterGlobalRow?.from_slg ?? null)}`;
     const exact = candidates.find((r) => `${statKey(r.avg)}|${statKey(r.obp)}|${statKey(r.slg)}` === key);
     return exact?.team || candidates[0].team;
   }, [selectedPlayer, seedByName]);
@@ -1532,7 +1548,7 @@ export default function TransferPortal() {
                   <div className="mt-3 text-xs text-muted-foreground border-t pt-2 flex items-center gap-4">
                     <span className="font-medium text-foreground">{selectedPlayer.first_name} {selectedPlayer.last_name}</span>
                     <span>{selectedPlayer.position || "-"} · {fromTeam || "-"} · {fromConference || "-"}</span>
-                    <span className="font-mono tabular-nums">Previous: {stat(hitterStoredRow?.from_avg ?? null)} / {stat(hitterStoredRow?.from_obp ?? null)} / {stat(hitterStoredRow?.from_slg ?? null)}</span>
+                    <span className="font-mono tabular-nums">Previous: {stat(hitterGlobalRow?.from_avg ?? null)} / {stat(hitterGlobalRow?.from_obp ?? null)} / {stat(hitterGlobalRow?.from_slg ?? null)}</span>
                   </div>
                 )}
               </CardContent>
@@ -1621,9 +1637,9 @@ export default function TransferPortal() {
                 // pitcher JUCO card philosophy (Projection / Skillset /
                 // Data Reliability / Competition with SOURCE stuff+).
                 const tm = selectedPlayer?.player_id ? jucoTrackmanMap.get(selectedPlayer.player_id) : undefined;
-                const fromAvg = hitterStoredRow?.from_avg ?? null;
-                const fromObp = hitterStoredRow?.from_obp ?? null;
-                const fromSlg = hitterStoredRow?.from_slg ?? null;
+                const fromAvg = hitterGlobalRow?.from_avg ?? null;
+                const fromObp = hitterGlobalRow?.from_obp ?? null;
+                const fromSlg = hitterGlobalRow?.from_slg ?? null;
                 const iso = fromAvg != null && fromSlg != null ? fromSlg - fromAvg : null;
                 return <JucoHitterRiskCard input={{
                   projectedWrcPlus: simulation.pWrcPlus,
@@ -1742,7 +1758,7 @@ export default function TransferPortal() {
                   <div className="mt-3 text-xs text-muted-foreground border-t pt-2 flex items-center gap-4">
                     <span className="font-medium text-foreground">{selectedPitcher.player_name}</span>
                     <span>{selectedPitcher.handedness === "R" ? "RHP" : selectedPitcher.handedness === "L" ? "LHP" : selectedPitcher.handedness || "-"} · {selectedPitcher.team || "-"} · {selectedPitcher.role || "-"}</span>
-                    <span className="font-mono tabular-nums">Previous: {stat(pitcherStoredRow?.from_era ?? null, 2)} ERA · {stat(pitcherStoredRow?.from_fip ?? null, 2)} FIP · {stat(pitcherStoredRow?.from_whip ?? null, 2)} WHIP · {stat(pitcherStoredRow?.from_k9 ?? null, 1)} K/9 · {stat(pitcherStoredRow?.from_bb9 ?? null, 2)} BB/9 · {stat(pitcherStoredRow?.from_hr9 ?? null, 2)} HR/9</span>
+                    <span className="font-mono tabular-nums">Previous: {stat(pitcherGlobalRow?.from_era ?? null, 2)} ERA · {stat(pitcherGlobalRow?.from_fip ?? null, 2)} FIP · {stat(pitcherGlobalRow?.from_whip ?? null, 2)} WHIP · {stat(pitcherGlobalRow?.from_k9 ?? null, 1)} K/9 · {stat(pitcherGlobalRow?.from_bb9 ?? null, 2)} BB/9 · {stat(pitcherGlobalRow?.from_hr9 ?? null, 2)} HR/9</span>
                   </div>
                 )}
               </CardContent>
