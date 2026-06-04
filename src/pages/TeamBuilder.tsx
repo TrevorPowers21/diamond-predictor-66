@@ -714,6 +714,15 @@ const writeLegacyPitchingRoleOverride = (
 
 const conferenceKeyAliases = getConferenceAliases;
 
+function formatDistanceToNowShort(date: Date): string {
+  const secs = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (secs < 60) return "just now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ago`;
+}
+
 function readLocalNum(key: string, fallback: number, remoteValues?: Record<string, number>): number {
   // 1) Supabase model_config is the authority
   const remote = remoteValues?.[key];
@@ -826,6 +835,9 @@ export default function TeamBuilder() {
   const [rosterPlayers, setRosterPlayers] = useState<BuildPlayer[]>([]);
   const [dirty, setDirty] = useState(false);
   const [highlightedPlayerIdx, setHighlightedPlayerIdx] = useState<number | null>(null);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "pending" | "saving" | "saved" | "error">("idle");
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const playerSaveTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const [programTierMultiplier, setProgramTierMultiplier] = useState<number>(1.2);
   const [programTierConference, setProgramTierConference] = useState<string>("");
   const [fallbackRosterTotalPlayerScore, setFallbackRosterTotalPlayerScore] = useState<number>(DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
@@ -1344,6 +1356,11 @@ export default function TeamBuilder() {
     programTierMultiplier,
     powerLookup,
   });
+
+  // Stable ref — savePlayerRowFn reads this at fire time so it never uses a
+  // stale prediction map from when the debounce was scheduled.
+  const livePredsRef = useRef(liveTargetPredictionByPlayerId);
+  useEffect(() => { livePredsRef.current = liveTargetPredictionByPlayerId; }, [liveTargetPredictionByPlayerId]);
 
   const storagePitchersForSelectedTeam = useMemo(() => {
     if (!selectedTeam) return [] as BuildPlayer[];
@@ -1874,49 +1891,41 @@ export default function TeamBuilder() {
         buildId = data.id;
       }
 
-      if (rosterPlayers.length > 0) {
-        const rows = rosterPlayers.map((rp) => ({
-          ...(() => {
-            const fullName = rp.player ? `${rp.player.first_name || ""} ${rp.player.last_name || ""}`.trim() : "";
-            const persistedName = (rp.custom_name && rp.custom_name.trim()) || fullName || getPlayerName(rp) || null;
-            return { custom_name: persistedName === "TBD" ? null : persistedName };
-          })(),
-          build_id: buildId!,
-          player_id: rp.player_id,
-          source: rp.source,
-          position_slot: rp.position_slot,
-          depth_order: rp.depth_order,
-          nil_value: rp.nil_value,
-          player_snapshot: buildPlayerSnapshot(
-            (rp.player_id ? liveTargetPredictionByPlayerId.get(rp.player_id) : null) ?? rp.prediction ?? null,
-          ),
-          production_notes: serializeBuildPlayerMeta(
-            rp.production_notes,
-            rp.team_metrics ?? null,
-            rp.team_power_plus ?? null,
-            rp.roster_status ?? null,
-            rp.depth_role ?? null,
-            rp.class_transition ?? null,
-            rp.dev_aggressiveness ?? null,
-            rp.class_transition_overridden ?? false,
-            rp.dev_aggressiveness_overridden ?? false,
-            rp.transfer_snapshot ?? null,
-            rp.player
-              ? {
-                  first_name: rp.player.first_name || "",
-                  last_name: rp.player.last_name || "",
-                  position: rp.player.position ?? null,
-                  team: rp.player.team ?? null,
-                  from_team: rp.player.from_team ?? null,
-                  conference: rp.player.conference ?? null,
-                }
-              : null,
-            rp.projection_tier ?? null,
-            rp.nil_value_overridden ?? false,
-          ),
-        }));
-        const { error } = await supabase.from("team_build_players").insert(rows);
-        if (error) throw error;
+      if (saveAs || !buildId) {
+        // New build — full insert of all players
+        if (rosterPlayers.length > 0) {
+          const rows = rosterPlayers.map((rp) => buildBuildPlayerRow(rp, buildId!));
+          const { data: inserted, error } = await supabase
+            .from("team_build_players").insert(rows).select("id, player_id");
+          if (error) throw error;
+          // Store returned row ids so future per-player saves can UPDATE by id
+          if (inserted?.length) {
+            const idByPlayerIdx = new Map(inserted.map((r, i) => [i, r.id]));
+            setRosterPlayers((prev) => {
+              let i = 0;
+              return prev.map((rp) => {
+                const rowId = idByPlayerIdx.get(i++);
+                return rowId ? { ...rp, id: rowId } : rp;
+              });
+            });
+          }
+        }
+      } else {
+        // Existing build — per-player autosave handles individual edits.
+        // Only insert players that don't have a row id yet (new adds since last save).
+        const newPlayers = rosterPlayers.filter((rp) => !rp.id);
+        if (newPlayers.length > 0) {
+          const rows = newPlayers.map((rp) => buildBuildPlayerRow(rp, buildId!));
+          const { data: inserted, error } = await supabase
+            .from("team_build_players").insert(rows).select("id");
+          if (error) throw error;
+          if (inserted?.length) {
+            let i = 0;
+            setRosterPlayers((prev) =>
+              prev.map((rp) => (!rp.id && i < inserted.length ? { ...rp, id: inserted[i++].id } : rp)),
+            );
+          }
+        }
       }
 
       setSelectedBuildId(buildId);
@@ -1925,6 +1934,8 @@ export default function TeamBuilder() {
       return { buildId, saveAs, targetName };
     },
     onSuccess: (result) => {
+      setLastSavedAt(new Date());
+      setAutoSaveStatus("saved");
       toast({ title: result?.saveAs ? `Build saved as "${result.targetName}"` : "Build saved" });
       queryClient.invalidateQueries({ queryKey: ["team-builds"] });
     },
@@ -1952,11 +1963,87 @@ export default function TeamBuilder() {
     const removed = rosterPlayers[idx];
     setRosterPlayers((prev) => prev.filter((_, i) => i !== idx));
     setDirty(true);
+    // Per-player delete — no debounce, immediate
+    if (removed?.id && selectedBuildId) {
+      setAutoSaveStatus("saving");
+      supabase.from("team_build_players").delete().eq("id", removed.id)
+        .then(({ error }) => {
+          if (error) setAutoSaveStatus("error");
+          else { setLastSavedAt(new Date()); setAutoSaveStatus("saved"); }
+        });
+    }
     if (removed && (removed.roster_status || "returner") === "target" && removed.player_id) {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(removed.player_id);
       if (isUuid) removeFromSupabaseBoard(removed.player_id);
     }
-  }, [rosterPlayers, removeFromSupabaseBoard]);
+  }, [rosterPlayers, selectedBuildId, removeFromSupabaseBoard, supabase]);
+
+  // ── Per-player autosave ───────────────────────────────────────────────────
+  // Builds the team_build_players row object for a single player.
+  // Used by both the full saveMutation and the per-player saves.
+  const buildBuildPlayerRow = useCallback((rp: BuildPlayer, buildId: string) => {
+    const fullName = rp.player ? `${rp.player.first_name || ""} ${rp.player.last_name || ""}`.trim() : "";
+    const persistedName = (rp.custom_name && rp.custom_name.trim()) || fullName || getPlayerName(rp) || null;
+    const rawPred = (rp.player_id ? livePredsRef.current.get(rp.player_id) : null) ?? rp.prediction ?? null;
+    return {
+      ...(rp.id ? { id: rp.id } : {}),
+      build_id: buildId,
+      custom_name: persistedName === "TBD" ? null : persistedName,
+      player_id: rp.player_id,
+      source: rp.source,
+      position_slot: rp.position_slot,
+      depth_order: rp.depth_order,
+      nil_value: rp.nil_value,
+      player_snapshot: buildPlayerSnapshot(rawPred),
+      production_notes: serializeBuildPlayerMeta(
+        rp.production_notes, rp.team_metrics ?? null, rp.team_power_plus ?? null,
+        rp.roster_status ?? null, rp.depth_role ?? null, rp.class_transition ?? null,
+        rp.dev_aggressiveness ?? null, rp.class_transition_overridden ?? false,
+        rp.dev_aggressiveness_overridden ?? false, rp.transfer_snapshot ?? null,
+        rp.player ? {
+          first_name: rp.player.first_name || "", last_name: rp.player.last_name || "",
+          position: rp.player.position ?? null, team: rp.player.team ?? null,
+          from_team: rp.player.from_team ?? null, conference: rp.player.conference ?? null,
+        } : null,
+        rp.projection_tier ?? null, rp.nil_value_overridden ?? false,
+      ),
+    };
+  }, []); // livePredsRef is a ref — stable, no dep needed
+
+  // Writes one player row. Only fires when the build already exists (selectedBuildId set)
+  // and the player already has a DB row id. New adds go through saveMutation.
+  const savePlayerRowFn = useCallback(async (rp: BuildPlayer, buildId: string) => {
+    if (!rp.id) return;
+    setAutoSaveStatus("saving");
+    const { error } = await supabase
+      .from("team_build_players")
+      .update(buildBuildPlayerRow(rp, buildId))
+      .eq("id", rp.id);
+    if (error) {
+      setAutoSaveStatus("error");
+    } else {
+      setLastSavedAt(new Date());
+      setAutoSaveStatus("saved");
+    }
+  }, [buildBuildPlayerRow, supabase]);
+
+  // Per-player debounce: each player index has its own timer so changing
+  // player A and player B within 2.5s saves both, not just the later one.
+  const debouncedSavePlayer = useCallback((idx: number) => {
+    if (!selectedBuildId) return;
+    setAutoSaveStatus("pending");
+    if (playerSaveTimers.current[idx]) clearTimeout(playerSaveTimers.current[idx]);
+    const buildId = selectedBuildId;
+    playerSaveTimers.current[idx] = setTimeout(() => {
+      delete playerSaveTimers.current[idx];
+      // Read the latest player state at fire time — not the stale closure value
+      setRosterPlayers((prev) => {
+        const rp = prev[idx];
+        if (rp?.id) void savePlayerRowFn(rp, buildId);
+        return prev;
+      });
+    }, 2500);
+  }, [selectedBuildId, savePlayerRowFn]);
 
   // Clear row highlight on the next click anywhere after an adjustment.
   // setTimeout(0) defers past React's own click handler so the dropdown click
@@ -1974,7 +2061,8 @@ export default function TeamBuilder() {
     if ("depth_role" in updates || "dev_aggressiveness" in updates) {
       setHighlightedPlayerIdx(idx);
     }
-  }, []);
+    debouncedSavePlayer(idx);
+  }, [debouncedSavePlayer]);
 
   const updatePlayerWithRecalc = useCallback(async (idx: number, updates: Partial<BuildPlayer>) => {
     const current = rosterPlayers[idx];
@@ -2003,7 +2091,8 @@ export default function TeamBuilder() {
     } catch (e: any) {
       toast({ title: "Recalc failed", description: e?.message || "Could not recalculate player outputs.", variant: "destructive" });
     }
-  }, [rosterPlayers, toast]);
+    debouncedSavePlayer(idx);
+  }, [rosterPlayers, toast, debouncedSavePlayer]);
 
   const markPlayerLeaving = useCallback((idx: number, name: string) => {
     setRosterPlayers((prev) => prev.filter((_, i) => i !== idx));
@@ -2982,21 +3071,33 @@ export default function TeamBuilder() {
             <Button variant="outline" onClick={newBuild}>
               <Plus className="h-4 w-4 mr-1" /> New Build
             </Button>
-            {dirty && (
+            {/* New build: explicit save to create it */}
+            {!selectedBuildId && dirty && (
               <Button
                 onClick={() => {
-                  if (selectedBuildId) {
-                    saveMutation.mutate({});
-                  } else {
-                    const name = askBuildName(buildName);
-                    if (!name) return;
-                    saveMutation.mutate({ saveAs: true, nameOverride: name });
-                  }
+                  const name = askBuildName(buildName);
+                  if (!name) return;
+                  saveMutation.mutate({ saveAs: true, nameOverride: name });
                 }}
                 disabled={!selectedTeam || saveMutation.isPending}
               >
-                {saveMutation.isPending ? "Saving…" : "Save"}
+                {saveMutation.isPending ? "Saving…" : "Save Build"}
               </Button>
+            )}
+            {/* Existing build: autosave status line */}
+            {selectedBuildId && (
+              <span className="text-xs text-muted-foreground min-w-[120px] text-right">
+                {autoSaveStatus === "pending" && "Unsaved changes"}
+                {autoSaveStatus === "saving" && "Saving…"}
+                {autoSaveStatus === "saved" && lastSavedAt && `Saved · ${formatDistanceToNowShort(lastSavedAt)}`}
+                {autoSaveStatus === "error" && (
+                  <span className="text-destructive">
+                    Save failed ·{" "}
+                    <button className="underline" onClick={() => saveMutation.mutate({})}>Retry</button>
+                  </span>
+                )}
+                {autoSaveStatus === "idle" && lastSavedAt && `Saved · ${formatDistanceToNowShort(lastSavedAt)}`}
+              </span>
             )}
             <Button
               variant="outline"
