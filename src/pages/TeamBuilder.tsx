@@ -1625,6 +1625,10 @@ export default function TeamBuilder() {
       if ((p.roster_status || "returner") !== "returner") return p;
       const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(p.player.position || ""));
       if (isPitcherRow) return p;
+      // If the player has a snapshot with hitter_depth_role, the coach's
+      // saved depth is authoritative — skip the PA recompute entirely.
+      // This prevents the corrective from overwriting manual coach adjustments.
+      if ((p.prediction as any)?.hitter_depth_role) return p;
       const hNameKey = `${normalizeName(`${p.player.first_name || ""} ${p.player.last_name || ""}`.trim())}|${normalizeName(p.player.team || "")}`;
       const playerIdHit = p.player_id ? seasonUsage.hitterAb?.get(p.player_id) : null;
       const hitterAb = playerIdHit ?? seasonUsage.hitterAbByNameTeam?.get(hNameKey) ?? null;
