@@ -312,9 +312,13 @@ export async function createPredictionsFromMaster(
   const insertedPreds: Array<{ id: string; player_id: string }> = [];
   for (let i = 0; i < predsToInsert.length; i += CHUNK) {
     const chunk = predsToInsert.slice(i, i + CHUNK);
+    // UPSERT instead of INSERT — the partial unique index on
+    // (player_id, model_type, variant, season) WHERE customer_team_id IS NULL
+    // prevents duplicate regular rows. ignoreDuplicates:false means we update
+    // the existing row if there's a conflict (e.g. re-run after CSV correction).
     const { data, error } = await supabase
       .from("player_predictions")
-      .insert(chunk)
+      .upsert(chunk, { onConflict: "player_id,model_type,variant,season", ignoreDuplicates: false })
       .select("id, player_id");
     if (error) {
       result.errors.push(`Prediction insert chunk ${i}: ${error.message}`);
