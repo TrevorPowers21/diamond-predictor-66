@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
+import { paForHitterDepthRole } from "@/lib/depthRoles";
 import { computeTransferProjection } from "@/lib/transferProjection";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { computePitcherProjection } from "@/lib/pitcherProjection";
@@ -478,7 +479,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     queryFn: async () => {
       let q = supabase
         .from("player_predictions")
-        .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at, o_war, market_value, projected_pa, p_war, projected_ip, pitcher_role")
+        .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_rv_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at, o_war, market_value, projected_pa, p_war, projected_ip, pitcher_role, hitter_depth_role")
         .eq("season", PROJECTION_SEASON)
         .in("model_type", ["returner", "transfer"])
         .in("player_id", targetPlayerIds);
@@ -627,19 +628,32 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
 
     if (!treatAsPitcher && effectiveTeamId && (livePred as any)?.variant === "precomputed" && (livePred as any)?.customer_team_id === effectiveTeamId) {
       const lp = livePred as any;
-      // Stored o_war + market_value are the canonical precomputed values —
-      // hitter_depth_role and projected_pa were already factored in by the
-      // precompute pipeline. Do NOT apply depthMult here; the stored values
-      // are final and team-specific. depthMult only applies to the client-
-      // computed fallback path (when no precomputed row exists).
-      // Stored o_war is the ONLY source. Number() coerces Supabase's string-typed
-      // numeric columns correctly. No depthMult, no fallback.
-      const owar = lp.o_war != null ? Number(lp.o_war) : null;
+      // Stored o_war + market_value are the canonical baseline — hitter_depth_role
+      // and projected_pa baked in by the precompute pipeline.
+      // Apply session-only overlays (same math as PlayerProfile):
+      //   depth overlay  : PA-ratio, exact because oWAR is linear in PA at fixed wRC+
+      //   devAgg overlay : ratio of session/stored transfer multipliers
+      const storedOwar = lp.o_war != null ? Number(lp.o_war) : null;
       const storedMarket = lp.market_value as number | null | undefined;
-      // market_value may be absent from p.prediction (saved build data doesn't
-      // include it in its schema). Fall back to transfer_snapshot.nil_valuation
-      // which IS populated from the load-build query.
-      const nil_valuation = storedMarket ?? p.transfer_snapshot?.nil_valuation ?? null;
+
+      const storedHitterDepthRole = (lp.hitter_depth_role as BuildPlayer["depth_role"]) ?? "everyday_starter";
+      const sessionPa = paForHitterDepthRole(p.depth_role);
+      const storedPa = paForHitterDepthRole(storedHitterDepthRole);
+      const depthScale = storedPa > 0 ? sessionPa / storedPa : 1;
+
+      const storedDevAgg = Number.isFinite(Number(lp.dev_aggressiveness)) ? Number(lp.dev_aggressiveness) : 0;
+      const sessionDevAgg = Number.isFinite(Number(p.dev_aggressiveness)) ? Number(p.dev_aggressiveness) : 0;
+      const ctRaw = String(p.class_transition || lp.class_transition || "SJ").toUpperCase();
+      const devAggClassAdj = ctRaw === "FS" ? 0.03 : ctRaw === "GR" ? 0.01 : 0.02;
+      const storedMult = 1 + devAggClassAdj + storedDevAgg * 0.06;
+      const sessionMult = 1 + devAggClassAdj + sessionDevAgg * 0.06;
+      const devAggScale = storedMult > 0 ? sessionMult / storedMult : 1;
+      const overlayScale = depthScale * devAggScale;
+
+      const owar = storedOwar != null ? storedOwar * overlayScale : null;
+      // market_value may be absent from p.prediction (saved build data). Fall back
+      // to transfer_snapshot.nil_valuation which IS populated from the load-build query.
+      const nil_valuation = storedMarket != null ? storedMarket * overlayScale : (p.transfer_snapshot?.nil_valuation ?? null);
       return {
         p_avg: lp.p_avg ?? null,
         p_obp: lp.p_obp ?? null,
@@ -1234,71 +1248,108 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const storedPrecomputed = p.roster_status === "target" && p.player_id
       ? liveTargetPredictionByPlayerId.get(p.player_id)
       : null;
-    // Stored values are the only source of truth for target players. The
-    // eager precompute runs every player in the country through every
-    // customer team — if a player exists, they have a precomputed row.
-    // No live sim, no transfer_snapshot fallback. Missing = "—" (data gap
-    // signal, not a fallback to mask it).
+    // Stored precomputed row is the only source of truth for target players.
+    // Primary source: liveTargetPredictionByPlayerId (fresh query keyed per team).
+    // Hitter targets fall back to p.prediction (same precomputed row loaded at
+    // build time via useLoadBuild — NOT live-computed). This means the Roster
+    // tab shows the same stored values as Target Board while the live query
+    // is still in-flight.
+    // Pitcher targets do NOT use p.prediction as a fallback — the pitcher path
+    // below uses `sourceBase = shown ?? p.transfer_snapshot`, so leaving
+    // shown=null lets transfer_snapshot (baked at add-time) carry the ERA etc.
+    // Mixing p.prediction (possibly a hitter row) would zero out p_era fields.
     const sim = null;
     void simulateTransferProjection;
     const shown = (p.roster_status === "target")
-      ? (storedPrecomputed ?? null)
+      ? (storedPrecomputed ?? (!treatAsPitcher ? p.prediction : null) ?? null)
       : (treatAsPitcher ? (computeReturnerPitchingProjection(p) ?? p.prediction) : p.prediction);
     if (treatAsPitcher) {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
       let source: any = sourceBase;
       if ((p.roster_status || "returner") === "target" && sourceBase) {
-        const livePred = p.player_id ? liveTargetPredictionByPlayerId.get(p.player_id) : null;
-        const classTransitionRaw = String(p.class_transition || livePred?.class_transition || "SJ").toUpperCase();
-        const classTransition: "FS" | "SJ" | "JS" | "GR" =
-          classTransitionRaw === "FS" || classTransitionRaw === "SJ" || classTransitionRaw === "JS" || classTransitionRaw === "GR"
-            ? classTransitionRaw
-            : "SJ";
-        const devAggCandidate = Number.isFinite(Number(p.dev_aggressiveness))
-          ? Number(p.dev_aggressiveness)
-          : Number.isFinite(Number(livePred?.dev_aggressiveness))
-            ? Number(livePred?.dev_aggressiveness)
-            : 0;
-        const devAgg = devAggCandidate;
-        const classEraAdj = toPitchingClassAdj(classTransition, pitchingEq.class_era_fs, pitchingEq.class_era_sj, pitchingEq.class_era_js, pitchingEq.class_era_gr);
-        const classFipAdj = toPitchingClassAdj(classTransition, pitchingEq.class_fip_fs, pitchingEq.class_fip_sj, pitchingEq.class_fip_js, pitchingEq.class_fip_gr);
-        const classWhipAdj = toPitchingClassAdj(classTransition, pitchingEq.class_whip_fs, pitchingEq.class_whip_sj, pitchingEq.class_whip_js, pitchingEq.class_whip_gr);
-        const classK9Adj = toPitchingClassAdj(classTransition, pitchingEq.class_k9_fs, pitchingEq.class_k9_sj, pitchingEq.class_k9_js, pitchingEq.class_k9_gr);
-        const classBb9Adj = toPitchingClassAdj(classTransition, pitchingEq.class_bb9_fs, pitchingEq.class_bb9_sj, pitchingEq.class_bb9_js, pitchingEq.class_bb9_gr);
-        const classHr9Adj = toPitchingClassAdj(classTransition, pitchingEq.class_hr9_fs, pitchingEq.class_hr9_sj, pitchingEq.class_hr9_js, pitchingEq.class_hr9_gr);
-        const lowBetterMult = (adj: number) => 1 - adj - (devAgg * 0.06);
-        const highBetterMult = (adj: number) => 1 + adj + (devAgg * 0.06);
-        const pEraAdj = sourceBase?.p_era == null ? null : Number(sourceBase.p_era) * lowBetterMult(classEraAdj);
-        const pFipAdj = sourceBase?.p_fip == null ? null : Number(sourceBase.p_fip) * lowBetterMult(classFipAdj);
-        const pWhipAdj = sourceBase?.p_whip == null ? null : Number(sourceBase.p_whip) * lowBetterMult(classWhipAdj);
-        const pK9Adj = sourceBase?.p_k9 == null ? null : Number(sourceBase.p_k9) * highBetterMult(classK9Adj);
-        const pBb9Adj = sourceBase?.p_bb9 == null ? null : Number(sourceBase.p_bb9) * lowBetterMult(classBb9Adj);
-        const pHr9Adj = sourceBase?.p_hr9 == null ? null : Number(sourceBase.p_hr9) * lowBetterMult(classHr9Adj);
-        const eraPlus = calcPitchingPlus(pEraAdj, pitchingEq.era_plus_ncaa_avg, pitchingEq.era_plus_ncaa_sd, pitchingEq.era_plus_scale, false);
-        const fipPlus = calcPitchingPlus(pFipAdj, pitchingEq.fip_plus_ncaa_avg, pitchingEq.fip_plus_ncaa_sd, pitchingEq.fip_plus_scale, false);
-        const whipPlus = calcPitchingPlus(pWhipAdj, pitchingEq.whip_plus_ncaa_avg, pitchingEq.whip_plus_ncaa_sd, pitchingEq.whip_plus_scale, false);
-        const k9Plus = calcPitchingPlus(pK9Adj, pitchingEq.k9_plus_ncaa_avg, pitchingEq.k9_plus_ncaa_sd, pitchingEq.k9_plus_scale, true);
-        const bb9Plus = calcPitchingPlus(pBb9Adj, pitchingEq.bb9_plus_ncaa_avg, pitchingEq.bb9_plus_ncaa_sd, pitchingEq.bb9_plus_scale, false);
-        const hr9Plus = calcPitchingPlus(pHr9Adj, pitchingEq.hr9_plus_ncaa_avg, pitchingEq.hr9_plus_ncaa_sd, pitchingEq.hr9_plus_scale, false);
-        const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-          ? (Number(eraPlus) * pitchingEq.era_plus_weight) +
-            (Number(fipPlus) * pitchingEq.fip_plus_weight) +
-            (Number(whipPlus) * pitchingEq.whip_plus_weight) +
-            (Number(k9Plus) * pitchingEq.k9_plus_weight) +
-            (Number(bb9Plus) * pitchingEq.bb9_plus_weight) +
-            (Number(hr9Plus) * pitchingEq.hr9_plus_weight)
-          : (sourceBase?.p_rv_plus ?? sourceBase?.p_wrc_plus ?? null);
-        source = {
-          ...sourceBase,
-          p_era: pEraAdj ?? sourceBase?.p_era ?? null,
-          p_fip: pFipAdj ?? sourceBase?.p_fip ?? null,
-          p_whip: pWhipAdj ?? sourceBase?.p_whip ?? null,
-          p_k9: pK9Adj ?? sourceBase?.p_k9 ?? null,
-          p_bb9: pBb9Adj ?? sourceBase?.p_bb9 ?? null,
-          p_hr9: pHr9Adj ?? sourceBase?.p_hr9 ?? null,
-          p_rv_plus: pRvPlus,
-          p_wrc_plus: pRvPlus,
-        };
+        const isPrecomputed = (sourceBase as any)?.variant === "precomputed";
+        if (isPrecomputed) {
+          // Precomputed rows already have conference, park, class transition, and devAgg
+          // fully applied by the pipeline. Do NOT re-apply class adjustments — that would
+          // double-count them (e.g. 3.83 × 0.97 = 3.72 when 3.83 is already the correct value).
+          // Only apply a devAgg ratio overlay when the coach changes it from the stored baseline.
+          const storedDevAgg = Number.isFinite(Number(sourceBase.dev_aggressiveness)) ? Number(sourceBase.dev_aggressiveness) : 0;
+          const sessionDevAgg = Number.isFinite(Number(p.dev_aggressiveness)) ? Number(p.dev_aggressiveness) : 0;
+          if (sessionDevAgg !== storedDevAgg) {
+            const lowDenom = 1 - storedDevAgg * 0.06;
+            const highDenom = 1 + storedDevAgg * 0.06;
+            const lowRatio = lowDenom > 0 ? (1 - sessionDevAgg * 0.06) / lowDenom : 1;
+            const highRatio = highDenom > 0 ? (1 + sessionDevAgg * 0.06) / highDenom : 1;
+            const adjEra  = sourceBase.p_era  != null ? Number(sourceBase.p_era)  * lowRatio  : null;
+            const adjFip  = sourceBase.p_fip  != null ? Number(sourceBase.p_fip)  * lowRatio  : null;
+            const adjWhip = sourceBase.p_whip != null ? Number(sourceBase.p_whip) * lowRatio  : null;
+            const adjK9   = sourceBase.p_k9   != null ? Number(sourceBase.p_k9)   * highRatio : null;
+            const adjBb9  = sourceBase.p_bb9  != null ? Number(sourceBase.p_bb9)  * lowRatio  : null;
+            const adjHr9  = sourceBase.p_hr9  != null ? Number(sourceBase.p_hr9)  * lowRatio  : null;
+            const eraPlus  = calcPitchingPlus(adjEra,  pitchingEq.era_plus_ncaa_avg,  pitchingEq.era_plus_ncaa_sd,  pitchingEq.era_plus_scale,  false);
+            const fipPlus  = calcPitchingPlus(adjFip,  pitchingEq.fip_plus_ncaa_avg,  pitchingEq.fip_plus_ncaa_sd,  pitchingEq.fip_plus_scale,  false);
+            const whipPlus = calcPitchingPlus(adjWhip, pitchingEq.whip_plus_ncaa_avg, pitchingEq.whip_plus_ncaa_sd, pitchingEq.whip_plus_scale, false);
+            const k9Plus   = calcPitchingPlus(adjK9,   pitchingEq.k9_plus_ncaa_avg,   pitchingEq.k9_plus_ncaa_sd,   pitchingEq.k9_plus_scale,   true);
+            const bb9Plus  = calcPitchingPlus(adjBb9,  pitchingEq.bb9_plus_ncaa_avg,  pitchingEq.bb9_plus_ncaa_sd,  pitchingEq.bb9_plus_scale,  false);
+            const hr9Plus  = calcPitchingPlus(adjHr9,  pitchingEq.hr9_plus_ncaa_avg,  pitchingEq.hr9_plus_ncaa_sd,  pitchingEq.hr9_plus_scale,  false);
+            const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
+              ? (Number(eraPlus) * pitchingEq.era_plus_weight) + (Number(fipPlus) * pitchingEq.fip_plus_weight) +
+                (Number(whipPlus) * pitchingEq.whip_plus_weight) + (Number(k9Plus) * pitchingEq.k9_plus_weight) +
+                (Number(bb9Plus) * pitchingEq.bb9_plus_weight) + (Number(hr9Plus) * pitchingEq.hr9_plus_weight)
+              : (sourceBase.p_rv_plus ?? sourceBase.p_wrc_plus ?? null);
+            source = {
+              ...sourceBase,
+              p_era: adjEra ?? sourceBase.p_era ?? null, p_fip: adjFip ?? sourceBase.p_fip ?? null,
+              p_whip: adjWhip ?? sourceBase.p_whip ?? null, p_k9: adjK9 ?? sourceBase.p_k9 ?? null,
+              p_bb9: adjBb9 ?? sourceBase.p_bb9 ?? null, p_hr9: adjHr9 ?? sourceBase.p_hr9 ?? null,
+              p_rv_plus: pRvPlus, p_wrc_plus: pRvPlus,
+            };
+          }
+          // sessionDevAgg === storedDevAgg: source stays as sourceBase unchanged
+        } else {
+          // Non-precomputed rows (regular/transfer snapshot): apply full class + devAgg
+          // adjustments since these rows don't have transfer context already applied.
+          const livePred = p.player_id ? liveTargetPredictionByPlayerId.get(p.player_id) : null;
+          const classTransitionRaw = String(p.class_transition || livePred?.class_transition || "SJ").toUpperCase();
+          const classTransition: "FS" | "SJ" | "JS" | "GR" =
+            classTransitionRaw === "FS" || classTransitionRaw === "SJ" || classTransitionRaw === "JS" || classTransitionRaw === "GR"
+              ? classTransitionRaw : "SJ";
+          const devAgg = Number.isFinite(Number(p.dev_aggressiveness))
+            ? Number(p.dev_aggressiveness)
+            : Number.isFinite(Number(livePred?.dev_aggressiveness)) ? Number(livePred?.dev_aggressiveness) : 0;
+          const classEraAdj  = toPitchingClassAdj(classTransition, pitchingEq.class_era_fs,  pitchingEq.class_era_sj,  pitchingEq.class_era_js,  pitchingEq.class_era_gr);
+          const classFipAdj  = toPitchingClassAdj(classTransition, pitchingEq.class_fip_fs,  pitchingEq.class_fip_sj,  pitchingEq.class_fip_js,  pitchingEq.class_fip_gr);
+          const classWhipAdj = toPitchingClassAdj(classTransition, pitchingEq.class_whip_fs, pitchingEq.class_whip_sj, pitchingEq.class_whip_js, pitchingEq.class_whip_gr);
+          const classK9Adj   = toPitchingClassAdj(classTransition, pitchingEq.class_k9_fs,   pitchingEq.class_k9_sj,   pitchingEq.class_k9_js,   pitchingEq.class_k9_gr);
+          const classBb9Adj  = toPitchingClassAdj(classTransition, pitchingEq.class_bb9_fs,  pitchingEq.class_bb9_sj,  pitchingEq.class_bb9_js,  pitchingEq.class_bb9_gr);
+          const classHr9Adj  = toPitchingClassAdj(classTransition, pitchingEq.class_hr9_fs,  pitchingEq.class_hr9_sj,  pitchingEq.class_hr9_js,  pitchingEq.class_hr9_gr);
+          const lowBetterMult  = (adj: number) => 1 - adj - (devAgg * 0.06);
+          const highBetterMult = (adj: number) => 1 + adj + (devAgg * 0.06);
+          const pEraAdj  = sourceBase?.p_era  == null ? null : Number(sourceBase.p_era)  * lowBetterMult(classEraAdj);
+          const pFipAdj  = sourceBase?.p_fip  == null ? null : Number(sourceBase.p_fip)  * lowBetterMult(classFipAdj);
+          const pWhipAdj = sourceBase?.p_whip == null ? null : Number(sourceBase.p_whip) * lowBetterMult(classWhipAdj);
+          const pK9Adj   = sourceBase?.p_k9   == null ? null : Number(sourceBase.p_k9)   * highBetterMult(classK9Adj);
+          const pBb9Adj  = sourceBase?.p_bb9  == null ? null : Number(sourceBase.p_bb9)  * lowBetterMult(classBb9Adj);
+          const pHr9Adj  = sourceBase?.p_hr9  == null ? null : Number(sourceBase.p_hr9)  * lowBetterMult(classHr9Adj);
+          const eraPlus  = calcPitchingPlus(pEraAdj,  pitchingEq.era_plus_ncaa_avg,  pitchingEq.era_plus_ncaa_sd,  pitchingEq.era_plus_scale,  false);
+          const fipPlus  = calcPitchingPlus(pFipAdj,  pitchingEq.fip_plus_ncaa_avg,  pitchingEq.fip_plus_ncaa_sd,  pitchingEq.fip_plus_scale,  false);
+          const whipPlus = calcPitchingPlus(pWhipAdj, pitchingEq.whip_plus_ncaa_avg, pitchingEq.whip_plus_ncaa_sd, pitchingEq.whip_plus_scale, false);
+          const k9Plus   = calcPitchingPlus(pK9Adj,   pitchingEq.k9_plus_ncaa_avg,   pitchingEq.k9_plus_ncaa_sd,   pitchingEq.k9_plus_scale,   true);
+          const bb9Plus  = calcPitchingPlus(pBb9Adj,  pitchingEq.bb9_plus_ncaa_avg,  pitchingEq.bb9_plus_ncaa_sd,  pitchingEq.bb9_plus_scale,  false);
+          const hr9Plus  = calcPitchingPlus(pHr9Adj,  pitchingEq.hr9_plus_ncaa_avg,  pitchingEq.hr9_plus_ncaa_sd,  pitchingEq.hr9_plus_scale,  false);
+          const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
+            ? (Number(eraPlus) * pitchingEq.era_plus_weight) + (Number(fipPlus) * pitchingEq.fip_plus_weight) +
+              (Number(whipPlus) * pitchingEq.whip_plus_weight) + (Number(k9Plus) * pitchingEq.k9_plus_weight) +
+              (Number(bb9Plus) * pitchingEq.bb9_plus_weight) + (Number(hr9Plus) * pitchingEq.hr9_plus_weight)
+            : (sourceBase?.p_rv_plus ?? sourceBase?.p_wrc_plus ?? null);
+          source = {
+            ...sourceBase,
+            p_era: pEraAdj ?? sourceBase?.p_era ?? null, p_fip: pFipAdj ?? sourceBase?.p_fip ?? null,
+            p_whip: pWhipAdj ?? sourceBase?.p_whip ?? null, p_k9: pK9Adj ?? sourceBase?.p_k9 ?? null,
+            p_bb9: pBb9Adj ?? sourceBase?.p_bb9 ?? null, p_hr9: pHr9Adj ?? sourceBase?.p_hr9 ?? null,
+            p_rv_plus: pRvPlus, p_wrc_plus: pRvPlus,
+          };
+        }
       }
       const pwarComputed = computePitcherPwar(p, source);
       const pwar = pwarComputed ?? source?.p_war ?? source?.owar ?? null;
@@ -1320,12 +1371,42 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const pWrc = (wObp * pObp) + (wSlg * pSlg) + (wAvg * pAvg) + (wIso * pIso);
       return Math.round((pWrc / ncaaWrc) * 100);
     })();
-    // Read stored o_war directly — depth is already baked in by the precompute.
-    // Supabase returns numeric columns as strings; Number() coerces correctly.
-    // No fallback: if null, display shows "—" until precompute runs for this team.
+    // Stored o_war is the canonical baseline — depth and dev_aggressiveness are
+    // already baked in by the precompute pipeline at the stored hitter_depth_role.
+    // Apply session-only overlays the same way PlayerProfile does:
+    //   depth overlay:  oWAR is linear in PA at fixed wRC+, so ratio is exact
+    //   devAgg overlay: ratio of (1 + classAdj + session×0.06) / (1 + classAdj + stored×0.06)
     const rawOwar = (shown as any)?.o_war;
-    const owar = rawOwar != null ? Number(rawOwar) : null;
-    return { sim, shown, shownWrc, owar, pwar: null };
+    const storedOwar = rawOwar != null ? Number(rawOwar) : null;
+
+    const storedHitterDepthRole = ((shown as any)?.hitter_depth_role as BuildPlayer["depth_role"]) ?? "everyday_starter";
+    const sessionPa = paForHitterDepthRole(p.depth_role);
+    const storedPa = paForHitterDepthRole(storedHitterDepthRole);
+    const depthScale = storedPa > 0 ? sessionPa / storedPa : 1;
+
+    const storedDevAgg = Number.isFinite(Number((shown as any)?.dev_aggressiveness)) ? Number((shown as any)?.dev_aggressiveness) : 0;
+    const sessionDevAgg = Number.isFinite(Number(p.dev_aggressiveness)) ? Number(p.dev_aggressiveness) : 0;
+    const ctRaw = String(p.class_transition || (shown as any)?.class_transition || "SJ").toUpperCase();
+    const devAggClassAdj = ctRaw === "FS" ? 0.03 : ctRaw === "GR" ? 0.01 : 0.02;
+    const storedMult = 1 + devAggClassAdj + storedDevAgg * 0.06;
+    const sessionMult = 1 + devAggClassAdj + sessionDevAgg * 0.06;
+    const devAggScale = storedMult > 0 ? sessionMult / storedMult : 1;
+
+    const owar = storedOwar != null ? storedOwar * depthScale * devAggScale : null;
+
+    // Apply devAgg scale to slash stats — mirrors PlayerProfile.applyDevScale.
+    // Depth role only affects PA → oWAR, not the rate stats themselves.
+    const shownFinal: any = (shown != null && devAggScale !== 1) ? {
+      ...(shown as any),
+      p_avg:     (shown as any).p_avg     != null ? Number((shown as any).p_avg)     * devAggScale : null,
+      p_obp:     (shown as any).p_obp     != null ? Number((shown as any).p_obp)     * devAggScale : null,
+      p_slg:     (shown as any).p_slg     != null ? Number((shown as any).p_slg)     * devAggScale : null,
+      p_iso:     (shown as any).p_iso     != null ? Number((shown as any).p_iso)     * devAggScale : null,
+      p_wrc_plus: shownWrc != null ? Math.round(shownWrc * devAggScale) : (shown as any).p_wrc_plus,
+    } : shown;
+    const shownWrcFinal = shownFinal?.p_wrc_plus ?? shownWrc;
+
+    return { sim, shown: shownFinal, shownWrc: shownWrcFinal, owar, pwar: null };
   }, [computePitcherPwar, computeReturnerPitchingProjection, simulateTransferProjection, pitchingEq, liveTargetPredictionByPlayerId, remoteEquationValues]);
 
   // ── Block K (relocated): positionPlayers, pitchers, targetPlayers, targetPositionPlayers, targetPitchers

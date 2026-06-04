@@ -2770,6 +2770,15 @@ export default function TeamBuilder() {
         if (idx >= 0) { next[k] = idx; usedIdxs.add(idx); }
       }
 
+      // Bail out when nothing changed — returning `prev` (same reference) lets
+      // React skip the re-render, breaking the render loop that fires when
+      // the playerProjection sort comparator produces floating-point deltas.
+      const prevEntries = Object.entries(prev);
+      if (
+        prevEntries.length === Object.keys(next).length &&
+        prevEntries.every(([k, v]) => next[k] === v)
+      ) return prev;
+
       return next;
     });
   }, [rosterPlayers, playerProjection]);
