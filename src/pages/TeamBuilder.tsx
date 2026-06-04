@@ -1749,6 +1749,8 @@ export default function TeamBuilder() {
             setBuildName(draft.buildName ?? "My Team Build");
             setSelectedTeam(draft.selectedTeam ?? "");
             setTotalBudget(Number(draft.totalBudget) || 0);
+            const draft33 = Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers[33] : null;
+            console.log("[Draft] restoring from localStorage — player33 depth_role:", (draft33 as any)?.depth_role, "id:", (draft33 as any)?.id);
             setRosterPlayers(Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers : []);
             setProgramTierMultiplier(Number(draft.programTierMultiplier) || 1.2);
             setProgramTierConference(draft.programTierConference ?? "");
@@ -1811,6 +1813,8 @@ export default function TeamBuilder() {
         depthAssignments,
         depthPlaceholders,
       };
+      const p33 = rosterPlayers[33];
+      console.log("[Draft] saving to localStorage — player33 depth_role:", (p33 as any)?.depth_role, "id:", (p33 as any)?.id);
       localStorage.setItem(draftKey, JSON.stringify(payload));
     } catch {
       // ignore storage quota/access errors
