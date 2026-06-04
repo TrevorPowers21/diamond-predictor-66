@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
-import { paForHitterDepthRole } from "@/lib/depthRoles";
+import { paForHitterDepthRole, pitcherRoleFromDepthRole, getPitchingPvfForRole } from "@/lib/depthRoles";
 import { computeTransferProjection } from "@/lib/transferProjection";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { computePitcherProjection } from "@/lib/pitcherProjection";
@@ -1454,7 +1454,10 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         ? (teamByKey.get(normalizeKey(selectedTeam))?.conference ?? p.player?.conference ?? null)
         : (p.player?.conference ?? null);
       const ptm = getProgramTierMultiplierByConference(conference, pitchingTierMultipliers);
-      const pvm = pitchingPvfForRole(currentPitcherRole);
+      // Use the 3-tier PVF: swing_starter → SM → market_pvf_weekday_sp,
+      // matching PitcherProfile's pitcherRoleFromDepthRole logic.
+      // pitchingPvfForRole only knows SP/RP so swing market value was wrong.
+      const pvm = getPitchingPvfForRole(pitcherRoleFromDepthRole(p.depth_role), pitchingEq);
       return Number(pwar) * pitchingEq.market_dollars_per_war * ptm * pvm;
     }
     return projectedPlayerScore(p) * nilBasePerOWar;
