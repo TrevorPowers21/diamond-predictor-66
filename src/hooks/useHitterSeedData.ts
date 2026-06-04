@@ -58,6 +58,7 @@ export function useHitterSeedData(season = 2026) {
           .from("Hitter Master")
           .select("source_player_id, playerFullName, Team, TeamID, Conference, conference_id, Season, Pos, BatHand, ThrowHand, AVG, OBP, SLG, ISO, ab")
           .eq("Season", season)
+          .order("source_player_id", { ascending: true })
           .range(from, from + pageSize - 1);
         if (error) throw error;
         all.push(...(data || []));

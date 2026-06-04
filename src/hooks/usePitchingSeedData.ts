@@ -90,6 +90,7 @@ export function usePitchingSeedData(season = 2026, enabled = true) {
           .eq("Season", season)
           .gte("IP", 10)
           .not("Role", "in", "(C,1B,2B,3B,SS,OF,LF,CF,RF,DH,IF,UT)")
+          .order("source_player_id", { ascending: true })
           .range(from, from + pageSize - 1);
         if (error) throw error;
         all.push(...(data || []));
