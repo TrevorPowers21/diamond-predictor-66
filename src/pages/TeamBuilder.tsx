@@ -1357,10 +1357,15 @@ export default function TeamBuilder() {
     powerLookup,
   });
 
-  // Stable ref — savePlayerRowFn reads this at fire time so it never uses a
-  // stale prediction map from when the debounce was scheduled.
+  // Stable refs — savePlayerRowFn reads these at fire time so closures are
+  // never stale. The debounce schedules 2.5s out; by then the coach may have
+  // made more changes, but these refs always hold the current values.
   const livePredsRef = useRef(liveTargetPredictionByPlayerId);
+  const playerProjectionRef = useRef(playerProjection);
+  const projectedNilRef = useRef(projectedNilForPlayer);
   useEffect(() => { livePredsRef.current = liveTargetPredictionByPlayerId; }, [liveTargetPredictionByPlayerId]);
+  useEffect(() => { playerProjectionRef.current = playerProjection; }, [playerProjection]);
+  useEffect(() => { projectedNilRef.current = projectedNilForPlayer; }, [projectedNilForPlayer]);
 
   const storagePitchersForSelectedTeam = useMemo(() => {
     if (!selectedTeam) return [] as BuildPlayer[];
@@ -1980,11 +1985,15 @@ export default function TeamBuilder() {
 
   // ── Per-player autosave ───────────────────────────────────────────────────
   // Builds the team_build_players row object for a single player.
-  // Used by both the full saveMutation and the per-player saves.
+  // Calls playerProjectionRef + projectedNilRef to get FINAL display values
+  // (post depth+devAgg overlay) so the snapshot stores what the coach sees —
+  // no client-side computation needed on next load.
   const buildBuildPlayerRow = useCallback((rp: BuildPlayer, buildId: string) => {
     const fullName = rp.player ? `${rp.player.first_name || ""} ${rp.player.last_name || ""}`.trim() : "";
     const persistedName = (rp.custom_name && rp.custom_name.trim()) || fullName || getPlayerName(rp) || null;
-    const rawPred = (rp.player_id ? livePredsRef.current.get(rp.player_id) : null) ?? rp.prediction ?? null;
+    const side = isPitcher(rp) ? "pitcher" : "hitter";
+    const proj = playerProjectionRef.current(rp, side as "hitter" | "pitcher");
+    const marketValue = projectedNilRef.current(rp, side as "hitter" | "pitcher");
     return {
       ...(rp.id ? { id: rp.id } : {}),
       build_id: buildId,
@@ -1994,7 +2003,14 @@ export default function TeamBuilder() {
       position_slot: rp.position_slot,
       depth_order: rp.depth_order,
       nil_value: rp.nil_value,
-      player_snapshot: buildPlayerSnapshot(rawPred),
+      player_snapshot: buildPlayerSnapshot({
+        shown: proj.shown as Record<string, unknown> | null,
+        owar: proj.owar,
+        pwar: proj.pwar,
+        marketValue: typeof marketValue === "number" ? marketValue : null,
+        coachDepthRole: rp.depth_role ?? null,
+        coachDevAgg: rp.dev_aggressiveness ?? null,
+      }),
       production_notes: serializeBuildPlayerMeta(
         rp.production_notes, rp.team_metrics ?? null, rp.team_power_plus ?? null,
         rp.roster_status ?? null, rp.depth_role ?? null, rp.class_transition ?? null,
@@ -2008,7 +2024,7 @@ export default function TeamBuilder() {
         rp.projection_tier ?? null, rp.nil_value_overridden ?? false,
       ),
     };
-  }, []); // livePredsRef is a ref — stable, no dep needed
+  }, []); // all reads go through refs — no deps needed
 
   // Writes one player row. Only fires when the build already exists (selectedBuildId set)
   // and the player already has a DB row id. New adds go through saveMutation.
