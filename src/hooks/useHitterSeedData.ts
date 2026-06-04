@@ -54,11 +54,6 @@ export function useHitterSeedData(season = 2026) {
       let from = 0;
       const pageSize = 1000;
       while (true) {
-        // Narrowed select: Player Dashboard scouting scores now come from
-        // player_predictions (1=1 via propagate_hitter_scores_to_predictions).
-        // Raw stats (contact, line_drive, etc.) and stored scores (contact_score,
-        // avg_ev_score, barrel_score, chase_score) were inputs to the now-stripped
-        // client-side scoreFromNormal fallback — no longer read. Cuts payload ~50%.
         const { data, error } = await supabase
           .from("Hitter Master")
           .select("source_player_id, playerFullName, Team, TeamID, Conference, conference_id, Season, Pos, BatHand, ThrowHand, AVG, OBP, SLG, ISO, ab")
