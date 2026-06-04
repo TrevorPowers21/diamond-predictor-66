@@ -1018,7 +1018,7 @@ export default function TransferPortal() {
   // (called downstream) picks: precomputed transfer row for the active
   // customer team → fallback to global returner. Same shape Compare and
   // PlayerProfile use; numbers across all three surfaces stay in lockstep.
-  const { data: selectedHitterPredictions = [] } = useQuery({
+  const { data: selectedHitterPredictions = [], isLoading: selectedHitterPredictionsLoading } = useQuery({
     queryKey: ["tps-hitter-pred-rows", selectedPlayer?.player_id ?? null],
     enabled: !!selectedPlayer?.player_id && !authLoading,
     staleTime: 30 * 60 * 1000,
@@ -1048,7 +1048,7 @@ export default function TransferPortal() {
     return match?.player_id ?? null;
   }, [selectedPitcher, players]);
 
-  const { data: selectedPitcherPredictions = [] } = useQuery({
+  const { data: selectedPitcherPredictions = [], isLoading: selectedPitcherPredictionsLoading } = useQuery({
     queryKey: ["tps-pitcher-pred-rows", selectedPitcherPlayerId],
     enabled: !!selectedPitcherPlayerId && !authLoading,
     staleTime: 30 * 60 * 1000,
@@ -1399,6 +1399,7 @@ export default function TransferPortal() {
 
   const simulation = useMemo(() => {
     if (!selectedPlayer) return null;
+    if (authLoading || selectedHitterPredictionsLoading) return null;
     // STORED-ROW READ. Same data path as Compare + PlayerProfile:
     // pickPreferredPrediction → precomputed transfer row for the active
     // customer team, fallback to global returner row. No live recompute,
@@ -1433,10 +1434,11 @@ export default function TransferPortal() {
       ptm: null, pvm: null,
       baWork: null, obpWork: null, isoWork: null,
     };
-  }, [selectedPlayer, selectedHitterPredictions, effectiveTeamId]);
+  }, [selectedPlayer, selectedHitterPredictions, selectedHitterPredictionsLoading, effectiveTeamId, authLoading]);
 
   const pitchingSimulation = useMemo<PitchingSim | null>(() => {
     if (!selectedPitcher) return null;
+    if (authLoading || selectedPitcherPredictionsLoading) return null;
     // STORED-ROW READ — mirror of the hitter side. pickPreferredPrediction
     // selects: precomputed transfer row for active customer team → fallback
     // global returner row. No live recompute.
@@ -1474,7 +1476,7 @@ export default function TransferPortal() {
       fromHr9ParkRaw: null, toHr9ParkRaw: null,
       weights: null,
     };
-  }, [selectedPitcher, selectedPitcherPredictions, effectiveTeamId, pitchingRoleOverride]);
+  }, [selectedPitcher, selectedPitcherPredictions, selectedPitcherPredictionsLoading, effectiveTeamId, pitchingRoleOverride, authLoading]);
 
   const addToTargetBoard = () => {
     if (!selectedPlayer || !selectedDestinationTeam) return;
