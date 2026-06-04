@@ -37,6 +37,7 @@ import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
 import { canonicalConferenceName } from "@/lib/conferenceMapping";
+import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { resolveMetricParkFactor } from "@/lib/parkFactors";
@@ -1100,6 +1101,20 @@ export default function ReturningPlayers() {
   const [bulkEditMode, setBulkEditMode] = useState(false);
   const [editedPlayers, setEditedPlayers] = useState<Record<string, { team?: string | null; position?: string | null }>>({});
   const { overrides: playerOverrideMap } = usePlayerOverrides();
+  const { conferenceStats } = useConferenceStats(2026);
+  // Map canonical conference name → conference_id UUIDs for fast-path server-side filtering.
+  const confIdMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const row of conferenceStats) {
+      if (!row.conference_id || !row.conference) continue;
+      const canonical = canonicalConferenceName(row.conference);
+      if (!canonical) continue;
+      const ids = map.get(canonical) || [];
+      if (!ids.includes(row.conference_id)) ids.push(row.conference_id);
+      map.set(canonical, ids);
+    }
+    return map;
+  }, [conferenceStats]);
   const playerOverrides = useMemo(() => {
     const obj: Record<string, { position?: string | null }> = {};
     for (const [pid, ov] of playerOverrideMap.entries()) {
@@ -1522,24 +1537,19 @@ export default function ReturningPlayers() {
         };
       };
 
-      // Fast path: server-side paging for sortable prediction columns when no extra filters are active.
-      // This keeps the player dashboard responsive without loading the entire dataset.
-      // Bail out to the slow path whenever any of the new multi-select filters are
-      // engaged so we can apply them server-side via the standard players query
-      // (or, for conference, post-fetch client-side over the full dataset).
+      // Fast path: server-side sort + paginate with all filters applied at the DB level.
+      // Works for both global view (variant=regular) and team-scoped view (variant=precomputed).
+      // Filters are passed directly to PostgREST WHERE clauses on the joined players table —
+      // same 200ms response time whether filters are active or not.
       //
-      // Fast path: server-side sort + paginate. Works for both global view
-      // (variant=regular, customer_team_id=null) and team-scoped view
-      // (variant=precomputed, customer_team_id=team). One row per player in
-      // both cases — no dedup needed, no full table scan.
+      // Conference filter stays on slow path: PostgREST can't have two `or` conditions
+      // on the same embedded resource, and conference filtering needs AND with the
+      // existing hitter-pool OR (position.not.in.pitchers,is_twp). The confIdMap is
+      // built and ready for when a solution is found (Supabase RPC or denormalised column).
+      // All other filters (class, bats, position, portal) use the fast path.
       if (
         FAST_DB_SORT_KEYS.includes(sortKey) &&
-        positionFilter === "all" &&
-        classFilters.size === 0 &&
-        batsFilters.size === 0 &&
-        confFilters.size === 0 &&
-        portalFilters.size === 0 &&
-        !showMissingOnly
+        confFilters.size === 0
       ) {
         const orderColumn =
           sortKey === "p_war"
@@ -1558,22 +1568,41 @@ export default function ReturningPlayers() {
         } else {
           fastQ = fastQ.eq("variant", "regular").is("customer_team_id", null);
         }
+        // Apply user-selected filters server-side (same fast path, same speed).
+        // Class, bats, portal, showMissingOnly → direct players table column filters.
+        // Position → OR logic to handle TWP + specific positions.
+        // Conference → not here (canonical name mismatch; stays in slow path).
+        if (classFilters.size > 0) {
+          fastQ = fastQ.filter("players.class_year", "in", `(${[...classFilters].join(",")})`);
+        }
+        if (batsFilters.size > 0) {
+          fastQ = fastQ.filter("players.bats_hand", "in", `(${[...batsFilters].join(",")})`);
+        }
+        if (portalFilters.size > 0) {
+          fastQ = fastQ.filter("players.portal_status", "in", `(${[...portalFilters].join(",")})`);
+        }
+        if (showMissingOnly) {
+          fastQ = fastQ.is("players.team", null);
+        }
+        if (positionFilters.size > 0) {
+          if (expandedHitterPositions.twpOnly) {
+            fastQ = fastQ.filter("players.is_twp", "eq", "true");
+          } else if (expandedHitterPositions.positions.length > 0) {
+            const posList = expandedHitterPositions.positions.join(",");
+            if (positionFilters.has("TWP")) {
+              fastQ = fastQ.or(`is_twp.eq.true,position.in.(${posList})`, { referencedTable: "players" });
+            } else {
+              fastQ = fastQ.filter("players.position", "in", `(${posList})`);
+            }
+          }
+        }
+
         const { data: pageData, error: pageErr, count } = await fastQ
-          // Hitter pool = non-pitcher primary OR flagged two-way. The is_twp
-          // branch surfaces pitcher-primary TWPs (position='P') in the hitter
-          // dashboard, matching the new architecture where TWPs appear in BOTH
-          // pools regardless of primary side.
+          // Hitter pool = non-pitcher primary OR flagged two-way.
           .or("position.not.in.(SP,RP,CL,P,LHP,RHP),is_twp.eq.true", { referencedTable: "players" })
-          // JUCO excluded — they live in the JUCO subtab. Without this filter
-          // JUCO returner-regular rows (Presto-corrected verbatim 2026)
-          // blend into the D1 leaderboard.
           .not("players.division", "eq", "NJCAA_D1")
           .gte("players.pa", 75)
           .order(orderColumn, { ascending: sortDir === "asc", nullsFirst: false })
-          // Stable secondary tiebreaker. Without this, PostgreSQL returns
-          // tied rows in arbitrary order — different on every request — so
-          // page→page navigation visibly reshuffles names whenever the
-          // primary sort has nulls or duplicate values.
           .order("id", { ascending: true })
           .range(from, to);
         if (pageErr) throw pageErr;
@@ -1613,13 +1642,14 @@ export default function ReturningPlayers() {
         return { rows, total: count ?? rows.length };
       }
 
-      // For other stat-column sorts (and all team-scoped views), load all rows
-      // then sort client-side. Uses bounded concurrent fetching (5 pages at a time,
-      // no count query needed) to avoid both sequential slowness and DB overload.
+      // For other stat-column sorts (and all team-scoped views with filters),
+      // load all rows then sort/filter client-side. Sequential pagination is
+      // more reliable than concurrent — DB indexes make this fast enough now.
       if (sortKey !== "name") {
         const PRED_PAGE_SIZE = 1000;
-        const CONCURRENT = 5;
-        const buildSlowQ = (from: number) => {
+        let allData: any[] = [];
+        let predFrom = 0;
+        while (true) {
           let q = supabase
             .from("player_predictions")
             .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip, division)")
@@ -1631,24 +1661,11 @@ export default function ReturningPlayers() {
             .not("players.division", "eq", "NJCAA_D1")
             .gte("players.pa", 75);
           q = applyTeamScopeFilter(q as any, effectiveTeamId);
-          return q.order("id", { ascending: true }).range(from, from + PRED_PAGE_SIZE - 1);
-        };
-
-        // Fetch 5 pages at a time without a count query.
-        let allData: any[] = [];
-        let from = 0;
-        while (true) {
-          const batch = await Promise.all(
-            Array.from({ length: CONCURRENT }, (_, i) => buildSlowQ(from + i * PRED_PAGE_SIZE))
-          );
-          let anyFull = false;
-          for (const { data, error } of batch) {
-            if (error) throw error;
-            if (data && data.length > 0) allData = allData.concat(data);
-            if (data && data.length === PRED_PAGE_SIZE) anyFull = true;
-          }
-          from += CONCURRENT * PRED_PAGE_SIZE;
-          if (!anyFull) break;
+          const { data, error } = await q.order("id", { ascending: true }).range(predFrom, predFrom + PRED_PAGE_SIZE - 1);
+          if (error) throw error;
+          allData = allData.concat(data || []);
+          if (!data || data.length < PRED_PAGE_SIZE) break;
+          predFrom += PRED_PAGE_SIZE;
         }
         _qlog(`slow-path fetch done (${allData.length} rows)`);
 
