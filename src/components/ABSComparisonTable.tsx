@@ -63,7 +63,57 @@ type Row = {
   abs: number | null;
   suffix?: string;
   decimals?: number;
+  /**
+   * Direction-aware delta color. Metric-specific because "negative is bad"
+   * isn't universal — e.g., pitcher Chase % drops for ~everyone under ABS
+   * (median -7), so a small drop is the GOOD outcome. See computeTone +
+   * the per-metric thresholds in buildHitterRows / buildPitcherRows.
+   * Thresholds are anchored to the staging percentile distribution pulled
+   * 2026-06-05 (see scripts/abs_percentiles.ts).
+   */
+  tone?: "good" | "bad" | "neutral";
 };
+
+type ToneSpec =
+  | { type: "tighter"; holds: number; badAt: number }  // |Δ|<holds gray; Δ<badAt red; Δ>0 green
+  | { type: "up"; holds: number; goodAt: number; badAt: number }  // higher Δ = good
+  | { type: "down"; holds: number; goodAt: number; badAt: number }  // lower Δ = good
+  | { type: "chaseHitter"; goodAt: number; badAt: number }  // bigger drop = good
+  | { type: "chasePitcher"; goodAt: number; badAt: number };  // smaller drop = good
+
+function computeTone(spec: ToneSpec, d: number | null): "good" | "bad" | "neutral" | undefined {
+  if (d == null) return undefined;
+  switch (spec.type) {
+    case "tighter":
+      if (Math.abs(d) < spec.holds) return "neutral";
+      if (d < spec.badAt) return "bad";
+      if (d > 0) return "good";
+      return "neutral";
+    case "up":
+      if (Math.abs(d) < spec.holds) return "neutral";
+      if (d > spec.goodAt) return "good";
+      if (d < spec.badAt) return "bad";
+      return "neutral";
+    case "down":
+      if (Math.abs(d) < spec.holds) return "neutral";
+      if (d < spec.goodAt) return "good";
+      if (d > spec.badAt) return "bad";
+      return "neutral";
+    case "chaseHitter":
+      if (d < spec.goodAt) return "good";
+      if (d > spec.badAt) return "bad";
+      return "neutral";
+    case "chasePitcher":
+      if (d > spec.goodAt) return "good";
+      if (d < spec.badAt) return "bad";
+      return "neutral";
+  }
+}
+
+function deltaOf(current: number | null, abs: number | null): number | null {
+  if (current == null || abs == null) return null;
+  return abs - current;
+}
 
 export function ABSComparisonTable(props: {
   sourcePlayerId: string | null | undefined;
@@ -138,22 +188,32 @@ export function ABSComparisonTable(props: {
 }
 
 function buildHitterRows(row: HitterRow): Row[] {
+  const swingD  = deltaOf(row.iz_swing_pct,  row.abs_iz_swing_pct);
+  const whiffD  = deltaOf(row.iz_whiff_pct,  row.abs_iz_whiff_pct);
+  const barrelD = deltaOf(row.iz_barrel_pct, row.abs_iz_barrel_pct);
+  const evD     = deltaOf(row.iz_exit_velo,  row.abs_iz_exit_velo);
+  const chaseD  = deltaOf(row.chase_pct,     row.abs_chase_pct);
   return [
-    { label: "Z-Swing%",  current: row.iz_swing_pct,  abs: row.abs_iz_swing_pct,  suffix: "%", decimals: 1 },
-    { label: "Z-Whiff%",  current: row.iz_whiff_pct,  abs: row.abs_iz_whiff_pct,  suffix: "%", decimals: 1 },
-    { label: "Z-Barrel%", current: row.iz_barrel_pct, abs: row.abs_iz_barrel_pct, suffix: "%", decimals: 1 },
-    { label: "Z-EV",      current: row.iz_exit_velo,  abs: row.abs_iz_exit_velo,  suffix: "",  decimals: 1 },
-    { label: "O-Swing%",  current: row.chase_pct,     abs: row.abs_chase_pct,     suffix: "%", decimals: 1 },
+    { label: "Z-Swing%",  current: row.iz_swing_pct,  abs: row.abs_iz_swing_pct,  suffix: "%", decimals: 1, tone: computeTone({ type: "up", holds: 5, goodAt: 8, badAt: -5 }, swingD) },
+    { label: "Z-Whiff%",  current: row.iz_whiff_pct,  abs: row.abs_iz_whiff_pct,  suffix: "%", decimals: 1, tone: computeTone({ type: "down", holds: 2, goodAt: -1, badAt: 4 }, whiffD) },
+    { label: "Z-Barrel%", current: row.iz_barrel_pct, abs: row.abs_iz_barrel_pct, suffix: "%", decimals: 1, tone: computeTone({ type: "tighter", holds: 2, badAt: -2 }, barrelD) },
+    { label: "Z-EV",      current: row.iz_exit_velo,  abs: row.abs_iz_exit_velo,  suffix: "",  decimals: 1, tone: computeTone({ type: "tighter", holds: 1.5, badAt: -1.5 }, evD) },
+    { label: "O-Swing%",  current: row.chase_pct,     abs: row.abs_chase_pct,     suffix: "%", decimals: 1, tone: computeTone({ type: "chaseHitter", goodAt: -6, badAt: -2 }, chaseD) },
   ];
 }
 
 function buildPitcherRows(row: PitcherRow): Row[] {
+  const chaseD  = deltaOf(row.chase_pct,    row.abs_chase_pct);
+  const izD     = deltaOf(row.iz_pct,       row.abs_iz_pct);
+  const strikeD = deltaOf(row.strike_pct,   row.abs_strike_pct);
+  const cswD    = deltaOf(row.csw_pct,      row.abs_csw_pct);
+  const whiffD  = deltaOf(row.iz_whiff_pct, row.abs_iz_whiff_pct);
   return [
-    { label: "O-Swing%",  current: row.chase_pct,    abs: row.abs_chase_pct,    suffix: "%", decimals: 1 },
-    { label: "In-Zone%",  current: row.iz_pct,       abs: row.abs_iz_pct,       suffix: "%", decimals: 1 },
-    { label: "Strike%",   current: row.strike_pct,   abs: row.abs_strike_pct,   suffix: "%", decimals: 1 },
-    { label: "CSW%",      current: row.csw_pct,      abs: row.abs_csw_pct,      suffix: "%", decimals: 1 },
-    { label: "IZ-Whiff%", current: row.iz_whiff_pct, abs: row.abs_iz_whiff_pct, suffix: "%", decimals: 1 },
+    { label: "O-Swing%",  current: row.chase_pct,    abs: row.abs_chase_pct,    suffix: "%", decimals: 1, tone: computeTone({ type: "chasePitcher", goodAt: -3, badAt: -10 }, chaseD) },
+    { label: "In-Zone%",  current: row.iz_pct,       abs: row.abs_iz_pct,       suffix: "%", decimals: 1, tone: computeTone({ type: "up", holds: 5, goodAt: 8, badAt: -5 }, izD) },
+    { label: "Strike%",   current: row.strike_pct,   abs: row.abs_strike_pct,   suffix: "%", decimals: 1, tone: computeTone({ type: "up", holds: 2, goodAt: 6, badAt: 3 }, strikeD) },
+    { label: "CSW%",      current: row.csw_pct,      abs: row.abs_csw_pct,      suffix: "%", decimals: 1, tone: computeTone({ type: "up", holds: 2, goodAt: 6, badAt: 3 }, cswD) },
+    { label: "IZ-Whiff%", current: row.iz_whiff_pct, abs: row.abs_iz_whiff_pct, suffix: "%", decimals: 1, tone: computeTone({ type: "up", holds: 2, goodAt: 4, badAt: -2 }, whiffD) },
   ];
 }
 
@@ -164,11 +224,13 @@ function ABSRow({ row }: { row: Row }) {
     return `${Number(v).toFixed(d)}${row.suffix ?? ""}`;
   };
   const delta = row.current != null && row.abs != null ? row.abs - row.current : null;
+  // Metric-aware tone takes precedence — see computeTone + buildHitterRows /
+  // buildPitcherRows. Falls through to neutral for any unattributed row.
   const deltaColor =
     delta == null ? "text-muted-foreground"
-    : Math.abs(delta) < 0.05 ? "text-muted-foreground"
-    : delta > 0 ? "text-[hsl(var(--success))]"
-    : "text-destructive";
+    : row.tone === "good" ? "text-[hsl(var(--success))]"
+    : row.tone === "bad" ? "text-destructive"
+    : "text-muted-foreground";
   const deltaPrefix = delta == null ? "" : delta > 0 ? "+" : "";
   return (
     <tr className="border-b border-border/50 last:border-0 hover:bg-muted/30 transition-colors duration-150">
