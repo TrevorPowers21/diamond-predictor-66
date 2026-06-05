@@ -6,6 +6,7 @@ import { importHistoricalPitchersCsv } from "@/lib/importHistoricalPitchers";
 import { importStuffPlusInputsCsv } from "@/lib/importStuffPlusInputsCsv";
 import { importConferenceStatsCsv, computeConferenceEnvRates } from "@/lib/importConferenceStats";
 import { importPortalEntriesCsv } from "@/lib/importPortalEntries";
+import { importAbsHitterStatsCsv, importAbsPitcherStatsCsv } from "@/lib/importAbsStats";
 import { calculateConferenceStuffPlus } from "@/savant/lib/conferenceStuffPlus";
 import { addMissingPlayers } from "@/lib/syncMasterToPlayers";
 import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
@@ -341,6 +342,32 @@ export async function runImports(
           }
         } catch (e) {
           err(`Conference Stats importer threw: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        break;
+      }
+      case "abs_hitter_stats": {
+        step(`${r.probe.fileName} → ABS Hitter Stats`);
+        try {
+          const res = await importAbsHitterStatsCsv(csvText, season);
+          ok(`${res.upserted} upserted (${res.d1Rows} D1 rows, ${res.jucoSkipped} JUCO skipped, ${res.missingSourceId} missing id) (${timeMs(startMs)})`);
+          for (const e of res.errors.slice(0, 3)) err(e);
+          if (res.errors.length > 3) warn(`...and ${res.errors.length - 3} more errors`);
+          if (res.upserted > 0) importedFilePaths.push(r.probe.filePath);
+        } catch (e) {
+          err(`ABS hitter importer threw: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        break;
+      }
+      case "abs_pitcher_stats": {
+        step(`${r.probe.fileName} → ABS Pitcher Stats`);
+        try {
+          const res = await importAbsPitcherStatsCsv(csvText, season);
+          ok(`${res.upserted} upserted (${res.d1Rows} D1 rows, ${res.jucoSkipped} JUCO skipped, ${res.missingSourceId} missing id) (${timeMs(startMs)})`);
+          for (const e of res.errors.slice(0, 3)) err(e);
+          if (res.errors.length > 3) warn(`...and ${res.errors.length - 3} more errors`);
+          if (res.upserted > 0) importedFilePaths.push(r.probe.filePath);
+        } catch (e) {
+          err(`ABS pitcher importer threw: ${e instanceof Error ? e.message : String(e)}`);
         }
         break;
       }

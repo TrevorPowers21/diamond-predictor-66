@@ -28,6 +28,7 @@ import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/Scou
 import { AiScoutingReportBody } from "@/components/AiScoutingReport";
 import { useScoutingReport } from "@/hooks/useScoutingReport";
 import CoachNotes from "@/components/CoachNotes";
+import { ABSComparisonTable } from "@/components/ABSComparisonTable";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
 // pdfGenerator is loaded on demand — jspdf (350KB) excluded from initial bundle
 const getPdfGenerator = () => import("@/lib/pdfGenerator");
@@ -1446,6 +1447,13 @@ export default function PlayerProfile() {
 
             {/* Portal Move — shows under Career Stats for any portal-active player */}
             {isTransferPortal && <PortalTeamCards player={player as any} />}
+
+            {player && (
+              <ABSComparisonTable
+                sourcePlayerId={(player as any).source_player_id ?? null}
+                playerType="hitter"
+              />
+            )}
 
             {/* Internal Power Ratings — admin only, fills left column space */}
             {isAdmin && seedPowerDerived && (

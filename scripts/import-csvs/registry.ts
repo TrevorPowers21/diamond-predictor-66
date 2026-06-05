@@ -9,7 +9,9 @@ export type CsvType =
   | "nil"
   | "portal_entries"
   | "portal_commits"
-  | "portal_withdrawals";
+  | "portal_withdrawals"
+  | "abs_hitter_stats"
+  | "abs_pitcher_stats";
 
 export type RegistryEntry = {
   type: CsvType;
@@ -287,5 +289,41 @@ export const REGISTRY: RegistryEntry[] = [
     filenameHints: [/nil/i, /valuation/i],
     downstream: [],
     description: "Per-player NIL valuations. Display only — no recalc. Importer not yet wired (Phase D).",
+  },
+  {
+    type: "abs_hitter_stats",
+    label: "ABS Hitter Stats",
+    required: ["playerId", "newestTeamLevel"],
+    signature: [
+      "HABSizBarrel%",
+      "IzBarrel%",
+      "HABS InZoneSwing%",
+      "InZoneSwing%",
+      "HABSizEV",
+      "IzExitVel",
+      "HABSInZoneWhiff%",
+      "InZoneWhiff%",
+    ],
+    filenameHints: [/^abs[_\-]hitter/i, /abs.*hitter/i],
+    downstream: [],
+    description: "TruMedia ABS hitter export. D1 only — JUCO rows dropped at import. Upserts into abs_hitter_stats keyed on (source_player_id, season). Display gated to Georgia.",
+  },
+  {
+    type: "abs_pitcher_stats",
+    label: "ABS Pitcher Stats",
+    required: ["playerId", "newestTeamLevel"],
+    signature: [
+      "ABSChase",
+      "ABSInZoneWhiff%",
+      "ABSCSW%",
+      "CSW%",
+      "ABSStrike%",
+      "Strike%",
+      "ABSInZone%",
+      "InZoneMdl%",
+    ],
+    filenameHints: [/^abs[_\-]pitcher/i, /abs.*pitcher/i],
+    downstream: [],
+    description: "TruMedia ABS pitcher export. D1 only — JUCO rows dropped at import. Upserts into abs_pitcher_stats keyed on (source_player_id, season). Display gated to Georgia.",
   },
 ];

@@ -26,6 +26,7 @@ import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/Scou
 import { AiScoutingReportBody } from "@/components/AiScoutingReport";
 import { useScoutingReport } from "@/hooks/useScoutingReport";
 import CoachNotes from "@/components/CoachNotes";
+import { ABSComparisonTable } from "@/components/ABSComparisonTable";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
 import { generateCoachNotesPdf, generateReportPdf } from "@/lib/pdfGenerator";
 import { assessPitcherRisk } from "@/lib/playerRisk";
@@ -1959,6 +1960,13 @@ export default function PitcherProfile() {
             {/* Portal Move — same compact card style as Career Stats */}
             {player && (player.transfer_portal || ["IN PORTAL", "COMMITTED", "WITHDRAWN"].includes(String((player as any).portal_status || "").toUpperCase())) && (
               <PortalTeamCards player={player as any} />
+            )}
+
+            {player && (
+              <ABSComparisonTable
+                sourcePlayerId={(player as any).source_player_id ?? null}
+                playerType="pitcher"
+              />
             )}
 
             {isAdmin && internalPowerRatings ? (
