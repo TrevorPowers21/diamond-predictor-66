@@ -35,6 +35,7 @@ import AdminTeams from "./pages/admin/AdminTeams";
 import AdminUsers from "./pages/admin/AdminUsers";
 import RoleGuard from "@/components/RoleGuard";
 import HighFollowList from "./pages/HighFollowList";
+import Settings from "./pages/Settings";
 
 const queryClient = new QueryClient();
 
@@ -92,6 +93,7 @@ const App = () => (
             <Route path="/dashboard/team-builder" element={<ProtectedRoute><TeamBuilder /></ProtectedRoute>} />
             <Route path="/dashboard/high-follow" element={<ProtectedRoute><HighFollowList /></ProtectedRoute>} />
             <Route path="/dashboard/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+            <Route path="/dashboard/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route
               path="/dashboard/admin/teams"
               element={
