@@ -2051,23 +2051,16 @@ export default function TeamBuilder() {
   // Writes one player row. Only fires when the build already exists (selectedBuildId set)
   // and the player already has a DB row id. New adds go through saveMutation.
   const savePlayerRowFn = useCallback(async (rp: BuildPlayer, buildId: string) => {
-    if (!rp.id) { console.log("[Save] savePlayerRowFn skipped — no rp.id", rp); return; }
+    if (!rp.id) return;
     const row = buildBuildPlayerRow(rp, buildId);
-    console.log("[Save] savePlayerRowFn firing for id:", rp.id,
-      "depth_role:", rp.depth_role,
-      "snapshot.hitter_depth_role:", (row.player_snapshot as any)?.hitter_depth_role,
-      "notes.depthRole:", JSON.parse(row.production_notes || "{}").depthRole,
-    );
     setAutoSaveStatus("saving");
     const { error } = await supabase
       .from("team_build_players")
       .update(row)
       .eq("id", rp.id);
     if (error) {
-      console.log("[Save] savePlayerRowFn ERROR:", error);
       setAutoSaveStatus("error");
     } else {
-      console.log("[Save] savePlayerRowFn SUCCESS for id:", rp.id);
       setLastSavedAt(new Date());
       setAutoSaveStatus("saved");
     }
@@ -2076,15 +2069,13 @@ export default function TeamBuilder() {
   // Per-player debounce: each player index has its own timer so changing
   // player A and player B within 2.5s saves both, not just the later one.
   const debouncedSavePlayer = useCallback((idx: number) => {
-    if (!selectedBuildId) { console.log("[Save] debouncedSavePlayer skipped — no selectedBuildId"); return; }
-    console.log("[Save] debouncedSavePlayer scheduled idx:", idx);
+    if (!selectedBuildId) return;
     setAutoSaveStatus("pending");
     if (playerSaveTimers.current[idx]) clearTimeout(playerSaveTimers.current[idx]);
     const buildId = selectedBuildId;
     playerSaveTimers.current[idx] = setTimeout(() => {
       delete playerSaveTimers.current[idx];
       const rp = rosterPlayersRef.current[idx];
-      console.log("[Save] timer fired idx:", idx, "rp.id:", rp?.id, "depth_role:", rp?.depth_role);
       if (rp?.id) void savePlayerRowFn(rp, buildId);
     }, 2500);
   }, [selectedBuildId, savePlayerRowFn]);
@@ -2096,14 +2087,11 @@ export default function TeamBuilder() {
       const buildId = selectedBuildIdRef.current;
       const players = rosterPlayersRef.current;
       const pendingIdxs = Object.keys(playerSaveTimers.current).map(Number);
-      console.log("[Save] UNMOUNT FLUSH — buildId:", buildId, "pending:", pendingIdxs);
-      if (!buildId) { console.log("[Save] UNMOUNT skipped — no buildId"); return; }
-      if (pendingIdxs.length === 0) { console.log("[Save] UNMOUNT — nothing pending"); return; }
+      if (!buildId || pendingIdxs.length === 0) return;
       pendingIdxs.forEach((idx) => {
         clearTimeout(playerSaveTimers.current[idx]);
         delete playerSaveTimers.current[idx];
         const rp = players[idx];
-        console.log("[Save] UNMOUNT flushing idx:", idx, "rp.id:", rp?.id, "depth_role:", rp?.depth_role);
         if (rp?.id) void savePlayerRowFn(rp, buildId);
       });
     };
@@ -2121,11 +2109,9 @@ export default function TeamBuilder() {
   }, [highlightedPlayerIdx]);
 
   const updatePlayer = useCallback((idx: number, updates: Partial<BuildPlayer>) => {
-    console.log("[Save] updatePlayer idx:", idx, "updates:", updates);
     setRosterPlayers((prev) => {
       const next = prev.map((p, i) => (i === idx ? { ...p, ...updates } : p));
       rosterPlayersRef.current = next;
-      console.log("[Save] ref updated, depth_role:", (next[idx] as any)?.depth_role, "id:", (next[idx] as any)?.id);
       return next;
     });
     setDirty(true);
