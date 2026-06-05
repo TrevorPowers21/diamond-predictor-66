@@ -11,7 +11,7 @@ import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useParkFactors } from "@/hooks/useParkFactors";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
 import { applyTeamScopeFilter } from "@/lib/teamScopedPredictions";
-import { CURRENT_SEASON, PRIOR_SEASON } from "@/lib/seasonConstants";
+import { CURRENT_SEASON, PRIOR_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { normalizeName } from "../helpers";
 import type { TeamRow } from "../types";
 
@@ -334,7 +334,10 @@ export function useTeamBuilderData({
         for (const player of players) {
           if (player.source_player_id && !active2025Ids.has(player.source_player_id)) continue;
           const preds = (player.player_predictions || []).filter(
-            (pr: any) => pr.variant === "regular" && (pr.status === "active" || pr.status === "departed"),
+            (pr: any) =>
+              pr.season === PROJECTION_SEASON &&
+              pr.variant === "regular" &&
+              (pr.status === "active" || pr.status === "departed"),
           );
           let best = preds.length > 0 ? preds[0] : null;
           for (const row of preds) {

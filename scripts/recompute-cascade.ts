@@ -1,22 +1,30 @@
 #!/usr/bin/env node
 /**
- * Replay the post-import cascade for a given season. Used to recover after a
- * data restore (e.g. JUCO recovery) where the bulk importer skipped the
- * computational cascade.
+ * Replay the post-import cascade for a given season. Used after every data
+ * upload (mid-season or season transition) to keep player_predictions current.
  *
  * Runs (in order):
+ *   0. markOldProjectionsStale     ← NEW: stales all predictions from seasons
+ *                                         older than PROJ_SEASON before writing
+ *                                         fresh rows. Prevents dual-active
+ *                                         collisions when seasons roll over.
  *   1. addMissingPlayers
  *   2. computeAndStoreNcaaAverages
  *   3. computeAndStoreAllScores
- *   4. createPredictionsFromMaster
+ *   4. createPredictionsFromMaster (returner + transfer regular rows via UPSERT)
  *   5. calculateConferenceStuffPlus
  *   6. computeConferenceEnvRates
  *   7. bulkRecalculatePredictionsLocal
+ *
+ * After the cascade, trigger the precompute Edge Function for each customer
+ * team to refresh team-specific precomputed rows (transfer projections).
+ * Use scripts/rerun_all_teams_precompute.ts for that step.
  *
  * Usage:
  *   npx tsx scripts/recompute-cascade.ts          # staging
  *   npx tsx scripts/recompute-cascade.ts --prod   # prod
  */
+import { markOldProjectionsStale } from "@/lib/markOldProjectionsStale";
 import { addMissingPlayers } from "@/lib/syncMasterToPlayers";
 import { computeAndStoreNcaaAverages } from "@/lib/computeNcaaAverages";
 import { computeAndStoreAllScores } from "@/lib/computeAndStoreScores";
@@ -50,6 +58,11 @@ async function step(label: string, fn: () => Promise<any>) {
 async function main() {
   const isProd = process.argv.includes("--prod");
   console.log(`${C.bold}Cascade replay — data ${DATA_SEASON} → projections ${PROJ_SEASON} on ${isProd ? "PROD" : "STAGING"}${C.reset}`);
+
+  // Step 0: stale old-season predictions before writing new ones.
+  // Prevents dual-active collisions on season rollover (e.g. 2027→2028).
+  // Idempotent on repeated mid-season uploads — only affects seasons < PROJ_SEASON.
+  await step("markOldProjectionsStale", () => markOldProjectionsStale(PROJ_SEASON));
 
   await step("addMissingPlayers", () => addMissingPlayers(DATA_SEASON));
   await step("computeAndStoreNcaaAverages", () => computeAndStoreNcaaAverages(DATA_SEASON));
