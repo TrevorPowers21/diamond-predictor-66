@@ -156,7 +156,28 @@ async function main(): Promise<void> {
     console.log("");
   }
 
-  const importable = results.filter((r) => r.match && r.supersededBy === undefined);
+  // When running unattended via launchd (RSTR_AUTOMATION_TOKEN set), only
+  // allow portal-type imports. Master data (hitter_master, pitching_master,
+  // conference_stats, etc.) must NEVER be imported to prod automatically —
+  // they require a human to deliberately run import:prod in a terminal.
+  const PORTAL_TYPES = new Set(["portal_entries", "portal_commits", "portal_withdrawals"]);
+  const MASTER_TYPES = new Set(["hitter_master", "pitching_master", "conference_stats", "park_factors", "pitcher_stuff_inputs", "pitch_arsenal"]);
+  const isUnattended = process.env.RSTR_AUTOMATION_TOKEN === "yes-promote-to-prod";
+  if (isUnattended) {
+    const blocked = results.filter((r) => r.match && MASTER_TYPES.has(r.match.type));
+    if (blocked.length > 0) {
+      console.error(`\n🚫 UNATTENDED RUN BLOCKED: The inbox contains master data files that cannot be auto-imported to production:`);
+      for (const b of blocked) console.error(`   • ${b.probe.fileName} (detected as: ${b.match!.label})`);
+      console.error(`\nRemove these files from the inbox, then re-run manually via: npm run import:prod\n`);
+      process.exit(1);
+    }
+    const nonPortal = results.filter((r) => r.match && !PORTAL_TYPES.has(r.match.type));
+    if (nonPortal.length > 0) {
+      console.log(`\nUnattended run — skipping non-portal files (${nonPortal.map(r => r.probe.fileName).join(", ")})`);
+    }
+  }
+
+  const importable = results.filter((r) => r.match && r.supersededBy === undefined && (!isUnattended || PORTAL_TYPES.has(r.match.type)));
   if (importable.length === 0) {
     console.log("Nothing to import. Drop CSVs in the inbox and re-run.");
     process.exit(0);

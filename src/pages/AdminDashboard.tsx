@@ -49,6 +49,8 @@ function ImportPitchArsenalButton() {
       <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        const confirmed = window.confirm("⚠️ WARNING: This will DELETE all existing Pitch Arsenal data for the season and replace it with the uploaded CSV.\n\nThis affects PRODUCTION. Are you absolutely sure?");
+        if (!confirmed) { if (fileRef.current) fileRef.current.value = ""; return; }
         setLoading(true);
         setResult(null);
         try {
@@ -377,6 +379,8 @@ function ImportHistoricalHittersButton() {
         <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={async (e) => {
           const file = e.target.files?.[0];
           if (!file) return;
+          const confirmed = window.confirm(`⚠️ WARNING: This will DELETE ALL existing D1 ${season} hitter data and replace it with the uploaded CSV.\n\nThis affects PRODUCTION. Are you absolutely sure?`);
+          if (!confirmed) { if (fileRef.current) fileRef.current.value = ""; return; }
           setLoading(true);
           setResult(null);
           try {
@@ -453,6 +457,8 @@ function ImportHistoricalPitchersButton() {
         <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={async (e) => {
           const file = e.target.files?.[0];
           if (!file) return;
+          const confirmed = window.confirm(`⚠️ WARNING: This will DELETE ALL existing D1 ${season} pitcher data and replace it with the uploaded CSV.\n\nThis affects PRODUCTION. Are you absolutely sure?`);
+          if (!confirmed) { if (fileRef.current) fileRef.current.value = ""; return; }
           setLoading(true);
           setResult(null);
           try {
