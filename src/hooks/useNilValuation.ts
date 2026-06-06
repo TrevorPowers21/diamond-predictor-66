@@ -10,7 +10,7 @@ export function useNilValuation(playerId: string | null | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("nil_valuations")
-        .select("player_id, season, market_value, percentile, updated_at")
+        .select("player_id, season, estimated_value, war, updated_at")
         .eq("player_id", playerId!)
         .order("season", { ascending: false })
         .limit(1)
