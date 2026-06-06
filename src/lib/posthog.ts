@@ -8,7 +8,7 @@ export function initPostHog() {
   posthog.init(KEY, {
     api_host: HOST,
     defaults: "2026-05-30",
-    person_profiles: "identified_only",
+    person_profiles: "always",
     // We fire $pageview/$pageleave manually in PostHogPageView (App.tsx)
     // so SPA route changes are tracked correctly.
     capture_pageview: false,
