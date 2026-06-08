@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
 import { paForHitterDepthRole, pitcherRoleFromDepthRole, getPitchingPvfForRole } from "@/lib/depthRoles";
+import { applyRoleTransitionAdjustment } from "@/lib/transferPitcherProjection";
 import { computeTransferProjection } from "@/lib/transferProjection";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { computePitcherProjection } from "@/lib/pitcherProjection";
@@ -1270,98 +1271,79 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       : (treatAsPitcher ? (p.prediction ?? computeReturnerPitchingProjection(p)) : p.prediction);
     if (treatAsPitcher) {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
-      let source: any = sourceBase;
-      if ((p.roster_status || "returner") === "target" && sourceBase) {
-        const isPrecomputed = (sourceBase as any)?.variant === "precomputed";
-        if (isPrecomputed) {
-          // Precomputed rows already have conference, park, class transition, and devAgg
-          // fully applied by the pipeline. Do NOT re-apply class adjustments — that would
-          // double-count them (e.g. 3.83 × 0.97 = 3.72 when 3.83 is already the correct value).
-          // Only apply a devAgg ratio overlay when the coach changes it from the stored baseline.
-          const storedDevAgg = Number.isFinite(Number(sourceBase.dev_aggressiveness)) ? Number(sourceBase.dev_aggressiveness) : 0;
-          const sessionDevAgg = Number.isFinite(Number(p.dev_aggressiveness)) ? Number(p.dev_aggressiveness) : 0;
-          if (sessionDevAgg !== storedDevAgg) {
-            const lowDenom = 1 - storedDevAgg * 0.06;
-            const highDenom = 1 + storedDevAgg * 0.06;
-            const lowRatio = lowDenom > 0 ? (1 - sessionDevAgg * 0.06) / lowDenom : 1;
-            const highRatio = highDenom > 0 ? (1 + sessionDevAgg * 0.06) / highDenom : 1;
-            const adjEra  = sourceBase.p_era  != null ? Number(sourceBase.p_era)  * lowRatio  : null;
-            const adjFip  = sourceBase.p_fip  != null ? Number(sourceBase.p_fip)  * lowRatio  : null;
-            const adjWhip = sourceBase.p_whip != null ? Number(sourceBase.p_whip) * lowRatio  : null;
-            const adjK9   = sourceBase.p_k9   != null ? Number(sourceBase.p_k9)   * highRatio : null;
-            const adjBb9  = sourceBase.p_bb9  != null ? Number(sourceBase.p_bb9)  * lowRatio  : null;
-            const adjHr9  = sourceBase.p_hr9  != null ? Number(sourceBase.p_hr9)  * lowRatio  : null;
-            const eraPlus  = calcPitchingPlus(adjEra,  pitchingEq.era_plus_ncaa_avg,  pitchingEq.era_plus_ncaa_sd,  pitchingEq.era_plus_scale,  false);
-            const fipPlus  = calcPitchingPlus(adjFip,  pitchingEq.fip_plus_ncaa_avg,  pitchingEq.fip_plus_ncaa_sd,  pitchingEq.fip_plus_scale,  false);
-            const whipPlus = calcPitchingPlus(adjWhip, pitchingEq.whip_plus_ncaa_avg, pitchingEq.whip_plus_ncaa_sd, pitchingEq.whip_plus_scale, false);
-            const k9Plus   = calcPitchingPlus(adjK9,   pitchingEq.k9_plus_ncaa_avg,   pitchingEq.k9_plus_ncaa_sd,   pitchingEq.k9_plus_scale,   true);
-            const bb9Plus  = calcPitchingPlus(adjBb9,  pitchingEq.bb9_plus_ncaa_avg,  pitchingEq.bb9_plus_ncaa_sd,  pitchingEq.bb9_plus_scale,  false);
-            const hr9Plus  = calcPitchingPlus(adjHr9,  pitchingEq.hr9_plus_ncaa_avg,  pitchingEq.hr9_plus_ncaa_sd,  pitchingEq.hr9_plus_scale,  false);
-            const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-              ? (Number(eraPlus) * pitchingEq.era_plus_weight) + (Number(fipPlus) * pitchingEq.fip_plus_weight) +
-                (Number(whipPlus) * pitchingEq.whip_plus_weight) + (Number(k9Plus) * pitchingEq.k9_plus_weight) +
-                (Number(bb9Plus) * pitchingEq.bb9_plus_weight) + (Number(hr9Plus) * pitchingEq.hr9_plus_weight)
-              : (sourceBase.p_rv_plus ?? sourceBase.p_wrc_plus ?? null);
-            source = {
-              ...sourceBase,
-              p_era: adjEra ?? sourceBase.p_era ?? null, p_fip: adjFip ?? sourceBase.p_fip ?? null,
-              p_whip: adjWhip ?? sourceBase.p_whip ?? null, p_k9: adjK9 ?? sourceBase.p_k9 ?? null,
-              p_bb9: adjBb9 ?? sourceBase.p_bb9 ?? null, p_hr9: adjHr9 ?? sourceBase.p_hr9 ?? null,
-              p_rv_plus: pRvPlus, p_wrc_plus: pRvPlus,
-            };
-          }
-          // sessionDevAgg === storedDevAgg: source stays as sourceBase unchanged
-        } else {
-          // Non-precomputed rows (regular/transfer snapshot): apply full class + devAgg
-          // adjustments since these rows don't have transfer context already applied.
-          const livePred = p.player_id ? liveTargetPredictionByPlayerId.get(p.player_id) : null;
-          const classTransitionRaw = String(p.class_transition || livePred?.class_transition || "SJ").toUpperCase();
-          const classTransition: "FS" | "SJ" | "JS" | "GR" =
-            classTransitionRaw === "FS" || classTransitionRaw === "SJ" || classTransitionRaw === "JS" || classTransitionRaw === "GR"
-              ? classTransitionRaw : "SJ";
-          const devAgg = Number.isFinite(Number(p.dev_aggressiveness))
-            ? Number(p.dev_aggressiveness)
-            : Number.isFinite(Number(livePred?.dev_aggressiveness)) ? Number(livePred?.dev_aggressiveness) : 0;
-          const classEraAdj  = toPitchingClassAdj(classTransition, pitchingEq.class_era_fs,  pitchingEq.class_era_sj,  pitchingEq.class_era_js,  pitchingEq.class_era_gr);
-          const classFipAdj  = toPitchingClassAdj(classTransition, pitchingEq.class_fip_fs,  pitchingEq.class_fip_sj,  pitchingEq.class_fip_js,  pitchingEq.class_fip_gr);
-          const classWhipAdj = toPitchingClassAdj(classTransition, pitchingEq.class_whip_fs, pitchingEq.class_whip_sj, pitchingEq.class_whip_js, pitchingEq.class_whip_gr);
-          const classK9Adj   = toPitchingClassAdj(classTransition, pitchingEq.class_k9_fs,   pitchingEq.class_k9_sj,   pitchingEq.class_k9_js,   pitchingEq.class_k9_gr);
-          const classBb9Adj  = toPitchingClassAdj(classTransition, pitchingEq.class_bb9_fs,  pitchingEq.class_bb9_sj,  pitchingEq.class_bb9_js,  pitchingEq.class_bb9_gr);
-          const classHr9Adj  = toPitchingClassAdj(classTransition, pitchingEq.class_hr9_fs,  pitchingEq.class_hr9_sj,  pitchingEq.class_hr9_js,  pitchingEq.class_hr9_gr);
-          const lowBetterMult  = (adj: number) => 1 - adj - (devAgg * 0.06);
-          const highBetterMult = (adj: number) => 1 + adj + (devAgg * 0.06);
-          const pEraAdj  = sourceBase?.p_era  == null ? null : Number(sourceBase.p_era)  * lowBetterMult(classEraAdj);
-          const pFipAdj  = sourceBase?.p_fip  == null ? null : Number(sourceBase.p_fip)  * lowBetterMult(classFipAdj);
-          const pWhipAdj = sourceBase?.p_whip == null ? null : Number(sourceBase.p_whip) * lowBetterMult(classWhipAdj);
-          const pK9Adj   = sourceBase?.p_k9   == null ? null : Number(sourceBase.p_k9)   * highBetterMult(classK9Adj);
-          const pBb9Adj  = sourceBase?.p_bb9  == null ? null : Number(sourceBase.p_bb9)  * lowBetterMult(classBb9Adj);
-          const pHr9Adj  = sourceBase?.p_hr9  == null ? null : Number(sourceBase.p_hr9)  * lowBetterMult(classHr9Adj);
-          const eraPlus  = calcPitchingPlus(pEraAdj,  pitchingEq.era_plus_ncaa_avg,  pitchingEq.era_plus_ncaa_sd,  pitchingEq.era_plus_scale,  false);
-          const fipPlus  = calcPitchingPlus(pFipAdj,  pitchingEq.fip_plus_ncaa_avg,  pitchingEq.fip_plus_ncaa_sd,  pitchingEq.fip_plus_scale,  false);
-          const whipPlus = calcPitchingPlus(pWhipAdj, pitchingEq.whip_plus_ncaa_avg, pitchingEq.whip_plus_ncaa_sd, pitchingEq.whip_plus_scale, false);
-          const k9Plus   = calcPitchingPlus(pK9Adj,   pitchingEq.k9_plus_ncaa_avg,   pitchingEq.k9_plus_ncaa_sd,   pitchingEq.k9_plus_scale,   true);
-          const bb9Plus  = calcPitchingPlus(pBb9Adj,  pitchingEq.bb9_plus_ncaa_avg,  pitchingEq.bb9_plus_ncaa_sd,  pitchingEq.bb9_plus_scale,  false);
-          const hr9Plus  = calcPitchingPlus(pHr9Adj,  pitchingEq.hr9_plus_ncaa_avg,  pitchingEq.hr9_plus_ncaa_sd,  pitchingEq.hr9_plus_scale,  false);
-          const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-            ? (Number(eraPlus) * pitchingEq.era_plus_weight) + (Number(fipPlus) * pitchingEq.fip_plus_weight) +
-              (Number(whipPlus) * pitchingEq.whip_plus_weight) + (Number(k9Plus) * pitchingEq.k9_plus_weight) +
-              (Number(bb9Plus) * pitchingEq.bb9_plus_weight) + (Number(hr9Plus) * pitchingEq.hr9_plus_weight)
-            : (sourceBase?.p_rv_plus ?? sourceBase?.p_wrc_plus ?? null);
-          source = {
-            ...sourceBase,
-            p_era: pEraAdj ?? sourceBase?.p_era ?? null, p_fip: pFipAdj ?? sourceBase?.p_fip ?? null,
-            p_whip: pWhipAdj ?? sourceBase?.p_whip ?? null, p_k9: pK9Adj ?? sourceBase?.p_k9 ?? null,
-            p_bb9: pBb9Adj ?? sourceBase?.p_bb9 ?? null, p_hr9: pHr9Adj ?? sourceBase?.p_hr9 ?? null,
-            p_rv_plus: pRvPlus, p_wrc_plus: pRvPlus,
-          };
-        }
-      }
-      // Stored is canonical; apply a session-only IP-ratio overlay so the
-      // depth-role knob actually moves pWAR. Mirrors PitcherProfile and the
-      // hitter path below (PA-ratio overlay for hitters).
-      //   ipScale  = sessionIp / storedIp        (depth knob)
-      //   pvfRatio = sessionPvf / storedPvf      (SP↔RP knob)
-      // If neither knob moved, both ratios = 1 → pWAR equals stored.
+      // Mirror hitter dev_agg pattern: one ratio formula, no target-only gate,
+      // no "if knob moved" branch. Stored is canonical; the knob multiplies
+      // on top. When knob equals stored, devAggScale = 1 → values equal stored.
+      //
+      // Pitcher inversion: low-better rates (ERA / FIP / WHIP / BB9 / HR9) use
+      // the INVERSE ratio so higher dev_agg lowers them. High-better rates (K9)
+      // and aggregates (pRV+, pWAR, MV) use the same direction as hitter.
+      const storedDevAggPitch = Number.isFinite(Number(sourceBase?.dev_aggressiveness)) ? Number(sourceBase.dev_aggressiveness) : 0;
+      const sessionDevAggPitch = Number.isFinite(Number(p.dev_aggressiveness)) ? Number(p.dev_aggressiveness) : 0;
+      const ctRawPitch = String(p.class_transition || sourceBase?.class_transition || "SJ").toUpperCase();
+      const devAggClassAdjPitch = ctRawPitch === "FS" ? 0.03 : ctRawPitch === "JS" ? 0.015 : ctRawPitch === "GR" ? 0.01 : 0.02;
+      const storedMultPitch = 1 + devAggClassAdjPitch + storedDevAggPitch * 0.06;
+      const sessionMultPitch = 1 + devAggClassAdjPitch + sessionDevAggPitch * 0.06;
+      const devAggScalePitch = storedMultPitch > 0 ? sessionMultPitch / storedMultPitch : 1;
+      const invDevAggScalePitch = devAggScalePitch > 0 ? 1 / devAggScalePitch : 1;
+      const devSource: any = (sourceBase != null && devAggScalePitch !== 1) ? {
+        ...sourceBase,
+        p_era:      sourceBase.p_era      != null ? Number(sourceBase.p_era)      * invDevAggScalePitch : null,
+        p_fip:      sourceBase.p_fip      != null ? Number(sourceBase.p_fip)      * invDevAggScalePitch : null,
+        p_whip:     sourceBase.p_whip     != null ? Number(sourceBase.p_whip)     * invDevAggScalePitch : null,
+        p_k9:       sourceBase.p_k9       != null ? Number(sourceBase.p_k9)       * devAggScalePitch    : null,
+        p_bb9:      sourceBase.p_bb9      != null ? Number(sourceBase.p_bb9)      * invDevAggScalePitch : null,
+        p_hr9:      sourceBase.p_hr9      != null ? Number(sourceBase.p_hr9)      * invDevAggScalePitch : null,
+        p_rv_plus:  sourceBase.p_rv_plus  != null ? Number(sourceBase.p_rv_plus)  * devAggScalePitch    : null,
+        p_wrc_plus: sourceBase.p_rv_plus  != null ? Number(sourceBase.p_rv_plus)  * devAggScalePitch    : (sourceBase.p_wrc_plus ?? null),
+      } : sourceBase;
+      // SP↔RP role-transition adjustment to rates. Mirrors PitcherProfile:
+      // when the session role bucket differs from the stored role, scale rates
+      // up (RP→SP: regression — ERA/FIP/WHIP go up, K9 goes down) or down
+      // (SP→RP: improvement). Uses transfer projection's admin percentages.
+      const storedRoleForTransition: "SP" | "RP" | "SM" | null =
+        sourceBase?.pitcher_role === "SP" ? "SP" :
+        sourceBase?.pitcher_role === "RP" ? "RP" :
+        sourceBase?.pitcher_role === "SM" ? "SM" : null;
+      const sourceIdForRT = (p.player as any)?.source_player_id ?? null;
+      const pmRoleForRT = sourceIdForRT ? pitchingStatsByNameTeam.bySourceId.get(sourceIdForRT)?.role : null;
+      const sessionRoleForTransition: "SP" | "RP" = effectivePitcherRoleForBuild(p, pmRoleForRT);
+      const roleChangedForTransition = storedRoleForTransition != null && storedRoleForTransition !== sessionRoleForTransition;
+      const rtRoleCurve = roleChangedForTransition ? {
+        tier1Max: pitchingEq.rp_to_sp_low_better_tier1_max,
+        tier2Max: pitchingEq.rp_to_sp_low_better_tier2_max,
+        tier3Max: pitchingEq.rp_to_sp_low_better_tier3_max,
+        tier1Mult: pitchingEq.rp_to_sp_low_better_tier1_mult,
+        tier2Mult: pitchingEq.rp_to_sp_low_better_tier2_mult,
+        tier3Mult: pitchingEq.rp_to_sp_low_better_tier3_mult,
+      } : undefined;
+      const source: any = roleChangedForTransition && devSource != null ? (() => {
+        const rtEra  = applyRoleTransitionAdjustment(devSource.p_era,  pitchingEq.sp_to_rp_reg_era_pct,  storedRoleForTransition, sessionRoleForTransition, true,  rtRoleCurve);
+        const rtFip  = applyRoleTransitionAdjustment(devSource.p_fip,  pitchingEq.sp_to_rp_reg_fip_pct,  storedRoleForTransition, sessionRoleForTransition, true,  rtRoleCurve);
+        const rtWhip = applyRoleTransitionAdjustment(devSource.p_whip, pitchingEq.sp_to_rp_reg_whip_pct, storedRoleForTransition, sessionRoleForTransition, true,  rtRoleCurve);
+        const rtK9   = applyRoleTransitionAdjustment(devSource.p_k9,   pitchingEq.sp_to_rp_reg_k9_pct,   storedRoleForTransition, sessionRoleForTransition, false, rtRoleCurve);
+        const rtBb9  = applyRoleTransitionAdjustment(devSource.p_bb9,  pitchingEq.sp_to_rp_reg_bb9_pct,  storedRoleForTransition, sessionRoleForTransition, true,  rtRoleCurve);
+        const rtHr9  = applyRoleTransitionAdjustment(devSource.p_hr9,  pitchingEq.sp_to_rp_reg_hr9_pct,  storedRoleForTransition, sessionRoleForTransition, true,  rtRoleCurve);
+        // Re-derive pRV+ from the role-adjusted rates so it tracks the new role too.
+        const eraP  = calcPitchingPlus(rtEra,  pitchingEq.era_plus_ncaa_avg,  pitchingEq.era_plus_ncaa_sd,  pitchingEq.era_plus_scale,  false);
+        const fipP  = calcPitchingPlus(rtFip,  pitchingEq.fip_plus_ncaa_avg,  pitchingEq.fip_plus_ncaa_sd,  pitchingEq.fip_plus_scale,  false);
+        const whipP = calcPitchingPlus(rtWhip, pitchingEq.whip_plus_ncaa_avg, pitchingEq.whip_plus_ncaa_sd, pitchingEq.whip_plus_scale, false);
+        const k9P   = calcPitchingPlus(rtK9,   pitchingEq.k9_plus_ncaa_avg,   pitchingEq.k9_plus_ncaa_sd,   pitchingEq.k9_plus_scale,   true);
+        const bb9P  = calcPitchingPlus(rtBb9,  pitchingEq.bb9_plus_ncaa_avg,  pitchingEq.bb9_plus_ncaa_sd,  pitchingEq.bb9_plus_scale,  false);
+        const hr9P  = calcPitchingPlus(rtHr9,  pitchingEq.hr9_plus_ncaa_avg,  pitchingEq.hr9_plus_ncaa_sd,  pitchingEq.hr9_plus_scale,  false);
+        const rtPRvPlus = [eraP, fipP, whipP, k9P, bb9P, hr9P].every((v) => v != null)
+          ? (Number(eraP) * pitchingEq.era_plus_weight) + (Number(fipP) * pitchingEq.fip_plus_weight) +
+            (Number(whipP) * pitchingEq.whip_plus_weight) + (Number(k9P) * pitchingEq.k9_plus_weight) +
+            (Number(bb9P) * pitchingEq.bb9_plus_weight) + (Number(hr9P) * pitchingEq.hr9_plus_weight)
+          : (devSource.p_rv_plus ?? devSource.p_wrc_plus ?? null);
+        return {
+          ...devSource,
+          p_era: rtEra, p_fip: rtFip, p_whip: rtWhip, p_k9: rtK9, p_bb9: rtBb9, p_hr9: rtHr9,
+          p_rv_plus: rtPRvPlus, p_wrc_plus: rtPRvPlus,
+        };
+      })() : devSource;
+      // Depth / SP↔RP overlay (existing behavior — moves pWAR/MV via IP + PVF
+      // ratios). devAggScale also folds in below to keep one consistent ratio.
       const storedPWar = source?.p_war != null ? Number(source.p_war) : null;
       const storedProjectedIp = Number(source?.projected_ip);
       const sourceIdForPm = (p.player as any)?.source_player_id ?? null;
@@ -1391,7 +1373,9 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const pvfStoredForRow = pitchingPvfForRole(storedRoleBucketForRow);
       const pvfNewForRow = pitchingPvfForRole(sessionRoleBucketForRow);
       const pvfRatioForRow = pvfStoredForRow > 0 ? pvfNewForRow / pvfStoredForRow : 1;
-      const pwar = storedPWar != null ? storedPWar * ipScaleForRow * pvfRatioForRow : null;
+      // devAggScalePitch folds in so dev_agg knob moves pWAR too (mirrors
+      // hitter's depthScale × devAggScale composition).
+      const pwar = storedPWar != null ? storedPWar * ipScaleForRow * pvfRatioForRow * devAggScalePitch : null;
       return { sim, shown: source, shownWrc: source?.p_rv_plus ?? source?.p_wrc_plus ?? null, owar: pwar ?? 0, pwar };
     }
     const shownWrc = (() => {
@@ -1515,7 +1499,16 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const pvfStored = pitchingPvfForRole(storedBucket);
       const pvfNew = pitchingPvfForRole(sessionBucket);
       const pvfRatioMv = pvfStored > 0 ? pvfNew / pvfStored : 1;
-      const overlayScale = ipScaleMv * pvfRatioMv;
+      // devAggScale ratio folds in so the dev_agg knob moves MV. Same formula
+      // and class-adj table as the rate-stat overlay above.
+      const storedDevAggMv = Number.isFinite(Number(source?.dev_aggressiveness)) ? Number(source?.dev_aggressiveness) : 0;
+      const sessionDevAggMv = Number.isFinite(Number(p.dev_aggressiveness)) ? Number(p.dev_aggressiveness) : 0;
+      const ctRawMv = String(p.class_transition || source?.class_transition || "SJ").toUpperCase();
+      const devAggClassAdjMv = ctRawMv === "FS" ? 0.03 : ctRawMv === "JS" ? 0.015 : ctRawMv === "GR" ? 0.01 : 0.02;
+      const storedMultMv = 1 + devAggClassAdjMv + storedDevAggMv * 0.06;
+      const sessionMultMv = 1 + devAggClassAdjMv + sessionDevAggMv * 0.06;
+      const devAggScaleMv = storedMultMv > 0 ? sessionMultMv / storedMultMv : 1;
+      const overlayScale = ipScaleMv * pvfRatioMv * devAggScaleMv;
       if (storedMv != null && Number.isFinite(storedMv)) return Math.max(0, storedMv * overlayScale);
       const direct = Number(source?.nil_valuation);
       if (Number.isFinite(direct)) return Math.max(0, direct * overlayScale);

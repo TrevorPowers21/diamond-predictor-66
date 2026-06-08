@@ -1547,23 +1547,28 @@ export default function TeamBuilder() {
         team_metrics: null,
         team_power_plus: null,
       };
+      // For TWPs the playerOverrides map can hold a stale pitcher role (set
+      // back when Kenny etc. were pitcher-only). Use players.position directly
+      // for the hitter side — that's where the manually-filled hitter position
+      // lives now. Non-TWP rows still honor the override.
+      const isPitcherPosStr = (s: string | null | undefined) => !!s && /^(SP|RP|CL|LHP|RHP|P)$/i.test(s);
+      const hitterPosForTwp = !isPitcherPosStr(player.position) ? player.position : null;
       const primary: BuildPlayer = {
         ...baseFields,
-        position_slot: isPitcherRow ? (inferredRole || "RP") : (playerOverrides[player.id]?.position ?? null),
+        position_slot: isPitcherRow
+          ? (inferredRole || "RP")
+          : (playerIsTwp ? hitterPosForTwp : (playerOverrides[player.id]?.position ?? null)),
         depth_role: isPitcherRow ? resolvedPitcherDepth : resolvedHitterDepth,
         player: playerMeta,
       };
-      // TWP: append the opposite-side mirror so both lineup and rotation/bullpen
-      // see this player. Same player_id (downstream depthAssignments keys by
-      // (slot, depth_order), not player_id, so no collision).
       if (playerIsTwp) {
         if (isPitcherRow) {
           // Primary is pitcher; add hitter mirror.
           const mirror: BuildPlayer = {
             ...baseFields,
-            position_slot: playerOverrides[player.id]?.position ?? null,
+            position_slot: hitterPosForTwp,
             depth_role: resolvedHitterDepth,
-            player: { ...playerMeta, position: playerOverrides[player.id]?.position ?? null },
+            player: { ...playerMeta, position: hitterPosForTwp },
           };
           return [primary, mirror];
         } else {
@@ -1589,23 +1594,39 @@ export default function TeamBuilder() {
         // Stable-merge so array indices don't shift on re-seed. depthAssignments
         // keys by array index, so any reorder rebinds the wrong player to a
         // depth slot. Strategy: walk `prev` in order, swap each returner row
-        // for its refreshed counterpart from `roster` (matched by player_id),
-        // append any returners not yet in prev, and keep non-returner rows
-        // (targets/portal/manual) at their existing positions.
-        const rosterByPid = new Map<string, BuildPlayer>();
+        // for its refreshed counterpart from `roster` (matched by player_id +
+        // side-signature), append any returners not yet in prev, and keep
+        // non-returner rows (targets/portal/manual) at their existing positions.
+        //
+        // TWPs now spawn two rows with the SAME player_id (one hitter, one
+        // pitcher). We need a compound key (player_id + isPitcherSlot) so the
+        // two sides don't collide in the lookup map — otherwise the merge
+        // collapses both prev rows onto whichever side won the Map.set race
+        // and re-fires of this effect compound the duplicates (3 hitters +
+        // 1 pitcher etc.).
+        const isPitcherSlot = (s: string | null | undefined) =>
+          !!s && /^(SP|RP|CL|LHP|RHP|P)$/i.test(s);
+        const rowKey = (r: BuildPlayer): string | null =>
+          r.player_id ? `${r.player_id}|${isPitcherSlot(r.position_slot) ? "P" : "H"}` : null;
+        const rosterByKey = new Map<string, BuildPlayer>();
         for (const r of roster) {
-          if (r.player_id) rosterByPid.set(r.player_id, r);
+          const k = rowKey(r);
+          if (k) rosterByKey.set(k, r);
         }
-        const seenPids = new Set<string>();
+        const seenKeys = new Set<string>();
         const merged: BuildPlayer[] = prev.map((p) => {
           if ((p.roster_status || "returner") !== "returner") return p;
-          if (!p.player_id) return p;
-          const refreshed = rosterByPid.get(p.player_id);
+          const k = rowKey(p);
+          if (!k) return p;
+          const refreshed = rosterByKey.get(k);
           if (!refreshed) return p; // no longer a returner in fresh data — keep as-is
-          seenPids.add(p.player_id);
+          seenKeys.add(k);
           return refreshed;
         });
-        const appended = roster.filter((r) => r.player_id && !seenPids.has(r.player_id));
+        const appended = roster.filter((r) => {
+          const k = rowKey(r);
+          return !!k && !seenKeys.has(k);
+        });
         return [...merged, ...appended];
       });
       autoSeededTeamRef.current = seedKey;
@@ -2824,9 +2845,13 @@ export default function TeamBuilder() {
         team_metrics: null,
         team_power_plus: null,
       };
+      const isPitcherPosStr = (s: string | null | undefined) => !!s && /^(SP|RP|CL|LHP|RHP|P)$/i.test(s);
+      const hitterPosForTwp = !isPitcherPosStr(player.position) ? player.position : null;
       const primary: BuildPlayer = {
         ...baseFields,
-        position_slot: isPitcherRow ? (inferredRole || "RP") : (playerOverrides[player.id]?.position ?? null),
+        position_slot: isPitcherRow
+          ? (inferredRole || "RP")
+          : (playerIsTwp ? hitterPosForTwp : (playerOverrides[player.id]?.position ?? null)),
         depth_role: isPitcherRow ? resolvedPitcherDepth : resolvedHitterDepth,
         player: playerMeta,
       };
@@ -2834,9 +2859,9 @@ export default function TeamBuilder() {
         if (isPitcherRow) {
           const mirror: BuildPlayer = {
             ...baseFields,
-            position_slot: playerOverrides[player.id]?.position ?? null,
+            position_slot: hitterPosForTwp,
             depth_role: resolvedHitterDepth,
-            player: { ...playerMeta, position: playerOverrides[player.id]?.position ?? null },
+            player: { ...playerMeta, position: hitterPosForTwp },
           };
           return [primary, mirror];
         } else {

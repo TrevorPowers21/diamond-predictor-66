@@ -106,9 +106,24 @@ export const isPitcher = (p: BuildPlayer): boolean => {
 
 export const isTwp = (p: BuildPlayer): boolean => !!p.player?.is_twp;
 
-export const hitterEligible = (p: BuildPlayer): boolean => !isPitcher(p) || isTwp(p);
+// TWP rows are spawned as a hitter+pitcher PAIR (see returners flatMap and
+// addPlayerFromTargetSearch). Each row's position_slot tells us which side
+// it represents — pitcher slots (SP/RP/CL/LHP/RHP/P) = the pitcher row,
+// anything else = the hitter row. Without this discriminator both rows
+// would show in both tabs and the position column would render "SP" on
+// hitter tab for TWPs like Kenny Ishikawa.
+const isPitcherSlot = (slot: string | null | undefined): boolean =>
+  !!slot && /^(SP|RP|CL|LHP|RHP|P)$/i.test(slot);
 
-export const pitcherEligible = (p: BuildPlayer): boolean => isPitcher(p) || isTwp(p);
+export const hitterEligible = (p: BuildPlayer): boolean => {
+  if (isTwp(p)) return !isPitcherSlot(p.position_slot);
+  return !isPitcher(p);
+};
+
+export const pitcherEligible = (p: BuildPlayer): boolean => {
+  if (isTwp(p)) return isPitcherSlot(p.position_slot);
+  return isPitcher(p);
+};
 
 export const depthKey = (slot: string, depth: number) => `${slot}:${depth}`;
 
