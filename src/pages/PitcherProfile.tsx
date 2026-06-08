@@ -1172,22 +1172,15 @@ export default function PitcherProfile() {
       tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
     };
 
-    // Pick the right stored row:
-    //   - Portal / target pitchers (transfer_portal or portal_status IN/COMMITTED):
-    //     use the team-scoped precomputed row so coaches see the "what if this
-    //     transfer joined our staff" projection.
-    //   - Returners (everyone else): use the global returner row — their
-    //     own-team projection. Matches Dashboard so profile and dashboard
-    //     agree for the same player.
-    const portalStatus = (player as any)?.portal_status as string | null | undefined;
-    const isPortalCandidate = !!((player as any)?.transfer_portal || portalStatus === "IN PORTAL" || portalStatus === "COMMITTED");
+    // Stored-first: prefer the team-scoped precomputed row whenever the
+    // active customer team has one — that's the projection coaches want to see
+    // ("what would this pitcher look like at our program"). Falls back to the
+    // global returner row when no team-scoped row exists.
     const storedTeamRow = effectiveTeamId
       ? (predictions as any[]).find((p) => p.customer_team_id === effectiveTeamId && p.variant === "precomputed")
       : null;
     const storedReturnerRow = (predictions as any[]).find((p) => p.model_type === "returner" && p.variant === "regular" && p.customer_team_id == null);
-    const stored = isPortalCandidate && storedTeamRow
-      ? storedTeamRow
-      : (storedReturnerRow ?? storedTeamRow ?? null);
+    const stored = storedTeamRow ?? storedReturnerRow ?? null;
 
     const overlayIp = pitcherExpectedIp(depthRole, eq);
     const storedDevAgg = Number.isFinite(Number((stored as any)?.dev_aggressiveness)) ? Number((stored as any).dev_aggressiveness) : 0;
