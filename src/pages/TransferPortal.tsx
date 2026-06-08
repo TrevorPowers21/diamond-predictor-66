@@ -121,6 +121,7 @@ type PitchingStorageRow = {
   chasePct: number | null;
   barrelPct: number | null;
   groundPct: number | null;
+  is_twp: boolean | null;
 };
 
 type PitchingPowerSnapshot = {
@@ -598,7 +599,7 @@ export default function TransferPortal() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, team, from_team, conference, division, transfer_portal, team_id, source_team_id, source_player_id, bats_hand, throws_hand, handedness")
+          .select("id, first_name, last_name, position, team, from_team, conference, division, transfer_portal, team_id, source_team_id, source_player_id, bats_hand, throws_hand, handedness, is_twp")
           .order("id", { ascending: true })
           .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
@@ -780,6 +781,7 @@ export default function TransferPortal() {
           chasePct: null,
           barrelPct: null,
           groundPct: null,
+          is_twp: (p as any).is_twp ?? null,
         };
       })
       .filter((r) => !!r.player_name);

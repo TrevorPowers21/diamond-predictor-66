@@ -5,8 +5,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { computeTransferProjection } from "@/lib/transferProjection";
+import { getProgramTierMultiplierByConference, getPositionValueMultiplier, DEFAULT_NIL_TIER_MULTIPLIERS } from "@/lib/nilProgramSpecific";
+import { resolveMetricParkFactor, batsHandToHandedness } from "@/lib/parkFactors";
+import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 import { profileRouteFor } from "@/lib/profileRoutes";
-import { pickHitterMarketValue } from "@/lib/twpMarketValue";
 import { normalizeKey, normalizeName } from "../helpers";
 // Pure helpers mirrored from TeamBuilder module scope
 const statKey = (v: number | null | undefined) => (v == null ? "na" : Math.round(v * 1000) / 1000 === 0 ? "0.000" : (v).toFixed(3));
@@ -115,80 +118,148 @@ export default function CompareTab({
     [compareBPlayer],
   );
 
-  // Customer-team name → customer_team_id lookup so we can pick the right
-  // precomputed transfer row when the coach selects a destination.
-  const { data: customerTeamsByName } = useQuery({
-    queryKey: ["compare-customer-teams"],
+  const { data: compareAInternals } = useQuery({
+    queryKey: ["team-builder-compare-internals-a", compareAPrediction?.id],
+    enabled: !!compareAPrediction?.id,
     queryFn: async () => {
-      const { data, error } = await supabase.from("customer_teams").select("id, name");
+      const { data, error } = await supabase
+        .from("player_prediction_internals")
+        .select("avg_power_rating, obp_power_rating, slg_power_rating")
+        .eq("prediction_id", compareAPrediction.id)
+        .maybeSingle();
       if (error) throw error;
-      const map = new Map<string, string>();
-      for (const ct of (data || [])) {
-        if (ct.name) map.set(normalizeKey(ct.name), ct.id);
-      }
-      return map;
+      return data;
     },
-    staleTime: 30 * 60 * 1000,
   });
 
-  // Stored-first: pick the precomputed transfer row for the destination
-  // customer team and read every projected value from it. Mirrors the read
-  // pattern in TransferPortal / PitcherProfile / Team Builder roster — no
-  // live recompute. Falls back to the global returner row if the destination
-  // isn't a customer team (no precomputed transfer row for it).
+  const { data: compareBInternals } = useQuery({
+    queryKey: ["team-builder-compare-internals-b", compareBPrediction?.id],
+    enabled: !!compareBPrediction?.id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("player_prediction_internals")
+        .select("avg_power_rating, obp_power_rating, slg_power_rating")
+        .eq("prediction_id", compareBPrediction.id)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+
   const computeCompareSimulation = useCallback((
     player: any | null,
+    prediction: any | null,
+    internals: { avg_power_rating: number | null; obp_power_rating: number | null; slg_power_rating: number | null } | null | undefined,
     destinationTeam: string,
   ) => {
-    if (!player || !destinationTeam) return null;
-    const destCustomerTeamId = customerTeamsByName?.get(normalizeKey(destinationTeam)) ?? null;
-    const allPreds: any[] = player.player_predictions || [];
-    const precomputedForDest = destCustomerTeamId
-      ? allPreds.find((p) => p.customer_team_id === destCustomerTeamId && p.variant === "precomputed")
-      : null;
-    const returnerRegular = allPreds.find((p) => p.variant === "regular" && p.customer_team_id == null);
-    const stored = precomputedForDest ?? returnerRegular ?? null;
-    if (!stored) return null;
+    if (!player || !prediction || !destinationTeam) return null;
 
-    const toTeamRow = teamByKey.get(normalizeKey(destinationTeam)) || null;
-    const fromTeamName = player.from_team || player.team || null;
+    const baPR = internals?.avg_power_rating ?? null;
+    const obpPR = internals?.obp_power_rating ?? null;
+    const isoPR = internals?.slg_power_rating ?? null;
+    const lastAvg = prediction.from_avg ?? null;
+    const lastObp = prediction.from_obp ?? null;
+    const lastSlg = prediction.from_slg ?? null;
+    if (baPR == null || obpPR == null || isoPR == null || lastAvg == null || lastObp == null || lastSlg == null) return null;
+
+    const inferredFromTeam = inferFromTeamForPrediction(player.first_name, player.last_name, lastAvg, lastObp, lastSlg);
+    const fromTeamName = player.from_team || inferredFromTeam || player.team || null;
     const fromTeamRow = fromTeamName ? teamByKey.get(normalizeKey(fromTeamName)) || null : null;
+    const toTeamRow = teamByKey.get(normalizeKey(destinationTeam)) || null;
+    if (!toTeamRow) return null;
+
     const fromConference = fromTeamRow?.conference || player.conference || null;
     const fromConfStats = resolveConferenceStats(fromConference);
-    const toConfStats = resolveConferenceStats(toTeamRow?.conference || null);
+    const toConfStats = resolveConferenceStats(toTeamRow.conference || null);
+    if (
+      !fromConfStats || !toConfStats ||
+      fromConfStats.avg_plus == null || toConfStats.avg_plus == null ||
+      fromConfStats.obp_plus == null || toConfStats.obp_plus == null ||
+      fromConfStats.iso_plus == null || toConfStats.iso_plus == null ||
+      fromConfStats.stuff_plus == null || toConfStats.stuff_plus == null
+    ) return null;
+
+    const compareHand = batsHandToHandedness((player as any).bats_hand);
+    const fromParkAvgRaw = resolveMetricParkFactor(fromTeamRow?.id, "avg", teamParkComponents, fromTeamRow?.name, undefined, undefined, compareHand);
+    const toParkAvgRaw = resolveMetricParkFactor(toTeamRow?.id, "avg", teamParkComponents, toTeamRow?.name, undefined, undefined, compareHand);
+    const fromParkObpRaw = resolveMetricParkFactor(fromTeamRow?.id, "obp", teamParkComponents, fromTeamRow?.name, undefined, undefined, compareHand);
+    const toParkObpRaw = resolveMetricParkFactor(toTeamRow?.id, "obp", teamParkComponents, toTeamRow?.name, undefined, undefined, compareHand);
+    const fromParkIsoRaw = resolveMetricParkFactor(fromTeamRow?.id, "iso", teamParkComponents, fromTeamRow?.name, undefined, undefined, compareHand);
+    const toParkIsoRaw = resolveMetricParkFactor(toTeamRow?.id, "iso", teamParkComponents, toTeamRow?.name, undefined, undefined, compareHand);
+    if (
+      fromParkAvgRaw == null || toParkAvgRaw == null ||
+      fromParkObpRaw == null || toParkObpRaw == null ||
+      fromParkIsoRaw == null || toParkIsoRaw == null
+    ) return null;
+
+    const projected = computeTransferProjection({
+      lastAvg, lastObp, lastSlg, baPR, obpPR, isoPR,
+      fromAvgPlus: fromConfStats.avg_plus, toAvgPlus: toConfStats.avg_plus,
+      fromObpPlus: fromConfStats.obp_plus, toObpPlus: toConfStats.obp_plus,
+      fromIsoPlus: fromConfStats.iso_plus, toIsoPlus: toConfStats.iso_plus,
+      fromStuff: fromConfStats.stuff_plus, toStuff: toConfStats.stuff_plus,
+      fromPark: normalizeParkToIndex(fromParkAvgRaw), toPark: normalizeParkToIndex(toParkAvgRaw),
+      fromObpPark: normalizeParkToIndex(fromParkObpRaw), toObpPark: normalizeParkToIndex(toParkObpRaw),
+      fromIsoPark: normalizeParkToIndex(fromParkIsoRaw), toIsoPark: normalizeParkToIndex(toParkIsoRaw),
+      ncaaAvgBA: toRate(eqNum("t_ba_ncaa_avg", 0.280)),
+      ncaaAvgOBP: toRate(eqNum("t_obp_ncaa_avg", 0.385)),
+      ncaaAvgISO: toRate(eqNum("t_iso_ncaa_avg", 0.162)),
+      ncaaAvgWrc: toRate(eqNum("t_wrc_ncaa_avg", 0.364)),
+      baStdPower: eqNum("t_ba_std_pr", 31.297),
+      baStdNcaa: toRate(eqNum("t_ba_std_ncaa", 0.043455)),
+      obpStdPower: eqNum("t_obp_std_pr", 28.889),
+      obpStdNcaa: toRate(eqNum("t_obp_std_ncaa", 0.046781)),
+      baPowerWeight: toRate(eqNum("t_ba_power_weight", 0.70)),
+      obpPowerWeight: toRate(eqNum("t_obp_power_weight", 0.70)),
+      baConferenceWeight: toWeight(eqNum("t_ba_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_conference_weight)),
+      obpConferenceWeight: toWeight(eqNum("t_obp_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_conference_weight)),
+      isoConferenceWeight: toWeight(eqNum("t_iso_conference_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_conference_weight)),
+      baPitchingWeight: toWeight(eqNum("t_ba_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_pitching_weight)),
+      obpPitchingWeight: toWeight(eqNum("t_obp_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_pitching_weight)),
+      isoPitchingWeight: toWeight(eqNum("t_iso_pitching_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_pitching_weight)),
+      baParkWeight: toWeight(eqNum("t_ba_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_ba_park_weight)),
+      obpParkWeight: toWeight(eqNum("t_obp_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_obp_park_weight)),
+      isoParkWeight: toWeight(eqNum("t_iso_park_weight", TRANSFER_WEIGHT_DEFAULTS.t_iso_park_weight)),
+      isoStdPower: eqNum("t_iso_std_power", 45.423),
+      isoStdNcaa: toRate(eqNum("t_iso_std_ncaa", 0.07849797197)),
+      wObp: toRate(eqNum("r_w_obp", 0.45)),
+      wSlg: toRate(eqNum("r_w_slg", 0.30)),
+      wAvg: toRate(eqNum("r_w_avg", 0.15)),
+      wIso: toRate(eqNum("r_w_iso", 0.10)),
+    });
+
+    const basePerOwar = eqNum("nil_base_per_owar", 25000);
+    const ptm = getProgramTierMultiplierByConference(toTeamRow.conference || null, DEFAULT_NIL_TIER_MULTIPLIERS);
+    const pvm = getPositionValueMultiplier(player.position ?? null);
+    const nilValuationRaw = projected.owar == null ? null : projected.owar * basePerOwar * ptm * pvm;
+    const nilValuation = nilValuationRaw == null ? null : Math.max(0, nilValuationRaw);
 
     return {
       fromTeam: fromTeamName,
       fromConference,
-      toConference: toTeamRow?.conference || null,
-      fromAvgPlus: fromConfStats?.avg_plus ?? null,
-      toAvgPlus: toConfStats?.avg_plus ?? null,
-      fromObpPlus: fromConfStats?.obp_plus ?? null,
-      toObpPlus: toConfStats?.obp_plus ?? null,
-      fromIsoPlus: fromConfStats?.iso_plus ?? null,
-      toIsoPlus: toConfStats?.iso_plus ?? null,
-      fromStuff: fromConfStats?.stuff_plus ?? null,
-      toStuff: toConfStats?.stuff_plus ?? null,
-      pAvg: stored.p_avg ?? null,
-      pObp: stored.p_obp ?? null,
-      pSlg: stored.p_slg ?? null,
-      pOps: stored.p_ops ?? null,
-      pIso: stored.p_iso ?? null,
-      pWrcPlus: stored.p_wrc_plus ?? null,
-      owar: stored.o_war ?? null,
-      // TWP-aware: raw market_value is NULL for is_twp=true rows; helper
-      // routes to twp_hitter_market_value.
-      nilValuation: pickHitterMarketValue(stored as any, !!(player as any)?.is_twp),
+      toConference: toTeamRow.conference || null,
+      fromPark: fromParkAvgRaw,
+      toPark: toParkAvgRaw,
+      fromAvgPlus: fromConfStats.avg_plus,
+      toAvgPlus: toConfStats.avg_plus,
+      fromObpPlus: fromConfStats.obp_plus,
+      toObpPlus: toConfStats.obp_plus,
+      fromIsoPlus: fromConfStats.iso_plus,
+      toIsoPlus: toConfStats.iso_plus,
+      fromStuff: fromConfStats.stuff_plus,
+      toStuff: toConfStats.stuff_plus,
+      nilValuation,
+      ...projected,
     };
-  }, [customerTeamsByName, resolveConferenceStats, teamByKey]);
+  }, [eqNum, inferFromTeamForPrediction, resolveConferenceStats, teamByKey, teamParkComponents]);
 
   const compareASimulation = useMemo(
-    () => computeCompareSimulation(compareAPlayer, compareADestinationTeam),
-    [compareAPlayer, compareADestinationTeam, computeCompareSimulation],
+    () => computeCompareSimulation(compareAPlayer, compareAPrediction, compareAInternals, compareADestinationTeam),
+    [compareAPlayer, compareAPrediction, compareAInternals, compareADestinationTeam, computeCompareSimulation],
   );
   const compareBSimulation = useMemo(
-    () => computeCompareSimulation(compareBPlayer, compareBDestinationTeam),
-    [compareBPlayer, compareBDestinationTeam, computeCompareSimulation],
+    () => computeCompareSimulation(compareBPlayer, compareBPrediction, compareBInternals, compareBDestinationTeam),
+    [compareBPlayer, compareBPrediction, compareBInternals, compareBDestinationTeam, computeCompareSimulation],
   );
 
   return (
