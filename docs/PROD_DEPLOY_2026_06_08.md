@@ -41,11 +41,16 @@ Paste contents of file into SQL editor.
 **What it does:** adds `pitcher_depth_role` column to `player_predictions` for parity with `hitter_depth_role`. Auto-assigned by the worker from `players.ip` + `pitcher_role`. Read sites prefer stored, fall back to live-derive for older rows.
 Paste contents of file into SQL editor.
 
-### 5. Mark known TWPs (Kenny Ishikawa)
-Ensures Kenny Ishikawa is flagged `is_twp=true` so cross-team views read his hitter + pitcher MVs from the split columns and the Target Board adds both sides when he's added.
+### 5. Mark known TWPs (Kenny Ishikawa) — VERIFY FIRST, may be a no-op
+Confirmed 2026-06-08: Kenny is already `is_twp=true` on prod (id `e00b691e-a532-475f-88fb-d001bd585885`, pa=100, ip=14). Skip if already set.
 
 ```sql
-UPDATE players SET is_twp = true WHERE id = '52fad838-9135-4681-b428-af5d17480c12';
+-- prod id (NOT the staging id):
+SELECT id, first_name, last_name, is_twp, pa, ip FROM players
+WHERE id = 'e00b691e-a532-475f-88fb-d001bd585885';
+
+-- Only run if is_twp = false above:
+UPDATE players SET is_twp = true WHERE id = 'e00b691e-a532-475f-88fb-d001bd585885';
 ```
 
 ---
@@ -100,27 +105,39 @@ Should return a row count (~18-19k on prod, similar to staging's 18,772).
 
 ## CLI scripts (run from local terminal)
 
-### 7. Master CSV reimport (refreshes Hitter Master + Pitching Master 2026 D1)
+### 7. Master CSV reimport — POST-WEEKEND refresh (Hitter Master + Pitching Master 2026 D1)
+
+The schema migration is being merged together with the post-weekend Master
+refresh so the cascade fires once and populates everything in a single pass.
+
+Drop the NEW (post-weekend) Hitter Master + Pitching Master CSVs into
+`~/RSTR IQ Data/inbox/` before running the import. If the post-weekend
+files aren't ready, fall back to the May 18 CSVs in `~/RSTR IQ Data/imported/2026-05-19/`
+and import a fresh Master later in a follow-up.
 
 ```sh
-# Re-copy CSVs into inbox (they'll get archived after import)
-cp ~/"RSTR IQ Data/imported/2026-05-19/2026 Final Regular Season Hitting Master 051826.csv" ~/"RSTR IQ Data/inbox/"
-cp ~/"RSTR IQ Data/imported/2026-05-19/2026 Final Regular Season Pitching Master 051826.csv" ~/"RSTR IQ Data/inbox/"
+# Verify the CSVs are in inbox first:
+ls -la ~/"RSTR IQ Data/inbox/"
 
-# Run prod import (cascade now actually works — bulkRecalc populates all 15K+ rows)
+# Run prod import — cascade now includes refreshPaIpFromMaster so existing
+# players' pa/ip get refreshed from the new Master CSVs before bulkRecalc
+# writes the new pitcher_depth_role + twp_*_market_value columns.
 cd ~/dev-main/diamond-predictor-66
 npm run import:prod
 ```
 
 The cascade now includes (after our fixes):
-- syncMasterToPlayers
 - addMissingPlayers
+- **refreshPaIpFromMaster** — NEW: refreshes existing players' pa/ip from
+  Master so depth-role derives off real counts (without this, TWPs with ip=null
+  fall back to weekend_starter at 85 IP regardless of actual usage)
 - computeAndStoreNcaaAverages
 - computeAndStoreAllScores (propagates hitter/pitcher scores to predictions)
 - createPredictionsFromMaster
 - conference Stuff+ rollup
 - env-rates
-- bulkRecalculatePredictionsLocal — now actually does work (populates o_war/MV with safety guards)
+- bulkRecalculatePredictionsLocal — writes pitcher_depth_role,
+  twp_hitter_market_value / twp_pitcher_market_value, depth-IP-based pWAR + MV
 
 ### 8. Per-team precompute rerun
 Refreshes all 10 customer teams' precomputed rows with the canonical class_transition + fresh Master data.

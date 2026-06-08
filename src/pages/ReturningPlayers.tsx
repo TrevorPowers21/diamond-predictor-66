@@ -2468,7 +2468,9 @@ export default function ReturningPlayers() {
           const dbRole = (dbPred?.pitcher_role as "SP" | "RP" | "SM" | null) ?? null;
           const effectiveRole: "SP" | "RP" | "SM" = dbRole || projectedRole;
           const dbPWar = dbPred?.p_war ?? null;
-          const dbMarketValue = dbPred?.market_value ?? null;
+          // TWP-aware: raw market_value is NULL for TWP rows by design; pull
+          // from twp_pitcher_market_value via the helper. Non-TWP rows unchanged.
+          const dbMarketValue = pickPitcherMarketValue(dbPred as any, !!(dbPred as any)?.is_twp);
 
           // Class for this pitcher: prefer the value attached to their
           // prediction (canonical, came from the recalc engine's player join);

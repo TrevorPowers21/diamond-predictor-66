@@ -518,16 +518,23 @@ export default function PlayerProfile() {
     updatePlayer.mutate(updates);
   };
 
-  // Prefer the team-scoped precomputed row when the current customer team has
-  // one. Falls back to the canonical global "regular" row otherwise.
+  // Picking the right prediction row:
+  //   - Portal / target players (transfer_portal or portal_status IN/COMMITTED):
+  //     use the team-scoped precomputed row so coaches see "what would this
+  //     transfer look like at OUR program."
+  //   - Returners (everyone else with a returner prediction): use the global
+  //     regular row — their own-team projection. Matches Dashboard
+  //     (ReturningPlayers.tsx) so the profile and dashboard agree for the
+  //     same player.
   const regularPred = (() => {
-    if (effectiveTeamId) {
-      const teamRow = predictions.find(
-        (p: any) => p.customer_team_id === effectiveTeamId && p.variant === "precomputed",
-      );
-      if (teamRow) return teamRow;
-    }
-    return predictions.find((p: any) => p.variant === "regular" && p.customer_team_id == null);
+    const portalStatus = (player as any)?.portal_status as string | null | undefined;
+    const isPortalCandidate = !!(player?.transfer_portal || portalStatus === "IN PORTAL" || portalStatus === "COMMITTED");
+    const teamRow = effectiveTeamId
+      ? predictions.find((p: any) => p.customer_team_id === effectiveTeamId && p.variant === "precomputed")
+      : null;
+    const returnerRow = predictions.find((p: any) => p.variant === "regular" && p.customer_team_id == null);
+    if (isPortalCandidate && teamRow) return teamRow;
+    return returnerRow ?? teamRow ?? null;
   })();
   const { isTransferPortal, isReturner, fromTeamData } = useTransferPortalContext(
     player, predictions, effectiveTeamId,
