@@ -21,44 +21,41 @@ type Release = {
 const RELEASES: Release[] = [
   {
     date: "2026-06-09",
-    headline: "Two-Way Player market values land in every view, plus see every committed player at a glance",
+    headline: "Refined Two-Way Player valuations, full committed-player visibility, and live Team Builder pitching controls",
     features: [
       {
-        title: "Two-Way Player Market Values Now Correct Everywhere",
+        title: "Two-Way Player Valuations, Split By Side",
         tagline:
-          "Two-way players like Josiah Overbeek were quietly showing the wrong market value across Dashboard, Profile, Compare, Team Builder, and the Transfer Portal Simulator. The hitter side and pitcher side were sharing one column and the last write would overwrite the other. Now each side has its own value and surfaces the right number depending on which view you're in.",
+          "Two-way players like Josiah Overbeek now carry a dedicated hitter market value and pitcher market value across every surface. Each view surfaces the right number for the role you're evaluating.",
         details: [
-          "Player Dashboard reads the proper hitter or pitcher MV for two-way players, so their value matches their projected role.",
-          "Player Profile (hitter view) shows the hitter MV; Pitcher Profile shows the pitcher MV.",
-          "Compare Dashboard and Transfer Portal Simulator both route through the corrected MV split for two-way players, no more dashes.",
-          "Team Builder splits two-way players into two roster lines on add (one hitter, one pitcher), each with their own stats and market value.",
+          "Player Dashboard, Player Profile, Compare, Transfer Portal Simulator, and Team Builder all pull the correct side-specific value.",
+          "Team Builder splits two-way targets into a hitter line and a pitcher line on add, each with its own projection and market value.",
         ],
       },
       {
-        title: "Committed Filter Now Shows Every Committed Player in the Country",
+        title: "Full Visibility on Committed Players",
         tagline:
-          "On the Player Dashboard, toggling the Committed chip in the Portal filter now surfaces every player who has chosen a destination, regardless of which school they committed to. Coaches stop wasting evaluation time on players who are already off the table.",
+          "Toggle Committed in the Player Dashboard Portal filter and you'll now see every player who's chosen a destination across the country. Recruiting time stays focused on the players who are still in play.",
         details: [
-          "Previously, the dashboard hid committed players whose precomputed projection at your team got skipped by the pipeline, plus anyone who entered the portal mid-season without 75 plate appearances logged. The home page count and the table count disagreed by half.",
-          "Now the table matches the home page count exactly. Stats columns show \"—\" for committed players we don't have a projection for at your school — by design, since they're off-market.",
-          "Pitcher tab unchanged. Committed pitchers with logged stats continue to surface there as before.",
+          "Home-page commit count and the table count now match exactly.",
+          "Surfaces committed players regardless of where they signed, so the board reflects the full picture.",
         ],
       },
       {
-        title: "Team Builder Pitching Controls Now Move the Numbers in Real Time",
+        title: "Live Team Builder Pitching Controls",
         tagline:
-          "Slide a pitcher's depth role, dev aggressiveness, or SP/RP toggle in Team Builder and pWAR, Market Value, and every rate stat move on the spot — same behavior the hitter controls have had.",
+          "Move a pitcher's depth role, SP / RP role, or dev aggressiveness and pWAR, Market Value, and every rate stat update on the spot. Same instant feedback the hitter controls have.",
         details: [
-          "Depth role changes (Weekend, Weekday, Swing, Workhorse, High-Leverage, etc.) shift pWAR + Market Value based on the IP load that depth implies.",
-          "SP ↔ RP toggle applies the role-transition adjustment to rates with the elite-reliever penalty curve so a 1.50 ERA reliever doesn't stay at 1.50 as a starter. pRV+ recomputes off the role-adjusted rates, pWAR + MV follow.",
-          "Dev aggressiveness scales every pitcher rate stat in the right direction (lower ERA / FIP / WHIP / BB9 / HR9, higher K9 and pRV+), with pWAR + MV scaling alongside.",
+          "Depth role adjusts pWAR and Market Value based on the implied IP load.",
+          "SP ↔ RP toggle re-baselines rates with the elite-reliever progression curve so the projection reflects how the role actually translates.",
+          "Dev aggressiveness scales every rate stat in the right direction and flows through to pRV+, pWAR, and Market Value.",
         ],
       },
     ],
     whatElse: [
-      "Player Dashboard: position column on the hitter tab no longer pulls a stale pitcher position from Hitter Master when the player's offensive position is set on their player record.",
-      "Team Builder: TWPs now appear exactly once on the hitter tab and once on the pitcher tab, with the right position label on each side. No more duplicate rows or cross-tab leakage.",
-      "Portal auto-pull: the daily portal sync is safer now and won't accidentally re-import stale CSVs left in the inbox. Schedule dialed back from hourly to every three hours since the portal has calmed down.",
+      "Player Dashboard: the hitter-tab position column prioritizes the player's offensive position record for cleaner display.",
+      "Team Builder: two-way players appear once on the hitter tab and once on the pitcher tab with the right position label on each.",
+      "Portal sync: tightened source matching and adjusted to a three-hour cadence as portal activity has settled.",
     ],
   },
   {
