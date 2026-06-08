@@ -1260,9 +1260,13 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // Mixing p.prediction (possibly a hitter row) would zero out p_era fields.
     const sim = null;
     void simulateTransferProjection;
+    // Stored-first: prefer the stored prediction row (which TB Dashboard also
+    // reads) so TB values match what coaches see elsewhere. Fall back to the
+    // live computeReturnerPitchingProjection only when no stored row exists
+    // (e.g. a newly-added player whose precompute hasn't run yet).
     const shown = (p.roster_status === "target")
       ? (storedPrecomputed ?? (!treatAsPitcher ? p.prediction : null) ?? null)
-      : (treatAsPitcher ? (computeReturnerPitchingProjection(p) ?? p.prediction) : p.prediction);
+      : (treatAsPitcher ? (p.prediction ?? computeReturnerPitchingProjection(p)) : p.prediction);
     if (treatAsPitcher) {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
       let source: any = sourceBase;

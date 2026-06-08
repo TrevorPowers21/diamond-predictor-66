@@ -3,7 +3,7 @@ import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
 import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { fetchParkFactorsMap, type ParkFactorsMap } from "@/lib/parkFactors";
-import { PRIOR_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { CURRENT_SEASON, PRIOR_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { computePitcherProjection, type PitcherProjectionInput } from "@/lib/pitcherProjection";
 import { PITCHING_EQ_DEFAULTS } from "@/hooks/usePitchingEquationWeights";
 import {
@@ -11,6 +11,8 @@ import {
   computePitcherMarketValue,
   computeHitterOWar,
   computeHitterMarketValue,
+  defaultHitterDepthRoleFromActualPa,
+  paForHitterDepthRole,
 } from "@/lib/depthRoles";
 
 // Fetch player meta needed to derive stored p_war / o_war / market_value
@@ -47,9 +49,14 @@ function deriveHitterStored(
   pWrcPlus: number | null | undefined,
   meta: { conference: string | null; position: string | null; pa: number | null },
 ) {
-  const oWar = computeHitterOWar(pWrcPlus, meta.pa, null);
+  // Derive depth role from raw PA → tier PA, matching per-team precompute math.
+  // Without this, oWAR is computed against raw PA which produces values that
+  // differ from what TB/PlayerProfile display via the depth-role overlay.
+  const hitterDepthRole = defaultHitterDepthRoleFromActualPa(meta.pa);
+  const projectedPa = paForHitterDepthRole(hitterDepthRole);
+  const oWar = computeHitterOWar(pWrcPlus, projectedPa, hitterDepthRole);
   const marketValue = computeHitterMarketValue(oWar, { conference: meta.conference, position: meta.position });
-  return { o_war: oWar, market_value: marketValue, projected_pa: meta.pa };
+  return { o_war: oWar, market_value: marketValue, projected_pa: projectedPa, hitter_depth_role: hitterDepthRole };
 }
 
 type PredictionRow = {
@@ -907,7 +914,7 @@ async function fetchPitcherContext(
           .from("Pitching Master")
           .select(PITCHER_SCOUTING_SELECT)
           .eq("source_player_id", sourceId)
-          .eq("Season", PRIOR_SEASON)
+          .eq("Season", CURRENT_SEASON)
           .maybeSingle();
         if (pm) scouting = mapPitchingMasterRow(pm);
       }
@@ -1221,9 +1228,12 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
     plFrom += 1000;
   }
   // 2) Hitter Master scouting -> bucket under players.id
+  // Use CURRENT_SEASON for the Master lookup (the just-imported season's
+  // actuals). The `season` arg drives which prediction rows we recalc
+  // (PROJECTION_SEASON), but Master data is always CURRENT_SEASON.
   let pfrom = 0;
   while (true) {
-    const { data } = await supabase.from("Hitter Master").select("source_player_id, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb").eq("Season", season).not("source_player_id", "is", null).range(pfrom, pfrom + 999);
+    const { data } = await supabase.from("Hitter Master").select("source_player_id, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb").eq("Season", CURRENT_SEASON).not("source_player_id", "is", null).range(pfrom, pfrom + 999);
     for (const r of data || []) {
       const playerId = r.source_player_id ? sourceToPlayerId.get(r.source_player_id) : null;
       if (!playerId) continue;
@@ -1256,6 +1266,28 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
     const isoPR = isoPower != null ? isoPower / 50 * 100 : null;
     return { baPlus: baPR, obpPlus: obpPR, isoPlus: isoPR };
   };
+
+  // Pre-fetch player meta for both hitter + pitcher loops. Needed by
+  // deriveHitterStored/derivePitcherStored to compute o_war / p_war /
+  // market_value with depth-role-derived tier PA (the same math the per-team
+  // precompute and display overlays use).
+  const allPlayerIds = Array.from(
+    new Set([...hitterPreds, ...pitcherPreds].map((p) => p.player_id).filter((v): v is string => !!v)),
+  );
+  const metaByPlayerId = new Map<string, { conference: string | null; team: string | null; position: string | null; pa: number | null }>();
+  for (let i = 0; i < allPlayerIds.length; i += 100) {
+    const chunk = allPlayerIds.slice(i, i + 100);
+    const { data } = await supabase
+      .from("players")
+      .select("id, conference, team, position, pa")
+      .in("id", chunk);
+    for (const r of (data || []) as any[]) {
+      metaByPlayerId.set(r.id, { conference: r.conference, team: r.team, position: r.position, pa: r.pa });
+    }
+  }
+
+  // Pitcher equation weights — needed by derivePitcherStored.
+  const pitchingEqForDerive = readPitchingWeights();
 
   let updated = 0;
   let errors = 0;
@@ -1295,6 +1327,19 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
             };
             result = recalcReturner(pred, config.returner, powerContext);
           }
+          // Derive stored o_war / market_value / projected_pa / hitter_depth_role
+          // so the regular variant row carries the same authoritative values that
+          // the per-team precompute writes to its rows. Without this, regular rows
+          // stay NULL and reads fall back to overlay-on-stale math.
+          // SAFETY: only spread derived fields when recalc produced a real
+          // p_wrc_plus — otherwise we'd write NULL on top of populated values
+          // for rows where the recalc fell through (missing inputs, etc.).
+          const hitterMetaForDerive = (pred.player_id ? metaByPlayerId.get(pred.player_id) : null)
+            ?? { conference: null, team: null, position: null, pa: null };
+          const hitterDerived = (result as any).p_wrc_plus != null
+            ? deriveHitterStored((result as any).p_wrc_plus, hitterMetaForDerive)
+            : {};
+
           // The protect_locked_predictions trigger blocks updates when locked=true,
           // so we MUST unlock before writing the recalculated fields, then re-lock.
           let lastErr: any = null;
@@ -1308,7 +1353,7 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
               if (unlockErr) { lastErr = unlockErr; throw unlockErr; }
               const { error: e } = await supabase
                 .from("player_predictions")
-                .update({ ...result, locked: true })
+                .update({ ...result, ...hitterDerived, locked: true })
                 .eq("id", pred.id);
               if (!e) { success = true; break; }
               lastErr = e;
@@ -1397,7 +1442,7 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
       const { data } = await supabase
         .from("Pitching Master")
         .select(PITCHER_SCOUTING_SELECT)
-        .eq("Season", season)
+        .eq("Season", CURRENT_SEASON)
         .in("source_player_id", chunk);
       for (const r of (data || []) as any[]) {
         if (r.source_player_id) scoutingBySourceId.set(r.source_player_id, mapPitchingMasterRow(r));
@@ -1435,6 +1480,23 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
             const coachRoleOverride = pred.player_id ? coachRoleByPlayerId.get(pred.player_id) ?? null : null;
             const { predictionUpdate, internalsUpdate } = recalcPitcher(pred, pitchingEq, pitchingPowerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride);
 
+            // Derive stored p_war / market_value / projected_ip the same way
+            // the per-team precompute does, so the regular variant row carries
+            // authoritative values instead of staying NULL.
+            // SAFETY: only spread derived fields when recalc produced a real
+            // p_rv_plus — otherwise we'd write NULL on top of populated values
+            // for rows where the recalc fell through (e.g. returner pitcher with
+            // missing scouting inputs).
+            const pitcherRole = ((predictionUpdate as any).pitcher_role ?? pred.pitcher_role ?? "RP") as "SP" | "RP" | "SM";
+            const pitcherDerived = (predictionUpdate as any).p_rv_plus != null
+              ? derivePitcherStored(
+                  (predictionUpdate as any).p_rv_plus,
+                  pitcherRole,
+                  { conference: ctx?.conference ?? null, team: ctx?.team ?? null },
+                  pitchingEqForDerive,
+                )
+              : {};
+
             // Unlock → update → re-lock (same pattern as hitter loop).
             let lastErr: any = null;
             let success = false;
@@ -1447,7 +1509,7 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
                 if (unlockErr) { lastErr = unlockErr; throw unlockErr; }
                 const { error: e } = await supabase
                   .from("player_predictions")
-                  .update({ ...predictionUpdate, locked: true })
+                  .update({ ...predictionUpdate, ...pitcherDerived, locked: true })
                   .eq("id", pred.id);
                 if (!e) { success = true; break; }
                 lastErr = e;

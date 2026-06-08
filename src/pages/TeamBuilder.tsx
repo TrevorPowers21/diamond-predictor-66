@@ -2215,72 +2215,44 @@ export default function TeamBuilder() {
         const bucket = pitchingPrByNameTeam.byName.get(fullNameKey) || [];
         return bucket.length === 1 ? bucket[0] : null;
       })();
-      if (pStats && pPower) {
-        const normConf = (c: string | null) => (c || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-        const fromConf = row.conference || null;
-        const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
-        const toConf = toTeamRow?.conference || null;
-        const fromPC = pitchingConfLookup.get(normConf(fromConf));
-        const toPC = pitchingConfLookup.get(normConf(toConf));
-        if (fromPC && toPC && toTeamRow) {
-          const fromTeamRowPark = row.team ? (teamByKey.get(normalizeKey(row.team)) || null) : null;
-          const baseRole = (() => {
-            const r = pStats.role || null;
-            if (r === "SP" || r === "RP" || r === "SM") return r as "SP" | "RP" | "SM";
-            const g = Number(pStats.g) || 0;
-            const gs = Number(pStats.gs) || 0;
-            if (g > 0 && gs != null) return ((gs / g) < 0.5 ? "RP" : "SP") as "SP" | "RP";
-            return null;
-          })();
-          const result = computeTransferPitcherProjection(
-            {
-              era: pStats.era ?? null, fip: pStats.fip ?? null, whip: pStats.whip ?? null,
-              k9: pStats.k9 ?? null, bb9: pStats.bb9 ?? null, hr9: pStats.hr9 ?? null,
-              storedPrPlus: {
-                era: pPower.eraPrPlus ?? null, fip: pPower.fipPrPlus ?? null,
-                whip: pPower.whipPrPlus ?? null, k9: pPower.k9PrPlus ?? null,
-                bb9: pPower.bb9PrPlus ?? null, hr9: pPower.hr9PrPlus ?? null,
-              },
-              baseRole,
-              fromEraPlus: fromPC.era_plus ?? null, toEraPlus: toPC.era_plus ?? null,
-              fromFipPlus: fromPC.fip_plus ?? null, toFipPlus: toPC.fip_plus ?? null,
-              fromWhipPlus: fromPC.whip_plus ?? null, toWhipPlus: toPC.whip_plus ?? null,
-              fromK9Plus: fromPC.k9_plus ?? null, toK9Plus: toPC.k9_plus ?? null,
-              fromBb9Plus: fromPC.bb9_plus ?? null, toBb9Plus: toPC.bb9_plus ?? null,
-              fromHr9Plus: fromPC.hr9_plus ?? null, toHr9Plus: toPC.hr9_plus ?? null,
-              fromHitterTalent: fromPC.hitter_talent_plus ?? null, toHitterTalent: toPC.hitter_talent_plus ?? null,
-              fromEraParkRaw: resolveMetricParkFactor(fromTeamRowPark?.id, "era", teamParkComponents, fromTeamRowPark?.name),
-              toEraParkRaw: resolveMetricParkFactor(toTeamRow.id, "era", teamParkComponents, toTeamRow.name),
-              fromWhipParkRaw: resolveMetricParkFactor(fromTeamRowPark?.id, "whip", teamParkComponents, fromTeamRowPark?.name),
-              toWhipParkRaw: resolveMetricParkFactor(toTeamRow.id, "whip", teamParkComponents, toTeamRow.name),
-              fromHr9ParkRaw: resolveMetricParkFactor(fromTeamRowPark?.id, "hr9", teamParkComponents, fromTeamRowPark?.name),
-              toHr9ParkRaw: resolveMetricParkFactor(toTeamRow.id, "hr9", teamParkComponents, toTeamRow.name),
-              toTeam: toTeamRow.name, toConference: toConf,
-            },
-            { eq: pitchingEq },
-          );
-          if (!result.blocked) {
-            transferSnapshot = {
-              ...transferSnapshot,
-              p_era: result.p_era, p_fip: result.p_fip, p_whip: result.p_whip,
-              p_k9: result.p_k9, p_bb9: result.p_bb9, p_hr9: result.p_hr9,
-              p_rv_plus: result.p_rv_plus, p_war: result.p_war,
-              p_wrc_plus: result.p_rv_plus, owar: result.p_war, nil_valuation: result.market_value,
-            };
-            newP.transfer_snapshot = transferSnapshot;
-          } else {
-            const computed = computeReturnerPitchingProjection(newP);
-            if (computed) {
-              transferSnapshot = { ...transferSnapshot, p_era: computed.p_era ?? null, p_fip: computed.p_fip ?? null, p_whip: computed.p_whip ?? null, p_k9: computed.p_k9 ?? null, p_bb9: computed.p_bb9 ?? null, p_hr9: computed.p_hr9 ?? null, p_rv_plus: computed.p_rv_plus ?? null, p_war: computed.p_war ?? null, p_wrc_plus: computed.p_rv_plus ?? null, owar: computed.p_war ?? null, nil_valuation: computed.nil_valuation ?? null };
-              newP.transfer_snapshot = transferSnapshot;
-            }
-          }
-        } else {
-          const computed = computeReturnerPitchingProjection(newP);
-          if (computed) {
-            transferSnapshot = { ...transferSnapshot, p_era: computed.p_era ?? null, p_fip: computed.p_fip ?? null, p_whip: computed.p_whip ?? null, p_k9: computed.p_k9 ?? null, p_bb9: computed.p_bb9 ?? null, p_hr9: computed.p_hr9 ?? null, p_rv_plus: computed.p_rv_plus ?? null, p_war: computed.p_war ?? null, p_wrc_plus: computed.p_rv_plus ?? null, owar: computed.p_war ?? null, nil_valuation: computed.nil_valuation ?? null };
-            newP.transfer_snapshot = transferSnapshot;
-          }
+      // Stored-first: fetch the player's precomputed row for the active team +
+      // their actual IP from players table. Bake stored values into snapshot
+      // and use real IP for depth role tier. Matches what Profile shows.
+      if (realPlayerId) {
+        const [{ data: storedRows }, { data: playerRow }] = await Promise.all([
+          supabase
+            .from("player_predictions")
+            .select("customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, pitcher_role, projected_ip, hitter_depth_role")
+            .eq("player_id", realPlayerId)
+            .eq("season", PROJECTION_SEASON)
+            .in("status", ["active", "departed"]),
+          supabase
+            .from("players")
+            .select("ip, position")
+            .eq("id", realPlayerId)
+            .maybeSingle(),
+        ]);
+        const teamScoped = (storedRows || []).find((r: any) => (r as any).customer_team_id === effectiveTeamId);
+        const globalRow = (storedRows || []).find((r: any) => (r as any).customer_team_id == null);
+        const stored: any = teamScoped ?? globalRow ?? (storedRows || [])[0] ?? null;
+        if (stored) {
+          newP.transfer_snapshot = {
+            ...transferSnapshot,
+            p_era: stored.p_era, p_fip: stored.p_fip, p_whip: stored.p_whip,
+            p_k9: stored.p_k9, p_bb9: stored.p_bb9, p_hr9: stored.p_hr9,
+            p_rv_plus: stored.p_rv_plus, p_war: stored.p_war,
+            p_wrc_plus: stored.p_rv_plus, owar: stored.p_war,
+            nil_valuation: stored.market_value,
+          };
+        }
+        // Re-derive depth_role from real IP + stored pitcher_role.
+        const realIp = (playerRow as any)?.ip ?? null;
+        const roleForDepth: "SP" | "RP" =
+          stored?.pitcher_role === "SP" ? "SP" :
+          stored?.pitcher_role === "RP" ? "RP" :
+          (inferredRole === "SP" ? "SP" : "RP");
+        if (realIp != null) {
+          newP.depth_role = defaultPitcherDepthRoleFromIp(realIp, roleForDepth);
         }
       }
       setRosterPlayers((prev) => [...prev, newP]);
@@ -2499,7 +2471,73 @@ export default function TeamBuilder() {
       nil_owar: row.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
       team_metrics: null, team_power_plus: null,
     };
-    if (isPitcherRow && !transferSnapshot) {
+    // Stored-first: fetch the player's precomputed row + actual PA/IP, and
+    // override snapshot + depth_role with stored values. Matches Profile display.
+    if (row.id) {
+      const [{ data: storedRows }, { data: playerRow }] = await Promise.all([
+        supabase
+          .from("player_predictions")
+          .select("customer_team_id, variant, p_avg, p_obp, p_slg, p_wrc_plus, o_war, market_value, hitter_depth_role, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, projected_ip")
+          .eq("player_id", row.id)
+          .eq("season", PROJECTION_SEASON)
+          .in("status", ["active", "departed"]),
+        supabase
+          .from("players")
+          .select("pa, ip")
+          .eq("id", row.id)
+          .maybeSingle(),
+      ]);
+      const teamScoped = (storedRows || []).find((r: any) => (r as any).customer_team_id === effectiveTeamId);
+      const globalRow = (storedRows || []).find((r: any) => (r as any).customer_team_id == null);
+      const stored: any = teamScoped ?? globalRow ?? (storedRows || [])[0] ?? null;
+      if (stored) {
+        if (isPitcherRow) {
+          newP.transfer_snapshot = {
+            p_avg: null, p_obp: null, p_slg: null,
+            p_wrc_plus: stored.p_rv_plus, p_era: stored.p_era, p_fip: stored.p_fip, p_whip: stored.p_whip,
+            p_k9: stored.p_k9, p_bb9: stored.p_bb9, p_hr9: stored.p_hr9,
+            p_rv_plus: stored.p_rv_plus, p_war: stored.p_war,
+            owar: stored.p_war, nil_valuation: stored.market_value,
+            from_team: row.from_team || row.team || null, from_conference: row.conference || null,
+          };
+          // Real IP drives depth role tier; stored pitcher_role chooses SP/RP.
+          const realIp = (playerRow as any)?.ip ?? null;
+          if (realIp != null) {
+            const roleForDepth: "SP" | "RP" = stored.pitcher_role === "SP" ? "SP" : "RP";
+            newP.depth_role = defaultPitcherDepthRoleFromIp(realIp, roleForDepth);
+          }
+        } else {
+          newP.transfer_snapshot = {
+            p_avg: stored.p_avg, p_obp: stored.p_obp, p_slg: stored.p_slg,
+            p_wrc_plus: stored.p_wrc_plus, owar: stored.o_war, nil_valuation: stored.market_value,
+            from_team: row.from_team || row.team || null, from_conference: row.conference || null,
+          };
+          // Prefer stored hitter_depth_role; fall back to deriving from real PA.
+          const realPa = (playerRow as any)?.pa ?? null;
+          const storedDepth = stored.hitter_depth_role;
+          if (storedDepth === "cornerstone" || storedDepth === "everyday_starter" || storedDepth === "platoon_starter" || storedDepth === "utility" || storedDepth === "bench") {
+            newP.depth_role = storedDepth;
+          } else if (realPa != null) {
+            newP.depth_role = defaultHitterDepthRoleFromPa(realPa);
+          }
+        }
+      } else if (isPitcherRow && !transferSnapshot) {
+        // No stored row found — fall back to old live-compute path so coaches don't
+        // see a blank target.
+        const computed = computeReturnerPitchingProjection(newP);
+        if (computed) {
+          newP.transfer_snapshot = {
+            p_avg: null, p_obp: null, p_slg: null,
+            p_wrc_plus: computed.p_rv_plus ?? null, p_era: computed.p_era ?? null,
+            p_fip: computed.p_fip ?? null, p_whip: computed.p_whip ?? null,
+            p_k9: computed.p_k9 ?? null, p_bb9: computed.p_bb9 ?? null, p_hr9: computed.p_hr9 ?? null,
+            p_rv_plus: computed.p_rv_plus ?? null, p_war: computed.p_war ?? null,
+            owar: computed.p_war ?? null, nil_valuation: computed.nil_valuation ?? null,
+            from_team: row.from_team || row.team || null, from_conference: row.conference || null,
+          };
+        }
+      }
+    } else if (isPitcherRow && !transferSnapshot) {
       const computed = computeReturnerPitchingProjection(newP);
       if (computed) {
         newP.transfer_snapshot = {

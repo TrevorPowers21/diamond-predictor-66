@@ -562,7 +562,11 @@ export async function runImports(
   step("bulkRecalculatePredictionsLocal");
   try {
     const start = Date.now();
-    await bulkRecalculatePredictionsLocal(season);
+    // No arg → defaults to PROJECTION_SEASON. Predictions are stored on the
+    // projection year (e.g. 2027), not the import year (2026). Passing the
+    // import season here filtered prediction fetches to season=import which
+    // returned 0 rows, silently making this step a no-op.
+    await bulkRecalculatePredictionsLocal();
     ok(`done (${timeMs(start)})`);
   } catch (e) {
     err(`Threw: ${e instanceof Error ? e.message : String(e)}`);

@@ -1216,23 +1216,15 @@ export default function PitcherProfile() {
       : devAggUnchanged
         ? rolePRvPlus
         : 100 + ((rolePRvPlus - 100) * (1 + devAggDelta));
-    // Use stored values only when the chosen depth's projected IP matches
-    // the IP the stored value was computed at. The precompute uses a single
-    // baseline IP per role bucket (pwar_ip_sp / pwar_ip_rp / pwar_ip_sm).
-    // If the depth's IP differs (e.g. specialist_reliever's 6 IP vs RP's
-    // ~33 IP baseline), the stored market value is for a different role
-    // size and must be recomputed. This catches both user depth changes
-    // AND auto-assigned defaults (e.g. 1-IP pitchers auto-defaulting to
-    // specialist_reliever despite stored being computed at RP baseline).
-    const storedBaselineIp =
-      storedRole === "SP" ? eq.pwar_ip_sp
-      : storedRole === "SM" ? eq.pwar_ip_sm
-      : eq.pwar_ip_rp;
-    const depthIp = overlayIp;
-    const storedDefaultDepth = stored != null
-      && storedBaselineIp != null
-      && Math.abs(depthIp - storedBaselineIp) < 1;
-    const noOverlay = storedDefaultDepth && devAggUnchanged && !roleChanged;
+    // Stored-first: default to stored values whenever the coach hasn't moved
+    // a slider away from the initial state. The previous IP-tier comparison
+    // would fall through to live-compute whenever the default depth role's IP
+    // didn't exactly match the stored baseline (e.g. specialist_reliever vs RP),
+    // producing values that drifted from the dashboard (which reads stored).
+    // Now: stored values shown UNLESS coach explicitly changes depth/role/dev.
+    const depthRoleUnchanged = depthRole === initialDepthRole;
+    const sessionRoleUnchanged = projectedRole === initialProjectedRole;
+    const noOverlay = depthRoleUnchanged && sessionRoleUnchanged && devAggUnchanged;
     const overlayPWar = noOverlay
       ? (stored?.p_war ?? null)
       : computePitcherWar(overlayPRvPlus, overlayIp, eq);
@@ -1273,14 +1265,13 @@ export default function PitcherProfile() {
       pWar: overlayPWar,
       marketValue: overlayMarketValue,
       projectedIp: overlayIp,
-      // Stored scouting scores from the picked prediction row — 1=1 with
-      // Pitching Master via propagate_pitcher_scores_to_predictions().
-      // Use pitcher_barrel_score (domain-scoped column added 2026-06-03)
-      // so two-way players' hitter values can't bleed in. Legacy
-      // whiff_score / bb_score are pitcher-domain only — no collision.
-      whiffScore: (stored as any)?.whiff_score ?? null,
-      bbScore: (stored as any)?.bb_score ?? null,
-      barrelScore: (stored as any)?.pitcher_barrel_score ?? null,
+      // Stored scouting scores from the picked prediction row — read the
+      // domain-scoped pitcher_*_score columns first (canonical source after
+      // 2026-06-03 split migration), fall back to legacy columns for rows
+      // written before propagation function was updated.
+      whiffScore: (stored as any)?.pitcher_whiff_score ?? (stored as any)?.whiff_score ?? null,
+      bbScore: (stored as any)?.pitcher_bb_score ?? (stored as any)?.bb_score ?? null,
+      barrelScore: (stored as any)?.pitcher_barrel_score ?? (stored as any)?.barrel_score ?? null,
     };
   }, [
     projectedDevAggressiveness,
