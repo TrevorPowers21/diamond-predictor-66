@@ -31,14 +31,21 @@ Paste contents of file into SQL editor.
 **What it does:** replaces `propagate_pitcher_scores_to_predictions` to include `pitcher_bb_score` and legacy `bb_score`.
 Paste contents of file into SQL editor.
 
-### 3. TWP market_value columns (PENDING — migration not yet written)
-**File:** `supabase/migrations/<timestamp>_twp_market_value_columns.sql` (TBD)
-**What it does:** adds two new nullable columns to `player_predictions` for TWP-specific market values.
+### 3. TWP market_value columns
+**File:** `supabase/migrations/20260608120000_twp_market_value_columns.sql`
+**What it does:** adds two new nullable columns to `player_predictions` for TWP-specific market values, so hitter and pitcher sides of a TWP no longer stomp each other's MV on the shared `market_value` column.
+Paste contents of file into SQL editor.
+
+### 4. Pitcher depth role column
+**File:** `supabase/migrations/20260608140000_pitcher_depth_role_column.sql`
+**What it does:** adds `pitcher_depth_role` column to `player_predictions` for parity with `hitter_depth_role`. Auto-assigned by the worker from `players.ip` + `pitcher_role`. Read sites prefer stored, fall back to live-derive for older rows.
+Paste contents of file into SQL editor.
+
+### 5. Mark known TWPs (Kenny Ishikawa)
+Ensures Kenny Ishikawa is flagged `is_twp=true` so cross-team views read his hitter + pitcher MVs from the split columns and the Target Board adds both sides when he's added.
 
 ```sql
-ALTER TABLE player_predictions
-  ADD COLUMN twp_hitter_market_value NUMERIC,
-  ADD COLUMN twp_pitcher_market_value NUMERIC;
+UPDATE players SET is_twp = true WHERE id = '52fad838-9135-4681-b428-af5d17480c12';
 ```
 
 ---
@@ -141,6 +148,8 @@ launchctl load ~/Library/LaunchAgents/com.rstriq.portal-pull.plist
 | Josiah Overbeek (Army, TWP) | `twp_hitter_market_value` populated, `twp_pitcher_market_value` ~$0, raw `market_value` = NULL | `/dashboard/player/bc25768c-882c-4a06-9e90-ea64c14f6c5f` (also `/dashboard/pitcher/bc25768c...`) |
 | Albert Roblez (Oregon State, RP, SR) | ct = GR, dashboard scouting tile shows Stf+/Whf/BB%/Brl, profile matches dashboard | `/dashboard/pitcher/2570eb20...` (find his prod id by name) |
 | Returning Players Dashboard | Hitter tab + Pitcher tab — scouting grades populated for D1 players | `/dashboard/returning` |
+| Kenny Ishikawa (returner TWP) | `is_twp=true`; profile shows both hitter + pitcher; adding to TB Target Board creates BOTH lineup + bullpen rows | `/dashboard/player/52fad838-9135-4681-b428-af5d17480c12` |
+| Dylan Vigue (weekday_starter) | `pitcher_depth_role='weekday_starter'`, `projected_ip=50`, pWAR computed off 50 IP (not 85) | search by name on prod |
 
 ---
 
@@ -158,4 +167,7 @@ launchctl load ~/Library/LaunchAgents/com.rstriq.portal-pull.plist
 | 8 | `ReturningPlayers` hitter tab reads `hitter_*_score` | `src/pages/ReturningPlayers.tsx` |
 | 9 | Dashboard pitcher scouting tile shows partial grades (OR not AND) | `src/pages/ReturningPlayers.tsx` |
 | 10 | ABS Comparison Table panel (cherry-picked from v2) | multiple |
-| 11 | TWP MV columns + TWP-aware derive + worker + read sites — PENDING | TBD |
+| 11 | TWP MV split columns (`twp_hitter_market_value`, `twp_pitcher_market_value`) + TWP-aware derive + worker + read sites | migration + `predictionEngine.ts` + worker + `PitcherProfile.tsx` + `PlayerProfile.tsx` + `ReturningPlayers.tsx` + `TeamBuilder.tsx` + `useTeamBuilderData.ts` + `useTeamBuilderSimulation.ts` + `twpMarketValue.ts` |
+| 12 | Stored `pitcher_depth_role` column + worker auto-derive + TB read | migration + worker + `TeamBuilder.tsx` + `useTeamBuilderData.ts` + `useTeamBuilderSimulation.ts` |
+| 13 | pWAR / market value computed off granular depth IP (weekday_starter=50, weekend=80, etc.) for BOTH returner + transfer paths | `predictionEngine.ts` + worker `applyPitcherPostprocess` |
+| 14 | Target Board adds BOTH hitter + pitcher row for TWPs | `TeamBuilder.tsx` `addPlayerFromTargetSearch` |

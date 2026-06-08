@@ -8,7 +8,7 @@ import { importConferenceStatsCsv, computeConferenceEnvRates } from "@/lib/impor
 import { importPortalEntriesCsv } from "@/lib/importPortalEntries";
 import { importAbsHitterStatsCsv, importAbsPitcherStatsCsv } from "@/lib/importAbsStats";
 import { calculateConferenceStuffPlus } from "@/savant/lib/conferenceStuffPlus";
-import { addMissingPlayers } from "@/lib/syncMasterToPlayers";
+import { addMissingPlayers, refreshPaIpFromMaster } from "@/lib/syncMasterToPlayers";
 import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
 import { computeAndStoreNcaaAverages } from "@/lib/computeNcaaAverages";
 import { computeAndStoreAllScores } from "@/lib/computeAndStoreScores";
@@ -498,6 +498,21 @@ export async function runImports(
     const errors = res?.errors?.length ?? 0;
     ok(`inserted=${inserted}, errors=${errors} (${timeMs(start)})`);
     if (Array.isArray(res?.errors)) for (const e of res.errors.slice(0, 3)) err(e);
+  } catch (e) {
+    err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // Refresh existing players' pa/ip from Master so depth-role derives off real
+  // counts. addMissingPlayers only INSERTs new source_player_ids — existing
+  // players' pa/ip stay frozen at first-insert values without this step. Manifests
+  // most painfully on TWPs (ip=null → depth-role falls back to weekend_starter
+  // at 85 IP regardless of actual usage).
+  step("refreshPaIpFromMaster");
+  try {
+    const start = Date.now();
+    const res = await refreshPaIpFromMaster(season);
+    ok(`pa updated=${res.paUpdated}, ip updated=${res.ipUpdated}, errors=${res.errors.length} (${timeMs(start)})`);
+    for (const e of res.errors.slice(0, 3)) err(e);
   } catch (e) {
     err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
   }

@@ -54,6 +54,7 @@ import {
 } from "@/components/ScoutingReport";
 import { useHighFollow } from "@/hooks/useHighFollow";
 import { JucoPlayerDashboardPanel } from "@/components/JucoPlayerDashboardPanel";
+import { pickHitterMarketValue, pickPitcherMarketValue } from "@/lib/twpMarketValue";
 
 type SortKey =
   | "name"
@@ -1517,7 +1518,7 @@ export default function ReturningPlayers() {
           model_type: row.model_type,
           status: row.status,
           pa: player.pa ?? null,
-          nil_value: (row.market_value ?? nilByPlayer.get(player.id)) ?? null,
+          nil_value: (pickHitterMarketValue(row, !!(player as any).is_twp) ?? nilByPlayer.get(player.id)) ?? null,
           prediction: {
             from_avg: row.from_avg,
             from_obp: row.from_obp,
@@ -2260,7 +2261,7 @@ export default function ReturningPlayers() {
         let q = supabase
           .from("player_predictions")
           .select(
-            "player_id, customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, projected_ip, pitcher_role, pitcher_whiff_score, pitcher_bb_score, pitcher_barrel_score, whiff_score, bb_score, players!inner(source_player_id, class_year, is_twp, portal_status)",
+            "player_id, customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, projected_ip, pitcher_role, pitcher_whiff_score, pitcher_bb_score, pitcher_barrel_score, whiff_score, bb_score, players!inner(source_player_id, class_year, is_twp, portal_status)",
             withCount ? { count: "exact" } : undefined,
           )
           .eq("season", PROJECTION_SEASON)
@@ -2307,7 +2308,8 @@ export default function ReturningPlayers() {
           p_hr9: r.p_hr9,
           p_rv_plus: r.p_rv_plus,
           p_war: r.p_war ?? null,
-          market_value: r.market_value ?? null,
+          // TWP-aware: route to twp_pitcher_market_value when this pitcher row is for a TWP.
+          market_value: pickPitcherMarketValue(r, !!(r.players as any)?.is_twp) ?? null,
           projected_ip: r.projected_ip ?? null,
           pitcher_role: r.pitcher_role,
           class_year: r.players?.class_year ?? null,

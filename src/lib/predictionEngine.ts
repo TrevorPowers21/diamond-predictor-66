@@ -13,15 +13,16 @@ import {
   computeHitterMarketValue,
   defaultHitterDepthRoleFromActualPa,
   paForHitterDepthRole,
+  pitcherExpectedIp,
 } from "@/lib/depthRoles";
 
 // Fetch player meta needed to derive stored p_war / o_war / market_value
 // after a recalc. Returns nulls when player_id missing.
 async function fetchPlayerMetaForDerived(playerId: string | null | undefined) {
-  if (!playerId) return { conference: null, team: null, position: null, pa: null };
+  if (!playerId) return { conference: null, team: null, position: null, pa: null, ip: null, is_twp: false };
   const { data } = await supabase
     .from("players")
-    .select("conference, team, position, pa")
+    .select("conference, team, position, pa, ip, is_twp")
     .eq("id", playerId)
     .maybeSingle();
   return {
@@ -29,25 +30,58 @@ async function fetchPlayerMetaForDerived(playerId: string | null | undefined) {
     team: (data as any)?.team ?? null,
     position: (data as any)?.position ?? null,
     pa: (data as any)?.pa ?? null,
+    ip: (data as any)?.ip ?? null,
+    is_twp: !!(data as any)?.is_twp,
   };
+}
+
+// Derive pitcher depth role from real IP + coarse role. Mirrors
+// defaultPitcherDepthRoleFromIp in src/pages/team-builder/helpers.ts.
+function derivePitcherDepthRole(ip: number | null | undefined, role: "SP" | "RP" | "SM"): string {
+  const r: "SP" | "RP" = role === "SP" ? "SP" : "RP";
+  const ipNum = Number(ip);
+  if (!Number.isFinite(ipNum) || ipNum <= 0) {
+    return r === "SP" ? "weekend_starter" : "high_leverage_reliever";
+  }
+  if (r === "SP") {
+    if (ipNum >= 65) return "weekend_starter";
+    if (ipNum >= 35) return "weekday_starter";
+    return "swing_starter";
+  }
+  if (ipNum >= 40) return "workhorse_reliever";
+  if (ipNum >= 25) return "high_leverage_reliever";
+  if (ipNum >= 15) return "mid_leverage_reliever";
+  if (ipNum >= 8) return "low_impact_reliever";
+  return "specialist_reliever";
 }
 
 // Compute pitcher derived columns from a freshly-recalculated row.
 function derivePitcherStored(
   pRvPlus: number | null | undefined,
   role: "SP" | "RP" | "SM",
-  meta: { conference: string | null; team: string | null },
+  meta: { conference: string | null; team: string | null; is_twp?: boolean; ip?: number | null },
   eq: ReturnType<typeof readPitchingWeights>,
 ) {
-  const projectedIp = role === "SP" ? eq.pwar_ip_sp : role === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
+  // Derive granular depth role from real IP, then use depth-role-specific
+  // projected IP for the pWAR formula. Previously used coarse role IP
+  // (pwar_ip_sp / rp / sm) which produced wrong WAR for weekday_starter,
+  // swing_starter, low_impact_reliever, etc.
+  const pitcherDepthRole = derivePitcherDepthRole(meta.ip, role);
+  const projectedIp = pitcherExpectedIp(pitcherDepthRole as any, eq);
   const pWar = computePitcherWar(pRvPlus, projectedIp, eq);
   const marketValue = computePitcherMarketValue(pWar, { conference: meta.conference, role, team: meta.team }, eq);
-  return { p_war: pWar, market_value: marketValue, projected_ip: projectedIp };
+  // For TWPs: route MV to twp_pitcher_market_value and NULL out the shared
+  // market_value column so the hitter loop's market_value write doesn't get
+  // stomped (and so any unconverted read fails loud).
+  if (meta.is_twp) {
+    return { p_war: pWar, market_value: null, twp_pitcher_market_value: marketValue, projected_ip: projectedIp, pitcher_depth_role: pitcherDepthRole };
+  }
+  return { p_war: pWar, market_value: marketValue, projected_ip: projectedIp, pitcher_depth_role: pitcherDepthRole };
 }
 
 function deriveHitterStored(
   pWrcPlus: number | null | undefined,
-  meta: { conference: string | null; position: string | null; pa: number | null },
+  meta: { conference: string | null; position: string | null; pa: number | null; is_twp?: boolean },
 ) {
   // Derive depth role from raw PA → tier PA, matching per-team precompute math.
   // Without this, oWAR is computed against raw PA which produces values that
@@ -56,6 +90,11 @@ function deriveHitterStored(
   const projectedPa = paForHitterDepthRole(hitterDepthRole);
   const oWar = computeHitterOWar(pWrcPlus, projectedPa, hitterDepthRole);
   const marketValue = computeHitterMarketValue(oWar, { conference: meta.conference, position: meta.position });
+  // For TWPs: route MV to twp_hitter_market_value and NULL the shared
+  // market_value column. Pitcher loop's derive does the same on its side.
+  if (meta.is_twp) {
+    return { o_war: oWar, market_value: null, twp_hitter_market_value: marketValue, projected_pa: projectedPa, hitter_depth_role: hitterDepthRole };
+  }
   return { o_war: oWar, market_value: marketValue, projected_pa: projectedPa, hitter_depth_role: hitterDepthRole };
 }
 
@@ -967,6 +1006,7 @@ async function fetchAllPredictionsForReturnerMode(season = 2026): Promise<Predic
       .from("player_predictions")
       .select("*")
       .eq("season", season)
+      .eq("variant", "regular")
       .in("model_type", ["returner", "transfer"])
       .in("status", ["active", "departed"])
       .or("from_avg.not.is.null,from_era.not.is.null")
@@ -1071,18 +1111,21 @@ export async function recalculatePredictionById(predictionId: string, updates: U
     }
     // Derive stored p_war + o_war + market_value so depth/dev/role changes
     // reflect in displays without re-running the precompute scripts.
+    //
+    // TWP path: derive functions route MV to twp_hitter_market_value /
+    // twp_pitcher_market_value and NULL the shared market_value column, so
+    // neither side's MV write stomps the other. No more "pitcher side wins"
+    // hack — each side has its own destination column.
     const meta = await fetchPlayerMetaForDerived(merged.player_id);
     const pitcherRole = ((updates as any).pitcher_role ?? (pitcherUpdate as any).pitcher_role ?? merged.pitcher_role ?? "RP") as "SP" | "RP" | "SM";
     const pitcherDerived = derivePitcherStored((pitcherUpdate as any).p_rv_plus, pitcherRole, meta, eq);
     const hitterDerived = deriveHitterStored((hitterResult as any).p_wrc_plus, meta);
-    // Hitter market_value would stomp pitcher market_value; for TWP we let the
-    // pitcher side win (pitcher precompute is canonical for value attribution).
-    const { market_value: _hitterMv, ...hitterDerivedNoMv } = hitterDerived;
     // Merge hitter result first, then pitcher fields — they target disjoint
-    // columns (p_avg/p_obp/... vs p_era/p_fip/...) so neither stomps the other.
+    // columns (p_avg/p_obp/... vs p_era/p_fip/...). For TWPs, derived puts
+    // each side's MV in a different column so order no longer matters.
     const { error: updateErr } = await supabase
       .from("player_predictions")
-      .update({ ...updates, ...hitterResult, ...pitcherUpdate, ...hitterDerivedNoMv, ...pitcherDerived, ...extraFields, locked: true })
+      .update({ ...updates, ...hitterResult, ...pitcherUpdate, ...hitterDerived, ...pitcherDerived, ...extraFields, locked: true })
       .eq("id", predictionId);
     if (updateErr) throw updateErr;
 
@@ -1274,15 +1317,15 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
   const allPlayerIds = Array.from(
     new Set([...hitterPreds, ...pitcherPreds].map((p) => p.player_id).filter((v): v is string => !!v)),
   );
-  const metaByPlayerId = new Map<string, { conference: string | null; team: string | null; position: string | null; pa: number | null }>();
+  const metaByPlayerId = new Map<string, { conference: string | null; team: string | null; position: string | null; pa: number | null; ip: number | null; is_twp: boolean }>();
   for (let i = 0; i < allPlayerIds.length; i += 100) {
     const chunk = allPlayerIds.slice(i, i + 100);
     const { data } = await supabase
       .from("players")
-      .select("id, conference, team, position, pa")
+      .select("id, conference, team, position, pa, ip, is_twp")
       .in("id", chunk);
     for (const r of (data || []) as any[]) {
-      metaByPlayerId.set(r.id, { conference: r.conference, team: r.team, position: r.position, pa: r.pa });
+      metaByPlayerId.set(r.id, { conference: r.conference, team: r.team, position: r.position, pa: r.pa, ip: r.ip, is_twp: !!r.is_twp });
     }
   }
 
@@ -1335,7 +1378,7 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
           // p_wrc_plus — otherwise we'd write NULL on top of populated values
           // for rows where the recalc fell through (missing inputs, etc.).
           const hitterMetaForDerive = (pred.player_id ? metaByPlayerId.get(pred.player_id) : null)
-            ?? { conference: null, team: null, position: null, pa: null };
+            ?? { conference: null, team: null, position: null, pa: null, is_twp: false };
           const hitterDerived = (result as any).p_wrc_plus != null
             ? deriveHitterStored((result as any).p_wrc_plus, hitterMetaForDerive)
             : {};
@@ -1488,11 +1531,14 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
             // for rows where the recalc fell through (e.g. returner pitcher with
             // missing scouting inputs).
             const pitcherRole = ((predictionUpdate as any).pitcher_role ?? pred.pitcher_role ?? "RP") as "SP" | "RP" | "SM";
+            const pitcherMeta = pred.player_id ? metaByPlayerId.get(pred.player_id) : null;
+            const pitcherIsTwp = pitcherMeta?.is_twp ?? false;
+            const pitcherIp = pitcherMeta?.ip ?? null;
             const pitcherDerived = (predictionUpdate as any).p_rv_plus != null
               ? derivePitcherStored(
                   (predictionUpdate as any).p_rv_plus,
                   pitcherRole,
-                  { conference: ctx?.conference ?? null, team: ctx?.team ?? null },
+                  { conference: ctx?.conference ?? null, team: ctx?.team ?? null, is_twp: pitcherIsTwp, ip: pitcherIp },
                   pitchingEqForDerive,
                 )
               : {};

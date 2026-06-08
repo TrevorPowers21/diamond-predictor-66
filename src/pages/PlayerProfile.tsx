@@ -49,6 +49,7 @@ import {
   type HitterDepthRole,
 } from "@/lib/depthRoles";
 import { useNilValuation } from "@/hooks/useNilValuation";
+import { pickHitterMarketValue } from "@/lib/twpMarketValue";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -811,7 +812,9 @@ export default function PlayerProfile() {
   // market_value on every row with p_wrc_plus. Null means data quality issue,
   // not a display fallback to paper over.
   const storedOWar = (regularPred as any)?.o_war as number | null | undefined;
-  const storedMarketValue = (regularPred as any)?.market_value as number | null | undefined;
+  // TWP-aware: for is_twp=true, raw market_value is NULL by design; pull from
+  // twp_hitter_market_value via the helper. Non-TWP rows unchanged.
+  const storedMarketValue = pickHitterMarketValue(regularPred as any, !!(player as any)?.is_twp);
   const storedHitterDepthRole = ((regularPred as any)?.hitter_depth_role as HitterDepthRole | null | undefined) ?? defaultHitterDepthRoleFromActualPa((player as any)?.pa ?? null);
   const historicalOWar = computeOWarFromWrcPlus(seedDerived?.wrcPlus ?? null, (player as any)?.pa ?? null);
   // Session-only depth role overlay scales the projected/displayed oWAR

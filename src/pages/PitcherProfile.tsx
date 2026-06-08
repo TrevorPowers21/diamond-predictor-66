@@ -49,6 +49,7 @@ import {
   type PitcherDepthRole,
 } from "@/lib/depthRoles";
 import { defaultPitcherDepthRoleFromIp } from "@/pages/team-builder/helpers";
+import { pickPitcherMarketValue } from "@/lib/twpMarketValue";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
@@ -1128,13 +1129,23 @@ export default function PitcherProfile() {
         : 0);
   const [projectedRole, setProjectedRole] = useState<"SP" | "RP" | "SM">(initialProjectedRole as "SP" | "RP" | "SM");
   const [projectedDevAggressiveness, setProjectedDevAggressiveness] = useState<number>(initialProjectedDevAggressiveness);
-  // Session-only depth role overlay. Default derived from stored pitcher_role +
-  // sample IP — no DB writes, resets on navigation. Drives the displayed
-  // pWAR + market_value via the depthRoles helpers.
-  const initialDepthRole: PitcherDepthRole = defaultPitcherDepthRoleFromIp(
-    storageIp,
-    (effectiveRoleDisplay === "SP" || effectiveRoleDisplay === "RP") ? effectiveRoleDisplay : "RP",
-  );
+  // Session-only depth role overlay. Prefer stored pitcher_depth_role (written
+  // by the precompute worker / bulkRecalc); fall back to deriving from stored
+  // pitcher_role + sample IP for older rows. Drives the displayed pWAR +
+  // market_value via the depthRoles helpers.
+  const initialDepthRole: PitcherDepthRole = (() => {
+    const stored = (activePrediction as any)?.pitcher_depth_role;
+    const validDepths: PitcherDepthRole[] = [
+      "weekend_starter", "weekday_starter", "swing_starter",
+      "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever",
+      "low_impact_reliever", "specialist_reliever",
+    ];
+    if (validDepths.includes(stored)) return stored as PitcherDepthRole;
+    return defaultPitcherDepthRoleFromIp(
+      storageIp,
+      (effectiveRoleDisplay === "SP" || effectiveRoleDisplay === "RP") ? effectiveRoleDisplay : "RP",
+    );
+  })();
   const [depthRole, setDepthRole] = useState<PitcherDepthRole>(initialDepthRole);
   useEffect(() => {
     setProjectedRole(initialProjectedRole as "SP" | "RP" | "SM");
@@ -1216,39 +1227,28 @@ export default function PitcherProfile() {
       : devAggUnchanged
         ? rolePRvPlus
         : 100 + ((rolePRvPlus - 100) * (1 + devAggDelta));
-    // Stored-first: default to stored values whenever the coach hasn't moved
-    // a slider away from the initial state. The previous IP-tier comparison
-    // would fall through to live-compute whenever the default depth role's IP
-    // didn't exactly match the stored baseline (e.g. specialist_reliever vs RP),
-    // producing values that drifted from the dashboard (which reads stored).
-    // Now: stored values shown UNLESS coach explicitly changes depth/role/dev.
-    const depthRoleUnchanged = depthRole === initialDepthRole;
-    const sessionRoleUnchanged = projectedRole === initialProjectedRole;
-    const noOverlay = depthRoleUnchanged && sessionRoleUnchanged && devAggUnchanged;
-    const overlayPWar = noOverlay
-      ? (stored?.p_war ?? null)
-      : computePitcherWar(overlayPRvPlus, overlayIp, eq);
-    const teamForMarket = displayTeam || null;
-    const conferenceForMarket = displayConference === "—" ? null : displayConference;
-    // When recomputing live (depth or dev_agg changed) BUT stored exists,
-    // scale the stored market value by the pWAR ratio (and PVF ratio if the
-    // role bucket changed). This preserves the customer team's conference
-    // tier baked into stored.market_value — otherwise we'd be mixing the
-    // tier the precompute used with the tier displayConference resolves to,
-    // which produces nonsense when stored is precomputed for one team and
-    // the profile renders at the player's current conference.
+    // PlayerProfile pattern: stored × overlayScale, no `noOverlay` branch.
+    // overlayScale is a single multiplier built from IP ratio (depth knob) +
+    // devAgg ratio + role-transition PVF ratio. When all knobs match stored,
+    // every ratio defaults to 1, so the displayed values equal stored. As
+    // soon as the coach moves a knob, the corresponding ratio shifts and
+    // the displayed pWAR + market_value update accordingly.
     const newRoleBucket = pitcherRoleFromDepthRole(depthRole);
     const storedRoleBucket = (storedRole as "SP" | "RP" | "SM" | null) ?? newRoleBucket;
-    const overlayMarketValue = noOverlay
-      ? (stored?.market_value ?? null)
-      : stored?.market_value != null && stored?.p_war != null && stored.p_war > 0 && overlayPWar != null && Number.isFinite(overlayPWar)
-        ? (() => {
-            const pvfStored = getPitchingPvfForRole(storedRoleBucket, eq);
-            const pvfNew = getPitchingPvfForRole(newRoleBucket, eq);
-            const pvfRatio = pvfStored > 0 ? pvfNew / pvfStored : 1;
-            return stored.market_value * (overlayPWar / stored.p_war) * pvfRatio;
-          })()
-        : computePitcherMarketValue(overlayPWar, { conference: conferenceForMarket, role: newRoleBucket, team: teamForMarket }, eq);
+    const storedProjectedIp = Number((stored as any)?.projected_ip);
+    const ipScale = Number.isFinite(storedProjectedIp) && storedProjectedIp > 0
+      ? overlayIp / storedProjectedIp
+      : 1;
+    const pvfStored = getPitchingPvfForRole(storedRoleBucket, eq);
+    const pvfNew = getPitchingPvfForRole(newRoleBucket, eq);
+    const pvfRatio = pvfStored > 0 ? pvfNew / pvfStored : 1;
+    const devAggScale = devAggUnchanged ? 1 : (1 + devAggDelta);
+    const overlayScale = ipScale * pvfRatio * devAggScale;
+    const overlayPWar = stored?.p_war != null ? Number(stored.p_war) * overlayScale : null;
+    // TWP-aware: for is_twp=true rows, stored.market_value is NULL by design;
+    // pull from twp_pitcher_market_value via the helper. Non-TWPs unchanged.
+    const storedPitcherMv = pickPitcherMarketValue(stored as any, !!(player as any)?.is_twp);
+    const overlayMarketValue = storedPitcherMv != null ? storedPitcherMv * overlayScale : null;
     const scaleLow = (v: number | null | undefined) =>
       v == null ? null : devAggUnchanged ? v : v * (1 - devAggDelta);
     const scaleHigh = (v: number | null | undefined) =>

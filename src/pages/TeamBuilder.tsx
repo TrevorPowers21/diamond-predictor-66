@@ -1032,7 +1032,12 @@ export default function TeamBuilder() {
         continue;
       }
       // Prefer storage pitcher entry when DB duplicate is not clearly pitcher-typed.
-      if (!isPitchLike(existing) || existing.__storagePitcher) {
+      // BUT: for TWPs, the DB row holds the real player UUID + the hitter side.
+      // Replacing it with a storage pitcher entry (synthetic `pm-pitcher-...` id)
+      // breaks the target-add path: row.id no longer matches players.id, so the
+      // stored-prediction fetch returns nothing, the TWP dual-row mirror never
+      // fires, and the player lands as "pitcher with - stats". Keep the DB row.
+      if ((!isPitchLike(existing) || existing.__storagePitcher) && !existing.is_twp) {
         if (existingPrimary) {
           byKey.set(existingPrimary, sp);
         }
@@ -1474,14 +1479,15 @@ export default function TeamBuilder() {
     // Wait for the query to have actually fetched data for this team
     if (returnersUpdatedAt === 0) return;
 
-    const roster: BuildPlayer[] = returners.map((r: any) => {
+    const roster: BuildPlayer[] = returners.flatMap((r: any) => {
       const player = r.players;
-      if (!player) return null;
-      // TWP (two-way) defaults to hitter side on the team builder — coaches
-      // can click into the profile to see the pitching view.
+      if (!player) return [] as BuildPlayer[];
+      // TWP (two-way) gets BOTH a hitter row AND a pitcher row appended.
+      // Different position_slots → distinct depthAssignments keys so they
+      // don't collide.
+      const playerIsTwp = !!(player as any).is_twp;
       const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)$/i.test(String(player.position || ""));
       const overrideRole = asPitcherRole(getSupabaseRole(player.id) || null);
-      // Check Pitching Master Role for accurate SP/RP from last season
       const _pName = `${player.first_name || ""} ${player.last_name || ""}`.trim();
       const _pmKey = `${normalizeName(_pName)}|${normalizeName(player.team || "")}`;
       const _pmSid = player.source_player_id || null;
@@ -1489,56 +1495,90 @@ export default function TeamBuilder() {
         || (_pmSid ? pitchingStatsByNameTeam.bySourceId.get(_pmSid) : null)
         || (() => { const b = pitchingStatsByNameTeam.byName.get(normalizeName(_pName)) || []; return b.length >= 1 ? b[0] : null; })();
       const pmRole = asPitcherRole(pmRec?.role ?? null);
-      // Pitcher role seed: coach override wins; otherwise derive from GS/G with
-      // the "5 starts minimum" floor so a pitcher who made 2 emergency starts
-      // doesn't get tagged as a starter. pmRole is ignored when there's enough
-      // GS/G signal because stored Role can lag reality.
       const seedPitcherGs = seasonUsage.pitcherGs.get(player.id) ?? pmRec?.gs ?? 0;
       const seedPitcherG = seasonUsage.pitcherG.get(player.id) ?? pmRec?.g ?? 0;
       const seedIsStarter = seedPitcherGs >= 5 && seedPitcherG > 0 && (seedPitcherGs / seedPitcherG) >= 0.5;
       const inferredRole: "SP" | "RP" | "SM" = overrideRole || (seedPitcherG > 0 ? (seedIsStarter ? "SP" : "RP") : (pmRole || asPitcherRole(player.position || null) || "RP"));
-      // Hitter role seed: 5-tier pure-PA model (defaultHitterDepthRoleFromPa).
-      // Falls back to name+team lookup when source_player_id doesn't reconcile.
       const _hNameKey = `${normalizeName(`${player.first_name || ""} ${player.last_name || ""}`.trim())}|${normalizeName(player.team || "")}`;
       const seedHitterAb = seasonUsage.hitterAb?.get(player.id) ?? seasonUsage.hitterAbByNameTeam?.get(_hNameKey) ?? 0;
       const seedHitterDepth = defaultHitterDepthRoleFromPa(seedHitterAb);
-      return {
+      const validPitcherDepths = [
+        "weekend_starter", "weekday_starter", "swing_starter",
+        "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever",
+        "low_impact_reliever", "specialist_reliever",
+      ];
+      const resolvedPitcherDepth = (() => {
+        const stored = (r as any)?.pitcher_depth_role;
+        if (validPitcherDepths.includes(stored)) return stored;
+        return defaultPitcherDepthRoleFromIp(pmRec?.ip ?? null, (inferredRole === "SP") ? "SP" : "RP");
+      })();
+      const validHitterDepths = ["cornerstone", "everyday_starter", "platoon_starter", "utility", "bench"];
+      const storedHitterDepth = (r as any)?.hitter_depth_role;
+      const resolvedHitterDepth = validHitterDepths.includes(storedHitterDepth) ? storedHitterDepth : seedHitterDepth;
+      const playerMeta = {
+        first_name: player.first_name,
+        last_name: player.last_name,
+        position: player.position,
+        is_twp: playerIsTwp,
+        class_year: (player as any).class_year ?? null,
+        throws_hand: (player as any).throws_hand ?? null,
+        bats_hand: (player as any).bats_hand ?? null,
+        team: player.team,
+        from_team: player.from_team,
+        conference: player.conference ?? null,
+        source_player_id: player.source_player_id ?? null,
+      };
+      const baseFields = {
         player_id: player.id,
         source: "returner" as const,
         custom_name: null,
-        position_slot: isPitcherRow ? (inferredRole || "RP") : (playerOverrides[player.id]?.position ?? null),
         depth_order: 1,
         nil_value: 0,
         production_notes: null,
         roster_status: "returner" as const,
-        depth_role: isPitcherRow
-          ? defaultPitcherDepthRoleFromIp(pmRec?.ip ?? null, (inferredRole === "SP") ? "SP" : "RP")
-          : seedHitterDepth,
         class_transition: r.class_transition ?? "SJ",
         dev_aggressiveness: r.dev_aggressiveness ?? 0,
         class_transition_overridden: false,
         dev_aggressiveness_overridden: false,
         transfer_snapshot: null,
-        player: {
-          first_name: player.first_name,
-          last_name: player.last_name,
-          position: player.position,
-          is_twp: (player as any).is_twp ?? false,
-          class_year: (player as any).class_year ?? null,
-          throws_hand: (player as any).throws_hand ?? null,
-          bats_hand: (player as any).bats_hand ?? null,
-          team: player.team,
-          from_team: player.from_team,
-          conference: player.conference ?? null,
-          source_player_id: player.source_player_id ?? null,
-        },
         prediction: r ?? null,
         nilVal: null,
         nil_owar: null,
         team_metrics: null,
         team_power_plus: null,
       };
-    }).filter(Boolean) as BuildPlayer[];
+      const primary: BuildPlayer = {
+        ...baseFields,
+        position_slot: isPitcherRow ? (inferredRole || "RP") : (playerOverrides[player.id]?.position ?? null),
+        depth_role: isPitcherRow ? resolvedPitcherDepth : resolvedHitterDepth,
+        player: playerMeta,
+      };
+      // TWP: append the opposite-side mirror so both lineup and rotation/bullpen
+      // see this player. Same player_id (downstream depthAssignments keys by
+      // (slot, depth_order), not player_id, so no collision).
+      if (playerIsTwp) {
+        if (isPitcherRow) {
+          // Primary is pitcher; add hitter mirror.
+          const mirror: BuildPlayer = {
+            ...baseFields,
+            position_slot: playerOverrides[player.id]?.position ?? null,
+            depth_role: resolvedHitterDepth,
+            player: { ...playerMeta, position: playerOverrides[player.id]?.position ?? null },
+          };
+          return [primary, mirror];
+        } else {
+          // Primary is hitter; add pitcher mirror.
+          const mirror: BuildPlayer = {
+            ...baseFields,
+            position_slot: inferredRole || "RP",
+            depth_role: resolvedPitcherDepth,
+            player: { ...playerMeta, position: inferredRole || "RP" },
+          };
+          return [primary, mirror];
+        }
+      }
+      return [primary];
+    }) as BuildPlayer[];
 
     if (roster.length > 0 || autoSeededTeamRef.current !== seedKey) {
       // Preserve any non-returner rows (especially "target" rows synced from
@@ -2222,7 +2262,7 @@ export default function TeamBuilder() {
         const [{ data: storedRows }, { data: playerRow }] = await Promise.all([
           supabase
             .from("player_predictions")
-            .select("customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, pitcher_role, projected_ip, hitter_depth_role")
+            .select("customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, pitcher_role, projected_ip, hitter_depth_role, pitcher_depth_role")
             .eq("player_id", realPlayerId)
             .eq("season", PROJECTION_SEASON)
             .in("status", ["active", "departed"]),
@@ -2245,13 +2285,22 @@ export default function TeamBuilder() {
             nil_valuation: stored.market_value,
           };
         }
-        // Re-derive depth_role from real IP + stored pitcher_role.
+        // Prefer stored pitcher_depth_role (written by worker / bulkRecalc);
+        // fall back to deriving from real IP + stored pitcher_role for older rows.
         const realIp = (playerRow as any)?.ip ?? null;
         const roleForDepth: "SP" | "RP" =
           stored?.pitcher_role === "SP" ? "SP" :
           stored?.pitcher_role === "RP" ? "RP" :
           (inferredRole === "SP" ? "SP" : "RP");
-        if (realIp != null) {
+        const storedPitcherDepth = stored?.pitcher_depth_role;
+        const validPitcherDepths = [
+          "weekend_starter", "weekday_starter", "swing_starter",
+          "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever",
+          "low_impact_reliever", "specialist_reliever",
+        ];
+        if (validPitcherDepths.includes(storedPitcherDepth)) {
+          newP.depth_role = storedPitcherDepth;
+        } else if (realIp != null) {
           newP.depth_role = defaultPitcherDepthRoleFromIp(realIp, roleForDepth);
         }
       }
@@ -2471,25 +2520,34 @@ export default function TeamBuilder() {
       nil_owar: row.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
       team_metrics: null, team_power_plus: null,
     };
+    // Hoisted so the TWP-mirror block after this can see the stored pitcher
+    // row + is_twp flag without re-fetching.
+    let twpStored: any = null;
+    let twpIsTwp = false;
+    let twpRealIp: number | null = null;
     // Stored-first: fetch the player's precomputed row + actual PA/IP, and
     // override snapshot + depth_role with stored values. Matches Profile display.
     if (row.id) {
       const [{ data: storedRows }, { data: playerRow }] = await Promise.all([
         supabase
           .from("player_predictions")
-          .select("customer_team_id, variant, p_avg, p_obp, p_slg, p_wrc_plus, o_war, market_value, hitter_depth_role, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, projected_ip")
+          .select("customer_team_id, variant, p_avg, p_obp, p_slg, p_wrc_plus, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, projected_ip")
           .eq("player_id", row.id)
           .eq("season", PROJECTION_SEASON)
           .in("status", ["active", "departed"]),
         supabase
           .from("players")
-          .select("pa, ip")
+          .select("pa, ip, is_twp")
           .eq("id", row.id)
           .maybeSingle(),
       ]);
       const teamScoped = (storedRows || []).find((r: any) => (r as any).customer_team_id === effectiveTeamId);
       const globalRow = (storedRows || []).find((r: any) => (r as any).customer_team_id == null);
       const stored: any = teamScoped ?? globalRow ?? (storedRows || [])[0] ?? null;
+      const playerIsTwp = !!(playerRow as any)?.is_twp;
+      twpStored = stored;
+      twpIsTwp = playerIsTwp;
+      twpRealIp = (playerRow as any)?.ip ?? null;
       if (stored) {
         if (isPitcherRow) {
           newP.transfer_snapshot = {
@@ -2497,19 +2555,34 @@ export default function TeamBuilder() {
             p_wrc_plus: stored.p_rv_plus, p_era: stored.p_era, p_fip: stored.p_fip, p_whip: stored.p_whip,
             p_k9: stored.p_k9, p_bb9: stored.p_bb9, p_hr9: stored.p_hr9,
             p_rv_plus: stored.p_rv_plus, p_war: stored.p_war,
-            owar: stored.p_war, nil_valuation: stored.market_value,
+            owar: stored.p_war,
+            // TWP routing: pull from twp_pitcher_market_value for TWPs (raw market_value is NULL).
+            nil_valuation: playerIsTwp ? (stored.twp_pitcher_market_value ?? null) : stored.market_value,
             from_team: row.from_team || row.team || null, from_conference: row.conference || null,
           };
-          // Real IP drives depth role tier; stored pitcher_role chooses SP/RP.
-          const realIp = (playerRow as any)?.ip ?? null;
-          if (realIp != null) {
-            const roleForDepth: "SP" | "RP" = stored.pitcher_role === "SP" ? "SP" : "RP";
-            newP.depth_role = defaultPitcherDepthRoleFromIp(realIp, roleForDepth);
+          // Prefer stored pitcher_depth_role (written by worker); fall back to
+          // deriving from real IP + stored pitcher_role for older rows.
+          const storedPitcherDepth = stored.pitcher_depth_role;
+          if (
+            storedPitcherDepth === "weekend_starter" || storedPitcherDepth === "weekday_starter" || storedPitcherDepth === "swing_starter"
+            || storedPitcherDepth === "workhorse_reliever" || storedPitcherDepth === "high_leverage_reliever"
+            || storedPitcherDepth === "mid_leverage_reliever" || storedPitcherDepth === "low_impact_reliever"
+            || storedPitcherDepth === "specialist_reliever"
+          ) {
+            newP.depth_role = storedPitcherDepth;
+          } else {
+            const realIp = (playerRow as any)?.ip ?? null;
+            if (realIp != null) {
+              const roleForDepth: "SP" | "RP" = stored.pitcher_role === "SP" ? "SP" : "RP";
+              newP.depth_role = defaultPitcherDepthRoleFromIp(realIp, roleForDepth);
+            }
           }
         } else {
           newP.transfer_snapshot = {
             p_avg: stored.p_avg, p_obp: stored.p_obp, p_slg: stored.p_slg,
-            p_wrc_plus: stored.p_wrc_plus, owar: stored.o_war, nil_valuation: stored.market_value,
+            p_wrc_plus: stored.p_wrc_plus, owar: stored.o_war,
+            // TWP routing: pull from twp_hitter_market_value for TWPs.
+            nil_valuation: playerIsTwp ? (stored.twp_hitter_market_value ?? null) : stored.market_value,
             from_team: row.from_team || row.team || null, from_conference: row.conference || null,
           };
           // Prefer stored hitter_depth_role; fall back to deriving from real PA.
@@ -2551,7 +2624,67 @@ export default function TeamBuilder() {
         };
       }
     }
-    setRosterPlayers((prev) => [...prev, newP]);
+    // TWP: drop the position-based primary entirely and always emit TWO rows
+    // from stored data — one hitter, one pitcher. The search match is purely
+    // by name; row.position (P vs 1B vs OF) shouldn't decide which sides
+    // appear. Coach assigns the hitter's position slot from the UI.
+    const playersToAdd: BuildPlayer[] = [];
+    if (twpStored && twpIsTwp) {
+      const realIp = twpRealIp;
+      const pitcherRole: "SP" | "RP" = twpStored.pitcher_role === "SP" ? "SP" : "RP";
+      const storedPitcherDepthRaw = twpStored.pitcher_depth_role;
+      const pitcherDepthRole = (
+        storedPitcherDepthRaw === "weekend_starter" || storedPitcherDepthRaw === "weekday_starter" || storedPitcherDepthRaw === "swing_starter"
+        || storedPitcherDepthRaw === "workhorse_reliever" || storedPitcherDepthRaw === "high_leverage_reliever"
+        || storedPitcherDepthRaw === "mid_leverage_reliever" || storedPitcherDepthRaw === "low_impact_reliever"
+        || storedPitcherDepthRaw === "specialist_reliever"
+      )
+        ? storedPitcherDepthRaw
+        : (realIp != null ? defaultPitcherDepthRoleFromIp(realIp, pitcherRole) : (pitcherRole === "SP" ? "weekend_starter" : "high_leverage_reliever"));
+      const storedHitterDepthRaw = twpStored.hitter_depth_role;
+      const hitterDepthRole = (
+        storedHitterDepthRaw === "cornerstone" || storedHitterDepthRaw === "everyday_starter"
+        || storedHitterDepthRaw === "platoon_starter" || storedHitterDepthRaw === "utility" || storedHitterDepthRaw === "bench"
+      )
+        ? storedHitterDepthRaw
+        : "everyday_starter";
+      // Hitter side: position_slot starts unassigned so it doesn't accidentally
+      // land in the pitcher's slot for TWPs whose players.position is "P".
+      const twpHitterP: BuildPlayer = {
+        ...newP,
+        position_slot: playerOverrides[row.id]?.position ?? null,
+        depth_role: hitterDepthRole,
+        roster_status: "target",
+        transfer_snapshot: {
+          p_avg: twpStored.p_avg, p_obp: twpStored.p_obp, p_slg: twpStored.p_slg,
+          p_wrc_plus: twpStored.p_wrc_plus, owar: twpStored.o_war,
+          nil_valuation: twpStored.twp_hitter_market_value ?? null,
+          from_team: row.from_team || row.team || null, from_conference: row.conference || null,
+        },
+        player: { ...newP.player, position: playerOverrides[row.id]?.position ?? null },
+      };
+      const twpPitcherP: BuildPlayer = {
+        ...newP,
+        position_slot: pitcherRole,
+        depth_role: pitcherDepthRole,
+        roster_status: "target",
+        transfer_snapshot: {
+          p_avg: null, p_obp: null, p_slg: null,
+          p_wrc_plus: twpStored.p_rv_plus,
+          p_era: twpStored.p_era, p_fip: twpStored.p_fip, p_whip: twpStored.p_whip,
+          p_k9: twpStored.p_k9, p_bb9: twpStored.p_bb9, p_hr9: twpStored.p_hr9,
+          p_rv_plus: twpStored.p_rv_plus, p_war: twpStored.p_war,
+          owar: twpStored.p_war,
+          nil_valuation: twpStored.twp_pitcher_market_value ?? null,
+          from_team: row.from_team || row.team || null, from_conference: row.conference || null,
+        },
+        player: { ...newP.player, position: pitcherRole },
+      };
+      playersToAdd.push(twpHitterP, twpPitcherP);
+    } else {
+      playersToAdd.push(newP);
+    }
+    setRosterPlayers((prev) => [...prev, ...playersToAdd]);
     setDirty(true);
     setTargetPlayerSearchQuery("");
     setTargetPlayerSearchOpen(false);
@@ -2592,54 +2725,33 @@ export default function TeamBuilder() {
       pushedPlayerIdsRef.current.add(pid);
     }
 
-    // 2. Pull Supabase board → roster targets (players added from profiles/dashboard)
+    // 2. Pull Supabase board → roster targets (players added from profiles/dashboard).
+    // Delegates to addPlayerFromTargetSearch so each player gets the stored-first
+    // snapshot fetch (real pWAR/oWAR/MV, depth role from stored, etc.) AND the
+    // TWP dual-row mirror. The inline push that used to live here wrote a
+    // blank-stats row with no DB fetch, which surfaced as "Overbeek showing
+    // only as a pitcher with no stats" for TWPs.
     if (supabaseTargetBoard.length > 0) {
       const existingPlayerIds = new Set(rosterPlayers.map((rp) => rp.player_id));
       const newFromSupabase = supabaseTargetBoard.filter((sb) => !existingPlayerIds.has(sb.player_id));
       if (newFromSupabase.length > 0) {
-        setRosterPlayers((prev) => {
-          const next = [...prev];
+        (async () => {
           for (const sb of newFromSupabase) {
-            if (next.some((rp) => rp.player_id === sb.player_id)) continue;
-            const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(sb.position || ""));
-            const inferredRole = asPitcherRole(sb.position || null);
-            next.push({
-              player_id: sb.player_id,
-              source: "portal",
-              custom_name: `${sb.first_name} ${sb.last_name}`.trim() || null,
-              position_slot: isPitcherRow ? (inferredRole || "RP") : (playerOverrides[sb.player_id]?.position ?? null),
-              depth_order: 1,
-              nil_value: 0,
-              production_notes: null,
-              roster_status: "target",
-              depth_role: isPitcherRow
-                ? defaultPitcherDepthRoleFromIp(
-                    ((sb as any).source_player_id ? pitchingStatsByNameTeam.bySourceId.get((sb as any).source_player_id)?.ip : null) ?? null,
-                    (inferredRole === "SP") ? "SP" : "RP",
-                  )
-                : "utility",
-              class_transition: classTransitionFromYearOrDefault(sb.class_year),
-              dev_aggressiveness: 0,
-              transfer_snapshot: null,
-              player: {
-                first_name: sb.first_name,
-                last_name: sb.last_name,
-                position: sb.position,
-                class_year: sb.class_year ?? null,
-                bats_hand: sb.bats_hand ?? null,
-                team: sb.team,
-                from_team: sb.team,
-                conference: sb.conference ?? null,
-                division: (sb as any).division ?? null,
-              } as any,
-              prediction: null,
-              nilVal: null,
-              nil_owar: null,
-            } as BuildPlayer);
+            await addPlayerFromTargetSearch({
+              id: sb.player_id,
+              first_name: sb.first_name,
+              last_name: sb.last_name,
+              position: sb.position,
+              class_year: sb.class_year ?? null,
+              bats_hand: (sb as any).bats_hand ?? null,
+              team: sb.team,
+              from_team: sb.team,
+              conference: sb.conference ?? null,
+              source_player_id: (sb as any).source_player_id ?? null,
+            });
           }
-          return next;
-        });
-        setDirty(true);
+          setDirty(true);
+        })();
       }
     }
 
@@ -2872,11 +2984,11 @@ export default function TeamBuilder() {
     setDepthPlaceholders({});
     skipAutoSeedOnceRef.current = true;
     // Rebuild roster from returners only (no targets)
-    const roster: BuildPlayer[] = returners.map((r: any) => {
+    const roster: BuildPlayer[] = returners.flatMap((r: any) => {
       const player = r.players;
-      if (!player) return null;
-      // TWP (two-way) defaults to hitter side on the team builder — coaches
-      // can click into the profile to see the pitching view.
+      if (!player) return [] as BuildPlayer[];
+      // TWP (two-way) gets BOTH a hitter row AND a pitcher row appended.
+      const playerIsTwp = !!(player as any).is_twp;
       const isPitcherRow = /^(SP|RP|CL|P|LHP|RHP)$/i.test(String(player.position || ""));
       const overrideRole = asPitcherRole(getSupabaseRole(player.id) || null);
       // Check Pitching Master Role for accurate SP/RP from last season
@@ -2900,43 +3012,78 @@ export default function TeamBuilder() {
       const _hNameKey = `${normalizeName(`${player.first_name || ""} ${player.last_name || ""}`.trim())}|${normalizeName(player.team || "")}`;
       const seedHitterAb = seasonUsage.hitterAb?.get(player.id) ?? seasonUsage.hitterAbByNameTeam?.get(_hNameKey) ?? 0;
       const seedHitterDepth = defaultHitterDepthRoleFromPa(seedHitterAb);
-      return {
+      const validPitcherDepths = [
+        "weekend_starter", "weekday_starter", "swing_starter",
+        "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever",
+        "low_impact_reliever", "specialist_reliever",
+      ];
+      const resolvedPitcherDepth = (() => {
+        const stored = (r as any)?.pitcher_depth_role;
+        if (validPitcherDepths.includes(stored)) return stored;
+        return defaultPitcherDepthRoleFromIp(pmRec?.ip ?? null, (inferredRole === "SP") ? "SP" : "RP");
+      })();
+      const validHitterDepths = ["cornerstone", "everyday_starter", "platoon_starter", "utility", "bench"];
+      const storedHitterDepth = (r as any)?.hitter_depth_role;
+      const resolvedHitterDepth = validHitterDepths.includes(storedHitterDepth) ? storedHitterDepth : seedHitterDepth;
+      const playerMeta = {
+        first_name: player.first_name,
+        last_name: player.last_name,
+        position: player.position,
+        is_twp: playerIsTwp,
+        class_year: (player as any).class_year ?? null,
+        throws_hand: (player as any).throws_hand ?? null,
+        bats_hand: (player as any).bats_hand ?? null,
+        team: player.team,
+        from_team: player.from_team,
+        conference: player.conference ?? null,
+        source_player_id: player.source_player_id ?? null,
+      };
+      const baseFields = {
         player_id: player.id,
         source: "returner" as const,
         custom_name: null,
-        position_slot: isPitcherRow ? (inferredRole || "RP") : (playerOverrides[player.id]?.position ?? null),
         depth_order: 1,
         nil_value: 0,
         production_notes: null,
         roster_status: "returner" as const,
-        depth_role: isPitcherRow
-          ? defaultPitcherDepthRoleFromIp(pmRec?.ip ?? null, (inferredRole === "SP") ? "SP" : "RP")
-          : seedHitterDepth,
         class_transition: r.class_transition ?? "SJ",
         dev_aggressiveness: r.dev_aggressiveness ?? 0,
         class_transition_overridden: false,
         dev_aggressiveness_overridden: false,
         transfer_snapshot: null,
-        player: {
-          first_name: player.first_name,
-          last_name: player.last_name,
-          position: player.position,
-          is_twp: (player as any).is_twp ?? false,
-          class_year: (player as any).class_year ?? null,
-          throws_hand: (player as any).throws_hand ?? null,
-          bats_hand: (player as any).bats_hand ?? null,
-          team: player.team,
-          from_team: player.from_team,
-          conference: player.conference ?? null,
-          source_player_id: player.source_player_id ?? null,
-        },
         prediction: r ?? null,
         nilVal: null,
         nil_owar: null,
         team_metrics: null,
         team_power_plus: null,
       };
-    }).filter(Boolean) as BuildPlayer[];
+      const primary: BuildPlayer = {
+        ...baseFields,
+        position_slot: isPitcherRow ? (inferredRole || "RP") : (playerOverrides[player.id]?.position ?? null),
+        depth_role: isPitcherRow ? resolvedPitcherDepth : resolvedHitterDepth,
+        player: playerMeta,
+      };
+      if (playerIsTwp) {
+        if (isPitcherRow) {
+          const mirror: BuildPlayer = {
+            ...baseFields,
+            position_slot: playerOverrides[player.id]?.position ?? null,
+            depth_role: resolvedHitterDepth,
+            player: { ...playerMeta, position: playerOverrides[player.id]?.position ?? null },
+          };
+          return [primary, mirror];
+        } else {
+          const mirror: BuildPlayer = {
+            ...baseFields,
+            position_slot: inferredRole || "RP",
+            depth_role: resolvedPitcherDepth,
+            player: { ...playerMeta, position: inferredRole || "RP" },
+          };
+          return [primary, mirror];
+        }
+      }
+      return [primary];
+    }) as BuildPlayer[];
     setRosterPlayers(roster);
     autoSeededTeamRef.current = normalizeName(selectedTeam);
   };

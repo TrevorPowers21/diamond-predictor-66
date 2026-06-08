@@ -38,6 +38,7 @@ import {
   pitcherRoleFromSlot,
 } from "../helpers";
 import type { BuildPlayer, TeamRow } from "../types";
+import { pickPitcherMarketValue } from "@/lib/twpMarketValue";
 
 // ── Module-level pure helpers ────────────────────────────────────────────────
 
@@ -479,7 +480,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     queryFn: async () => {
       let q = supabase
         .from("player_predictions")
-        .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_rv_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at, o_war, market_value, projected_pa, p_war, projected_ip, pitcher_role, hitter_depth_role")
+        .select("id, player_id, customer_team_id, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_rv_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, power_rating_plus, class_transition, dev_aggressiveness, model_type, variant, status, updated_at, o_war, market_value, projected_pa, p_war, projected_ip, pitcher_role, hitter_depth_role, pitcher_depth_role")
         .eq("season", PROJECTION_SEASON)
         .in("model_type", ["returner", "transfer"])
         .in("player_id", targetPlayerIds);
@@ -1355,8 +1356,42 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
           };
         }
       }
-      const pwarComputed = computePitcherPwar(p, source);
-      const pwar = pwarComputed ?? source?.p_war ?? source?.owar ?? null;
+      // Stored is canonical; apply a session-only IP-ratio overlay so the
+      // depth-role knob actually moves pWAR. Mirrors PitcherProfile and the
+      // hitter path below (PA-ratio overlay for hitters).
+      //   ipScale  = sessionIp / storedIp        (depth knob)
+      //   pvfRatio = sessionPvf / storedPvf      (SP↔RP knob)
+      // If neither knob moved, both ratios = 1 → pWAR equals stored.
+      const storedPWar = source?.p_war != null ? Number(source.p_war) : null;
+      const storedProjectedIp = Number(source?.projected_ip);
+      const sourceIdForPm = (p.player as any)?.source_player_id ?? null;
+      const pmRoleForRow = sourceIdForPm ? pitchingStatsByNameTeam.bySourceId.get(sourceIdForPm)?.role : null;
+      const currentRoleForRow = effectivePitcherRoleForBuild(p, pmRoleForRow);
+      const sessionDepthRole = normalizePitcherDepthRole(p.depth_role, currentRoleForRow);
+      const sessionIpForRow = (() => {
+        switch (sessionDepthRole) {
+          case "weekend_starter":       return pitchingEq.pwar_ip_sp;
+          case "weekday_starter":       return pitchingEq.pwar_ip_sm;
+          case "swing_starter":         return 30;
+          case "workhorse_reliever":    return 50;
+          case "high_leverage_reliever":return 33;
+          case "mid_leverage_reliever": return 20;
+          case "low_impact_reliever":   return 12;
+          case "specialist_reliever":   return 6;
+          default:                      return pitchingEq.pwar_ip_rp;
+        }
+      })();
+      const ipScaleForRow = Number.isFinite(storedProjectedIp) && storedProjectedIp > 0
+        ? sessionIpForRow / storedProjectedIp
+        : 1;
+      const storedRoleBucketForRow: "SP" | "RP" =
+        (source?.pitcher_role === "SP") ? "SP" : "RP";
+      const sessionRoleBucketForRow: "SP" | "RP" =
+        (sessionDepthRole === "weekend_starter" || sessionDepthRole === "weekday_starter" || sessionDepthRole === "swing_starter") ? "SP" : "RP";
+      const pvfStoredForRow = pitchingPvfForRole(storedRoleBucketForRow);
+      const pvfNewForRow = pitchingPvfForRole(sessionRoleBucketForRow);
+      const pvfRatioForRow = pvfStoredForRow > 0 ? pvfNewForRow / pvfStoredForRow : 1;
+      const pwar = storedPWar != null ? storedPWar * ipScaleForRow * pvfRatioForRow : null;
       return { sim, shown: source, shownWrc: source?.p_rv_plus ?? source?.p_wrc_plus ?? null, owar: pwar ?? 0, pwar };
     }
     const shownWrc = (() => {
@@ -1445,24 +1480,46 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const renderAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
     if (renderAsPitcher) {
       const projection = playerProjection(p, "pitcher");
-      // Stored values only — no fallback to sim/snapshot/raw prediction.
       const source: any = projection.shown ?? null;
+      // Stored-only: TWP-aware market_value from the prediction row, or the
+      // snapshot's nil_valuation (target board adds bake stored MV here at
+      // add-time). No live compute, no PTM/PVF re-multiplication — the
+      // precompute pipeline already applied all that.
+      const isTwpPlayer = !!(p.player as any)?.is_twp;
+      const storedMv = pickPitcherMarketValue(source, isTwpPlayer);
+      // Apply the same IP-ratio + PVF-ratio overlay the pwar calc uses so the
+      // depth-role knob shifts market value alongside pWAR. Ratios default to 1
+      // when nothing has moved → MV equals stored.
+      const storedProjectedIp = Number(source?.projected_ip);
+      const srcId = (p.player as any)?.source_player_id ?? null;
+      const pmRole = srcId ? pitchingStatsByNameTeam.bySourceId.get(srcId)?.role : null;
+      const currentRole = effectivePitcherRoleForBuild(p, pmRole);
+      const sessionDepth = normalizePitcherDepthRole(p.depth_role, currentRole);
+      const sessionIp = (() => {
+        switch (sessionDepth) {
+          case "weekend_starter":       return pitchingEq.pwar_ip_sp;
+          case "weekday_starter":       return pitchingEq.pwar_ip_sm;
+          case "swing_starter":         return 30;
+          case "workhorse_reliever":    return 50;
+          case "high_leverage_reliever":return 33;
+          case "mid_leverage_reliever": return 20;
+          case "low_impact_reliever":   return 12;
+          case "specialist_reliever":   return 6;
+          default:                      return pitchingEq.pwar_ip_rp;
+        }
+      })();
+      const ipScaleMv = Number.isFinite(storedProjectedIp) && storedProjectedIp > 0 ? sessionIp / storedProjectedIp : 1;
+      const storedBucket: "SP" | "RP" = source?.pitcher_role === "SP" ? "SP" : "RP";
+      const sessionBucket: "SP" | "RP" =
+        (sessionDepth === "weekend_starter" || sessionDepth === "weekday_starter" || sessionDepth === "swing_starter") ? "SP" : "RP";
+      const pvfStored = pitchingPvfForRole(storedBucket);
+      const pvfNew = pitchingPvfForRole(sessionBucket);
+      const pvfRatioMv = pvfStored > 0 ? pvfNew / pvfStored : 1;
+      const overlayScale = ipScaleMv * pvfRatioMv;
+      if (storedMv != null && Number.isFinite(storedMv)) return Math.max(0, storedMv * overlayScale);
       const direct = Number(source?.nil_valuation);
-      if (Number.isFinite(direct) && direct > 0) return direct;
-      const pwar = projection.pwar;
-      if (!Number.isFinite(Number(pwar))) return 0;
-      const sourceId = (p.player as any)?.source_player_id ?? null;
-      const pmRole = sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId)?.role : null;
-      const currentPitcherRole = effectivePitcherRoleForBuild(p, pmRole);
-      const conference = selectedTeam
-        ? (teamByKey.get(normalizeKey(selectedTeam))?.conference ?? p.player?.conference ?? null)
-        : (p.player?.conference ?? null);
-      const ptm = getProgramTierMultiplierByConference(conference, pitchingTierMultipliers);
-      // Use the 3-tier PVF: swing_starter → SM → market_pvf_weekday_sp,
-      // matching PitcherProfile's pitcherRoleFromDepthRole logic.
-      // pitchingPvfForRole only knows SP/RP so swing market value was wrong.
-      const pvm = getPitchingPvfForRole(pitcherRoleFromDepthRole(p.depth_role), pitchingEq);
-      return Number(pwar) * pitchingEq.market_dollars_per_war * ptm * pvm;
+      if (Number.isFinite(direct)) return Math.max(0, direct * overlayScale);
+      return 0;
     }
     return projectedPlayerScore(p) * nilBasePerOWar;
   }, [nilBasePerOWar, pitchingEq, pitchingPvfForRole, pitchingTierMultipliers, projectedPlayerScore, playerProjection, selectedTeam, teamByKey, pitchingStatsByNameTeam]);

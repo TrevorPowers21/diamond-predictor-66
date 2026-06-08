@@ -14,6 +14,114 @@ type AddMissingResult = {
   errors: string[];
 };
 
+type RefreshPaIpResult = {
+  paUpdated: number;
+  ipUpdated: number;
+  errors: string[];
+};
+
+/**
+ * Refresh players.pa from Hitter Master and players.ip from Pitching Master
+ * for the given season. Non-destructive — only touches existing rows. Lives
+ * alongside addMissingPlayers in the cascade so that CSV refreshes propagate
+ * updated counts to the players table (without which depth-role derives on
+ * stored ip/pa fall back to wrong defaults — e.g. a TWP with 14 IP gets
+ * classified as weekend_starter because players.ip is null).
+ */
+export async function refreshPaIpFromMaster(season = 2026): Promise<RefreshPaIpResult> {
+  const result: RefreshPaIpResult = { paUpdated: 0, ipUpdated: 0, errors: [] };
+
+  // Load existing players keyed by source_player_id.
+  console.log("[refreshPaIp] Loading existing players...");
+  const players = new Map<string, { id: string; pa: number | null; ip: number | null }>();
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("players")
+      .select("id, source_player_id, pa, ip")
+      .not("source_player_id", "is", null)
+      .range(from, from + 999);
+    if (error) { result.errors.push(`Load players: ${error.message}`); return result; }
+    for (const r of data || []) {
+      if (r.source_player_id) players.set(r.source_player_id, { id: r.id, pa: r.pa, ip: r.ip });
+    }
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  console.log(`[refreshPaIp] ${players.size} existing players`);
+
+  // Hitter Master → pa
+  console.log(`[refreshPaIp] Loading Hitter Master season ${season}...`);
+  const hitterUpdates: { id: string; pa: number }[] = [];
+  from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("Hitter Master")
+      .select("source_player_id, pa")
+      .eq("Season", season)
+      .range(from, from + 999);
+    if (error) { result.errors.push(`Hitter load: ${error.message}`); break; }
+    for (const h of data || []) {
+      const sid = h.source_player_id;
+      if (!sid || h.pa == null) continue;
+      const existing = players.get(sid);
+      if (!existing) continue;
+      if (existing.pa !== Number(h.pa)) {
+        hitterUpdates.push({ id: existing.id, pa: Number(h.pa) });
+      }
+    }
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+
+  // Pitching Master → ip
+  console.log(`[refreshPaIp] Loading Pitching Master season ${season}...`);
+  const pitcherUpdates: { id: string; ip: number }[] = [];
+  from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("Pitching Master")
+      .select("source_player_id, IP")
+      .eq("Season", season)
+      .range(from, from + 999);
+    if (error) { result.errors.push(`Pitcher load: ${error.message}`); break; }
+    for (const p of data || []) {
+      const sid = p.source_player_id;
+      const ip = (p as any).IP;
+      if (!sid || ip == null) continue;
+      const existing = players.get(sid);
+      if (!existing) continue;
+      if (existing.ip !== Number(ip)) {
+        pitcherUpdates.push({ id: existing.id, ip: Number(ip) });
+      }
+    }
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+
+  console.log(`[refreshPaIp] ${hitterUpdates.length} pa updates, ${pitcherUpdates.length} ip updates`);
+
+  for (let i = 0; i < hitterUpdates.length; i += CHUNK_SIZE) {
+    const chunk = hitterUpdates.slice(i, i + CHUNK_SIZE);
+    await Promise.all(chunk.map(async (u) => {
+      const { error } = await supabase.from("players").update({ pa: u.pa }).eq("id", u.id);
+      if (error) result.errors.push(`pa update ${u.id}: ${error.message}`);
+      else result.paUpdated++;
+    }));
+  }
+  for (let i = 0; i < pitcherUpdates.length; i += CHUNK_SIZE) {
+    const chunk = pitcherUpdates.slice(i, i + CHUNK_SIZE);
+    await Promise.all(chunk.map(async (u) => {
+      const { error } = await supabase.from("players").update({ ip: u.ip }).eq("id", u.id);
+      if (error) result.errors.push(`ip update ${u.id}: ${error.message}`);
+      else result.ipUpdated++;
+    }));
+  }
+
+  console.log(`[refreshPaIp] Done — pa updated ${result.paUpdated}, ip updated ${result.ipUpdated}`, result);
+  return result;
+}
+
 /**
  * Load a map from Teams Table.id (per-season UUID) → Teams Table.source_id
  * (stable program identifier). Master tables store the per-season UUID in
