@@ -3,7 +3,7 @@ import { Sparkles, ArrowLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const STORAGE_KEY = "rstr_iq_whats_new_seen_v3";
+const STORAGE_KEY = "rstr_iq_whats_new_seen_v4";
 
 type Feature = {
   title: string;
@@ -19,6 +19,48 @@ type Release = {
 };
 
 const RELEASES: Release[] = [
+  {
+    date: "2026-06-09",
+    headline: "Two-Way Player market values land in every view, plus see every committed player at a glance",
+    features: [
+      {
+        title: "Two-Way Player Market Values Now Correct Everywhere",
+        tagline:
+          "Two-way players like Josiah Overbeek were quietly showing the wrong market value across Dashboard, Profile, Compare, Team Builder, and the Transfer Portal Simulator. The hitter side and pitcher side were sharing one column and the last write would overwrite the other. Now each side has its own value and surfaces the right number depending on which view you're in.",
+        details: [
+          "Player Dashboard reads the proper hitter or pitcher MV for two-way players, so their value matches their projected role.",
+          "Player Profile (hitter view) shows the hitter MV; Pitcher Profile shows the pitcher MV.",
+          "Compare Dashboard and Transfer Portal Simulator both route through the corrected MV split for two-way players, no more dashes.",
+          "Team Builder splits two-way players into two roster lines on add (one hitter, one pitcher), each with their own stats and market value.",
+        ],
+      },
+      {
+        title: "Committed Filter Now Shows Every Committed Player in the Country",
+        tagline:
+          "On the Player Dashboard, toggling the Committed chip in the Portal filter now surfaces every player who has chosen a destination, regardless of which school they committed to. Coaches stop wasting evaluation time on players who are already off the table.",
+        details: [
+          "Previously, the dashboard hid committed players whose precomputed projection at your team got skipped by the pipeline, plus anyone who entered the portal mid-season without 75 plate appearances logged. The home page count and the table count disagreed by half.",
+          "Now the table matches the home page count exactly. Stats columns show \"—\" for committed players we don't have a projection for at your school — by design, since they're off-market.",
+          "Pitcher tab unchanged. Committed pitchers with logged stats continue to surface there as before.",
+        ],
+      },
+      {
+        title: "Team Builder Pitching Controls Now Move the Numbers in Real Time",
+        tagline:
+          "Slide a pitcher's depth role, dev aggressiveness, or SP/RP toggle in Team Builder and pWAR, Market Value, and every rate stat move on the spot — same behavior the hitter controls have had.",
+        details: [
+          "Depth role changes (Weekend, Weekday, Swing, Workhorse, High-Leverage, etc.) shift pWAR + Market Value based on the IP load that depth implies.",
+          "SP ↔ RP toggle applies the role-transition adjustment to rates with the elite-reliever penalty curve so a 1.50 ERA reliever doesn't stay at 1.50 as a starter. pRV+ recomputes off the role-adjusted rates, pWAR + MV follow.",
+          "Dev aggressiveness scales every pitcher rate stat in the right direction (lower ERA / FIP / WHIP / BB9 / HR9, higher K9 and pRV+), with pWAR + MV scaling alongside.",
+        ],
+      },
+    ],
+    whatElse: [
+      "Player Dashboard: position column on the hitter tab no longer pulls a stale pitcher position from Hitter Master when the player's offensive position is set on their player record.",
+      "Team Builder: TWPs now appear exactly once on the hitter tab and once on the pitcher tab, with the right position label on each side. No more duplicate rows or cross-tab leakage.",
+      "Portal auto-pull: the daily portal sync is safer now and won't accidentally re-import stale CSVs left in the inbox. Schedule dialed back from hourly to every three hours since the portal has calmed down.",
+    ],
+  },
   {
     date: "2026-06-04",
     headline: "Smarter Team Builder hitter controls, faster Transfer Portal, expanded pitcher coverage",
