@@ -6,8 +6,9 @@ import { importHistoricalPitchersCsv } from "@/lib/importHistoricalPitchers";
 import { importStuffPlusInputsCsv } from "@/lib/importStuffPlusInputsCsv";
 import { importConferenceStatsCsv, computeConferenceEnvRates } from "@/lib/importConferenceStats";
 import { importPortalEntriesCsv } from "@/lib/importPortalEntries";
+import { importAbsHitterStatsCsv, importAbsPitcherStatsCsv } from "@/lib/importAbsStats";
 import { calculateConferenceStuffPlus } from "@/savant/lib/conferenceStuffPlus";
-import { addMissingPlayers } from "@/lib/syncMasterToPlayers";
+import { addMissingPlayers, refreshPaIpFromMaster } from "@/lib/syncMasterToPlayers";
 import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
 import { computeAndStoreNcaaAverages } from "@/lib/computeNcaaAverages";
 import { computeAndStoreAllScores } from "@/lib/computeAndStoreScores";
@@ -344,6 +345,32 @@ export async function runImports(
         }
         break;
       }
+      case "abs_hitter_stats": {
+        step(`${r.probe.fileName} → ABS Hitter Stats`);
+        try {
+          const res = await importAbsHitterStatsCsv(csvText, season);
+          ok(`${res.upserted} upserted (${res.d1Rows} D1 rows, ${res.jucoSkipped} JUCO skipped, ${res.missingSourceId} missing id) (${timeMs(startMs)})`);
+          for (const e of res.errors.slice(0, 3)) err(e);
+          if (res.errors.length > 3) warn(`...and ${res.errors.length - 3} more errors`);
+          if (res.upserted > 0) importedFilePaths.push(r.probe.filePath);
+        } catch (e) {
+          err(`ABS hitter importer threw: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        break;
+      }
+      case "abs_pitcher_stats": {
+        step(`${r.probe.fileName} → ABS Pitcher Stats`);
+        try {
+          const res = await importAbsPitcherStatsCsv(csvText, season);
+          ok(`${res.upserted} upserted (${res.d1Rows} D1 rows, ${res.jucoSkipped} JUCO skipped, ${res.missingSourceId} missing id) (${timeMs(startMs)})`);
+          for (const e of res.errors.slice(0, 3)) err(e);
+          if (res.errors.length > 3) warn(`...and ${res.errors.length - 3} more errors`);
+          if (res.upserted > 0) importedFilePaths.push(r.probe.filePath);
+        } catch (e) {
+          err(`ABS pitcher importer threw: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        break;
+      }
       default: {
         step(`${r.probe.fileName} → ${r.match.label}`);
         warn(`Importer for ${r.match.label} not yet wired (Phase D).`);
@@ -475,6 +502,21 @@ export async function runImports(
     err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
   }
 
+  // Refresh existing players' pa/ip from Master so depth-role derives off real
+  // counts. addMissingPlayers only INSERTs new source_player_ids — existing
+  // players' pa/ip stay frozen at first-insert values without this step. Manifests
+  // most painfully on TWPs (ip=null → depth-role falls back to weekend_starter
+  // at 85 IP regardless of actual usage).
+  step("refreshPaIpFromMaster");
+  try {
+    const start = Date.now();
+    const res = await refreshPaIpFromMaster(season);
+    ok(`pa updated=${res.paUpdated}, ip updated=${res.ipUpdated}, errors=${res.errors.length} (${timeMs(start)})`);
+    for (const e of res.errors.slice(0, 3)) err(e);
+  } catch (e) {
+    err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   step("computeAndStoreNcaaAverages");
   try {
     const start = Date.now();
@@ -535,7 +577,11 @@ export async function runImports(
   step("bulkRecalculatePredictionsLocal");
   try {
     const start = Date.now();
-    await bulkRecalculatePredictionsLocal(season);
+    // No arg → defaults to PROJECTION_SEASON. Predictions are stored on the
+    // projection year (e.g. 2027), not the import year (2026). Passing the
+    // import season here filtered prediction fetches to season=import which
+    // returned 0 rows, silently making this step a no-op.
+    await bulkRecalculatePredictionsLocal();
     ok(`done (${timeMs(start)})`);
   } catch (e) {
     err(`Threw: ${e instanceof Error ? e.message : String(e)}`);

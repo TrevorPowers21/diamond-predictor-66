@@ -28,6 +28,7 @@ import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/Scou
 import { AiScoutingReportBody } from "@/components/AiScoutingReport";
 import { useScoutingReport } from "@/hooks/useScoutingReport";
 import CoachNotes from "@/components/CoachNotes";
+import { ABSComparisonTable } from "@/components/ABSComparisonTable";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
 // pdfGenerator is loaded on demand — jspdf (350KB) excluded from initial bundle
 const getPdfGenerator = () => import("@/lib/pdfGenerator");
@@ -48,6 +49,7 @@ import {
   type HitterDepthRole,
 } from "@/lib/depthRoles";
 import { useNilValuation } from "@/hooks/useNilValuation";
+import { pickHitterMarketValue } from "@/lib/twpMarketValue";
 
 const statFormat = (v: number | null | undefined, decimals = 3) => {
   if (v == null) return "—";
@@ -516,16 +518,23 @@ export default function PlayerProfile() {
     updatePlayer.mutate(updates);
   };
 
-  // Prefer the team-scoped precomputed row when the current customer team has
-  // one. Falls back to the canonical global "regular" row otherwise.
+  // Picking the right prediction row:
+  //   - Portal / target players (transfer_portal or portal_status IN/COMMITTED):
+  //     use the team-scoped precomputed row so coaches see "what would this
+  //     transfer look like at OUR program."
+  //   - Returners (everyone else with a returner prediction): use the global
+  //     regular row — their own-team projection. Matches Dashboard
+  //     (ReturningPlayers.tsx) so the profile and dashboard agree for the
+  //     same player.
   const regularPred = (() => {
-    if (effectiveTeamId) {
-      const teamRow = predictions.find(
-        (p: any) => p.customer_team_id === effectiveTeamId && p.variant === "precomputed",
-      );
-      if (teamRow) return teamRow;
-    }
-    return predictions.find((p: any) => p.variant === "regular" && p.customer_team_id == null);
+    const portalStatus = (player as any)?.portal_status as string | null | undefined;
+    const isPortalCandidate = !!(player?.transfer_portal || portalStatus === "IN PORTAL" || portalStatus === "COMMITTED");
+    const teamRow = effectiveTeamId
+      ? predictions.find((p: any) => p.customer_team_id === effectiveTeamId && p.variant === "precomputed")
+      : null;
+    const returnerRow = predictions.find((p: any) => p.variant === "regular" && p.customer_team_id == null);
+    if (isPortalCandidate && teamRow) return teamRow;
+    return returnerRow ?? teamRow ?? null;
   })();
   const { isTransferPortal, isReturner, fromTeamData } = useTransferPortalContext(
     player, predictions, effectiveTeamId,
@@ -810,7 +819,9 @@ export default function PlayerProfile() {
   // market_value on every row with p_wrc_plus. Null means data quality issue,
   // not a display fallback to paper over.
   const storedOWar = (regularPred as any)?.o_war as number | null | undefined;
-  const storedMarketValue = (regularPred as any)?.market_value as number | null | undefined;
+  // TWP-aware: for is_twp=true, raw market_value is NULL by design; pull from
+  // twp_hitter_market_value via the helper. Non-TWP rows unchanged.
+  const storedMarketValue = pickHitterMarketValue(regularPred as any, !!(player as any)?.is_twp);
   const storedHitterDepthRole = ((regularPred as any)?.hitter_depth_role as HitterDepthRole | null | undefined) ?? defaultHitterDepthRoleFromActualPa((player as any)?.pa ?? null);
   const historicalOWar = computeOWarFromWrcPlus(seedDerived?.wrcPlus ?? null, (player as any)?.pa ?? null);
   // Session-only depth role overlay scales the projected/displayed oWAR
@@ -1446,6 +1457,13 @@ export default function PlayerProfile() {
 
             {/* Portal Move — shows under Career Stats for any portal-active player */}
             {isTransferPortal && <PortalTeamCards player={player as any} />}
+
+            {player && (
+              <ABSComparisonTable
+                sourcePlayerId={(player as any).source_player_id ?? null}
+                playerType="hitter"
+              />
+            )}
 
             {/* Internal Power Ratings — admin only, fills left column space */}
             {isAdmin && seedPowerDerived && (

@@ -54,6 +54,7 @@ import {
 } from "@/components/ScoutingReport";
 import { useHighFollow } from "@/hooks/useHighFollow";
 import { JucoPlayerDashboardPanel } from "@/components/JucoPlayerDashboardPanel";
+import { pickHitterMarketValue, pickPitcherMarketValue } from "@/lib/twpMarketValue";
 
 type SortKey =
   | "name"
@@ -1493,10 +1494,13 @@ export default function ReturningPlayers() {
         nilByPlayer: Map<string, number | null>,
       ): ReturnerPlayer => {
         // Read scouting scores directly from player_predictions.
-        const seedEvScore = row.ev_score ?? null;
-        const seedBarrelScore = row.barrel_score ?? null;
-        const seedContactScore = row.contact_score ?? null;
-        const seedChaseScore = row.chase_score ?? null;
+        // Domain-scoped hitter_*_score columns (added 2026-06-03 migration) are
+        // the canonical source; fall back to legacy columns for rows written
+        // before the propagation function was updated.
+        const seedEvScore = row.hitter_ev_score ?? row.ev_score ?? null;
+        const seedBarrelScore = row.hitter_barrel_score ?? row.barrel_score ?? null;
+        const seedContactScore = row.hitter_contact_score ?? row.contact_score ?? null;
+        const seedChaseScore = row.hitter_chase_score ?? row.chase_score ?? null;
 
         return {
           id: player.id,
@@ -1514,7 +1518,7 @@ export default function ReturningPlayers() {
           model_type: row.model_type,
           status: row.status,
           pa: player.pa ?? null,
-          nil_value: (row.market_value ?? nilByPlayer.get(player.id)) ?? null,
+          nil_value: (pickHitterMarketValue(row, !!(player as any).is_twp) ?? nilByPlayer.get(player.id)) ?? null,
           prediction: {
             from_avg: row.from_avg,
             from_obp: row.from_obp,
@@ -1529,10 +1533,10 @@ export default function ReturningPlayers() {
             p_wrc_plus: row.p_wrc_plus,
             o_war: row.o_war ?? null,
             power_rating_plus: row.power_rating_plus,
-            ev_score: row.ev_score ?? null,
-            barrel_score: row.barrel_score ?? null,
-            contact_score: row.contact_score ?? null,
-            chase_score: row.chase_score ?? null,
+            ev_score: row.hitter_ev_score ?? row.ev_score ?? null,
+            barrel_score: row.hitter_barrel_score ?? row.barrel_score ?? null,
+            contact_score: row.hitter_contact_score ?? row.contact_score ?? null,
+            chase_score: row.hitter_chase_score ?? row.chase_score ?? null,
           },
         };
       };
@@ -1685,8 +1689,14 @@ export default function ReturningPlayers() {
             row.p_avg != null && row.p_obp != null && row.p_slg != null && row.p_ops != null && row.p_iso != null && row.p_wrc_plus != null;
           const existingHasPred =
             existing.p_avg != null && existing.p_obp != null && existing.p_slg != null && existing.p_ops != null && existing.p_iso != null && existing.p_wrc_plus != null;
-          const rowHasScout = row.ev_score != null || row.barrel_score != null || row.whiff_score != null || row.chase_score != null;
-          const existingHasScout = existing.ev_score != null || existing.barrel_score != null || existing.whiff_score != null || existing.chase_score != null;
+          const rowHasScout =
+            row.hitter_ev_score != null || row.hitter_barrel_score != null || row.hitter_chase_score != null || row.hitter_contact_score != null ||
+            row.pitcher_whiff_score != null || row.pitcher_barrel_score != null || row.pitcher_chase_score != null || row.pitcher_bb_score != null ||
+            row.ev_score != null || row.barrel_score != null || row.whiff_score != null || row.chase_score != null;
+          const existingHasScout =
+            existing.hitter_ev_score != null || existing.hitter_barrel_score != null || existing.hitter_chase_score != null || existing.hitter_contact_score != null ||
+            existing.pitcher_whiff_score != null || existing.pitcher_barrel_score != null || existing.pitcher_chase_score != null || existing.pitcher_bb_score != null ||
+            existing.ev_score != null || existing.barrel_score != null || existing.whiff_score != null || existing.chase_score != null;
           const rowScore =
             ((row.players.transfer_portal === true && row.model_type === "transfer") ||
               (row.players.transfer_portal !== true && row.model_type === "returner")
@@ -1908,10 +1918,9 @@ export default function ReturningPlayers() {
           row.p_iso != null &&
           row.p_wrc_plus != null;
         const rowHasScout =
-          row.ev_score != null ||
-          row.barrel_score != null ||
-          row.whiff_score != null ||
-          row.chase_score != null;
+          row.hitter_ev_score != null || row.hitter_barrel_score != null || row.hitter_chase_score != null || row.hitter_contact_score != null ||
+          row.pitcher_whiff_score != null || row.pitcher_barrel_score != null || row.pitcher_chase_score != null || row.pitcher_bb_score != null ||
+          row.ev_score != null || row.barrel_score != null || row.whiff_score != null || row.chase_score != null;
         const existingHasPred =
           existing.p_avg != null &&
           existing.p_obp != null &&
@@ -1920,10 +1929,9 @@ export default function ReturningPlayers() {
           existing.p_iso != null &&
           existing.p_wrc_plus != null;
         const existingHasScout =
-          existing.ev_score != null ||
-          existing.barrel_score != null ||
-          existing.whiff_score != null ||
-          existing.chase_score != null;
+          existing.hitter_ev_score != null || existing.hitter_barrel_score != null || existing.hitter_chase_score != null || existing.hitter_contact_score != null ||
+          existing.pitcher_whiff_score != null || existing.pitcher_barrel_score != null || existing.pitcher_chase_score != null || existing.pitcher_bb_score != null ||
+          existing.ev_score != null || existing.barrel_score != null || existing.whiff_score != null || existing.chase_score != null;
         const rowScore =
           ((currentPlayer.transfer_portal === true && row.model_type === "transfer") ||
             (currentPlayer.transfer_portal !== true && row.model_type === "returner")
@@ -2253,7 +2261,7 @@ export default function ReturningPlayers() {
         let q = supabase
           .from("player_predictions")
           .select(
-            "player_id, customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, projected_ip, pitcher_role, whiff_score, bb_score, pitcher_barrel_score, players!inner(source_player_id, class_year, is_twp, portal_status)",
+            "player_id, customer_team_id, variant, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, projected_ip, pitcher_role, pitcher_whiff_score, pitcher_bb_score, pitcher_barrel_score, whiff_score, bb_score, players!inner(source_player_id, class_year, is_twp, portal_status)",
             withCount ? { count: "exact" } : undefined,
           )
           .eq("season", PROJECTION_SEASON)
@@ -2300,15 +2308,16 @@ export default function ReturningPlayers() {
           p_hr9: r.p_hr9,
           p_rv_plus: r.p_rv_plus,
           p_war: r.p_war ?? null,
-          market_value: r.market_value ?? null,
+          // TWP-aware: route to twp_pitcher_market_value when this pitcher row is for a TWP.
+          market_value: pickPitcherMarketValue(r, !!(r.players as any)?.is_twp) ?? null,
           projected_ip: r.projected_ip ?? null,
           pitcher_role: r.pitcher_role,
           class_year: r.players?.class_year ?? null,
           player_id: r.player_id ?? null,
           is_twp: !!(r.players as any)?.is_twp,
           portal_status: (r.players as any)?.portal_status ?? null,
-          whiff_score: r.whiff_score ?? null,
-          bb_score: r.bb_score ?? null,
+          whiff_score: r.pitcher_whiff_score ?? r.whiff_score ?? null,
+          bb_score: r.pitcher_bb_score ?? r.bb_score ?? null,
           barrel_score: r.pitcher_barrel_score ?? null,
         });
       }
@@ -2459,7 +2468,9 @@ export default function ReturningPlayers() {
           const dbRole = (dbPred?.pitcher_role as "SP" | "RP" | "SM" | null) ?? null;
           const effectiveRole: "SP" | "RP" | "SM" = dbRole || projectedRole;
           const dbPWar = dbPred?.p_war ?? null;
-          const dbMarketValue = dbPred?.market_value ?? null;
+          // TWP-aware: raw market_value is NULL for TWP rows by design; pull
+          // from twp_pitcher_market_value via the helper. Non-TWP rows unchanged.
+          const dbMarketValue = pickPitcherMarketValue(dbPred as any, !!(dbPred as any)?.is_twp);
 
           // Class for this pitcher: prefer the value attached to their
           // prediction (canonical, came from the recalc engine's player join);
@@ -3433,15 +3444,12 @@ export default function ReturningPlayers() {
                             <TableCell className="text-right text-sm tabular-nums">{r.p_war == null ? "—" : r.p_war.toFixed(2)}</TableCell>
                             <TableCell className="text-right text-sm tabular-nums">{moneyFormat(r.market_value)}</TableCell>
                             <TableCell className="text-center">
-                              {r.stuff_score != null &&
-                              r.whiff_score != null &&
-                              r.bb_score != null &&
-                              r.barrel_score != null ? (
+                              {(r.stuff_score != null || r.whiff_score != null || r.bb_score != null || r.barrel_score != null) ? (
                                 <div className="flex gap-1 justify-center flex-wrap">
-                                  <ScoutMiniBox label="Stf+" value={r.stuff_score} />
-                                  <ScoutMiniBox label="Whf" value={r.whiff_score} />
-                                  <ScoutMiniBox label="BB%" value={r.bb_score} />
-                                  <ScoutMiniBox label="Brl" value={r.barrel_score} />
+                                  {r.stuff_score != null && <ScoutMiniBox label="Stf+" value={r.stuff_score} />}
+                                  {r.whiff_score != null && <ScoutMiniBox label="Whf" value={r.whiff_score} />}
+                                  {r.bb_score != null && <ScoutMiniBox label="BB%" value={r.bb_score} />}
+                                  {r.barrel_score != null && <ScoutMiniBox label="Brl" value={r.barrel_score} />}
                                 </div>
                               ) : (
                                 <span className="text-xs text-muted-foreground">—</span>

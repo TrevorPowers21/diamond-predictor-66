@@ -841,6 +841,47 @@ function paForHitterDepthRole(role: HitterDepthRoleAuto): number {
     case "bench":            return 25;
   }
 }
+// Auto-assign pitcher depth role from last-season IP + role (mirrors
+// defaultPitcherDepthRoleFromIp in src/pages/team-builder/helpers.ts).
+type PitcherDepthRoleAuto =
+  | "weekend_starter" | "weekday_starter" | "swing_starter"
+  | "workhorse_reliever" | "high_leverage_reliever" | "mid_leverage_reliever"
+  | "low_impact_reliever" | "specialist_reliever";
+function defaultPitcherDepthRoleFromIp(ip: number | null | undefined, role: "SP" | "RP" | "SM"): PitcherDepthRoleAuto {
+  const r: "SP" | "RP" = role === "SP" ? "SP" : "RP";  // SM treated as RP variant
+  const ipNum = Number(ip);
+  if (!Number.isFinite(ipNum) || ipNum <= 0) {
+    return r === "SP" ? "weekend_starter" : "high_leverage_reliever";
+  }
+  if (r === "SP") {
+    if (ipNum >= 65) return "weekend_starter";
+    if (ipNum >= 35) return "weekday_starter";
+    return "swing_starter";
+  }
+  if (ipNum >= 40) return "workhorse_reliever";
+  if (ipNum >= 25) return "high_leverage_reliever";
+  if (ipNum >= 15) return "mid_leverage_reliever";
+  if (ipNum >= 8) return "low_impact_reliever";
+  return "specialist_reliever";
+}
+// Projected IP per granular pitcher depth role (mirrors pitcherExpectedIp in
+// src/lib/depthRoles.ts). Drives the IP term inside the pWAR formula.
+function ipForPitcherDepthRole(
+  depthRole: PitcherDepthRoleAuto,
+  eq: { pwar_ip_sp: number; pwar_ip_sm: number; pwar_ip_rp: number },
+): number {
+  switch (depthRole) {
+    case "weekend_starter":        return eq.pwar_ip_sp;  // ~80 IP
+    case "weekday_starter":        return eq.pwar_ip_sm;  // ~50 IP
+    case "swing_starter":          return 30;
+    case "workhorse_reliever":     return 50;
+    case "high_leverage_reliever": return 33;
+    case "mid_leverage_reliever":  return 20;
+    case "low_impact_reliever":    return 12;
+    case "specialist_reliever":    return 6;
+    default:                       return eq.pwar_ip_rp;
+  }
+}
 function computeHitterOWar(wrcPlus: number | null | undefined, depthRole: HitterDepthRoleAuto): number | null {
   if (wrcPlus == null || !Number.isFinite(wrcPlus)) return null;
   const pa = paForHitterDepthRole(depthRole);
@@ -1078,6 +1119,11 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     const projectedPa = paForHitterDepthRole(hitterDepthRole);
     const oWar = computeHitterOWar(final.pWrcPlus, hitterDepthRole);
     const marketValue = computeHitterMarketValue(oWar, toConference, p.position);
+    // TWP routing: hitter side MV goes to twp_hitter_market_value, raw
+    // market_value is NULL'd. Pitcher loop will populate twp_pitcher_market_value
+    // separately. Avoids the previous stomp where the pitcher loop's MV
+    // overwrote the hitter loop's MV on the shared column.
+    const isTwpRow = !!(p as any).is_twp;
 
     upserts.push({
       player_id: p.id,
@@ -1099,7 +1145,8 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
       p_wrc: final.pWrc,
       p_wrc_plus: final.pWrcPlus,
       o_war: oWar,
-      market_value: marketValue,
+      market_value: isTwpRow ? null : marketValue,
+      twp_hitter_market_value: isTwpRow ? marketValue : null,
       projected_pa: projectedPa,
       hitter_depth_role: hitterDepthRole,
       locked: false,
@@ -1215,7 +1262,7 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string) {
 
   // Players — pitcher-primary OR is_twp, exclude own roster, exclude JUCO
   const allPlayers = await loadAllPaged(() =>
-    supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, division, source_player_id, source_team_id, is_twp, class_year"),
+    supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, division, source_player_id, source_team_id, is_twp, class_year, ip"),
   );
   const pitcherTest = (p: string | null) => /^(SP|RP|CL|P|LHP|RHP|SM)/i.test(String(p || ""));
   const pitchers = allPlayers.filter((p: any) =>
@@ -1330,6 +1377,21 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string) {
       toTeam: toTeam.name,
     });
 
+    // TWP routing: pitcher side MV goes to twp_pitcher_market_value, raw
+    // market_value is left untouched (NULL'd by the hitter loop for TWPs).
+    // Non-TWP pitcher-only rows write to market_value normally.
+    const isTwpRow = !!(p as any).is_twp;
+    // Auto-derive granular depth role from player's actual IP + coarse role
+    // (mirrors hitter_depth_role's storage pattern).
+    const pitcherDepthRole = defaultPitcherDepthRoleFromIp((p as any).ip ?? null, final.pitcher_role);
+    // Recompute pWAR + market value using the granular depth role's projected IP.
+    // Without this, a weekday_starter would get pWAR off the coarse SP/RP/SM IP
+    // (e.g. 85 IP instead of 50), inflating both pWAR and MV.
+    const depthIp = ipForPitcherDepthRole(pitcherDepthRole, eq);
+    const recomputedPWar = final.p_rv_plus != null ? computePitcherWar(final.p_rv_plus, depthIp, eq) : final.p_war;
+    const recomputedMarketValue = recomputedPWar != null
+      ? computePitcherMarketValue(recomputedPWar, { conference: toConference, role: final.pitcher_role, team: toTeam.name }, eq)
+      : final.market_value;
     upserts.push({
       player_id: p.id,
       customer_team_id: customerTeamId,
@@ -1346,10 +1408,12 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string) {
       p_bb9: final.p_bb9,
       p_hr9: final.p_hr9,
       p_rv_plus: final.p_rv_plus,
-      p_war: final.p_war,
-      market_value: final.market_value,
-      projected_ip: final.projected_ip,
+      p_war: recomputedPWar,
+      market_value: isTwpRow ? null : recomputedMarketValue,
+      twp_pitcher_market_value: isTwpRow ? recomputedMarketValue : null,
+      projected_ip: depthIp,
       pitcher_role: final.pitcher_role,
+      pitcher_depth_role: pitcherDepthRole,
       locked: false,
       updated_at: new Date().toISOString(),
     });

@@ -3,7 +3,7 @@ import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
 import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { fetchParkFactorsMap, type ParkFactorsMap } from "@/lib/parkFactors";
-import { PRIOR_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { CURRENT_SEASON, PRIOR_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { computePitcherProjection, type PitcherProjectionInput } from "@/lib/pitcherProjection";
 import { PITCHING_EQ_DEFAULTS } from "@/hooks/usePitchingEquationWeights";
 import {
@@ -11,15 +11,18 @@ import {
   computePitcherMarketValue,
   computeHitterOWar,
   computeHitterMarketValue,
+  defaultHitterDepthRoleFromActualPa,
+  paForHitterDepthRole,
+  pitcherExpectedIp,
 } from "@/lib/depthRoles";
 
 // Fetch player meta needed to derive stored p_war / o_war / market_value
 // after a recalc. Returns nulls when player_id missing.
 async function fetchPlayerMetaForDerived(playerId: string | null | undefined) {
-  if (!playerId) return { conference: null, team: null, position: null, pa: null };
+  if (!playerId) return { conference: null, team: null, position: null, pa: null, ip: null, is_twp: false };
   const { data } = await supabase
     .from("players")
-    .select("conference, team, position, pa")
+    .select("conference, team, position, pa, ip, is_twp")
     .eq("id", playerId)
     .maybeSingle();
   return {
@@ -27,29 +30,72 @@ async function fetchPlayerMetaForDerived(playerId: string | null | undefined) {
     team: (data as any)?.team ?? null,
     position: (data as any)?.position ?? null,
     pa: (data as any)?.pa ?? null,
+    ip: (data as any)?.ip ?? null,
+    is_twp: !!(data as any)?.is_twp,
   };
+}
+
+// Derive pitcher depth role from real IP + coarse role. Mirrors
+// defaultPitcherDepthRoleFromIp in src/pages/team-builder/helpers.ts.
+function derivePitcherDepthRole(ip: number | null | undefined, role: "SP" | "RP" | "SM"): string {
+  const r: "SP" | "RP" = role === "SP" ? "SP" : "RP";
+  const ipNum = Number(ip);
+  if (!Number.isFinite(ipNum) || ipNum <= 0) {
+    return r === "SP" ? "weekend_starter" : "high_leverage_reliever";
+  }
+  if (r === "SP") {
+    if (ipNum >= 65) return "weekend_starter";
+    if (ipNum >= 35) return "weekday_starter";
+    return "swing_starter";
+  }
+  if (ipNum >= 40) return "workhorse_reliever";
+  if (ipNum >= 25) return "high_leverage_reliever";
+  if (ipNum >= 15) return "mid_leverage_reliever";
+  if (ipNum >= 8) return "low_impact_reliever";
+  return "specialist_reliever";
 }
 
 // Compute pitcher derived columns from a freshly-recalculated row.
 function derivePitcherStored(
   pRvPlus: number | null | undefined,
   role: "SP" | "RP" | "SM",
-  meta: { conference: string | null; team: string | null },
+  meta: { conference: string | null; team: string | null; is_twp?: boolean; ip?: number | null },
   eq: ReturnType<typeof readPitchingWeights>,
 ) {
-  const projectedIp = role === "SP" ? eq.pwar_ip_sp : role === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
+  // Derive granular depth role from real IP, then use depth-role-specific
+  // projected IP for the pWAR formula. Previously used coarse role IP
+  // (pwar_ip_sp / rp / sm) which produced wrong WAR for weekday_starter,
+  // swing_starter, low_impact_reliever, etc.
+  const pitcherDepthRole = derivePitcherDepthRole(meta.ip, role);
+  const projectedIp = pitcherExpectedIp(pitcherDepthRole as any, eq);
   const pWar = computePitcherWar(pRvPlus, projectedIp, eq);
   const marketValue = computePitcherMarketValue(pWar, { conference: meta.conference, role, team: meta.team }, eq);
-  return { p_war: pWar, market_value: marketValue, projected_ip: projectedIp };
+  // For TWPs: route MV to twp_pitcher_market_value and NULL out the shared
+  // market_value column so the hitter loop's market_value write doesn't get
+  // stomped (and so any unconverted read fails loud).
+  if (meta.is_twp) {
+    return { p_war: pWar, market_value: null, twp_pitcher_market_value: marketValue, projected_ip: projectedIp, pitcher_depth_role: pitcherDepthRole };
+  }
+  return { p_war: pWar, market_value: marketValue, projected_ip: projectedIp, pitcher_depth_role: pitcherDepthRole };
 }
 
 function deriveHitterStored(
   pWrcPlus: number | null | undefined,
-  meta: { conference: string | null; position: string | null; pa: number | null },
+  meta: { conference: string | null; position: string | null; pa: number | null; is_twp?: boolean },
 ) {
-  const oWar = computeHitterOWar(pWrcPlus, meta.pa, null);
+  // Derive depth role from raw PA → tier PA, matching per-team precompute math.
+  // Without this, oWAR is computed against raw PA which produces values that
+  // differ from what TB/PlayerProfile display via the depth-role overlay.
+  const hitterDepthRole = defaultHitterDepthRoleFromActualPa(meta.pa);
+  const projectedPa = paForHitterDepthRole(hitterDepthRole);
+  const oWar = computeHitterOWar(pWrcPlus, projectedPa, hitterDepthRole);
   const marketValue = computeHitterMarketValue(oWar, { conference: meta.conference, position: meta.position });
-  return { o_war: oWar, market_value: marketValue, projected_pa: meta.pa };
+  // For TWPs: route MV to twp_hitter_market_value and NULL the shared
+  // market_value column. Pitcher loop's derive does the same on its side.
+  if (meta.is_twp) {
+    return { o_war: oWar, market_value: null, twp_hitter_market_value: marketValue, projected_pa: projectedPa, hitter_depth_role: hitterDepthRole };
+  }
+  return { o_war: oWar, market_value: marketValue, projected_pa: projectedPa, hitter_depth_role: hitterDepthRole };
 }
 
 type PredictionRow = {
@@ -907,7 +953,7 @@ async function fetchPitcherContext(
           .from("Pitching Master")
           .select(PITCHER_SCOUTING_SELECT)
           .eq("source_player_id", sourceId)
-          .eq("Season", PRIOR_SEASON)
+          .eq("Season", CURRENT_SEASON)
           .maybeSingle();
         if (pm) scouting = mapPitchingMasterRow(pm);
       }
@@ -960,6 +1006,7 @@ async function fetchAllPredictionsForReturnerMode(season = 2026): Promise<Predic
       .from("player_predictions")
       .select("*")
       .eq("season", season)
+      .eq("variant", "regular")
       .in("model_type", ["returner", "transfer"])
       .in("status", ["active", "departed"])
       .or("from_avg.not.is.null,from_era.not.is.null")
@@ -1064,18 +1111,21 @@ export async function recalculatePredictionById(predictionId: string, updates: U
     }
     // Derive stored p_war + o_war + market_value so depth/dev/role changes
     // reflect in displays without re-running the precompute scripts.
+    //
+    // TWP path: derive functions route MV to twp_hitter_market_value /
+    // twp_pitcher_market_value and NULL the shared market_value column, so
+    // neither side's MV write stomps the other. No more "pitcher side wins"
+    // hack — each side has its own destination column.
     const meta = await fetchPlayerMetaForDerived(merged.player_id);
     const pitcherRole = ((updates as any).pitcher_role ?? (pitcherUpdate as any).pitcher_role ?? merged.pitcher_role ?? "RP") as "SP" | "RP" | "SM";
     const pitcherDerived = derivePitcherStored((pitcherUpdate as any).p_rv_plus, pitcherRole, meta, eq);
     const hitterDerived = deriveHitterStored((hitterResult as any).p_wrc_plus, meta);
-    // Hitter market_value would stomp pitcher market_value; for TWP we let the
-    // pitcher side win (pitcher precompute is canonical for value attribution).
-    const { market_value: _hitterMv, ...hitterDerivedNoMv } = hitterDerived;
     // Merge hitter result first, then pitcher fields — they target disjoint
-    // columns (p_avg/p_obp/... vs p_era/p_fip/...) so neither stomps the other.
+    // columns (p_avg/p_obp/... vs p_era/p_fip/...). For TWPs, derived puts
+    // each side's MV in a different column so order no longer matters.
     const { error: updateErr } = await supabase
       .from("player_predictions")
-      .update({ ...updates, ...hitterResult, ...pitcherUpdate, ...hitterDerivedNoMv, ...pitcherDerived, ...extraFields, locked: true })
+      .update({ ...updates, ...hitterResult, ...pitcherUpdate, ...hitterDerived, ...pitcherDerived, ...extraFields, locked: true })
       .eq("id", predictionId);
     if (updateErr) throw updateErr;
 
@@ -1221,9 +1271,12 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
     plFrom += 1000;
   }
   // 2) Hitter Master scouting -> bucket under players.id
+  // Use CURRENT_SEASON for the Master lookup (the just-imported season's
+  // actuals). The `season` arg drives which prediction rows we recalc
+  // (PROJECTION_SEASON), but Master data is always CURRENT_SEASON.
   let pfrom = 0;
   while (true) {
-    const { data } = await supabase.from("Hitter Master").select("source_player_id, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb").eq("Season", season).not("source_player_id", "is", null).range(pfrom, pfrom + 999);
+    const { data } = await supabase.from("Hitter Master").select("source_player_id, contact, line_drive, avg_exit_velo, pop_up, bb, chase, barrel, ev90, pull, la_10_30, gb").eq("Season", CURRENT_SEASON).not("source_player_id", "is", null).range(pfrom, pfrom + 999);
     for (const r of data || []) {
       const playerId = r.source_player_id ? sourceToPlayerId.get(r.source_player_id) : null;
       if (!playerId) continue;
@@ -1256,6 +1309,28 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
     const isoPR = isoPower != null ? isoPower / 50 * 100 : null;
     return { baPlus: baPR, obpPlus: obpPR, isoPlus: isoPR };
   };
+
+  // Pre-fetch player meta for both hitter + pitcher loops. Needed by
+  // deriveHitterStored/derivePitcherStored to compute o_war / p_war /
+  // market_value with depth-role-derived tier PA (the same math the per-team
+  // precompute and display overlays use).
+  const allPlayerIds = Array.from(
+    new Set([...hitterPreds, ...pitcherPreds].map((p) => p.player_id).filter((v): v is string => !!v)),
+  );
+  const metaByPlayerId = new Map<string, { conference: string | null; team: string | null; position: string | null; pa: number | null; ip: number | null; is_twp: boolean }>();
+  for (let i = 0; i < allPlayerIds.length; i += 100) {
+    const chunk = allPlayerIds.slice(i, i + 100);
+    const { data } = await supabase
+      .from("players")
+      .select("id, conference, team, position, pa, ip, is_twp")
+      .in("id", chunk);
+    for (const r of (data || []) as any[]) {
+      metaByPlayerId.set(r.id, { conference: r.conference, team: r.team, position: r.position, pa: r.pa, ip: r.ip, is_twp: !!r.is_twp });
+    }
+  }
+
+  // Pitcher equation weights — needed by derivePitcherStored.
+  const pitchingEqForDerive = readPitchingWeights();
 
   let updated = 0;
   let errors = 0;
@@ -1295,6 +1370,19 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
             };
             result = recalcReturner(pred, config.returner, powerContext);
           }
+          // Derive stored o_war / market_value / projected_pa / hitter_depth_role
+          // so the regular variant row carries the same authoritative values that
+          // the per-team precompute writes to its rows. Without this, regular rows
+          // stay NULL and reads fall back to overlay-on-stale math.
+          // SAFETY: only spread derived fields when recalc produced a real
+          // p_wrc_plus — otherwise we'd write NULL on top of populated values
+          // for rows where the recalc fell through (missing inputs, etc.).
+          const hitterMetaForDerive = (pred.player_id ? metaByPlayerId.get(pred.player_id) : null)
+            ?? { conference: null, team: null, position: null, pa: null, is_twp: false };
+          const hitterDerived = (result as any).p_wrc_plus != null
+            ? deriveHitterStored((result as any).p_wrc_plus, hitterMetaForDerive)
+            : {};
+
           // The protect_locked_predictions trigger blocks updates when locked=true,
           // so we MUST unlock before writing the recalculated fields, then re-lock.
           let lastErr: any = null;
@@ -1308,7 +1396,7 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
               if (unlockErr) { lastErr = unlockErr; throw unlockErr; }
               const { error: e } = await supabase
                 .from("player_predictions")
-                .update({ ...result, locked: true })
+                .update({ ...result, ...hitterDerived, locked: true })
                 .eq("id", pred.id);
               if (!e) { success = true; break; }
               lastErr = e;
@@ -1397,7 +1485,7 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
       const { data } = await supabase
         .from("Pitching Master")
         .select(PITCHER_SCOUTING_SELECT)
-        .eq("Season", season)
+        .eq("Season", CURRENT_SEASON)
         .in("source_player_id", chunk);
       for (const r of (data || []) as any[]) {
         if (r.source_player_id) scoutingBySourceId.set(r.source_player_id, mapPitchingMasterRow(r));
@@ -1435,6 +1523,26 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
             const coachRoleOverride = pred.player_id ? coachRoleByPlayerId.get(pred.player_id) ?? null : null;
             const { predictionUpdate, internalsUpdate } = recalcPitcher(pred, pitchingEq, pitchingPowerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride);
 
+            // Derive stored p_war / market_value / projected_ip the same way
+            // the per-team precompute does, so the regular variant row carries
+            // authoritative values instead of staying NULL.
+            // SAFETY: only spread derived fields when recalc produced a real
+            // p_rv_plus — otherwise we'd write NULL on top of populated values
+            // for rows where the recalc fell through (e.g. returner pitcher with
+            // missing scouting inputs).
+            const pitcherRole = ((predictionUpdate as any).pitcher_role ?? pred.pitcher_role ?? "RP") as "SP" | "RP" | "SM";
+            const pitcherMeta = pred.player_id ? metaByPlayerId.get(pred.player_id) : null;
+            const pitcherIsTwp = pitcherMeta?.is_twp ?? false;
+            const pitcherIp = pitcherMeta?.ip ?? null;
+            const pitcherDerived = (predictionUpdate as any).p_rv_plus != null
+              ? derivePitcherStored(
+                  (predictionUpdate as any).p_rv_plus,
+                  pitcherRole,
+                  { conference: ctx?.conference ?? null, team: ctx?.team ?? null, is_twp: pitcherIsTwp, ip: pitcherIp },
+                  pitchingEqForDerive,
+                )
+              : {};
+
             // Unlock → update → re-lock (same pattern as hitter loop).
             let lastErr: any = null;
             let success = false;
@@ -1447,7 +1555,7 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
                 if (unlockErr) { lastErr = unlockErr; throw unlockErr; }
                 const { error: e } = await supabase
                   .from("player_predictions")
-                  .update({ ...predictionUpdate, locked: true })
+                  .update({ ...predictionUpdate, ...pitcherDerived, locked: true })
                   .eq("id", pred.id);
                 if (!e) { success = true; break; }
                 lastErr = e;

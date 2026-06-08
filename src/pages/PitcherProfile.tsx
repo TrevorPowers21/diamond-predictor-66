@@ -26,6 +26,7 @@ import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/Scou
 import { AiScoutingReportBody } from "@/components/AiScoutingReport";
 import { useScoutingReport } from "@/hooks/useScoutingReport";
 import CoachNotes from "@/components/CoachNotes";
+import { ABSComparisonTable } from "@/components/ABSComparisonTable";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
 import { generateCoachNotesPdf, generateReportPdf } from "@/lib/pdfGenerator";
 import { assessPitcherRisk } from "@/lib/playerRisk";
@@ -48,6 +49,7 @@ import {
   type PitcherDepthRole,
 } from "@/lib/depthRoles";
 import { defaultPitcherDepthRoleFromIp } from "@/pages/team-builder/helpers";
+import { pickPitcherMarketValue } from "@/lib/twpMarketValue";
 
 const fmt = (v: number | null | undefined, digits = 3) => (v == null ? "—" : Number(v).toFixed(digits));
 const fmtWhole = (v: number | null | undefined) => (v == null ? "—" : Math.round(v).toString());
@@ -1127,13 +1129,23 @@ export default function PitcherProfile() {
         : 0);
   const [projectedRole, setProjectedRole] = useState<"SP" | "RP" | "SM">(initialProjectedRole as "SP" | "RP" | "SM");
   const [projectedDevAggressiveness, setProjectedDevAggressiveness] = useState<number>(initialProjectedDevAggressiveness);
-  // Session-only depth role overlay. Default derived from stored pitcher_role +
-  // sample IP — no DB writes, resets on navigation. Drives the displayed
-  // pWAR + market_value via the depthRoles helpers.
-  const initialDepthRole: PitcherDepthRole = defaultPitcherDepthRoleFromIp(
-    storageIp,
-    (effectiveRoleDisplay === "SP" || effectiveRoleDisplay === "RP") ? effectiveRoleDisplay : "RP",
-  );
+  // Session-only depth role overlay. Prefer stored pitcher_depth_role (written
+  // by the precompute worker / bulkRecalc); fall back to deriving from stored
+  // pitcher_role + sample IP for older rows. Drives the displayed pWAR +
+  // market_value via the depthRoles helpers.
+  const initialDepthRole: PitcherDepthRole = (() => {
+    const stored = (activePrediction as any)?.pitcher_depth_role;
+    const validDepths: PitcherDepthRole[] = [
+      "weekend_starter", "weekday_starter", "swing_starter",
+      "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever",
+      "low_impact_reliever", "specialist_reliever",
+    ];
+    if (validDepths.includes(stored)) return stored as PitcherDepthRole;
+    return defaultPitcherDepthRoleFromIp(
+      storageIp,
+      (effectiveRoleDisplay === "SP" || effectiveRoleDisplay === "RP") ? effectiveRoleDisplay : "RP",
+    );
+  })();
   const [depthRole, setDepthRole] = useState<PitcherDepthRole>(initialDepthRole);
   useEffect(() => {
     setProjectedRole(initialProjectedRole as "SP" | "RP" | "SM");
@@ -1160,14 +1172,22 @@ export default function PitcherProfile() {
       tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
     };
 
-    // Stored-first: prefer precomputed row (team transfer) then returner row.
-    // Session overlays (role transition, dev_agg, depth role) apply on top —
-    // no raw-input recompute, no DB writes.
+    // Pick the right stored row:
+    //   - Portal / target pitchers (transfer_portal or portal_status IN/COMMITTED):
+    //     use the team-scoped precomputed row so coaches see the "what if this
+    //     transfer joined our staff" projection.
+    //   - Returners (everyone else): use the global returner row — their
+    //     own-team projection. Matches Dashboard so profile and dashboard
+    //     agree for the same player.
+    const portalStatus = (player as any)?.portal_status as string | null | undefined;
+    const isPortalCandidate = !!((player as any)?.transfer_portal || portalStatus === "IN PORTAL" || portalStatus === "COMMITTED");
     const storedTeamRow = effectiveTeamId
       ? (predictions as any[]).find((p) => p.customer_team_id === effectiveTeamId && p.variant === "precomputed")
       : null;
     const storedReturnerRow = (predictions as any[]).find((p) => p.model_type === "returner" && p.variant === "regular" && p.customer_team_id == null);
-    const stored = storedTeamRow ?? storedReturnerRow ?? null;
+    const stored = isPortalCandidate && storedTeamRow
+      ? storedTeamRow
+      : (storedReturnerRow ?? storedTeamRow ?? null);
 
     const overlayIp = pitcherExpectedIp(depthRole, eq);
     const storedDevAgg = Number.isFinite(Number((stored as any)?.dev_aggressiveness)) ? Number((stored as any).dev_aggressiveness) : 0;
@@ -1215,47 +1235,28 @@ export default function PitcherProfile() {
       : devAggUnchanged
         ? rolePRvPlus
         : 100 + ((rolePRvPlus - 100) * (1 + devAggDelta));
-    // Use stored values only when the chosen depth's projected IP matches
-    // the IP the stored value was computed at. The precompute uses a single
-    // baseline IP per role bucket (pwar_ip_sp / pwar_ip_rp / pwar_ip_sm).
-    // If the depth's IP differs (e.g. specialist_reliever's 6 IP vs RP's
-    // ~33 IP baseline), the stored market value is for a different role
-    // size and must be recomputed. This catches both user depth changes
-    // AND auto-assigned defaults (e.g. 1-IP pitchers auto-defaulting to
-    // specialist_reliever despite stored being computed at RP baseline).
-    const storedBaselineIp =
-      storedRole === "SP" ? eq.pwar_ip_sp
-      : storedRole === "SM" ? eq.pwar_ip_sm
-      : eq.pwar_ip_rp;
-    const depthIp = overlayIp;
-    const storedDefaultDepth = stored != null
-      && storedBaselineIp != null
-      && Math.abs(depthIp - storedBaselineIp) < 1;
-    const noOverlay = storedDefaultDepth && devAggUnchanged && !roleChanged;
-    const overlayPWar = noOverlay
-      ? (stored?.p_war ?? null)
-      : computePitcherWar(overlayPRvPlus, overlayIp, eq);
-    const teamForMarket = displayTeam || null;
-    const conferenceForMarket = displayConference === "—" ? null : displayConference;
-    // When recomputing live (depth or dev_agg changed) BUT stored exists,
-    // scale the stored market value by the pWAR ratio (and PVF ratio if the
-    // role bucket changed). This preserves the customer team's conference
-    // tier baked into stored.market_value — otherwise we'd be mixing the
-    // tier the precompute used with the tier displayConference resolves to,
-    // which produces nonsense when stored is precomputed for one team and
-    // the profile renders at the player's current conference.
+    // PlayerProfile pattern: stored × overlayScale, no `noOverlay` branch.
+    // overlayScale is a single multiplier built from IP ratio (depth knob) +
+    // devAgg ratio + role-transition PVF ratio. When all knobs match stored,
+    // every ratio defaults to 1, so the displayed values equal stored. As
+    // soon as the coach moves a knob, the corresponding ratio shifts and
+    // the displayed pWAR + market_value update accordingly.
     const newRoleBucket = pitcherRoleFromDepthRole(depthRole);
     const storedRoleBucket = (storedRole as "SP" | "RP" | "SM" | null) ?? newRoleBucket;
-    const overlayMarketValue = noOverlay
-      ? (stored?.market_value ?? null)
-      : stored?.market_value != null && stored?.p_war != null && stored.p_war > 0 && overlayPWar != null && Number.isFinite(overlayPWar)
-        ? (() => {
-            const pvfStored = getPitchingPvfForRole(storedRoleBucket, eq);
-            const pvfNew = getPitchingPvfForRole(newRoleBucket, eq);
-            const pvfRatio = pvfStored > 0 ? pvfNew / pvfStored : 1;
-            return stored.market_value * (overlayPWar / stored.p_war) * pvfRatio;
-          })()
-        : computePitcherMarketValue(overlayPWar, { conference: conferenceForMarket, role: newRoleBucket, team: teamForMarket }, eq);
+    const storedProjectedIp = Number((stored as any)?.projected_ip);
+    const ipScale = Number.isFinite(storedProjectedIp) && storedProjectedIp > 0
+      ? overlayIp / storedProjectedIp
+      : 1;
+    const pvfStored = getPitchingPvfForRole(storedRoleBucket, eq);
+    const pvfNew = getPitchingPvfForRole(newRoleBucket, eq);
+    const pvfRatio = pvfStored > 0 ? pvfNew / pvfStored : 1;
+    const devAggScale = devAggUnchanged ? 1 : (1 + devAggDelta);
+    const overlayScale = ipScale * pvfRatio * devAggScale;
+    const overlayPWar = stored?.p_war != null ? Number(stored.p_war) * overlayScale : null;
+    // TWP-aware: for is_twp=true rows, stored.market_value is NULL by design;
+    // pull from twp_pitcher_market_value via the helper. Non-TWPs unchanged.
+    const storedPitcherMv = pickPitcherMarketValue(stored as any, !!(player as any)?.is_twp);
+    const overlayMarketValue = storedPitcherMv != null ? storedPitcherMv * overlayScale : null;
     const scaleLow = (v: number | null | undefined) =>
       v == null ? null : devAggUnchanged ? v : v * (1 - devAggDelta);
     const scaleHigh = (v: number | null | undefined) =>
@@ -1272,14 +1273,13 @@ export default function PitcherProfile() {
       pWar: overlayPWar,
       marketValue: overlayMarketValue,
       projectedIp: overlayIp,
-      // Stored scouting scores from the picked prediction row — 1=1 with
-      // Pitching Master via propagate_pitcher_scores_to_predictions().
-      // Use pitcher_barrel_score (domain-scoped column added 2026-06-03)
-      // so two-way players' hitter values can't bleed in. Legacy
-      // whiff_score / bb_score are pitcher-domain only — no collision.
-      whiffScore: (stored as any)?.whiff_score ?? null,
-      bbScore: (stored as any)?.bb_score ?? null,
-      barrelScore: (stored as any)?.pitcher_barrel_score ?? null,
+      // Stored scouting scores from the picked prediction row — read the
+      // domain-scoped pitcher_*_score columns first (canonical source after
+      // 2026-06-03 split migration), fall back to legacy columns for rows
+      // written before propagation function was updated.
+      whiffScore: (stored as any)?.pitcher_whiff_score ?? (stored as any)?.whiff_score ?? null,
+      bbScore: (stored as any)?.pitcher_bb_score ?? (stored as any)?.bb_score ?? null,
+      barrelScore: (stored as any)?.pitcher_barrel_score ?? (stored as any)?.barrel_score ?? null,
     };
   }, [
     projectedDevAggressiveness,
@@ -1959,6 +1959,13 @@ export default function PitcherProfile() {
             {/* Portal Move — same compact card style as Career Stats */}
             {player && (player.transfer_portal || ["IN PORTAL", "COMMITTED", "WITHDRAWN"].includes(String((player as any).portal_status || "").toUpperCase())) && (
               <PortalTeamCards player={player as any} />
+            )}
+
+            {player && (
+              <ABSComparisonTable
+                sourcePlayerId={(player as any).source_player_id ?? null}
+                playerType="pitcher"
+              />
             )}
 
             {isAdmin && internalPowerRatings ? (
