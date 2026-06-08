@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { CURRENT_SEASON, PRIOR_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { pickHitterMarketValue, pickPitcherMarketValue } from "@/lib/twpMarketValue";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -870,7 +871,7 @@ export default function TransferPortal() {
       if (!selectedPlayer?.player_id) return [];
       const { data, error } = await supabase
         .from("player_predictions")
-        .select("id, player_id, customer_team_id, variant, model_type, status, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, o_war, market_value")
+        .select("id, player_id, customer_team_id, variant, model_type, status, from_avg, from_obp, from_slg, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value")
         .eq("player_id", selectedPlayer.player_id)
         .eq("season", PROJECTION_SEASON)
         .in("status", ["active", "departed"])
@@ -917,7 +918,7 @@ export default function TransferPortal() {
       if (!selectedPitcherPlayerId) return [];
       const { data, error } = await supabase
         .from("player_predictions")
-        .select("id, player_id, customer_team_id, variant, model_type, status, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, pitcher_role")
+        .select("id, player_id, customer_team_id, variant, model_type, status, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, pitcher_role")
         .eq("player_id", selectedPitcherPlayerId)
         .eq("season", PROJECTION_SEASON)
         .in("status", ["active", "departed"])
@@ -1311,7 +1312,9 @@ export default function TransferPortal() {
       pWrc: null,
       pWrcPlus: row?.p_wrc_plus ?? null,
       owar: row?.o_war ?? null,
-      nilValuation: row?.market_value ?? null,
+      // TWP-aware: raw market_value is NULL for is_twp=true rows by design;
+      // pickHitterMarketValue routes to twp_hitter_market_value for them.
+      nilValuation: pickHitterMarketValue(row as any, !!(selectedPlayer as any)?.is_twp),
       // Live-compute breakdowns dropped (Context+Multipliers + Show Work
       // sections removed). Stored predictions don't carry the per-factor
       // equation breakdown.
@@ -1373,7 +1376,8 @@ export default function TransferPortal() {
       pHr9: row?.p_hr9 ?? null,
       pRvPlus: row?.p_rv_plus ?? null,
       pWar: row?.p_war ?? null,
-      marketValue: row?.market_value ?? null,
+      // TWP-aware: pull from twp_pitcher_market_value when is_twp=true.
+      marketValue: pickPitcherMarketValue(row as any, !!(selectedPitcher as any)?.is_twp),
       projectedRole: role,
       fromConference: selectedPitcher.conference ?? null,
       toConference: null,
