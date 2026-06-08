@@ -56,25 +56,47 @@ export function detect(probe: CsvProbe): DetectionResult {
 
   const scored = REGISTRY.map((entry) => scoreEntry(probe, entry));
 
-  // Eliminate entries missing any required column
-  const eligible = scored.filter((s) => s.required === s.entry.required.length);
+  // FILENAME-FIRST detection: a CSV must match a registry entry's filenameHints
+  // to be imported at all. Column-header signatures are only used as a sanity
+  // check on the filename-matched entry, never as a fallback.
+  //
+  // 2026-06-09: shifted from "filename OR signature" to "filename required"
+  // because the auto-portal-pull was importing stale Master/ABS CSVs left in
+  // the inbox — they matched signature columns even though the filename had
+  // no portal hint. End result: a portal cron silently re-ran the full
+  // master cascade on a Friday, mangling production data.
+  const filenameMatched = scored.filter((s) => s.filename);
 
-  if (eligible.length === 0) {
-    // Find the closest near-miss to explain
-    const best = [...scored].sort((a, b) => b.required - a.required + (b.signature - a.signature) * 0.01)[0];
-    const missing = best.entry.required.filter((r) => !hasColumnCI(probe.header, r));
+  if (filenameMatched.length === 0) {
     return {
       probe,
       match: null,
       confidence: "none",
-      reason: `No registry entry matched. Closest: ${best.entry.label} (missing required: ${missing.join(", ")}).`,
+      reason: `No registry entry matched on filename. To import this file, rename it to match a filenameHint pattern, or add a new entry to REGISTRY.`,
       alternates: scored
+        .filter((s) => s.required === s.entry.required.length && s.signature > 0)
         .map((s) => ({ entry: s.entry, score: compositeScore(s) }))
         .sort((a, b) => b.score - a.score)
         .slice(0, 3),
     };
   }
 
+  // Among filename-matched entries, require the required columns to be present.
+  const eligible = filenameMatched.filter((s) => s.required === s.entry.required.length);
+
+  if (eligible.length === 0) {
+    const best = [...filenameMatched].sort((a, b) => b.required - a.required + (b.signature - a.signature) * 0.01)[0];
+    const missing = best.entry.required.filter((r) => !hasColumnCI(probe.header, r));
+    return {
+      probe,
+      match: null,
+      confidence: "none",
+      reason: `Filename matched ${best.entry.label} but file is missing required columns: ${missing.join(", ")}.`,
+      alternates: filenameMatched.map((s) => ({ entry: s.entry, score: compositeScore(s) })),
+    };
+  }
+
+  // Multiple filename matches (rare) — tiebreak on signature column count.
   eligible.sort((a, b) => compositeScore(b) - compositeScore(a));
   const winner = eligible[0];
   const runnerUp = eligible[1];
@@ -88,10 +110,9 @@ export function detect(probe: CsvProbe): DetectionResult {
   if (winnerRatio >= 0.5 && margin >= 10) confidence = "high";
   else if (winnerRatio >= 0.3 && margin >= 5) confidence = "medium";
   else if (winnerRatio > 0) confidence = "low";
-  else confidence = "none";
+  else confidence = "medium"; // filename matched but no signature columns — still safe to import
 
-  const filenameNote = winner.filename ? " (filename hint matched)" : "";
-  const reason = `Matched ${winnerSig}/${winnerTotalSig} signature columns${filenameNote}.`;
+  const reason = `Filename matched ${winner.entry.label}; ${winnerSig}/${winnerTotalSig} signature columns also present.`;
 
   return {
     probe,

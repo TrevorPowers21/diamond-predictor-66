@@ -297,15 +297,21 @@ function PlayerTableRow({
         ) : (
           (() => {
             const dbPos = p.player?.position || "";
+            // Reject pitcher-position lookups — TWPs whose Hitter Master row
+            // still has Pos="P" (legacy) would otherwise override their real
+            // hitter position from `players`. The hitter tab should never show
+            // a pitcher position in this column.
+            const isPitcherPos = (s: string) => /^(SP|RP|CL|LHP|RHP|P)$/i.test(s.trim());
             if (dbPos === "OF" || !dbPos) {
               const fullName = `${p.player?.first_name || ""} ${p.player?.last_name || ""}`.trim();
               const team = p.player?.team || "";
               const posMap = exitPositions as Record<string, string>;
               const exact = posMap[`${fullName}|${team}`] || posMap[fullName];
-              if (exact) return exact;
+              if (exact && !isPitcherPos(exact)) return exact;
               const namePrefix = `${fullName}|`;
               for (const key of Object.keys(posMap)) {
-                if (key.startsWith(namePrefix)) return posMap[key];
+                const v = posMap[key];
+                if (key.startsWith(namePrefix) && v && !isPitcherPos(v)) return v;
               }
               return dbPos || "—";
             }
@@ -391,7 +397,11 @@ function PlayerTableRow({
               : 0,
           )}
           onValueChange={(v) =>
-            updatePlayerWithRecalc(globalIdx, {
+            // Profile-style: session-only update, no DB recalc round trip.
+            // The session overlay in the simulation handles the math (same
+            // formula PlayerProfile uses). One state change → one re-render →
+            // values move and stay put. No multi-call flicker, no DB write.
+            updatePlayer(globalIdx, {
               dev_aggressiveness: Number(v),
               dev_aggressiveness_overridden: true,
             })

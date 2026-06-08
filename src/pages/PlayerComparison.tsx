@@ -13,6 +13,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { pickPreferredPrediction } from "@/lib/teamScopedPredictions";
+import { pickHitterMarketValue, pickPitcherMarketValue } from "@/lib/twpMarketValue";
 import { cn } from "@/lib/utils";
 
 const PROJECTION_SEASON = 2027;
@@ -145,7 +146,7 @@ export default function PlayerComparison() {
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, position, team, conference")
+          .select("id, first_name, last_name, position, team, conference, is_twp")
           .order("id", { ascending: true })
           .range(from, from + PAGE - 1);
         if (error) throw error;
@@ -174,7 +175,7 @@ export default function PlayerComparison() {
       const { data, error } = await supabase
         .from("player_predictions")
         .select(
-          "id, player_id, customer_team_id, variant, model_type, status, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, o_war, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, pitcher_role",
+          "id, player_id, customer_team_id, variant, model_type, status, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, o_war, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, pitcher_role",
         )
         .in("player_id", ids)
         .eq("season", PROJECTION_SEASON)
@@ -361,10 +362,17 @@ export default function PlayerComparison() {
                   <div className="text-muted-foreground text-[10px] uppercase tracking-wide">oWAR</div>
                   <div className="text-2xl font-bold tabular-nums">{row.o_war?.toFixed(2) ?? "—"}</div>
                 </div>
-                <div className={`rounded-lg border-2 p-3 text-center ${heroColor(row.market_value, 75000, 25000)}`}>
-                  <div className="text-muted-foreground text-[10px] uppercase tracking-wide">Market Value</div>
-                  <div className="text-xl font-bold tabular-nums">{money(row.market_value)}</div>
-                </div>
+                {(() => {
+                  // TWP-aware: raw market_value is NULL for is_twp=true rows;
+                  // pickHitterMarketValue routes to twp_hitter_market_value.
+                  const hitterMv = pickHitterMarketValue(row as any, !!(player as any)?.is_twp);
+                  return (
+                    <div className={`rounded-lg border-2 p-3 text-center ${heroColor(hitterMv, 75000, 25000)}`}>
+                      <div className="text-muted-foreground text-[10px] uppercase tracking-wide">Market Value</div>
+                      <div className="text-xl font-bold tabular-nums">{money(hitterMv)}</div>
+                    </div>
+                  );
+                })()}
               </div>
               <div className="grid grid-cols-5 gap-1.5">
                 {([
@@ -482,10 +490,16 @@ export default function PlayerComparison() {
                   <div className="text-muted-foreground text-[10px] uppercase tracking-wide">pWAR</div>
                   <div className="text-2xl font-bold tabular-nums">{row.p_war?.toFixed(2) ?? "—"}</div>
                 </div>
-                <div className={`rounded-lg border-2 p-3 text-center ${heroColor(row.market_value, 75000, 25000)}`}>
-                  <div className="text-muted-foreground text-[10px] uppercase tracking-wide">Market Value</div>
-                  <div className="text-xl font-bold tabular-nums">{money(row.market_value)}</div>
-                </div>
+                {(() => {
+                  // TWP-aware: pull from twp_pitcher_market_value when is_twp=true.
+                  const pitcherMv = pickPitcherMarketValue(row as any, !!(player as any)?.is_twp);
+                  return (
+                    <div className={`rounded-lg border-2 p-3 text-center ${heroColor(pitcherMv, 75000, 25000)}`}>
+                      <div className="text-muted-foreground text-[10px] uppercase tracking-wide">Market Value</div>
+                      <div className="text-xl font-bold tabular-nums">{money(pitcherMv)}</div>
+                    </div>
+                  );
+                })()}
               </div>
               <div className="grid grid-cols-3 gap-1.5">
                 {([
