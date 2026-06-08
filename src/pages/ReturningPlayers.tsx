@@ -1551,9 +1551,19 @@ export default function ReturningPlayers() {
       // existing hitter-pool OR (position.not.in.pitchers,is_twp). The confIdMap is
       // built and ready for when a solution is found (Supabase RPC or denormalised column).
       // All other filters (class, bats, position, portal) use the fast path.
+      //
+      // EXCEPT: when the COMMITTED portal filter is active, force the slow path.
+      // Committed players don't always have a precomputed prediction at the
+      // active customer team (the precompute pipeline skips off-market players
+      // for that team's scope), so the prediction-joined fast path silently
+      // hides them. The slow path enriches the result with a direct players-
+      // table query for is_twp=COMMITTED rows that the prediction join missed,
+      // so coaches see every committed player and know who's off the table.
+      const committedFilterActive = portalFilters.has("COMMITTED");
       if (
         FAST_DB_SORT_KEYS.includes(sortKey) &&
-        confFilters.size === 0
+        confFilters.size === 0 &&
+        !committedFilterActive
       ) {
         const orderColumn =
           sortKey === "p_war"
@@ -1751,6 +1761,67 @@ export default function ReturningPlayers() {
         }
 
         let allRows = dedupedRows.map((row: any) => toReturnerRow(row, row.players, nilByPlayer));
+
+        // Committed-player enrichment. The prediction-joined query above
+        // requires a precomputed row at the active customer team to surface
+        // a player. The pipeline doesn't always generate one for COMMITTED
+        // players (they're off-market), so coaches couldn't see who'd already
+        // chosen a destination — exactly the info that tells you not to waste
+        // recruiting effort. Pull committed players directly from `players`
+        // and synthesize null-projection rows for any that the join missed.
+        if (committedFilterActive) {
+          const existingIds = new Set(allRows.map((r) => r.id));
+          let extra: any[] = [];
+          let extraFrom = 0;
+          const EXTRA_PAGE = 1000;
+          while (true) {
+            // Match the hitter-pool filter the prediction-joined query uses
+            // (non-pitcher position OR TWP) so committed pitchers don't leak
+            // into the hitter tab. PA ≥ 75 keeps the same noise floor; TWPs
+            // pass even with low PA.
+            const { data, error } = await supabase
+              .from("players")
+              .select("id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip, division")
+              .eq("portal_status", "COMMITTED")
+              .or("and(position.not.in.(SP,RP,CL,P,LHP,RHP),pa.gte.75),is_twp.eq.true")
+              .not("division", "eq", "NJCAA_D1")
+              .order("id", { ascending: true })
+              .range(extraFrom, extraFrom + EXTRA_PAGE - 1);
+            if (error) throw error;
+            extra = extra.concat(data || []);
+            if (!data || data.length < EXTRA_PAGE) break;
+            extraFrom += EXTRA_PAGE;
+          }
+          const synth = extra
+            .filter((p) => !existingIds.has(p.id))
+            .map((p) => ({
+              id: p.id,
+              prediction_id: null,
+              first_name: p.first_name,
+              last_name: p.last_name,
+              team: p.team,
+              conference: p.conference,
+              position: p.position,
+              is_twp: p.is_twp ?? null,
+              class_year: p.class_year,
+              bats_hand: p.bats_hand ?? null,
+              transfer_portal: p.transfer_portal,
+              portal_status: "COMMITTED",
+              model_type: null,
+              status: null,
+              pa: p.pa ?? null,
+              nil_value: null,
+              prediction: {
+                from_avg: null, from_obp: null, from_slg: null,
+                class_transition: null, dev_aggressiveness: null,
+                p_avg: null, p_obp: null, p_slg: null, p_ops: null, p_iso: null,
+                p_wrc_plus: null, o_war: null, power_rating_plus: null,
+                ev_score: null, barrel_score: null, contact_score: null, chase_score: null,
+              },
+            } as ReturnerPlayer));
+          allRows = allRows.concat(synth);
+        }
+
         if (positionFilters.size > 0) allRows = allRows.filter((p) => positionMatchesFilter(p.position, p.is_twp));
         if (classFilters.size > 0) allRows = allRows.filter((p) => p.class_year != null && classFilters.has(p.class_year));
         if (batsFilters.size > 0) allRows = allRows.filter((p) => p.bats_hand != null && batsFilters.has(p.bats_hand));
