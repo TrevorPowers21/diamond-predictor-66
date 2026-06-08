@@ -3,7 +3,7 @@ import { Sparkles, ArrowLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const STORAGE_KEY = "rstr_iq_whats_new_seen_v3";
+const STORAGE_KEY = "rstr_iq_whats_new_seen_v4";
 
 type Feature = {
   title: string;
@@ -19,6 +19,45 @@ type Release = {
 };
 
 const RELEASES: Release[] = [
+  {
+    date: "2026-06-09",
+    headline: "Refined Two-Way Player valuations, full committed-player visibility, and live Team Builder pitching controls",
+    features: [
+      {
+        title: "Two-Way Player Valuations, Split By Side",
+        tagline:
+          "Two-way players like Josiah Overbeek now carry a dedicated hitter market value and pitcher market value across every surface. Each view surfaces the right number for the role you're evaluating.",
+        details: [
+          "Player Dashboard, Player Profile, Compare, Transfer Portal Simulator, and Team Builder all pull the correct side-specific value.",
+          "Team Builder splits two-way targets into a hitter line and a pitcher line on add, each with its own projection and market value.",
+        ],
+      },
+      {
+        title: "Full Visibility on Committed Players",
+        tagline:
+          "Toggle Committed in the Player Dashboard Portal filter and you'll now see every player who's chosen a destination across the country. Recruiting time stays focused on the players who are still in play.",
+        details: [
+          "Home-page commit count and the table count now match exactly.",
+          "Surfaces committed players regardless of where they signed, so the board reflects the full picture.",
+        ],
+      },
+      {
+        title: "Live Team Builder Pitching Controls",
+        tagline:
+          "Move a pitcher's depth role, SP / RP role, or dev aggressiveness and pWAR, Market Value, and every rate stat update on the spot. Same instant feedback the hitter controls have.",
+        details: [
+          "Depth role adjusts pWAR and Market Value based on the implied IP load.",
+          "SP ↔ RP toggle re-baselines rates with the elite-reliever progression curve so the projection reflects how the role actually translates.",
+          "Dev aggressiveness scales every rate stat in the right direction and flows through to pRV+, pWAR, and Market Value.",
+        ],
+      },
+    ],
+    whatElse: [
+      "Player Dashboard: the hitter-tab position column prioritizes the player's offensive position record for cleaner display.",
+      "Team Builder: two-way players appear once on the hitter tab and once on the pitcher tab with the right position label on each.",
+      "Portal sync: tightened source matching and adjusted to a three-hour cadence as portal activity has settled.",
+    ],
+  },
   {
     date: "2026-06-04",
     headline: "Smarter Team Builder hitter controls, faster Transfer Portal, expanded pitcher coverage",
