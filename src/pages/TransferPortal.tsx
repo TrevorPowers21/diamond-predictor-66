@@ -63,6 +63,7 @@ type SimPlayer = {
   bats_hand: string | null;
   throws_hand: string | null;
   handedness: string | null;
+  is_twp: boolean | null;
 };
 
 type ConferenceRow = {
@@ -626,6 +627,7 @@ export default function TransferPortal() {
           bats_hand: (p.bats_hand as string | null) ?? null,
           throws_hand: (p.throws_hand as string | null) ?? null,
           handedness: (p.handedness as string | null) ?? null,
+          is_twp: (p.is_twp as boolean | null) ?? null,
           from_avg: null,
           from_obp: null,
           from_slg: null,
