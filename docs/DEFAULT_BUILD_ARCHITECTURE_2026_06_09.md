@@ -284,21 +284,33 @@ Before deploying to prod:
 
 ---
 
-## Open Questions for Trevor
+## Resolved Questions
 
 1. **Who creates the default build — client-side script or Edge Function?**  
-   The current precompute trigger fires a Supabase Edge Function. Should default build
-   creation be an additional step in that same function, or a separate trigger
-   that fires after precompute jobs complete?
+   **Resolved:** Add default build creation as the final step of the existing
+   precompute Edge Function that fires when a new customer team is added.
+   No separate trigger needed.
 
-2. **`player_snapshot` population at default build creation**  
-   Snapshots are currently written client-side via `buildBuildPlayerRow`. For
-   server-side default build creation we need equivalent server logic. The
-   `refresh_build_snapshots_for_team` SQL function (migration `20260604180001`)
-   already exists and handles this. Should we call it as the final step of
-   default build creation?
+   **Follow-up — Keeping snapshots current through the spring:**  
+   When new regular season data is uploaded mid-spring (e.g., updated TruMedia CSV),
+   the recompute cascade refreshes `player_predictions`. The precompute Edge Function
+   should also call `refresh_build_snapshots_for_team` as its final step on every run
+   — not just at initial setup. This keeps all active default build snapshots current
+   with the latest predictions automatically.  
+   For **coach builds**: same refresh applies — underlying prediction updates, coach
+   overlays (depth role, devAgg) are preserved and re-applied from `production_notes`.
+   Coaches see updated numbers without losing their adjustments.
+
+2. **`user_id` on default builds**  
+   **Resolved:** Use the super admin's `user_id` who triggered the customer team
+   creation. No schema change required. The Edge Function runs with the service role
+   key but passes the admin's user_id as the build owner. Fully traceable, clean.  
+   The `refresh_build_snapshots_for_team` SQL function (migration `20260604180001`)
+   already exists and handles snapshot population server-side. It is called as the
+   final step of default build creation and on every subsequent precompute run.
 
 3. **Fall data equation weighting**  
-   Trevor noted that small fall samples may warrant 100% weight (vs. 30% blend for
-   full regular season). Is this a hardcoded rule (fall = 100%, regular = blend)
-   or should it be configurable per data period in `model_config`?
+   **Resolved:** Not hardcoded. Will be configurable via `model_config` per
+   `data_period`. Exact weighting models to be determined later through data science
+   testing when fall data is available. Schema supports it (`source_data_period` on
+   `player_predictions`); implementation deferred.
