@@ -7,6 +7,7 @@ import { importStuffPlusInputsCsv } from "@/lib/importStuffPlusInputsCsv";
 import { importConferenceStatsCsv, computeConferenceEnvRates } from "@/lib/importConferenceStats";
 import { importPortalEntriesCsv } from "@/lib/importPortalEntries";
 import { importAbsHitterStatsCsv, importAbsPitcherStatsCsv } from "@/lib/importAbsStats";
+import { importPlayerSlotValuesCsv } from "@/lib/importSlotValues";
 import { calculateConferenceStuffPlus } from "@/savant/lib/conferenceStuffPlus";
 import { addMissingPlayers, refreshPaIpFromMaster } from "@/lib/syncMasterToPlayers";
 import { createPredictionsFromMaster } from "@/lib/createPredictionsFromMaster";
@@ -368,6 +369,21 @@ export async function runImports(
           if (res.upserted > 0) importedFilePaths.push(r.probe.filePath);
         } catch (e) {
           err(`ABS pitcher importer threw: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        break;
+      }
+      case "player_slot_values": {
+        step(`${r.probe.fileName} → Player Slot Values`);
+        try {
+          // Draft year falls back to current season; importer also reads a
+          // draft_year column from the CSV if present (per-row would override).
+          const res = await importPlayerSlotValuesCsv(csvText, season);
+          ok(`${res.upserted} upserted (${res.matchedToPlayer} matched to player, ${res.highSchoolRows} HS, ${res.unmatchedCollegeRows} unmatched college, ${res.missingSlotValue} missing $) (${timeMs(startMs)})`);
+          for (const e of res.errors.slice(0, 3)) err(e);
+          if (res.errors.length > 3) warn(`...and ${res.errors.length - 3} more errors`);
+          if (res.upserted > 0) importedFilePaths.push(r.probe.filePath);
+        } catch (e) {
+          err(`Slot values importer threw: ${e instanceof Error ? e.message : String(e)}`);
         }
         break;
       }

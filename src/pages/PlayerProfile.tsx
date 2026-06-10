@@ -414,6 +414,26 @@ export default function PlayerProfile() {
     enabled: !!id && isAdmin && predictions.length > 0,
   });
 
+  // MLB Draft slot value (most recent draft cycle for this player).
+  // Returns null when the player isn't in player_slot_values — surface hides
+  // itself in that case.
+  const { data: slotValueRow } = useQuery({
+    queryKey: ["player-slot-value", id],
+    queryFn: async () => {
+      if (!id) return null;
+      const { data, error } = await supabase
+        .from("player_slot_values" as any)
+        .select("draft_year, rank, slot_value")
+        .eq("player_id", id)
+        .order("draft_year", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) return null;
+      return data as unknown as { draft_year: number; rank: number | null; slot_value: number } | null;
+    },
+    enabled: !!id,
+  });
+
   const updatePortalStatus = useMutation({
     mutationFn: async (fields: { portal_status: string; portal_entry_date: string | null; commit_school: string | null; commit_date: string | null }) => {
       const { error } = await supabase
@@ -1450,6 +1470,24 @@ export default function PlayerProfile() {
               </Card>
             )}
 
+            {/* MLB Draft slot — left column, between Career Stats and Portal Move */}
+            {slotValueRow && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border border-[#162241] bg-[#0d1a30] p-4 text-center min-h-[94px] flex flex-col justify-center">
+                  <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">{slotValueRow.draft_year} Draft Rank</div>
+                  <div className="text-2xl font-bold tracking-tight mt-1 leading-tight text-white">
+                    {slotValueRow.rank != null ? `#${slotValueRow.rank}` : "—"}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-[#162241] bg-[#0d1a30] p-4 text-center min-h-[94px] flex flex-col justify-center">
+                  <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Draft Slot Value</div>
+                  <div className="text-2xl font-bold tracking-tight mt-1 leading-tight text-[#D4AF37]">
+                    ${Math.round(slotValueRow.slot_value).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Portal Move — shows under Career Stats for any portal-active player */}
             {isTransferPortal && <PortalTeamCards player={player as any} />}
 
@@ -1532,7 +1570,6 @@ export default function PlayerProfile() {
                 )}
               </div>
             </div>
-
 
               {(() => {
                 // 2026-05-24: JUCO branch removed. JUCO hitters now have populated

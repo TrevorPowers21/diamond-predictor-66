@@ -523,6 +523,22 @@ export default function PitcherProfile() {
       return data;
     },
   });
+  // MLB Draft slot value (most recent draft cycle for this pitcher).
+  const { data: slotValueRow } = useQuery({
+    queryKey: ["pitcher-slot-value", id],
+    enabled: !!id && isDbRoute,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("player_slot_values" as any)
+        .select("draft_year, rank, slot_value")
+        .eq("player_id", id!)
+        .order("draft_year", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) return null;
+      return data as unknown as { draft_year: number; rank: number | null; slot_value: number } | null;
+    },
+  });
   const { teams: teamDirectory } = useTeamsTable();
   const { conferenceStatsByKey } = useConferenceStats(2026);
   const lookupPlayerName = useMemo(() => {
@@ -1827,7 +1843,7 @@ export default function PitcherProfile() {
                       <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Stuff+ Overview</CardTitle>
                     </CardHeader>
                     <CardContent className="px-4 pb-4">
-                      <div className="rounded-lg border border-[#162241] bg-[#0d1a30] p-4 text-center">
+                      <div className="rounded-lg border border-[#162241] bg-[#0d1a30] p-4 text-center min-h-[94px] flex flex-col justify-center">
                         <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Stuff+</div>
                         <div className="text-3xl font-bold tracking-tight mt-1 text-[#8a94a6]">N/A</div>
                         <div className="text-[10px] text-[#5a6478] mt-1">No TrackMan capture for this pitcher</div>
@@ -1948,6 +1964,24 @@ export default function PitcherProfile() {
                   </table>
               </CardContent>
             </Card>
+
+            {/* MLB Draft slot — left column, between Career Stats and Portal Move */}
+            {slotValueRow && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border border-[#162241] bg-[#0d1a30] p-4 text-center min-h-[94px] flex flex-col justify-center">
+                  <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">{slotValueRow.draft_year} Draft Rank</div>
+                  <div className="text-2xl font-bold tracking-tight mt-1 leading-tight text-white">
+                    {slotValueRow.rank != null ? `#${slotValueRow.rank}` : "—"}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-[#162241] bg-[#0d1a30] p-4 text-center min-h-[94px] flex flex-col justify-center">
+                  <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Draft Slot Value</div>
+                  <div className="text-2xl font-bold tracking-tight mt-1 leading-tight text-[#D4AF37]">
+                    ${Math.round(slotValueRow.slot_value).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Portal Move — same compact card style as Career Stats */}
             {player && (player.transfer_portal || ["IN PORTAL", "COMMITTED", "WITHDRAWN"].includes(String((player as any).portal_status || "").toUpperCase())) && (
