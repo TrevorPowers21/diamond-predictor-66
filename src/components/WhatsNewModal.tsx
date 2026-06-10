@@ -3,7 +3,7 @@ import { Sparkles, ArrowLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const STORAGE_KEY = "rstr_iq_whats_new_seen_v4";
+const STORAGE_KEY = "rstr_iq_whats_new_seen_v5";
 
 type Feature = {
   title: string;
@@ -19,6 +19,43 @@ type Release = {
 };
 
 const RELEASES: Release[] = [
+  {
+    date: "2026-06-10",
+    headline: "Projected MLB Draft slot values now live on player profiles",
+    features: [
+      {
+        title: "Draft Rank and Slot Value on the Player Profile",
+        tagline:
+          "Every draft-eligible college player in the 2026 class now carries a projected draft rank and slot dollar value, surfaced directly on their profile alongside the projection and portal tracking you already use.",
+        details: [
+          "Two new cells sit in the left column under Career Stats: '2026 Draft Rank' showing the player's industry-aggregated rank, and 'Draft Slot Value' showing the projected MLB Draft bonus.",
+          "Coverage spans the full 2026 ranked college class, so any draft-eligible player you're tracking has the slot context attached.",
+          "The framework is designed for annual refresh, so 2027 and 2028 draft classes can drop in as scouting consensus develops.",
+        ],
+      },
+      {
+        title: "Two-Way Player Valuations, Split By Side",
+        tagline:
+          "Two-way players now carry a dedicated hitter market value and pitcher market value across every surface. Each view surfaces the right number for the role you're evaluating.",
+        details: [
+          "Player Dashboard, Player Profile, Compare, Transfer Portal Simulator, and Team Builder all pull the correct side-specific value.",
+          "Team Builder splits two-way targets into a hitter line and a pitcher line on add, each with its own projection and market value.",
+        ],
+      },
+      {
+        title: "Full Visibility on Committed Players",
+        tagline:
+          "Toggle Committed in the Player Dashboard Portal filter and you'll now see every player who's chosen a destination across the country. Recruiting time stays focused on the players who are still in play.",
+        details: [
+          "Home-page commit count and the table count now match exactly.",
+          "Surfaces committed players regardless of where they signed, so the board reflects the full picture.",
+        ],
+      },
+    ],
+    whatElse: [
+      "Pitcher profiles get the same Draft Rank and Slot Value treatment as hitter profiles.",
+    ],
+  },
   {
     date: "2026-06-09",
     headline: "Refined Two-Way Player valuations, full committed-player visibility, and live Team Builder pitching controls",
