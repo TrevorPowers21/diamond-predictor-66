@@ -11,7 +11,8 @@ export type CsvType =
   | "portal_commits"
   | "portal_withdrawals"
   | "abs_hitter_stats"
-  | "abs_pitcher_stats";
+  | "abs_pitcher_stats"
+  | "player_slot_values";
 
 export type RegistryEntry = {
   type: CsvType;
@@ -325,5 +326,23 @@ export const REGISTRY: RegistryEntry[] = [
     filenameHints: [/^abs[_\-]pitcher/i, /abs.*pitcher/i],
     downstream: [],
     description: "TruMedia ABS pitcher export. D1 only — JUCO rows dropped at import. Upserts into abs_pitcher_stats keyed on (source_player_id, season). Display gated to Georgia.",
+  },
+  {
+    type: "player_slot_values",
+    label: "Player Slot Values",
+    required: ["Player", "Slot Value ($)"],
+    signature: [
+      "School",
+      "Commitment",
+      "Aggregate",
+      "Composite",
+      "MLB.com",
+      "Baseball America",
+      "Keith Law",
+      "Perfect Game",
+    ],
+    filenameHints: [/slot[_\-]?values?/i, /draft[_\-]?slot/i],
+    downstream: [],
+    description: "MLB Draft slot dollar values per draft-eligible player. Combined hitter + pitcher in one table. HS prospects (Commitment column populated) get player_id NULL and carry commitment_school inline. Upserts into player_slot_values keyed on (draft_year, player_name, current_school).",
   },
 ];
