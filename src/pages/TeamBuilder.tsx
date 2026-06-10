@@ -2066,6 +2066,36 @@ export default function TeamBuilder() {
     }
   }, [buildBuildPlayerRow, supabase]);
 
+  // Immediately INSERT a newly added player into team_build_players when an
+  // existing build is active. Per-player autosave only UPDATEs (requires rp.id),
+  // so without this a transfer added mid-session is never written to DB and
+  // disappears on the next loadBuild.
+  const insertNewPlayerFn = useCallback(async (newP: BuildPlayer, insertIdx: number) => {
+    const buildId = selectedBuildIdRef.current;
+    if (!buildId) return;
+    setAutoSaveStatus("saving");
+    const row = buildBuildPlayerRow(newP, buildId);
+    const { data: inserted, error } = await supabase
+      .from("team_build_players")
+      .insert([row])
+      .select("id")
+      .single();
+    if (error) {
+      console.error("[insertNewPlayer] failed:", error.message);
+      setAutoSaveStatus("error");
+      return;
+    }
+    const newId = inserted.id;
+    setRosterPlayers((prev) => {
+      if (insertIdx >= prev.length) return prev;
+      const next = prev.map((p, i) => i === insertIdx ? { ...p, id: newId } : p);
+      rosterPlayersRef.current = next;
+      return next;
+    });
+    setLastSavedAt(new Date());
+    setAutoSaveStatus("saved");
+  }, [buildBuildPlayerRow, supabase]);
+
   // Per-player debounce: each player index has its own timer so changing
   // player A and player B within 2.5s saves both, not just the later one.
   const debouncedSavePlayer = useCallback((idx: number) => {
@@ -2200,12 +2230,14 @@ export default function TeamBuilder() {
       team_metrics: null,
       team_power_plus: null,
     };
-    setRosterPlayers((prev) => [...prev, newP]);
+    const insertIdx = rosterPlayersRef.current.length;
+    setRosterPlayers((prev) => { const next = [...prev, newP]; rosterPlayersRef.current = next; return next; });
     setIncomingName("");
     setIncomingPosition("");
     setIncomingNil(0);
     setIncomingProjectionTier("");
     setDirty(true);
+    void insertNewPlayerFn(newP, insertIdx);
   };
 
   const addPlayerFromTargetSearch = async (row: any) => {
@@ -2375,11 +2407,13 @@ export default function TeamBuilder() {
           }
         }
       }
-      setRosterPlayers((prev) => [...prev, newP]);
+      const insertIdx = rosterPlayersRef.current.length;
+      setRosterPlayers((prev) => { const next = [...prev, newP]; rosterPlayersRef.current = next; return next; });
       setDirty(true);
       setTargetPlayerSearchQuery("");
       setTargetPlayerSearchOpen(false);
       toast({ title: "Added to targets", description: fullName });
+      void insertNewPlayerFn(newP, insertIdx);
       return;
     }
     if (row?.__storagePitcher) {
@@ -2495,11 +2529,13 @@ export default function TeamBuilder() {
           newP.depth_role = defaultPitcherDepthRoleFromIp(realIp, roleForDepth);
         }
       }
-      setRosterPlayers((prev) => [...prev, newP]);
+      const insertIdx = rosterPlayersRef.current.length;
+      setRosterPlayers((prev) => { const next = [...prev, newP]; rosterPlayersRef.current = next; return next; });
       setDirty(true);
       setTargetPlayerSearchQuery("");
       setTargetPlayerSearchOpen(false);
       toast({ title: "Added to targets", description: fullName });
+      void insertNewPlayerFn(newP, insertIdx);
       return;
     }
 
@@ -2642,7 +2678,8 @@ export default function TeamBuilder() {
       ? [buildHitterRow(), buildPitcherRow()]
       : (isPitcherByPos ? [buildPitcherRow()] : [buildHitterRow()]);
 
-    setRosterPlayers((prev) => [...prev, ...playersToAdd]);
+    const baseInsertIdx = rosterPlayersRef.current.length;
+    setRosterPlayers((prev) => { const next = [...prev, ...playersToAdd]; rosterPlayersRef.current = next; return next; });
     setDirty(true);
     setTargetPlayerSearchQuery("");
     setTargetPlayerSearchOpen(false);
@@ -2650,6 +2687,7 @@ export default function TeamBuilder() {
       addToSupabaseBoard({ playerId: row.id });
     }
     toast({ title: "Added to targets", description: `${row.first_name} ${row.last_name}` });
+    playersToAdd.forEach((p, i) => void insertNewPlayerFn(p, baseInsertIdx + i));
     } catch (err: any) {
       toast({ title: "Failed to add target", description: err?.message || "Unexpected error while adding player target.", variant: "destructive" });
     }

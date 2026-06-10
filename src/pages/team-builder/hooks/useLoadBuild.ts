@@ -133,11 +133,18 @@ export function useLoadBuild({
         const snapshotMap: Record<string, any> = {};
         for (const bp of players) {
           const pid = typeof bp.player_id === "string" ? bp.player_id.trim() : bp.player_id;
-          if (pid && bp.player_snapshot) snapshotMap[pid] = bp.player_snapshot;
+          const snap = bp.player_snapshot as any;
+          // Only use snapshot if it has at least one meaningful stat value.
+          // Snapshots saved before predictions loaded have all-null stats —
+          // treat those as missing so the live prediction query fires instead.
+          const hasData = snap && (
+            snap.p_avg != null || snap.p_era != null || snap.o_war != null || snap.p_war != null
+          );
+          if (pid && hasData) snapshotMap[pid] = snap;
         }
 
-        // Only fetch player_predictions for players WITHOUT a snapshot (new adds,
-        // pre-migration builds). This eliminates the heavy query on the happy path.
+        // Only fetch player_predictions for players WITHOUT a valid snapshot (new adds,
+        // pre-migration builds, or snapshots saved before predictions resolved).
         const idsNeedingPred = playerIds.filter((id) => !snapshotMap[id]);
 
         if (playerIds.length > 0) {
