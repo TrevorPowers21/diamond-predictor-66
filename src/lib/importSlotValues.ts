@@ -47,6 +47,17 @@ function parseBool(raw: string | undefined | null): boolean {
 }
 
 /**
+ * Detects the "Commitment" column carrying MLB Draft history instead of a
+ * college name. Examples Trevor flagged: "Blue Jays '23 (18)", "Rays '24 (2)",
+ * "D-Backs '24 (20)". Pattern: an apostrophe-year token or a parenthesized
+ * round number. These rows are previously-drafted college players, NOT HS.
+ */
+function commitmentLooksLikeMlbDraft(commit: string | null): boolean {
+  if (!commit) return false;
+  return /['’]\s?\d{2}\b/.test(commit) || /\(\s*\d+\s*\)/.test(commit);
+}
+
+/**
  * Heuristic high-school detector from a school name. Catches the long tail
  * of HS prospects whose Commitment column is blank in the CSV.
  */
@@ -210,7 +221,10 @@ export async function importPlayerSlotValuesCsv(
     }
 
     const currentSchool = idx.current_school >= 0 ? trimOrNull(row[idx.current_school]) : null;
-    const commitmentSchool = idx.commitment_school >= 0 ? trimOrNull(row[idx.commitment_school]) : null;
+    const rawCommit = idx.commitment_school >= 0 ? trimOrNull(row[idx.commitment_school]) : null;
+    // MLB Draft history strings like "Blue Jays '23 (18)" are not real commitments.
+    // Strip them so they don't show up as a college destination on the War Room board.
+    const commitmentSchool = commitmentLooksLikeMlbDraft(rawCommit) ? null : rawCommit;
     const explicitHs = idx.is_high_school >= 0 ? parseBool(row[idx.is_high_school]) : false;
     const isHs = explicitHs || !!commitmentSchool || schoolLooksHighSchool(currentSchool);
 

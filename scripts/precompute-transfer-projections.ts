@@ -454,6 +454,18 @@ async function main() {
     process.stdout.write(`\r  ${written}/${upserts.length}`);
   }
   console.log(`\n${C.green}✓ done${C.reset}`);
+
+  // Forward hitter scouting scores onto the new precomputed rows so the
+  // Player Dashboard chip fields (contact / barrel / ev / chase) populate
+  // for this customer team. The precompute upsert payload itself never
+  // writes those columns; the propagate RPC syncs them from Hitter Master.
+  console.log(`${C.cyan}→${C.reset} propagating hitter scores to predictions...`);
+  const { data: propagated, error: propErr } = await (supabase as any).rpc(
+    "propagate_hitter_scores_to_predictions",
+    { target_season: CURRENT_SEASON },
+  );
+  if (propErr) console.error(`${C.red}✗ propagate failed: ${propErr.message}${C.reset}`);
+  else console.log(`${C.green}✓ propagated scores to ${propagated ?? 0} prediction rows${C.reset}`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

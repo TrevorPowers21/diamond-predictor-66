@@ -1454,6 +1454,13 @@ export default function TeamBuilder() {
       }));
   }, [allPlayersForSearch, seedHittersForSearch, selectedTeam]);
 
+  // Flips to true once loadBuild finishes setting rosterPlayers. State (not
+  // ref) so the Supabase target-board sync effect re-fires when it flips and
+  // can run its pull step after the saved build has populated the roster.
+  // Prevents a race that duplicated saved-build targets on remount.
+  const [buildLoadDone, setBuildLoadDone] = useState(false);
+  const buildLoadDoneRef = useRef(false);
+  buildLoadDoneRef.current = buildLoadDone;
   const loadBuild = useLoadBuild({
     builds, allPlayersForSearch, selectedTeam, selectedTeamId, effectiveTeamId,
     pitchingMasterRows, pitchingStatsByNameTeam, seasonUsage,
@@ -1461,6 +1468,7 @@ export default function TeamBuilder() {
     setSelectedBuildId, setBuildName, setTotalBudget, setSelectedTeam,
     setDepthAssignments, setDepthPlaceholders, setRosterPlayers, setDirty,
     lastDepthTeamRef, skipAutoSeedOnceRef, autoSeededTeamRef,
+    buildLoadDoneRef, setBuildLoadDone,
   });
 
   // Auto-load roster when team changes and it's a new build.
@@ -2049,6 +2057,26 @@ export default function TeamBuilder() {
         await addPlayerFromTargetSearch(matchedDb);
         return;
       }
+      // Seed-hitter row didn't dedupe to the preloaded list — either the
+      // 16K-player query hasn't resolved yet (fresh refresh) or the seed's
+      // team is the player's NEXT school and doesn't match DB row's team.
+      // JIT-fetch the DB row directly so we don't fall through to the
+      // manual-seed path (which has no stored prediction → blank stats).
+      // Mirrors TransferPortal.tsx's per-selected-player fetch pattern.
+      const { data: dbHits } = await supabase
+        .from("players")
+        .select("id, first_name, last_name, position, is_twp, class_year, throws_hand, bats_hand, team, from_team, conference, transfer_portal, portal_status")
+        .ilike("first_name", row.first_name || "")
+        .ilike("last_name", row.last_name || "");
+      const dbCandidates = (dbHits || []).filter((p: any) => (p.team || "").trim() !== "");
+      const dbExact = dbCandidates.find((p: any) =>
+        normalizeName(p.team || "") === normalizeName(row.team || ""),
+      );
+      const resolved = dbExact ?? (dbCandidates.length === 1 ? dbCandidates[0] : null);
+      if (resolved) {
+        await addPlayerFromTargetSearch(resolved);
+        return;
+      }
       const fullName = `${row.first_name || ""} ${row.last_name || ""}`.trim();
       const alreadyAddedSeed = rosterPlayers.some((p) => {
         if ((p.roster_status || "returner") !== "target") return false;
@@ -2223,6 +2251,46 @@ export default function TeamBuilder() {
         toast({ title: "Already on target board", description: `${fullName} is already a target.` });
         setTargetPlayerSearchQuery("");
         setTargetPlayerSearchOpen(false);
+        return;
+      }
+      // Same JIT pattern as the seed-hitter branch: storage pitchers carry a
+      // synthetic `pm-pitcher-...` id (not a UUID), so the standard stored-
+      // fetch path can't resolve them. Try the preloaded list first (which
+      // may not have arrived yet on fresh refresh), then a direct Supabase
+      // round-trip by source_player_id and/or name+team. Route the DB row
+      // through the standard path so prediction + transfer_snapshot are
+      // populated identically to a Dashboard / Profile add.
+      const matchedDbLocal = allPlayersForSearch.find((p: any) =>
+        (row.source_player_id && p.source_player_id === row.source_player_id) ||
+        (normalizeName(`${p.first_name || ""} ${p.last_name || ""}`) === normalizeName(fullName) &&
+          normalizeName(p.team || "") === normalizeName(row.team || "")),
+      );
+      if (matchedDbLocal) {
+        await addPlayerFromTargetSearch(matchedDbLocal);
+        return;
+      }
+      let dbCandidates: any[] = [];
+      if (row.source_player_id) {
+        const { data } = await supabase
+          .from("players")
+          .select("id, first_name, last_name, position, is_twp, class_year, throws_hand, bats_hand, team, from_team, conference, source_player_id, transfer_portal, portal_status")
+          .eq("source_player_id", row.source_player_id);
+        dbCandidates = (data || []).filter((p: any) => (p.team || "").trim() !== "");
+      }
+      if (dbCandidates.length === 0) {
+        const { data } = await supabase
+          .from("players")
+          .select("id, first_name, last_name, position, is_twp, class_year, throws_hand, bats_hand, team, from_team, conference, source_player_id, transfer_portal, portal_status")
+          .ilike("first_name", row.first_name || "")
+          .ilike("last_name", row.last_name || "");
+        dbCandidates = (data || []).filter((p: any) => (p.team || "").trim() !== "");
+      }
+      const dbExact = dbCandidates.find((p: any) =>
+        normalizeName(p.team || "") === normalizeName(row.team || ""),
+      );
+      const resolved = dbExact ?? (dbCandidates.length === 1 ? dbCandidates[0] : null);
+      if (resolved) {
+        await addPlayerFromTargetSearch(resolved);
         return;
       }
       const inferredRole = asPitcherRole(row.__pitching?.role || row.position || "RP") || "RP";
@@ -2519,7 +2587,13 @@ export default function TeamBuilder() {
     // TWP dual-row mirror. The inline push that used to live here wrote a
     // blank-stats row with no DB fetch, which surfaced as "Overbeek showing
     // only as a pitcher with no stats" for TWPs.
-    if (supabaseTargetBoard.length > 0) {
+    //
+    // Wait for saved-build load to finish before pulling — otherwise the
+    // empty initial rosterPlayers makes every supabase target look "new" and
+    // we end up adding duplicates of players that are about to be loaded
+    // from team_build_players.
+    const savedBuildPending = builds.length > 0 && !buildLoadDoneRef.current;
+    if (supabaseTargetBoard.length > 0 && !savedBuildPending) {
       const existingPlayerIds = new Set(rosterPlayers.map((rp) => rp.player_id));
       const newFromSupabase = supabaseTargetBoard.filter((sb) => !existingPlayerIds.has(sb.player_id));
       if (newFromSupabase.length > 0) {
@@ -2544,16 +2618,18 @@ export default function TeamBuilder() {
     }
 
     // Only lock the one-shot sync after we've actually seen the Supabase board
-    // load. Without this guard, a first render where supabaseTargetBoard is
-    // still empty (query in-flight) would skip the pull and then refuse to
-    // re-run when data arrives, so seeded target rows would never appear.
-    if (supabaseTargetBoard.length > 0) {
+    // load AND the saved build (if any) has populated rosterPlayers. Without
+    // those guards, a first render where either query is in-flight would
+    // skip the pull and then refuse to re-run when data arrives, so seeded
+    // target rows would never appear OR would duplicate saved-build rows.
+    if (supabaseTargetBoard.length > 0 && !savedBuildPending) {
       targetSyncedRef.current = true;
     }
     // Intentionally not depending on rosterPlayers — this is a one-shot sync
     // (gated by targetSyncedRef). Re-running on every roster edit churned the
-    // effect needlessly and caused position-shuffle glitches.
-  }, [supabaseTargetBoard, targetBoardLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+    // effect needlessly and caused position-shuffle glitches. buildLoadDone
+    // IS in deps so the effect re-fires once when loadBuild finishes.
+  }, [supabaseTargetBoard, targetBoardLoading, builds.length, buildLoadDone]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
 

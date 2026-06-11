@@ -897,7 +897,7 @@ function computeHitterMarketValue(oWar: number | null, conference: string | null
 }
 
 async function runPrecomputeForTeam(supabase: any, customerTeamId: string, scope: string) {
-  if (scope === "pitchers_d1") return runPitcherPrecompute(supabase, customerTeamId);
+  if (scope === "pitchers_d1" || scope === "pitchers_juco") return runPitcherPrecompute(supabase, customerTeamId, scope);
   return runHitterPrecompute(supabase, customerTeamId, scope);
 }
 
@@ -961,7 +961,17 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
   const resolveConferenceHitting = (name: string | null, id: string | null) => {
     if (id && confById.has(id)) return confById.get(id);
     const k = normalizeKey(name);
-    return k ? confByKey.get(k) ?? null : null;
+    const direct = k ? (confByKey.get(k) ?? null) : null;
+    if (direct) return direct;
+    // JUCO district fallback — players.conference stores "NJCAA D1 <District>"
+    // but Conference Stats keys by "NJCAA D1 <District> District". Mirrors the
+    // pitcher resolver + scripts/precompute-transfer-projections.ts.
+    const jucoName = jucoDistrictNameFromConference(name);
+    if (jucoName) {
+      const jucoId = JUCO_DISTRICT_CONFERENCE_ID[jucoName];
+      if (jucoId && confById.has(jucoId)) return confById.get(jucoId);
+    }
+    return null;
   };
 
   // Park Factors — map raw `avg_factor`/`lhb_avg_factor` → `avg`/`lhb_avg`
@@ -1163,6 +1173,16 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     if (error) throw new Error(`batch ${i / UPSERT_BATCH + 1} failed: ${error.message}`);
   }
 
+  // Forward hitter scouting scores (barrel/ev/contact/chase) onto the newly
+  // upserted precomputed rows so Player Dashboard chip rendering matches the
+  // global regular variant. Without this, a freshly precomputed customer team
+  // ships with NULL chip fields on every row.
+  const { error: propErr } = await supabase.rpc(
+    "propagate_hitter_scores_to_predictions",
+    { target_season: CURRENT_SEASON },
+  );
+  if (propErr) console.error("hitter score propagation failed:", propErr);
+
   const topBlockReasons: Record<string, number> = {};
   for (const [k, v] of [...blockReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)) {
     topBlockReasons[k] = v;
@@ -1180,8 +1200,15 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
 // Mirrors scripts/precompute-pitchers.ts logic.
 // ─────────────────────────────────────────────────────────────────────────
 
-async function runPitcherPrecompute(supabase: any, customerTeamId: string) {
-  const eq = PITCHING_EQ_DEFAULTS;
+async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope: string = "pitchers_d1") {
+  const isJucoScope = scope === "pitchers_juco";
+  const JUCO_IP_THRESHOLD = 20;
+  // JUCO scope uses the dedicated JUCO weight overrides — zeroes power
+  // weights and park weights, swaps in JUCO conference/competition weights.
+  // Mirrors src/lib/buildTransferPitcherInputs.ts line 190.
+  const eq: typeof PITCHING_EQ_DEFAULTS = isJucoScope
+    ? { ...PITCHING_EQ_DEFAULTS, ...JUCO_PITCHING_TRANSFER_WEIGHTS }
+    : PITCHING_EQ_DEFAULTS;
 
   // Resolve customer team → destination
   const { data: ct, error: ctErr } = await supabase
@@ -1222,7 +1249,17 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string) {
   const resolvePitchingConfStats = (name: string | null, id: string | null) => {
     if (id && confById.has(id)) return confById.get(id);
     const k = normalizeKey(name);
-    return k ? (confByKey.get(k) ?? null) : null;
+    const direct = k ? (confByKey.get(k) ?? null) : null;
+    if (direct) return direct;
+    // JUCO district fallback — players.conference stores "NJCAA D1 <District>"
+    // but Conference Stats keys by "NJCAA D1 <District> District". Mirrors the
+    // resolution in scripts/precompute-pitchers.ts.
+    const jucoName = jucoDistrictNameFromConference(name);
+    if (jucoName) {
+      const jucoId = JUCO_DISTRICT_CONFERENCE_ID[jucoName];
+      if (jucoId && confById.has(jucoId)) return confById.get(jucoId);
+    }
+    return null;
   };
 
   // Park Factors — pitcher uses rg_factor (era), whip_factor, hr9_factor
@@ -1260,16 +1297,20 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string) {
     }
   }
 
-  // Players — pitcher-primary OR is_twp, exclude own roster, exclude JUCO
+  // Players — pitcher-primary OR is_twp, exclude own roster, division-scoped
   const allPlayers = await loadAllPaged(() =>
     supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, division, source_player_id, source_team_id, is_twp, class_year, ip"),
   );
   const pitcherTest = (p: string | null) => /^(SP|RP|CL|P|LHP|RHP|SM)/i.test(String(p || ""));
-  const pitchers = allPlayers.filter((p: any) =>
-    (pitcherTest(p.position) || p.is_twp)
-    && (!toSourceId || p.source_team_id !== toSourceId)
-    && p.division !== "NJCAA_D1",
-  );
+  const matchesDivision = (d: string | null) => isJucoScope ? d === "NJCAA_D1" : d !== "NJCAA_D1";
+  const pitchers = allPlayers.filter((p: any) => {
+    if (!(pitcherTest(p.position) || p.is_twp)) return false;
+    if (toSourceId && p.source_team_id === toSourceId) return false;
+    if (!matchesDivision(p.division)) return false;
+    // JUCO IP floor — mirrors scripts/precompute-pitchers.ts to drop tiny-sample noise
+    if (isJucoScope && p.division === "NJCAA_D1" && (Number(p.ip) || 0) < JUCO_IP_THRESHOLD) return false;
+    return true;
+  });
 
   // Pitching Master — for each pitcher's last-season stats + PR+
   const sourceIds = pitchers.map((p: any) => p.source_player_id).filter(Boolean) as string[];
@@ -1356,7 +1397,20 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string) {
       fromK9Plus: Number(fromPC.k9_plus ?? 100), toK9Plus: Number(toPC.k9_plus ?? 100),
       fromBb9Plus: Number(fromPC.bb9_plus ?? 100), toBb9Plus: Number(toPC.bb9_plus ?? 100),
       fromHr9Plus: Number(fromPC.hr9_plus ?? 100), toHr9Plus: Number(toPC.hr9_plus ?? 100),
-      fromHitterTalent: Number(fromPC.hitter_talent_plus ?? 100), toHitterTalent: Number(toPC.hitter_talent_plus ?? 100),
+      // JUCO source: replace raw district Overall_Power_Rating with the
+      // calibrated HTP override (Mountain West / Horizon equivalents per
+      // district). Without this, each JUCO district uses its inflated raw
+      // value and pitchers get inconsistent regressions across districts.
+      // Mirrors src/lib/buildTransferPitcherInputs.ts line 196-198.
+      fromHitterTalent: (() => {
+        if (p.division === "NJCAA_D1") {
+          const district = jucoDistrictNameFromConference(p.conference);
+          const override = district ? JUCO_DISTRICT_HTP_OVERRIDE[district] : undefined;
+          if (override != null) return override;
+        }
+        return Number(fromPC.hitter_talent_plus ?? 100);
+      })(),
+      toHitterTalent: Number(toPC.hitter_talent_plus ?? 100),
       fromEraParkRaw: resolveParkFactor(fromTeamRow?.id ?? null, null, "era"),
       toEraParkRaw: resolveParkFactor(toTeam.id, null, "era"),
       fromWhipParkRaw: resolveParkFactor(fromTeamRow?.id ?? null, null, "whip"),
@@ -1371,7 +1425,9 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string) {
       classTransition: pred?.class_transition ?? null,
       classYear: (p as any).class_year ?? null,
       devAggressiveness: pred?.dev_aggressiveness ?? null,
-      isJucoSource: false,
+      // For JUCO scope, mark source as JUCO so postprocess zeroes class
+      // transitions and dev aggressiveness adjustments (which D1-only).
+      isJucoSource: p.division === "NJCAA_D1",
       eq,
       toConference,
       toTeam: toTeam.name,
@@ -1426,6 +1482,16 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string) {
     });
     if (error) throw new Error(`pitcher batch ${i / UPSERT_BATCH + 1} failed: ${error.message}`);
   }
+
+  // Forward pitcher scouting scores (whiff/iz_whiff/barrel/chase/ev/bb) onto
+  // the newly upserted precomputed pitcher rows. Same rationale as the hitter
+  // propagate above — without this, a fresh customer team has NULL pitcher
+  // chip fields.
+  const { error: propErr } = await supabase.rpc(
+    "propagate_pitcher_scores_to_predictions",
+    { target_season: CURRENT_SEASON },
+  );
+  if (propErr) console.error("pitcher score propagation failed:", propErr);
 
   const topBlockReasons: Record<string, number> = {};
   for (const [k, v] of [...blockReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)) topBlockReasons[k] = v;

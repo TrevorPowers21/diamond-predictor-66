@@ -570,6 +570,15 @@ async function main() {
     process.stdout.write(`\r  ${written}/${upserts.length}`);
   }
   console.log(`\n${C.green}✓ done${C.reset}`);
+
+  // Forward pitcher scouting scores onto the new precomputed rows.
+  console.log(`${C.cyan}→${C.reset} propagating pitcher scores to predictions...`);
+  const { data: propagated, error: propErr } = await (supabase as any).rpc(
+    "propagate_pitcher_scores_to_predictions",
+    { target_season: CURRENT_SEASON },
+  );
+  if (propErr) console.error(`${C.red}✗ propagate failed: ${propErr.message}${C.reset}`);
+  else console.log(`${C.green}✓ propagated scores to ${propagated ?? 0} prediction rows${C.reset}`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
