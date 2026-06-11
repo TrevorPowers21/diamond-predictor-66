@@ -2407,11 +2407,22 @@ export default function TeamBuilder() {
     // stats. Non-TWPs get a single row matching their position. No live
     // recompute, no transfer-projection math — the precompute pipeline
     // already produced the per-team projection.
-    const alreadyAdded = rosterPlayers.some(
-      (p) => p.player_id === row.id && (p.roster_status || "returner") === "target"
-    );
-    if (alreadyAdded) {
-      toast({ title: "Already on target board", description: `${row.first_name} ${row.last_name} is already a target.` });
+    //
+    // Invariant: a player_id can appear at most once per side (hitter / pitcher).
+    // Adding a TWP creates two rows with the same player_id but different
+    // sides — that's legitimate. Adding a returner-on-this-team to the target
+    // board is NOT legitimate: it spawns a second row using the precomputed
+    // transfer projection (assumes transfer-to-this-team math), which sits
+    // beside the returner row and looks like a bug (same wRC+, different
+    // oWAR / MV because depth + transfer overlays differ).
+    //
+    // The setRosterPlayers updater pattern at the end of this branch is the
+    // bulletproof side of this guard — it operates on latest state so the
+    // sync-effect race (where rosterPlayers may be stale at closure capture)
+    // can't slip past it either.
+    const alreadyOnRoster = rosterPlayers.some((p) => p.player_id === row.id);
+    if (alreadyOnRoster) {
+      toast({ title: "Already on your roster", description: `${row.first_name} ${row.last_name} is already on this team.` });
       setTargetPlayerSearchQuery("");
       setTargetPlayerSearchOpen(false);
       return;
@@ -2540,7 +2551,23 @@ export default function TeamBuilder() {
       ? [buildHitterRow(), buildPitcherRow()]
       : (isPitcherByPos ? [buildPitcherRow()] : [buildHitterRow()]);
 
-    setRosterPlayers((prev) => [...prev, ...playersToAdd]);
+    // Bulletproof dedup at apply-time. The upfront `alreadyOnRoster` check
+    // above reads from closure-captured rosterPlayers; the sync-effect race
+    // could fire this function with stale closure (roster empty at capture,
+    // populated by loadBuild by apply time). The updater pattern operates on
+    // latest state, so any row whose (player_id, side) already exists on
+    // roster — even if it landed *between* the upfront check and here — is
+    // silently dropped. TWPs are unaffected: hitter side and pitcher side
+    // have distinct keys.
+    const rosterSideOf = (rp: any): "P" | "H" =>
+      /^(SP|RP|CL|P|LHP|RHP)$/i.test(String(rp?.position_slot || "")) ? "P" : "H";
+    const rosterKeyOf = (rp: any) => `${rp?.player_id || ""}|${rosterSideOf(rp)}`;
+    setRosterPlayers((prev) => {
+      const existingKeys = new Set(prev.map(rosterKeyOf));
+      const fresh = playersToAdd.filter((np) => !existingKeys.has(rosterKeyOf(np)));
+      if (fresh.length === 0) return prev;
+      return [...prev, ...fresh];
+    });
     setDirty(true);
     setTargetPlayerSearchQuery("");
     setTargetPlayerSearchOpen(false);
