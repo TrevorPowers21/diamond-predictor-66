@@ -2572,7 +2572,9 @@ export default function TeamBuilder() {
     setTargetPlayerSearchQuery("");
     setTargetPlayerSearchOpen(false);
     if (row.id && !isOnSupabaseBoard(row.id)) {
-      addToSupabaseBoard({ playerId: row.id });
+      // silent=true: TB shows its own "Added to targets" toast immediately
+      // below, no need to double-notify.
+      addToSupabaseBoard({ playerId: row.id, silent: true });
     }
     toast({ title: "Added to targets", description: `${row.first_name} ${row.last_name}` });
     } catch (err: any) {
@@ -2603,7 +2605,9 @@ export default function TeamBuilder() {
       const pid = p.player_id!;
       if (pushedPlayerIdsRef.current.has(pid)) continue;
       if (!isOnSupabaseBoard(pid)) {
-        addToSupabaseBoard({ playerId: pid });
+        // silent=true: the sync effect can fire on every remount; only the
+        // direct user-initiated add path should toast.
+        addToSupabaseBoard({ playerId: pid, silent: true });
       }
       pushedPlayerIdsRef.current.add(pid);
     }
