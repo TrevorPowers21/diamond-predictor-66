@@ -743,7 +743,7 @@ export default function TeamBuilder() {
     supabaseTargetBoard, targetBoardLoading, removeFromSupabaseBoard, addToSupabaseBoard, isOnSupabaseBoard,
     selectedTeamRow, selectedTeamId,
     remoteEquationValues, allPlayersForSearch, hitterMasterPaMap,
-    seasonUsage, builds, returners, returnersUpdatedAt,
+    seasonUsage, builds, buildsLoading, returners, returnersUpdatedAt,
   } = useTeamBuilderData({ effectiveTeamId, selectedTeam });
   const thinSampleMap = seasonUsage.thinSample;
 
@@ -2592,7 +2592,13 @@ export default function TeamBuilder() {
     // empty initial rosterPlayers makes every supabase target look "new" and
     // we end up adding duplicates of players that are about to be loaded
     // from team_build_players.
-    const savedBuildPending = builds.length > 0 && !buildLoadDoneRef.current;
+    //
+    // Two cases of "pending":
+    //   1) builds query still loading — builds.length === 0 here doesn't
+    //      mean "no saved builds", it means "we don't know yet"
+    //   2) builds query resolved with saved builds, but loadBuild hasn't
+    //      run to populate rosterPlayers yet
+    const savedBuildPending = buildsLoading || (builds.length > 0 && !buildLoadDoneRef.current);
     if (supabaseTargetBoard.length > 0 && !savedBuildPending) {
       const existingPlayerIds = new Set(rosterPlayers.map((rp) => rp.player_id));
       const newFromSupabase = supabaseTargetBoard.filter((sb) => !existingPlayerIds.has(sb.player_id));
@@ -2629,7 +2635,7 @@ export default function TeamBuilder() {
     // (gated by targetSyncedRef). Re-running on every roster edit churned the
     // effect needlessly and caused position-shuffle glitches. buildLoadDone
     // IS in deps so the effect re-fires once when loadBuild finishes.
-  }, [supabaseTargetBoard, targetBoardLoading, builds.length, buildLoadDone]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [supabaseTargetBoard, targetBoardLoading, builds.length, buildsLoading, buildLoadDone]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
 

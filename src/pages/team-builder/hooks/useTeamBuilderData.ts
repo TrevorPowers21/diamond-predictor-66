@@ -277,7 +277,7 @@ export function useTeamBuilderData({
 
   // ── Team-scoped queries ──────────────────────────────────────────────────────
 
-  const { data: builds = [] } = useQuery({
+  const { data: builds = [], isLoading: buildsLoading } = useQuery({
     queryKey: ["team-builds", effectiveTeamId ?? null],
     enabled: !!effectiveTeamId,
     queryFn: async () => {
@@ -400,6 +400,7 @@ export function useTeamBuilderData({
     hitterMasterPaMap,
     seasonUsage,
     builds,
+    buildsLoading,
     returners,
     returnersUpdatedAt,
   };
