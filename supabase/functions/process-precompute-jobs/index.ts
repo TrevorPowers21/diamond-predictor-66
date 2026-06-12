@@ -1572,9 +1572,9 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
   while (true) {
     const { data, error } = await supabase
       .from("player_predictions")
-      .select("player_id, customer_team_id, variant, p_avg, p_obp, p_slg, p_wrc_plus, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, pitcher_depth_role, projected_ip")
+      .select("player_id, customer_team_id, variant, p_avg, p_obp, p_slg, p_wrc_plus, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, pitcher_depth_role, projected_ip, class_transition, dev_aggressiveness")
       .in("player_id", playerIds)
-      .eq("season", CURRENT_SEASON)
+      .eq("season", PROJECTION_SEASON)
       .in("status", ["active", "departed"])
       .range(from, from + PAGE - 1);
     if (error) break;
@@ -1583,15 +1583,20 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
     from += PAGE;
   }
 
-  // Build prediction map: team-scoped precomputed > global regular
-  const predMap = new Map<string, any>();
+  // Split into hitter-model rows (pitcher_role=null) and pitcher-model rows
+  // (pitcher_role != null). Using a flat predMap would cause scorePredictionLikeDashboard
+  // to pick the hitter-model row for pitchers (p_avg fields score higher), leaving
+  // p_era null on every pitcher snapshot.
+  const hitterPredMap = new Map<string, any>();
+  const pitcherPredMap = new Map<string, any>();
   for (const pred of predictions) {
     const key = pred.player_id;
-    const existing = predMap.get(key);
     const isTeamScoped = pred.customer_team_id === customerTeamId && pred.variant === "precomputed";
     const isGlobal = pred.customer_team_id == null && pred.variant === "regular";
+    const map = pred.pitcher_role != null ? pitcherPredMap : hitterPredMap;
+    const existing = map.get(key);
     if (!existing || isTeamScoped || (isGlobal && existing.variant !== "precomputed")) {
-      predMap.set(key, pred);
+      map.set(key, pred);
     }
   }
 
@@ -1601,14 +1606,19 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
   const playerRows: any[] = [];
 
   for (const p of returners) {
-    const pred = predMap.get(p.id) ?? null;
     const isTwp = !!p.is_twp;
     const isPitcher = isPitcherPos(p.position);
+    // For TWPs: use side-specific rows. For non-TWPs: pitcher players use
+    // pitcherPredMap first (has p_era), hitters use hitterPredMap.
+    const hPred = isTwp ? (hitterPredMap.get(p.id) ?? null) : (!isPitcher ? (hitterPredMap.get(p.id) ?? null) : null);
+    const pPred = isTwp
+      ? (pitcherPredMap.get(p.id) ?? null)
+      : (isPitcher ? (pitcherPredMap.get(p.id) ?? hitterPredMap.get(p.id) ?? null) : null);
 
     if (isTwp) {
-      const hDepth = validHitterDepths.includes(pred?.hitter_depth_role) ? pred.hitter_depth_role : hitterDepthFromPa(p.pa ?? null);
-      const pRole: "SP" | "RP" = pred?.pitcher_role === "SP" ? "SP" : "RP";
-      const pDepth = validPitcherDepths.includes(pred?.pitcher_depth_role) ? pred.pitcher_depth_role : pitcherDepthFromIp(p.ip ?? null, pRole);
+      const hDepth = validHitterDepths.includes(hPred?.hitter_depth_role) ? hPred.hitter_depth_role : hitterDepthFromPa(p.pa ?? null);
+      const pRole: "SP" | "RP" = pPred?.pitcher_role === "SP" ? "SP" : "RP";
+      const pDepth = validPitcherDepths.includes(pPred?.pitcher_depth_role) ? pPred.pitcher_depth_role : pitcherDepthFromIp(p.ip ?? null, pRole);
       const customName = `${p.first_name || ""} ${p.last_name || ""}`.trim() || null;
       playerRows.push({
         player_id: p.id, source: "returner", custom_name: customName,
@@ -1617,7 +1627,7 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
         class_transition: "same", dev_aggressiveness: 0,
         class_transition_overridden: false, dev_aggressiveness_overridden: false,
         depth_role: hDepth,
-        player_snapshot: pred ? { p_avg: pred.p_avg, p_obp: pred.p_obp, p_slg: pred.p_slg, p_wrc_plus: pred.p_wrc_plus, o_war: pred.o_war, market_value: pred.twp_hitter_market_value ?? pred.market_value, hitter_depth_role: pred.hitter_depth_role } : null,
+        player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, market_value: hPred.twp_hitter_market_value ?? hPred.market_value, hitter_depth_role: hPred.hitter_depth_role, class_transition: hPred.class_transition ?? null, dev_aggressiveness: hPred.dev_aggressiveness ?? null } : null,
       });
       playerRows.push({
         player_id: p.id, source: "returner", custom_name: customName,
@@ -1626,28 +1636,28 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
         class_transition: "same", dev_aggressiveness: 0,
         class_transition_overridden: false, dev_aggressiveness_overridden: false,
         depth_role: pDepth,
-        player_snapshot: pred ? { p_era: pred.p_era, p_fip: pred.p_fip, p_whip: pred.p_whip, p_k9: pred.p_k9, p_bb9: pred.p_bb9, p_hr9: pred.p_hr9, p_rv_plus: pred.p_rv_plus, p_war: pred.p_war, pitcher_role: pred.pitcher_role, market_value: pred.twp_pitcher_market_value ?? pred.market_value } : null,
+        player_snapshot: pPred ? { p_era: pPred.p_era, p_fip: pPred.p_fip, p_whip: pPred.p_whip, p_k9: pPred.p_k9, p_bb9: pPred.p_bb9, p_hr9: pPred.p_hr9, p_rv_plus: pPred.p_rv_plus, p_war: pPred.p_war, pitcher_role: pPred.pitcher_role, market_value: pPred.twp_pitcher_market_value ?? pPred.market_value, class_transition: pPred.class_transition ?? null, dev_aggressiveness: pPred.dev_aggressiveness ?? null } : null,
       });
     } else if (isPitcher) {
-      const pRole: "SP" | "RP" = pred?.pitcher_role === "SP" ? "SP" : "RP";
-      const pDepth = validPitcherDepths.includes(pred?.pitcher_depth_role) ? pred.pitcher_depth_role : pitcherDepthFromIp(p.ip ?? null, pRole);
+      const pRole: "SP" | "RP" = pPred?.pitcher_role === "SP" ? "SP" : "RP";
+      const pDepth = validPitcherDepths.includes(pPred?.pitcher_depth_role) ? pPred.pitcher_depth_role : pitcherDepthFromIp(p.ip ?? null, pRole);
       playerRows.push({
         player_id: p.id, source: "returner", custom_name: `${p.first_name || ""} ${p.last_name || ""}`.trim() || null,
         position_slot: pRole, depth_order: 1, nil_value: 0, production_notes: null, roster_status: "returner",
         class_transition: "same", dev_aggressiveness: 0,
         class_transition_overridden: false, dev_aggressiveness_overridden: false,
         depth_role: pDepth,
-        player_snapshot: pred ? { p_era: pred.p_era, p_fip: pred.p_fip, p_whip: pred.p_whip, p_k9: pred.p_k9, p_bb9: pred.p_bb9, p_hr9: pred.p_hr9, p_rv_plus: pred.p_rv_plus, p_war: pred.p_war, pitcher_role: pred.pitcher_role, pitcher_depth_role: pred.pitcher_depth_role, market_value: pred.market_value } : null,
+        player_snapshot: pPred ? { p_era: pPred.p_era, p_fip: pPred.p_fip, p_whip: pPred.p_whip, p_k9: pPred.p_k9, p_bb9: pPred.p_bb9, p_hr9: pPred.p_hr9, p_rv_plus: pPred.p_rv_plus, p_war: pPred.p_war, pitcher_role: pPred.pitcher_role, pitcher_depth_role: pPred.pitcher_depth_role, market_value: pPred.market_value, class_transition: pPred.class_transition ?? null, dev_aggressiveness: pPred.dev_aggressiveness ?? null } : null,
       });
     } else {
-      const hDepth = validHitterDepths.includes(pred?.hitter_depth_role) ? pred.hitter_depth_role : hitterDepthFromPa(p.pa ?? null);
+      const hDepth = validHitterDepths.includes(hPred?.hitter_depth_role) ? hPred.hitter_depth_role : hitterDepthFromPa(p.pa ?? null);
       playerRows.push({
         player_id: p.id, source: "returner", custom_name: `${p.first_name || ""} ${p.last_name || ""}`.trim() || null,
         position_slot: p.position ?? null, depth_order: 1, nil_value: 0, production_notes: null, roster_status: "returner",
         class_transition: "same", dev_aggressiveness: 0,
         class_transition_overridden: false, dev_aggressiveness_overridden: false,
         depth_role: hDepth,
-        player_snapshot: pred ? { p_avg: pred.p_avg, p_obp: pred.p_obp, p_slg: pred.p_slg, p_wrc_plus: pred.p_wrc_plus, o_war: pred.o_war, market_value: pred.market_value, hitter_depth_role: pred.hitter_depth_role } : null,
+        player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, market_value: hPred.market_value, hitter_depth_role: hPred.hitter_depth_role, class_transition: hPred.class_transition ?? null, dev_aggressiveness: hPred.dev_aggressiveness ?? null } : null,
       });
     }
   }
