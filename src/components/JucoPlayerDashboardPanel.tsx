@@ -262,12 +262,21 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
           .eq("players.division", "NJCAA_D1")
           .not("p_wrc_plus", "is", null)
           .gte("players.pa", HITTER_PA_THRESHOLD)
-          .in("variant", ["regular", "precomputed"])
-          .in("model_type", ["returner", "transfer"]);
+          .in("model_type", ["returner", "transfer"])
+          // Exclude pitcher-primary unless flagged TWP. Some JUCO data tags
+          // hitters with position='P' (no real pitching IP) and they leak onto
+          // the hitter dashboard with ~150-220 PA. Two-way players (is_twp)
+          // remain eligible since they legitimately appear on both sides.
+          .or("position.not.in.(SP,RP,CL,P,LHP,RHP),is_twp.eq.true", { referencedTable: "players" })
+          .order("player_id", { ascending: true });
+        // Strict variant filter (matches D1 fast path in ReturningPlayers.tsx
+        // line 1580 + 2331). Impersonation reads ONLY the team-scoped
+        // precomputed row, no fallback to global regular. Guarantees the
+        // dashboard shows the same row the Profile reads.
         if (effectiveTeamId) {
-          q = q.or(`customer_team_id.is.null,customer_team_id.eq.${effectiveTeamId}`);
+          q = q.eq("variant", "precomputed").eq("customer_team_id", effectiveTeamId);
         } else {
-          q = q.is("customer_team_id", null);
+          q = q.eq("variant", "regular").is("customer_team_id", null);
         }
         const { data, error } = await q.range(from, from + 999);
         if (error) throw error;
@@ -275,22 +284,22 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
         if (!data || data.length < 1000) break;
         from += 1000;
       }
-      // Dedupe per player: prefer team-scoped precomputed over global regular.
+      // Dedupe per player: ORDER BY above puts team-scoped rows first, so
+      // take-first wins them automatically. Stored values only — no live
+      // compute fallback (a null stored value displays as blank, never
+      // re-derived from raw rates).
       const byPlayer = new Map<string, any>();
       for (const r of preds) {
-        const key = r.player_id;
-        const existing = byPlayer.get(key);
-        const isTeamScoped = r.customer_team_id != null && r.variant === "precomputed";
-        if (!existing || isTeamScoped) byPlayer.set(key, r);
+        if (!byPlayer.has(r.player_id)) byPlayer.set(r.player_id, r);
       }
       return Array.from(byPlayer.values()).map((r: any): HitterRow => {
         const p = r.players;
         const avg = r.p_avg != null ? Number(r.p_avg) : null;
         const obp = r.p_obp != null ? Number(r.p_obp) : null;
         const slg = r.p_slg != null ? Number(r.p_slg) : null;
-        const iso = r.p_iso != null ? Number(r.p_iso) : (avg != null && slg != null ? slg - avg : null);
-        const ops = r.p_ops != null ? Number(r.p_ops) : (obp != null && slg != null ? obp + slg : null);
-        const wrcPlus = r.p_wrc_plus != null ? Number(r.p_wrc_plus) : computeWrcPlus(avg, obp, slg, iso);
+        const iso = r.p_iso != null ? Number(r.p_iso) : null;
+        const ops = r.p_ops != null ? Number(r.p_ops) : null;
+        const wrcPlus = r.p_wrc_plus != null ? Number(r.p_wrc_plus) : null;
         return {
           id: p?.source_player_id ?? p?.id ?? Math.random().toString(),
           source_player_id: p?.source_player_id ?? "",
@@ -323,12 +332,17 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
           .eq("players.division", "NJCAA_D1")
           .not("p_era", "is", null)
           .gte("players.ip", PITCHER_IP_THRESHOLD)
-          .in("variant", ["regular", "precomputed"])
-          .in("model_type", ["returner", "transfer"]);
+          .in("model_type", ["returner", "transfer"])
+          // Only pitcher-primary positions (or TWPs). Mirrors the hitter
+          // guard — keeps misclassified rows from leaking the wrong way.
+          .or("position.in.(SP,RP,CL,P,LHP,RHP),is_twp.eq.true", { referencedTable: "players" })
+          .order("player_id", { ascending: true });
+        // Strict variant filter — same rule as the hitter query + D1 fast path.
+        // Impersonation reads ONLY the team-scoped precomputed row, no fallback.
         if (effectiveTeamId) {
-          q = q.or(`customer_team_id.is.null,customer_team_id.eq.${effectiveTeamId}`);
+          q = q.eq("variant", "precomputed").eq("customer_team_id", effectiveTeamId);
         } else {
-          q = q.is("customer_team_id", null);
+          q = q.eq("variant", "regular").is("customer_team_id", null);
         }
         const { data, error } = await q.range(from, from + 999);
         if (error) throw error;
@@ -336,12 +350,10 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
         if (!data || data.length < 1000) break;
         from += 1000;
       }
+      // Dedupe per player: ORDER BY above puts team-scoped first; take-first wins.
       const byPlayer = new Map<string, any>();
       for (const r of preds) {
-        const key = r.player_id;
-        const existing = byPlayer.get(key);
-        const isTeamScoped = r.customer_team_id != null && r.variant === "precomputed";
-        if (!existing || isTeamScoped) byPlayer.set(key, r);
+        if (!byPlayer.has(r.player_id)) byPlayer.set(r.player_id, r);
       }
       return Array.from(byPlayer.values()).map((r: any): PitcherRow => {
         const p = r.players;
@@ -351,8 +363,8 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
         const k9 = r.p_k9 != null ? Number(r.p_k9) : null;
         const bb9 = r.p_bb9 != null ? Number(r.p_bb9) : null;
         const hr9 = r.p_hr9 != null ? Number(r.p_hr9) : null;
-        const ip = r.projected_ip != null ? Number(r.projected_ip) : (p?.ip != null ? Number(p.ip) : null);
-        const prvPlus = r.p_rv_plus != null ? Number(r.p_rv_plus) : computePrvPlus(era, fip, whip, k9, bb9, hr9);
+        const ip = r.projected_ip != null ? Number(r.projected_ip) : null;
+        const prvPlus = r.p_rv_plus != null ? Number(r.p_rv_plus) : null;
         return {
           id: p?.source_player_id ?? p?.id ?? Math.random().toString(),
           source_player_id: p?.source_player_id ?? "",
@@ -417,11 +429,16 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
     rows = [...rows].sort((a, b) => {
       const av = a[key as keyof HitterRow] as any;
       const bv = b[key as keyof HitterRow] as any;
-      if (av == null && bv == null) return 0;
-      if (av == null) return 1;
-      if (bv == null) return -1;
-      if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv) * mul;
-      return (Number(av) - Number(bv)) * mul;
+      let cmp = 0;
+      if (av == null && bv == null) cmp = 0;
+      else if (av == null) cmp = 1;
+      else if (bv == null) cmp = -1;
+      else if (typeof av === "string" && typeof bv === "string") cmp = av.localeCompare(bv) * mul;
+      else cmp = (Number(av) - Number(bv)) * mul;
+      // Stable tie-breaker on source_player_id so identical sort values don't
+      // flicker their relative order across reloads.
+      if (cmp !== 0) return cmp;
+      return (a.source_player_id || "").localeCompare(b.source_player_id || "");
     });
     return rows;
   }, [hitterRows, search, positionFilters, classFilters, batsFilters, districtFilters, hitterSort]);
@@ -440,11 +457,14 @@ export function JucoPlayerDashboardPanel({ view }: { view: "hitting" | "pitching
     rows = [...rows].sort((a, b) => {
       const av = a[key as keyof PitcherRow] as any;
       const bv = b[key as keyof PitcherRow] as any;
-      if (av == null && bv == null) return 0;
-      if (av == null) return 1;
-      if (bv == null) return -1;
-      if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv) * mul;
-      return (Number(av) - Number(bv)) * mul;
+      let cmp = 0;
+      if (av == null && bv == null) cmp = 0;
+      else if (av == null) cmp = 1;
+      else if (bv == null) cmp = -1;
+      else if (typeof av === "string" && typeof bv === "string") cmp = av.localeCompare(bv) * mul;
+      else cmp = (Number(av) - Number(bv)) * mul;
+      if (cmp !== 0) return cmp;
+      return (a.source_player_id || "").localeCompare(b.source_player_id || "");
     });
     return rows;
   }, [pitcherRows, search, classFilters, throwsFilters, districtFilters, pitcherSort]);
