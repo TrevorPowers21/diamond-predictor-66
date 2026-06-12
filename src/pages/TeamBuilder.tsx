@@ -1772,11 +1772,13 @@ export default function TeamBuilder() {
     if (selectedBuildId) return;
     if (buildsLoading) return;
     if (builds.length === 0) return;
-    // Prefer most-recent coach build; fall back to the most-recent default build.
+    // Prefer most-recent coach build for the current season; fall back to any
+    // prior-year coach build, then to the most-recent default build.
     // Builds are sorted updated_at DESC by the query, so [0] is always the latest.
     const coachBuilds = builds.filter((b: any) => !b.is_default);
     const defaultBuilds = builds.filter((b: any) => b.is_default);
-    const toLoad = (coachBuilds[0] ?? defaultBuilds[0]) as { id: string } | undefined;
+    const currentYearCoachBuilds = coachBuilds.filter((b: any) => b.academic_year === PROJECTION_SEASON);
+    const toLoad = (currentYearCoachBuilds[0] ?? coachBuilds[0] ?? defaultBuilds[0]) as { id: string } | undefined;
     if (!toLoad) return;
     loadBuild(toLoad.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1896,6 +1898,7 @@ export default function TeamBuilder() {
           total_budget: totalBudget,
           depth_assignments: depthAssignments,
           depth_placeholders: depthPlaceholders,
+          academic_year: PROJECTION_SEASON,
         }).select("id").single();
         if (error) throw error;
         buildId = data.id;
@@ -1962,6 +1965,42 @@ export default function TeamBuilder() {
     const b = builds.find((x: any) => x.id === selectedBuildId);
     return (b as any)?.is_default === true;
   }, [selectedBuildId, builds]);
+
+  // Season transition banner — shown when the coach has prior-year builds but no
+  // current-season coach build yet. Dismissed per-session.
+  const hasCurrentYearCoachBuild = useMemo(
+    () => builds.some((b: any) => !b.is_default && b.academic_year === PROJECTION_SEASON),
+    [builds],
+  );
+  const hasPriorYearCoachBuild = useMemo(
+    () => builds.some((b: any) => !b.is_default && b.academic_year != null && b.academic_year !== PROJECTION_SEASON),
+    [builds],
+  );
+  const SEASON_BANNER_KEY = `tb_season_banner_dismissed_${PROJECTION_SEASON}`;
+  const [seasonBannerDismissed, setSeasonBannerDismissed] = useState(
+    () => typeof sessionStorage !== "undefined" && sessionStorage.getItem(SEASON_BANNER_KEY) === "1",
+  );
+  const showSeasonBanner = !seasonBannerDismissed && hasPriorYearCoachBuild && !hasCurrentYearCoachBuild;
+  const dismissSeasonBanner = useCallback(() => {
+    sessionStorage.setItem(SEASON_BANNER_KEY, "1");
+    setSeasonBannerDismissed(true);
+  }, [SEASON_BANNER_KEY]);
+
+  // Dirty-default prompt — shown ~4.5s after the last change while on a default
+  // build. Clears automatically once isDefaultBuild becomes false (fork on save).
+  const dirtyDefaultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showDirtyDefaultPrompt, setShowDirtyDefaultPrompt] = useState(false);
+  useEffect(() => {
+    if (dirty && isDefaultBuild) {
+      dirtyDefaultTimerRef.current = setTimeout(() => setShowDirtyDefaultPrompt(true), 4500);
+    } else {
+      if (dirtyDefaultTimerRef.current) clearTimeout(dirtyDefaultTimerRef.current);
+      setShowDirtyDefaultPrompt(false);
+    }
+    return () => {
+      if (dirtyDefaultTimerRef.current) clearTimeout(dirtyDefaultTimerRef.current);
+    };
+  }, [dirty, isDefaultBuild]);
 
   // Ref that prevents duplicate concurrent fork calls. Stores the in-flight
   // promise so all callers await the same fork operation.
@@ -3142,6 +3181,65 @@ export default function TeamBuilder() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        {/* Season transition banner — prior-year builds exist but no current-season coach build yet */}
+        {showSeasonBanner && (
+          <div className="rounded-lg border border-[#D4AF37]/40 bg-[#D4AF37]/5 px-4 py-3 flex items-start justify-between gap-4">
+            <div className="space-y-0.5 text-sm">
+              <p className="font-medium text-foreground">Team build is now {PROJECTION_SEASON}.</p>
+              <button
+                onClick={dismissSeasonBanner}
+                className="text-[#D4AF37] hover:underline text-left block"
+              >
+                See previous builds here.
+              </button>
+              <button
+                onClick={() => {
+                  dismissSeasonBanner();
+                  const name = askBuildName(buildName);
+                  if (!name) return;
+                  saveMutation.mutate({ saveAs: true, nameOverride: name });
+                }}
+                className="text-[#D4AF37] hover:underline text-left block"
+              >
+                Save to create new build.
+              </button>
+            </div>
+            <button
+              onClick={dismissSeasonBanner}
+              className="text-muted-foreground hover:text-foreground text-lg leading-none shrink-0 mt-0.5"
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* Dirty-default prompt — shown after idle when editing the default build */}
+        {showDirtyDefaultPrompt && (
+          <div className="rounded-md border border-[#D4AF37]/30 bg-[#D4AF37]/10 px-4 py-2.5 flex items-center justify-between text-sm">
+            <span className="text-foreground">
+              You&apos;re editing the default roster.{" "}
+              <button
+                onClick={() => {
+                  const name = askBuildName(buildName);
+                  if (!name) return;
+                  saveMutation.mutate({ saveAs: true, nameOverride: name });
+                }}
+                className="text-[#D4AF37] hover:underline font-medium"
+              >
+                Save to create your {PROJECTION_SEASON} build.
+              </button>
+            </span>
+            <button
+              onClick={() => setShowDirtyDefaultPrompt(false)}
+              className="ml-4 text-muted-foreground hover:text-foreground text-base leading-none shrink-0"
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {/* Header — brand Oswald + gold accent, consistent with Overview & Player Dashboard */}
         <div className="rounded-lg border-l-[3px] border-l-[#D4AF37] border-t border-r border-b border-border/60 bg-muted/20 px-4 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
