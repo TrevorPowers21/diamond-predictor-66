@@ -1726,20 +1726,30 @@ export default function TeamBuilder() {
             // it so the auto-load effect can default to the most-recent build.
             if (draftKey) localStorage.removeItem(draftKey);
           } else {
-            setSelectedBuildId(draft.selectedBuildId ?? null);
-            setBuildName(draft.buildName ?? "My Team Build");
-            setSelectedTeam(draft.selectedTeam ?? "");
-            setTotalBudget(Number(draft.totalBudget) || 0);
-            setRosterPlayers(Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers : []);
-            setProgramTierMultiplier(Number(draft.programTierMultiplier) || 1.2);
-            setProgramTierConference(draft.programTierConference ?? "");
-            setFallbackRosterTotalPlayerScore(Number(draft.fallbackRosterTotalPlayerScore) || DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
-            setDirty(false);
-            if (draft.depthAssignments) setDepthAssignments(draft.depthAssignments);
-            if (draft.depthPlaceholders) setDepthPlaceholders(draft.depthPlaceholders);
-            skipAutoSeedOnceRef.current = true;
-            autoSeededTeamRef.current = normalizeName(draft.selectedTeam);
-            restoredFromDraftRef.current = true;
+            const hasContent =
+              Array.isArray(draft.rosterPlayers) && draft.rosterPlayers.length > 0;
+            const wasDirty = draft.dirty === true;
+            if (!hasContent && !wasDirty) {
+              // The draft was saved when nothing had loaded yet (e.g., previous
+              // visit hit a render bug). Discard it so the auto-load effect can
+              // run and pull the most-recent saved build.
+              if (draftKey) localStorage.removeItem(draftKey);
+            } else {
+              setSelectedBuildId(draft.selectedBuildId ?? null);
+              setBuildName(draft.buildName ?? "My Team Build");
+              setSelectedTeam(draft.selectedTeam ?? "");
+              setTotalBudget(Number(draft.totalBudget) || 0);
+              setRosterPlayers(Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers : []);
+              setProgramTierMultiplier(Number(draft.programTierMultiplier) || 1.2);
+              setProgramTierConference(draft.programTierConference ?? "");
+              setFallbackRosterTotalPlayerScore(Number(draft.fallbackRosterTotalPlayerScore) || DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
+              setDirty(false);
+              if (draft.depthAssignments) setDepthAssignments(draft.depthAssignments);
+              if (draft.depthPlaceholders) setDepthPlaceholders(draft.depthPlaceholders);
+              skipAutoSeedOnceRef.current = true;
+              autoSeededTeamRef.current = normalizeName(draft.selectedTeam);
+              restoredFromDraftRef.current = true;
+            }
           }
         }
       }
@@ -1904,6 +1914,7 @@ export default function TeamBuilder() {
           position_slot: rp.position_slot,
           depth_order: rp.depth_order,
           nil_value: rp.nil_value,
+          player_snapshot: rp.prediction ?? null,
           production_notes: serializeBuildPlayerMeta(
             rp.production_notes,
             rp.team_metrics ?? null,
