@@ -39,6 +39,8 @@
     "precompute-returner-pitchers:prod": "tsx --env-file-if-exists=.env.production.local scripts/precompute-returner-pitchers.ts --prod",
     "create-default-builds": "tsx --env-file-if-exists=.env.local scripts/create-default-builds.ts",
     "create-default-builds:prod": "tsx --env-file-if-exists=.env.production.local scripts/create-default-builds.ts --prod",
+    "backfill-build-snapshots": "tsx --env-file-if-exists=.env.local scripts/backfill-build-snapshots.ts",
+    "backfill-build-snapshots:prod": "tsx --env-file-if-exists=.env.production.local scripts/backfill-build-snapshots.ts --prod",
     "backfill-2027-hitter-returners": "tsx --env-file-if-exists=.env.local scripts/backfill-2027-hitter-returners.ts",
     "backfill-2027-hitter-returners:prod": "tsx --env-file-if-exists=.env.production.local scripts/backfill-2027-hitter-returners.ts --prod",
     "precompute-returner-hitters": "tsx --env-file-if-exists=.env.local scripts/backfill-2027-hitter-returners.ts",

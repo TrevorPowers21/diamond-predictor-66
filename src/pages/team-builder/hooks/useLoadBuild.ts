@@ -258,22 +258,28 @@ export function useLoadBuild({
               const player = playerMap[pid];
               if (!player) continue;
               const isTwp = (player as any)?.is_twp ?? false;
+              // Split on pitcher_role for all players, not just TWPs. Without
+              // this, scorePredictionLikeDashboard picks the hitter-model row
+              // for pure pitchers (it scores higher because p_avg etc. are
+              // populated), leaving p_era null on the pitcher slot.
+              const hitterRows = rows.filter((r: any) => r.pitcher_role == null);
+              const pitcherRows = rows.filter((r: any) => r.pitcher_role != null);
               if (isTwp) {
-                // TWP: split on pitcher_role so each side gets the right model row.
-                const hitterRows = rows.filter((r: any) => r.pitcher_role == null);
-                const pitcherRows = rows.filter((r: any) => r.pitcher_role != null);
+                // TWP: both sides get their own row.
                 const hPick = pickBest(hitterRows);
                 const pPick = pickBest(pitcherRows);
                 if (hPick) predictionMap[`${pid}|H`] = hPick;
                 if (pPick) predictionMap[`${pid}|P`] = pPick;
               } else {
-                const best = pickBest(rows);
-                if (!best) continue;
-                // Non-TWP: infer side from the player's natural position, NOT from
-                // pitcher_role (which is often null even for returner pitchers).
+                // Non-TWP: infer side from the player's natural position.
                 const playerPos = String((player as any)?.position ?? "");
                 const side = isPitcherSlot(playerPos) ? "P" : "H";
-                predictionMap[`${pid}|${side}`] = best;
+                // Prefer the model row matching the side; fall back to full set.
+                const candidates = side === "P"
+                  ? (pitcherRows.length > 0 ? pitcherRows : rows)
+                  : (hitterRows.length > 0 ? hitterRows : rows);
+                const best = pickBest(candidates);
+                if (best) predictionMap[`${pid}|${side}`] = best;
               }
             }
           }

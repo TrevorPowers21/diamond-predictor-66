@@ -214,7 +214,7 @@ async function main() {
           "player_id, customer_team_id, variant, model_type, p_avg, p_obp, p_slg, p_wrc_plus, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, pitcher_depth_role, projected_ip"
         )
         .in("player_id", playerIds)
-        .eq("season", academicYear - 1) // returner season = current season
+        .eq("season", academicYear) // predictions stored at PROJECTION_SEASON
         .in("status", ["active", "departed"])
     );
 
