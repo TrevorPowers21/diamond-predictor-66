@@ -1760,11 +1760,17 @@ export default function TeamBuilder() {
     if (stateTeamRef.current !== effectiveTeamId) return;
     if (restoredFromDraftRef.current) return;
     if (selectedBuildId) return;
+    if (buildsLoading) return;
     if (builds.length === 0) return;
-    const latest = builds[0] as { id: string };
-    loadBuild(latest.id);
+    // Prefer most-recent coach build; fall back to the most-recent default build.
+    // Builds are sorted updated_at DESC by the query, so [0] is always the latest.
+    const coachBuilds = builds.filter((b: any) => !b.is_default);
+    const defaultBuilds = builds.filter((b: any) => b.is_default);
+    const toLoad = (coachBuilds[0] ?? defaultBuilds[0]) as { id: string } | undefined;
+    if (!toLoad) return;
+    loadBuild(toLoad.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveTeamId, selectedBuildId, builds.length]);
+  }, [effectiveTeamId, selectedBuildId, builds.length, buildsLoading]);
 
   // Persist Team Builder draft so browser back returns to the same state.
   // Two guards prevent cross-team leakage:
@@ -1853,9 +1859,13 @@ export default function TeamBuilder() {
   const saveMutation = useMutation({
     mutationFn: async (opts?: { saveAs?: boolean; nameOverride?: string }) => {
       if (!user) throw new Error("Not logged in");
+      // If currently on a default build, silently fork to a coach build first.
+      // Returns the new build ID (or null if already a coach build). We use the
+      // return value directly because React state won't update until next render.
+      const forkedId = await forkFromDefaultIfNeeded();
       const saveAs = !!opts?.saveAs;
       const targetName = (opts?.nameOverride || buildName || "").trim() || (selectedTeam ? `${selectedTeam} Build` : "My Team Build");
-      let buildId = saveAs ? null : selectedBuildId;
+      let buildId = saveAs ? null : (forkedId ?? selectedBuildId);
 
       if (buildId) {
         await supabase.from("team_builds").update({
@@ -1935,8 +1945,85 @@ export default function TeamBuilder() {
     onError: (e: any) => toast({ title: "Save failed", description: e.message, variant: "destructive" }),
   });
 
+  // True when the currently loaded build is a system-managed default build.
+  const isDefaultBuild = useMemo(() => {
+    if (!selectedBuildId) return false;
+    const b = builds.find((x: any) => x.id === selectedBuildId);
+    return (b as any)?.is_default === true;
+  }, [selectedBuildId, builds]);
+
+  // Ref that prevents duplicate concurrent fork calls. Stores the in-flight
+  // promise so all callers await the same fork operation.
+  const forkInFlightRef = useRef<Promise<string | null> | null>(null);
+  const forkedBuildIdRef = useRef<string | null>(null);
+
+  // Silently forks the current default build into a new coach build.
+  // Returns the new build id if a fork was created, null if no fork needed.
+  // Safe to call multiple times — deduplicates via ref.
+  const forkFromDefaultIfNeeded = useCallback(async (): Promise<string | null> => {
+    if (forkedBuildIdRef.current) return null; // already forked this session
+    if (!selectedBuildId) return null;
+    const b = builds.find((x: any) => x.id === selectedBuildId);
+    if (!(b as any)?.is_default) return null;
+
+    if (forkInFlightRef.current) return forkInFlightRef.current;
+
+    const promise = (async () => {
+      const { data: newBuild, error: buildErr } = await supabase
+        .from("team_builds")
+        .insert([{
+          customer_team_id: (b as any).customer_team_id,
+          team: (b as any).team,
+          name: "Unsaved Build",
+          user_id: (b as any).user_id,
+          total_budget: (b as any).total_budget ?? 0,
+          depth_assignments: (b as any).depth_assignments ?? {},
+          depth_placeholders: (b as any).depth_placeholders ?? {},
+          is_default: false,
+          academic_year: (b as any).academic_year ?? null,
+        }])
+        .select("id")
+        .single();
+      if (buildErr || !newBuild) {
+        console.error("[forkDefault] build insert failed:", buildErr?.message);
+        forkInFlightRef.current = null;
+        return null;
+      }
+      const newBuildId = newBuild.id as string;
+
+      // Copy all player rows to the new build, clearing the DB-assigned ids.
+      const { data: existingPlayers } = await supabase
+        .from("team_build_players")
+        .select("*")
+        .eq("build_id", selectedBuildId);
+      if (existingPlayers && existingPlayers.length > 0) {
+        const copies = existingPlayers.map(({ id: _id, build_id: _bid, ...rest }: any) => ({
+          ...rest,
+          build_id: newBuildId,
+        }));
+        await supabase.from("team_build_players").insert(copies);
+      }
+
+      forkedBuildIdRef.current = newBuildId;
+      setSelectedBuildId(newBuildId);
+      setBuildName("Unsaved Build");
+      queryClient.invalidateQueries({ queryKey: ["team-builds"] });
+      return newBuildId;
+    })();
+
+    forkInFlightRef.current = promise;
+    return promise;
+  }, [selectedBuildId, builds, supabase, queryClient]);
+
   const deleteBuildMutation = useMutation({
     mutationFn: async (id: string) => {
+      const b = builds.find((x: any) => x.id === id);
+      if ((b as any)?.is_default) {
+        const confirmed = window.confirm(
+          "You are removing the default roster for this team. This cannot be undone and will affect what coaches see when they first log in.\n\nAre you sure you want to proceed?"
+        );
+        if (!confirmed) return;
+      }
       await supabase.from("team_builds").delete().eq("id", id);
     },
     onSuccess: () => {
@@ -3065,7 +3152,9 @@ export default function TeamBuilder() {
                 <SelectContent>
                   <SelectItem value="new">+ New Build</SelectItem>
                   {builds.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>{b.name} ({b.team})</SelectItem>
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.name}{(b as any).is_default ? " (Default)" : ""} ({b.team})
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
