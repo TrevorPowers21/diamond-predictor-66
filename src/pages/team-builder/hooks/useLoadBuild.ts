@@ -55,6 +55,13 @@ type LoadBuildParams = {
   lastDepthTeamRef: MutableRefObject<string | null>;
   skipAutoSeedOnceRef: MutableRefObject<boolean>;
   autoSeededTeamRef: MutableRefObject<string>;
+  // Optional: ref kept here only to keep the prior signature stable for
+  // callers that already pass it. The actual "build load done" signal that
+  // unblocks the Supabase target-board sync effect comes from setBuildLoadDone.
+  buildLoadDoneRef?: MutableRefObject<boolean>;
+  // Flipped to true after loadBuild finishes setting rosterPlayers. Lets the
+  // sync effect re-fire (state, not ref) once the saved build has populated.
+  setBuildLoadDone?: (done: boolean) => void;
 };
 
 export function useLoadBuild({
@@ -79,6 +86,8 @@ export function useLoadBuild({
   lastDepthTeamRef,
   skipAutoSeedOnceRef,
   autoSeededTeamRef,
+  buildLoadDoneRef,
+  setBuildLoadDone,
 }: LoadBuildParams) {
   return useCallback(
     async (buildId: string) => {
@@ -427,6 +436,8 @@ export function useLoadBuild({
         );
       }
       setDirty(false);
+      if (buildLoadDoneRef) buildLoadDoneRef.current = true;
+      if (setBuildLoadDone) setBuildLoadDone(true);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [builds, allPlayersForSearch, selectedTeam, resolveTeamBuilderPlayer],

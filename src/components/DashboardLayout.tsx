@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   ChevronRight,
   Star,
+  Target,
   Building2,
   UserCog,
 } from "lucide-react";
@@ -27,6 +28,7 @@ const navItems = [
   { label: "Transfer Portal", href: "/dashboard/portal", icon: Users, description: "Simulate transfers" },
   { label: "Team Builder", href: "/dashboard/team-builder", icon: Hammer, description: "Build your roster" },
   { label: "Player Dashboard", href: "/dashboard/returning", icon: Activity, description: "All player stats" },
+  { label: "The War Room: Draft IQ", href: "/dashboard/war-room", icon: Target, description: "Draft-eligible college + HS commits" },
   { label: "High Follow", href: "/dashboard/high-follow", icon: Star, description: "Your watchlist" },
   { label: "Compare", href: "/dashboard/compare", icon: GitCompare, description: "Side-by-side analysis" },
 ];

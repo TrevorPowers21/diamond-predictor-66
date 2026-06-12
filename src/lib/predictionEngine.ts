@@ -3,6 +3,7 @@ import { loadEquationWeightsMap } from "@/hooks/useEquationWeights";
 import { TRANSFER_WEIGHT_DEFAULTS } from "@/lib/transferWeightDefaults";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { fetchParkFactorsMap, type ParkFactorsMap } from "@/lib/parkFactors";
+import { projectJucoReturnerPitcher } from "@/lib/jucoReturnerPitcherProjection";
 import { CURRENT_SEASON, PRIOR_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { computePitcherProjection, type PitcherProjectionInput } from "@/lib/pitcherProjection";
 import { PITCHING_EQ_DEFAULTS } from "@/hooks/usePitchingEquationWeights";
@@ -1317,15 +1318,15 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
   const allPlayerIds = Array.from(
     new Set([...hitterPreds, ...pitcherPreds].map((p) => p.player_id).filter((v): v is string => !!v)),
   );
-  const metaByPlayerId = new Map<string, { conference: string | null; team: string | null; position: string | null; pa: number | null; ip: number | null; is_twp: boolean }>();
+  const metaByPlayerId = new Map<string, { conference: string | null; team: string | null; position: string | null; pa: number | null; ip: number | null; is_twp: boolean; division: string | null }>();
   for (let i = 0; i < allPlayerIds.length; i += 100) {
     const chunk = allPlayerIds.slice(i, i + 100);
     const { data } = await supabase
       .from("players")
-      .select("id, conference, team, position, pa, ip, is_twp")
+      .select("id, conference, team, position, pa, ip, is_twp, division")
       .in("id", chunk);
     for (const r of (data || []) as any[]) {
-      metaByPlayerId.set(r.id, { conference: r.conference, team: r.team, position: r.position, pa: r.pa, ip: r.ip, is_twp: !!r.is_twp });
+      metaByPlayerId.set(r.id, { conference: r.conference, team: r.team, position: r.position, pa: r.pa, ip: r.ip, is_twp: !!r.is_twp, division: r.division ?? null });
     }
   }
 
@@ -1521,7 +1522,48 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
               hr9: scouting?.hr9_pr_plus ?? null,
             };
             const coachRoleOverride = pred.player_id ? coachRoleByPlayerId.get(pred.player_id) ?? null : null;
-            const { predictionUpdate, internalsUpdate } = recalcPitcher(pred, pitchingEq, pitchingPowerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride);
+            const pitcherMeta = pred.player_id ? metaByPlayerId.get(pred.player_id) : null;
+
+            // ── JUCO branch ──────────────────────────────────────────────
+            // JUCO returner pitcher regular rows DO NOT go through recalcPitcher.
+            // Mirrors the hitter JUCO branch in scripts/backfill-2027-hitter-returners.ts:
+            // verbatim passthrough of 2026 actuals → 2027 projection columns.
+            // Without this branch, JUCO arms get D1 NCAA-baseline regression
+            // applied (e.g. Blais's 2.45 ERA gets pulled to ~4.20).
+            const isJucoPitcher = pitcherMeta?.division === "NJCAA_D1";
+            let predictionUpdate: any;
+            let internalsUpdate: any = {};
+            if (isJucoPitcher) {
+              const result = projectJucoReturnerPitcher({
+                from_era:  pred.from_era,
+                from_fip:  pred.from_fip,
+                from_whip: pred.from_whip,
+                from_k9:   pred.from_k9,
+                from_bb9:  pred.from_bb9,
+                from_hr9:  pred.from_hr9,
+                actualIp:  pitcherMeta?.ip ?? null,
+                inferredRole: scouting?.Role ?? null,
+                games:        scouting?.G ?? null,
+                gamesStarted: scouting?.GS ?? null,
+                conference:   pitcherMeta?.conference ?? null,
+                team:         pitcherMeta?.team ?? null,
+                eq: pitchingEqForDerive,
+              });
+              predictionUpdate = {
+                p_era: result.p_era, p_fip: result.p_fip, p_whip: result.p_whip,
+                p_k9: result.p_k9, p_bb9: result.p_bb9, p_hr9: result.p_hr9,
+                p_rv_plus: result.p_rv_plus,
+                pitcher_role: result.pitcher_role,
+                pitcher_depth_role: result.pitcher_depth_role,
+                p_war: result.p_war,
+                market_value: result.market_value,
+                projected_ip: result.projected_ip,
+              };
+            } else {
+              const r = recalcPitcher(pred, pitchingEq, pitchingPowerEq, parkMap, scouting, player, storedPrPlus, coachRoleOverride);
+              predictionUpdate = r.predictionUpdate;
+              internalsUpdate = r.internalsUpdate;
+            }
 
             // Derive stored p_war / market_value / projected_ip the same way
             // the per-team precompute does, so the regular variant row carries
@@ -1531,10 +1573,15 @@ export async function bulkRecalculatePredictionsLocal(season: number = PROJECTIO
             // for rows where the recalc fell through (e.g. returner pitcher with
             // missing scouting inputs).
             const pitcherRole = ((predictionUpdate as any).pitcher_role ?? pred.pitcher_role ?? "RP") as "SP" | "RP" | "SM";
-            const pitcherMeta = pred.player_id ? metaByPlayerId.get(pred.player_id) : null;
             const pitcherIsTwp = pitcherMeta?.is_twp ?? false;
             const pitcherIp = pitcherMeta?.ip ?? null;
-            const pitcherDerived = (predictionUpdate as any).p_rv_plus != null
+            // JUCO already supplied p_war / market_value / projected_ip via
+            // projectJucoReturnerPitcher — skipping derive avoids the D1
+            // conference/park factor re-introduction that would defeat the
+            // verbatim passthrough.
+            const pitcherDerived = isJucoPitcher
+              ? {}
+              : (predictionUpdate as any).p_rv_plus != null
               ? derivePitcherStored(
                   (predictionUpdate as any).p_rv_plus,
                   pitcherRole,

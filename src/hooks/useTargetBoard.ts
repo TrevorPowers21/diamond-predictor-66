@@ -70,7 +70,7 @@ export function useTargetBoard() {
   const playerIds = new Set(board.map((r) => r.player_id));
 
   const addPlayer = useMutation({
-    mutationFn: async ({ playerId }: { playerId: string }) => {
+    mutationFn: async ({ playerId, silent: _silent }: { playerId: string; silent?: boolean }) => {
       if (!user?.id) throw new Error("Not logged in");
       if (!effectiveTeamId) throw new Error("No team in scope — impersonate or join a team first");
       const { error } = await tb()
@@ -81,13 +81,17 @@ export function useTargetBoard() {
         });
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ["target-board", effectiveTeamId ?? null] });
-      toast.success("Added to Target Board");
+      // silent=true suppresses the toast. Used by the TB roster→supabase sync
+      // effect, which can fire on every remount; the user-facing add path
+      // (PlayerProfile / Dashboard "Add to board" buttons) leaves silent
+      // undefined so they keep their visible confirmation.
+      if (!variables?.silent) toast.success("Added to Target Board");
     },
-    onError: (e: any) => {
+    onError: (e: any, variables) => {
       if (e?.message?.includes("duplicate") || e?.code === "23505") {
-        toast.info("Already on Target Board");
+        if (!variables?.silent) toast.info("Already on Target Board");
       } else {
         toast.error(`Failed to add: ${e.message}`);
       }

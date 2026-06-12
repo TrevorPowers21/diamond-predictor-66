@@ -1935,11 +1935,17 @@ export default function ReturningPlayers() {
         .eq("season", PROJECTION_SEASON)
         .in("player_id", playerIds)
         .in("model_type", ["returner", "transfer"])
-        .in("variant", ["regular", "precomputed"])
         .in("status", ["active", "departed"]);
-      predQuery = applyTeamScopeFilter(predQuery as any, effectiveTeamId);
+      // Strict variant filter — same rule as the fast path. Impersonation
+      // pulls only the team-scoped precomputed row, no fallback.
+      if (effectiveTeamId) {
+        predQuery = predQuery.eq("variant", "precomputed").eq("customer_team_id", effectiveTeamId);
+      } else {
+        predQuery = predQuery.eq("variant", "regular").is("customer_team_id", null);
+      }
       const { data: allDataRaw, error: predErr } = await predQuery;
       if (predErr) throw predErr;
+      // Dedupe is now a no-op (one row per player), but keeping the call for safety.
       const allData = dedupePreferredPerPlayer(allDataRaw || [], effectiveTeamId);
 
       const nilByPlayer = new Map<string, number | null>();
@@ -2338,7 +2344,15 @@ export default function ReturningPlayers() {
           .eq("season", PROJECTION_SEASON)
           .in("status", ["active", "departed"])
           .not("p_era", "is", null);
-        q = applyTeamScopeFilter(q as any, effectiveTeamId);
+        // Strict variant filter (mirrors hitter fast path line 1580-1583).
+        // Impersonation reads ONLY the team-scoped precomputed row, no fallback
+        // to global regular returner. Guarantees the dashboard shows the same
+        // row the Profile reads. Pitchers without a team-scoped row drop off.
+        if (effectiveTeamId) {
+          q = q.eq("variant", "precomputed").eq("customer_team_id", effectiveTeamId);
+        } else {
+          q = q.eq("variant", "regular").is("customer_team_id", null);
+        }
         return q.range(from, from + PAGE - 1);
       };
 

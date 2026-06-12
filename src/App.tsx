@@ -21,6 +21,7 @@ const SavantHitterPage = lazy(() => import("@/savant/pages/HitterPage"));
 const SavantPitcherPage = lazy(() => import("@/savant/pages/PitcherPage"));
 import TransferPortal from "./pages/TransferPortal";
 import ReturningPlayers from "./pages/ReturningPlayers";
+import WarRoom from "./pages/WarRoom";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import ProtectedRoute from "@/components/ProtectedRoute";
@@ -84,6 +85,7 @@ const App = () => (
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/dashboard/portal" element={<ProtectedRoute><TransferPortal /></ProtectedRoute>} />
             <Route path="/dashboard/returning" element={<ProtectedRoute><ReturningPlayers /></ProtectedRoute>} />
+            <Route path="/dashboard/war-room" element={<ProtectedRoute><WarRoom /></ProtectedRoute>} />
             <Route path="/dashboard/dev-weights" element={<ProtectedRoute><DevWeights /></ProtectedRoute>} />
             {/* NIL Valuations route intentionally disabled for now; keep page for rework later. */}
             {/* <Route path="/dashboard/nil" element={<ProtectedRoute><NilValuations /></ProtectedRoute>} /> */}
