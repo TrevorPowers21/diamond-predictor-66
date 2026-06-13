@@ -237,7 +237,9 @@ async function main() {
       // Use pitcher-model row first; fall back to general row if none
       pred = pitcherPredMap.get(pid) ?? predMap.get(pid) ?? null;
     } else {
-      pred = predMap.get(pid) ?? null;
+      // For TWP hitter rows, also fall back to pitcher-model row — the pitcher-model
+      // row carries both hitter and pitcher stats for two-way players.
+      pred = predMap.get(pid) ?? (isTwp ? pitcherPredMap.get(pid) : null) ?? null;
     }
 
     if (!pred) {

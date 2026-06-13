@@ -265,9 +265,11 @@ export function useLoadBuild({
               const hitterRows = rows.filter((r: any) => r.pitcher_role == null);
               const pitcherRows = rows.filter((r: any) => r.pitcher_role != null);
               if (isTwp) {
-                // TWP: both sides get their own row.
-                const hPick = pickBest(hitterRows);
-                const pPick = pickBest(pitcherRows);
+                // TWP: each side gets its own prediction. Fall back to the full
+                // row set when a dedicated side-specific row doesn't exist — the
+                // pitcher-model row carries both hitter and pitcher stats for TWPs.
+                const hPick = pickBest(hitterRows.length > 0 ? hitterRows : rows);
+                const pPick = pickBest(pitcherRows.length > 0 ? pitcherRows : rows);
                 if (hPick) predictionMap[`${pid}|H`] = hPick;
                 if (pPick) predictionMap[`${pid}|P`] = pPick;
               } else {
