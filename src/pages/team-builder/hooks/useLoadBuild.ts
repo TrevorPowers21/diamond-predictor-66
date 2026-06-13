@@ -155,9 +155,10 @@ export function useLoadBuild({
           if (!pid) continue;
           const snap = bp.player_snapshot as any;
           // Reject snapshots saved before predictions resolved (all-null stats).
+          // Exclude o_war alone — a stale partial snapshot can write o_war=0
+          // while leaving p_avg/p_era null, which would falsely pass this gate.
           const hasData = snap && (
-            snap.p_avg != null || snap.p_era != null ||
-            snap.o_war != null || snap.p_war != null
+            snap.p_avg != null || snap.p_era != null || snap.p_war != null
           );
           if (hasData) {
             const side = isPitcherSlot(bp.position_slot) ? "P" : "H";
