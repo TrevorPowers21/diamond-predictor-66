@@ -2183,7 +2183,7 @@ export default function TeamBuilder() {
     setDirty(true);
   };
 
-  const addPlayerFromTargetSearch = async (row: any) => {
+  const addPlayerFromTargetSearch = async (row: any, { silent = false } = {}) => {
     try {
     if (row?.__seedHitter) {
       const matchedDb = allPlayersForSearch.find((p: any) =>
@@ -2374,7 +2374,7 @@ export default function TeamBuilder() {
       setDirty(true);
       setTargetPlayerSearchQuery("");
       setTargetPlayerSearchOpen(false);
-      toast({ title: "Added to targets", description: fullName });
+      if (!silent) toast({ title: "Added to targets", description: fullName });
       return;
     }
     if (row?.__storagePitcher) {
@@ -2534,7 +2534,7 @@ export default function TeamBuilder() {
       setDirty(true);
       setTargetPlayerSearchQuery("");
       setTargetPlayerSearchOpen(false);
-      toast({ title: "Added to targets", description: fullName });
+      if (!silent) toast({ title: "Added to targets", description: fullName });
       return;
     }
 
@@ -2713,7 +2713,7 @@ export default function TeamBuilder() {
       // below, no need to double-notify.
       addToSupabaseBoard({ playerId: row.id, silent: true });
     }
-    toast({ title: "Added to targets", description: `${row.first_name} ${row.last_name}` });
+    if (!silent) toast({ title: "Added to targets", description: `${row.first_name} ${row.last_name}` });
     } catch (err: any) {
       toast({ title: "Failed to add target", description: err?.message || "Unexpected error while adding player target.", variant: "destructive" });
     }
@@ -2784,7 +2784,7 @@ export default function TeamBuilder() {
               from_team: sb.team,
               conference: sb.conference ?? null,
               source_player_id: (sb as any).source_player_id ?? null,
-            });
+            }, { silent: true });
           }
           setDirty(true);
         })();
