@@ -396,6 +396,40 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     return { byKey, byName, bySourceId };
   }, [pitchingMasterRows, teams]);
 
+  // Raw pitcher skill metrics from Pitching Master rows — used by the target
+  // board Risk badge to feed assessPitcherRisk with the same inputs
+  // PitcherProfile / TransferPortal pass. Keyed by source_player_id; falls
+  // back to name|team. Stored verbatim (no z-score conversion) because
+  // assessPitcherRisk does its own normalization.
+  const pitcherSkillByKey = useMemo(() => {
+    type Skill = {
+      stuffPlus: number | null;
+      whiffPct: number | null;
+      bbPct: number | null;
+      hardHit: number | null;
+      izWhiff: number | null;
+      ip: number | null;
+    };
+    const bySourceId = new Map<string, Skill>();
+    const byNameTeam = new Map<string, Skill>();
+    for (const pr of pitchingMasterRows as any[]) {
+      const name = (pr.playerName || "").trim();
+      const team = (pr.team || "").trim();
+      if (!name) continue;
+      const skill: Skill = {
+        stuffPlus: pr.stuffPlus ?? null,
+        whiffPct: pr.miss_pct ?? null,
+        bbPct: pr.bb_pct ?? null,
+        hardHit: pr.hard_hit_pct ?? null,
+        izWhiff: pr.in_zone_whiff_pct ?? null,
+        ip: pr.ip ?? null,
+      };
+      if (pr.source_player_id) bySourceId.set(pr.source_player_id, skill);
+      byNameTeam.set(`${normalizeName(name)}|${normalizeName(team)}`, skill);
+    }
+    return { bySourceId, byNameTeam };
+  }, [pitchingMasterRows]);
+
   // ── Block D: confByKey, confByConfId ─────────────────────────────────────────
   // Build conferenceStats (same local useMemo from TB) from newConfStats
   const conferenceStats: ConferenceRow[] = useMemo(() => {
@@ -1433,11 +1467,27 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   }, [computePitcherPwar, computeReturnerPitchingProjection, simulateTransferProjection, pitchingEq, liveTargetPredictionByPlayerId, remoteEquationValues]);
 
   // ── Block K (relocated): positionPlayers, pitchers, targetPlayers, targetPositionPlayers, targetPitchers
+  // Off-roster target gate: a target row that the coach hasn't toggled "on
+  // roster" yet ("+" icon, default for newly added targets) does not
+  // aggregate into roster totals or show in the main roster tables. It
+  // still renders its own target board row with its individual projection.
+  // Returners always count. The included_in_roster column defaults true at
+  // the DB level so any row pre-dating the migration continues to count.
+  // (Defined here, ahead of positionPlayers, so the table-building filters
+  // can read it without hitting a temporal-dead-zone error.)
+  const countsTowardRoster = (p: BuildPlayer) => {
+    if ((p.roster_status || "returner") !== "target") return true;
+    return (p as any).included_in_roster !== false;
+  };
+
   // Sorted by WAR desc so highest-impact players appear at the top of each table.
   // Must live AFTER playerProjection — sort comparators call into it.
-  const positionPlayers = [...rosterPlayers.filter(hitterEligible)]
+  // Main roster tables exclude off-roster targets — they show only on the
+  // target board until the coach clicks the "+" icon to add them. Returners
+  // and on-roster targets are unaffected and continue to render here.
+  const positionPlayers = [...rosterPlayers.filter((p) => hitterEligible(p) && countsTowardRoster(p))]
     .sort((a, b) => (playerProjection(b, "hitter")?.owar ?? -Infinity) - (playerProjection(a, "hitter")?.owar ?? -Infinity));
-  const pitchers = [...rosterPlayers.filter(pitcherEligible)]
+  const pitchers = [...rosterPlayers.filter((p) => pitcherEligible(p) && countsTowardRoster(p))]
     .sort((a, b) => ((playerProjection(b, "pitcher") as any)?.pwar ?? -Infinity) - ((playerProjection(a, "pitcher") as any)?.pwar ?? -Infinity));
   const targetPlayers = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target");
   const targetPositionPlayers = [...targetPlayers.filter(hitterEligible)]
@@ -1527,10 +1577,16 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const v = Number(p.nil_value);
       return Number.isFinite(v) ? Math.max(0, v) : 0;
     }
+    // Denominator includes returners + on-roster targets + the target being
+    // computed (so off-roster targets each see their own "what if I were
+    // the next add" share). Other off-roster targets are skipped so they
+    // don't dilute each other's marginal value — each one is independently
+    // priced as the lone next addition.
     let overriddenTotal = 0;
     let nonOverriddenScore = 0;
     for (const rp of rosterPlayers) {
       if (!isProjectedStatus(rp)) continue;
+      if (!countsTowardRoster(rp) && rp !== p) continue;
       if (rp.nil_value_overridden) {
         overriddenTotal += Math.max(0, Number(rp.nil_value) || 0);
       } else {
@@ -1563,11 +1619,15 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
 
   const totalRosterPlayerScore = rosterPlayers.reduce((sum, p) => {
     if (!isProjectedStatus(p)) return sum;
+    if (!countsTowardRoster(p)) return sum;
     return sum + projectedPlayerScore(p);
   }, 0);
   // Per-side fan-out: each row's hitter + pitcher eligibility fires
-  // independently so each line counts toward the budget.
+  // independently so each line counts toward the budget. Off-roster
+  // targets are skipped — they show their own marginal value on their
+  // row but do not consume any of the team budget.
   const totalEffectiveNil = rosterPlayers.reduce((sum, p) => {
+    if (!countsTowardRoster(p)) return sum;
     let v = 0;
     if (hitterEligible(p)) v += effectiveNilForPlayer(p, "hitter");
     if (pitcherEligible(p)) v += effectiveNilForPlayer(p, "pitcher");
@@ -1693,7 +1753,16 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     };
   }, [isProjectedStatus, playerProjection, effectiveNilForPlayer, projectedNilForPlayer, pitchingEq, pitchingStatsByNameTeam]);
 
-  const rosterTableTotals = useMemo(() => calcTotals(rosterPlayers), [calcTotals, rosterPlayers]);
+  // Page-level totals only count rows that have actually been added to the
+  // roster — off-roster targets ("+" toggle, default for newly searched
+  // additions) are excluded from the headline WAR / NIL summaries. They
+  // still render their own row on the target board with their individual
+  // projection, and they still flow into the per-target-table totals
+  // below (which are intentionally a "what if I added all of these?" view).
+  const rosterTableTotals = useMemo(
+    () => calcTotals(rosterPlayers.filter(countsTowardRoster)),
+    [calcTotals, rosterPlayers],
+  );
   const positionTableTotals = useMemo(() => calcTotals(positionPlayers, "hitter"), [calcTotals, positionPlayers]);
   const pitcherTableTotals = useMemo(() => calcTotals(pitchers, "pitcher"), [calcTotals, pitchers]);
   const targetPositionTableTotals = useMemo(() => calcTotals(targetPositionPlayers, "hitter"), [calcTotals, targetPositionPlayers]);
@@ -1713,6 +1782,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     selectedTeamConference,
     selectedTeamFullName,
     pitchingPrByNameTeam,
+    pitcherSkillByKey,
     confByKey,
     seedByName,
     seedByPlayerId,

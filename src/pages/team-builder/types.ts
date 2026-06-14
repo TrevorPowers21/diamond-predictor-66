@@ -64,6 +64,12 @@ export type BuildPlayer = {
   // Doesn't drive WAR or other math — just a tag the coach can see on the
   // roster row to ID expected role.
   projection_tier?: "developmental" | "role_player" | "contributor" | "immediate_impact" | null;
+  // Target board "shopping list" gate. True means this row counts toward
+  // roster aggregations (oWAR sum, MV sum, NIL budget). Returners default
+  // true (preserves prior behavior). New search-added targets land as
+  // false and flip to true when the coach clicks the "+" icon on the
+  // target board row.
+  included_in_roster?: boolean;
   player?: {
     first_name: string;
     last_name: string;

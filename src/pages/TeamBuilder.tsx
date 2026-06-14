@@ -100,6 +100,8 @@ type BuildPlayer = {
   dev_aggressiveness?: number | null;
   class_transition_overridden?: boolean;
   dev_aggressiveness_overridden?: boolean;
+  // Target board "shopping list" gate. See types.ts BuildPlayer for full docs.
+  included_in_roster?: boolean;
   // joined
   player?: {
     first_name: string;
@@ -1318,6 +1320,7 @@ export default function TeamBuilder() {
     teamByKey,
     selectedTeamSourceId, selectedTeamConference, selectedTeamFullName,
     pitchingPrByNameTeam,
+    pitcherSkillByKey,
     confByKey,
     seedByName, seedByPlayerId,
     liveTargetPredictionByPlayerId, liveTargetPlayerById, internalsByPredictionId,
@@ -1917,6 +1920,10 @@ export default function TeamBuilder() {
           position_slot: rp.position_slot,
           depth_order: rp.depth_order,
           nil_value: rp.nil_value,
+          // Returners + existing targets default true (column-level default).
+          // Only newly added targets land as false; the "+" toggle on the
+          // target board flips this to true.
+          included_in_roster: rp.included_in_roster ?? true,
           player_snapshot: rp.prediction ?? null,
           production_notes: serializeBuildPlayerMeta(
             rp.production_notes,
@@ -2242,6 +2249,9 @@ export default function TeamBuilder() {
         dev_aggressiveness: 0,
         class_transition_overridden: false,
         dev_aggressiveness_overridden: false,
+        // New targets land off-roster — coach clicks the "+" icon on the
+        // target board row to add them to roster aggregations.
+        included_in_roster: false,
         transfer_snapshot: {
           p_avg: row.__seedStats?.avg ?? null,
           p_obp: row.__seedStats?.obp ?? null,
@@ -2460,6 +2470,9 @@ export default function TeamBuilder() {
         dev_aggressiveness: 0,
         class_transition_overridden: false,
         dev_aggressiveness_overridden: false,
+        // New targets land off-roster — coach clicks the "+" icon on the
+        // target board row to add them to roster aggregations.
+        included_in_roster: false,
         transfer_snapshot: transferSnapshot,
         player: {
           first_name: row.first_name || "", last_name: row.last_name || "",
@@ -2614,6 +2627,9 @@ export default function TeamBuilder() {
       dev_aggressiveness: devAggressiveness,
       class_transition_overridden: false,
       dev_aggressiveness_overridden: false,
+      // New targets land off-roster — coach clicks the "+" icon on the
+      // target board row to add them to roster aggregations.
+      included_in_roster: false,
       prediction: stored ?? null,
       nilVal: row.nil_valuations?.[0]?.estimated_value ?? null,
       nil_owar: row.nil_valuations?.[0]?.component_breakdown?.ncaa_owar ?? null,
@@ -2971,11 +2987,20 @@ export default function TeamBuilder() {
     });
   }, [rosterPlayers, playerProjection]);
 
+  // Depth-chart assignment dropdowns: only on-roster players are
+  // assignable. Off-roster targets ("+" toggle, not yet added to the
+  // roster) are excluded so the coach can't accidentally slot a player
+  // they haven't committed to. The mapped `idx` is the ORIGINAL
+  // rosterPlayers index — filtering preserves it, so saved
+  // depthAssignments continue to resolve correctly.
+  const isOnRoster = (rp: BuildPlayer) =>
+    (rp.roster_status || "returner") !== "target" ||
+    (rp as any).included_in_roster !== false;
   const eligiblePositionPlayers = useMemo(
     () =>
       rosterPlayers
         .map((rp, idx) => ({ rp, idx }))
-        .filter(({ rp }) => !isPitcher(rp) && (rp.roster_status || "returner") !== "leaving"),
+        .filter(({ rp }) => !isPitcher(rp) && (rp.roster_status || "returner") !== "leaving" && isOnRoster(rp)),
     [rosterPlayers],
   );
 
@@ -2983,7 +3008,7 @@ export default function TeamBuilder() {
     () =>
       rosterPlayers
         .map((rp, idx) => ({ rp, idx }))
-        .filter(({ rp }) => isPitcher(rp) && (rp.roster_status || "returner") !== "leaving"),
+        .filter(({ rp }) => isPitcher(rp) && (rp.roster_status || "returner") !== "leaving" && isOnRoster(rp)),
     [rosterPlayers],
   );
 
@@ -3133,6 +3158,7 @@ export default function TeamBuilder() {
   const playerRowProps = useMemo(() => ({
     allPlayersById,
     pitchingSourceMap: pitchingStatsByNameTeam.bySourceId,
+    pitcherSkillByKey,
     thinSampleMap,
     powerLookup,
     confByKey,
@@ -3156,6 +3182,7 @@ export default function TeamBuilder() {
   }), [
     allPlayersById,
     pitchingStatsByNameTeam,
+    pitcherSkillByKey,
     thinSampleMap,
     powerLookup,
     confByKey,

@@ -447,6 +447,11 @@ export function useLoadBuild({
                     bp.position_slot || (isPitcherRow ? inferredRole || "RP" : null),
                   depth_order: bp.depth_order ?? 1,
                   nil_value: Number(bp.nil_value) || 0,
+                  // Target-board "shopping list" flag. Defaults true if the
+                  // column is missing (rows saved before the migration), so
+                  // existing builds keep counting everything toward roster
+                  // totals the same way they always have.
+                  included_in_roster: (bp as any).included_in_roster ?? true,
                   production_notes: meta.notes,
                   roster_status:
                     meta.rosterStatus ??

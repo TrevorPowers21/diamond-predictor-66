@@ -67,6 +67,22 @@ export default function AnalyticsTab({
   // define depthKey locally — trivial: (slot, depth) => `${slot}:${depth}`
   const depthKey = (slot: string, depth: number) => `${slot}:${depth}`;
 
+  // Effective roster = the rows that actually count toward this build's
+  // analytics. Off-roster targets ("+" toggle on the target board, default
+  // for newly searched additions) are excluded from every aggregation here
+  // — position tier breakdown, lineup oWAR, rotation/bullpen pWAR, depth
+  // chart, and the year-over-year + championship benchmark math. They
+  // still render their own row on the target board with their individual
+  // projection; they just don't bloat the team-level numbers until the
+  // coach has explicitly added them.
+  const effectiveRosterPlayers = useMemo(
+    () => rosterPlayers.filter((p) => {
+      if ((p.roster_status || "returner") !== "target") return true;
+      return (p as any).included_in_roster !== false;
+    }),
+    [rosterPlayers],
+  );
+
   // Local helper to get display name from a BuildPlayer
   const getPlayerName = (p: BuildPlayer) =>
     p.player ? `${p.player.first_name} ${p.player.last_name}` : p.custom_name || "TBD";
@@ -94,7 +110,7 @@ export default function AnalyticsTab({
   const POS_TO_TIER: Record<string, "premium" | "skill" | "power"> = {};
   for (const t of HITTER_TIERS) for (const p of t.positions) POS_TO_TIER[p] = t.key;
 
-  for (const p of rosterPlayers) {
+  for (const p of effectiveRosterPlayers) {
     if ((p.roster_status || "returner") === "leaving") continue;
     const pos = (p.position_slot || p.player?.position || "")
       .toString().toUpperCase().trim();
@@ -142,15 +158,15 @@ export default function AnalyticsTab({
       hitterByExactPos[pos].warTotal += war;
     }
   }
-  const activeCount = rosterPlayers.filter(p => (p.roster_status || "returner") !== "leaving").length;
-  const leavingCount = rosterPlayers.filter(p => (p.roster_status || "returner") === "leaving").length;
+  const activeCount = effectiveRosterPlayers.filter(p => (p.roster_status || "returner") !== "leaving").length;
+  const leavingCount = effectiveRosterPlayers.filter(p => (p.roster_status || "returner") === "leaving").length;
   const groups = Object.entries(posGroups).sort((a, b) => b[1].nilTotal - a[1].nilTotal);
 
   // Current build positional WAR splits — mirror the snapshot schema
   // so the year-over-year + benchmark compare cards line up cleanly.
   const hitterContribs: Array<{ p: BuildPlayer; owar: number }> = [];
   const pitcherContribs: Array<{ p: BuildPlayer; pwar: number; role: "SP" | "RP" }> = [];
-  for (const p of rosterPlayers) {
+  for (const p of effectiveRosterPlayers) {
     if ((p.roster_status || "returner") === "leaving") continue;
     if (hitterEligible(p)) {
       const owar = playerProjection(p, "hitter").owar ?? 0;
@@ -524,7 +540,10 @@ export default function AnalyticsTab({
         const hitterStarterPosByIdx = new Map<number, string>();
         const rotationIdxs = new Set<number>();
         const bullpenIdxs = new Set<number>();
-        rosterPlayers.forEach((p, idx) => {
+        // Iterates effectiveRosterPlayers so the index alignment matches
+        // the read loop below. Indices stay consistent because both loops
+        // use the same filtered array.
+        effectiveRosterPlayers.forEach((p, idx) => {
           if ((p.roster_status || "returner") === "leaving") return;
           const role = p.depth_role || "";
           // d1-eligible hitter tiers: cornerstone, everyday_starter,
@@ -559,6 +578,10 @@ export default function AnalyticsTab({
           const p = rosterPlayers[idx];
           if (!p) continue;
           if ((p.roster_status || "returner") === "leaving") continue;
+          // depthAssignments are saved with original-rosterPlayers indices,
+          // so we can't swap to effectiveRosterPlayers here. Instead, skip
+          // off-roster targets inline so they don't fill an empty depth slot.
+          if ((p.roster_status || "returner") === "target" && (p as any).included_in_roster === false) continue;
           if (!hitterEligible(p)) continue;
           const currentPos = (p.position_slot || p.player?.position || "")
             .toString().toUpperCase().trim();
@@ -575,6 +598,7 @@ export default function AnalyticsTab({
           const p = rosterPlayers[idx];
           if (!p) return;
           if ((p.roster_status || "returner") === "leaving") return;
+          if ((p.roster_status || "returner") === "target" && (p as any).included_in_roster === false) return;
           if (!pitcherEligible(p)) return;
           if (rotationIdxs.has(idx) || bullpenIdxs.has(idx)) return;
           rotationIdxs.add(idx);
@@ -585,6 +609,7 @@ export default function AnalyticsTab({
           const p = rosterPlayers[idx];
           if (!p) return;
           if ((p.roster_status || "returner") === "leaving") return;
+          if ((p.roster_status || "returner") === "target" && (p as any).included_in_roster === false) return;
           if (!pitcherEligible(p)) return;
           if (rotationIdxs.has(idx) || bullpenIdxs.has(idx)) return;
           bullpenIdxs.add(idx);
@@ -597,7 +622,7 @@ export default function AnalyticsTab({
         const rotation: PitcherRow[] = [];
         const bullpen: PitcherRow[] = [];
         let pitchingWarTotal = 0;
-        rosterPlayers.forEach((p, idx) => {
+        effectiveRosterPlayers.forEach((p, idx) => {
           if ((p.roster_status || "returner") === "leaving") return;
           if (hitterEligible(p)) {
             const owar = playerProjection(p, "hitter").owar ?? 0;

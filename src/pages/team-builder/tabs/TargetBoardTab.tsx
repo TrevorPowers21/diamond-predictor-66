@@ -129,7 +129,7 @@ export default function TargetBoardTab({
                 <TableHead className="sticky left-0 z-20 bg-muted/95 backdrop-blur-sm shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] min-w-[180px]">Player</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-center">Risk</TableHead>
-                <TableHead>Position Change</TableHead>
+                <TableHead className="text-center">Position</TableHead>
                 <TableHead>Dev Agg</TableHead>
                 <TableHead>Depth</TableHead>
                 <TableHead className="text-center min-w-[220px] whitespace-nowrap">pAVG/pOBP/pSLG</TableHead>
@@ -147,7 +147,7 @@ export default function TargetBoardTab({
               ) : (
                 targetPositionPlayers.map((p, i) => {
                   const globalIdx = rosterPlayers.indexOf(p);
-                  return <PlayerTableRow key={globalIdx} p={p} idx={i} globalIdx={globalIdx} pool="hitter" {...playerRowProps} />;
+                  return <PlayerTableRow key={globalIdx} p={p} idx={i} globalIdx={globalIdx} pool="hitter" tableContext="target" {...playerRowProps} />;
                 })
               )}
               <TableRow className="bg-muted/40 font-medium">
@@ -187,7 +187,7 @@ export default function TargetBoardTab({
               <TableRow>
                 <TableHead className="sticky left-0 z-20 bg-muted/95 backdrop-blur-sm shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] min-w-[180px]">Player</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Pos</TableHead>
+                <TableHead className="text-center">Risk</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Dev Agg</TableHead>
                 <TableHead>Depth</TableHead>
@@ -206,7 +206,7 @@ export default function TargetBoardTab({
               ) : (
                 targetPitchers.map((p, i) => {
                   const globalIdx = rosterPlayers.indexOf(p);
-                  return <PlayerTableRow key={globalIdx} p={p} idx={i} globalIdx={globalIdx} pool="pitcher" {...playerRowProps} />;
+                  return <PlayerTableRow key={globalIdx} p={p} idx={i} globalIdx={globalIdx} pool="pitcher" tableContext="target" {...playerRowProps} />;
                 })
               )}
               <TableRow className="bg-muted/40 font-medium">
