@@ -20,6 +20,47 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    date: "2026-06-14",
+    headline: "Team Builder target board is now a true shopping list",
+    features: [
+      {
+        title: "Toggle Targets Onto the Roster One at a Time",
+        tagline:
+          "Searching a player onto the target board no longer auto-counts them in your roster math. Each target shows its own projection on its own line, and you click the + icon next to the name when you're ready to add them to your roster.",
+        details: [
+          "Every target row has a + icon to the left of the player name. Click it to add the player to your roster — the icon flips to a green ✓ and that player now flows into your Total WAR, Lineup oWAR, Rotation pWAR, Bullpen pWAR, NIL budget, depth chart, and Program Analytics.",
+          "Click the ✓ to take them back off the roster — they stay on the target board with their individual projection visible, just no longer counted.",
+          "While a player is off the roster (+), the Actual Value column on their row shows what their NIL share would be if they were your next signing — your individual evaluation of that player against the budget you have remaining.",
+          "Trash icon still removes a target from the board entirely.",
+        ],
+      },
+      {
+        title: "Existing Saved Targets Now Show as Watching By Default",
+        tagline:
+          "Every target you had saved before today is now listed as + (watching) — nothing was deleted. Your Total WAR, NIL, and Program Analytics now reflect just your actual returners. Click + on any target you want counted back into the roster math.",
+        details: [
+          "Your saved target list is intact. Every player you were watching is still there, with the same projection, depth role, dev aggressiveness, and notes you set.",
+          "If you were using the target board to plan your real 2026 roster (transfers you're confident in landing), click + on each of those targets and your numbers will return to where you remember them.",
+          "If you were using the target board as a watch list (which most coaches are), the new lower numbers ARE your correct roster math — those targets shouldn't have been inflating your totals all along.",
+        ],
+      },
+      {
+        title: "Cleaner Target Board Layout",
+        tagline:
+          "The target board's Position column is now read-only (no dropdown), the Risk column now shows a proper pitcher risk grade for pitcher targets, and on-roster targets render with the same row style as your returners on the Roster tab.",
+        details: [
+          "Pitchers on the target board get a Risk grade tuned to pitcher-specific inputs (stuff+, whiff%, walk%, etc.) instead of borrowing the hitter risk calculation.",
+          "Position assignment (the dropdown for slotting a player into your depth chart) lives only on the Roster tab now. The target board shows the player's natural position as text — you decide where they slot when you add them.",
+          "When you ✓ a target into the roster, that player's row picks up the position dropdown and looks identical to your other roster rows.",
+        ],
+      },
+    ],
+    whatElse: [
+      "Saved builds with pitcher returners now show pWAR correctly. Pitcher columns weren't being requested when a saved build loaded, so pWAR / Market Value were rendering blank on reload — fixed.",
+      "Position dropdown on the Roster tab now defaults to '—' for newly added targets so you can pick their slot fresh instead of inheriting their old school's position.",
+    ],
+  },
+  {
     date: "2026-06-10",
     headline: "Projected MLB Draft slot values now live on player profiles",
     features: [
