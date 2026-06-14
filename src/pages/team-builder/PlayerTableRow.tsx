@@ -4,10 +4,10 @@ import { TableRow, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Trash2 } from "lucide-react";
+import { Trash2, Plus, Check } from "lucide-react";
 import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
 import { profileRouteFor } from "@/lib/profileRoutes";
-import { assessHitterRisk } from "@/lib/playerRisk";
+import { assessHitterRisk, assessPitcherRisk } from "@/lib/playerRisk";
 import type { BuildPlayer, PitcherDepthRole } from "./types";
 import {
   effectivePitcherRoleForBuild,
@@ -29,6 +29,27 @@ const DEV_AGGRESSIVENESS_OPTIONS = [0, 0.5, 1] as const;
 export interface PlayerTableRowSharedProps {
   allPlayersById: Map<string, unknown>;
   pitchingSourceMap: Map<string, { role?: string | null }>;
+  // Raw pitcher skill metrics from Pitching Master (stuffPlus, whiff%, etc).
+  // Used by the target board Risk badge for pitcher rows. Keys: source_player_id
+  // (preferred), then normalized "name|team".
+  pitcherSkillByKey: {
+    bySourceId: Map<string, {
+      stuffPlus: number | null;
+      whiffPct: number | null;
+      bbPct: number | null;
+      hardHit: number | null;
+      izWhiff: number | null;
+      ip: number | null;
+    }>;
+    byNameTeam: Map<string, {
+      stuffPlus: number | null;
+      whiffPct: number | null;
+      bbPct: number | null;
+      hardHit: number | null;
+      izWhiff: number | null;
+      ip: number | null;
+    }>;
+  };
   thinSampleMap: Map<string, boolean>;
   powerLookup: Map<string, {
     chase?: number | null;
@@ -81,6 +102,13 @@ interface Props extends PlayerTableRowSharedProps {
   idx: number;
   globalIdx: number;
   pool?: "hitter" | "pitcher";
+  // Which subtab is rendering this row. Some cells differ between the two:
+  //   target board: Cell 3 = Risk badge, Cell 4 = static position text
+  //   roster     : Cell 3 = Position text, Cell 4 = position dropdown
+  // The +/✓ toggle, From: line, Status badge, and stat cells are identical
+  // across both. Defaults to "roster" so existing call sites that don't pass
+  // the prop yet stay on today's roster-style rendering.
+  tableContext?: "roster" | "target";
 }
 
 function PlayerTableRow({
@@ -88,8 +116,10 @@ function PlayerTableRow({
   idx: _idx,
   globalIdx,
   pool,
+  tableContext = "roster",
   allPlayersById,
   pitchingSourceMap,
+  pitcherSkillByKey,
   thinSampleMap,
   powerLookup,
   confByKey,
@@ -150,6 +180,24 @@ function PlayerTableRow({
     <TableRow key={globalIdx}>
       <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] min-w-[180px]">
         <div className="flex items-center gap-2">
+          {isTarget && (() => {
+            const onRoster = (p as any).included_in_roster !== false;
+            return (
+              <button
+                type="button"
+                onClick={() => updatePlayer(globalIdx, { included_in_roster: !onRoster } as any)}
+                title={onRoster ? "Remove from Roster" : "Add to Roster"}
+                aria-label={onRoster ? "Remove from Roster" : "Add to Roster"}
+                className={
+                  onRoster
+                    ? "inline-flex items-center justify-center w-4 h-4 rounded-sm text-emerald-600 hover:text-emerald-700 transition-colors"
+                    : "inline-flex items-center justify-center w-4 h-4 rounded-sm text-muted-foreground hover:text-foreground transition-colors"
+                }
+              >
+                {onRoster ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+              </button>
+            );
+          })()}
           {linkedPlayerId ? (
             <Link
               to={profileRouteFor(
@@ -238,21 +286,62 @@ function PlayerTableRow({
         )}
       </TableCell>
 
-      <TableCell className={isTarget ? "text-center" : undefined}>
-        {isTarget ? (
+      <TableCell className={(isTarget && tableContext === "target") ? "text-center" : undefined}>
+        {(isTarget && tableContext === "target") ? (
           (() => {
             const pName = p.player
               ? `${p.player.first_name || ""} ${p.player.last_name || ""}`.trim()
               : "";
             const pTeam = p.player?.from_team || p.player?.team || "";
             const pSourceId = p.player?.source_player_id || null;
+            const originConf = p.player?.conference ?? p.transfer_snapshot?.from_conference ?? null;
+            const colors: Record<string, string> = {
+              Low: "text-[hsl(142,71%,35%)] bg-[hsl(142,71%,45%,0.12)]",
+              Moderate: "text-[hsl(200,80%,35%)] bg-[hsl(200,80%,50%,0.12)]",
+              Elevated: "text-[hsl(40,90%,38%)] bg-[hsl(40,90%,50%,0.12)]",
+              High: "text-[hsl(0,72%,41%)] bg-[hsl(0,72%,51%,0.12)]",
+            };
+
+            if (isPitcherRow) {
+              // Pitcher Risk: feed assessPitcherRisk with the same inputs
+              // PitcherProfile / TransferPortal use. Skillset comes from
+              // Pitching Master via pitcherSkillByKey; rate proxies come
+              // from the stored prediction / transfer snapshot. careerSeasons
+              // and confHitterTalentPlus aren't plumbed into TB today —
+              // those factors fall back to defaults.
+              const ptKey = `${normalizeName(pName)}|${normalizeName(pTeam)}`;
+              const skill =
+                (pSourceId ? pitcherSkillByKey.bySourceId.get(pSourceId) : null) ??
+                pitcherSkillByKey.byNameTeam.get(ptKey) ??
+                null;
+              const prv = p.prediction?.p_rv_plus ?? p.transfer_snapshot?.p_rv_plus ?? sim?.p_rv_plus ?? null;
+              const risk = assessPitcherRisk({
+                conference: originConf,
+                projectedPrvPlus: prv,
+                confHitterTalentPlus: null,
+                careerSeasons: undefined,
+                ip: skill?.ip ?? null,
+                stuffPlus: skill?.stuffPlus ?? null,
+                whiffPct: skill?.whiffPct ?? null,
+                izWhiff: skill?.izWhiff ?? null,
+                bbPct: skill?.bbPct ?? null,
+                hardHit: skill?.hardHit ?? null,
+              });
+              return (
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${colors[risk.grade] || ""}`}
+                >
+                  {risk.grade}
+                </span>
+              );
+            }
+
             const spKey = `${normalizeName(pName)}|${normalizeName(pTeam)}`;
             const sp =
               (pSourceId ? powerLookup.get(`sid:${pSourceId}`) : null) ??
               powerLookup.get(spKey) ??
               powerLookup.get(normalizeName(pName)) ??
               null;
-            const originConf = p.player?.conference ?? p.transfer_snapshot?.from_conference ?? null;
             const pureWrc =
               p.prediction?.p_wrc_plus ?? p.transfer_snapshot?.p_wrc_plus ?? sim?.pWrcPlus ?? null;
             const confRow = originConf ? confByKey.get(normalizeKey(originConf)) : null;
@@ -272,12 +361,6 @@ function PlayerTableRow({
               gb: sp?.gb,
               bb: sp?.bb,
             });
-            const colors: Record<string, string> = {
-              Low: "text-[hsl(142,71%,35%)] bg-[hsl(142,71%,45%,0.12)]",
-              Moderate: "text-[hsl(200,80%,35%)] bg-[hsl(200,80%,50%,0.12)]",
-              Elevated: "text-[hsl(40,90%,38%)] bg-[hsl(40,90%,50%,0.12)]",
-              High: "text-[hsl(0,72%,41%)] bg-[hsl(0,72%,51%,0.12)]",
-            };
             return (
               <span
                 className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${colors[risk.grade] || ""}`}
@@ -320,8 +403,18 @@ function PlayerTableRow({
         )}
       </TableCell>
 
-      <TableCell>
-        {isPitcherRow ? (
+      <TableCell className={tableContext === "target" ? "text-center" : undefined}>
+        {tableContext === "target" ? (
+          // Target board renders the position as read-only text — the
+          // "where do they slot in?" decision lives on the roster subtab,
+          // where the dropdown still appears once the coach adds them in.
+          (() => {
+            if (isPitcherRow) return currentPitcherRole || "—";
+            const slot = p.position_slot;
+            if (slot && slot !== "none") return slot;
+            return p.player?.position || "—";
+          })()
+        ) : isPitcherRow ? (
           <Select
             value={currentPitcherRole}
             onValueChange={(v) => {
@@ -348,7 +441,12 @@ function PlayerTableRow({
           </Select>
         ) : (
           <Select
-            value={p.position_slot || (isTarget ? (p.player?.position || "none") : "none")}
+            // Always default to "none" (renders as "—") when no slot is
+            // assigned. The prior target-only fallback to the player's
+            // natural position made on-roster targets look "stuck" on
+            // their old position when they should be unassigned and
+            // coach-selectable like any other roster slot.
+            value={p.position_slot || "none"}
             onValueChange={(v) => {
               const nextSlot = v === "none" ? null : v;
               updatePlayer(globalIdx, { position_slot: nextSlot });
