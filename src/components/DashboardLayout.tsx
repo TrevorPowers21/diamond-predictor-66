@@ -29,7 +29,7 @@ const navItems = [
   { label: "Team Builder", href: "/dashboard/team-builder", icon: Hammer, description: "Build your roster" },
   { label: "Player Dashboard", href: "/dashboard/returning", icon: Activity, description: "All player stats" },
   { label: "The War Room: Draft IQ", href: "/dashboard/war-room", icon: Target, description: "Draft-eligible college + HS commits" },
-  { label: "High Follow", href: "/dashboard/high-follow", icon: Star, description: "Your watchlist" },
+  { label: "Targets", href: "/dashboard/targets", icon: Star, description: "Target board + watchlist" },
   { label: "Compare", href: "/dashboard/compare", icon: GitCompare, description: "Side-by-side analysis" },
 ];
 

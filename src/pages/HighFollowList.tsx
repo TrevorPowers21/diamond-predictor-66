@@ -72,7 +72,15 @@ function ScoutMini({ label, value }: { label: string; value: number | null | und
 
 // ── Component ───────────────────────────────────────────────────────
 
-export default function HighFollowList() {
+interface HighFollowListProps {
+  // When rendered inside the Targets parent page (as the "High Follow"
+  // subtab) we skip wrapping in DashboardLayout because the parent
+  // already provides it. Default false preserves the standalone route
+  // behavior at /dashboard/high-follow.
+  embedded?: boolean;
+}
+
+export default function HighFollowList({ embedded = false }: HighFollowListProps = {}) {
   const { list, isLoading, removePlayer } = useHighFollow();
   const { effectiveTeamId } = useAuth();
   const [search, setSearch] = useState("");
@@ -330,8 +338,8 @@ export default function HighFollowList() {
   const hitterCount = list.filter((r) => r.player_type === "hitter").length;
   const pitcherCount = list.filter((r) => r.player_type === "pitcher").length;
 
-  return (
-    <DashboardLayout>
+  const body = (
+    <>
       <ScoutingReportProvider>
         <div className="space-y-4 max-w-[1600px] mx-auto pb-20">
           {/* Header */}
@@ -569,6 +577,8 @@ export default function HighFollowList() {
         </div>
         <DownloadReportBar />
       </ScoutingReportProvider>
-    </DashboardLayout>
+    </>
   );
+
+  return embedded ? body : <DashboardLayout>{body}</DashboardLayout>;
 }

@@ -36,6 +36,7 @@ import AdminTeams from "./pages/admin/AdminTeams";
 import AdminUsers from "./pages/admin/AdminUsers";
 import RoleGuard from "@/components/RoleGuard";
 import HighFollowList from "./pages/HighFollowList";
+import Targets from "./pages/Targets";
 import Settings from "./pages/Settings";
 
 const queryClient = new QueryClient();
@@ -93,6 +94,8 @@ const App = () => (
             <Route path="/dashboard/player/:id" element={<ProtectedRoute><PlayerProfile /></ProtectedRoute>} />
             <Route path="/dashboard/pitcher/:id" element={<ProtectedRoute><PitcherProfile /></ProtectedRoute>} />
             <Route path="/dashboard/team-builder" element={<ProtectedRoute><TeamBuilder /></ProtectedRoute>} />
+            <Route path="/dashboard/targets" element={<ProtectedRoute><Targets /></ProtectedRoute>} />
+            {/* Legacy /dashboard/high-follow URL still works — renders the standalone page so bookmarks don't break. */}
             <Route path="/dashboard/high-follow" element={<ProtectedRoute><HighFollowList /></ProtectedRoute>} />
             <Route path="/dashboard/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
             <Route path="/dashboard/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
