@@ -1596,8 +1596,44 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const remainingBudget = Math.max(0, totalBudget - overriddenTotal);
     if (nonOverriddenScore <= 0) return 0;
     const score = projectedPlayerScore(p);
-    return (score / nonOverriddenScore) * remainingBudget;
-  }, [projectedPlayerScore, totalBudget, rosterPlayers]);
+    // League-wide denominator floor — fixes "shrinking roster inflates
+    // per-player share" bug exposed by the off-roster target toggle.
+    //
+    // The raw share formula divides by the actual roster's score sum.
+    // When coaches toggle most targets off-roster, the denominator
+    // collapses (e.g., 7-WAR roster on a $3.5M budget showed a 2-WAR
+    // player at ~$1M — way above market). The floor caps that
+    // inflation by saying "for budget-share purposes, never use a
+    // denominator smaller than what a competitive customer-base D1
+    // roster scores."
+    //
+    // RAW_WAR_BENCHMARK = 33 — calibrated to where the actual NIL
+    // budget money is. Customer base (12 teams, season 2026):
+    //   league p75 = 28.8 (all 309 D1 teams)
+    //   customer median = 28.1
+    //   customer mean = 29.4
+    //   customer p75 = 34.9 (Vanderbilt / Kansas / Arkansas territory)
+    // 33 sits between customer mean and p75 — captures "what a
+    // competitive high-budget customer expects their roster to be."
+    //
+    // adjustedBenchmark = RAW_WAR_BENCHMARK × programTierMultiplier
+    // so the floor is on the SAME scale as projectedPlayerScore
+    // (which has tier + position multipliers baked in). The tier
+    // multiplier on both numerator and denominator cancels for the
+    // SAME player, meaning two coaches at different tiers with the
+    // SAME budget see similar values — budget is the dominant signal,
+    // tier doesn't double-count on top of it. Position premium
+    // (1.3x C/SS/CF, 1.0x DH/1B, etc.) survives in the numerator only,
+    // so premium positions still command premium shares.
+    //
+    // When the actual roster score exceeds adjustedBenchmark, the
+    // formula reverts to pure proportional split — bigger rosters
+    // → smaller individual shares, exactly the prior behavior.
+    const RAW_WAR_BENCHMARK = 33;
+    const adjustedBenchmark = RAW_WAR_BENCHMARK * programTierMultiplier;
+    const denominator = Math.max(nonOverriddenScore, adjustedBenchmark);
+    return (score / denominator) * remainingBudget;
+  }, [projectedPlayerScore, totalBudget, rosterPlayers, programTierMultiplier]);
 
   const effectiveNilForPlayer = useCallback((p: BuildPlayer, _side?: "hitter" | "pitcher") => {
     if (!isProjectedStatus(p)) return 0;
