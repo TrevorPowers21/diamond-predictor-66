@@ -117,16 +117,19 @@ interface ProjectionRow {
   twp_hitter_market_value: number | null;
   twp_pitcher_market_value: number | null;
   pitcher_role: string | null;
-  // 20-80 scouting scores — same shape Returning Players renders into
-  // ScoutMiniBox tiles. Hitter side uses the first four; pitcher side
-  // uses stuff_score / whiff_score / bb_score / barrel_score.
-  barrel_score: number | null;
-  ev_score: number | null;
-  contact_score: number | null;
-  chase_score: number | null;
-  stuff_score: number | null;
-  whiff_score: number | null;
-  bb_score: number | null;
+  // 20-80 scouting scores. player_predictions stores these prefixed
+  // (hitter_*_score / pitcher_*_score) so each side's row carries only
+  // its own metrics. Same source Returning Players renders into the
+  // ScoutMiniBox tiles. Hitter side: barrel / avg EV / contact / chase.
+  // Pitcher side: iz_whiff (stuff proxy) / whiff / bb / barrel.
+  hitter_barrel_score: number | null;
+  hitter_avg_ev_score: number | null;
+  hitter_contact_score: number | null;
+  hitter_chase_score: number | null;
+  pitcher_iz_whiff_score: number | null;
+  pitcher_whiff_score: number | null;
+  pitcher_bb_score: number | null;
+  pitcher_barrel_score: number | null;
 }
 
 type HitterSortKey =
@@ -253,7 +256,7 @@ export default function TargetBoardSubtab() {
       let q = supabase
         .from("player_predictions")
         .select(
-          "player_id, variant, customer_team_id, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, o_war, market_value, p_era, p_fip, p_whip, p_k9, p_bb9, p_rv_plus, p_war, twp_hitter_market_value, twp_pitcher_market_value, pitcher_role, barrel_score, ev_score, contact_score, chase_score, stuff_score, whiff_score, bb_score",
+          "player_id, variant, customer_team_id, p_avg, p_obp, p_slg, p_ops, p_wrc_plus, o_war, market_value, p_era, p_fip, p_whip, p_k9, p_bb9, p_rv_plus, p_war, twp_hitter_market_value, twp_pitcher_market_value, pitcher_role, hitter_barrel_score, hitter_avg_ev_score, hitter_contact_score, hitter_chase_score, pitcher_iz_whiff_score, pitcher_whiff_score, pitcher_bb_score, pitcher_barrel_score",
         )
         .in("player_id", playerIds)
         .eq("season", PROJECTION_SEASON)
@@ -523,10 +526,10 @@ export default function TargetBoardSubtab() {
                         </TableCell>
                         <TableCell className="text-center p-1">
                           <div className="flex gap-0.5 justify-center flex-wrap">
-                            {pred?.barrel_score != null && <ScoutMiniBox label="Brl" value={pred.barrel_score} />}
-                            {pred?.ev_score != null && <ScoutMiniBox label="EV" value={pred.ev_score} />}
-                            {pred?.contact_score != null && <ScoutMiniBox label="Con" value={pred.contact_score} />}
-                            {pred?.chase_score != null && <ScoutMiniBox label="Chs" value={pred.chase_score} />}
+                            {pred?.hitter_barrel_score != null && <ScoutMiniBox label="Brl" value={pred.hitter_barrel_score} />}
+                            {pred?.hitter_avg_ev_score != null && <ScoutMiniBox label="EV" value={pred.hitter_avg_ev_score} />}
+                            {pred?.hitter_contact_score != null && <ScoutMiniBox label="Con" value={pred.hitter_contact_score} />}
+                            {pred?.hitter_chase_score != null && <ScoutMiniBox label="Chs" value={pred.hitter_chase_score} />}
                           </div>
                         </TableCell>
                         <TableCell className="text-center p-0">
@@ -633,10 +636,10 @@ export default function TargetBoardSubtab() {
                         </TableCell>
                         <TableCell className="text-center p-1">
                           <div className="flex gap-0.5 justify-center flex-wrap">
-                            {pred?.stuff_score != null && <ScoutMiniBox label="Stf+" value={pred.stuff_score} />}
-                            {pred?.whiff_score != null && <ScoutMiniBox label="Whf" value={pred.whiff_score} />}
-                            {pred?.bb_score != null && <ScoutMiniBox label="BB%" value={pred.bb_score} />}
-                            {pred?.barrel_score != null && <ScoutMiniBox label="Brl" value={pred.barrel_score} />}
+                            {pred?.pitcher_iz_whiff_score != null && <ScoutMiniBox label="IZ Whf" value={pred.pitcher_iz_whiff_score} />}
+                            {pred?.pitcher_whiff_score != null && <ScoutMiniBox label="Whf" value={pred.pitcher_whiff_score} />}
+                            {pred?.pitcher_bb_score != null && <ScoutMiniBox label="BB%" value={pred.pitcher_bb_score} />}
+                            {pred?.pitcher_barrel_score != null && <ScoutMiniBox label="Brl" value={pred.pitcher_barrel_score} />}
                           </div>
                         </TableCell>
                         <TableCell className="text-center p-0">
