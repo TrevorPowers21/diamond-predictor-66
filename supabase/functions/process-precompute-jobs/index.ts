@@ -1219,12 +1219,14 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
 async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope: string = "pitchers_d1", sourcePlayerIds?: string[]) {
   const isJucoScope = scope === "pitchers_juco";
   const JUCO_IP_THRESHOLD = 20;
-  // JUCO scope uses the dedicated JUCO weight overrides — zeroes power
-  // weights and park weights, swaps in JUCO conference/competition weights.
-  // Mirrors src/lib/buildTransferPitcherInputs.ts line 190.
-  const eq: typeof PITCHING_EQ_DEFAULTS = isJucoScope
-    ? { ...PITCHING_EQ_DEFAULTS, ...JUCO_PITCHING_TRANSFER_WEIGHTS }
-    : PITCHING_EQ_DEFAULTS;
+  // Per-pitcher weight selection happens inside the loop (search "// Pick eq
+  // per pitcher" below). Reason: the pitchers_d1 scope filter passes through
+  // BOTH D1 and D2 source players (matchesDivision = d !== "NJCAA_D1"); within
+  // that mixed scope, D1 sources use D1 defaults but D2 sources need JUCO
+  // weights (zero power, zero park) since they have no power-rating data.
+  // Mirrors the hitter path which has done this per-player since day one.
+  const eqD1: typeof PITCHING_EQ_DEFAULTS = PITCHING_EQ_DEFAULTS;
+  const eqJucoOrD2: typeof PITCHING_EQ_DEFAULTS = { ...PITCHING_EQ_DEFAULTS, ...JUCO_PITCHING_TRANSFER_WEIGHTS };
 
   // Resolve customer team → destination
   const { data: ct, error: ctErr } = await supabase
@@ -1381,6 +1383,12 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
   for (const p of pitchers) {
     const pm = p.source_player_id ? pmBySourceId.get(String(p.source_player_id)) : null;
     if (!pm) { blocked++; blockReasons.set("no_pm_row", (blockReasons.get("no_pm_row") || 0) + 1); continue; }
+
+    // Pick eq per pitcher — D1 source uses defaults, JUCO/D2 source uses the
+    // JUCO weight override (zero power, zero park, JUCO conference/competition
+    // weights). Behavior for D1 pitchers is identical to before this change.
+    const isSubNcaaSource = p.division === "NJCAA_D1" || p.division === "D2";
+    const eq: typeof PITCHING_EQ_DEFAULTS = isSubNcaaSource ? eqJucoOrD2 : eqD1;
 
     const pred = predByPlayer.get(p.id);
     const fromTeamName = (p.from_team || p.team || "") as string;
