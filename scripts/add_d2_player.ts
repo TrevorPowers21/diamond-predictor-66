@@ -372,6 +372,19 @@ async function main() {
         K9: baseline.k9,
         BB9: baseline.bb9,
         HR9: baseline.hr9,
+        // Neutral pr_plus placeholders (=100, NCAA league average). Required
+        // by the precompute input validator; in the JUCO/D2 weights path these
+        // get multiplied by transfer_*_power_weight=0 so they have NO effect
+        // on the projected line. When Logan's real TrackMan/Stuff+ data is
+        // eventually ingested through the Stuff+ rollup pipeline
+        // (src/savant/lib/rollupStuffPlusToMaster.ts), these columns are
+        // overwritten with the computed power-rating-plus values.
+        era_pr_plus:  100,
+        fip_pr_plus:  100,
+        whip_pr_plus: 100,
+        k9_pr_plus:   100,
+        bb9_pr_plus:  100,
+        hr9_pr_plus:  100,
       };
       if (pmCsv) {
         const G = numOrNull(pmCsv.G);
