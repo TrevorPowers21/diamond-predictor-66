@@ -336,9 +336,14 @@ const ALL_PITCH_TYPES = ["4S FB", "Sinker", "Cutter", "Gyro Slider", "Slider", "
 
 export async function runStuffPlusPipeline(
   season: number = 2026,
+  sourcePlayerIds?: string[],
 ): Promise<{ report: StuffPlusReport; errors: string[] }> {
   const errors: string[] = [];
   console.time("[Stuff+] TOTAL");
+  // Optional sourcePlayerIds filter — when omitted/empty, behavior is identical
+  // to the original bulk run. Pop constants are always loaded as a whole D1
+  // table because every pitcher z-scores against the same baseline.
+  const scoped = (sourcePlayerIds && sourcePlayerIds.length > 0);
 
   // ── Pull population constants ──────────────────────────────────────────
   // Filter to D1 only — JUCO pitches z-score against D1 pop too (locked
@@ -366,7 +371,11 @@ export async function runStuffPlusPipeline(
   const allRows = await fetchAll<PitchRow>(
     "pitcher_stuff_plus_inputs",
     "id, source_player_id, pitch_type, hand, pitches, velocity, ivb, hb, rel_height, rel_side, extension, spin, fb_ch_velo_diff, needs_review",
-    (q: any) => q.eq("season", season).in("pitch_type", ALL_PITCH_TYPES),
+    (q: any) => {
+      let qq = q.eq("season", season).in("pitch_type", ALL_PITCH_TYPES);
+      if (scoped) qq = qq.in("source_player_id", sourcePlayerIds!);
+      return qq;
+    },
   );
   console.timeEnd("[Stuff+] 2. fetch pitch rows");
 
