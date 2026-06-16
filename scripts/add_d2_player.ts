@@ -486,6 +486,15 @@ async function main() {
         from_k9: baseline.k9,
         from_bb9: baseline.bb9,
         from_hr9: baseline.hr9,
+        // Mirror to p_* — JUCO/D2 returner-regular rows display 2026 actuals
+        // in the cross-team view. Without these, the Profile page renders "—"
+        // for every projected rate even though the from_* row holds the data.
+        p_era: baseline.era,
+        p_fip: baseline.fip,
+        p_whip: baseline.whip,
+        p_k9: baseline.k9,
+        p_bb9: baseline.bb9,
+        p_hr9: baseline.hr9,
         pitcher_role: null,
         projected_ip: null,
       };
@@ -522,6 +531,13 @@ async function main() {
         from_avg: baseline.avg,
         from_obp: baseline.obp,
         from_slg: baseline.slg,
+        // Mirror to p_* — JUCO/D2 returner-regular rows show 2026 actuals in
+        // the cross-team view (Profile reads p_*). p_ops = OBP+SLG (mechanical).
+        p_avg: baseline.avg,
+        p_obp: baseline.obp,
+        p_slg: baseline.slg,
+        p_iso: baseline.iso,
+        p_ops: baseline.obp + baseline.slg,
         projected_pa: null,
       };
       if (apply) {
