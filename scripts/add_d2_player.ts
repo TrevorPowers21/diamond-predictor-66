@@ -321,7 +321,7 @@ async function main() {
         division: baseline.from_division,
         portal_status: "COMMITTED",
         transfer_portal: true,
-        data_status: "manual",
+        data_status: "partial",  // D2 — has outcome/slash line but no TruMedia scouting
       };
       if (apply) {
         const { error } = await sb.from("players").insert(row);
@@ -360,7 +360,6 @@ async function main() {
         Team: baseline.from_team,
         Conference: baseline.from_conference,
         division: "D2",
-        Pos: baseline.position,
         ThrowHand: baseline.throws_hand,
         IP: baseline.ip,
         ERA: baseline.era,
@@ -413,10 +412,10 @@ async function main() {
         ThrowHand: baseline.throws_hand,
         pa: baseline.pa,
         ab: baseline.ab,
-        avg: baseline.avg,
-        obp: baseline.obp,
-        slg: baseline.slg,
-        iso: baseline.iso,
+        AVG: baseline.avg,
+        OBP: baseline.obp,
+        SLG: baseline.slg,
+        ISO: baseline.iso,
       };
       if (apply) {
         const { error } = await sb.from("Hitter Master").insert(hmRow);
