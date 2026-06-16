@@ -49,6 +49,15 @@ type PitcherBaseline = {
   ip: number; era: number; fip: number; whip: number;
   k9: number; bb9: number; hr9: number;
 };
+type HitterBaseline = {
+  type: "hitter";
+  first_name: string; last_name: string;
+  position: string; bats_hand: string; throws_hand: string; handedness: string;
+  class_year: string; height_inches: number | null; weight: number | null;
+  from_team: string; from_conference: string; from_division: string;
+  pa: number; ab: number;
+  avg: number; obp: number; slg: number; iso: number;
+};
 type BioOnlyBaseline = {
   type: "bio_only";
   first_name: string; last_name: string;
@@ -57,7 +66,7 @@ type BioOnlyBaseline = {
   height_inches: number | null; weight: number | null;
   from_team: string | null; from_conference: string | null; from_division: string;
 };
-type Baseline = PitcherBaseline | BioOnlyBaseline;
+type Baseline = PitcherBaseline | HitterBaseline | BioOnlyBaseline;
 
 const PLAYER_BASELINES: Record<string, Baseline> = {
   logan_harrell: {
@@ -320,8 +329,46 @@ async function main() {
         info(`           ${JSON.stringify({ name: fullName, IP: baseline.ip, ERA: baseline.era, K9: baseline.k9, BB9: baseline.bb9 })}`);
       }
     }
+  } else if (baseline.type === "hitter") {
+    step('Step 3: Hitter Master');
+    const { data: existing, error: selErr } = await sb.from("Hitter Master")
+      .select("id")
+      .eq("source_player_id", sourcePlayerId)
+      .eq("Season", CURRENT_SEASON)
+      .maybeSingle();
+    if (selErr) { err(`Hitter Master lookup: ${selErr.message}`); process.exit(1); }
+    if (existing) {
+      warn(`Hitter Master row already exists (id=${existing.id}) — skipping.`);
+    } else {
+      const hmRow: Record<string, unknown> = {
+        id: randomUUID(),
+        source_player_id: sourcePlayerId,
+        Season: CURRENT_SEASON,
+        playerFullName: fullName,
+        Team: baseline.from_team,
+        Conference: baseline.from_conference,
+        division: "D2",
+        Pos: baseline.position,
+        BatHand: baseline.bats_hand,
+        ThrowHand: baseline.throws_hand,
+        pa: baseline.pa,
+        ab: baseline.ab,
+        avg: baseline.avg,
+        obp: baseline.obp,
+        slg: baseline.slg,
+        iso: baseline.iso,
+      };
+      if (apply) {
+        const { error } = await sb.from("Hitter Master").insert(hmRow);
+        if (error) { err(`Hitter Master insert: ${error.message}`); process.exit(1); }
+        ok(`Inserted Hitter Master row`);
+      } else {
+        info(`[dry-run] Would INSERT Hitter Master row`);
+        info(`           ${JSON.stringify({ name: fullName, pa: baseline.pa, avg: baseline.avg, obp: baseline.obp, slg: baseline.slg })}`);
+      }
+    }
   } else {
-    step("Step 3: Pitching Master — SKIPPED (bio-only player)");
+    step("Step 3: Hitter Master / Pitching Master — SKIPPED (bio-only player)");
   }
 
   // ── 4. player_predictions — pitchers only (returner baseline) ────────
@@ -362,6 +409,41 @@ async function main() {
       } else {
         info(`[dry-run] Would INSERT player_predictions row (returner baseline, p_* NULL — engine computes on add)`);
         info(`           ${JSON.stringify({ player_id: playerId, from_era: baseline.era, from_fip: baseline.fip, from_k9: baseline.k9 })}`);
+      }
+    }
+  } else if (baseline.type === "hitter" && playerId) {
+    step("Step 4: player_predictions (returner baseline — hitter)");
+    const { data: existing, error: selErr } = await sb.from("player_predictions")
+      .select("id")
+      .eq("player_id", playerId)
+      .eq("season", PROJECTION_SEASON)
+      .eq("variant", "regular")
+      .is("customer_team_id", null)
+      .maybeSingle();
+    if (selErr) { err(`player_predictions lookup: ${selErr.message}`); process.exit(1); }
+    if (existing) {
+      warn(`player_predictions row already exists (id=${existing.id}) — skipping.`);
+    } else {
+      const predRow: Record<string, unknown> = {
+        id: randomUUID(),
+        player_id: playerId,
+        customer_team_id: null,
+        model_type: "returner",
+        variant: "regular",
+        season: PROJECTION_SEASON,
+        status: "active",
+        from_avg: baseline.avg,
+        from_obp: baseline.obp,
+        from_slg: baseline.slg,
+        projected_pa: null,
+      };
+      if (apply) {
+        const { error } = await sb.from("player_predictions").insert(predRow);
+        if (error) { err(`player_predictions insert: ${error.message}`); process.exit(1); }
+        ok(`Inserted player_predictions row`);
+      } else {
+        info(`[dry-run] Would INSERT player_predictions (hitter returner baseline, p_* NULL — engine computes on add)`);
+        info(`           ${JSON.stringify({ player_id: playerId, from_avg: baseline.avg, from_obp: baseline.obp, from_slg: baseline.slg })}`);
       }
     }
   } else if (baseline.type === "bio_only") {

@@ -120,7 +120,10 @@ function jucoDistrictNameFromConference(conference: string | null | undefined): 
 }
 
 function transferWeightsForSource(division: string | null | undefined) {
-  return division === "NJCAA_D1" ? JUCO_TRANSFER_WEIGHTS : TRANSFER_WEIGHT_DEFAULTS;
+  // D2 routed through JUCO weights (zero power, zero park) — D2 hitters have
+  // slash lines but no TruMedia power-rating data. Mirrors src/lib edit.
+  if (division === "NJCAA_D1" || division === "D2") return JUCO_TRANSFER_WEIGHTS;
+  return TRANSFER_WEIGHT_DEFAULTS;
 }
 
 function pitcherTransferWeightsForSource(division: string | null | undefined) {
@@ -334,7 +337,9 @@ function buildHitterTransferInputs(args: {
   if (rawLastObp == null) missingInputs.push("Last OBP");
   if (rawLastSlg == null) missingInputs.push("Last SLG");
 
-  const isJucoSource = player.division === "NJCAA_D1";
+  // D2 routed through the JUCO hitter path — same outlier regression + JUCO
+  // weights. Matches src/lib/buildTransferProjectionInputs.ts.
+  const isJucoSource = player.division === "NJCAA_D1" || player.division === "D2";
   const lastAvg = isJucoSource && rawLastAvg != null
     ? applyJucoOutlierRegression(rawLastAvg, JUCO_REGRESSION_CONFIG.avg.mean, JUCO_REGRESSION_CONFIG.avg.threshold, JUCO_REGRESSION_CONFIG.avg.slope, JUCO_REGRESSION_CONFIG.avg.maxR)
     : rawLastAvg;

@@ -92,9 +92,12 @@ export const JUCO_TRANSFER_WEIGHTS = {
   t_iso_power_weight: 0,
 } as const;
 
-/** Returns the appropriate weight set based on source player division. */
+/** Returns the appropriate weight set based on source player division.
+ *  D2 routed through the JUCO weights (same zero-power / zero-park profile —
+ *  D2 hitters have raw slash lines but no TruMedia power-rating data). */
 export function transferWeightsForSource(division: string | null | undefined) {
-  return division === "NJCAA_D1" ? JUCO_TRANSFER_WEIGHTS : TRANSFER_WEIGHT_DEFAULTS;
+  if (division === "NJCAA_D1" || division === "D2") return JUCO_TRANSFER_WEIGHTS;
+  return TRANSFER_WEIGHT_DEFAULTS;
 }
 
 /**
