@@ -356,6 +356,16 @@ async function main() {
     if (existing) {
       warn(`Pitching Master row already exists (id=${existing.id}) — skipping.`);
     } else {
+      // Role drives the pitcher depth-role inference in precompute. If the
+      // baseline.position is already a pitcher-role string (SP/RP/SM/CL), use
+      // it. Otherwise leave Role null and let the engine fall back to G/GS
+      // ratio (and to "SM" if those are also null — which produces a
+      // conservative ~30 projected_ip / under-projected pWAR).
+      const pitcherRoleFromPos = (() => {
+        const p = (baseline.position || "").toUpperCase().trim();
+        if (p === "SP" || p === "RP" || p === "SM" || p === "CL") return p === "CL" ? "RP" : p;
+        return null;
+      })();
       const pmRow: Record<string, unknown> = {
         id: randomUUID(),
         source_player_id: sourcePlayerId,
@@ -365,6 +375,7 @@ async function main() {
         Conference: baseline.from_conference,
         division: "D2",
         ThrowHand: baseline.throws_hand,
+        Role: pitcherRoleFromPos,
         IP: baseline.ip,
         ERA: baseline.era,
         FIP: baseline.fip,
