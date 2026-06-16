@@ -907,12 +907,12 @@ function computeHitterMarketValue(oWar: number | null, conference: string | null
   return Math.max(0, oWar * HITTER_DOLLARS_PER_WAR * ptm * pvm);
 }
 
-async function runPrecomputeForTeam(supabase: any, customerTeamId: string, scope: string) {
-  if (scope === "pitchers_d1" || scope === "pitchers_juco") return runPitcherPrecompute(supabase, customerTeamId, scope);
-  return runHitterPrecompute(supabase, customerTeamId, scope);
+async function runPrecomputeForTeam(supabase: any, customerTeamId: string, scope: string, sourcePlayerIds?: string[]) {
+  if (scope === "pitchers_d1" || scope === "pitchers_juco") return runPitcherPrecompute(supabase, customerTeamId, scope, sourcePlayerIds);
+  return runHitterPrecompute(supabase, customerTeamId, scope, sourcePlayerIds);
 }
 
-async function runHitterPrecompute(supabase: any, customerTeamId: string, scope: string) {
+async function runHitterPrecompute(supabase: any, customerTeamId: string, scope: string, sourcePlayerIds?: string[]) {
   // Resolve customer team → destination team
   const { data: ct, error: ctErr } = await supabase
     .from("customer_teams")
@@ -1034,19 +1034,24 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     }
   }
 
-  // Players — D1 hitters only, exclude own roster
+  // Players — D1 hitters only, exclude own roster.
+  // source_player_id selected so the optional sourcePlayerIds filter below can apply.
   const allPlayers = await loadAllPaged(() =>
-    supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, pa, is_twp, class_year"),
+    supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, source_player_id, pa, is_twp, class_year"),
   );
   const isPitcher = (p: string | null) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(p || ""));
   const matchesDivision = (d: string | null) => {
     if (scope === "juco") return d === "NJCAA_D1";
     return d !== "NJCAA_D1"; // hitters_d1 / default
   };
+  const filterSet = (sourcePlayerIds && sourcePlayerIds.length > 0) ? new Set(sourcePlayerIds) : null;
   const hitters = allPlayers.filter((p: any) =>
     (!isPitcher(p.position) || p.is_twp)
     && (!toSourceId || p.source_team_id !== toSourceId)
-    && matchesDivision(p.division));
+    && matchesDivision(p.division)
+    // Optional surgical scope: when sourcePlayerIds is passed, restrict to exactly those players.
+    // When omitted/empty, behavior is identical to the original bulk scope.
+    && (!filterSet || filterSet.has(p.source_player_id)));
 
   // Latest active predictions for each hitter
   const playerIds = hitters.map((p: any) => p.id);
@@ -1211,7 +1216,7 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
 // Mirrors scripts/precompute-pitchers.ts logic.
 // ─────────────────────────────────────────────────────────────────────────
 
-async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope: string = "pitchers_d1") {
+async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope: string = "pitchers_d1", sourcePlayerIds?: string[]) {
   const isJucoScope = scope === "pitchers_juco";
   const JUCO_IP_THRESHOLD = 20;
   // JUCO scope uses the dedicated JUCO weight overrides — zeroes power
@@ -1314,12 +1319,16 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
   );
   const pitcherTest = (p: string | null) => /^(SP|RP|CL|P|LHP|RHP|SM)/i.test(String(p || ""));
   const matchesDivision = (d: string | null) => isJucoScope ? d === "NJCAA_D1" : d !== "NJCAA_D1";
+  // Optional surgical scope: when sourcePlayerIds is passed, restrict to exactly those players.
+  // When omitted/empty, behavior is identical to the original bulk scope.
+  const filterSet = (sourcePlayerIds && sourcePlayerIds.length > 0) ? new Set(sourcePlayerIds) : null;
   const pitchers = allPlayers.filter((p: any) => {
     if (!(pitcherTest(p.position) || p.is_twp)) return false;
     if (toSourceId && p.source_team_id === toSourceId) return false;
     if (!matchesDivision(p.division)) return false;
     // JUCO IP floor — mirrors scripts/precompute-pitchers.ts to drop tiny-sample noise
     if (isJucoScope && p.division === "NJCAA_D1" && (Number(p.ip) || 0) < JUCO_IP_THRESHOLD) return false;
+    if (filterSet && !filterSet.has(p.source_player_id)) return false;
     return true;
   });
 
@@ -1530,7 +1539,9 @@ Deno.serve(async (req: Request) => {
 
   let body: any;
   try { body = await req.json(); } catch { body = {}; }
-  const { jobId, customerTeamId: directTeamId, scope: directScope } = body || {};
+  // sourcePlayerIds (optional): when present, restricts the run to exactly those players.
+  // When omitted/empty, behavior is identical to the original bulk scope.
+  const { jobId, customerTeamId: directTeamId, scope: directScope, sourcePlayerIds } = body || {};
 
   try {
     // Claim job (or accept direct customer_team_id for ad-hoc runs)
@@ -1571,7 +1582,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const result = await runPrecomputeForTeam(supabase, job.customer_team_id, job.scope);
+    const result = await runPrecomputeForTeam(supabase, job.customer_team_id, job.scope, sourcePlayerIds);
 
     await supabase
       .from("precompute_jobs")
