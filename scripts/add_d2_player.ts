@@ -81,28 +81,83 @@ const PLAYER_BASELINES: Record<string, Baseline> = {
     k9: 9.39, bb9: 1.94, hr9: 0.87,
   },
   jake_berkland: {
-    type: "bio_only",
+    type: "hitter",
     first_name: "Jake", last_name: "Berkland",
-    position: null, bats_hand: null, throws_hand: null, handedness: null,
-    class_year: null, height_inches: null, weight: null,
-    from_team: null, from_conference: null,
+    position: "SS", bats_hand: "R", throws_hand: "R", handedness: "R",
+    class_year: "SO", height_inches: null, weight: null,
+    from_team: "Minnesota State University-Mankato",
+    from_conference: "Northern Sun Intercollegiate Conference",
     from_division: "D2",
+    pa: 270, ab: 204,
+    avg: 0.363, obp: 0.507, slg: 0.608, iso: 0.245, // ISO = SLG - AVG
   },
 };
 
-// Gulf South Conference seed (D2). OPR=76 back-derives HTP=66 with
-// Stuff+=92, WRC+=100 via HTP = OPR + 1.25(Stuff+ - 100) + 0.75(100 - WRC+).
-// HTP 66 = NEC floor of D1 per coach calibration 2026-06-16.
-const GULF_SOUTH_CONF = {
-  season: CURRENT_SEASON,
-  division: "D2",
-  "conference abbreviation": "Gulf South Conference",
-  ERA: 5.94, FIP: 4.85, WHIP: 1.65,
-  K9: 7.59, BB9: 4.44, HR9: 0.95,
-  Overall_Power_Rating: 76,
-  Stuff_plus: 92,
-  WRC_plus: 100,
+// D2 conference seeds keyed by full conference name. Each player baseline's
+// `from_conference` is looked up here at Step 1. ba_plus / obp_plus / slg_plus
+// / iso_plus computed against NCAA D1 2026 anchors at insert time (see
+// NCAA_2026 below). Stuff+ and (for pitcher-source conferences) OPR + WRC+
+// hand-calibrated per coach guidance.
+//
+//  Gulf South: OPR=76 back-derives HTP=66 (NEC tier floor) via
+//    HTP = OPR + 1.25(Stuff+ - 100) + 0.75(100 - WRC+).
+//    HTP only used when projecting a PITCHER out of this conf (Logan-style).
+//  NSIC: Stuff+=94 only; no HTP override (Jake is a hitter — HTP not used
+//    in hitter projection path).
+type ConferenceSeed = {
+  AVG?: number; OBP?: number; SLG?: number; ISO?: number;
+  ERA?: number; FIP?: number; WHIP?: number;
+  K9?: number; BB9?: number; HR9?: number;
+  Stuff_plus: number;
+  WRC_plus?: number;
+  Overall_Power_Rating?: number;
+};
+
+const NCAA_2026 = {
+  AVG: 0.2779, OBP: 0.3829, SLG: 0.417, ISO: 0.1584,
 } as const;
+
+const CONFERENCE_SEEDS: Record<string, ConferenceSeed> = {
+  "Gulf South Conference": {
+    ERA: 5.94, FIP: 4.85, WHIP: 1.65, K9: 7.59, BB9: 4.44, HR9: 0.95,
+    Stuff_plus: 92,
+    Overall_Power_Rating: 76,
+    WRC_plus: 100,
+  },
+  "Northern Sun Intercollegiate Conference": {
+    AVG: 0.293, OBP: 0.394, SLG: 0.455, ISO: 0.161,
+    Stuff_plus: 94,
+  },
+};
+
+function buildConferenceRow(name: string): Record<string, unknown> {
+  const seed = CONFERENCE_SEEDS[name];
+  if (!seed) throw new Error(`No CONFERENCE_SEEDS entry for "${name}". Add one before running.`);
+  const row: Record<string, unknown> = {
+    season: CURRENT_SEASON,
+    division: "D2",
+    "conference abbreviation": name,
+    Stuff_plus: seed.Stuff_plus,
+  };
+  if (seed.AVG != null) row.AVG = seed.AVG;
+  if (seed.OBP != null) row.OBP = seed.OBP;
+  if (seed.SLG != null) row.SLG = seed.SLG;
+  if (seed.ISO != null) row.ISO = seed.ISO;
+  if (seed.ERA != null) row.ERA = seed.ERA;
+  if (seed.FIP != null) row.FIP = seed.FIP;
+  if (seed.WHIP != null) row.WHIP = seed.WHIP;
+  if (seed.K9 != null) row.K9 = seed.K9;
+  if (seed.BB9 != null) row.BB9 = seed.BB9;
+  if (seed.HR9 != null) row.HR9 = seed.HR9;
+  // +stats derived from raw vs NCAA 2026 anchors. Engine reads these.
+  if (seed.AVG != null) row.ba_plus = Math.round((seed.AVG / NCAA_2026.AVG) * 1000) / 10;
+  if (seed.OBP != null) row.obp_plus = Math.round((seed.OBP / NCAA_2026.OBP) * 1000) / 10;
+  if (seed.SLG != null) row.slg_plus = Math.round((seed.SLG / NCAA_2026.SLG) * 1000) / 10;
+  if (seed.ISO != null) row.iso_plus = Math.round((seed.ISO / NCAA_2026.ISO) * 1000) / 10;
+  if (seed.Overall_Power_Rating != null) row.Overall_Power_Rating = seed.Overall_Power_Rating;
+  if (seed.WRC_plus != null) row.WRC_plus = seed.WRC_plus;
+  return row;
+}
 
 const STAGING_URL_FRAG = "slrxowawbijbjrkozqlj";
 const PROD_URL_FRAG = "trbvxuoliwrfowibatkm";
@@ -201,30 +256,35 @@ async function main() {
 
   const sb = createClient(url, key, { auth: { persistSession: false } });
 
-  // ── 1. Conference Stats — Gulf South Conference ──────────────────────
-  step("Step 1: Conference Stats (Gulf South Conference)");
+  // ── 1. Conference Stats — seed THIS PLAYER's home D2 conference ──────
+  const confName = baseline.from_conference;
+  if (!confName) {
+    step("Step 1: Conference Stats — SKIPPED (player has no from_conference)");
+  } else {
+  step(`Step 1: Conference Stats (${confName})`);
   {
     const { data: existing, error: selErr } = await sb.from("Conference Stats")
       .select("conference_id")
       .eq("season", CURRENT_SEASON)
       .eq("division", "D2")
-      .eq("conference abbreviation", "Gulf South Conference")
+      .eq("conference abbreviation", confName)
       .maybeSingle();
     if (selErr) { err(`Conference Stats lookup: ${selErr.message}`); process.exit(1); }
     if (existing) {
-      ok(`Gulf South row already exists (conference_id=${existing.conference_id})`);
+      ok(`${confName} row already exists (conference_id=${existing.conference_id})`);
     } else {
       const conferenceId = randomUUID();
-      const row = { conference_id: conferenceId, ...GULF_SOUTH_CONF };
+      const row = { conference_id: conferenceId, ...buildConferenceRow(confName) };
       if (apply) {
         const { error } = await sb.from("Conference Stats").insert(row);
         if (error) { err(`Conference Stats insert: ${error.message}`); process.exit(1); }
-        ok(`Inserted Gulf South row (conference_id=${conferenceId})`);
+        ok(`Inserted ${confName} row (conference_id=${conferenceId})`);
       } else {
         info(`[dry-run] Would INSERT Conference Stats row`);
-        info(`           ${JSON.stringify({ conference_id: conferenceId, ...GULF_SOUTH_CONF })}`);
+        info(`           ${JSON.stringify(row)}`);
       }
     }
+  }
   }
 
   // ── 2. players row ───────────────────────────────────────────────────
