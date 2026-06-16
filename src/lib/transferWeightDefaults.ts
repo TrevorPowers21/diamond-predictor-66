@@ -288,4 +288,9 @@ export const JUCO_DISTRICT_HTP_OVERRIDE: Record<string, number> = {
   "West": 71,             // AZ / UT / Pacific NW — Stuff+ 94.7, SWAC tier
   "South Central": 68,    // OK / MO / AR — Stuff+ 93.8, NEC-SWAC range
   "East": 65,             // NY / NJ / MD — Stuff+ 92.0, NEC tier
+  // D2 conferences — routed through the JUCO pitching engine via the D2
+  // branch in detectJucoPitcherSource. HTP locked by coach calibration per
+  // conference (not formula-derived). Add new D2 conferences here as Kansas /
+  // other customers onboard non-DB commits.
+  "Gulf South Conference": 66, // D2 — coach-locked 2026-06-16, NEC tier floor
 };

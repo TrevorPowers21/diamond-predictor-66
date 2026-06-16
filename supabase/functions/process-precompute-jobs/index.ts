@@ -109,6 +109,8 @@ const JUCO_DISTRICT_HTP_OVERRIDE: Record<string, number> = {
   "South Atlantic": 94, "Mid-South": 88, "Southwest": 85, "Plains": 82,
   "Appalachian": 78, "Midwest": 75, "South": 73, "West": 71,
   "South Central": 68, "East": 65,
+  // D2 conferences routed through this map via detectJucoPitcherSource D2 branch
+  "Gulf South Conference": 66,
 };
 
 function jucoDistrictNameFromConference(conference: string | null | undefined): string | null {
@@ -122,7 +124,11 @@ function transferWeightsForSource(division: string | null | undefined) {
 }
 
 function pitcherTransferWeightsForSource(division: string | null | undefined) {
-  return division === "NJCAA_D1" ? JUCO_PITCHING_TRANSFER_WEIGHTS : null;
+  // D2 routed through the JUCO pitching engine — same zero-power / zero-park
+  // path. Conference HTP comes from JUCO_DISTRICT_HTP_OVERRIDE keyed by full
+  // conference name (e.g. "Gulf South Conference"). Mirrors src/lib edit.
+  if (division === "NJCAA_D1" || division === "D2") return JUCO_PITCHING_TRANSFER_WEIGHTS;
+  return null;
 }
 
 function applyJucoOutlierRegression(
@@ -1408,6 +1414,13 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
           const override = district ? JUCO_DISTRICT_HTP_OVERRIDE[district] : undefined;
           if (override != null) return override;
         }
+        if (p.division === "D2") {
+          // D2 conferences key directly by full conference name (no NJCAA prefix
+          // to strip). Match src/lib path.
+          const confKey = String(p.conference || "").trim();
+          const override = confKey ? JUCO_DISTRICT_HTP_OVERRIDE[confKey] : undefined;
+          if (override != null) return override;
+        }
         return Number(fromPC.hitter_talent_plus ?? 100);
       })(),
       toHitterTalent: Number(toPC.hitter_talent_plus ?? 100),
@@ -1427,7 +1440,8 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
       devAggressiveness: pred?.dev_aggressiveness ?? null,
       // For JUCO scope, mark source as JUCO so postprocess zeroes class
       // transitions and dev aggressiveness adjustments (which D1-only).
-      isJucoSource: p.division === "NJCAA_D1",
+      // D2 routed through same path — same zero-power / zero-park behavior.
+      isJucoSource: p.division === "NJCAA_D1" || p.division === "D2",
       eq,
       toConference,
       toTeam: toTeam.name,

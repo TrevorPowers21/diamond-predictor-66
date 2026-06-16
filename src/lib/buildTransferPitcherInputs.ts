@@ -141,6 +141,7 @@ const deriveBaseRole = (stats: PitcherStatsRow): "SP" | "RP" | "SM" | null => {
 
 const detectJucoPitcherSource = (player: PitcherTransferPlayer): boolean => {
   if (player.division === "NJCAA_D1") return true;
+  if (player.division === "D2") return true;
   if (/^NJCAA D1/i.test(String(player.conference || ""))) return true;
   return false;
 };

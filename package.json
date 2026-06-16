@@ -47,6 +47,8 @@
     "import-presto-pitchers": "tsx --env-file-if-exists=.env.local scripts/import-juco-presto-pitchers.ts",
     "import-presto-pitchers:prod": "tsx --env-file-if-exists=.env.production.local scripts/import-juco-presto-pitchers.ts --prod",
     "add-presto-missing-pitchers": "tsx --env-file-if-exists=.env.local scripts/add-presto-missing-pitchers.ts",
+    "add-d2-player": "tsx --env-file-if-exists=.env.local scripts/add_d2_player.ts",
+    "add-d2-player:prod": "tsx --env-file-if-exists=.env.production.local scripts/add_d2_player.ts",
     "import-juco-class-dob": "tsx --env-file-if-exists=.env.local scripts/import-juco-class-dob.ts",
     "import-pull-air": "tsx --env-file-if-exists=.env.local scripts/import-pull-air.ts",
     "import-pull-air:prod": "tsx --env-file-if-exists=.env.production.local scripts/import-pull-air.ts --prod",
