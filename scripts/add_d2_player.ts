@@ -322,6 +322,10 @@ async function main() {
         portal_status: "COMMITTED",
         transfer_portal: true,
         data_status: "partial",  // D2 — has outcome/slash line but no TruMedia scouting
+        // pa / ip drive the precompute hitter depth-role + pitcher role inference.
+        // Without these the engine falls back to bench (25 proj PA) / blocked.
+        pa: baseline.type === "hitter" ? baseline.pa : null,
+        ip: baseline.type === "pitcher" ? baseline.ip : null,
       };
       if (apply) {
         const { error } = await sb.from("players").insert(row);
