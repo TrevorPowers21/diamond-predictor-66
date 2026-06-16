@@ -156,8 +156,9 @@ async function main() {
         body: JSON.stringify({ jobId: job.id, sourcePlayerIds: resolvedIds }),
       });
       const text = await res.text().catch(() => "");
-      if (res.ok) ok(`fired (status ${res.status}) ${text.slice(0, 200)}`);
-      else err(`fire failed (status ${res.status}): ${text.slice(0, 300)}`);
+      // Full response — block reasons can be in topBlockReason near the end.
+      if (res.ok) ok(`fired (status ${res.status})\n             ${text}`);
+      else err(`fire failed (status ${res.status}): ${text}`);
     }
   }
 
