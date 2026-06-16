@@ -103,18 +103,20 @@ function syntheticSourceId(name: string, team: string): string {
   return `d2-${hash}`;
 }
 
-// "16.4%" -> 0.164. "85.2" -> 85.2. "" or undefined -> null.
-// Per the zero-is-missing feedback rule, treat exactly 0 as null too.
+// "16.4%" -> 16.4 (percentage value, NOT decimal). "85.2" -> 85.2.
+// Existing D1 pipeline stores percent columns as the percentage value
+// (e.g. miss_pct mean ≈ 23.4, not 0.234). Confirmed in the
+// computeAndStorePitchingScores baselines output.
+// Per the zero-is-missing feedback rule, treat exactly 0 as null.
 function parseValue(raw: string | undefined): number | null {
   if (raw == null) return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
-  const isPct = trimmed.endsWith("%");
-  const stripped = isPct ? trimmed.slice(0, -1) : trimmed;
+  const stripped = trimmed.endsWith("%") ? trimmed.slice(0, -1) : trimmed;
   const n = Number(stripped);
   if (!Number.isFinite(n)) return null;
   if (n === 0) return null;
-  return isPct ? n / 100 : n;
+  return n;
 }
 
 function parseCsvSingleRow(path: string): Record<string, string> | null {
