@@ -109,6 +109,8 @@ const JUCO_DISTRICT_HTP_OVERRIDE: Record<string, number> = {
   "South Atlantic": 94, "Mid-South": 88, "Southwest": 85, "Plains": 82,
   "Appalachian": 78, "Midwest": 75, "South": 73, "West": 71,
   "South Central": 68, "East": 65,
+  // D2 conferences routed through this map via detectJucoPitcherSource D2 branch
+  "Gulf South Conference": 66,
 };
 
 function jucoDistrictNameFromConference(conference: string | null | undefined): string | null {
@@ -118,11 +120,18 @@ function jucoDistrictNameFromConference(conference: string | null | undefined): 
 }
 
 function transferWeightsForSource(division: string | null | undefined) {
-  return division === "NJCAA_D1" ? JUCO_TRANSFER_WEIGHTS : TRANSFER_WEIGHT_DEFAULTS;
+  // D2 routed through JUCO weights (zero power, zero park) — D2 hitters have
+  // slash lines but no TruMedia power-rating data. Mirrors src/lib edit.
+  if (division === "NJCAA_D1" || division === "D2") return JUCO_TRANSFER_WEIGHTS;
+  return TRANSFER_WEIGHT_DEFAULTS;
 }
 
 function pitcherTransferWeightsForSource(division: string | null | undefined) {
-  return division === "NJCAA_D1" ? JUCO_PITCHING_TRANSFER_WEIGHTS : null;
+  // D2 routed through the JUCO pitching engine — same zero-power / zero-park
+  // path. Conference HTP comes from JUCO_DISTRICT_HTP_OVERRIDE keyed by full
+  // conference name (e.g. "Gulf South Conference"). Mirrors src/lib edit.
+  if (division === "NJCAA_D1" || division === "D2") return JUCO_PITCHING_TRANSFER_WEIGHTS;
+  return null;
 }
 
 function applyJucoOutlierRegression(
@@ -328,7 +337,9 @@ function buildHitterTransferInputs(args: {
   if (rawLastObp == null) missingInputs.push("Last OBP");
   if (rawLastSlg == null) missingInputs.push("Last SLG");
 
-  const isJucoSource = player.division === "NJCAA_D1";
+  // D2 routed through the JUCO hitter path — same outlier regression + JUCO
+  // weights. Matches src/lib/buildTransferProjectionInputs.ts.
+  const isJucoSource = player.division === "NJCAA_D1" || player.division === "D2";
   const lastAvg = isJucoSource && rawLastAvg != null
     ? applyJucoOutlierRegression(rawLastAvg, JUCO_REGRESSION_CONFIG.avg.mean, JUCO_REGRESSION_CONFIG.avg.threshold, JUCO_REGRESSION_CONFIG.avg.slope, JUCO_REGRESSION_CONFIG.avg.maxR)
     : rawLastAvg;
@@ -896,12 +907,12 @@ function computeHitterMarketValue(oWar: number | null, conference: string | null
   return Math.max(0, oWar * HITTER_DOLLARS_PER_WAR * ptm * pvm);
 }
 
-async function runPrecomputeForTeam(supabase: any, customerTeamId: string, scope: string) {
-  if (scope === "pitchers_d1" || scope === "pitchers_juco") return runPitcherPrecompute(supabase, customerTeamId, scope);
-  return runHitterPrecompute(supabase, customerTeamId, scope);
+async function runPrecomputeForTeam(supabase: any, customerTeamId: string, scope: string, sourcePlayerIds?: string[]) {
+  if (scope === "pitchers_d1" || scope === "pitchers_juco") return runPitcherPrecompute(supabase, customerTeamId, scope, sourcePlayerIds);
+  return runHitterPrecompute(supabase, customerTeamId, scope, sourcePlayerIds);
 }
 
-async function runHitterPrecompute(supabase: any, customerTeamId: string, scope: string) {
+async function runHitterPrecompute(supabase: any, customerTeamId: string, scope: string, sourcePlayerIds?: string[]) {
   // Resolve customer team → destination team
   const { data: ct, error: ctErr } = await supabase
     .from("customer_teams")
@@ -1023,19 +1034,24 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
     }
   }
 
-  // Players — D1 hitters only, exclude own roster
+  // Players — D1 hitters only, exclude own roster.
+  // source_player_id selected so the optional sourcePlayerIds filter below can apply.
   const allPlayers = await loadAllPaged(() =>
-    supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, pa, is_twp, class_year"),
+    supabase.from("players").select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, source_player_id, pa, is_twp, class_year"),
   );
   const isPitcher = (p: string | null) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(p || ""));
   const matchesDivision = (d: string | null) => {
     if (scope === "juco") return d === "NJCAA_D1";
     return d !== "NJCAA_D1"; // hitters_d1 / default
   };
+  const filterSet = (sourcePlayerIds && sourcePlayerIds.length > 0) ? new Set(sourcePlayerIds) : null;
   const hitters = allPlayers.filter((p: any) =>
     (!isPitcher(p.position) || p.is_twp)
     && (!toSourceId || p.source_team_id !== toSourceId)
-    && matchesDivision(p.division));
+    && matchesDivision(p.division)
+    // Optional surgical scope: when sourcePlayerIds is passed, restrict to exactly those players.
+    // When omitted/empty, behavior is identical to the original bulk scope.
+    && (!filterSet || filterSet.has(p.source_player_id)));
 
   // Latest active predictions for each hitter
   const playerIds = hitters.map((p: any) => p.id);
@@ -1200,15 +1216,17 @@ async function runHitterPrecompute(supabase: any, customerTeamId: string, scope:
 // Mirrors scripts/precompute-pitchers.ts logic.
 // ─────────────────────────────────────────────────────────────────────────
 
-async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope: string = "pitchers_d1") {
+async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope: string = "pitchers_d1", sourcePlayerIds?: string[]) {
   const isJucoScope = scope === "pitchers_juco";
   const JUCO_IP_THRESHOLD = 20;
-  // JUCO scope uses the dedicated JUCO weight overrides — zeroes power
-  // weights and park weights, swaps in JUCO conference/competition weights.
-  // Mirrors src/lib/buildTransferPitcherInputs.ts line 190.
-  const eq: typeof PITCHING_EQ_DEFAULTS = isJucoScope
-    ? { ...PITCHING_EQ_DEFAULTS, ...JUCO_PITCHING_TRANSFER_WEIGHTS }
-    : PITCHING_EQ_DEFAULTS;
+  // Per-pitcher weight selection happens inside the loop (search "// Pick eq
+  // per pitcher" below). Reason: the pitchers_d1 scope filter passes through
+  // BOTH D1 and D2 source players (matchesDivision = d !== "NJCAA_D1"); within
+  // that mixed scope, D1 sources use D1 defaults but D2 sources need JUCO
+  // weights (zero power, zero park) since they have no power-rating data.
+  // Mirrors the hitter path which has done this per-player since day one.
+  const eqD1: typeof PITCHING_EQ_DEFAULTS = PITCHING_EQ_DEFAULTS;
+  const eqJucoOrD2: typeof PITCHING_EQ_DEFAULTS = { ...PITCHING_EQ_DEFAULTS, ...JUCO_PITCHING_TRANSFER_WEIGHTS };
 
   // Resolve customer team → destination
   const { data: ct, error: ctErr } = await supabase
@@ -1303,12 +1321,16 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
   );
   const pitcherTest = (p: string | null) => /^(SP|RP|CL|P|LHP|RHP|SM)/i.test(String(p || ""));
   const matchesDivision = (d: string | null) => isJucoScope ? d === "NJCAA_D1" : d !== "NJCAA_D1";
+  // Optional surgical scope: when sourcePlayerIds is passed, restrict to exactly those players.
+  // When omitted/empty, behavior is identical to the original bulk scope.
+  const filterSet = (sourcePlayerIds && sourcePlayerIds.length > 0) ? new Set(sourcePlayerIds) : null;
   const pitchers = allPlayers.filter((p: any) => {
     if (!(pitcherTest(p.position) || p.is_twp)) return false;
     if (toSourceId && p.source_team_id === toSourceId) return false;
     if (!matchesDivision(p.division)) return false;
     // JUCO IP floor — mirrors scripts/precompute-pitchers.ts to drop tiny-sample noise
     if (isJucoScope && p.division === "NJCAA_D1" && (Number(p.ip) || 0) < JUCO_IP_THRESHOLD) return false;
+    if (filterSet && !filterSet.has(p.source_player_id)) return false;
     return true;
   });
 
@@ -1362,6 +1384,12 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
     const pm = p.source_player_id ? pmBySourceId.get(String(p.source_player_id)) : null;
     if (!pm) { blocked++; blockReasons.set("no_pm_row", (blockReasons.get("no_pm_row") || 0) + 1); continue; }
 
+    // Pick eq per pitcher — D1 source uses defaults, JUCO/D2 source uses the
+    // JUCO weight override (zero power, zero park, JUCO conference/competition
+    // weights). Behavior for D1 pitchers is identical to before this change.
+    const isSubNcaaSource = p.division === "NJCAA_D1" || p.division === "D2";
+    const eq: typeof PITCHING_EQ_DEFAULTS = isSubNcaaSource ? eqJucoOrD2 : eqD1;
+
     const pred = predByPlayer.get(p.id);
     const fromTeamName = (p.from_team || p.team || "") as string;
     const fromTeamRow = teamByName.get(normalizeKey(fromTeamName)) || null;
@@ -1408,6 +1436,13 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
           const override = district ? JUCO_DISTRICT_HTP_OVERRIDE[district] : undefined;
           if (override != null) return override;
         }
+        if (p.division === "D2") {
+          // D2 conferences key directly by full conference name (no NJCAA prefix
+          // to strip). Match src/lib path.
+          const confKey = String(p.conference || "").trim();
+          const override = confKey ? JUCO_DISTRICT_HTP_OVERRIDE[confKey] : undefined;
+          if (override != null) return override;
+        }
         return Number(fromPC.hitter_talent_plus ?? 100);
       })(),
       toHitterTalent: Number(toPC.hitter_talent_plus ?? 100),
@@ -1427,7 +1462,8 @@ async function runPitcherPrecompute(supabase: any, customerTeamId: string, scope
       devAggressiveness: pred?.dev_aggressiveness ?? null,
       // For JUCO scope, mark source as JUCO so postprocess zeroes class
       // transitions and dev aggressiveness adjustments (which D1-only).
-      isJucoSource: p.division === "NJCAA_D1",
+      // D2 routed through same path — same zero-power / zero-park behavior.
+      isJucoSource: p.division === "NJCAA_D1" || p.division === "D2",
       eq,
       toConference,
       toTeam: toTeam.name,
@@ -1511,7 +1547,9 @@ Deno.serve(async (req: Request) => {
 
   let body: any;
   try { body = await req.json(); } catch { body = {}; }
-  const { jobId, customerTeamId: directTeamId, scope: directScope } = body || {};
+  // sourcePlayerIds (optional): when present, restricts the run to exactly those players.
+  // When omitted/empty, behavior is identical to the original bulk scope.
+  const { jobId, customerTeamId: directTeamId, scope: directScope, sourcePlayerIds } = body || {};
 
   try {
     // Claim job (or accept direct customer_team_id for ad-hoc runs)
@@ -1552,7 +1590,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const result = await runPrecomputeForTeam(supabase, job.customer_team_id, job.scope);
+    const result = await runPrecomputeForTeam(supabase, job.customer_team_id, job.scope, sourcePlayerIds);
 
     await supabase
       .from("precompute_jobs")

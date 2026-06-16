@@ -407,10 +407,17 @@ export async function computeAndStoreHitterScores(season = 2026): Promise<{ upda
  * Compute and store all pitching power rating scores for a given season.
  * Reads raw sub-metrics from Pitching Master, computes scores, writes back.
  */
-export async function computeAndStorePitchingScores(season = 2026): Promise<{ updated: number; errors: number }> {
+export async function computeAndStorePitchingScores(
+  season = 2026,
+  sourcePlayerIds?: string[],
+): Promise<{ updated: number; errors: number }> {
   let updated = 0;
   let errors = 0;
   console.time("[ComputePitching] TOTAL");
+  // Optional sourcePlayerIds filter — when omitted/empty, behavior is identical
+  // to the original bulk run. When provided, only those pitchers' rows are
+  // fetched + scored + written back; everyone else's row stays untouched.
+  const scoped = (sourcePlayerIds && sourcePlayerIds.length > 0);
 
   console.time("[ComputePitching] 1. fetch baselines");
   const { pitcher: pitcherBaselines } = await fetchSeasonBaselines(season);
@@ -440,10 +447,12 @@ export async function computeAndStorePitchingScores(season = 2026): Promise<{ up
   let from = 0;
   const readPageSize = 1000;
   while (true) {
-    const { data: rows, error } = await supabase
+    let q = supabase
       .from("Pitching Master")
       .select("id, source_player_id, Season, IP, Team, TeamID, ERA, FIP, WHIP, K9, BB9, HR9, miss_pct, bb_pct, hard_hit_pct, in_zone_whiff_pct, chase_pct, barrel_pct, line_pct, exit_vel, ground_pct, in_zone_pct, \"90th_vel\", h_pull_pct, la_10_30_pct, stuff_plus")
-      .eq("Season", season)
+      .eq("Season", season);
+    if (scoped) q = q.in("source_player_id", sourcePlayerIds!);
+    const { data: rows, error } = await q
       .order("id", { ascending: true })
       .range(from, from + readPageSize - 1);
     if (error) throw error;

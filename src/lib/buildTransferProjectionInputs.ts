@@ -157,8 +157,11 @@ export function buildHitterTransferInputs(
   if (rawLastObp == null) missingInputs.push("Last OBP");
   if (rawLastSlg == null) missingInputs.push("Last SLG");
 
-  // JUCO outlier regression (only pulls down stats above outlier threshold)
-  const isJucoSource = player.division === "NJCAA_D1";
+  // JUCO/D2 outlier regression (only pulls down stats above outlier threshold).
+  // D2 routed through the same path — power_weight=0 (no Hitter Master power
+  // ratings needed), outlier regression applies, JUCO conference + park weights.
+  // Matches the pitcher-side D2 routing in buildTransferPitcherInputs.ts.
+  const isJucoSource = player.division === "NJCAA_D1" || player.division === "D2";
   const lastAvg = isJucoSource && rawLastAvg != null
     ? applyJucoOutlierRegression(rawLastAvg, JUCO_REGRESSION_CONFIG.avg.mean, JUCO_REGRESSION_CONFIG.avg.threshold, JUCO_REGRESSION_CONFIG.avg.slope, JUCO_REGRESSION_CONFIG.avg.maxR)
     : rawLastAvg;

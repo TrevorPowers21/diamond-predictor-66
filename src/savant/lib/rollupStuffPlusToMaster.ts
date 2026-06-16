@@ -40,16 +40,18 @@ interface PitchRow {
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
-async function fetchAll(season: number): Promise<PitchRow[]> {
+async function fetchAll(season: number, sourcePlayerIds?: string[]): Promise<PitchRow[]> {
   const PAGE = 1000;
   const all: PitchRow[] = [];
   let offset = 0;
+  const scoped = (sourcePlayerIds && sourcePlayerIds.length > 0);
   while (true) {
-    const { data, error } = await (supabase as any)
+    let q = (supabase as any)
       .from("pitcher_stuff_plus_inputs")
       .select("source_player_id, pitches, stuff_plus")
-      .eq("season", season)
-      .range(offset, offset + PAGE - 1);
+      .eq("season", season);
+    if (scoped) q = q.in("source_player_id", sourcePlayerIds!);
+    const { data, error } = await q.range(offset, offset + PAGE - 1);
     if (error) throw new Error(error.message);
     if (!data || data.length === 0) break;
     all.push(...(data as PitchRow[]));
@@ -61,12 +63,13 @@ async function fetchAll(season: number): Promise<PitchRow[]> {
 
 export async function rollupStuffPlusToMaster(
   season: number,
+  sourcePlayerIds?: string[],
 ): Promise<{ report: StuffPlusRollupReport; errors: string[] }> {
   const errors: string[] = [];
   console.time("[StuffPlusRollup] TOTAL");
 
   console.time("[StuffPlusRollup] 1. fetch per-pitch rows");
-  const rows = await fetchAll(season);
+  const rows = await fetchAll(season, sourcePlayerIds);
   console.timeEnd("[StuffPlusRollup] 1. fetch per-pitch rows");
   console.log(`[StuffPlusRollup] ${rows.length} per-pitch rows for ${season}`);
 

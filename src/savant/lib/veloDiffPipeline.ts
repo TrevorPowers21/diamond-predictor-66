@@ -51,16 +51,25 @@ async function fetchAll<T>(
 
 export async function runVeloDiffPipeline(
   season: number = 2026,
+  sourcePlayerIds?: string[],
 ): Promise<{ report: VeloDiffReport; errors: string[] }> {
   const errors: string[] = [];
   console.time("[VeloDiff] TOTAL");
 
   // ── Step 1: Pull all relevant rows ─────────────────────────────────────
+  // Optional sourcePlayerIds filter scopes the run to a specific list of
+  // pitchers. When omitted/empty, behavior is identical to the original
+  // bulk run (covers every player). Matches the precompute pattern.
   console.time("[VeloDiff] 1. fetch pitch rows");
+  const scoped = (sourcePlayerIds && sourcePlayerIds.length > 0);
   const allRows = await fetchAll<PitchRow & { division?: string }>(
     "pitcher_stuff_plus_inputs",
     "id, source_player_id, pitch_type, hand, pitches, velocity, division",
-    (q: any) => q.eq("season", season).in("pitch_type", ["4S FB", "Sinker", "Change-up"]),
+    (q: any) => {
+      let qq = q.eq("season", season).in("pitch_type", ["4S FB", "Sinker", "Change-up"]);
+      if (scoped) qq = qq.in("source_player_id", sourcePlayerIds!);
+      return qq;
+    },
   );
   console.timeEnd("[VeloDiff] 1. fetch pitch rows");
 

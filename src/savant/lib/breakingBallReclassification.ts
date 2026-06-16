@@ -1082,9 +1082,15 @@ async function fetchAllRows<T>(
 
 export async function runBreakingBallReclassification(
   season: number = 2026,
+  sourcePlayerIds?: string[],
 ): Promise<{ report: ReclassificationReport; errors: string[] }> {
   const errors: string[] = [];
   console.time("[Reclass] TOTAL");
+
+  // Optional sourcePlayerIds filter scopes the run to a specific list of
+  // pitchers. When omitted/empty, behavior is identical to the original
+  // bulk run. Diagnostic still scans the whole table (read-only).
+  const scoped = (sourcePlayerIds && sourcePlayerIds.length > 0);
 
   // ── Diagnostic: fetch ALL distinct pitch_type values in the table ─────
   console.time("[Reclass] 1. diagnostic pitch_type fetch");
@@ -1113,7 +1119,11 @@ export async function runBreakingBallReclassification(
   const { data: rawData, error: pullErrMsg } = await fetchAllRows<RawBreakingBallRow>(
     "pitcher_stuff_plus_inputs",
     "*",
-    (q: any) => q.eq("season", season).in("pitch_type", BREAKING_BALL_TAGS),
+    (q: any) => {
+      let qq = q.eq("season", season).in("pitch_type", BREAKING_BALL_TAGS);
+      if (scoped) qq = qq.in("source_player_id", sourcePlayerIds!);
+      return qq;
+    },
   );
 
   if (pullErrMsg) {
