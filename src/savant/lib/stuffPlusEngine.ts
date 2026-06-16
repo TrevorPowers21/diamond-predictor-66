@@ -367,15 +367,18 @@ export async function runStuffPlusPipeline(
   }
 
   // ── Pull all pitch rows ────────────────────────────────────────────────
+  // IMPORTANT: do NOT scope the fetch here. The recenter step at line
+  // 447-481 calibrates per-(pitch_type×hand) bucket means against the
+  // population so Stuff+ lands at mean=100. Scoping the fetch means the
+  // recenter calibrates against ONLY the scope (1 player => mean of 1 =>
+  // every score forced to 100). Instead we always score the whole season's
+  // pitches and filter at the WRITE step below. Pop constants are already
+  // unconditionally loaded above for the same reason.
   console.time("[Stuff+] 2. fetch pitch rows");
   const allRows = await fetchAll<PitchRow>(
     "pitcher_stuff_plus_inputs",
     "id, source_player_id, pitch_type, hand, pitches, velocity, ivb, hb, rel_height, rel_side, extension, spin, fb_ch_velo_diff, needs_review",
-    (q: any) => {
-      let qq = q.eq("season", season).in("pitch_type", ALL_PITCH_TYPES);
-      if (scoped) qq = qq.in("source_player_id", sourcePlayerIds!);
-      return qq;
-    },
+    (q: any) => q.eq("season", season).in("pitch_type", ALL_PITCH_TYPES),
   );
   console.timeEnd("[Stuff+] 2. fetch pitch rows");
 
@@ -481,12 +484,17 @@ export async function runStuffPlusPipeline(
   console.timeEnd("[Stuff+] 4b. recenter to mean=100");
 
   // ── Write stuff_plus scores back in batches ────────────────────────────
+  // Surgical write: when sourcePlayerIds is provided, only write rows for
+  // those players. Scoring + recenter ran against the full population to
+  // get correct calibration; writes are then filtered down.
   console.time("[Stuff+] 5. write per-pitch scores");
   let written = 0;
+  const writeFilter = scoped ? new Set(sourcePlayerIds!) : null;
 
   // Group by rounded score for efficient batch updates
   const scoreGroups = new Map<number, string[]>();
   for (const s of scored) {
+    if (writeFilter && !writeFilter.has(s.source_player_id)) continue;
     const key = s.stuff_plus;
     if (!scoreGroups.has(key)) scoreGroups.set(key, []);
     scoreGroups.get(key)!.push(s.id);
@@ -507,9 +515,12 @@ export async function runStuffPlusPipeline(
 
   console.timeEnd("[Stuff+] 5. write per-pitch scores");
 
-  // Flag outliers
+  // Flag outliers (apply the same write filter — only flag scoped rows)
   console.time("[Stuff+] 6. flag outliers");
-  const outlierIds = scored.filter((s) => s.needs_review && s.review_note).map((s) => s.id);
+  const outlierIds = scored
+    .filter((s) => s.needs_review && s.review_note)
+    .filter((s) => !writeFilter || writeFilter.has(s.source_player_id))
+    .map((s) => s.id);
   if (outlierIds.length > 0) {
     for (let i = 0; i < outlierIds.length; i += 500) {
       const batch = outlierIds.slice(i, i + 500);
@@ -565,10 +576,12 @@ export async function runStuffPlusPipeline(
   console.timeEnd("[Stuff+] 7. compute overall composite");
 
   // ── Write overall Stuff+ to Pitching Master (for RSTR IQ) ──────────────
-  // Group by rounded overall score for batch updates
+  // Group by rounded overall score for batch updates. Apply the same write
+  // filter — only update Pitching Master rows for scoped players.
   console.time("[Stuff+] 8. write overall to Pitching Master");
   const overallGroups = new Map<number, string[]>();
   for (const o of overallResults) {
+    if (writeFilter && !writeFilter.has(o.source_player_id)) continue;
     if (!overallGroups.has(o.overall)) overallGroups.set(o.overall, []);
     overallGroups.get(o.overall)!.push(o.source_player_id);
   }
