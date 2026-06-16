@@ -144,7 +144,7 @@ function ScoutGrade({ label, value, fullLabel }: { label: string; value: number 
   return (
     <div className={`rounded-lg border p-3 ${tier}`}>
       <div className="text-xs font-medium opacity-80">{fullLabel}</div>
-      <div className="text-2xl font-bold mt-1">{value}</div>
+      <div className="text-2xl font-bold mt-1">{Math.round(value)}</div>
       <div className="text-xs font-semibold mt-0.5">{grade}</div>
     </div>
   );
@@ -1655,10 +1655,10 @@ export default function PlayerProfile() {
                 </CardHeader>
                 <CardContent className="px-4 pb-4">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <ScoutGrade label="Brl" value={activeSeasonScoutingGrades.barrelScore != null ? Math.round(activeSeasonScoutingGrades.barrelScore) : null} fullLabel="Barrel%" />
-                    <ScoutGrade label="EV" value={activeSeasonScoutingGrades.avgEVScore != null ? Math.round(activeSeasonScoutingGrades.avgEVScore) : null} fullLabel="Exit Velo" />
-                    <ScoutGrade label="Con" value={activeSeasonScoutingGrades.contactScore != null ? Math.round(activeSeasonScoutingGrades.contactScore) : null} fullLabel="Contact%" />
-                    <ScoutGrade label="Chs" value={activeSeasonScoutingGrades.chaseScore != null ? Math.round(activeSeasonScoutingGrades.chaseScore) : null} fullLabel="Chase%" />
+                    <ScoutGrade label="Brl" value={activeSeasonScoutingGrades.barrelScore ?? null} fullLabel="Barrel%" />
+                    <ScoutGrade label="EV" value={activeSeasonScoutingGrades.avgEVScore ?? null} fullLabel="Exit Velo" />
+                    <ScoutGrade label="Con" value={activeSeasonScoutingGrades.contactScore ?? null} fullLabel="Contact%" />
+                    <ScoutGrade label="Chs" value={activeSeasonScoutingGrades.chaseScore ?? null} fullLabel="Chase%" />
                   </div>
                   {effectiveSeason === 2026 && projectionSourceRow?.combined_used && (
                     <p className="mt-2 text-[10px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"} sample</p>
@@ -1924,10 +1924,10 @@ function HistoricalHitterView({
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <ScoutGrade label="Brl" value={row.barrel_score != null ? Math.round(row.barrel_score) : null} fullLabel="Barrel%" />
-              <ScoutGrade label="EV"  value={row.avg_ev_score != null ? Math.round(row.avg_ev_score) : null} fullLabel="Exit Velo" />
-              <ScoutGrade label="Con" value={row.contact_score != null ? Math.round(row.contact_score) : null} fullLabel="Contact%" />
-              <ScoutGrade label="Chs" value={row.chase_score != null ? Math.round(row.chase_score) : null} fullLabel="Chase%" />
+              <ScoutGrade label="Brl" value={row.barrel_score ?? null} fullLabel="Barrel%" />
+              <ScoutGrade label="EV"  value={row.avg_ev_score ?? null} fullLabel="Exit Velo" />
+              <ScoutGrade label="Con" value={row.contact_score ?? null} fullLabel="Contact%" />
+              <ScoutGrade label="Chs" value={row.chase_score ?? null} fullLabel="Chase%" />
             </div>
             {isAdmin && (
               <>
