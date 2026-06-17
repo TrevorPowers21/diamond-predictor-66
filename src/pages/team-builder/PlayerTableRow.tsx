@@ -677,13 +677,19 @@ function PlayerTableRow({
           type="text"
           inputMode="numeric"
           className="w-28 h-8 mx-auto text-center"
-          // When the override flag is on, show whatever was typed (incl. "0").
-          // formatWithCommas otherwise returns "" for 0, which hides the
-          // coach's explicit "pay this player $0" decision.
+          // Actual Value is coach-input-only. When the override flag is on
+          // (coach has typed a number), show whatever was typed including
+          // "0" — formatWithCommas otherwise returns "" for 0, which would
+          // hide the coach's explicit "pay this player $0" decision. When
+          // the flag is off, render empty regardless of any p.nil_value
+          // residue from prior sessions / saved-build loads / removed
+          // "Apply Projected NIL" bulk-fill — the projection still flows
+          // through effectiveNilForPlayer for budget totals, it just
+          // doesn't masquerade as a coach-typed actual in this cell.
           value={
             p.nil_value_overridden
               ? (Number.isFinite(Number(p.nil_value)) ? Number(p.nil_value).toLocaleString("en-US") : "")
-              : formatWithCommas(p.nil_value)
+              : ""
           }
           onChange={(e) => {
             const raw = e.target.value.trim();
