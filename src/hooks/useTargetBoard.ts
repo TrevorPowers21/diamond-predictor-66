@@ -26,8 +26,16 @@ export interface TargetBoardRow {
 }
 
 /**
- * Per-team recruiting watchlist. Scoped on (user, customer_team_id) so
- * impersonating a different team flips to that team's separate list.
+ * Team-wide recruiting watchlist. Scoped on customer_team_id only so every
+ * coach on the same team sees the same shared board — Coach A's add shows
+ * up for Coach B and vice versa. user_id stays on insert as audit ("who
+ * added it") but does NOT filter reads or deletes.
+ *
+ * Migration 2026-06-17: changed scoping from (user, customer_team_id) to
+ * customer_team_id only. Requires DB-side unique-constraint swap from
+ * (user_id, customer_team_id, player_id) → (customer_team_id, player_id)
+ * plus a one-time dedupe of duplicate (team, player) rows that the old
+ * constraint had allowed. SQL lives in commit message of this change.
  *
  * No team in scope (superadmin not impersonating) → returns an empty
  * board. Surfaces should prompt the user to pick a team rather than
@@ -43,7 +51,7 @@ export function useTargetBoard() {
     queryFn: async () => {
       const { data, error } = await tb()
         .select("id, player_id, notes, added_at, players!inner(first_name, last_name, team, conference, position, class_year, portal_status, bats_hand, division)")
-        .eq("user_id", user!.id)
+        // Team-scoped only — every coach on the team sees the same board.
         .eq("customer_team_id", effectiveTeamId!)
         .order("added_at", { ascending: false });
 
@@ -113,7 +121,7 @@ export function useTargetBoard() {
       if (!effectiveTeamId) throw new Error("No team in scope");
       const { error } = await tb()
         .delete()
-        .eq("user_id", user.id)
+        // Team-scoped delete — any coach on the team can remove any entry.
         .eq("customer_team_id", effectiveTeamId)
         .eq("player_id", playerId);
       if (error) throw error;
