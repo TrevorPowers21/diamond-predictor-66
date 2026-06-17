@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { getProgramTierMultiplierByConference } from "@/lib/nilProgramSpecific";
@@ -941,7 +942,18 @@ export default function PitcherProfile() {
   }, [pitchingEq, powerRatingsRow]);
 
   const latestStats = useMemo(() => seasonStats[0] || null, [seasonStats]);
-  const activePrediction = useMemo(() => predictions[0] || null, [predictions]);
+  // Use the same prediction picker TB uses (pickPreferredPrediction):
+  //   1. Team-scoped precomputed row if effectiveTeamId is set + a precomputed
+  //      row exists for that team.
+  //   2. Otherwise the global returner-regular row (customer_team_id IS NULL).
+  //   3. Last-resort any precomputed row.
+  // Replaces the prior `predictions[0]` which was non-deterministic — Postgres
+  // could return any of a player's 13 prediction rows (1 regular + 12
+  // precomputed) first, so the displayed projection depended on row order.
+  const activePrediction = useMemo(
+    () => pickPreferredPrediction(predictions as any[], effectiveTeamId) ?? null,
+    [predictions, effectiveTeamId],
+  );
   const conferenceByTeam = useMemo(() => {
     const map = new Map<string, string>();
     for (const row of teamDirectory as Array<{ name: string | null; conference: string | null; park_factor: number | null }>) {
