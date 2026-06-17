@@ -75,7 +75,7 @@ export type PitchingMasterSeedRow = {
  */
 export function usePitchingSeedData(season = 2026, enabled = true) {
   const { data: dbRows = [], isLoading } = useQuery({
-    queryKey: ["pitching_master", season, "ip10"],
+    queryKey: ["pitching_master", season, "ip0"],
     enabled,
     queryFn: async () => {
       const all: any[] = [];
@@ -88,7 +88,7 @@ export function usePitchingSeedData(season = 2026, enabled = true) {
           .from("Pitching Master")
           .select("*")
           .eq("Season", season)
-          .gte("IP", 10)
+          .gte("IP", 0)
           .not("Role", "in", "(C,1B,2B,3B,SS,OF,LF,CF,RF,DH,IF,UT)")
           .order("source_player_id", { ascending: true })
           .range(from, from + pageSize - 1);
