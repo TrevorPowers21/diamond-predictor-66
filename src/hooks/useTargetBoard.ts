@@ -65,6 +65,15 @@ export function useTargetBoard() {
         division: row.players.division ?? null,
       })) as TargetBoardRow[];
     },
+    // Refetch when the user re-focuses TB / Targets / any surface using the
+    // hook. Profile add in another tab/route → target_board mutation runs in
+    // that context → this query may be cached as fresh on the other surface.
+    // refetchOnWindowFocus guarantees the latest server state on focus.
+    refetchOnWindowFocus: true,
+    // Treat data as immediately stale so any refetch trigger (focus,
+    // remount, invalidation) actually re-runs the network call instead of
+    // serving cached.
+    staleTime: 0,
   });
 
   const playerIds = new Set(board.map((r) => r.player_id));
