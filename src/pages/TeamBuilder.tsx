@@ -3231,22 +3231,16 @@ export default function TeamBuilder() {
               <TabsTrigger value="depth">Depth Chart</TabsTrigger>
               <TabsTrigger value="analytics">Program Analytics</TabsTrigger>
             </TabsList>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setRosterPlayers((prev) =>
-                  prev.map((p) => {
-                    if ((p.roster_status || "returner") === "leaving") return p;
-                    const projectedNil = projectedNilForPlayer(p);
-                    return { ...p, nil_value: Math.round(projectedNil) };
-                  })
-                );
-                setDirty(true);
-              }}
-            >
-              Apply Projected NIL
-            </Button>
+            {/*
+              Apply Projected NIL button removed 2026-06-17. The math concept
+              stays — projectedNilForPlayer feeds totals/budget when a row has
+              nil_value_overridden=false (see effectiveNilForPlayer) — but the
+              one-click bulk-fill was being clicked accidentally and leaving
+              projected values in the Actual Value cells without setting the
+              override flag, so coaches saw projection numbers that looked like
+              their own typed-in actuals. Removing the button forces all
+              Actual Value entries to be explicit per-row coach typing.
+            */}
           </div>
 
           <TabsContent value="roster" className="space-y-6">

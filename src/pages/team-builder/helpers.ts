@@ -293,6 +293,13 @@ export const defaultPitcherDepthRoleFromIp = (
   if (role === "SP") {
     if (ipNum >= 65) return "weekend_starter";
     if (ipNum >= 35) return "weekday_starter";
+    // Thin-sample SPs (< 10 IP) drop to specialist_reliever. Without this
+    // floor, a 3-IP arm got the "swing_starter" tier (85 projected IP) →
+    // pWAR / market_value scaled ~14× too high. Mirrors the RP < 8 IP
+    // specialist_reliever rule below. Affects display only; coach can
+    // still override the depth role in TB if a low-sample arm is actually
+    // going to start meaningful innings.
+    if (ipNum < 10) return "specialist_reliever";
     return "swing_starter";
   }
   if (ipNum >= 40) return "workhorse_reliever";
