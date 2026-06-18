@@ -20,6 +20,7 @@ import { useHitterSeedData } from "@/hooks/useHitterSeedData";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
+import { MarketPayLogButton } from "@/components/MarketPayLogButton";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
@@ -957,6 +958,7 @@ export default function PlayerProfile() {
                   onSave={(fields) => updatePortalStatus.mutateAsync(fields)}
                 />
                 <PortalContactButton player={player as any} />
+                <MarketPayLogButton playerId={player?.id ?? null} />
                 {combinedUsed && (
                   <Badge
                     variant="outline"
