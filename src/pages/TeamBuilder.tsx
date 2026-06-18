@@ -2592,14 +2592,28 @@ export default function TeamBuilder() {
       // below, no need to double-notify.
       addToSupabaseBoard({ playerId: row.id, silent: true });
     }
-    toast({ title: "Added to targets", description: `${row.first_name} ${row.last_name}` });
+    // __sync: this row was injected by the bidirectional sync pull (a Profile /
+    // Dashboard / Portal add propagating into TB). The originating surface
+    // already showed its own toast — second toast would be noise.
+    if (!row?.__sync) {
+      toast({ title: "Added to targets", description: `${row.first_name} ${row.last_name}` });
+    }
     } catch (err: any) {
       toast({ title: "Failed to add target", description: err?.message || "Unexpected error while adding player target.", variant: "destructive" });
     }
   };
 
-  // Bidirectional sync between Supabase target board and Team Builder roster targets
-  const targetSyncedRef = useRef(false);
+  // Bidirectional sync between Supabase target board and Team Builder roster targets.
+  // Previously gated as a one-shot effect via targetSyncedRef so this block
+  // only ran on the first mount. That broke cross-surface real-time sync:
+  // a player added on the Player Dashboard / Profile / Portal after TB was
+  // already open would never propagate to the TB target board tab until the
+  // coach navigated away and back. Same in reverse for TB-added targets that
+  // were supposed to appear on the Targets page. Removed the one-shot gate
+  // 2026-06-17 — the existing dedupe (pushedPlayerIdsRef on push, existing
+  // playerIds check on pull) prevents duplicate operations on re-runs.
+  // The effect deps already exclude rosterPlayers, so it only re-fires when
+  // supabaseTargetBoard / build-load state changes — no roster-edit churn.
   // Per-id push tracker — without this, an empty initial supabaseTargetBoard
   // load lets the effect re-run after each mutation invalidation. Even
   // though isOnSupabaseBoard guards the call, the query is invalidated but
@@ -2608,7 +2622,6 @@ export default function TeamBuilder() {
   // user hit on hard refresh.
   const pushedPlayerIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (targetSyncedRef.current) return;
     // Don't push until the board query has resolved — while loading,
     // isOnSupabaseBoard returns false for everyone, causing duplicate-insert
     // errors ("Already on Target Board") for players already in the DB.
@@ -2645,8 +2658,13 @@ export default function TeamBuilder() {
     //      mean "no saved builds", it means "we don't know yet"
     //   2) builds query resolved with saved builds, but loadBuild hasn't
     //      run to populate rosterPlayers yet
-    const savedBuildPending = buildsLoading || (builds.length > 0 && !buildLoadDoneRef.current);
-    if (supabaseTargetBoard.length > 0 && !savedBuildPending) {
+    // No savedBuildPending gate. Pull whenever supabaseTargetBoard has
+    // entries — the existingPlayerIds dedup below prevents duplicates with
+    // anything a saved-build load (now or later) brings in. Result: the TB
+    // target board tab consistently shows the team's target_board entries
+    // regardless of which build is loaded (or none), matching the Targets
+    // sidebar — "one team board that appears on every build."
+    if (supabaseTargetBoard.length > 0) {
       const existingPlayerIds = new Set(rosterPlayers.map((rp) => rp.player_id));
       const newFromSupabase = supabaseTargetBoard.filter((sb) => !existingPlayerIds.has(sb.player_id));
       if (newFromSupabase.length > 0) {
@@ -2663,26 +2681,54 @@ export default function TeamBuilder() {
               from_team: sb.team,
               conference: sb.conference ?? null,
               source_player_id: (sb as any).source_player_id ?? null,
+              // __sync flag suppresses the "Added to targets" toast inside
+              // addPlayerFromTargetSearch — the originating surface (Profile /
+              // Dashboard / Portal) already showed its own "Added to Target
+              // Board" toast, so a second one fires for every cross-surface
+              // pull. Cross-surface pulls also shouldn't mark the build dirty.
+              __sync: true,
             });
           }
-          setDirty(true);
         })();
       }
     }
 
-    // Only lock the one-shot sync after we've actually seen the Supabase board
-    // load AND the saved build (if any) has populated rosterPlayers. Without
-    // those guards, a first render where either query is in-flight would
-    // skip the pull and then refuse to re-run when data arrives, so seeded
-    // target rows would never appear OR would duplicate saved-build rows.
-    if (supabaseTargetBoard.length > 0 && !savedBuildPending) {
-      targetSyncedRef.current = true;
+    // Reverse-direction sync: when target_board entries get deleted on
+    // another surface (Targets page trash icon, Player Profile remove, etc.),
+    // any matching roster_status='target' rows in this TB's rosterPlayers
+    // become stale ghosts. Purge them.
+    //
+    // Gate on pushedPlayerIdsRef — we only purge targets that were previously
+    // synced to target_board. A target that's still pending its first push
+    // (just added via TB search this session) won't be in pushedPlayerIdsRef
+    // yet, so it's preserved until the push completes.
+    {
+      const supabaseIds = new Set(supabaseTargetBoard.map((sb) => sb.player_id));
+      const purgeIds = new Set<string>();
+      for (const p of rosterPlayers) {
+        if ((p.roster_status || "returner") !== "target") continue;
+        if (!p.player_id) continue;
+        if (!pushedPlayerIdsRef.current.has(p.player_id)) continue;
+        if (!supabaseIds.has(p.player_id)) purgeIds.add(p.player_id);
+      }
+      if (purgeIds.size > 0) {
+        setRosterPlayers((prev) =>
+          prev.filter((p) => !(p.player_id && purgeIds.has(p.player_id) && (p.roster_status || "returner") === "target"))
+        );
+        // Drop purged IDs from the push tracker so a re-add would re-push.
+        for (const pid of purgeIds) pushedPlayerIdsRef.current.delete(pid);
+      }
     }
-    // Intentionally not depending on rosterPlayers — this is a one-shot sync
-    // (gated by targetSyncedRef). Re-running on every roster edit churned the
-    // effect needlessly and caused position-shuffle glitches. buildLoadDone
+
+    // (one-shot lock removed 2026-06-17 — effect now re-runs whenever the
+    // supabaseTargetBoard list changes, so cross-surface adds appear in TB
+    // immediately and vice versa.)
+    // Intentionally not depending on rosterPlayers — we only want to sync
+    // when supabaseTargetBoard or build-load state changes. Re-running on
+    // every roster edit churns the effect and caused position-shuffle
+    // glitches in the past. buildLoadDone
     // IS in deps so the effect re-fires once when loadBuild finishes.
-  }, [supabaseTargetBoard, targetBoardLoading, builds.length, buildsLoading, buildLoadDone]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [supabaseTargetBoard, targetBoardLoading, builds.length, buildsLoading, buildLoadDone, selectedBuildId]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
 
