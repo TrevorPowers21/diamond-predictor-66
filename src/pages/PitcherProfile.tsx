@@ -40,6 +40,7 @@ import { computePrvPlus } from "@/savant/lib/prvPlus";
 import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
+import { MarketPayLogButton } from "@/components/MarketPayLogButton";
 import { PortalTeamCards } from "@/components/PortalTeamCards";
 import {
   computePitcherWar,
@@ -1495,6 +1496,7 @@ export default function PitcherProfile() {
                     onSave={(fields) => updatePortalStatus.mutateAsync({ playerId: player.id, ...fields })}
                   />
                   <PortalContactButton player={player as any} />
+                  <MarketPayLogButton playerId={player?.id ?? null} />
                 </>
               )}
               {combinedUsed && (
