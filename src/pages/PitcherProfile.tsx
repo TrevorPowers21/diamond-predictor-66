@@ -41,6 +41,7 @@ import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
 import { MarketPayLogButton } from "@/components/MarketPayLogButton";
+import PlayerPageTabs from "@/components/PlayerPageTabs";
 import { PortalTeamCards } from "@/components/PortalTeamCards";
 import {
   computePitcherWar,
@@ -1448,6 +1449,7 @@ export default function PitcherProfile() {
   return (
     <DashboardLayout>
       <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
+        {id && <PlayerPageTabs playerId={id} kind="pitcher" />}
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"

@@ -58,6 +58,7 @@
     "aggregate-pitch-log-dimensions:prod": "tsx --env-file-if-exists=.env.production.local scripts/aggregate_pitch_log_dimensions.ts --prod",
     "add-presto-missing-pitchers": "tsx --env-file-if-exists=.env.local scripts/add-presto-missing-pitchers.ts",
     "add-d2-player": "tsx --env-file-if-exists=.env.local scripts/add_d2_player.ts",
+    "audit-pitch-log-vs-master": "tsx --env-file-if-exists=.env.local scripts/audit_pitch_log_vs_master.ts",
     "add-d2-player:prod": "tsx --env-file-if-exists=.env.production.local scripts/add_d2_player.ts",
     "add-d2-pitcher-stuff": "tsx --env-file-if-exists=.env.local scripts/add_d2_pitcher_stuff.ts",
     "add-d2-pitcher-stuff:prod": "tsx --env-file-if-exists=.env.production.local scripts/add_d2_pitcher_stuff.ts",

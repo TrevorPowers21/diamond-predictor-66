@@ -68,6 +68,20 @@ WHERE proname IN ('exec_sql', 'bulk_update_pitch_log_stuff_plus');
 -- Expected: 2 rows
 ```
 
+### 1e. RLS + read policies
+File: [`supabase/migrations/20260622120000_pitch_log_rls.sql`](../supabase/migrations/20260622120000_pitch_log_rls.sql)
+
+Enables RLS on all 4 pitch_log tables + grants `authenticated` SELECT. Without this, the Stats page can't read the data even though service_role scripts can write. Matches the existing pattern used by `pitching_power_ratings_storage` etc.
+
+Verify:
+```sql
+SELECT tablename, rowsecurity
+FROM pg_tables
+WHERE tablename LIKE 'pitch_log%'
+ORDER BY tablename;
+-- Expected: 4 rows, rowsecurity = true on all
+```
+
 ---
 
 ## Step 2 — Ingest CSVs (Phase 1)

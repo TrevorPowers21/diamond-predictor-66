@@ -21,6 +21,7 @@ import { computeHitterPowerRatings } from "@/lib/powerRatings";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
 import { MarketPayLogButton } from "@/components/MarketPayLogButton";
+import PlayerPageTabs from "@/components/PlayerPageTabs";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
@@ -905,6 +906,7 @@ export default function PlayerProfile() {
   return (
     <DashboardLayout>
       <div className="space-y-4 max-w-[1400px] mx-auto">
+        {id && <PlayerPageTabs playerId={id} kind="player" />}
         {/* Back + Header */}
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => returnTo ? navigate(returnTo) : navigate(-1)}>

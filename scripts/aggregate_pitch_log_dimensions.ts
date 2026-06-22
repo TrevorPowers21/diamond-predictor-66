@@ -95,6 +95,21 @@ const DIMENSIONS: Dimension[] = [
     )`,
     hitter_filter: null,
   },
+  {
+    // Hitters only — individual pitches whose per-pitch Stuff+ score is
+    // >= 100. Not the pitcher's season average — each pitch graded
+    // individually. So a soft-tossing arm who hits 100 on one slider
+    // still contributes that pitch to the slice.
+    key: "vs_stuff_100plus",
+    pitcher_filter: null,
+    hitter_filter: "stuff_plus >= 100",
+  },
+  {
+    // Hitters only — same per-pitch shape, narrower cutoff for elite pitches.
+    key: "vs_stuff_105plus",
+    pitcher_filter: null,
+    hitter_filter: "stuff_plus >= 105",
+  },
 ];
 
 function pitcherTotalsSQL(dim: Dimension): string {
@@ -219,6 +234,75 @@ ON CONFLICT (pitcher_id, season, pitch_type_reclassified, dimension_key) DO UPDA
 `.trim();
 }
 
+function hitterByPitchTypeSQL(dim: Dimension): string {
+  return `
+INSERT INTO public.pitch_log_hitter_by_pitch_type (
+  batter_id, season, pitch_type_reclassified, dimension_key,
+  pa, ab, hits_single, hits_double, hits_triple, hits_hr,
+  k, bb, hbp,
+  pitches, swings, whiffs, chases,
+  in_zone, in_zone_swings, in_zone_whiffs, fouls,
+  batted_balls_in_play, batted_barrels, batted_hard_hit,
+  ev_sum, batted_balls_with_ev
+)
+SELECT
+  batter_id,
+  season,
+  pitch_type_reclassified,
+  '${dim.key}' AS dimension_key,
+  COUNT(*) FILTER (WHERE pitch_result_category NOT IN ('Ball','Strike','Foul','Other')) AS pa,
+  COUNT(*) FILTER (WHERE pitch_result_category IN
+    ('Strikeout','HR','Single','Double','Triple','GroundOut','FlyOut','LineOut','PopOut','Error','FieldersChoice','DoublePlay')) AS ab,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'Single') AS hits_single,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'Double') AS hits_double,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'Triple') AS hits_triple,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'HR') AS hits_hr,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'Strikeout') AS k,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'Walk') AS bb,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'HBP') AS hbp,
+  COUNT(*) AS pitches,
+  COUNT(*) FILTER (WHERE is_swing) AS swings,
+  COUNT(*) FILTER (WHERE is_whiff) AS whiffs,
+  COUNT(*) FILTER (WHERE is_chase) AS chases,
+  COUNT(*) FILTER (WHERE is_in_zone) AS in_zone,
+  COUNT(*) FILTER (WHERE is_in_zone AND is_swing) AS in_zone_swings,
+  COUNT(*) FILTER (WHERE is_in_zone AND is_whiff) AS in_zone_whiffs,
+  COUNT(*) FILTER (WHERE is_foul) AS fouls,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play) AS batted_balls_in_play,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity >= 95 AND launch_angle >= 10 AND launch_angle < 35) AS batted_barrels,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity >= 95) AS batted_hard_hit,
+  SUM(exit_velocity) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS ev_sum,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS batted_balls_with_ev
+FROM public.pitch_log
+WHERE pitch_type_reclassified IS NOT NULL AND ${dim.hitter_filter!}
+GROUP BY batter_id, season, pitch_type_reclassified
+ON CONFLICT (batter_id, season, pitch_type_reclassified, dimension_key) DO UPDATE SET
+  pa = EXCLUDED.pa,
+  ab = EXCLUDED.ab,
+  hits_single = EXCLUDED.hits_single,
+  hits_double = EXCLUDED.hits_double,
+  hits_triple = EXCLUDED.hits_triple,
+  hits_hr = EXCLUDED.hits_hr,
+  k = EXCLUDED.k,
+  bb = EXCLUDED.bb,
+  hbp = EXCLUDED.hbp,
+  pitches = EXCLUDED.pitches,
+  swings = EXCLUDED.swings,
+  whiffs = EXCLUDED.whiffs,
+  chases = EXCLUDED.chases,
+  in_zone = EXCLUDED.in_zone,
+  in_zone_swings = EXCLUDED.in_zone_swings,
+  in_zone_whiffs = EXCLUDED.in_zone_whiffs,
+  fouls = EXCLUDED.fouls,
+  batted_balls_in_play = EXCLUDED.batted_balls_in_play,
+  batted_barrels = EXCLUDED.batted_barrels,
+  batted_hard_hit = EXCLUDED.batted_hard_hit,
+  ev_sum = EXCLUDED.ev_sum,
+  batted_balls_with_ev = EXCLUDED.batted_balls_with_ev,
+  computed_at = NOW();
+`.trim();
+}
+
 function hitterTotalsSQL(dim: Dimension): string {
   return `
 INSERT INTO public.pitch_log_hitter_totals (
@@ -261,10 +345,14 @@ SELECT
   COUNT(*) FILTER (WHERE is_whiff) AS total_whiffs,
   COUNT(*) FILTER (WHERE is_foul) AS total_fouls,
   COUNT(*) FILTER (WHERE is_batted_ball_in_play) AS batted_balls_in_play,
-  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle IS NOT NULL AND launch_angle < 10) AS batted_ground_balls,
-  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle >= 10 AND launch_angle < 25) AS batted_line_drives,
-  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle >= 25 AND launch_angle < 50) AS batted_fly_balls,
-  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle > 50) AS batted_pop_ups,
+  -- LA category cutoffs (locked 2026-06-22): GB <5°, LD 5-20°, FB 20-50°, PU >=50°.
+  -- TruMedia uses <5/5-20/20-55/>=55 — we deviate at the FB/PU boundary
+  -- (capping PU at 50 instead of 55) to keep PU as a "true infield popup"
+  -- bucket and not pull mid-arc fly balls into it.
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle IS NOT NULL AND launch_angle < 5) AS batted_ground_balls,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle >= 5 AND launch_angle < 20) AS batted_line_drives,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle >= 20 AND launch_angle < 50) AS batted_fly_balls,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle >= 50) AS batted_pop_ups,
   COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity >= 95 AND launch_angle >= 10 AND launch_angle < 35) AS batted_barrels,
   COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity >= 95) AS batted_hard_hit,
   COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle >= 10 AND launch_angle < 30) AS batted_la_10_to_30,
@@ -327,6 +415,7 @@ async function main(): Promise<void> {
     }
     if (dim.hitter_filter) {
       tasks.push({ label: `${dim.key} → hitter_totals`, sql: hitterTotalsSQL(dim) });
+      tasks.push({ label: `${dim.key} → hitter_by_pitch_type`, sql: hitterByPitchTypeSQL(dim) });
     }
   }
 

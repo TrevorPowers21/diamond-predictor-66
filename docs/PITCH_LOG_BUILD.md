@@ -420,3 +420,291 @@ Score each pitch via `calculateStuffPlus` from `stuffPlusEngine.ts`, then recent
 - This is a 2M+ row build. **Do not rush ingestion.** Build in concept fully, validate sample data end-to-end, then scale.
 - Locked rulings live in §5 — re-derive these only if Trevor + Sam revisit explicitly.
 - Profile display swap happens LAST and only after side-by-side comparison validates new numbers vs current (per the pitch usage audit memory).
+
+---
+
+## 10. Deferred — Spray Angle & Pull/Center/Oppo
+
+**Status:** Deferred 2026-06-22. Existing CSV exports do not include
+`SprayAng`. Re-exporting all 32 TruMedia CSVs is the bottleneck (not
+the ingest itself), so this work is queued for a future session when
+fresh exports are available.
+
+### What it unlocks
+Pull% / Center% / Oppo% for hitters. Tracks where in fair territory each
+batted ball goes. Standard scouting cut — coaches use it to identify
+pull-heavy hitters, oppo-power threats, etc.
+
+### TruMedia column spec
+- **Name:** `SprayAng`
+- **Units:** degrees. **More negative = more to LF.**
+- **Sign convention:** for a RHB, pull (LF) = negative; oppo (RF) = positive.
+  Sign flips for LHB.
+
+### Implementation when ready
+1. **Re-export 32 TruMedia CSVs** with `SprayAng` included as an additional column.
+2. **`ALTER TABLE pitch_log ADD COLUMN spray_angle numeric;`** (~instant)
+3. Update [`scripts/ingest_pitch_log.ts`](../scripts/ingest_pitch_log.ts) to grab the new column (find SprayAng position in CSV header, add to COL constants).
+4. Re-run ingest over all 32 CSVs. UPSERT on uniq_pitch_id is idempotent so existing rows just update with the new column; no duplicates. ~15 min.
+5. **`ALTER TABLE pitch_log_hitter_totals ADD COLUMN batted_pull integer NOT NULL DEFAULT 0, ADD COLUMN batted_center integer NOT NULL DEFAULT 0, ADD COLUMN batted_oppo integer NOT NULL DEFAULT 0;`** Same for `pitch_log_hitter_by_pitch_type`.
+6. Update aggregation SQL in [`scripts/aggregate_pitch_log_dimensions.ts`](../scripts/aggregate_pitch_log_dimensions.ts) — add per-direction COUNT(*) FILTERs:
+   ```sql
+   COUNT(*) FILTER (
+     WHERE is_batted_ball_in_play AND spray_angle IS NOT NULL
+       AND ((bat_hand = 'R' AND spray_angle < -15) OR (bat_hand = 'L' AND spray_angle > 15))
+   ) AS batted_pull,
+   COUNT(*) FILTER (
+     WHERE is_batted_ball_in_play AND spray_angle IS NOT NULL
+       AND spray_angle BETWEEN -15 AND 15
+   ) AS batted_center,
+   COUNT(*) FILTER (
+     WHERE is_batted_ball_in_play AND spray_angle IS NOT NULL
+       AND ((bat_hand = 'R' AND spray_angle > 15) OR (bat_hand = 'L' AND spray_angle < -15))
+   ) AS batted_oppo,
+   ```
+7. Re-aggregate (~12 min). Pull%/Center%/Oppo% derive as `count / batted_balls_in_play`.
+8. Add to `HITTER_METRICS_CONTACT` in `src/savant/lib/pitchLogRates.ts` for display.
+
+### Center-band cutoff is 15° (standard)
+Industry convention. Adjust if you want a wider/narrower center band — easy parameter tweak in the SQL.
+
+
+### Also queued for the re-export: batted-ball distance
+
+Adding to the same re-export pass so we only re-export once. The deeper play:
+combine `SprayAng` + `launch_angle` + distance to derive an "expected
+power" / xSLG-style metric per batted ball.
+
+#### Why distance matters
+- A ball pulled hard to LF needs less distance to clear the fence (shorter
+  in most parks).
+- Same ball to CF needs ~400+ to clear.
+- Same ball to oppo needs similar to pull (mirror image, opposite field).
+
+So power isn't just LA × EV — direction-adjusted distance is the real
+signal. Hitters who consistently hit 380+ to CF have meaningful pull-line
++ oppo-line power even if their pull homers don't blow you away.
+
+#### TruMedia column spec (TBD — check the export menu)
+- Likely names: `Distance`, `HitDistance`, `TrueDistance`, `FlyDistance`
+- Units: feet
+- Confirm before re-export which exact field TruMedia exposes; might be one
+  of several (e.g., "true" distance accounts for hang time and air resistance
+  vs. raw projection).
+
+#### Schema add when re-importing
+```sql
+ALTER TABLE pitch_log ADD COLUMN hit_distance numeric;
+```
+
+#### Future xPower metric (rough sketch)
+```
+xPowerScore = f(launch_angle, exit_velocity, hit_distance, abs(spray_angle))
+```
+Where the model rewards:
+- Optimal LA (~25-30°)
+- High EV
+- Long distance
+- Effective use of pull (closer fence) — adjusts threshold for "elite" by direction
+
+Concrete formulas come later — for now, just capture the data fields.
+
+#### Combined re-export checklist (for one future pass)
+- [ ] `SprayAng` (degrees, negative = LF)
+- [ ] `Distance` / `HitDistance` (feet)
+- [ ] Any other batted-ball fields TruMedia exposes that aren't currently
+      in pitch_log (review CSV header)
+
+Doing all of these in one re-export saves us from doing this dance twice.
+
+
+### Pull Air% — top-of-list display target
+
+Once we have `SprayAng`, `Pull Air%` becomes a first-class scouting stat
+on the hitter Stats page. It's the standard "power projection" signal —
+how often the hitter pulls the ball in the air vs grounding it out.
+
+#### Definition
+- **Pulled in the air** = SprayAng to pull side (RHB: `< -15°`, LHB: `> 15°`)
+  AND `launch_angle >= 10°` (above the ground-ball cutoff)
+- **Denominator:** `batted_balls_in_play` (matches the rest of our batted-ball rates)
+
+#### Existing data — Hitter Master already has it
+- `Hitter Master.pull_air` (rate)
+- `Hitter Master.pull_air_score` (100-scale tier)
+
+So Pull Air% will be available **on Overview already** (from HM scouting
+columns) AND on Season Stats once pitch_log has `SprayAng`. Good
+cross-check opportunity — if our derived pull_air diverges materially from
+HM's pull_air, we know the spray-angle classification is off.
+
+#### Schema add
+```sql
+ALTER TABLE pitch_log_hitter_totals ADD COLUMN batted_pull_air integer NOT NULL DEFAULT 0;
+ALTER TABLE pitch_log_hitter_by_pitch_type ADD COLUMN batted_pull_air integer NOT NULL DEFAULT 0;
+```
+
+#### Aggregation SQL
+```sql
+COUNT(*) FILTER (
+  WHERE is_batted_ball_in_play
+    AND spray_angle IS NOT NULL
+    AND launch_angle >= 10
+    AND ((bat_hand = 'R' AND spray_angle < -15)
+      OR (bat_hand = 'L' AND spray_angle > 15))
+) AS batted_pull_air,
+```
+
+#### Display
+Add to `HITTER_METRICS_CONTACT` in `src/savant/lib/pitchLogRates.ts`:
+```ts
+{ label: "Pull Air%", derive: (r) => safeDiv(r.batted_pull_air, r.batted_balls_in_play), format: pct },
+```
+
+Position in the table: after Hard Hit% / Barrel% (it pairs with the power
+signals), or near the GB/LD/FB cluster (it's a directional batted-ball rate).
+
+
+### Architectural note: aggregate vs per-pitch sourcing
+
+The cross-check above is opportunistic, NOT a sign the two should converge:
+
+- **Hitter/Pitching Master** = TruMedia season aggregate. **Not filter-aware.**
+  Single number per metric per season per player. Drives the Overview /
+  Projection / Risk / NIL flows.
+- **pitch_log + aggregations** = per-pitch driven. **Filter-aware.** The
+  Stats page recomputes every metric for the active dimension (vs LHP, vs
+  Stuff+ 100, etc.) by re-running the count-then-divide derivation against
+  the filtered pitch population.
+
+So for any metric that overlaps (Pull Air%, Contact%, Chase%, Barrel%,
+etc.), the two will be CLOSE but not identical:
+
+- Pitch_log includes postseason; HM may not
+- Pitch_log can be filtered; HM is whole-season
+- Pitch_log denominators are derived from actual pitch counts; HM
+  denominators are TruMedia's aggregation choices
+
+This is **by design.** The Stats page is the deep-dive / filter
+exploration surface. Overview stays as the projection / scouting summary
+surface backed by HM. Coaches use both.
+
+The cross-check is useful for catching definitional bugs (chase formula
+mismatch, LA cutoff drift), not for forcing the two surfaces to display
+identical numbers — that defeats the purpose of having pitch_log.
+
+
+### xBA / xSLG — expected stats from (EV, LA, Spray)
+
+Your formulation is exactly how Statcast does it. Logged here for once
+SprayAng lands.
+
+#### Concept
+Every batted ball with (exit_velocity, launch_angle, spray_angle) maps to
+an expected hit probability based on the historical outcomes of similar
+batted balls. Sum those probabilities across all the player's batted balls,
+add automatic outs (K = 0), divide by AB → xBA.
+
+Same shape for xSLG with weighted bases (1B × 1 + 2B × 2 + 3B × 3 + HR × 4).
+
+#### Two approaches, pick one
+
+| | Where the probabilities come from | Pros | Cons |
+|---|---|---|---|
+| **A. Empirical (college)** | Build a lookup from our own pitch_log: bin every 2026+ batted ball by (EV bucket, LA bucket, spray bucket), measure actual outcome rates per bucket | True to college defense + fields. Recalibrates as data grows. | Smaller sample than MLB. Some buckets thin. |
+| **B. MLB Statcast model** | Adopt MLB's published lookup as-is | Already calibrated, dense | Wrong defense quality (college defenders ≠ MLB), wrong field dimensions |
+
+**Recommendation: A.** College outcomes differ from MLB enough that
+MLB-trained xStats will systematically misprice college batted balls.
+
+#### Implementation outline (A)
+
+1. **Wait until SprayAng + Distance are ingested** (the deferred re-export above).
+
+2. **Build the bucket lookup table once** —
+   ```sql
+   CREATE TABLE pitch_log_xba_lookup (
+     ev_bucket integer NOT NULL,       -- e.g., 5-mph bins: 60, 65, 70, ..., 115
+     la_bucket integer NOT NULL,       -- e.g., 5° bins: -20, -15, ..., 50
+     spray_bucket integer NOT NULL,    -- e.g., 10° bins: -50, -40, ..., 50
+     sample_size integer NOT NULL,
+     p_single numeric NOT NULL,
+     p_double numeric NOT NULL,
+     p_triple numeric NOT NULL,
+     p_hr numeric NOT NULL,
+     p_out numeric NOT NULL,
+     p_hit numeric NOT NULL,           -- p_single + p_double + p_triple + p_hr
+     expected_bases numeric NOT NULL,  -- 1·p_single + 2·p_double + ... + 4·p_hr
+     PRIMARY KEY (ev_bucket, la_bucket, spray_bucket)
+   );
+   ```
+   Populated by aggregating every batted ball in pitch_log: GROUP BY the
+   buckets, COUNT each outcome category, divide by group size.
+
+3. **Add per-player x-stat columns to hitter aggregations** —
+   ```sql
+   ALTER TABLE pitch_log_hitter_totals
+     ADD COLUMN x_hits_sum numeric NOT NULL DEFAULT 0,
+     ADD COLUMN x_bases_sum numeric NOT NULL DEFAULT 0;
+   ```
+   Same on `pitch_log_hitter_by_pitch_type` for per-pitch-type xBA/xSLG.
+
+4. **Aggregation SQL** — JOIN pitch_log batted balls to the lookup table by
+   their bucket coordinates, sum p_hit and expected_bases per (batter, season,
+   dimension), AB stays as before.
+   ```sql
+   xBA   = (x_hits_sum  + 0 × Ks) / ab    -- Ks contribute 0 to numerator
+   xSLG  = (x_bases_sum + 0 × Ks) / ab
+   ```
+   Note: AB denominator already excludes BB/HBP per standard convention.
+
+5. **Display** — add to `HITTER_METRICS_SLASH` and the top stat chip line,
+   adjacent to AVG and SLG. Coaches read at a glance: "AVG .312 / xBA .295
+   = he's been a little lucky" or "AVG .267 / xBA .310 = expect regression up."
+
+6. **Bucket-size tuning** is the main calibration knob. Too coarse → low
+   sample, model misses fine differences. Too fine → buckets get thin and
+   estimates jitter. Likely sweet spot: 5-mph EV, 5° LA, 10° spray.
+
+#### When to build this
+After the SprayAng re-export AND after we've validated the basic Stats page
+in coaching workflow. xBA / xSLG are the "Phase 5d" power-projection layer
+on top — useful but not required for launch.
+
+
+#### x-stats UI placement (locked)
+
+x-stats render in the **percentile bars panel** (right column), not in the
+rate tables on the left. Matches Baseball Savant exactly:
+
+```
+PLATE DISCIPLINE          ─ left card ─
+Contact%   85%
+Chase%     22%   ...
+
+QUALITY OF CONTACT        ─ left card ─
+Avg EV     94 mph
+Hard Hit%  52%   ...
+
+PERCENTILE RANKS          ─ right card ─
+AVG        ████████░░░░░ 65
+xBA        ██████████░░░ 85   ← elite expected, .035 above actual
+SLG        █████████░░░░ 78
+xSLG       ███████████░░ 92   ← actual likely undersells him
+OBP        ███████░░░░░░ 60
+```
+
+**Why this placement:**
+- Visual comparison of actual vs expected is the entire point of x-stats
+- Percentile bars already render as comparison-against-population
+- Stacking AVG/xBA and SLG/xSLG side-by-side makes the luck/regression story
+  jump out at coach-glance speed
+- Keeps the rate tables clean (slash + discipline + batted ball without
+  doubling up on alt-versions)
+
+**Implementation in `pitchLogRates.ts`:**
+- Add `HITTER_METRICS_EXPECTED` array with xBA, xSLG entries (use `format: slash`)
+- Wire into the right-column BarGroup in PitchLogSection
+- Skip the left-column RateTable entirely for x-stats — they live only on the
+  percentile side
+
