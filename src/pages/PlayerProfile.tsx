@@ -251,6 +251,14 @@ export default function PlayerProfile() {
 
   const { data: aiScoutingReport } = useScoutingReport(player?.id, "hitter");
 
+  // pitch_log 2026 hitter rates — invoked unconditionally up here so the
+  // hook call order is stable across the !player early return below.
+  // Internal `enabled: !!sourcePlayerId` guard prevents fetching until
+  // the player query resolves.
+  const pitchLogRatesQuery = usePitchLog2026HitterRates(
+    (player as any)?.source_player_id ?? null,
+  );
+
   const { data: predictions = [], isLoading: isPredictionsLoading } = useQuery({
     queryKey: ["player-predictions", id, effectiveTeamId],
     queryFn: async () => {
@@ -782,14 +790,12 @@ export default function PlayerProfile() {
   // Falls back to seedPowerDerived (2025) when no Hitter Master row exists for the selected season
   const activeSeasonRow = (hitterMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason) || null;
 
-  // 2026-only: pull rates from pitch_log and compute scouting grades
-  // client-side. pitch_log is the comprehensive 2026 source — every
-  // tracked pitch flows into it, vs. Hitter Master which carries
-  // stored rates from an earlier ingest. Live-derive only for the
-  // current 2026 season; prior seasons keep their stored grades.
-  const { data: pitchLogRates } = usePitchLog2026HitterRates(
-    effectiveSeason === 2026 ? (player?.source_player_id ?? null) : null,
-  );
+  // pitch_log hook intentionally consumed here (after the !player early
+  // return). The actual useQuery call lives ABOVE that return — see the
+  // `pitchLogRatesQuery` line in the top hook section. React requires
+  // hook call order to be stable across renders, so we read its data
+  // here but invoke it earlier.
+  const pitchLogRates = pitchLogRatesQuery.data;
   const pitchLogPowerDerived = pitchLogRates?.hasData
     ? computeHitterPowerRatings({
         contact: pitchLogRates.contact,
