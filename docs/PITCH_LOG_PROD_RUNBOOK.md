@@ -352,6 +352,98 @@ Steps 3-6 are all idempotent so they're safe to re-run.
 
 ---
 
+## Step 8 — 2026-06-23 session additions (xStats + scout grade alignment)
+
+The pitch_log Stats page + Overview/Dashboard scouting grades work added several SQL changes after the original 6-step runbook was written. Run these AFTER Step 7 (aggregation) completes successfully.
+
+### 8a. Apply the four 2026-06-22+ migrations
+
+Paste each in the prod SQL editor, in order:
+
+1. `supabase/migrations/20260622140000_pitch_log_hitter_by_pitch_type.sql` — adds `pitch_log_hitter_by_pitch_type` table (hitter per-pitch-type aggregation). Mirror of pitcher_by_pitch_type.
+2. `supabase/migrations/20260623120000_pitch_log_xba_lookup.sql` — creates `pitch_log_xba_lookup` (~10,500 EV/LA bucket rows for Statcast-style xStats).
+3. `supabase/migrations/20260623140000_pitch_log_total_out_of_zone.sql` — adds `total_out_of_zone` / `out_of_zone` columns to all 4 agg tables. Fixes Chase% / Zone% denominator bug (was including ~17% NULL `is_in_zone` pitches as "out of zone" and crashing rates).
+
+Verify:
+```sql
+SELECT column_name FROM information_schema.columns
+WHERE table_name = 'pitch_log_hitter_totals'
+  AND column_name IN ('total_out_of_zone');
+-- Expected: 1 row
+
+SELECT COUNT(*) FROM pitch_log_xba_lookup;
+-- Expected: 0 (we populate it in 8b)
+
+SELECT table_name FROM information_schema.tables
+WHERE table_name = 'pitch_log_hitter_by_pitch_type';
+-- Expected: 1 row
+```
+
+### 8b. Populate the xBA bucket lookup
+
+```bash
+npm run build-xba-lookup:prod
+```
+
+Scans every batted ball in `pitch_log`, buckets by (EV, LA), computes `p_hit` / `expected_bases` / `expected_woba` per bucket using linear weights. Smooths thin buckets via 3×3 neighbor averaging. ~2 min.
+
+Verify ~9,500-10,500 rows populated, `p_hit` between 0 and 1.
+
+### 8c. Re-run aggregation with the updated SQL
+
+The aggregation script changed substantially:
+- Adds `total_out_of_zone` / `out_of_zone` count columns
+- xStats foul-gate fix (CASE-gated on `is_batted_ball_in_play`, no longer summing p_hit on tracked fouls)
+- Sac handling (Sacs contribute via lookup or actual outcome to x_hits_sum)
+- Untracked-batted-ball fallback (single = 1.0 hit, etc.)
+
+```bash
+npm run aggregate-pitch-log-dimensions:prod -- --apply
+```
+
+~10-12 min. All 32 INSERT...SELECTs (8 dimensions × applicable tables) re-run idempotently via ON CONFLICT DO UPDATE.
+
+### 8d. Calibrate xStats quantile lookups against prod distribution
+
+```bash
+npm run calibrate-xstats-quantile:prod
+```
+
+Reads all qualified prod hitters/pitchers, pairs raw xStat with actual stat, outputs 51-point lookup arrays (xBA / xSLG / xwOBA / pitcher xBA / pitcher xSLG). Prints them to stdout as TS-formatted const arrays.
+
+### 8e. Update lookup constants in code
+
+Open the script output. Replace the corresponding lookup arrays in `src/savant/lib/pitchLogRates.ts`:
+- `HITTER_XBA_LOOKUP`
+- `HITTER_XSLG_LOOKUP`
+- `HITTER_XWOBA_LOOKUP`
+- `PITCHER_XBA_LOOKUP`
+- `PITCHER_XSLG_LOOKUP`
+
+Commit + push the update. This is the only code change needed after Step 8 — the displayed xStats will then align with the actual prod 2026 D1 distribution.
+
+### 8f. Verify
+
+Quick sanity probes on prod data:
+```sql
+-- League distributions should land near actual stats
+SELECT AVG(x_hits_sum / NULLIF(ab + sac, 0)) AS league_raw_xba_weighted
+FROM pitch_log_hitter_totals
+WHERE season = 2026 AND dimension_key = 'all' AND pa >= 30;
+-- Expected: ~.275-.290 (close to league AVG)
+
+SELECT
+  COUNT(*) AS qualified_pop,
+  AVG(stuff_plus_sum / NULLIF(stuff_plus_data_pitches, 0)) AS league_avg_stuff_plus
+FROM pitch_log_pitcher_totals
+WHERE season = 2026 AND dimension_key = 'all' AND total_pitches >= 100;
+-- Expected qualified: ~5,400; Stuff+: ~99-100
+```
+
+A Hudson Brown / Roblez spot-check on the prod-pointed preview URL confirms display values.
+
+---
+
 ## File inventory
 
 ```
@@ -366,13 +458,19 @@ supabase/migrations/
   20260619140000_pitch_log_computed_columns.sql   # Step 1b — derived columns
   20260620120000_pitch_log_aggregations.sql       # Step 1c — aggregation tables
   20260620140000_pitch_log_helper_functions.sql   # Step 1d — exec_sql + bulk_update
+  20260622120000_pitch_log_rls.sql                # Step 1e — RLS + read policies
+  20260622140000_pitch_log_hitter_by_pitch_type.sql  # Step 8a #1 — hitter per-pitch table
+  20260623120000_pitch_log_xba_lookup.sql         # Step 8a #2 — xBA bucket lookup table
+  20260623140000_pitch_log_total_out_of_zone.sql  # Step 8a #3 — Chase/Zone denom fix
 
 scripts/
   ingest_pitch_log.ts                             # Step 2
   derive_pitch_log_flags.ts                       # Step 3 (alt — paste SQL above)
   reclassify_pitch_log.ts                         # Step 4 (alt — paste SQL above)
   compute_pitch_log_stuff_plus.ts                 # Step 5
-  aggregate_pitch_log_dimensions.ts               # Step 7 (Phase 4 dimensions)
+  aggregate_pitch_log_dimensions.ts               # Step 7 + 8c (Phase 4 dimensions, with session adds)
+  build_xba_lookup.ts                             # Step 8b
+  calibrate_xstats_quantile.ts                    # Step 8d
 ```
 
 npm scripts:
@@ -381,5 +479,7 @@ npm scripts:
 - `reclassify-pitch-log[:prod]`
 - `compute-pitch-log-stuff-plus[:prod]`
 - `aggregate-pitch-log-dimensions[:prod]`
+- `build-xba-lookup[:prod]`
+- `calibrate-xstats-quantile[:prod]`
 
 All `:prod` variants use `.env.production.local`.
