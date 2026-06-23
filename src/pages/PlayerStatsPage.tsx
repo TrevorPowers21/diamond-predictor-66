@@ -1,10 +1,7 @@
 import { useParams } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
-import { Badge } from "@/components/ui/badge";
-import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
-import { MarketPayLogButton } from "@/components/MarketPayLogButton";
-import CoachNotes from "@/components/CoachNotes";
 import PlayerPageTabs from "@/components/PlayerPageTabs";
+import { PlayerStatsHeader } from "@/components/PlayerStatsHeader";
 import { usePlayerSourceId } from "@/hooks/usePlayerSourceId";
 import { HitterPitchLog } from "@/savant/components/PitchLogSection";
 
@@ -13,11 +10,12 @@ const SEASON = 2026;
 /**
  * /dashboard/player/:id/stats — 2026 pitch-log analysis for a hitter.
  *
- * Sibling route to /dashboard/player/:id (PlayerProfile, the projection-
- * focused view). Same URL :id (UUID), but this page surfaces the
- * actual-season aggregated splits from the pitch_log pipeline.
+ * Sibling route to /dashboard/player/:id (PlayerProfile). Same identity
+ * strip layout (badges row + action button row) as Profile so coaches
+ * can do research here without switching tabs.
  *
- * Pitcher counterpart: /dashboard/pitcher/:id/stats (PitcherStatsPage).
+ * Export Report PDF lives on Profile — the View Full Report button
+ * routes there.
  */
 export default function PlayerStatsPage() {
   const { id } = useParams<{ id: string }>();
@@ -32,57 +30,9 @@ export default function PlayerStatsPage() {
           <h2 className="text-2xl font-bold tracking-tight">
             {player?.firstName} {player?.lastName}
           </h2>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            {player?.position && (
-              <Badge variant="secondary" className="text-xs uppercase tracking-wider">
-                {player.position}
-              </Badge>
-            )}
-            {player?.schoolName && (
-              <Badge variant="outline" className="text-xs">{player.schoolName}</Badge>
-            )}
-            {player?.conference && (
-              <Badge variant="outline" className="text-xs text-muted-foreground">
-                {player.conference}
-              </Badge>
-            )}
-            {player && (player.portalStatus === null || player.portalStatus === "NOT IN PORTAL") ? (
-              <Badge className="bg-muted text-muted-foreground border-0 text-[10px] font-semibold uppercase tracking-wider">
-                Not In Portal
-              </Badge>
-            ) : (
-              player && (
-                <PortalStatusBadge
-                  player={{
-                    portal_status: player.portalStatus,
-                    portal_entry_date: player.portalEntryDate,
-                    commit_school: player.commitSchool,
-                    commit_date: player.commitDate,
-                  }}
-                  isAdmin={false}
-                />
-              )
-            )}
-            {player && (
-              <PortalContactButton
-                player={{
-                  portal_status: player.portalStatus,
-                  athletic_aid: player.athleticAid,
-                  contact_cell: player.contactCell,
-                  contact_email: player.contactEmail,
-                  gpa: player.gpa,
-                  va_roster_link: player.vaRosterLink,
-                }}
-              />
-            )}
-            {player?.id && <MarketPayLogButton playerId={player.id} />}
-            {player?.id && (
-              <CoachNotes
-                playerId={player.id}
-                playerName={`${player.firstName ?? ""} ${player.lastName ?? ""}`.trim()}
-              />
-            )}
-          </div>
+          {player && id && (
+            <PlayerStatsHeader player={player} kind="hitter" profileHref={`/dashboard/player/${id}`} />
+          )}
         </div>
 
         {isLoading && (

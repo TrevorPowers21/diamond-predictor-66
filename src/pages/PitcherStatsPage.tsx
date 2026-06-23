@@ -1,10 +1,7 @@
 import { useParams } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
-import { Badge } from "@/components/ui/badge";
-import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
-import { MarketPayLogButton } from "@/components/MarketPayLogButton";
-import CoachNotes from "@/components/CoachNotes";
 import PlayerPageTabs from "@/components/PlayerPageTabs";
+import { PlayerStatsHeader } from "@/components/PlayerStatsHeader";
 import { usePlayerSourceId } from "@/hooks/usePlayerSourceId";
 import { usePitcherMaster } from "@/savant/hooks/usePitcherMaster";
 import { PitcherPitchLog } from "@/savant/components/PitchLogSection";
@@ -14,12 +11,8 @@ const SEASON = 2026;
 /**
  * /dashboard/pitcher/:id/stats — 2026 pitch-log analysis for a pitcher.
  *
- * Sibling route to /dashboard/pitcher/:id (PitcherProfile, the projection-
- * focused view). Same URL :id (UUID), but this page surfaces the
- * actual-season aggregated splits + per-pitch-type breakdown from the
- * pitch_log pipeline.
- *
- * Hitter counterpart: /dashboard/player/:id/stats (PlayerStatsPage).
+ * Mirrors PitcherProfile's identity strip. Export Report PDF lives on
+ * Profile — View Full Report routes there.
  */
 export default function PitcherStatsPage() {
   const { id } = useParams<{ id: string }>();
@@ -35,62 +28,14 @@ export default function PitcherStatsPage() {
           <h2 className="text-2xl font-bold tracking-tight">
             {player?.firstName} {player?.lastName}
           </h2>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            {player?.position && (
-              <Badge variant="secondary" className="text-xs uppercase tracking-wider">
-                {player.position}
-              </Badge>
-            )}
-            {pm?.Role && (
-              <Badge variant="outline" className="text-xs uppercase tracking-wider border-[#D4AF37]/40 text-[#D4AF37]">
-                {pm.Role}
-              </Badge>
-            )}
-            {player?.schoolName && (
-              <Badge variant="outline" className="text-xs">{player.schoolName}</Badge>
-            )}
-            {player?.conference && (
-              <Badge variant="outline" className="text-xs text-muted-foreground">
-                {player.conference}
-              </Badge>
-            )}
-            {player && (player.portalStatus === null || player.portalStatus === "NOT IN PORTAL") ? (
-              <Badge className="bg-muted text-muted-foreground border-0 text-[10px] font-semibold uppercase tracking-wider">
-                Not In Portal
-              </Badge>
-            ) : (
-              player && (
-                <PortalStatusBadge
-                  player={{
-                    portal_status: player.portalStatus,
-                    portal_entry_date: player.portalEntryDate,
-                    commit_school: player.commitSchool,
-                    commit_date: player.commitDate,
-                  }}
-                  isAdmin={false}
-                />
-              )
-            )}
-            {player && (
-              <PortalContactButton
-                player={{
-                  portal_status: player.portalStatus,
-                  athletic_aid: player.athleticAid,
-                  contact_cell: player.contactCell,
-                  contact_email: player.contactEmail,
-                  gpa: player.gpa,
-                  va_roster_link: player.vaRosterLink,
-                }}
-              />
-            )}
-            {player?.id && <MarketPayLogButton playerId={player.id} />}
-            {player?.id && (
-              <CoachNotes
-                playerId={player.id}
-                playerName={`${player.firstName ?? ""} ${player.lastName ?? ""}`.trim()}
-              />
-            )}
-          </div>
+          {player && id && (
+            <PlayerStatsHeader
+              player={player}
+              kind="pitcher"
+              pitcherRole={pm?.Role ?? null}
+              profileHref={`/dashboard/pitcher/${id}`}
+            />
+          )}
         </div>
 
         {isLoading && (
