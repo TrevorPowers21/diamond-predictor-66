@@ -68,6 +68,7 @@
     "calibrate-xstats-quantile": "tsx --env-file-if-exists=.env.local scripts/calibrate_xstats_quantile.ts",
     "verify-percentile-metrics": "tsx --env-file-if-exists=.env.local scripts/verify_percentile_metrics.ts",
     "verify-percentile-all-dims": "tsx --env-file-if-exists=.env.local scripts/verify_percentile_all_dims.ts",
+    "audit-overview-vs-pitch-log": "tsx --env-file-if-exists=.env.local scripts/audit_overview_vs_pitch_log.ts",
     "add-d2-player:prod": "tsx --env-file-if-exists=.env.production.local scripts/add_d2_player.ts",
     "add-d2-pitcher-stuff": "tsx --env-file-if-exists=.env.local scripts/add_d2_pitcher_stuff.ts",
     "add-d2-pitcher-stuff:prod": "tsx --env-file-if-exists=.env.production.local scripts/add_d2_pitcher_stuff.ts",
