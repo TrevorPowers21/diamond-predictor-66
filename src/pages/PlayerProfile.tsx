@@ -1463,16 +1463,28 @@ export default function PlayerProfile() {
                       {(hitterMasterSeasons as any[])
                         .sort((a, b) => Number(a.Season) - Number(b.Season))
                         .map((row: any, i: number) => {
-                          const ops = row.OBP != null && row.SLG != null ? (Number(row.OBP) + Number(row.SLG)) : null;
-                          const iso = row.SLG != null && row.AVG != null ? (Number(row.SLG) - Number(row.AVG)) : null;
+                          // Switch #6 (2026-06-23): for 2026 specifically,
+                          // prefer pitch_log-derived slash + PA. HM's stored
+                          // 2026 row was snapshotted pre-postseason; pitch_log
+                          // includes the May 22-June 16 series. e.g., Hudson
+                          // Brown HM has 177 PA / .341 AVG vs pl 200 PA / .333.
+                          // Falls back to HM when pitch_log has no row.
+                          const isCurrentSeason = Number(row.Season) === 2026;
+                          const pl = isCurrentSeason ? pitchLogRates : null;
+                          const pa = pl?.pa ?? row.pa ?? null;
+                          const avg = pl?.avg ?? (row.AVG != null ? Number(row.AVG) : null);
+                          const obp = pl?.obp ?? (row.OBP != null ? Number(row.OBP) : null);
+                          const slg = pl?.slg ?? (row.SLG != null ? Number(row.SLG) : null);
+                          const ops = obp != null && slg != null ? obp + slg : null;
+                          const iso = avg != null && slg != null ? slg - avg : null;
                           return (
                             <tr key={row.Season} className={`border-b border-[#162241]/60 last:border-0 transition-colors duration-150 hover:bg-[#162241]/40 ${i % 2 === 1 ? "bg-[#0d1a30]" : ""}`}>
                               <td className="py-1.5 pr-1 font-semibold text-white">{row.Season}</td>
                               <td className="py-1.5 px-1 text-[#8a94a6] truncate max-w-[60px]">{teamAbbrev(row.Team, row.TeamID)}</td>
-                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.pa ?? "—"}</td>
-                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.AVG != null ? Number(row.AVG).toFixed(3) : "—"}</td>
-                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.OBP != null ? Number(row.OBP).toFixed(3) : "—"}</td>
-                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.SLG != null ? Number(row.SLG).toFixed(3) : "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{pa ?? "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{avg != null ? avg.toFixed(3) : "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{obp != null ? obp.toFixed(3) : "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{slg != null ? slg.toFixed(3) : "—"}</td>
                               <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{ops != null ? ops.toFixed(3) : "—"}</td>
                               <td className="py-1.5 pl-1 text-right tabular-nums text-slate-200">{iso != null ? iso.toFixed(3) : "—"}</td>
                             </tr>

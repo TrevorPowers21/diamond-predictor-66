@@ -35,6 +35,16 @@ export interface PitchLogHitterRates2026 {
   hasData: boolean;
   /** 2026 PA from pitch_log (sanity check — small PA → low confidence). */
   pa: number | null;
+  /**
+   * 2026 traditional slash line derived from pitch_log raw counts.
+   * Used by PlayerProfile career stats table (Switch #6) to show the
+   * truer 2026 line including postseason games that HM doesn't have.
+   * null when pa is 0.
+   */
+  ab: number | null;
+  avg: number | null;
+  obp: number | null;
+  slg: number | null;
 }
 
 export function usePitchLog2026HitterRates(sourcePlayerId: string | null) {
@@ -49,13 +59,14 @@ export function usePitchLog2026HitterRates(sourcePlayerId: string | null) {
         contact: null, lineDrive: null, avgExitVelo: null, popUp: null,
         bb: null, chase: null, barrel: null, ev90: null, pull: null,
         la10_30: null, gb: null, hasData: false, pa: null,
+        ab: null, avg: null, obp: null, slg: null,
       };
       if (!sourcePlayerId) return empty;
 
       const { data } = await (supabase as any)
         .from("pitch_log_hitter_totals")
         .select(
-          "pa, ab, bb, hbp, total_pitches, total_swings, total_whiffs, total_in_zone, total_chases, batted_balls_in_play, batted_barrels, ev_sum, batted_balls_with_ev, batted_ground_balls, batted_line_drives, batted_fly_balls, batted_pop_ups, batted_la_10_to_30",
+          "pa, ab, sac, hits_single, hits_double, hits_triple, hits_hr, bb, hbp, total_pitches, total_swings, total_whiffs, total_in_zone, total_out_of_zone, total_chases, batted_balls_in_play, batted_barrels, ev_sum, batted_balls_with_ev, batted_ground_balls, batted_line_drives, batted_fly_balls, batted_pop_ups, batted_la_10_to_30",
         )
         .eq("batter_id", sourcePlayerId)
         .eq("season", 2026)
@@ -65,7 +76,11 @@ export function usePitchLog2026HitterRates(sourcePlayerId: string | null) {
       if (!data) return empty;
 
       const r = data as any;
-      const outOfZone = (r.total_pitches ?? 0) - (r.total_in_zone ?? 0);
+      // Chase% denominator: definite-OOZ pitches only (is_in_zone IS
+      // FALSE). The old formula (total_pitches - total_in_zone)
+      // included untracked pitches in the denominator, crashing rates
+      // to ~70% of true value — see Hudson Brown audit 2026-06-23.
+      const outOfZone = r.total_out_of_zone ?? 0;
       const bip = r.batted_balls_in_play ?? 0;
       const evN = r.batted_balls_with_ev ?? 0;
 
@@ -88,6 +103,14 @@ export function usePitchLog2026HitterRates(sourcePlayerId: string | null) {
       const trackedBipFloor = 5; // min tracked balls before we trust the rate
       const evDen = evN >= trackedBipFloor ? evN : null;
 
+      // Traditional slash from pitch_log raw counts (Switch #6).
+      const hits = (r.hits_single ?? 0) + (r.hits_double ?? 0)
+        + (r.hits_triple ?? 0) + (r.hits_hr ?? 0);
+      const tb = (r.hits_single ?? 0) + 2 * (r.hits_double ?? 0)
+        + 3 * (r.hits_triple ?? 0) + 4 * (r.hits_hr ?? 0);
+      const obpDen = (r.ab ?? 0) + (r.bb ?? 0) + (r.hbp ?? 0) + (r.sac ?? 0);
+      const onBaseNum = hits + (r.bb ?? 0) + (r.hbp ?? 0);
+
       return {
         contact: r.total_swings > 0
           ? ((r.total_swings - r.total_whiffs) / r.total_swings) * 100
@@ -104,6 +127,10 @@ export function usePitchLog2026HitterRates(sourcePlayerId: string | null) {
         gb: pct(r.batted_ground_balls, evDen),
         hasData: (r.pa ?? 0) > 0 || bip > 0,
         pa: r.pa ?? null,
+        ab: r.ab ?? null,
+        avg: (r.ab ?? 0) > 0 ? hits / r.ab : null,
+        obp: obpDen > 0 ? onBaseNum / obpDen : null,
+        slg: (r.ab ?? 0) > 0 ? tb / r.ab : null,
       };
     },
   });
