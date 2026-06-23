@@ -3,7 +3,6 @@ import DashboardLayout from "@/components/DashboardLayout";
 import PlayerPageTabs from "@/components/PlayerPageTabs";
 import { PlayerStatsHeader } from "@/components/PlayerStatsHeader";
 import { usePlayerSourceId } from "@/hooks/usePlayerSourceId";
-import { usePitcherMaster } from "@/savant/hooks/usePitcherMaster";
 import { PitcherPitchLog } from "@/savant/components/PitchLogSection";
 
 const SEASON = 2026;
@@ -17,26 +16,20 @@ const SEASON = 2026;
 export default function PitcherStatsPage() {
   const { id } = useParams<{ id: string }>();
   const { data: player, isLoading } = usePlayerSourceId(id);
-  const { data: pm } = usePitcherMaster(player?.sourcePlayerId ?? null, SEASON);
 
   return (
     <DashboardLayout>
       <div className="space-y-5 p-4 md:p-6">
         {id && <PlayerPageTabs playerId={id} kind="pitcher" />}
 
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">
-            {player?.firstName} {player?.lastName}
-          </h2>
-          {player && id && (
-            <PlayerStatsHeader
-              player={player}
-              kind="pitcher"
-              pitcherRole={pm?.Role ?? null}
-              profileHref={`/dashboard/pitcher/${id}`}
-            />
-          )}
-        </div>
+        {player && id && (
+          <PlayerStatsHeader
+            player={player}
+            kind="pitcher"
+            playerName={`${player.firstName ?? ""} ${player.lastName ?? ""}`.trim()}
+            profileHref={`/dashboard/pitcher/${id}`}
+          />
+        )}
 
         {isLoading && (
           <div className="py-10 text-sm text-white/50">Loading player…</div>

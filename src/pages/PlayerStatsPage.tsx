@@ -26,14 +26,14 @@ export default function PlayerStatsPage() {
       <div className="space-y-5 p-4 md:p-6">
         {id && <PlayerPageTabs playerId={id} kind="player" />}
 
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">
-            {player?.firstName} {player?.lastName}
-          </h2>
-          {player && id && (
-            <PlayerStatsHeader player={player} kind="hitter" profileHref={`/dashboard/player/${id}`} />
-          )}
-        </div>
+        {player && id && (
+          <PlayerStatsHeader
+            player={player}
+            kind="hitter"
+            playerName={`${player.firstName ?? ""} ${player.lastName ?? ""}`.trim()}
+            profileHref={`/dashboard/player/${id}`}
+          />
+        )}
 
         {isLoading && (
           <div className="py-10 text-sm text-white/50">Loading player…</div>

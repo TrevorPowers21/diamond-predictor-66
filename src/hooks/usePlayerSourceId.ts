@@ -29,6 +29,8 @@ export interface PlayerSourceIdResult {
   contactEmail: string | null;
   gpa: number | null;
   vaRosterLink: string | null;
+  batsHand: string | null;
+  throwsHand: string | null;
   isPitcher: boolean;
   isTwp: boolean;
 }
@@ -45,7 +47,7 @@ export function usePlayerSourceId(id: string | undefined) {
       const { data, error } = await supabase
         .from("players")
         .select(
-          "id, source_player_id, first_name, last_name, position, team_id, is_twp, portal_status, portal_entry_date, commit_school, commit_date, athletic_aid, contact_cell, contact_email, gpa, va_roster_link, team, conference",
+          "id, source_player_id, first_name, last_name, position, team_id, is_twp, portal_status, portal_entry_date, commit_school, commit_date, athletic_aid, contact_cell, contact_email, gpa, va_roster_link, bats_hand, throws_hand, team, conference",
         )
         .eq(lookupColumn, id)
         .maybeSingle();
@@ -104,6 +106,8 @@ export function usePlayerSourceId(id: string | undefined) {
         contactEmail: d.contact_email ?? null,
         gpa: d.gpa ?? null,
         vaRosterLink: d.va_roster_link ?? null,
+        batsHand: d.bats_hand ?? null,
+        throwsHand: d.throws_hand ?? null,
         isPitcher,
         isTwp: !!d.is_twp,
       };

@@ -10,25 +10,28 @@ import { useHighFollow } from "@/hooks/useHighFollow";
 import type { PlayerSourceIdResult } from "@/hooks/usePlayerSourceId";
 
 /**
- * Shared identity strip for the Season Stats pages — mirrors the layout
- * and functionality of PlayerProfile / PitcherProfile's header.
+ * Shared identity strip for the Season Stats pages.
  *
- * Row 1 — badges:    position / TWP / school / conf / portal status
- * Row 2 — actions:   Portal Contact | Market Pay | Coach Notes | Target Board | High Follow | View Full Report
+ * Mirrors the layout of PlayerProfile / PitcherProfile:
+ *   [name + badges row, flex-1] [CoachNotes][ToB][HighFollow][View Full Report]
  *
- * Export Report PDF lives only on the Profile page (depends on derived
- * projection + scouting state). The "View Full Report" link routes the
- * coach there to fire the same export.
+ * Badge order per kind matches the matching Profile page exactly:
+ *   Hitter:  position · TWP · school · conf · portal · contact · pay
+ *   Pitcher: school · conf · handedness (RHP/LHP) · TWP · portal · contact · pay
+ *
+ * Export Report PDF lives on Profile (depends on rich projection +
+ * scouting state); View Full Report routes there to fire the same
+ * download, keeping the PDF a single source of truth.
  */
 export function PlayerStatsHeader({
   player,
   kind,
-  pitcherRole,
+  playerName,
   profileHref,
 }: {
   player: PlayerSourceIdResult;
   kind: "hitter" | "pitcher";
-  pitcherRole?: string | null;
+  playerName: string;
   profileHref: string;
 }) {
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
@@ -36,70 +39,93 @@ export function PlayerStatsHeader({
     useHighFollow();
 
   const playerId = player.id;
-  const fullName = `${player.firstName ?? ""} ${player.lastName ?? ""}`.trim();
+  const handednessLabel =
+    player.throwsHand === "R" ? "RHP" : player.throwsHand === "L" ? "LHP" : null;
+
+  const portalBadge =
+    player.portalStatus === null || player.portalStatus === "NOT IN PORTAL" ? (
+      <Badge className="bg-muted text-muted-foreground border-0 text-[10px] font-semibold uppercase tracking-wider">
+        Not In Portal
+      </Badge>
+    ) : (
+      <PortalStatusBadge
+        player={{
+          portal_status: player.portalStatus,
+          portal_entry_date: player.portalEntryDate,
+          commit_school: player.commitSchool,
+          commit_date: player.commitDate,
+        }}
+        isAdmin={false}
+      />
+    );
+
+  const twpBadge = player.isTwp && (
+    <Badge
+      variant="outline"
+      className="text-[10px] font-semibold uppercase tracking-wider border-[#D4AF37]/40 bg-[#D4AF37]/10 text-[#D4AF37]"
+      title={
+        kind === "pitcher"
+          ? "Two-way player — also appears in the hitter pool"
+          : "Two-way player — also appears in the pitcher pool"
+      }
+    >
+      TWP
+    </Badge>
+  );
+
+  const portalContact = (
+    <PortalContactButton
+      player={{
+        portal_status: player.portalStatus,
+        athletic_aid: player.athleticAid,
+        contact_cell: player.contactCell,
+        contact_email: player.contactEmail,
+        gpa: player.gpa,
+        va_roster_link: player.vaRosterLink,
+      }}
+    />
+  );
 
   return (
-    <div>
-      <div className="flex flex-wrap items-center gap-2 mt-1">
-        {player.position && (
-          <Badge variant="secondary" className="text-xs uppercase tracking-wider">
-            {player.position}
-          </Badge>
-        )}
-        {kind === "pitcher" && pitcherRole && (
-          <Badge
-            variant="outline"
-            className="text-xs uppercase tracking-wider border-[#D4AF37]/40 text-[#D4AF37]"
-          >
-            {pitcherRole}
-          </Badge>
-        )}
-        {player.isTwp && (
-          <Badge
-            variant="outline"
-            className="text-[10px] font-semibold uppercase tracking-wider border-[#D4AF37]/40 bg-[#D4AF37]/10 text-[#D4AF37]"
-            title="Two-way player — also appears in the pitcher pool"
-          >
-            TWP
-          </Badge>
-        )}
-        {player.schoolName && <Badge variant="outline" className="text-xs">{player.schoolName}</Badge>}
-        {player.conference && (
-          <Badge variant="outline" className="text-xs text-muted-foreground">
-            {player.conference}
-          </Badge>
-        )}
-        {(player.portalStatus === null || player.portalStatus === "NOT IN PORTAL") ? (
-          <Badge className="bg-muted text-muted-foreground border-0 text-[10px] font-semibold uppercase tracking-wider">
-            Not In Portal
-          </Badge>
-        ) : (
-          <PortalStatusBadge
-            player={{
-              portal_status: player.portalStatus,
-              portal_entry_date: player.portalEntryDate,
-              commit_school: player.commitSchool,
-              commit_date: player.commitDate,
-            }}
-            isAdmin={false}
-          />
-        )}
+    <div className="flex items-start gap-3">
+      <div className="flex-1">
+        <h2 className="text-2xl font-bold tracking-tight">{playerName}</h2>
+        <div className="flex items-center gap-2 mt-1 flex-wrap">
+          {kind === "hitter" ? (
+            <>
+              {player.position && <Badge variant="secondary">{player.position}</Badge>}
+              {twpBadge}
+              {player.schoolName && <Badge variant="outline">{player.schoolName}</Badge>}
+              {player.conference && (
+                <Badge variant="outline" className="text-muted-foreground">
+                  {player.conference}
+                </Badge>
+              )}
+              {portalBadge}
+              {playerId && portalContact}
+              {playerId && <MarketPayLogButton playerId={playerId} />}
+            </>
+          ) : (
+            <>
+              {player.schoolName && <Badge variant="outline">{player.schoolName}</Badge>}
+              {player.conference && (
+                <Badge variant="outline" className="text-muted-foreground">
+                  {player.conference}
+                </Badge>
+              )}
+              {handednessLabel && <Badge variant="secondary">{handednessLabel}</Badge>}
+              {twpBadge}
+              {portalBadge}
+              {playerId && portalContact}
+              {playerId && <MarketPayLogButton playerId={playerId} />}
+            </>
+          )}
+        </div>
       </div>
 
       {playerId && (
-        <div className="flex flex-wrap items-center gap-2 mt-3">
-          <PortalContactButton
-            player={{
-              portal_status: player.portalStatus,
-              athletic_aid: player.athleticAid,
-              contact_cell: player.contactCell,
-              contact_email: player.contactEmail,
-              gpa: player.gpa,
-              va_roster_link: player.vaRosterLink,
-            }}
-          />
-          <MarketPayLogButton playerId={playerId} />
-          <CoachNotes playerId={playerId} playerName={fullName} />
+        <>
+          <CoachNotes playerId={playerId} playerName={playerName} />
           <Button
             variant={isOnBoard(playerId) ? "default" : "outline"}
             size="sm"
@@ -130,7 +156,7 @@ export function PlayerStatsHeader({
               View Full Report
             </Link>
           </Button>
-        </div>
+        </>
       )}
     </div>
   );
