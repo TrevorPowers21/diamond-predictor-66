@@ -1619,7 +1619,7 @@ export default function PitcherProfile() {
                       nil_value: projectedPitching.marketValue,
                       overall_pr_plus: internalPowerRatings?.overallPlus,
                       stuff_plus: pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus,
-                      whiff_pct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                      whiff_pct: pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct,
                       // Stf+ stays client-computed until next computeAndStoreScores
                       // populates stuff_score. Other 3 read from pred (1=1).
                       stuff_score: internalPowerRatings?.scores?.stuff,
@@ -1654,7 +1654,7 @@ export default function PitcherProfile() {
                           bb9: (masterRow as any)?.bb9, hr9: (masterRow as any)?.hr9,
                           ip: (masterRow as any)?.combined_ip ?? (masterRow as any)?.ip ?? (masterRow as any)?.IP,
                           stuffPlus: pitchArsenal.overallStuffPlus ?? (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus,
-                          whiffPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                          whiffPct: pitchArsenal.overallWhiffPct ?? (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct,
                           izWhiffPct: (projectionSourceRow as any)?.in_zone_whiff_pct ?? internalPowerRatings?.metrics?.izWhiff,
                           chasePct: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase,
                           bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb,
@@ -1685,7 +1685,7 @@ export default function PitcherProfile() {
                       ip: (masterRow as any)?.combined_ip ?? (masterRow as any)?.ip ?? (masterRow as any)?.IP ?? null,
                       classYear: displayClass || undefined,
                       stuffPlus: pitchArsenal.overallStuffPlus ?? (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus,
-                      whiffPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                      whiffPct: pitchArsenal.overallWhiffPct ?? (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct,
                       bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb,
                       chase: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase,
                       barrel: (projectionSourceRow as any)?.barrel_pct ?? internalPowerRatings?.metrics?.barrel,
@@ -1798,7 +1798,7 @@ export default function PitcherProfile() {
                     overall_pr_plus: internalPowerRatings?.overallPlus,
                     // Scouting scores
                     stuff_plus: pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus,
-                    whiff_pct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                    whiff_pct: pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct,
                     // Stf+ stays client-computed until next computeAndStoreScores
                     // populates stuff_score. Other 3 read from pred (1=1).
                     stuff_score: internalPowerRatings?.scores?.stuff,
@@ -1841,7 +1841,7 @@ export default function PitcherProfile() {
                         bb9: (masterRow as any)?.bb9, hr9: (masterRow as any)?.hr9,
                         ip: (masterRow as any)?.combined_ip ?? (masterRow as any)?.ip ?? (masterRow as any)?.IP,
                         stuffPlus: pitchArsenal.overallStuffPlus ?? (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus,
-                        whiffPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                        whiffPct: pitchArsenal.overallWhiffPct ?? (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct,
                         izWhiffPct: (projectionSourceRow as any)?.in_zone_whiff_pct ?? internalPowerRatings?.metrics?.izWhiff,
                         chasePct: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase,
                         bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb,
@@ -1872,7 +1872,7 @@ export default function PitcherProfile() {
                     ip: (masterRow as any)?.combined_ip ?? (masterRow as any)?.ip ?? (masterRow as any)?.IP ?? null,
                     classYear: displayClass || undefined,
                     stuffPlus: pitchArsenal.overallStuffPlus ?? (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus,
-                    whiffPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                    whiffPct: pitchArsenal.overallWhiffPct ?? (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct,
                     bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb,
                     chase: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase,
                     barrel: (projectionSourceRow as any)?.barrel_pct ?? internalPowerRatings?.metrics?.barrel,
@@ -1919,10 +1919,7 @@ export default function PitcherProfile() {
 
             {(() => {
               const sp = pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus;
-              const combinedUsedForOverview = !!(masterRow as any)?.combined_used;
-              const wp = combinedUsedForOverview
-                ? (pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null)
-                : ((masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct);
+              const wp = pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null;
               const hasArsenal = pitchArsenal.rows.length > 0;
               const hasAnySignal = sp != null || wp != null || hasArsenal;
               if (!hasAnySignal) {
@@ -1976,11 +1973,9 @@ export default function PitcherProfile() {
                       );
                     })()}
                     {(() => {
-                      // For pullback pitchers (combined_used), prefer arsenal-derived whiff% which is blend-aware.
-                      const combinedUsedForOverview = !!(masterRow as any)?.combined_used;
-                      const wp = combinedUsedForOverview
-                        ? (pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null)
-                        : ((masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct);
+                      // Pitch_log arsenal-derived Whiff% is primary
+                      // (per-pitch weighted), PM miss_pct is fallback.
+                      const wp = pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null;
                       const tierStyle = wp == null ? { border: "#162241", bg: "#0d1a30", text: "#8a94a6" }
                         : wp >= 27 ? { border: "hsl(142,71%,45%,0.3)", bg: "hsl(142,71%,45%,0.12)", text: "hsl(142,71%,35%)" }
                         : wp >= 21 ? { border: "hsl(200,80%,50%,0.3)", bg: "hsl(200,80%,50%,0.12)", text: "hsl(200,80%,35%)" }
@@ -2367,7 +2362,7 @@ export default function PitcherProfile() {
                 return <JucoPitcherRiskCard input={{
                   projectedPrvPlus: prvForRisk,
                   stuffPlus: pitchArsenal.overallStuffPlus ?? (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus,
-                  missPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                  missPct: pitchArsenal.overallWhiffPct ?? (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct,
                   bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb ?? null,
                   chasePct: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase ?? null,
                   barrelPct: (projectionSourceRow as any)?.barrel_pct ?? internalPowerRatings?.metrics?.barrel ?? null,
@@ -2391,7 +2386,7 @@ export default function PitcherProfile() {
                 careerSeasons: pitcherMasterSeasons as any[],
                 ip: (masterRow as any)?.combined_ip ?? (masterRow as any)?.ip ?? (masterRow as any)?.IP ?? null, classYear: displayClass || undefined,
                 stuffPlus: pitchArsenal.overallStuffPlus ?? (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus,
-                whiffPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                whiffPct: pitchArsenal.overallWhiffPct ?? (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct,
                 bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb,
                 chase: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase,
                 barrel: (projectionSourceRow as any)?.barrel_pct ?? internalPowerRatings?.metrics?.barrel,
@@ -2426,7 +2421,7 @@ export default function PitcherProfile() {
                 bb9: (masterRow as any)?.bb9, hr9: (masterRow as any)?.hr9,
                 ip: (masterRow as any)?.combined_ip ?? (masterRow as any)?.ip ?? (masterRow as any)?.IP,
                 stuffPlus: pitchArsenal.overallStuffPlus ?? (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus,
-                whiffPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                whiffPct: pitchArsenal.overallWhiffPct ?? (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct,
                 izWhiffPct: (projectionSourceRow as any)?.in_zone_whiff_pct ?? internalPowerRatings?.metrics?.izWhiff,
                 chasePct: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase,
                 bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb,
