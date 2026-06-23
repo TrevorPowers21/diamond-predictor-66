@@ -239,6 +239,8 @@ function PitcherPitchTypeTable({ breakdowns }: { breakdowns: PitchTypeBreakdown[
             <th className="py-2 pr-3 text-right">Whiff%</th>
             <th className="py-2 pr-3 text-right">Chase%</th>
             <th className="py-2 pr-3 text-right">CSW%</th>
+            <th className="py-2 pr-3 text-right">Hard Hit%</th>
+            <th className="py-2 pr-3 text-right">EV</th>
           </tr>
         </thead>
         <tbody>
@@ -260,6 +262,8 @@ function PitcherPitchTypeTable({ breakdowns }: { breakdowns: PitchTypeBreakdown[
               <td className="py-2 pr-3 text-right tabular-nums">{fmtPct(b.whiffPct)}</td>
               <td className="py-2 pr-3 text-right tabular-nums">{fmtPct(b.chasePct)}</td>
               <td className="py-2 pr-3 text-right tabular-nums">{fmtPct(b.cswPct)}</td>
+              <td className="py-2 pr-3 text-right tabular-nums">{fmtPct(b.hardHitPct)}</td>
+              <td className="py-2 pr-3 text-right tabular-nums">{fmt1(b.avgEv)}</td>
             </tr>
           ))}
         </tbody>

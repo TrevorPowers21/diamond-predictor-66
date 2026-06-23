@@ -222,6 +222,10 @@ export interface PitchTypeBreakdown {
   calledStrikePct: number | null;
   /** CSW% = (called strikes + whiffs) / pitches. Coach standard for "missed bats and stolen strikes." */
   cswPct: number | null;
+  /** Hard Hit% allowed: (95+ EV balls in play) / balls in play, this pitch type only. */
+  hardHitPct: number | null;
+  /** Avg EV against (all balls in play with EV tracking). */
+  avgEv: number | null;
 }
 
 // ───────────────────────────────────────────────────────────────────
@@ -733,5 +737,7 @@ export function derivePitchTypeBreakdowns(
     izWhiffPct: safeDiv(r.in_zone_whiffs, r.in_zone_swings),
     calledStrikePct: safeDiv(r.called_strikes, r.pitches),
     cswPct: safeDiv(r.called_strikes + r.whiffs, r.pitches),
+    hardHitPct: safeDiv(r.batted_hard_hit_allowed, r.batted_balls_allowed_in_play),
+    avgEv: safeDiv(r.ev_sum_allowed, r.batted_balls_allowed_with_ev),
   }));
 }

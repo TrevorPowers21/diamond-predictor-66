@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { PortalStatusBadge } from "@/components/PortalStatus";
 import PlayerPageTabs from "@/components/PlayerPageTabs";
 import { usePlayerSourceId } from "@/hooks/usePlayerSourceId";
+import { usePitcherMaster } from "@/savant/hooks/usePitcherMaster";
 import { PitcherPitchLog } from "@/savant/components/PitchLogSection";
 
 const SEASON = 2026;
@@ -21,6 +22,7 @@ const SEASON = 2026;
 export default function PitcherStatsPage() {
   const { id } = useParams<{ id: string }>();
   const { data: player, isLoading } = usePlayerSourceId(id);
+  const { data: pm } = usePitcherMaster(player?.sourcePlayerId ?? null, SEASON);
 
   return (
     <DashboardLayout>
@@ -35,6 +37,11 @@ export default function PitcherStatsPage() {
             {player?.position && (
               <Badge variant="secondary" className="text-xs uppercase tracking-wider">
                 {player.position}
+              </Badge>
+            )}
+            {pm?.Role && (
+              <Badge variant="outline" className="text-xs uppercase tracking-wider border-[#D4AF37]/40 text-[#D4AF37]">
+                {pm.Role}
               </Badge>
             )}
             {player?.schoolName && (
