@@ -27,7 +27,6 @@ export default function PitcherStatsPage() {
             player={player}
             kind="pitcher"
             playerName={`${player.firstName ?? ""} ${player.lastName ?? ""}`.trim()}
-            profileHref={`/dashboard/pitcher/${id}`}
           />
         )}
 

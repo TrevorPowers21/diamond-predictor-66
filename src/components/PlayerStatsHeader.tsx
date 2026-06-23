@@ -1,5 +1,4 @@
-import { Link } from "react-router-dom";
-import { Target, Star, ExternalLink } from "lucide-react";
+import { Target, Star } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
@@ -27,12 +26,10 @@ export function PlayerStatsHeader({
   player,
   kind,
   playerName,
-  profileHref,
 }: {
   player: PlayerSourceIdResult;
   kind: "hitter" | "pitcher";
   playerName: string;
-  profileHref: string;
 }) {
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
   const { isOnList: isOnHighFollow, addPlayer: addToHighFollow, removePlayer: removeFromHighFollow } =
@@ -94,7 +91,6 @@ export function PlayerStatsHeader({
           {kind === "hitter" ? (
             <>
               {player.position && <Badge variant="secondary">{player.position}</Badge>}
-              {twpBadge}
               {player.schoolName && <Badge variant="outline">{player.schoolName}</Badge>}
               {player.conference && (
                 <Badge variant="outline" className="text-muted-foreground">
@@ -104,6 +100,7 @@ export function PlayerStatsHeader({
               {portalBadge}
               {playerId && portalContact}
               {playerId && <MarketPayLogButton playerId={playerId} />}
+              {twpBadge}
             </>
           ) : (
             <>
@@ -114,10 +111,10 @@ export function PlayerStatsHeader({
                 </Badge>
               )}
               {handednessLabel && <Badge variant="secondary">{handednessLabel}</Badge>}
-              {twpBadge}
               {portalBadge}
               {playerId && portalContact}
               {playerId && <MarketPayLogButton playerId={playerId} />}
+              {twpBadge}
             </>
           )}
         </div>
@@ -149,12 +146,6 @@ export function PlayerStatsHeader({
           >
             <Star className="mr-2 h-3.5 w-3.5" />
             {isOnHighFollow(playerId) ? "On High Follow" : "Add to High Follow"}
-          </Button>
-          <Button variant="outline" size="sm" className="cursor-pointer" asChild>
-            <Link to={profileHref}>
-              <ExternalLink className="mr-2 h-3.5 w-3.5" />
-              View Full Report
-            </Link>
           </Button>
         </>
       )}
