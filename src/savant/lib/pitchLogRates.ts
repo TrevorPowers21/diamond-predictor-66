@@ -190,13 +190,22 @@ export function deriveHitterRates(row: PitchLogHitterTotalsRow | null): HitterRa
         : null,
     izWhiffPct: safeDiv(row.total_in_zone_whiffs, row.total_in_zone_swings),
     zonePct: safeDiv(row.total_in_zone, row.total_pitches),
-    groundBallPct: safeDiv(row.batted_ground_balls, row.batted_balls_in_play),
-    lineDrivePct: safeDiv(row.batted_line_drives, row.batted_balls_in_play),
-    flyBallPct: safeDiv(row.batted_fly_balls, row.batted_balls_in_play),
-    popUpPct: safeDiv(row.batted_pop_ups, row.batted_balls_in_play),
-    hardHitPct: safeDiv(row.batted_hard_hit, row.batted_balls_in_play),
-    barrelPct: safeDiv(row.batted_barrels, row.batted_balls_in_play),
-    la1030Pct: safeDiv(row.batted_la_10_to_30, row.batted_balls_in_play),
+    // All EV/LA-derived numerators (GB/LD/FB/PU/HH/Barrel/LA10-30/hard
+    // hit) have implicit "EV or LA NOT NULL" filters in the aggregation
+    // SQL — they only count tracked balls. Denominator must match:
+    // batted_balls_with_ev, NOT batted_balls_in_play. Using BIP divides
+    // tracked numerators by untracked-inclusive denominators and
+    // crashes the rates to ~33-50% of true value for partially-tracked
+    // hitters. HM rate columns (from TruMedia CSV) use tracked-only
+    // denominators by convention; matching that keeps Overview grades
+    // and Stats percentile bars on the same scale.
+    groundBallPct: safeDiv(row.batted_ground_balls, row.batted_balls_with_ev),
+    lineDrivePct: safeDiv(row.batted_line_drives, row.batted_balls_with_ev),
+    flyBallPct: safeDiv(row.batted_fly_balls, row.batted_balls_with_ev),
+    popUpPct: safeDiv(row.batted_pop_ups, row.batted_balls_with_ev),
+    hardHitPct: safeDiv(row.batted_hard_hit, row.batted_balls_with_ev),
+    barrelPct: safeDiv(row.batted_barrels, row.batted_balls_with_ev),
+    la1030Pct: safeDiv(row.batted_la_10_to_30, row.batted_balls_with_ev),
     avgEv: safeDiv(row.ev_sum, row.batted_balls_with_ev),
     totalPitches: row.total_pitches,
     pa: row.pa,
@@ -473,9 +482,9 @@ export const PITCHER_METRICS_BATTED_BALL: MetricDef<PitchLogPitcherTotalsRow>[] 
     invert: true,
     format: slash,
   },
-  { label: "Hard Hit%", derive: (r) => safeDiv(r.batted_hard_hit_allowed, r.batted_balls_allowed_in_play), invert: true, format: pct },
-  { label: "Barrel%", derive: (r) => safeDiv(r.batted_barrels_allowed, r.batted_balls_allowed_in_play), invert: true, format: pct },
-  { label: "GB%", derive: (r) => safeDiv(r.batted_ground_balls_allowed, r.batted_balls_allowed_in_play), format: pct },
+  { label: "Hard Hit%", derive: (r) => safeDiv(r.batted_hard_hit_allowed, r.batted_balls_allowed_with_ev), invert: true, format: pct },
+  { label: "Barrel%", derive: (r) => safeDiv(r.batted_barrels_allowed, r.batted_balls_allowed_with_ev), invert: true, format: pct },
+  { label: "GB%", derive: (r) => safeDiv(r.batted_ground_balls_allowed, r.batted_balls_allowed_with_ev), format: pct },
   { label: "HR%", derive: (r) => safeDiv(r.hits_hr_allowed, r.total_pa), invert: true, format: pct },
 ];
 
@@ -582,15 +591,18 @@ export const HITTER_METRICS_DISCIPLINE_BARS: MetricDef<PitchLogHitterTotalsRow>[
 ];
 
 // Full batted-ball metric list for the rate table (left column).
+// All EV/LA-derived numerators use batted_balls_with_ev as denominator
+// (matches HM's tracked-only convention). Using BIP would crash rates
+// to 33-50% of true value for partially-tracked hitters.
 export const HITTER_METRICS_CONTACT: MetricDef<PitchLogHitterTotalsRow>[] = [
   { label: "Avg EV", derive: (r) => safeDiv(r.ev_sum, r.batted_balls_with_ev), format: one },
   { label: "Max EV", derive: (r) => r.max_ev, format: one },
-  { label: "Hard Hit%", derive: (r) => safeDiv(r.batted_hard_hit, r.batted_balls_in_play), format: pct },
-  { label: "Barrel%", derive: (r) => safeDiv(r.batted_barrels, r.batted_balls_in_play), format: pct },
-  { label: "LA 10-30%", derive: (r) => safeDiv(r.batted_la_10_to_30, r.batted_balls_in_play), format: pct },
-  { label: "GB%", derive: (r) => safeDiv(r.batted_ground_balls, r.batted_balls_in_play), invert: true, format: pct },
-  { label: "LD%", derive: (r) => safeDiv(r.batted_line_drives, r.batted_balls_in_play), format: pct },
-  { label: "FB%", derive: (r) => safeDiv(r.batted_fly_balls, r.batted_balls_in_play), format: pct },
+  { label: "Hard Hit%", derive: (r) => safeDiv(r.batted_hard_hit, r.batted_balls_with_ev), format: pct },
+  { label: "Barrel%", derive: (r) => safeDiv(r.batted_barrels, r.batted_balls_with_ev), format: pct },
+  { label: "LA 10-30%", derive: (r) => safeDiv(r.batted_la_10_to_30, r.batted_balls_with_ev), format: pct },
+  { label: "GB%", derive: (r) => safeDiv(r.batted_ground_balls, r.batted_balls_with_ev), invert: true, format: pct },
+  { label: "LD%", derive: (r) => safeDiv(r.batted_line_drives, r.batted_balls_with_ev), format: pct },
+  { label: "FB%", derive: (r) => safeDiv(r.batted_fly_balls, r.batted_balls_with_ev), format: pct },
 ];
 
 // Percentile-bar subset — drops GB / LD / FB which read better as raw
@@ -598,9 +610,9 @@ export const HITTER_METRICS_CONTACT: MetricDef<PitchLogHitterTotalsRow>[] = [
 export const HITTER_METRICS_CONTACT_BARS: MetricDef<PitchLogHitterTotalsRow>[] = [
   { label: "Avg EV", derive: (r) => safeDiv(r.ev_sum, r.batted_balls_with_ev), format: one },
   { label: "Max EV", derive: (r) => r.max_ev, format: one },
-  { label: "Hard Hit%", derive: (r) => safeDiv(r.batted_hard_hit, r.batted_balls_in_play), format: pct },
-  { label: "Barrel%", derive: (r) => safeDiv(r.batted_barrels, r.batted_balls_in_play), format: pct },
-  { label: "LA 10-30%", derive: (r) => safeDiv(r.batted_la_10_to_30, r.batted_balls_in_play), format: pct },
+  { label: "Hard Hit%", derive: (r) => safeDiv(r.batted_hard_hit, r.batted_balls_with_ev), format: pct },
+  { label: "Barrel%", derive: (r) => safeDiv(r.batted_barrels, r.batted_balls_with_ev), format: pct },
+  { label: "LA 10-30%", derive: (r) => safeDiv(r.batted_la_10_to_30, r.batted_balls_with_ev), format: pct },
 ];
 
 void two; // (reserved for future metrics that need 2-decimal formatting)
@@ -690,7 +702,7 @@ export function deriveHitterPitchTypeBreakdowns(
       iso: avg !== null && slg !== null ? slg - avg : null,
       whiffPct: safeDiv(r.whiffs, r.swings),
       chasePct: safeDiv(r.chases, r.pitches - r.in_zone),
-      hardHitPct: safeDiv(r.batted_hard_hit, r.batted_balls_in_play),
+      hardHitPct: safeDiv(r.batted_hard_hit, r.batted_balls_with_ev),
       avgEv: safeDiv(r.ev_sum, r.batted_balls_with_ev),
     };
   });
@@ -717,7 +729,7 @@ export function derivePitchTypeBreakdowns(
     izWhiffPct: safeDiv(r.in_zone_whiffs, r.in_zone_swings),
     calledStrikePct: safeDiv(r.called_strikes, r.pitches),
     cswPct: safeDiv(r.called_strikes + r.whiffs, r.pitches),
-    hardHitPct: safeDiv(r.batted_hard_hit_allowed, r.batted_balls_allowed_in_play),
+    hardHitPct: safeDiv(r.batted_hard_hit_allowed, r.batted_balls_allowed_with_ev),
     avgEv: safeDiv(r.ev_sum_allowed, r.batted_balls_allowed_with_ev),
   }));
 }

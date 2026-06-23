@@ -74,20 +74,34 @@ export function usePitchLog2026HitterRates(sourcePlayerId: string | null) {
       const pct = (num: number | null, den: number | null) =>
         num != null && den != null && den > 0 ? (num / den) * 100 : null;
 
+      // CRITICAL: batted_barrels / batted_line_drives / batted_ground_balls
+      // / batted_pop_ups / batted_la_10_to_30 all have implicit "EV/LA
+      // NOT NULL" filters in the aggregation SQL — they only count
+      // tracked balls. So the denominator must be tracked-balls
+      // (batted_balls_with_ev), NOT batted_balls_in_play. Using BIP
+      // as the denominator divides tracked-only events by an
+      // untracked-inclusive denominator, crashing the rates to ~33-50%
+      // of true value for players with partial-game tracking. That
+      // misalignment matched the Overview-vs-Stats grade drift coaches
+      // were seeing — Stats percentiles use the right denominator,
+      // Overview scouting grades were on the wrong one until this fix.
+      const trackedBipFloor = 5; // min tracked balls before we trust the rate
+      const evDen = evN >= trackedBipFloor ? evN : null;
+
       return {
         contact: r.total_swings > 0
           ? ((r.total_swings - r.total_whiffs) / r.total_swings) * 100
           : null,
-        lineDrive: pct(r.batted_line_drives, bip),
-        avgExitVelo: evN > 0 ? r.ev_sum / evN : null,
-        popUp: pct(r.batted_pop_ups, bip),
+        lineDrive: pct(r.batted_line_drives, evDen),
+        avgExitVelo: evN >= trackedBipFloor ? r.ev_sum / evN : null,
+        popUp: pct(r.batted_pop_ups, evDen),
         bb: pct(r.bb, r.pa),
         chase: pct(r.total_chases, outOfZone),
-        barrel: pct(r.batted_barrels, bip),
+        barrel: pct(r.batted_barrels, evDen),
         ev90: null,  // requires per-pitcher quantile; fall back to HM
         pull: null,  // requires spray-angle ingest (deferred)
-        la10_30: pct(r.batted_la_10_to_30, bip),
-        gb: pct(r.batted_ground_balls, bip),
+        la10_30: pct(r.batted_la_10_to_30, evDen),
+        gb: pct(r.batted_ground_balls, evDen),
         hasData: (r.pa ?? 0) > 0 || bip > 0,
         pa: r.pa ?? null,
       };
