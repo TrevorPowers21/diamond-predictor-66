@@ -594,13 +594,56 @@ export default function PitcherProfile() {
 
       const seasonsToQuery = arsenalCombineSeasons.seasons;
 
-      // Primary: pull from pitcher_stuff_plus_inputs across all blended seasons
-      const { data: stuffRows, error } = await (supabase as any)
-        .from("pitcher_stuff_plus_inputs")
-        .select("season, source_player_id, hand, pitch_type, pitches, whiff_pct, stuff_plus")
-        .eq("source_player_id", sourceId)
-        .in("season", seasonsToQuery)
-        .order("pitches", { ascending: false });
+      // PITCH_LOG (Switch #1, 2026-06-23): for the 2026 portion of the
+      // arsenal, prefer pitch_log over PSP-I. PSP-I drops pitches that
+      // didn't survive the Stuff+ pipeline (Cody Howard's 4-Seam Fastball
+      // is missing entirely from PSP-I despite being 57.8% of his
+      // pitches), so usage% re-normalizes against a partial subset and
+      // misleads coaches. pitch_log counts every pitch. Prior seasons
+      // still come from PSP-I until/unless we backfill the pipeline.
+      const pitcherThrowsHand = (player as any)?.throws_hand
+        ?? (player as any)?.ThrowHand
+        ?? "R";
+      let plog2026Rows: any[] = [];
+      if (seasonsToQuery.includes(2026)) {
+        const { data: plog } = await (supabase as any)
+          .from("pitch_log_pitcher_by_pitch_type")
+          .select("pitch_type_reclassified, pitches, swings, whiffs, stuff_plus_sum, data_pitches")
+          .eq("pitcher_id", sourceId)
+          .eq("season", 2026)
+          .eq("dimension_key", "all");
+        plog2026Rows = (plog ?? [])
+          .filter((r: any) => r.pitch_type_reclassified && r.pitches > 0)
+          .map((r: any) => ({
+            season: 2026,
+            source_player_id: sourceId,
+            hand: pitcherThrowsHand,
+            pitch_type: r.pitch_type_reclassified,
+            pitches: r.pitches,
+            whiff_pct: r.swings > 0 ? (r.whiffs / r.swings) * 100 : null,
+            stuff_plus: r.data_pitches > 0 ? r.stuff_plus_sum / r.data_pitches : null,
+          }));
+      }
+
+      // Pull PSP-I for the seasons NOT covered by pitch_log (i.e., prior
+      // seasons in a blend). Skip 2026 PSP-I when pitch_log returned rows.
+      const pspSeasonsToQuery = plog2026Rows.length > 0
+        ? seasonsToQuery.filter((s) => s !== 2026)
+        : seasonsToQuery;
+
+      let pspRows: any[] = [];
+      if (pspSeasonsToQuery.length > 0) {
+        const { data } = await (supabase as any)
+          .from("pitcher_stuff_plus_inputs")
+          .select("season, source_player_id, hand, pitch_type, pitches, whiff_pct, stuff_plus")
+          .eq("source_player_id", sourceId)
+          .in("season", pspSeasonsToQuery)
+          .order("pitches", { ascending: false });
+        pspRows = data ?? [];
+      }
+
+      const stuffRows = [...plog2026Rows, ...pspRows];
+      const error = null;
 
       if (!error && stuffRows && stuffRows.length > 0) {
         // Aggregate per (pitch_type, hand): sum pitches, pitch-weighted stuff_plus and whiff_pct
