@@ -130,6 +130,9 @@ const PITCH_TYPE_LABELS: Record<string, string> = {
   "4S FB": "4-Seam FB",
   "FOUR-SEAM": "4-Seam FB",
   "FF": "4-Seam FB",
+  // pitch_log_pitcher_by_pitch_type uses these long labels
+  "4-Seam Fastball": "4-Seam FB",
+  "4-SEAM FASTBALL": "4-Seam FB",
   SI: "Sinker",
   SINKER: "Sinker",
   Sinker: "Sinker",
@@ -159,7 +162,22 @@ const PITCH_TYPE_LABELS: Record<string, string> = {
   FS: "Splitter",
 };
 
-const PITCH_DISPLAY_ORDER = ["4S", "4S FB", "SI", "SINKER", "Sinker", "CT", "CUTTER", "Cutter", "GYRO SLIDER", "Gyro Slider", "SL", "SLIDER", "Slider", "SWP", "SWEEPER", "Sweeper", "CB", "CURVEBALL", "Curveball", "CH", "CHANGE-UP", "Change-up", "SP", "SPLITTER", "Splitter"] as const;
+// Pitch arsenal sort order: fastball variants → cutter → slider family
+// (gyro / sweeper / slider) → curveball → off-speed (change-up / splitter).
+// Includes legacy short codes ("4S", "SI"...), legacy all-caps from
+// pre-2026 PSP-I, and the modern mixed-case pitch_log labels
+// ("4-Seam Fastball", "Sinker"...) so both display layers sort correctly.
+const PITCH_DISPLAY_ORDER = [
+  "4S", "4S FB", "4-SEAM FASTBALL", "4-Seam Fastball",
+  "SI", "SINKER", "Sinker",
+  "CT", "CUTTER", "Cutter",
+  "GYRO SLIDER", "Gyro Slider",
+  "SL", "SLIDER", "Slider",
+  "SWP", "SWEEPER", "Sweeper",
+  "CB", "CURVEBALL", "Curveball",
+  "CH", "CHANGE-UP", "Change-up", "Changeup", "CHANGEUP",
+  "SP", "SPLITTER", "Splitter",
+] as const;
 
 const PITCHER_PROFILE_STORAGE_OVERRIDE_KEY = "pitcher_profile_projection_overrides_v1";
 const getPitchingPvfForRole = (
@@ -1405,7 +1423,10 @@ export default function PitcherProfile() {
         const pitchCount = row.total_pitches == null ? null : Number(row.total_pitches);
         const usagePct = pitchCount != null && totalAll != null && totalAll > 0 ? (pitchCount / totalAll) * 100 : null;
         return {
-          pitchType: String(row.pitch_type || "").trim().toUpperCase(),
+          // Preserve case from the data source — pitch_log returns
+          // "4-Seam Fastball" etc. PSP-I returns mixed case. Display
+          // them as-is rather than shouting "4-SEAM FASTBALL" at coaches.
+          pitchType: String(row.pitch_type || "").trim(),
           hand: row.hand ?? null,
           stuffPlus: row.stuff_plus == null ? null : Number(row.stuff_plus),
           usagePct,
