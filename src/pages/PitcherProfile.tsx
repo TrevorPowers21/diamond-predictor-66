@@ -1952,13 +1952,14 @@ export default function PitcherProfile() {
                 <CardContent className="px-4 pb-4">
                   <div className="grid grid-cols-2 gap-3">
                     {(() => {
-                      // Switch #3 (2026-06-23): prefer pitch_log-derived
-                      // overall Stuff+ over PM's stored stuff_plus. PM's
-                      // value was hand-built with gaps; pitch_log version
-                      // is computed per-pitch from the full 2026 dataset.
-                      // PM is the fallback when pitch_log has no arsenal
-                      // data for the pitcher (rare).
-                      const sp = pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus;
+                      // Stuff+ on the Stuff+ Overview card uses the
+                      // direct pitch_log totals value (stuff_plus_sum /
+                      // stuff_plus_data_pitches) — exactly what Stats
+                      // shows — so the two surfaces report the same
+                      // number to coaches. Arsenal-derived weighted is
+                      // the fallback (close but not identical), then PM.
+                      const plOverall = pitchLog2026PitcherRatesQuery.data?.stuffPlus ?? null;
+                      const sp = plOverall ?? pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus;
                       const tierStyle = sp == null ? { border: "#162241", bg: "#0d1a30", text: "#8a94a6" }
                         : sp >= 103 ? { border: "hsl(142,71%,45%,0.3)", bg: "hsl(142,71%,45%,0.12)", text: "hsl(142,71%,35%)" }
                         : sp >= 98 ? { border: "hsl(200,80%,50%,0.3)", bg: "hsl(200,80%,50%,0.12)", text: "hsl(200,80%,35%)" }
@@ -1973,9 +1974,15 @@ export default function PitcherProfile() {
                       );
                     })()}
                     {(() => {
-                      // Pitch_log arsenal-derived Whiff% is primary
-                      // (per-pitch weighted), PM miss_pct is fallback.
-                      const wp = pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null;
+                      // Whiff% on the Stuff+ Overview card uses the
+                      // direct pitch_log overall (total_whiffs /
+                      // total_swings) — exactly what the Pitcher Stats
+                      // page shows — so the two surfaces report the
+                      // same number to coaches. Per-pitch weighted
+                      // arsenal Whiff% is a fallback (close but not
+                      // identical to direct overall), then PM stored.
+                      const plOverall = pitchLog2026PitcherRatesQuery.data?.whiff ?? null;
+                      const wp = plOverall ?? pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null;
                       const tierStyle = wp == null ? { border: "#162241", bg: "#0d1a30", text: "#8a94a6" }
                         : wp >= 27 ? { border: "hsl(142,71%,45%,0.3)", bg: "hsl(142,71%,45%,0.12)", text: "hsl(142,71%,35%)" }
                         : wp >= 21 ? { border: "hsl(200,80%,50%,0.3)", bg: "hsl(200,80%,50%,0.12)", text: "hsl(200,80%,35%)" }
