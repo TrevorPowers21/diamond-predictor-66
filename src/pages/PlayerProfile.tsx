@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useHitterSeedData } from "@/hooks/useHitterSeedData";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
+import { usePitchLog2026HitterRates } from "@/hooks/usePitchLog2026HitterRates";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
 import { MarketPayLogButton } from "@/components/MarketPayLogButton";
@@ -781,21 +782,51 @@ export default function PlayerProfile() {
   // Falls back to seedPowerDerived (2025) when no Hitter Master row exists for the selected season
   const activeSeasonRow = (hitterMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason) || null;
 
+  // 2026-only: pull rates from pitch_log and compute scouting grades
+  // client-side. pitch_log is the comprehensive 2026 source — every
+  // tracked pitch flows into it, vs. Hitter Master which carries
+  // stored rates from an earlier ingest. Live-derive only for the
+  // current 2026 season; prior seasons keep their stored grades.
+  const { data: pitchLogRates } = usePitchLog2026HitterRates(
+    effectiveSeason === 2026 ? (player?.source_player_id ?? null) : null,
+  );
+  const pitchLogPowerDerived = pitchLogRates?.hasData
+    ? computeHitterPowerRatings({
+        contact: pitchLogRates.contact,
+        lineDrive: pitchLogRates.lineDrive,
+        avgExitVelo: pitchLogRates.avgExitVelo,
+        popUp: pitchLogRates.popUp,
+        bb: pitchLogRates.bb,
+        chase: pitchLogRates.chase,
+        barrel: pitchLogRates.barrel,
+        // ev90 + pull aren't yet derivable from pitch_log — passing null
+        // produces null sub-scores; the priority chain below falls
+        // through to the stored HM ev90_score / pull_score instead.
+        ev90: pitchLogRates.ev90,
+        pull: pitchLogRates.pull,
+        la10_30: pitchLogRates.la10_30,
+        gb: pitchLogRates.gb,
+      } as any)
+    : null;
+
   const activeSeasonScoutingGrades = activeSeasonRow ? {
-    // Trust the stored Hitter Master.X_score (populated by computeAndStoreScores).
-    // No client-side derivation fallback — null displays as "—" instead of risking
-    // divergence from the canonical precomputed value.
-    barrelScore: activeSeasonRow.barrel_score ?? null,
-    avgEVScore: activeSeasonRow.avg_ev_score ?? null,
-    contactScore: activeSeasonRow.contact_score ?? null,
-    chaseScore: activeSeasonRow.chase_score ?? null,
-    bbScore: activeSeasonRow.bb_score ?? seedPowerDerived?.bbScore ?? null,
-    lineDriveScore: activeSeasonRow.line_drive_score ?? seedPowerDerived?.lineDriveScore ?? null,
-    popUpScore: activeSeasonRow.pop_up_score ?? seedPowerDerived?.popUpScore ?? null,
+    // Priority chain per metric: pitch_log-derived (2026 live) →
+    // stored Hitter Master.X_score (populated by computeAndStoreScores)
+    // → seedPowerDerived (2025 carry-forward).
+    barrelScore: pitchLogPowerDerived?.barrelScore ?? activeSeasonRow.barrel_score ?? null,
+    avgEVScore: pitchLogPowerDerived?.avgEVScore ?? activeSeasonRow.avg_ev_score ?? null,
+    contactScore: pitchLogPowerDerived?.contactScore ?? activeSeasonRow.contact_score ?? null,
+    chaseScore: pitchLogPowerDerived?.chaseScore ?? activeSeasonRow.chase_score ?? null,
+    bbScore: pitchLogPowerDerived?.bbScore ?? activeSeasonRow.bb_score ?? seedPowerDerived?.bbScore ?? null,
+    lineDriveScore: pitchLogPowerDerived?.lineDriveScore ?? activeSeasonRow.line_drive_score ?? seedPowerDerived?.lineDriveScore ?? null,
+    popUpScore: pitchLogPowerDerived?.popUpScore ?? activeSeasonRow.pop_up_score ?? seedPowerDerived?.popUpScore ?? null,
+    // ev90 + pull stay on stored HM — pitch_log can't derive them yet.
     ev90Score: activeSeasonRow.ev90_score ?? seedPowerDerived?.ev90Score ?? null,
     pullScore: activeSeasonRow.pull_score ?? seedPowerDerived?.pullScore ?? null,
-    laScore: activeSeasonRow.la_score ?? seedPowerDerived?.laScore ?? null,
-    gbScore: activeSeasonRow.gb_score ?? seedPowerDerived?.gbScore ?? null,
+    laScore: pitchLogPowerDerived?.laScore ?? activeSeasonRow.la_score ?? seedPowerDerived?.laScore ?? null,
+    gbScore: pitchLogPowerDerived?.gbScore ?? activeSeasonRow.gb_score ?? seedPowerDerived?.gbScore ?? null,
+    // Overall power-rating roll-ups stay on stored HM (these feed
+    // pWAR / market-value paths Trevor flagged as untouchable).
     baPlus: activeSeasonRow.ba_power_rating ?? seedPowerDerived?.baPlus ?? null,
     obpPlus: activeSeasonRow.obp_power_rating ?? seedPowerDerived?.obpPlus ?? null,
     isoPlus: activeSeasonRow.iso_power_rating ?? seedPowerDerived?.isoPlus ?? null,
