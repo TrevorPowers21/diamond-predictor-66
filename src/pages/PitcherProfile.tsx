@@ -26,6 +26,9 @@ import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
 import { AiScoutingReportBody } from "@/components/AiScoutingReport";
 import { useScoutingReport } from "@/hooks/useScoutingReport";
+import { usePitchLog2026PitcherRates } from "@/hooks/usePitchLog2026PitcherRates";
+import { usePitchLog2026PitcherPop } from "@/hooks/usePitchLog2026PitcherPop";
+import { percentileRank } from "@/savant/lib/percentile";
 import CoachNotes from "@/components/CoachNotes";
 import { ABSComparisonTable } from "@/components/ABSComparisonTable";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
@@ -423,6 +426,15 @@ export default function PitcherProfile() {
   });
 
   const { data: aiScoutingReport } = useScoutingReport(player?.id, "pitcher");
+
+  // pitch_log 2026 pitcher rates + league pop for percentile-rank scouting
+  // grades (aligns PitcherProfile with the Pitcher Stats page percentile bars).
+  // Internal `enabled` guards prevent fetching until the player query resolves;
+  // pop hook fetches once per session (30-min cache).
+  const pitchLog2026PitcherRatesQuery = usePitchLog2026PitcherRates(
+    (player as any)?.source_player_id ?? null,
+  );
+  const pitchLog2026PitcherPopQuery = usePitchLog2026PitcherPop();
 
   const { data: seasonStats = [] } = useQuery({
     queryKey: ["pitcher-profile-season-stats", id],
@@ -2259,10 +2271,31 @@ export default function PitcherProfile() {
               </CardHeader>
               <CardContent className="px-4 pb-4">
                 <div className="grid grid-cols-4 gap-2">
-                  <ScoutGrade value={internalPowerRatings?.scores?.stuff ?? null} fullLabel="Stuff+" />
-                  <ScoutGrade value={internalPowerRatings?.scores?.whiff ?? null} fullLabel="Whiff%" />
-                  <ScoutGrade value={internalPowerRatings?.scores?.bb ?? null} fullLabel="BB%" />
-                  <ScoutGrade value={internalPowerRatings?.scores?.barrel ?? null} fullLabel="Barrel%" />
+                  {(() => {
+                    // Switch #5 alignment 2026-06-23: replace normal-distribution
+                    // scoring (scoreFromMetric vs static p_ncaa_avg baselines)
+                    // with live percentile rank against the qualified pitch_log
+                    // 2026 pitcher population. Same methodology and same pop
+                    // the Pitcher Stats page percentile bars use, so a coach
+                    // sees the same percentile on Overview and Stats.
+                    // Fallback: stored / normal-dist when pop or rates not yet loaded.
+                    const plRates = pitchLog2026PitcherRatesQuery.data;
+                    const plPop = pitchLog2026PitcherPopQuery.data ?? [];
+                    const livePercentile = plRates?.hasData && plPop.length > 0 ? {
+                      stuff: percentileRank(plRates.stuffPlus, plPop.map(p => p.stuffPlus)),
+                      whiff: percentileRank(plRates.whiff, plPop.map(p => p.whiff)),
+                      bb: percentileRank(plRates.bb, plPop.map(p => p.bb), { invert: true }),
+                      barrel: percentileRank(plRates.barrel, plPop.map(p => p.barrel), { invert: true }),
+                    } : null;
+                    return (
+                      <>
+                        <ScoutGrade value={livePercentile?.stuff ?? internalPowerRatings?.scores?.stuff ?? null} fullLabel="Stuff+" />
+                        <ScoutGrade value={livePercentile?.whiff ?? internalPowerRatings?.scores?.whiff ?? null} fullLabel="Whiff%" />
+                        <ScoutGrade value={livePercentile?.bb ?? internalPowerRatings?.scores?.bb ?? null} fullLabel="BB%" />
+                        <ScoutGrade value={livePercentile?.barrel ?? internalPowerRatings?.scores?.barrel ?? null} fullLabel="Barrel%" />
+                      </>
+                    );
+                  })()}
                 </div>
               </CardContent>
             </Card>
