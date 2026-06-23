@@ -26,6 +26,9 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { usePitchingSeedData } from "@/hooks/usePitchingSeedData";
+import { usePitchLog2026HitterPop } from "@/hooks/usePitchLog2026HitterPop";
+import { usePitchLog2026PitcherPop } from "@/hooks/usePitchLog2026PitcherPop";
+import { percentileRank } from "@/savant/lib/percentile";
 import {
   DEFAULT_NIL_TIER_MULTIPLIERS,
   getProgramTierMultiplierByConference,
@@ -454,6 +457,7 @@ type PitchingSortKey =
 
 interface ReturnerPlayer {
   id: string;
+  source_player_id: string | null;
   prediction_id: string;
   first_name: string;
   last_name: string;
@@ -932,6 +936,60 @@ const RETURNING_VIEW_SNAPSHOT_KEY = "returning_players_view_snapshot_v1";
 export default function ReturningPlayers() {
   const pitchingPowerEq = usePitchingEquationWeights();
   const queryClient = useQueryClient();
+
+  // pitch_log 2026 populations (cached 30 min). Used to compute live
+  // percentile-rank scout chips for the Hitter / Pitcher Dashboard
+  // tables — matches the rank displayed on the Stats page percentile
+  // bars and PlayerProfile / PitcherProfile scouting cards.
+  const { data: hitterPop = [] } = usePitchLog2026HitterPop();
+  const { data: pitcherPop = [] } = usePitchLog2026PitcherPop();
+  const hitterPopBySourceId = useMemo(() => {
+    const map = new Map<string, (typeof hitterPop)[number]>();
+    for (const r of hitterPop) map.set(r.sourcePlayerId, r);
+    return map;
+  }, [hitterPop]);
+  const pitcherPopBySourceId = useMemo(() => {
+    const map = new Map<string, (typeof pitcherPop)[number]>();
+    for (const r of pitcherPop) map.set(r.sourcePlayerId, r);
+    return map;
+  }, [pitcherPop]);
+  // Pre-sorted population arrays per metric for fast rank lookup.
+  const hitterPopArrays = useMemo(() => ({
+    barrel: hitterPop.map(r => r.barrel),
+    avgEv: hitterPop.map(r => r.avgExitVelo),
+    contact: hitterPop.map(r => r.contact),
+    chase: hitterPop.map(r => r.chase),
+  }), [hitterPop]);
+  const pitcherPopArrays = useMemo(() => ({
+    stuff: pitcherPop.map(r => r.stuffPlus),
+    whiff: pitcherPop.map(r => r.whiff),
+    bb: pitcherPop.map(r => r.bb),
+    barrel: pitcherPop.map(r => r.barrel),
+  }), [pitcherPop]);
+  /** Returns the 4 Hitter Dashboard scout chip values as percentile ranks for a given source_player_id. Null when player has no pitch_log row. */
+  const livePitchLogHitterScores = useCallback((sourcePlayerId: string | null | undefined) => {
+    if (!sourcePlayerId || hitterPop.length === 0) return null;
+    const row = hitterPopBySourceId.get(String(sourcePlayerId));
+    if (!row) return null;
+    return {
+      barrel: percentileRank(row.barrel, hitterPopArrays.barrel),
+      ev: percentileRank(row.avgExitVelo, hitterPopArrays.avgEv),
+      contact: percentileRank(row.contact, hitterPopArrays.contact),
+      chase: percentileRank(row.chase, hitterPopArrays.chase, { invert: true }),
+    };
+  }, [hitterPop, hitterPopBySourceId, hitterPopArrays]);
+  /** Returns the 4 Pitcher Dashboard scout chip values as percentile ranks for a given source_player_id. */
+  const livePitchLogPitcherScores = useCallback((sourcePlayerId: string | null | undefined) => {
+    if (!sourcePlayerId || pitcherPop.length === 0) return null;
+    const row = pitcherPopBySourceId.get(String(sourcePlayerId));
+    if (!row) return null;
+    return {
+      stuff: percentileRank(row.stuffPlus, pitcherPopArrays.stuff),
+      whiff: percentileRank(row.whiff, pitcherPopArrays.whiff),
+      bb: percentileRank(row.bb, pitcherPopArrays.bb, { invert: true }),
+      barrel: percentileRank(row.barrel, pitcherPopArrays.barrel, { invert: true }),
+    };
+  }, [pitcherPop, pitcherPopBySourceId, pitcherPopArrays]);
   const location = useLocation();
   const applyPredictionPatchToCache = useCallback((predictionId: string, patch: Partial<ReturnerPlayer["prediction"]>) => {
     queryClient.setQueryData(
@@ -1519,6 +1577,7 @@ export default function ReturningPlayers() {
           status: row.status,
           pa: player.pa ?? null,
           nil_value: (pickHitterMarketValue(row, !!(player as any).is_twp) ?? nilByPlayer.get(player.id)) ?? null,
+          source_player_id: player.source_player_id ?? null,
           prediction: {
             from_avg: row.from_avg,
             from_obp: row.from_obp,
@@ -1573,7 +1632,7 @@ export default function ReturningPlayers() {
         const to = from + pageSize - 1;
         let fastQ = supabase
           .from("player_predictions")
-          .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip, division)", { count: "exact" })
+          .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip, division, source_player_id)", { count: "exact" })
           .eq("season", PROJECTION_SEASON)
           .in("model_type", ["returner", "transfer"])
           .in("status", ["active", "departed"]);
@@ -1666,7 +1725,7 @@ export default function ReturningPlayers() {
         while (true) {
           let q = supabase
             .from("player_predictions")
-            .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip, division)")
+            .select("*, players!inner(id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip, division, source_player_id)")
             .eq("season", PROJECTION_SEASON)
             .in("model_type", ["returner", "transfer"])
             .in("variant", ["regular", "precomputed"])
@@ -1781,7 +1840,7 @@ export default function ReturningPlayers() {
             // pass even with low PA.
             const { data, error } = await supabase
               .from("players")
-              .select("id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip, division")
+              .select("id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip, division, source_player_id")
               .eq("portal_status", "COMMITTED")
               .or("and(position.not.in.(SP,RP,CL,P,LHP,RHP),pa.gte.75),is_twp.eq.true")
               .not("division", "eq", "NJCAA_D1")
@@ -1868,7 +1927,7 @@ export default function ReturningPlayers() {
       const buildBaseQuery = () => {
         let q = supabase
           .from("players")
-          .select("id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip", { count: "exact" } as any)
+          .select("id, first_name, last_name, team, conference, position, is_twp, class_year, bats_hand, transfer_portal, portal_status, pa, ip, source_player_id", { count: "exact" } as any)
           .order("last_name", { ascending: true })
           .order("first_name", { ascending: true });
         if (expandedHitterPositions.twpOnly) {
@@ -3200,10 +3259,26 @@ export default function ReturningPlayers() {
                             </TableCell>
                             <TableCell className="text-center p-1">
                               <div className="flex gap-0.5 justify-center">
-                                {pred.barrel_score != null && <ScoutMiniBox label="Brl" value={pred.barrel_score} />}
-                                {pred.ev_score != null && <ScoutMiniBox label="EV" value={pred.ev_score} />}
-                                {pred.contact_score != null && <ScoutMiniBox label="Con" value={pred.contact_score} />}
-                                {pred.chase_score != null && <ScoutMiniBox label="Chs" value={pred.chase_score} />}
+                                {(() => {
+                                  // 2026-06-23: prefer live pitch_log percentile
+                                  // ranks (same source as Stats page bars +
+                                  // PlayerProfile scout card). Falls back to
+                                  // stored prediction scores when pop or
+                                  // pitch_log row is not yet loaded / missing.
+                                  const live = livePitchLogHitterScores(p.source_player_id);
+                                  const brl = live?.barrel ?? pred.barrel_score;
+                                  const ev = live?.ev ?? pred.ev_score;
+                                  const con = live?.contact ?? pred.contact_score;
+                                  const chs = live?.chase ?? pred.chase_score;
+                                  return (
+                                    <>
+                                      {brl != null && <ScoutMiniBox label="Brl" value={brl} />}
+                                      {ev != null && <ScoutMiniBox label="EV" value={ev} />}
+                                      {con != null && <ScoutMiniBox label="Con" value={con} />}
+                                      {chs != null && <ScoutMiniBox label="Chs" value={chs} />}
+                                    </>
+                                  );
+                                })()}
                               </div>
                             </TableCell>
                             <TableCell className="text-center p-1">
@@ -3529,16 +3604,24 @@ export default function ReturningPlayers() {
                             <TableCell className="text-right text-sm tabular-nums">{r.p_war == null ? "—" : r.p_war.toFixed(2)}</TableCell>
                             <TableCell className="text-right text-sm tabular-nums">{moneyFormat(r.market_value)}</TableCell>
                             <TableCell className="text-center">
-                              {(r.stuff_score != null || r.whiff_score != null || r.bb_score != null || r.barrel_score != null) ? (
-                                <div className="flex gap-1 justify-center flex-wrap">
-                                  {r.stuff_score != null && <ScoutMiniBox label="Stf+" value={r.stuff_score} />}
-                                  {r.whiff_score != null && <ScoutMiniBox label="Whf" value={r.whiff_score} />}
-                                  {r.bb_score != null && <ScoutMiniBox label="BB%" value={r.bb_score} />}
-                                  {r.barrel_score != null && <ScoutMiniBox label="Brl" value={r.barrel_score} />}
-                                </div>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">—</span>
-                              )}
+                              {(() => {
+                                const live = livePitchLogPitcherScores((r as any).source_player_id);
+                                const stf = live?.stuff ?? r.stuff_score;
+                                const whf = live?.whiff ?? r.whiff_score;
+                                const bb = live?.bb ?? r.bb_score;
+                                const brl = live?.barrel ?? r.barrel_score;
+                                const anyValue = stf != null || whf != null || bb != null || brl != null;
+                                return anyValue ? (
+                                  <div className="flex gap-1 justify-center flex-wrap">
+                                    {stf != null && <ScoutMiniBox label="Stf+" value={stf} />}
+                                    {whf != null && <ScoutMiniBox label="Whf" value={whf} />}
+                                    {bb != null && <ScoutMiniBox label="BB%" value={bb} />}
+                                    {brl != null && <ScoutMiniBox label="Brl" value={brl} />}
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                );
+                              })()}
                             </TableCell>
                           </TableRow>
                         ))}

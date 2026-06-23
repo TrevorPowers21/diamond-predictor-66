@@ -17,6 +17,7 @@ import { supabase } from "@/integrations/supabase/client";
  * surfaces consistent.
  */
 export interface PitchLogHitterPopRow {
+  sourcePlayerId: string;
   contact: number | null;
   lineDrive: number | null;
   avgExitVelo: number | null;
@@ -42,7 +43,7 @@ export function usePitchLog2026HitterPop() {
       const out: PitchLogHitterPopRow[] = [];
       let from = 0;
       const cols =
-        "pa, total_pitches, total_swings, total_whiffs, total_in_zone, total_out_of_zone, total_chases, bb, batted_balls_in_play, batted_balls_with_ev, batted_barrels, batted_hard_hit, ev_sum, batted_ground_balls, batted_line_drives, batted_pop_ups, batted_la_10_to_30";
+        "batter_id, pa, total_pitches, total_swings, total_whiffs, total_in_zone, total_out_of_zone, total_chases, bb, batted_balls_in_play, batted_balls_with_ev, batted_barrels, batted_hard_hit, ev_sum, batted_ground_balls, batted_line_drives, batted_pop_ups, batted_la_10_to_30";
 
       while (true) {
         const { data, error } = await (supabase as any)
@@ -62,6 +63,7 @@ export function usePitchLog2026HitterPop() {
             n != null && d != null && d > 0 ? (n / d) * 100 : null;
 
           out.push({
+            sourcePlayerId: String(r.batter_id),
             contact: r.total_swings > 0
               ? ((r.total_swings - r.total_whiffs) / r.total_swings) * 100
               : null,

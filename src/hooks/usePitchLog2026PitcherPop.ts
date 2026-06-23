@@ -13,6 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
  * pitcher pop is ~5,400.
  */
 export interface PitchLogPitcherPopRow {
+  sourcePlayerId: string;
   stuffPlus: number | null;
   whiff: number | null;
   bb: number | null;
@@ -37,7 +38,7 @@ export function usePitchLog2026PitcherPop() {
       const out: PitchLogPitcherPopRow[] = [];
       let from = 0;
       const cols =
-        "total_pitches, total_swings, total_whiffs, total_in_zone, total_in_zone_swings, total_in_zone_whiffs, total_out_of_zone, total_chases, total_pa, total_bb, stuff_plus_sum, stuff_plus_data_pitches, batted_balls_allowed_in_play, batted_balls_allowed_with_ev, batted_barrels_allowed, batted_hard_hit_allowed, batted_ground_balls_allowed, ev_sum_allowed";
+        "pitcher_id, total_pitches, total_swings, total_whiffs, total_in_zone, total_in_zone_swings, total_in_zone_whiffs, total_out_of_zone, total_chases, total_pa, total_bb, stuff_plus_sum, stuff_plus_data_pitches, batted_balls_allowed_in_play, batted_balls_allowed_with_ev, batted_barrels_allowed, batted_hard_hit_allowed, batted_ground_balls_allowed, ev_sum_allowed";
 
       while (true) {
         const { data, error } = await (supabase as any)
@@ -56,6 +57,7 @@ export function usePitchLog2026PitcherPop() {
             n != null && d != null && d > 0 ? (n / d) * 100 : null;
 
           out.push({
+            sourcePlayerId: String(r.pitcher_id),
             stuffPlus: r.stuff_plus_data_pitches > 0
               ? r.stuff_plus_sum / r.stuff_plus_data_pitches
               : null,
