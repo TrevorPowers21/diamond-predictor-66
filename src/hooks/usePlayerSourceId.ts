@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
  *   - undefined while loading
  */
 export interface PlayerSourceIdResult {
+  id: string | null;
   sourcePlayerId: string | null;
   firstName: string | null;
   lastName: string | null;
@@ -20,6 +21,14 @@ export interface PlayerSourceIdResult {
   schoolName: string | null;
   conference: string | null;
   portalStatus: string | null;
+  portalEntryDate: string | null;
+  commitSchool: string | null;
+  commitDate: string | null;
+  athleticAid: string | null;
+  contactCell: string | null;
+  contactEmail: string | null;
+  gpa: number | null;
+  vaRosterLink: string | null;
   isPitcher: boolean;
   isTwp: boolean;
 }
@@ -36,7 +45,7 @@ export function usePlayerSourceId(id: string | undefined) {
       const { data, error } = await supabase
         .from("players")
         .select(
-          "source_player_id, first_name, last_name, position, team_id, is_twp, portal_status, team, conference",
+          "id, source_player_id, first_name, last_name, position, team_id, is_twp, portal_status, portal_entry_date, commit_school, commit_date, athletic_aid, contact_cell, contact_email, gpa, va_roster_link, team, conference",
         )
         .eq(lookupColumn, id)
         .maybeSingle();
@@ -76,17 +85,27 @@ export function usePlayerSourceId(id: string | undefined) {
         if (mRow?.Conference) conference = mRow.Conference;
       }
 
+      const d = data as any;
       return {
+        id: d.id ?? null,
         sourcePlayerId: sourceId,
-        firstName: (data as any).first_name ?? null,
-        lastName: (data as any).last_name ?? null,
+        firstName: d.first_name ?? null,
+        lastName: d.last_name ?? null,
         position: pos,
         teamId,
         schoolName,
         conference,
-        portalStatus: (data as any).portal_status ?? null,
+        portalStatus: d.portal_status ?? null,
+        portalEntryDate: d.portal_entry_date ?? null,
+        commitSchool: d.commit_school ?? null,
+        commitDate: d.commit_date ?? null,
+        athleticAid: d.athletic_aid ?? null,
+        contactCell: d.contact_cell ?? null,
+        contactEmail: d.contact_email ?? null,
+        gpa: d.gpa ?? null,
+        vaRosterLink: d.va_roster_link ?? null,
         isPitcher,
-        isTwp: !!(data as any).is_twp,
+        isTwp: !!d.is_twp,
       };
     },
     staleTime: 30 * 60 * 1000,

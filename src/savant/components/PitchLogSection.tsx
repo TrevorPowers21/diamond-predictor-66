@@ -22,7 +22,9 @@ import {
   derivePitchTypeBreakdowns,
   HITTER_DIMENSIONS,
   HITTER_METRICS_CONTACT,
+  HITTER_METRICS_CONTACT_BARS,
   HITTER_METRICS_DISCIPLINE,
+  HITTER_METRICS_DISCIPLINE_BARS,
   HITTER_METRICS_SLASH,
   HITTER_QUALIFIED_PA,
   PITCHER_DIMENSIONS,
@@ -683,13 +685,13 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
         <>
           <Panel title="Batted Ball Data">
             <BarGroup
-              metrics={[...HITTER_METRICS_SLASH, ...HITTER_METRICS_CONTACT]}
+              metrics={[...HITTER_METRICS_SLASH, ...HITTER_METRICS_CONTACT_BARS]}
               playerRow={row}
               qualifiedPop={qualifiedPop}
             />
           </Panel>
           <Panel title="Plate Discipline">
-            <BarGroup metrics={HITTER_METRICS_DISCIPLINE} playerRow={row} qualifiedPop={qualifiedPop} />
+            <BarGroup metrics={HITTER_METRICS_DISCIPLINE_BARS} playerRow={row} qualifiedPop={qualifiedPop} />
           </Panel>
         </>
       }

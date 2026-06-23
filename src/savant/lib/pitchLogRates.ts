@@ -565,6 +565,23 @@ export const HITTER_METRICS_DISCIPLINE: MetricDef<PitchLogHitterTotalsRow>[] = [
   { label: "HR%", derive: (r) => safeDiv(r.hits_hr, r.pa), format: pct },
 ];
 
+// Percentile-bar subset — drops Zone% (more about pitch selection seen
+// than hitter skill; doesn't read cleanly on a bar).
+export const HITTER_METRICS_DISCIPLINE_BARS: MetricDef<PitchLogHitterTotalsRow>[] = [
+  {
+    label: "Contact%",
+    derive: (r) =>
+      r.total_swings > 0 ? (r.total_swings - r.total_whiffs) / r.total_swings : null,
+    format: pct,
+  },
+  { label: "Chase%", derive: (r) => safeDiv(r.total_chases, r.total_pitches - r.total_in_zone), invert: true, format: pct },
+  { label: "IZ Whiff%", derive: (r) => safeDiv(r.total_in_zone_whiffs, r.total_in_zone_swings), invert: true, format: pct },
+  { label: "K%", derive: (r) => safeDiv(r.k, r.pa), invert: true, format: pct },
+  { label: "BB%", derive: (r) => safeDiv(r.bb, r.pa), format: pct },
+  { label: "HR%", derive: (r) => safeDiv(r.hits_hr, r.pa), format: pct },
+];
+
+// Full batted-ball metric list for the rate table (left column).
 export const HITTER_METRICS_CONTACT: MetricDef<PitchLogHitterTotalsRow>[] = [
   { label: "Avg EV", derive: (r) => safeDiv(r.ev_sum, r.batted_balls_with_ev), format: one },
   { label: "Max EV", derive: (r) => r.max_ev, format: one },
@@ -574,6 +591,16 @@ export const HITTER_METRICS_CONTACT: MetricDef<PitchLogHitterTotalsRow>[] = [
   { label: "GB%", derive: (r) => safeDiv(r.batted_ground_balls, r.batted_balls_in_play), invert: true, format: pct },
   { label: "LD%", derive: (r) => safeDiv(r.batted_line_drives, r.batted_balls_in_play), format: pct },
   { label: "FB%", derive: (r) => safeDiv(r.batted_fly_balls, r.batted_balls_in_play), format: pct },
+];
+
+// Percentile-bar subset — drops GB / LD / FB which read better as raw
+// values in the table than as bars (no clear "better is higher").
+export const HITTER_METRICS_CONTACT_BARS: MetricDef<PitchLogHitterTotalsRow>[] = [
+  { label: "Avg EV", derive: (r) => safeDiv(r.ev_sum, r.batted_balls_with_ev), format: one },
+  { label: "Max EV", derive: (r) => r.max_ev, format: one },
+  { label: "Hard Hit%", derive: (r) => safeDiv(r.batted_hard_hit, r.batted_balls_in_play), format: pct },
+  { label: "Barrel%", derive: (r) => safeDiv(r.batted_barrels, r.batted_balls_in_play), format: pct },
+  { label: "LA 10-30%", derive: (r) => safeDiv(r.batted_la_10_to_30, r.batted_balls_in_play), format: pct },
 ];
 
 void two; // (reserved for future metrics that need 2-decimal formatting)

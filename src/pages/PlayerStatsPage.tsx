@@ -1,7 +1,9 @@
 import { useParams } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
-import { PortalStatusBadge } from "@/components/PortalStatus";
+import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
+import { MarketPayLogButton } from "@/components/MarketPayLogButton";
+import CoachNotes from "@/components/CoachNotes";
 import PlayerPageTabs from "@/components/PlayerPageTabs";
 import { usePlayerSourceId } from "@/hooks/usePlayerSourceId";
 import { HitterPitchLog } from "@/savant/components/PitchLogSection";
@@ -51,10 +53,34 @@ export default function PlayerStatsPage() {
             ) : (
               player && (
                 <PortalStatusBadge
-                  player={{ portal_status: player.portalStatus }}
+                  player={{
+                    portal_status: player.portalStatus,
+                    portal_entry_date: player.portalEntryDate,
+                    commit_school: player.commitSchool,
+                    commit_date: player.commitDate,
+                  }}
                   isAdmin={false}
                 />
               )
+            )}
+            {player && (
+              <PortalContactButton
+                player={{
+                  portal_status: player.portalStatus,
+                  athletic_aid: player.athleticAid,
+                  contact_cell: player.contactCell,
+                  contact_email: player.contactEmail,
+                  gpa: player.gpa,
+                  va_roster_link: player.vaRosterLink,
+                }}
+              />
+            )}
+            {player?.id && <MarketPayLogButton playerId={player.id} />}
+            {player?.id && (
+              <CoachNotes
+                playerId={player.id}
+                playerName={`${player.firstName ?? ""} ${player.lastName ?? ""}`.trim()}
+              />
             )}
           </div>
         </div>
