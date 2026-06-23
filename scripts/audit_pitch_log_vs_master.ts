@@ -106,7 +106,7 @@ async function auditPitcher() {
     k9: estIp > 0 ? (plt.total_k * 9) / estIp : null,
     bb9: estIp > 0 ? (plt.total_bb * 9) / estIp : null,
     whiff: safeDiv(plt.total_whiffs, plt.total_swings),
-    chase: safeDiv(plt.total_chases, plt.total_pitches - plt.total_in_zone),
+    chase: safeDiv(plt.total_chases, plt.total_out_of_zone),
     iz_whiff: safeDiv(plt.total_in_zone_whiffs, plt.total_in_zone_swings),
     stuff: safeDiv(plt.stuff_plus_sum, plt.stuff_plus_data_pitches),
     hard_hit: safeDiv(plt.batted_hard_hit_allowed ?? 0, plt.batted_balls_allowed_in_play ?? 0),
@@ -291,7 +291,7 @@ async function main() {
       plt.total_swings > 0
         ? (plt.total_swings - plt.total_whiffs) / plt.total_swings
         : null,
-    chase: safeDiv(plt.total_chases, plt.total_pitches - plt.total_in_zone),
+    chase: safeDiv(plt.total_chases, plt.total_out_of_zone),
     barrel: safeDiv(plt.batted_barrels, plt.batted_balls_in_play),
     hard_hit: safeDiv(plt.batted_hard_hit, plt.batted_balls_in_play),
     avg_ev: safeDiv(plt.ev_sum ?? 0, plt.batted_balls_with_ev),

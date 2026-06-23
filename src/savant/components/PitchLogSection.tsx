@@ -332,6 +332,12 @@ interface RateTableProps<TRow> {
   metrics: readonly MetricDef<TRow>[];
   playerRow: TRow;
   qualifiedPop: TRow[];
+  /**
+   * Per-row sample-size weight for computing the league reference as a
+   * weighted mean instead of median. Typically PA (hitter) or
+   * total_pitches (pitcher). When omitted, falls back to the median.
+   */
+  weightOf?: (row: TRow) => number | null;
   /** Extra rows shown below NCAA Avg — typically prior-season rows from Hitter/Pitching Master. */
   historicalRows?: HistoricalRowSpec[];
 }
@@ -343,14 +349,47 @@ function median(values: number[]): number | null {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
-function RateTable<TRow>({ metrics, playerRow, qualifiedPop, historicalRows }: RateTableProps<TRow>) {
-  // Pre-compute player + NCAA-median values for each metric column.
+/**
+ * Weighted league mean: Σ(value × weight) / Σ(weight). Used for the
+ * "NCAA average" reference on percentile bars so the label matches how
+ * coaches actually think of league AVG (hits / total AB, not the median
+ * player's AVG). Median was off by 8-10 pts on right-skewed distributions
+ * like xBA (.275 median vs .283 weighted = league actual AVG).
+ *
+ * Returns null when the weighted denominator is 0 (rare — would mean
+ * no player has any sample for the weight metric).
+ */
+function weightedMean(pairs: Array<{ value: number; weight: number }>): number | null {
+  if (pairs.length === 0) return null;
+  let sumValue = 0, sumWeight = 0;
+  for (const p of pairs) {
+    if (p.weight > 0 && Number.isFinite(p.value)) {
+      sumValue += p.value * p.weight;
+      sumWeight += p.weight;
+    }
+  }
+  return sumWeight > 0 ? sumValue / sumWeight : null;
+}
+
+function RateTable<TRow>({ metrics, playerRow, qualifiedPop, weightOf, historicalRows }: RateTableProps<TRow>) {
+  // Pre-compute player + NCAA reference values for each metric column.
+  // When weightOf is provided, use weighted mean (matches "league AVG"
+  // convention: hits / total AB across all players). Otherwise median.
   const cols = metrics.map((m) => {
     const value = m.derive(playerRow);
-    const popValues = qualifiedPop
-      .map((r) => m.derive(r))
-      .filter((v): v is number => v != null && !Number.isNaN(v));
-    const ncaa = median(popValues);
+    const ncaa = weightOf
+      ? weightedMean(
+          qualifiedPop
+            .map((r) => ({ value: m.derive(r), weight: weightOf(r) }))
+            .filter((p): p is { value: number; weight: number } =>
+              p.value != null && !Number.isNaN(p.value) && p.weight != null && p.weight > 0,
+            ),
+        )
+      : median(
+          qualifiedPop
+            .map((r) => m.derive(r))
+            .filter((v): v is number => v != null && !Number.isNaN(v)),
+        );
     return { label: m.label, value, ncaa, format: m.format };
   });
 
@@ -507,20 +546,64 @@ function PageShell({
 }
 
 // Reusable bordered panel used for each labeled section.
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({
+  title,
+  children,
+  headerBadge,
+}: {
+  title: string;
+  children: React.ReactNode;
+  headerBadge?: React.ReactNode;
+}) {
   return (
     <section
       className="border px-5 py-5"
       style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
     >
-      <div className="mb-4 flex items-center gap-2">
-        <span className="h-3 w-0.5" style={{ backgroundColor: GOLD }} />
-        <h3 className="font-[Oswald] text-[14px] font-bold uppercase tracking-[0.18em] text-white">
-          {title}
-        </h3>
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="h-3 w-0.5" style={{ backgroundColor: GOLD }} />
+          <h3 className="font-[Oswald] text-[14px] font-bold uppercase tracking-[0.18em] text-white">
+            {title}
+          </h3>
+        </div>
+        {headerBadge}
       </div>
       {children}
     </section>
+  );
+}
+
+/**
+ * Tracking-reliability badge for the Batted Ball Data panel. Shows the
+ * % of BIP that have EV/LA tracking. xBA / xSLG / xwOBA fall back to
+ * actual outcomes for untracked BIP — so coaches need to know when a
+ * player's xStats are mostly fallback. Thresholds: ≥80% green ("FULL"),
+ * 50-80% amber ("PARTIAL"), <50% red ("LOW").
+ */
+function TrackingReliabilityBadge({
+  trackedBip,
+  totalBip,
+}: {
+  trackedBip: number;
+  totalBip: number;
+}) {
+  if (totalBip === 0) return null;
+  const pct = (trackedBip / totalBip) * 100;
+  const tier =
+    pct >= 80
+      ? { label: "FULL TRACKING", color: "rgb(34 197 94)", bg: "rgba(34,197,94,0.12)", border: "rgba(34,197,94,0.35)" }
+      : pct >= 50
+        ? { label: "PARTIAL TRACKING", color: "rgb(234 179 8)", bg: "rgba(234,179,8,0.12)", border: "rgba(234,179,8,0.35)" }
+        : { label: "LOW TRACKING", color: "rgb(239 68 68)", bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.35)" };
+  return (
+    <span
+      className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-sm border"
+      style={{ color: tier.color, backgroundColor: tier.bg, borderColor: tier.border }}
+      title={`${trackedBip} of ${totalBip} batted balls in play have EV/LA tracking (${pct.toFixed(0)}%). xBA / xSLG / xwOBA fall back to actual outcomes for untracked balls.`}
+    >
+      {tier.label} · {pct.toFixed(0)}%
+    </span>
   );
 }
 
@@ -578,13 +661,23 @@ export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
               metrics={PITCHER_METRICS_DISCIPLINE}
               playerRow={totalsRow}
               qualifiedPop={qualifiedPop}
+              weightOf={(r) => r.total_pitches}
             />
           </Panel>
-          <Panel title="Batted Ball Metrics">
+          <Panel
+            title="Batted Ball Metrics"
+            headerBadge={
+              <TrackingReliabilityBadge
+                trackedBip={totalsRow.batted_balls_allowed_with_ev ?? 0}
+                totalBip={totalsRow.batted_balls_allowed_in_play ?? 0}
+              />
+            }
+          >
             <RateTable
               metrics={[...PITCHER_METRICS_SLASH_AGAINST, ...PITCHER_METRICS_BATTED_BALL]}
               playerRow={totalsRow}
               qualifiedPop={qualifiedPop}
+              weightOf={(r) => r.total_ab}
             />
           </Panel>
           <Panel title="Per-Pitch Breakdown">
@@ -662,11 +755,20 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
       topStats={<HitterStatsLine row={row} />}
       left={
         <>
-          <Panel title="Batted Ball Data">
+          <Panel
+            title="Batted Ball Data"
+            headerBadge={
+              <TrackingReliabilityBadge
+                trackedBip={row.batted_balls_with_ev ?? 0}
+                totalBip={row.batted_balls_in_play ?? 0}
+              />
+            }
+          >
             <RateTable
               metrics={[...HITTER_METRICS_SLASH, ...HITTER_METRICS_CONTACT]}
               playerRow={row}
               qualifiedPop={qualifiedPop}
+              weightOf={(r) => r.ab + (r.sac ?? 0)}
             />
           </Panel>
           <Panel title="Plate Discipline">
@@ -674,6 +776,7 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
               metrics={HITTER_METRICS_DISCIPLINE}
               playerRow={row}
               qualifiedPop={qualifiedPop}
+              weightOf={(r) => r.pa}
             />
           </Panel>
           <Panel title="vs Pitch Type">
@@ -683,7 +786,15 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
       }
       right={
         <>
-          <Panel title="Batted Ball Data">
+          <Panel
+            title="Batted Ball Data"
+            headerBadge={
+              <TrackingReliabilityBadge
+                trackedBip={row.batted_balls_with_ev ?? 0}
+                totalBip={row.batted_balls_in_play ?? 0}
+              />
+            }
+          >
             <BarGroup
               metrics={[...HITTER_METRICS_SLASH, ...HITTER_METRICS_CONTACT_BARS]}
               playerRow={row}

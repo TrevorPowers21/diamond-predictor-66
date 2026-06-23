@@ -88,7 +88,7 @@ interface KeyMetric {
 async function auditPitcherDims() {
   console.log("=== PITCHER side, by dimension ===\n");
   const cols =
-    "pitcher_id, total_pitches, total_swings, total_in_zone, total_in_zone_swings, total_in_zone_whiffs, total_chases, total_whiffs, total_called_strikes, total_pa, total_k, total_bb, total_ab, x_hits_sum_allowed, x_bases_sum_allowed, stuff_plus_sum, stuff_plus_data_pitches, fb_velo_sum, fb_velo_pitches";
+    "pitcher_id, total_pitches, total_swings, total_in_zone, total_in_zone_swings, total_in_zone_whiffs, total_out_of_zone, total_chases, total_whiffs, total_called_strikes, total_pa, total_k, total_bb, total_ab, x_hits_sum_allowed, x_bases_sum_allowed, stuff_plus_sum, stuff_plus_data_pitches, fb_velo_sum, fb_velo_pitches";
 
   const keyMetrics: KeyMetric[] = [
     {
@@ -108,7 +108,7 @@ async function auditPitcherDims() {
     },
     {
       label: "Chase%",
-      fn: (r) => safeDiv(r.total_chases, r.total_pitches - r.total_in_zone),
+      fn: (r) => safeDiv(r.total_chases, r.total_out_of_zone),
       fmt: (v) => `${(v * 100).toFixed(1)}%`,
     },
     {
@@ -152,7 +152,7 @@ async function auditPitcherDims() {
 async function auditHitterDims() {
   console.log("\n=== HITTER side, by dimension ===\n");
   const cols =
-    "batter_id, pa, ab, hits_single, hits_double, hits_triple, hits_hr, bb, hbp, sac, k, total_pitches, total_swings, total_in_zone, total_in_zone_swings, total_in_zone_whiffs, total_chases, total_whiffs, batted_balls_in_play, batted_barrels, batted_hard_hit, ev_sum, batted_balls_with_ev, max_ev, x_hits_sum, x_bases_sum";
+    "batter_id, pa, ab, hits_single, hits_double, hits_triple, hits_hr, bb, hbp, sac, k, total_pitches, total_swings, total_in_zone, total_in_zone_swings, total_in_zone_whiffs, total_out_of_zone, total_chases, total_whiffs, batted_balls_in_play, batted_barrels, batted_hard_hit, ev_sum, batted_balls_with_ev, max_ev, x_hits_sum, x_bases_sum";
 
   const keyMetrics: KeyMetric[] = [
     {
@@ -163,7 +163,7 @@ async function auditHitterDims() {
     },
     {
       label: "Chase%",
-      fn: (r) => safeDiv(r.total_chases, r.total_pitches - r.total_in_zone),
+      fn: (r) => safeDiv(r.total_chases, r.total_out_of_zone),
       fmt: (v) => `${(v * 100).toFixed(1)}%`,
     },
     {

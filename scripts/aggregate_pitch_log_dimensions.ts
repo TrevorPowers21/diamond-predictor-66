@@ -118,7 +118,7 @@ INSERT INTO public.pitch_log_pitcher_totals (
   pitcher_id, season, dimension_key,
   total_pitches, total_swings, total_takes,
   total_data_pitches, total_velo_pitches,
-  total_in_zone, total_in_zone_swings, total_in_zone_whiffs,
+  total_in_zone, total_in_zone_swings, total_in_zone_whiffs, total_out_of_zone,
   total_chases, total_whiffs, total_strikes, total_fouls, total_called_strikes,
   total_bf, total_pa, total_k, total_bb, total_hbp,
   stuff_plus_sum, stuff_plus_data_pitches,
@@ -141,6 +141,7 @@ SELECT
   COUNT(*) FILTER (WHERE is_in_zone) AS total_in_zone,
   COUNT(*) FILTER (WHERE is_in_zone AND is_swing) AS total_in_zone_swings,
   COUNT(*) FILTER (WHERE is_in_zone AND is_whiff) AS total_in_zone_whiffs,
+  COUNT(*) FILTER (WHERE is_in_zone IS FALSE) AS total_out_of_zone,
   COUNT(*) FILTER (WHERE is_chase) AS total_chases,
   COUNT(*) FILTER (WHERE is_whiff) AS total_whiffs,
   COUNT(*) FILTER (WHERE is_strike) AS total_strikes,
@@ -171,10 +172,39 @@ SELECT
   COUNT(*) FILTER (WHERE pitch_result_category = 'HR') AS hits_hr_allowed,
   COUNT(*) FILTER (WHERE pitch_result_category IN
     ('Strikeout','HR','Single','Double','Triple','GroundOut','FlyOut','LineOut','PopOut','Error','FieldersChoice','DoublePlay')) AS total_ab,
-  -- xStats sums from xba_lookup join (NULL on non-batted-balls; SUM ignores NULL).
-  SUM(p_hit) AS x_hits_sum_allowed,
-  SUM(expected_bases) AS x_bases_sum_allowed,
-  SUM(expected_woba) AS x_woba_sum_allowed,
+  -- xStats sums with untracked-fallback (locked 2026-06-23 per Trevor):
+  -- tracked batted balls use the (EV, LA) bucket lookup; UNTRACKED
+  -- batted balls fall back to actual outcome so partial-tracking
+  -- players don't get artificially low xBA. Single = 1.0 hit, HR =
+  -- 4.0 bases, out = 0, etc. Linear weights for xwOBA: 0.882/1.254/
+  -- 1.586/2.041 for 1B/2B/3B/HR.
+  -- BUG-FIX 2026-06-23: gate ENTIRE sum on is_batted_ball_in_play.
+  -- The previous COALESCE form ran the lookup join on every pitch
+  -- with EV/LA tracked, including tracked fouls (~80 per hitter).
+  -- Tracked fouls inherited p_hit ~0.27 and inflated x_hits_sum by
+  -- ~22 units per hitter (Hudson Brown: 56→78). xStats must only
+  -- count outcomes from balls in play.
+  SUM(CASE
+    WHEN NOT is_batted_ball_in_play THEN 0
+    WHEN p_hit IS NOT NULL THEN p_hit
+    WHEN pitch_result_category IN ('Single','Double','Triple','HR') THEN 1.0
+    ELSE 0.0 END) AS x_hits_sum_allowed,
+  SUM(CASE
+    WHEN NOT is_batted_ball_in_play THEN 0
+    WHEN expected_bases IS NOT NULL THEN expected_bases
+    WHEN pitch_result_category = 'Single' THEN 1.0
+    WHEN pitch_result_category = 'Double' THEN 2.0
+    WHEN pitch_result_category = 'Triple' THEN 3.0
+    WHEN pitch_result_category = 'HR' THEN 4.0
+    ELSE 0.0 END) AS x_bases_sum_allowed,
+  SUM(CASE
+    WHEN NOT is_batted_ball_in_play THEN 0
+    WHEN expected_woba IS NOT NULL THEN expected_woba
+    WHEN pitch_result_category = 'Single' THEN 0.882
+    WHEN pitch_result_category = 'Double' THEN 1.254
+    WHEN pitch_result_category = 'Triple' THEN 1.586
+    WHEN pitch_result_category = 'HR' THEN 2.041
+    ELSE 0.0 END) AS x_woba_sum_allowed,
   -- Avg FB Velo aggregate (4-Seam, Sinker, Cutter combined).
   SUM(release_velocity) FILTER (WHERE pitch_type_reclassified IN ('4-Seam Fastball','Sinker','Cutter') AND has_velo) AS fb_velo_sum,
   COUNT(*) FILTER (WHERE pitch_type_reclassified IN ('4-Seam Fastball','Sinker','Cutter') AND has_velo) AS fb_velo_pitches
@@ -193,6 +223,7 @@ ON CONFLICT (pitcher_id, season, dimension_key) DO UPDATE SET
   total_in_zone = EXCLUDED.total_in_zone,
   total_in_zone_swings = EXCLUDED.total_in_zone_swings,
   total_in_zone_whiffs = EXCLUDED.total_in_zone_whiffs,
+  total_out_of_zone = EXCLUDED.total_out_of_zone,
   total_chases = EXCLUDED.total_chases,
   total_whiffs = EXCLUDED.total_whiffs,
   total_strikes = EXCLUDED.total_strikes,
@@ -232,7 +263,7 @@ function pitcherByPitchTypeSQL(dim: Dimension): string {
   return `
 INSERT INTO public.pitch_log_pitcher_by_pitch_type (
   pitcher_id, season, pitch_type_reclassified, dimension_key,
-  pitches, swings, whiffs, in_zone, in_zone_swings, in_zone_whiffs,
+  pitches, swings, whiffs, in_zone, in_zone_swings, in_zone_whiffs, out_of_zone,
   chases, called_strikes,
   data_pitches, velo_pitches,
   stuff_plus_sum,
@@ -254,6 +285,7 @@ SELECT
   COUNT(*) FILTER (WHERE is_in_zone) AS in_zone,
   COUNT(*) FILTER (WHERE is_in_zone AND is_swing) AS in_zone_swings,
   COUNT(*) FILTER (WHERE is_in_zone AND is_whiff) AS in_zone_whiffs,
+  COUNT(*) FILTER (WHERE is_in_zone IS FALSE) AS out_of_zone,
   COUNT(*) FILTER (WHERE is_chase) AS chases,
   COUNT(*) FILTER (WHERE pitch_result = 'Strike Looking') AS called_strikes,
   COUNT(*) FILTER (WHERE is_data) AS data_pitches,
@@ -281,9 +313,28 @@ SELECT
   COUNT(*) FILTER (WHERE pitch_result_category = 'HR') AS hits_hr_allowed,
   COUNT(*) FILTER (WHERE pitch_result_category IN
     ('Strikeout','HR','Single','Double','Triple','GroundOut','FlyOut','LineOut','PopOut','Error','FieldersChoice','DoublePlay')) AS ab,
-  SUM(p_hit) AS x_hits_sum_allowed,
-  SUM(expected_bases) AS x_bases_sum_allowed,
-  SUM(expected_woba) AS x_woba_sum_allowed
+  -- xStats with untracked-fallback (see comment in pitcherTotalsSQL).
+  SUM(CASE
+    WHEN NOT is_batted_ball_in_play THEN 0
+    WHEN p_hit IS NOT NULL THEN p_hit
+    WHEN pitch_result_category IN ('Single','Double','Triple','HR') THEN 1.0
+    ELSE 0.0 END) AS x_hits_sum_allowed,
+  SUM(CASE
+    WHEN NOT is_batted_ball_in_play THEN 0
+    WHEN expected_bases IS NOT NULL THEN expected_bases
+    WHEN pitch_result_category = 'Single' THEN 1.0
+    WHEN pitch_result_category = 'Double' THEN 2.0
+    WHEN pitch_result_category = 'Triple' THEN 3.0
+    WHEN pitch_result_category = 'HR' THEN 4.0
+    ELSE 0.0 END) AS x_bases_sum_allowed,
+  SUM(CASE
+    WHEN NOT is_batted_ball_in_play THEN 0
+    WHEN expected_woba IS NOT NULL THEN expected_woba
+    WHEN pitch_result_category = 'Single' THEN 0.882
+    WHEN pitch_result_category = 'Double' THEN 1.254
+    WHEN pitch_result_category = 'Triple' THEN 1.586
+    WHEN pitch_result_category = 'HR' THEN 2.041
+    ELSE 0.0 END) AS x_woba_sum_allowed
 FROM public.pitch_log
 LEFT JOIN public.pitch_log_xba_lookup
   ON FLOOR(exit_velocity)::int = ev_bin
@@ -295,6 +346,7 @@ ON CONFLICT (pitcher_id, season, pitch_type_reclassified, dimension_key) DO UPDA
   swings = EXCLUDED.swings,
   whiffs = EXCLUDED.whiffs,
   in_zone = EXCLUDED.in_zone,
+  out_of_zone = EXCLUDED.out_of_zone,
   in_zone_swings = EXCLUDED.in_zone_swings,
   in_zone_whiffs = EXCLUDED.in_zone_whiffs,
   chases = EXCLUDED.chases,
@@ -337,7 +389,7 @@ INSERT INTO public.pitch_log_hitter_by_pitch_type (
   pa, ab, hits_single, hits_double, hits_triple, hits_hr,
   k, bb, hbp,
   pitches, swings, whiffs, chases,
-  in_zone, in_zone_swings, in_zone_whiffs, fouls,
+  in_zone, in_zone_swings, in_zone_whiffs, out_of_zone, fouls,
   batted_balls_in_play, batted_barrels, batted_hard_hit,
   ev_sum, batted_balls_with_ev, max_ev,
   x_hits_sum, x_bases_sum, x_woba_sum
@@ -364,6 +416,7 @@ SELECT
   COUNT(*) FILTER (WHERE is_in_zone) AS in_zone,
   COUNT(*) FILTER (WHERE is_in_zone AND is_swing) AS in_zone_swings,
   COUNT(*) FILTER (WHERE is_in_zone AND is_whiff) AS in_zone_whiffs,
+  COUNT(*) FILTER (WHERE is_in_zone IS FALSE) AS out_of_zone,
   COUNT(*) FILTER (WHERE is_foul) AS fouls,
   COUNT(*) FILTER (WHERE is_batted_ball_in_play) AS batted_balls_in_play,
   COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity >= 95 AND launch_angle >= 10 AND launch_angle < 35) AS batted_barrels,
@@ -371,9 +424,28 @@ SELECT
   SUM(exit_velocity) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS ev_sum,
   COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS batted_balls_with_ev,
   MAX(exit_velocity) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS max_ev,
-  SUM(p_hit) AS x_hits_sum,
-  SUM(expected_bases) AS x_bases_sum,
-  SUM(expected_woba) AS x_woba_sum
+  -- xStats with untracked-fallback (see comment in pitcherTotalsSQL).
+  SUM(CASE
+    WHEN NOT is_batted_ball_in_play THEN 0
+    WHEN p_hit IS NOT NULL THEN p_hit
+    WHEN pitch_result_category IN ('Single','Double','Triple','HR') THEN 1.0
+    ELSE 0.0 END) AS x_hits_sum,
+  SUM(CASE
+    WHEN NOT is_batted_ball_in_play THEN 0
+    WHEN expected_bases IS NOT NULL THEN expected_bases
+    WHEN pitch_result_category = 'Single' THEN 1.0
+    WHEN pitch_result_category = 'Double' THEN 2.0
+    WHEN pitch_result_category = 'Triple' THEN 3.0
+    WHEN pitch_result_category = 'HR' THEN 4.0
+    ELSE 0.0 END) AS x_bases_sum,
+  SUM(CASE
+    WHEN NOT is_batted_ball_in_play THEN 0
+    WHEN expected_woba IS NOT NULL THEN expected_woba
+    WHEN pitch_result_category = 'Single' THEN 0.882
+    WHEN pitch_result_category = 'Double' THEN 1.254
+    WHEN pitch_result_category = 'Triple' THEN 1.586
+    WHEN pitch_result_category = 'HR' THEN 2.041
+    ELSE 0.0 END) AS x_woba_sum
 FROM public.pitch_log
 LEFT JOIN public.pitch_log_xba_lookup
   ON FLOOR(exit_velocity)::int = ev_bin
@@ -395,6 +467,7 @@ ON CONFLICT (batter_id, season, pitch_type_reclassified, dimension_key) DO UPDAT
   whiffs = EXCLUDED.whiffs,
   chases = EXCLUDED.chases,
   in_zone = EXCLUDED.in_zone,
+  out_of_zone = EXCLUDED.out_of_zone,
   in_zone_swings = EXCLUDED.in_zone_swings,
   in_zone_whiffs = EXCLUDED.in_zone_whiffs,
   fouls = EXCLUDED.fouls,
@@ -419,7 +492,7 @@ INSERT INTO public.pitch_log_hitter_totals (
   k, bb, hbp, sac,
   total_pitches, total_swings, total_takes,
   total_data_pitches, total_velo_pitches,
-  total_in_zone, total_in_zone_swings, total_in_zone_whiffs,
+  total_in_zone, total_in_zone_swings, total_in_zone_whiffs, total_out_of_zone,
   total_chases, total_whiffs, total_fouls,
   batted_balls_in_play,
   batted_ground_balls, batted_line_drives, batted_fly_balls, batted_pop_ups,
@@ -450,6 +523,7 @@ SELECT
   COUNT(*) FILTER (WHERE is_in_zone) AS total_in_zone,
   COUNT(*) FILTER (WHERE is_in_zone AND is_swing) AS total_in_zone_swings,
   COUNT(*) FILTER (WHERE is_in_zone AND is_whiff) AS total_in_zone_whiffs,
+  COUNT(*) FILTER (WHERE is_in_zone IS FALSE) AS total_out_of_zone,
   COUNT(*) FILTER (WHERE is_chase) AS total_chases,
   COUNT(*) FILTER (WHERE is_whiff) AS total_whiffs,
   COUNT(*) FILTER (WHERE is_foul) AS total_fouls,
@@ -468,9 +542,28 @@ SELECT
   SUM(exit_velocity) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS ev_sum,
   COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS batted_balls_with_ev,
   MAX(exit_velocity) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS max_ev,
-  SUM(p_hit) AS x_hits_sum,
-  SUM(expected_bases) AS x_bases_sum,
-  SUM(expected_woba) AS x_woba_sum
+  -- xStats with untracked-fallback (see comment in pitcherTotalsSQL).
+  SUM(CASE
+    WHEN NOT is_batted_ball_in_play THEN 0
+    WHEN p_hit IS NOT NULL THEN p_hit
+    WHEN pitch_result_category IN ('Single','Double','Triple','HR') THEN 1.0
+    ELSE 0.0 END) AS x_hits_sum,
+  SUM(CASE
+    WHEN NOT is_batted_ball_in_play THEN 0
+    WHEN expected_bases IS NOT NULL THEN expected_bases
+    WHEN pitch_result_category = 'Single' THEN 1.0
+    WHEN pitch_result_category = 'Double' THEN 2.0
+    WHEN pitch_result_category = 'Triple' THEN 3.0
+    WHEN pitch_result_category = 'HR' THEN 4.0
+    ELSE 0.0 END) AS x_bases_sum,
+  SUM(CASE
+    WHEN NOT is_batted_ball_in_play THEN 0
+    WHEN expected_woba IS NOT NULL THEN expected_woba
+    WHEN pitch_result_category = 'Single' THEN 0.882
+    WHEN pitch_result_category = 'Double' THEN 1.254
+    WHEN pitch_result_category = 'Triple' THEN 1.586
+    WHEN pitch_result_category = 'HR' THEN 2.041
+    ELSE 0.0 END) AS x_woba_sum
 FROM public.pitch_log
 LEFT JOIN public.pitch_log_xba_lookup
   ON FLOOR(exit_velocity)::int = ev_bin
@@ -496,6 +589,7 @@ ON CONFLICT (batter_id, season, dimension_key) DO UPDATE SET
   total_in_zone = EXCLUDED.total_in_zone,
   total_in_zone_swings = EXCLUDED.total_in_zone_swings,
   total_in_zone_whiffs = EXCLUDED.total_in_zone_whiffs,
+  total_out_of_zone = EXCLUDED.total_out_of_zone,
   total_chases = EXCLUDED.total_chases,
   total_whiffs = EXCLUDED.total_whiffs,
   total_fouls = EXCLUDED.total_fouls,

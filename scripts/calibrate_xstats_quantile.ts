@@ -83,8 +83,13 @@ async function main() {
   for (const r of qH) {
     const hits = r.hits_single + r.hits_double + r.hits_triple + r.hits_hr;
     const tb = r.hits_single + 2 * r.hits_double + 3 * r.hits_triple + 4 * r.hits_hr;
-    hAvg.push({ x: r.x_hits_sum / r.ab, y: hits / r.ab });
-    hSlg.push({ x: r.x_bases_sum / r.ab, y: tb / r.ab });
+    // Display uses xAB = AB + SAC as denominator (Sacs contribute to
+    // num via tracked bucket lookup). Calibrate against actual AVG / SLG
+    // which use traditional AB so mapped output reads on the same scale
+    // coaches expect.
+    const xAb = r.ab + (r.sac ?? 0);
+    hAvg.push({ x: r.x_hits_sum / xAb, y: hits / r.ab });
+    hSlg.push({ x: r.x_bases_sum / xAb, y: tb / r.ab });
     // wOBA: (sum_woba + W_BB*BB + W_HBP*HBP) / (AB + BB + HBP + SF)
     const obpDen = r.ab + r.bb + r.hbp + r.sac;
     const wobaActualNum =

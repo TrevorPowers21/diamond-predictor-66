@@ -58,7 +58,7 @@ async function auditPitcher() {
   console.log("=== PITCHER metrics (qualified: total_pitches >= 100) ===\n");
   const all = await fetchAll(
     "pitch_log_pitcher_totals",
-    "pitcher_id, total_pitches, total_swings, total_in_zone, total_in_zone_swings, total_in_zone_whiffs, total_chases, total_whiffs, total_called_strikes, total_strikes, total_pa, total_k, total_bb, stuff_plus_sum, stuff_plus_data_pitches, fb_velo_sum, fb_velo_pitches",
+    "pitcher_id, total_pitches, total_swings, total_in_zone, total_in_zone_swings, total_in_zone_whiffs, total_out_of_zone, total_chases, total_whiffs, total_called_strikes, total_strikes, total_pa, total_k, total_bb, stuff_plus_sum, stuff_plus_data_pitches, fb_velo_sum, fb_velo_pitches",
   );
   const qual = all.filter((r) => r.total_pitches >= PITCHER_MIN_PITCHES);
   console.log(`Qualified pop: ${qual.length}\n`);
@@ -68,7 +68,7 @@ async function auditPitcher() {
     "FB Velo": (r) => safeDiv(r.fb_velo_sum, r.fb_velo_pitches),
     "Whiff%": (r) => safeDiv(r.total_whiffs, r.total_swings),
     "IZ Whiff%": (r) => safeDiv(r.total_in_zone_whiffs, r.total_in_zone_swings),
-    "Chase%": (r) => safeDiv(r.total_chases, r.total_pitches - r.total_in_zone),
+    "Chase%": (r) => safeDiv(r.total_chases, r.total_out_of_zone),
     "CSW%": (r) => safeDiv(r.total_called_strikes + r.total_whiffs, r.total_pitches),
     "Strike%": (r) => safeDiv(r.total_strikes, r.total_pitches),
     "Zone%": (r) => safeDiv(r.total_in_zone, r.total_pitches),
@@ -98,7 +98,7 @@ async function auditHitter() {
   console.log("\n\n=== HITTER metrics (qualified: pa >= 30) ===\n");
   const all = await fetchAll(
     "pitch_log_hitter_totals",
-    "batter_id, pa, ab, hits_single, hits_double, hits_triple, hits_hr, bb, hbp, sac, k, total_pitches, total_swings, total_in_zone, total_in_zone_swings, total_in_zone_whiffs, total_chases, total_whiffs, batted_balls_in_play, batted_barrels, batted_hard_hit, batted_ground_balls, batted_line_drives, batted_fly_balls, batted_la_10_to_30, ev_sum, batted_balls_with_ev, max_ev",
+    "batter_id, pa, ab, hits_single, hits_double, hits_triple, hits_hr, bb, hbp, sac, k, total_pitches, total_swings, total_in_zone, total_in_zone_swings, total_in_zone_whiffs, total_out_of_zone, total_chases, total_whiffs, batted_balls_in_play, batted_barrels, batted_hard_hit, batted_ground_balls, batted_line_drives, batted_fly_balls, batted_la_10_to_30, ev_sum, batted_balls_with_ev, max_ev",
   );
   const qual = all.filter((r) => r.pa >= HITTER_MIN_PA);
   console.log(`Qualified pop: ${qual.length}\n`);
@@ -106,7 +106,7 @@ async function auditHitter() {
   const metrics: Record<string, (r: any) => number | null> = {
     "Contact%": (r) =>
       r.total_swings > 0 ? (r.total_swings - r.total_whiffs) / r.total_swings : null,
-    "Chase%": (r) => safeDiv(r.total_chases, r.total_pitches - r.total_in_zone),
+    "Chase%": (r) => safeDiv(r.total_chases, r.total_out_of_zone),
     "IZ Whiff%": (r) => safeDiv(r.total_in_zone_whiffs, r.total_in_zone_swings),
     "Zone%": (r) => safeDiv(r.total_in_zone, r.total_pitches),
     "K%": (r) => safeDiv(r.k, r.pa),
