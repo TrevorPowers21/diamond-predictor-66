@@ -121,7 +121,13 @@ INSERT INTO public.pitch_log_pitcher_totals (
   total_in_zone, total_in_zone_swings, total_in_zone_whiffs,
   total_chases, total_whiffs, total_strikes, total_fouls, total_called_strikes,
   total_bf, total_pa, total_k, total_bb, total_hbp,
-  stuff_plus_sum, stuff_plus_data_pitches
+  stuff_plus_sum, stuff_plus_data_pitches,
+  batted_balls_allowed_in_play, batted_barrels_allowed, batted_hard_hit_allowed,
+  ev_sum_allowed, batted_balls_allowed_with_ev,
+  batted_ground_balls_allowed, batted_line_drives_allowed, batted_fly_balls_allowed, batted_pop_ups_allowed,
+  hits_single_allowed, hits_double_allowed, hits_triple_allowed, hits_hr_allowed, total_ab,
+  x_hits_sum_allowed, x_bases_sum_allowed, x_woba_sum_allowed,
+  fb_velo_sum, fb_velo_pitches
 )
 SELECT
   pitcher_id,
@@ -146,8 +152,36 @@ SELECT
   COUNT(*) FILTER (WHERE pitch_result_category = 'Walk') AS total_bb,
   COUNT(*) FILTER (WHERE pitch_result_category = 'HBP') AS total_hbp,
   SUM(stuff_plus) AS stuff_plus_sum,
-  COUNT(*) FILTER (WHERE stuff_plus IS NOT NULL) AS stuff_plus_data_pitches
+  COUNT(*) FILTER (WHERE stuff_plus IS NOT NULL) AS stuff_plus_data_pitches,
+  -- Batted-ball quality allowed (mirror of hitter side, from pitcher's POV)
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play) AS batted_balls_allowed_in_play,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity >= 95 AND launch_angle >= 10 AND launch_angle < 35) AS batted_barrels_allowed,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity >= 95) AS batted_hard_hit_allowed,
+  SUM(exit_velocity) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS ev_sum_allowed,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS batted_balls_allowed_with_ev,
+  -- Batted-ball-type allowed (locked LA cutoffs: GB<5, LD 5-20, FB 20-50, PU>=50)
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle IS NOT NULL AND launch_angle < 5) AS batted_ground_balls_allowed,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle >= 5 AND launch_angle < 20) AS batted_line_drives_allowed,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle >= 20 AND launch_angle < 50) AS batted_fly_balls_allowed,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle >= 50) AS batted_pop_ups_allowed,
+  -- Hits + AB allowed (for AVG-against, SLG-against, WHIP, HR/9)
+  COUNT(*) FILTER (WHERE pitch_result_category = 'Single') AS hits_single_allowed,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'Double') AS hits_double_allowed,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'Triple') AS hits_triple_allowed,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'HR') AS hits_hr_allowed,
+  COUNT(*) FILTER (WHERE pitch_result_category IN
+    ('Strikeout','HR','Single','Double','Triple','GroundOut','FlyOut','LineOut','PopOut','Error','FieldersChoice','DoublePlay')) AS total_ab,
+  -- xStats sums from xba_lookup join (NULL on non-batted-balls; SUM ignores NULL).
+  SUM(p_hit) AS x_hits_sum_allowed,
+  SUM(expected_bases) AS x_bases_sum_allowed,
+  SUM(expected_woba) AS x_woba_sum_allowed,
+  -- Avg FB Velo aggregate (4-Seam, Sinker, Cutter combined).
+  SUM(release_velocity) FILTER (WHERE pitch_type_reclassified IN ('4-Seam Fastball','Sinker','Cutter') AND has_velo) AS fb_velo_sum,
+  COUNT(*) FILTER (WHERE pitch_type_reclassified IN ('4-Seam Fastball','Sinker','Cutter') AND has_velo) AS fb_velo_pitches
 FROM public.pitch_log
+LEFT JOIN public.pitch_log_xba_lookup
+  ON FLOOR(exit_velocity)::int = ev_bin
+ AND FLOOR(launch_angle)::int = la_bin
 WHERE ${dim.pitcher_filter!}
 GROUP BY pitcher_id, season
 ON CONFLICT (pitcher_id, season, dimension_key) DO UPDATE SET
@@ -171,6 +205,25 @@ ON CONFLICT (pitcher_id, season, dimension_key) DO UPDATE SET
   total_hbp = EXCLUDED.total_hbp,
   stuff_plus_sum = EXCLUDED.stuff_plus_sum,
   stuff_plus_data_pitches = EXCLUDED.stuff_plus_data_pitches,
+  batted_balls_allowed_in_play = EXCLUDED.batted_balls_allowed_in_play,
+  batted_barrels_allowed = EXCLUDED.batted_barrels_allowed,
+  batted_hard_hit_allowed = EXCLUDED.batted_hard_hit_allowed,
+  ev_sum_allowed = EXCLUDED.ev_sum_allowed,
+  batted_balls_allowed_with_ev = EXCLUDED.batted_balls_allowed_with_ev,
+  batted_ground_balls_allowed = EXCLUDED.batted_ground_balls_allowed,
+  batted_line_drives_allowed = EXCLUDED.batted_line_drives_allowed,
+  batted_fly_balls_allowed = EXCLUDED.batted_fly_balls_allowed,
+  batted_pop_ups_allowed = EXCLUDED.batted_pop_ups_allowed,
+  hits_single_allowed = EXCLUDED.hits_single_allowed,
+  hits_double_allowed = EXCLUDED.hits_double_allowed,
+  hits_triple_allowed = EXCLUDED.hits_triple_allowed,
+  hits_hr_allowed = EXCLUDED.hits_hr_allowed,
+  total_ab = EXCLUDED.total_ab,
+  x_hits_sum_allowed = EXCLUDED.x_hits_sum_allowed,
+  x_bases_sum_allowed = EXCLUDED.x_bases_sum_allowed,
+  x_woba_sum_allowed = EXCLUDED.x_woba_sum_allowed,
+  fb_velo_sum = EXCLUDED.fb_velo_sum,
+  fb_velo_pitches = EXCLUDED.fb_velo_pitches,
   computed_at = NOW();
 `.trim();
 }
@@ -183,7 +236,12 @@ INSERT INTO public.pitch_log_pitcher_by_pitch_type (
   chases, called_strikes,
   data_pitches, velo_pitches,
   stuff_plus_sum,
-  velo_sum, ivb_sum, hb_sum, extension_sum, spin_sum, rel_height_sum, rel_side_sum
+  velo_sum, ivb_sum, hb_sum, extension_sum, spin_sum, rel_height_sum, rel_side_sum,
+  batted_balls_allowed_in_play, batted_barrels_allowed, batted_hard_hit_allowed,
+  ev_sum_allowed, batted_balls_allowed_with_ev,
+  batted_ground_balls_allowed, batted_line_drives_allowed, batted_fly_balls_allowed, batted_pop_ups_allowed,
+  hits_single_allowed, hits_double_allowed, hits_triple_allowed, hits_hr_allowed, ab,
+  x_hits_sum_allowed, x_bases_sum_allowed, x_woba_sum_allowed
 )
 SELECT
   pitcher_id,
@@ -207,8 +265,29 @@ SELECT
   SUM(extension) AS extension_sum,
   SUM(spin) AS spin_sum,
   SUM(rel_height) AS rel_height_sum,
-  SUM(rel_side) AS rel_side_sum
+  SUM(rel_side) AS rel_side_sum,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play) AS batted_balls_allowed_in_play,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity >= 95 AND launch_angle >= 10 AND launch_angle < 35) AS batted_barrels_allowed,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity >= 95) AS batted_hard_hit_allowed,
+  SUM(exit_velocity) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS ev_sum_allowed,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS batted_balls_allowed_with_ev,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle IS NOT NULL AND launch_angle < 5) AS batted_ground_balls_allowed,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle >= 5 AND launch_angle < 20) AS batted_line_drives_allowed,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle >= 20 AND launch_angle < 50) AS batted_fly_balls_allowed,
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle >= 50) AS batted_pop_ups_allowed,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'Single') AS hits_single_allowed,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'Double') AS hits_double_allowed,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'Triple') AS hits_triple_allowed,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'HR') AS hits_hr_allowed,
+  COUNT(*) FILTER (WHERE pitch_result_category IN
+    ('Strikeout','HR','Single','Double','Triple','GroundOut','FlyOut','LineOut','PopOut','Error','FieldersChoice','DoublePlay')) AS ab,
+  SUM(p_hit) AS x_hits_sum_allowed,
+  SUM(expected_bases) AS x_bases_sum_allowed,
+  SUM(expected_woba) AS x_woba_sum_allowed
 FROM public.pitch_log
+LEFT JOIN public.pitch_log_xba_lookup
+  ON FLOOR(exit_velocity)::int = ev_bin
+ AND FLOOR(launch_angle)::int = la_bin
 WHERE pitch_type_reclassified IS NOT NULL AND ${dim.pitcher_filter!}
 GROUP BY pitcher_id, season, pitch_type_reclassified
 ON CONFLICT (pitcher_id, season, pitch_type_reclassified, dimension_key) DO UPDATE SET
@@ -230,6 +309,23 @@ ON CONFLICT (pitcher_id, season, pitch_type_reclassified, dimension_key) DO UPDA
   spin_sum = EXCLUDED.spin_sum,
   rel_height_sum = EXCLUDED.rel_height_sum,
   rel_side_sum = EXCLUDED.rel_side_sum,
+  batted_balls_allowed_in_play = EXCLUDED.batted_balls_allowed_in_play,
+  batted_barrels_allowed = EXCLUDED.batted_barrels_allowed,
+  batted_hard_hit_allowed = EXCLUDED.batted_hard_hit_allowed,
+  ev_sum_allowed = EXCLUDED.ev_sum_allowed,
+  batted_balls_allowed_with_ev = EXCLUDED.batted_balls_allowed_with_ev,
+  batted_ground_balls_allowed = EXCLUDED.batted_ground_balls_allowed,
+  batted_line_drives_allowed = EXCLUDED.batted_line_drives_allowed,
+  batted_fly_balls_allowed = EXCLUDED.batted_fly_balls_allowed,
+  batted_pop_ups_allowed = EXCLUDED.batted_pop_ups_allowed,
+  hits_single_allowed = EXCLUDED.hits_single_allowed,
+  hits_double_allowed = EXCLUDED.hits_double_allowed,
+  hits_triple_allowed = EXCLUDED.hits_triple_allowed,
+  hits_hr_allowed = EXCLUDED.hits_hr_allowed,
+  ab = EXCLUDED.ab,
+  x_hits_sum_allowed = EXCLUDED.x_hits_sum_allowed,
+  x_bases_sum_allowed = EXCLUDED.x_bases_sum_allowed,
+  x_woba_sum_allowed = EXCLUDED.x_woba_sum_allowed,
   computed_at = NOW();
 `.trim();
 }
@@ -243,7 +339,8 @@ INSERT INTO public.pitch_log_hitter_by_pitch_type (
   pitches, swings, whiffs, chases,
   in_zone, in_zone_swings, in_zone_whiffs, fouls,
   batted_balls_in_play, batted_barrels, batted_hard_hit,
-  ev_sum, batted_balls_with_ev
+  ev_sum, batted_balls_with_ev, max_ev,
+  x_hits_sum, x_bases_sum, x_woba_sum
 )
 SELECT
   batter_id,
@@ -272,8 +369,15 @@ SELECT
   COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity >= 95 AND launch_angle >= 10 AND launch_angle < 35) AS batted_barrels,
   COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity >= 95) AS batted_hard_hit,
   SUM(exit_velocity) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS ev_sum,
-  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS batted_balls_with_ev
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS batted_balls_with_ev,
+  MAX(exit_velocity) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS max_ev,
+  SUM(p_hit) AS x_hits_sum,
+  SUM(expected_bases) AS x_bases_sum,
+  SUM(expected_woba) AS x_woba_sum
 FROM public.pitch_log
+LEFT JOIN public.pitch_log_xba_lookup
+  ON FLOOR(exit_velocity)::int = ev_bin
+ AND FLOOR(launch_angle)::int = la_bin
 WHERE pitch_type_reclassified IS NOT NULL AND ${dim.hitter_filter!}
 GROUP BY batter_id, season, pitch_type_reclassified
 ON CONFLICT (batter_id, season, pitch_type_reclassified, dimension_key) DO UPDATE SET
@@ -299,6 +403,10 @@ ON CONFLICT (batter_id, season, pitch_type_reclassified, dimension_key) DO UPDAT
   batted_hard_hit = EXCLUDED.batted_hard_hit,
   ev_sum = EXCLUDED.ev_sum,
   batted_balls_with_ev = EXCLUDED.batted_balls_with_ev,
+  max_ev = EXCLUDED.max_ev,
+  x_hits_sum = EXCLUDED.x_hits_sum,
+  x_bases_sum = EXCLUDED.x_bases_sum,
+  x_woba_sum = EXCLUDED.x_woba_sum,
   computed_at = NOW();
 `.trim();
 }
@@ -316,7 +424,8 @@ INSERT INTO public.pitch_log_hitter_totals (
   batted_balls_in_play,
   batted_ground_balls, batted_line_drives, batted_fly_balls, batted_pop_ups,
   batted_barrels, batted_hard_hit, batted_la_10_to_30,
-  ev_sum, batted_balls_with_ev
+  ev_sum, batted_balls_with_ev, max_ev,
+  x_hits_sum, x_bases_sum, x_woba_sum
 )
 SELECT
   batter_id,
@@ -357,8 +466,15 @@ SELECT
   COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity >= 95) AS batted_hard_hit,
   COUNT(*) FILTER (WHERE is_batted_ball_in_play AND launch_angle >= 10 AND launch_angle < 30) AS batted_la_10_to_30,
   SUM(exit_velocity) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS ev_sum,
-  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS batted_balls_with_ev
+  COUNT(*) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS batted_balls_with_ev,
+  MAX(exit_velocity) FILTER (WHERE is_batted_ball_in_play AND exit_velocity IS NOT NULL) AS max_ev,
+  SUM(p_hit) AS x_hits_sum,
+  SUM(expected_bases) AS x_bases_sum,
+  SUM(expected_woba) AS x_woba_sum
 FROM public.pitch_log
+LEFT JOIN public.pitch_log_xba_lookup
+  ON FLOOR(exit_velocity)::int = ev_bin
+ AND FLOOR(launch_angle)::int = la_bin
 WHERE ${dim.hitter_filter!}
 GROUP BY batter_id, season
 ON CONFLICT (batter_id, season, dimension_key) DO UPDATE SET
@@ -393,6 +509,10 @@ ON CONFLICT (batter_id, season, dimension_key) DO UPDATE SET
   batted_la_10_to_30 = EXCLUDED.batted_la_10_to_30,
   ev_sum = EXCLUDED.ev_sum,
   batted_balls_with_ev = EXCLUDED.batted_balls_with_ev,
+  max_ev = EXCLUDED.max_ev,
+  x_hits_sum = EXCLUDED.x_hits_sum,
+  x_bases_sum = EXCLUDED.x_bases_sum,
+  x_woba_sum = EXCLUDED.x_woba_sum,
   computed_at = NOW();
 `.trim();
 }

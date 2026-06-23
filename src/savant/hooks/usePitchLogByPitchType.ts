@@ -25,6 +25,23 @@ export interface PitchLogByPitchTypeRow {
   spin_sum: number | null;
   rel_height_sum: number | null;
   rel_side_sum: number | null;
+  batted_balls_allowed_in_play: number;
+  batted_barrels_allowed: number;
+  batted_hard_hit_allowed: number;
+  ev_sum_allowed: number | null;
+  batted_balls_allowed_with_ev: number;
+  batted_ground_balls_allowed: number;
+  batted_line_drives_allowed: number;
+  batted_fly_balls_allowed: number;
+  batted_pop_ups_allowed: number;
+  hits_single_allowed: number;
+  hits_double_allowed: number;
+  hits_triple_allowed: number;
+  hits_hr_allowed: number;
+  ab: number;
+  x_hits_sum_allowed: number | null;
+  x_bases_sum_allowed: number | null;
+  x_woba_sum_allowed: number | null;
 }
 
 export function usePitchLogByPitchType(

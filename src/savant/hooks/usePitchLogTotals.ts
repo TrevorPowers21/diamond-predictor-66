@@ -26,6 +26,25 @@ export interface PitchLogPitcherTotalsRow {
   total_hbp: number;
   stuff_plus_sum: number | null;
   stuff_plus_data_pitches: number;
+  x_hits_sum_allowed: number | null;
+  x_bases_sum_allowed: number | null;
+  x_woba_sum_allowed: number | null;
+  fb_velo_sum: number | null;
+  fb_velo_pitches: number;
+  batted_balls_allowed_in_play: number;
+  batted_barrels_allowed: number;
+  batted_hard_hit_allowed: number;
+  ev_sum_allowed: number | null;
+  batted_balls_allowed_with_ev: number;
+  batted_ground_balls_allowed: number;
+  batted_line_drives_allowed: number;
+  batted_fly_balls_allowed: number;
+  batted_pop_ups_allowed: number;
+  hits_single_allowed: number;
+  hits_double_allowed: number;
+  hits_triple_allowed: number;
+  hits_hr_allowed: number;
+  total_ab: number;
 }
 
 export interface PitchLogHitterTotalsRow {
@@ -63,6 +82,10 @@ export interface PitchLogHitterTotalsRow {
   batted_la_10_to_30: number;
   ev_sum: number | null;
   batted_balls_with_ev: number;
+  max_ev: number | null;
+  x_hits_sum: number | null;
+  x_bases_sum: number | null;
+  x_woba_sum: number | null;
 }
 
 const SHARED_QUERY_OPTS = {

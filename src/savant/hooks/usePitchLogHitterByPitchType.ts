@@ -29,6 +29,10 @@ export interface PitchLogHitterByPitchTypeRow {
   batted_hard_hit: number;
   ev_sum: number | null;
   batted_balls_with_ev: number;
+  max_ev: number | null;
+  x_hits_sum: number | null;
+  x_bases_sum: number | null;
+  x_woba_sum: number | null;
 }
 
 export function usePitchLogHitterByPitchType(

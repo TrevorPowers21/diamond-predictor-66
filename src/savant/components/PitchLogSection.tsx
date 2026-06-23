@@ -6,6 +6,7 @@ import {
 } from "@/savant/hooks/usePitchLogTotals";
 import { usePitchLogByPitchType } from "@/savant/hooks/usePitchLogByPitchType";
 import { usePitchLogHitterByPitchType } from "@/savant/hooks/usePitchLogHitterByPitchType";
+import { usePitcherMaster } from "@/savant/hooks/usePitcherMaster";
 import {
   usePitchLogHitterPopulation,
   usePitchLogPitcherPopulation,
@@ -25,7 +26,9 @@ import {
   HITTER_METRICS_SLASH,
   HITTER_QUALIFIED_PA,
   PITCHER_DIMENSIONS,
+  PITCHER_METRICS_BATTED_BALL,
   PITCHER_METRICS_DISCIPLINE,
+  PITCHER_METRICS_SLASH_AGAINST,
   PITCHER_QUALIFIED_PITCHES,
   safeDiv,
 } from "@/savant/lib/pitchLogRates";
@@ -169,25 +172,37 @@ function HitterStatsLine({ row }: { row: import("@/savant/hooks/usePitchLogTotal
   );
 }
 
-function PitcherStatsLine({ row }: { row: import("@/savant/hooks/usePitchLogTotals").PitchLogPitcherTotalsRow }) {
+function PitcherStatsLine({
+  row,
+  pm,
+}: {
+  row: import("@/savant/hooks/usePitchLogTotals").PitchLogPitcherTotalsRow;
+  pm: import("@/savant/hooks/usePitcherMaster").PitcherMasterRow | null | undefined;
+}) {
   const kPct = safeDiv(row.total_k, row.total_pa);
   const bbPct = safeDiv(row.total_bb, row.total_pa);
-  const whiff = safeDiv(row.total_whiffs, row.total_swings);
-  const chase = safeDiv(row.total_chases, row.total_pitches - row.total_in_zone);
-  const zone = safeDiv(row.total_in_zone, row.total_pitches);
-  const strike = safeDiv(row.total_strikes, row.total_pitches);
   const stuff = safeDiv(row.stuff_plus_sum, row.stuff_plus_data_pitches);
+
+  const hitsAllowed =
+    row.hits_single_allowed +
+    row.hits_double_allowed +
+    row.hits_triple_allowed +
+    row.hits_hr_allowed;
+  const ipEst = row.total_bf / 4.3;
+  const whip = ipEst > 0 ? (hitsAllowed + row.total_bb) / ipEst : null;
+
   return (
     <div className="flex flex-wrap gap-2">
-      <StatChip label="BF" value={`${row.total_bf}`} emphasize />
-      <StatChip label="K" value={`${row.total_k}`} emphasize />
-      <StatChip label="BB" value={`${row.total_bb}`} emphasize />
-      <StatChip label="K%" value={fmtPct(kPct)} emphasize />
-      <StatChip label="BB%" value={fmtPct(bbPct)} emphasize />
-      <StatChip label="Whiff%" value={fmtPct(whiff)} />
-      <StatChip label="Chase%" value={fmtPct(chase)} />
-      <StatChip label="Zone%" value={fmtPct(zone)} />
-      <StatChip label="Strike%" value={fmtPct(strike)} />
+      {/* Season aggregates (static — from Pitching Master, NOT filter-aware) */}
+      <StatChip label="IP" value={pm?.IP != null ? pm.IP.toFixed(1) : "—"} emphasize />
+      <StatChip label="ERA" value={pm?.ERA != null ? pm.ERA.toFixed(2) : "—"} emphasize />
+      <StatChip label="FIP" value={pm?.FIP != null ? pm.FIP.toFixed(2) : "—"} emphasize />
+      {/* Filter-aware (recomputes from pitch_log per active dimension) */}
+      <StatChip label="WHIP" value={whip != null ? whip.toFixed(2) : "—"} />
+      <StatChip label="K" value={`${row.total_k}`} />
+      <StatChip label="BB" value={`${row.total_bb}`} />
+      <StatChip label="K%" value={fmtPct(kPct)} />
+      <StatChip label="BB%" value={fmtPct(bbPct)} />
       <StatChip label="Stuff+" value={fmt1(stuff)} emphasize />
     </div>
   );
@@ -516,6 +531,7 @@ export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
   const { data: totalsRow } = usePitchLogPitcherTotals(pitcherId, season, dimension);
   const { data: byTypeRows = [] } = usePitchLogByPitchType(pitcherId, season, dimension);
   const { data: population = [] } = usePitchLogPitcherPopulation(season, dimension);
+  const { data: pmRow } = usePitcherMaster(pitcherId, season);
 
   const qualifiedPop = useMemo(
     () => population.filter((r) => r.total_pitches >= PITCHER_QUALIFIED_PITCHES),
@@ -548,12 +564,19 @@ export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
       picker={picker}
       sampleCount={totalsRow.total_pitches}
       sampleLabel="pitches"
-      topStats={<PitcherStatsLine row={totalsRow} />}
+      topStats={<PitcherStatsLine row={totalsRow} pm={pmRow ?? null} />}
       left={
         <>
-          <Panel title="Plate Discipline & Stuff">
+          <Panel title="Quality of Stuff">
             <RateTable
               metrics={PITCHER_METRICS_DISCIPLINE}
+              playerRow={totalsRow}
+              qualifiedPop={qualifiedPop}
+            />
+          </Panel>
+          <Panel title="Batted Ball Metrics">
+            <RateTable
+              metrics={[...PITCHER_METRICS_SLASH_AGAINST, ...PITCHER_METRICS_BATTED_BALL]}
               playerRow={totalsRow}
               qualifiedPop={qualifiedPop}
             />
@@ -564,13 +587,22 @@ export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
         </>
       }
       right={
-        <Panel title="Percentile Ranks">
-          <BarGroup
-            metrics={PITCHER_METRICS_DISCIPLINE}
-            playerRow={totalsRow}
-            qualifiedPop={qualifiedPop}
-          />
-        </Panel>
+        <>
+          <Panel title="Quality of Stuff">
+            <BarGroup
+              metrics={PITCHER_METRICS_DISCIPLINE}
+              playerRow={totalsRow}
+              qualifiedPop={qualifiedPop}
+            />
+          </Panel>
+          <Panel title="Batted Ball Metrics">
+            <BarGroup
+              metrics={[...PITCHER_METRICS_SLASH_AGAINST, ...PITCHER_METRICS_BATTED_BALL]}
+              playerRow={totalsRow}
+              qualifiedPop={qualifiedPop}
+            />
+          </Panel>
+        </>
       }
     />
   );
