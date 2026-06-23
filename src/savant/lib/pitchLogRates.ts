@@ -506,64 +506,9 @@ export const PITCHER_METRICS_DISCIPLINE: MetricDef<PitchLogPitcherTotalsRow>[] =
   { label: "Zone%", derive: (r) => safeDiv(r.total_in_zone, r.total_pitches), format: pct },
 ];
 
+// Hitter Slash Line — xStats + BABIP only. Raw AVG/OBP/SLG/OPS/ISO live
+// in the top stats line so they don't double up here.
 export const HITTER_METRICS_SLASH: MetricDef<PitchLogHitterTotalsRow>[] = [
-  {
-    label: "AVG",
-    derive: (r) => safeDiv(r.hits_single + r.hits_double + r.hits_triple + r.hits_hr, r.ab),
-    format: slash,
-  },
-  {
-    label: "OBP",
-    derive: (r) => {
-      const h = r.hits_single + r.hits_double + r.hits_triple + r.hits_hr;
-      return safeDiv(h + r.bb + r.hbp, r.ab + r.bb + r.hbp + r.sac);
-    },
-    format: slash,
-  },
-  {
-    label: "SLG",
-    derive: (r) =>
-      safeDiv(
-        r.hits_single + 2 * r.hits_double + 3 * r.hits_triple + 4 * r.hits_hr,
-        r.ab,
-      ),
-    format: slash,
-  },
-  {
-    label: "OPS",
-    derive: (r) => {
-      const h = r.hits_single + r.hits_double + r.hits_triple + r.hits_hr;
-      const obp = safeDiv(h + r.bb + r.hbp, r.ab + r.bb + r.hbp + r.sac);
-      const slg = safeDiv(
-        r.hits_single + 2 * r.hits_double + 3 * r.hits_triple + 4 * r.hits_hr,
-        r.ab,
-      );
-      return obp !== null && slg !== null ? obp + slg : null;
-    },
-    format: slash,
-  },
-  {
-    label: "ISO",
-    derive: (r) => {
-      const avg = safeDiv(r.hits_single + r.hits_double + r.hits_triple + r.hits_hr, r.ab);
-      const slg = safeDiv(
-        r.hits_single + 2 * r.hits_double + 3 * r.hits_triple + 4 * r.hits_hr,
-        r.ab,
-      );
-      return avg !== null && slg !== null ? slg - avg : null;
-    },
-    format: slash,
-  },
-  {
-    label: "BABIP",
-    derive: (r) => {
-      const h = r.hits_single + r.hits_double + r.hits_triple + r.hits_hr;
-      return safeDiv(h - r.hits_hr, r.ab - r.k - r.hits_hr + r.sac);
-    },
-    format: slash,
-  },
-  // xStats — quantile-mapped against 2026 D1 hitter pop to align with
-  // actual AVG / SLG / wOBA distributions.
   {
     label: "xBA",
     derive: (r) => {
@@ -590,6 +535,14 @@ export const HITTER_METRICS_SLASH: MetricDef<PitchLogHitterTotalsRow>[] = [
       const xwobaDen = r.ab + r.bb + r.hbp + r.sac;
       const raw = xwobaDen > 0 ? xwobaNum / xwobaDen : null;
       return raw === null ? null : lookupInterp(HITTER_XWOBA_LOOKUP, raw);
+    },
+    format: slash,
+  },
+  {
+    label: "BABIP",
+    derive: (r) => {
+      const h = r.hits_single + r.hits_double + r.hits_triple + r.hits_hr;
+      return safeDiv(h - r.hits_hr, r.ab - r.k - r.hits_hr + r.sac);
     },
     format: slash,
   },

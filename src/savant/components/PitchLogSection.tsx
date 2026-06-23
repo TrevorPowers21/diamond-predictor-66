@@ -660,16 +660,16 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
       topStats={<HitterStatsLine row={row} />}
       left={
         <>
-          <Panel title="Plate Discipline">
+          <Panel title="Batted Ball Data">
             <RateTable
-              metrics={HITTER_METRICS_DISCIPLINE}
+              metrics={[...HITTER_METRICS_SLASH, ...HITTER_METRICS_CONTACT]}
               playerRow={row}
               qualifiedPop={qualifiedPop}
             />
           </Panel>
-          <Panel title="Batted Ball Data">
+          <Panel title="Plate Discipline">
             <RateTable
-              metrics={HITTER_METRICS_CONTACT}
+              metrics={HITTER_METRICS_DISCIPLINE}
               playerRow={row}
               qualifiedPop={qualifiedPop}
             />
@@ -681,14 +681,15 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
       }
       right={
         <>
-          <Panel title="Slash Line">
-            <BarGroup metrics={HITTER_METRICS_SLASH} playerRow={row} qualifiedPop={qualifiedPop} />
+          <Panel title="Batted Ball Data">
+            <BarGroup
+              metrics={[...HITTER_METRICS_SLASH, ...HITTER_METRICS_CONTACT]}
+              playerRow={row}
+              qualifiedPop={qualifiedPop}
+            />
           </Panel>
           <Panel title="Plate Discipline">
             <BarGroup metrics={HITTER_METRICS_DISCIPLINE} playerRow={row} qualifiedPop={qualifiedPop} />
-          </Panel>
-          <Panel title="Batted Ball Data">
-            <BarGroup metrics={HITTER_METRICS_CONTACT} playerRow={row} qualifiedPop={qualifiedPop} />
           </Panel>
         </>
       }
