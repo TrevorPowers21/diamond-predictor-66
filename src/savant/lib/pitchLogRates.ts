@@ -59,11 +59,37 @@ export const safeDiv = (n: number | null | undefined, d: number | null | undefin
   return den > 0 ? num / den : null;
 };
 
+/**
+ * Same as safeDiv but returns null if the denominator is below `floor`.
+ * Used to suppress noisy small-sample rates (e.g., Barrel% from 3 tracked
+ * batted balls). Without a floor, a hitter with 5 tracked BIP and 1
+ * barrel shows up as 20% Barrel and gets ranked against players with
+ * 200+ tracked BIP — a misleading p80+ display.
+ */
+export const safeDivFloor = (
+  n: number | null | undefined,
+  d: number | null | undefined,
+  floor: number,
+) => {
+  const num = n ?? 0;
+  const den = d ?? 0;
+  return den >= floor && den > 0 ? num / den : null;
+};
+
 /** Minimum total_pitches in a dimension before a pitcher is "qualified" for percentile ranking. */
 export const PITCHER_QUALIFIED_PITCHES = 100;
 
 /** Minimum PA in a dimension before a hitter is "qualified" for percentile ranking. */
 export const HITTER_QUALIFIED_PA = 30;
+
+/** Min tracked batted balls before Barrel%/HardHit%/EV-derived rates display. */
+export const MIN_TRACKED_BIP = 5;
+/** Min AB before xStats display. */
+export const MIN_AB_FOR_XSTATS = 15;
+/** Min swings before plate-discipline rates (Whiff%, Contact%) display. */
+export const MIN_SWINGS_FOR_RATES = 15;
+/** Min OOZ pitches before Chase% displays. */
+export const MIN_OOZ_FOR_CHASE = 20;
 
 export interface PitcherRates {
   // Production-against
@@ -108,9 +134,16 @@ export function derivePitcherRates(row: PitchLogPitcherTotalsRow | null): Pitche
     kPct: safeDiv(row.total_k, row.total_pa),
     bbPct: safeDiv(row.total_bb, row.total_pa),
     strikePct: safeDiv(row.total_strikes, row.total_pitches),
-    zonePct: safeDiv(row.total_in_zone, row.total_pitches),
+    // Zone% (tracked-only): definite in-zone / (in-zone + out-of-zone).
+// Old denom (total_pitches) included ~17% NULL/untracked pitches as
+// "not in zone", crashing league Zone% to 38% vs the real ~50%.
+zonePct: safeDiv(row.total_in_zone, row.total_in_zone + row.total_out_of_zone),
     whiffPct: safeDiv(row.total_whiffs, row.total_swings),
-    chasePct: safeDiv(row.total_chases, row.total_swings),
+    // O-Swing% / Chase%: swings on OOZ pitches / total OOZ pitches.
+    // Both restricted to is_in_zone IS FALSE (definite OOZ) via the
+    // total_out_of_zone aggregation column. Old denominator used
+    // total_swings which gave a different metric.
+    chasePct: safeDiv(row.total_chases, row.total_out_of_zone),
     contactPct:
       row.total_swings > 0
         ? (row.total_swings - row.total_whiffs) / row.total_swings
@@ -151,6 +184,10 @@ export interface HitterRates {
   totalPitches: number;
   pa: number;
   dataReliabilityPct: number | null;
+  /** Counts for the panel-level "Batted Ball tracking" reliability badge. */
+  bipTotal: number;
+  bipTracked: number;
+  bipTrackingPct: number | null;
 }
 
 export function deriveHitterRates(row: PitchLogHitterTotalsRow | null): HitterRates | null {
@@ -183,13 +220,20 @@ export function deriveHitterRates(row: PitchLogHitterTotalsRow | null): HitterRa
     bbPct: safeDiv(row.bb, row.pa),
     hrRate: safeDiv(row.hits_hr, row.pa),
     whiffPct: safeDiv(row.total_whiffs, row.total_swings),
-    chasePct: safeDiv(row.total_chases, row.total_swings),
+    // O-Swing% / Chase%: swings on OOZ pitches / total OOZ pitches.
+    // Both restricted to is_in_zone IS FALSE (definite OOZ) via the
+    // total_out_of_zone aggregation column. Old denominator used
+    // total_swings which gave a different metric.
+    chasePct: safeDiv(row.total_chases, row.total_out_of_zone),
     contactPct:
       row.total_swings > 0
         ? (row.total_swings - row.total_whiffs) / row.total_swings
         : null,
     izWhiffPct: safeDiv(row.total_in_zone_whiffs, row.total_in_zone_swings),
-    zonePct: safeDiv(row.total_in_zone, row.total_pitches),
+    // Zone% (tracked-only): definite in-zone / (in-zone + out-of-zone).
+// Old denom (total_pitches) included ~17% NULL/untracked pitches as
+// "not in zone", crashing league Zone% to 38% vs the real ~50%.
+zonePct: safeDiv(row.total_in_zone, row.total_in_zone + row.total_out_of_zone),
     // All EV/LA-derived numerators (GB/LD/FB/PU/HH/Barrel/LA10-30/hard
     // hit) have implicit "EV or LA NOT NULL" filters in the aggregation
     // SQL — they only count tracked balls. Denominator must match:
@@ -199,17 +243,20 @@ export function deriveHitterRates(row: PitchLogHitterTotalsRow | null): HitterRa
     // hitters. HM rate columns (from TruMedia CSV) use tracked-only
     // denominators by convention; matching that keeps Overview grades
     // and Stats percentile bars on the same scale.
-    groundBallPct: safeDiv(row.batted_ground_balls, row.batted_balls_with_ev),
-    lineDrivePct: safeDiv(row.batted_line_drives, row.batted_balls_with_ev),
-    flyBallPct: safeDiv(row.batted_fly_balls, row.batted_balls_with_ev),
-    popUpPct: safeDiv(row.batted_pop_ups, row.batted_balls_with_ev),
-    hardHitPct: safeDiv(row.batted_hard_hit, row.batted_balls_with_ev),
-    barrelPct: safeDiv(row.batted_barrels, row.batted_balls_with_ev),
-    la1030Pct: safeDiv(row.batted_la_10_to_30, row.batted_balls_with_ev),
-    avgEv: safeDiv(row.ev_sum, row.batted_balls_with_ev),
+    groundBallPct: safeDivFloor(row.batted_ground_balls, row.batted_balls_with_ev, MIN_TRACKED_BIP),
+    lineDrivePct: safeDivFloor(row.batted_line_drives, row.batted_balls_with_ev, MIN_TRACKED_BIP),
+    flyBallPct: safeDivFloor(row.batted_fly_balls, row.batted_balls_with_ev, MIN_TRACKED_BIP),
+    popUpPct: safeDivFloor(row.batted_pop_ups, row.batted_balls_with_ev, MIN_TRACKED_BIP),
+    hardHitPct: safeDivFloor(row.batted_hard_hit, row.batted_balls_with_ev, MIN_TRACKED_BIP),
+    barrelPct: safeDivFloor(row.batted_barrels, row.batted_balls_with_ev, MIN_TRACKED_BIP),
+    la1030Pct: safeDivFloor(row.batted_la_10_to_30, row.batted_balls_with_ev, MIN_TRACKED_BIP),
+    avgEv: safeDivFloor(row.ev_sum, row.batted_balls_with_ev, MIN_TRACKED_BIP),
     totalPitches: row.total_pitches,
     pa: row.pa,
     dataReliabilityPct: safeDiv(row.total_data_pitches, row.total_pitches),
+    bipTotal: row.batted_balls_in_play ?? 0,
+    bipTracked: row.batted_balls_with_ev ?? 0,
+    bipTrackingPct: safeDiv(row.batted_balls_with_ev, row.batted_balls_in_play),
   };
 }
 
@@ -355,84 +402,88 @@ function lookupInterp(
 // Built via scripts/calibrate_xstats_quantile.ts against the qualified
 // 2026 D1 population. Refresh after each season-end ingest.
 
+// Refreshed 2026-06-23 after: foul-gate fix, OOZ denominator fix,
+// Sac handling fix (xAB = AB + SAC denominator). Re-run
+// `npm run calibrate-xstats-quantile` after each season-end ingest.
+
 const HITTER_XBA_LOOKUP: ReadonlyArray<readonly [number, number]> = [
-  [0.0020, 0.0750], [0.0441, 0.1583], [0.0657, 0.1772], [0.0878, 0.1923],
-  [0.1056, 0.2000], [0.1253, 0.2079], [0.1405, 0.2135], [0.1560, 0.2179],
-  [0.1742, 0.2222], [0.1910, 0.2268], [0.2068, 0.2308], [0.2218, 0.2339],
-  [0.2365, 0.2381], [0.2496, 0.2414], [0.2593, 0.2446], [0.2696, 0.2479],
-  [0.2781, 0.2500], [0.2861, 0.2539], [0.2937, 0.2568], [0.3009, 0.2597],
-  [0.3070, 0.2623], [0.3130, 0.2651], [0.3183, 0.2678], [0.3238, 0.2704],
-  [0.3296, 0.2731], [0.3344, 0.2754], [0.3389, 0.2786], [0.3430, 0.2810],
-  [0.3476, 0.2833], [0.3512, 0.2865], [0.3556, 0.2888], [0.3605, 0.2915],
-  [0.3642, 0.2935], [0.3687, 0.2953], [0.3729, 0.2977], [0.3789, 0.3009],
-  [0.3840, 0.3035], [0.3879, 0.3065], [0.3927, 0.3100], [0.3966, 0.3133],
-  [0.4017, 0.3164], [0.4060, 0.3191], [0.4119, 0.3220], [0.4176, 0.3265],
-  [0.4249, 0.3306], [0.4330, 0.3371], [0.4429, 0.3429], [0.4523, 0.3495],
-  [0.4660, 0.3582], [0.4850, 0.3729], [0.5730, 0.4485],
+  [0.1018, 0.0750], [0.1687, 0.1583], [0.1869, 0.1772], [0.1961, 0.1914],
+  [0.2042, 0.2000], [0.2103, 0.2079], [0.2155, 0.2135], [0.2203, 0.2178],
+  [0.2242, 0.2222], [0.2280, 0.2268], [0.2317, 0.2308], [0.2347, 0.2339],
+  [0.2373, 0.2381], [0.2408, 0.2414], [0.2435, 0.2446], [0.2460, 0.2478],
+  [0.2486, 0.2500], [0.2508, 0.2537], [0.2537, 0.2568], [0.2556, 0.2597],
+  [0.2578, 0.2623], [0.2595, 0.2651], [0.2616, 0.2676], [0.2636, 0.2703],
+  [0.2657, 0.2727], [0.2683, 0.2754], [0.2702, 0.2785], [0.2726, 0.2810],
+  [0.2748, 0.2833], [0.2771, 0.2865], [0.2791, 0.2887], [0.2812, 0.2914],
+  [0.2831, 0.2935], [0.2853, 0.2952], [0.2876, 0.2976], [0.2899, 0.3008],
+  [0.2918, 0.3034], [0.2945, 0.3065], [0.2974, 0.3099], [0.3005, 0.3133],
+  [0.3035, 0.3163], [0.3061, 0.3191], [0.3094, 0.3220], [0.3125, 0.3265],
+  [0.3157, 0.3306], [0.3203, 0.3371], [0.3254, 0.3429], [0.3312, 0.3495],
+  [0.3393, 0.3581], [0.3524, 0.3729], [0.4145, 0.4485],
 ];
 
 const HITTER_XSLG_LOOKUP: ReadonlyArray<readonly [number, number]> = [
-  [0.0026, 0.0980], [0.0582, 0.2154], [0.0863, 0.2500], [0.1206, 0.2649],
-  [0.1454, 0.2771], [0.1698, 0.2898], [0.1905, 0.2993], [0.2168, 0.3072],
-  [0.2405, 0.3155], [0.2642, 0.3228], [0.2857, 0.3301], [0.3069, 0.3370],
-  [0.3286, 0.3431], [0.3451, 0.3500], [0.3600, 0.3563], [0.3735, 0.3627],
-  [0.3871, 0.3690], [0.3994, 0.3757], [0.4111, 0.3806], [0.4226, 0.3860],
-  [0.4320, 0.3919], [0.4420, 0.3971], [0.4484, 0.4026], [0.4569, 0.4070],
-  [0.4656, 0.4123], [0.4734, 0.4188], [0.4823, 0.4246], [0.4906, 0.4318],
-  [0.4988, 0.4368], [0.5070, 0.4422], [0.5158, 0.4472], [0.5246, 0.4526],
-  [0.5341, 0.4596], [0.5425, 0.4667], [0.5521, 0.4739], [0.5604, 0.4800],
-  [0.5706, 0.4867], [0.5812, 0.4925], [0.5926, 0.5000], [0.6012, 0.5058],
-  [0.6103, 0.5153], [0.6234, 0.5263], [0.6369, 0.5357], [0.6508, 0.5469],
-  [0.6660, 0.5590], [0.6853, 0.5704], [0.7075, 0.5845], [0.7367, 0.6045],
-  [0.7678, 0.6311], [0.8241, 0.6723], [1.0967, 1.1569],
+  [0.1236, 0.0980], [0.2354, 0.2154], [0.2569, 0.2500], [0.2727, 0.2647],
+  [0.2846, 0.2771], [0.2937, 0.2892], [0.3019, 0.2991], [0.3090, 0.3071],
+  [0.3163, 0.3154], [0.3234, 0.3224], [0.3300, 0.3299], [0.3355, 0.3367],
+  [0.3411, 0.3429], [0.3473, 0.3497], [0.3522, 0.3562], [0.3572, 0.3626],
+  [0.3630, 0.3689], [0.3686, 0.3756], [0.3728, 0.3805], [0.3777, 0.3860],
+  [0.3820, 0.3919], [0.3862, 0.3968], [0.3917, 0.4023], [0.3965, 0.4066],
+  [0.4006, 0.4123], [0.4057, 0.4186], [0.4103, 0.4244], [0.4149, 0.4316],
+  [0.4196, 0.4366], [0.4249, 0.4422], [0.4300, 0.4471], [0.4351, 0.4525],
+  [0.4416, 0.4593], [0.4486, 0.4667], [0.4546, 0.4739], [0.4602, 0.4798],
+  [0.4655, 0.4866], [0.4713, 0.4925], [0.4780, 0.5000], [0.4841, 0.5057],
+  [0.4932, 0.5152], [0.5018, 0.5263], [0.5110, 0.5357], [0.5218, 0.5469],
+  [0.5339, 0.5588], [0.5490, 0.5704], [0.5645, 0.5844], [0.5867, 0.6045],
+  [0.6117, 0.6310], [0.6560, 0.6723], [0.9084, 1.1569],
 ];
 
 const HITTER_XWOBA_LOOKUP: ReadonlyArray<readonly [number, number]> = [
-  [0.0427, 0.1291], [0.1331, 0.2289], [0.1615, 0.2482], [0.1778, 0.2605],
-  [0.1940, 0.2681], [0.2104, 0.2775], [0.2241, 0.2833], [0.2351, 0.2892],
-  [0.2487, 0.2944], [0.2648, 0.2993], [0.2789, 0.3031], [0.2908, 0.3066],
-  [0.3014, 0.3103], [0.3121, 0.3138], [0.3205, 0.3169], [0.3309, 0.3204],
-  [0.3372, 0.3243], [0.3460, 0.3276], [0.3525, 0.3307], [0.3597, 0.3339],
-  [0.3661, 0.3371], [0.3708, 0.3400], [0.3762, 0.3431], [0.3816, 0.3459],
-  [0.3858, 0.3480], [0.3920, 0.3510], [0.3970, 0.3538], [0.4012, 0.3564],
-  [0.4065, 0.3599], [0.4109, 0.3629], [0.4153, 0.3655], [0.4197, 0.3683],
-  [0.4246, 0.3714], [0.4289, 0.3742], [0.4335, 0.3777], [0.4381, 0.3812],
-  [0.4432, 0.3842], [0.4483, 0.3878], [0.4543, 0.3915], [0.4598, 0.3954],
-  [0.4654, 0.3993], [0.4709, 0.4042], [0.4769, 0.4080], [0.4852, 0.4123],
-  [0.4914, 0.4168], [0.5017, 0.4226], [0.5142, 0.4298], [0.5265, 0.4400],
-  [0.5426, 0.4530], [0.5620, 0.4719], [0.6755, 0.6706],
+  [0.1466, 0.1291], [0.2386, 0.2289], [0.2580, 0.2482], [0.2705, 0.2605],
+  [0.2787, 0.2681], [0.2854, 0.2773], [0.2902, 0.2833], [0.2950, 0.2892],
+  [0.3000, 0.2944], [0.3033, 0.2992], [0.3069, 0.3029], [0.3106, 0.3064],
+  [0.3137, 0.3102], [0.3175, 0.3137], [0.3208, 0.3169], [0.3239, 0.3203],
+  [0.3271, 0.3241], [0.3299, 0.3276], [0.3325, 0.3307], [0.3357, 0.3337],
+  [0.3382, 0.3369], [0.3410, 0.3398], [0.3434, 0.3430], [0.3455, 0.3457],
+  [0.3480, 0.3479], [0.3502, 0.3509], [0.3528, 0.3537], [0.3553, 0.3564],
+  [0.3572, 0.3599], [0.3595, 0.3628], [0.3619, 0.3655], [0.3641, 0.3683],
+  [0.3673, 0.3713], [0.3703, 0.3742], [0.3735, 0.3776], [0.3768, 0.3812],
+  [0.3795, 0.3842], [0.3826, 0.3877], [0.3861, 0.3914], [0.3890, 0.3953],
+  [0.3933, 0.3992], [0.3972, 0.4041], [0.4009, 0.4079], [0.4047, 0.4123],
+  [0.4096, 0.4167], [0.4170, 0.4226], [0.4227, 0.4296], [0.4338, 0.4400],
+  [0.4469, 0.4527], [0.4640, 0.4719], [0.5881, 0.6706],
 ];
 
 const PITCHER_XBA_LOOKUP: ReadonlyArray<readonly [number, number]> = [
-  [0.0031, 0.1091], [0.0553, 0.1789], [0.0872, 0.1923], [0.1080, 0.2022],
-  [0.1268, 0.2090], [0.1440, 0.2156], [0.1619, 0.2212], [0.1799, 0.2259],
-  [0.1965, 0.2299], [0.2168, 0.2333], [0.2353, 0.2368], [0.2492, 0.2400],
-  [0.2626, 0.2436], [0.2727, 0.2464], [0.2828, 0.2492], [0.2906, 0.2519],
-  [0.2976, 0.2551], [0.3042, 0.2578], [0.3097, 0.2601], [0.3149, 0.2623],
-  [0.3198, 0.2646], [0.3241, 0.2671], [0.3281, 0.2706], [0.3325, 0.2727],
-  [0.3362, 0.2760], [0.3404, 0.2788], [0.3446, 0.2813], [0.3488, 0.2842],
-  [0.3529, 0.2866], [0.3565, 0.2887], [0.3605, 0.2913], [0.3638, 0.2938],
-  [0.3673, 0.2963], [0.3708, 0.2990], [0.3741, 0.3021], [0.3782, 0.3053],
-  [0.3830, 0.3088], [0.3876, 0.3120], [0.3920, 0.3146], [0.3959, 0.3187],
-  [0.4005, 0.3226], [0.4066, 0.3258], [0.4116, 0.3303], [0.4179, 0.3354],
-  [0.4241, 0.3418], [0.4314, 0.3492], [0.4412, 0.3562], [0.4501, 0.3647],
-  [0.4612, 0.3793], [0.4823, 0.4000], [0.6103, 0.4918],
+  [0.1263, 0.1091], [0.1916, 0.1789], [0.2045, 0.1923], [0.2146, 0.2025],
+  [0.2209, 0.2090], [0.2258, 0.2158], [0.2305, 0.2213], [0.2351, 0.2261],
+  [0.2386, 0.2300], [0.2421, 0.2335], [0.2447, 0.2370], [0.2473, 0.2403],
+  [0.2497, 0.2436], [0.2528, 0.2464], [0.2553, 0.2492], [0.2580, 0.2519],
+  [0.2605, 0.2551], [0.2631, 0.2578], [0.2649, 0.2601], [0.2667, 0.2624],
+  [0.2686, 0.2646], [0.2704, 0.2671], [0.2724, 0.2706], [0.2745, 0.2727],
+  [0.2768, 0.2759], [0.2788, 0.2788], [0.2811, 0.2813], [0.2826, 0.2841],
+  [0.2846, 0.2866], [0.2862, 0.2886], [0.2880, 0.2913], [0.2900, 0.2937],
+  [0.2920, 0.2963], [0.2938, 0.2990], [0.2958, 0.3021], [0.2982, 0.3053],
+  [0.3009, 0.3087], [0.3033, 0.3118], [0.3056, 0.3146], [0.3086, 0.3187],
+  [0.3116, 0.3226], [0.3148, 0.3258], [0.3179, 0.3303], [0.3212, 0.3354],
+  [0.3260, 0.3418], [0.3304, 0.3491], [0.3356, 0.3562], [0.3447, 0.3647],
+  [0.3535, 0.3793], [0.3677, 0.4000], [0.5231, 0.5231],
 ];
 
 const PITCHER_XSLG_LOOKUP: ReadonlyArray<readonly [number, number]> = [
-  [0.0031, 0.1455], [0.0820, 0.2540], [0.1237, 0.2857], [0.1595, 0.3026],
-  [0.1904, 0.3143], [0.2145, 0.3253], [0.2415, 0.3333], [0.2655, 0.3403],
-  [0.2918, 0.3469], [0.3173, 0.3540], [0.3429, 0.3605], [0.3620, 0.3656],
-  [0.3774, 0.3714], [0.3924, 0.3770], [0.4083, 0.3810], [0.4209, 0.3858],
-  [0.4307, 0.3913], [0.4405, 0.3966], [0.4508, 0.4020], [0.4614, 0.4064],
-  [0.4688, 0.4112], [0.4766, 0.4153], [0.4833, 0.4200], [0.4896, 0.4240],
-  [0.4973, 0.4277], [0.5036, 0.4324], [0.5099, 0.4367], [0.5162, 0.4417],
-  [0.5221, 0.4469], [0.5277, 0.4521], [0.5350, 0.4577], [0.5402, 0.4628],
-  [0.5475, 0.4667], [0.5528, 0.4714], [0.5579, 0.4770], [0.5651, 0.4833],
-  [0.5712, 0.4897], [0.5796, 0.4945], [0.5872, 0.5000], [0.5962, 0.5095],
-  [0.6050, 0.5172], [0.6141, 0.5249], [0.6237, 0.5347], [0.6348, 0.5440],
-  [0.6483, 0.5567], [0.6608, 0.5699], [0.6745, 0.5851], [0.6911, 0.6080],
-  [0.7129, 0.6341], [0.7457, 0.6812], [0.8911, 0.9333],
+  [0.1537, 0.1455], [0.2859, 0.2540], [0.3061, 0.2857], [0.3193, 0.3032],
+  [0.3308, 0.3146], [0.3407, 0.3255], [0.3485, 0.3333], [0.3562, 0.3404],
+  [0.3618, 0.3473], [0.3674, 0.3543], [0.3729, 0.3608], [0.3781, 0.3656],
+  [0.3825, 0.3714], [0.3873, 0.3774], [0.3915, 0.3811], [0.3953, 0.3860],
+  [0.3996, 0.3913], [0.4046, 0.3966], [0.4088, 0.4018], [0.4127, 0.4063],
+  [0.4165, 0.4110], [0.4198, 0.4151], [0.4232, 0.4196], [0.4270, 0.4239],
+  [0.4299, 0.4276], [0.4339, 0.4323], [0.4371, 0.4366], [0.4404, 0.4417],
+  [0.4435, 0.4464], [0.4477, 0.4519], [0.4518, 0.4576], [0.4556, 0.4626],
+  [0.4597, 0.4667], [0.4635, 0.4712], [0.4681, 0.4766], [0.4721, 0.4831],
+  [0.4762, 0.4896], [0.4821, 0.4944], [0.4884, 0.5000], [0.4929, 0.5094],
+  [0.4993, 0.5167], [0.5048, 0.5246], [0.5116, 0.5345], [0.5184, 0.5439],
+  [0.5269, 0.5563], [0.5365, 0.5695], [0.5473, 0.5849], [0.5612, 0.6080],
+  [0.5839, 0.6341], [0.6168, 0.6818], [0.9106, 0.9333],
 ];
 
 export const PITCHER_METRICS_SLASH_AGAINST: MetricDef<PitchLogPitcherTotalsRow>[] = [
@@ -454,7 +505,7 @@ export const PITCHER_METRICS_SLASH_AGAINST: MetricDef<PitchLogPitcherTotalsRow>[
   {
     label: "xBA",
     derive: (r) => {
-      const raw = safeDiv(r.x_hits_sum_allowed, r.total_ab);
+      const raw = safeDivFloor(r.x_hits_sum_allowed, r.total_ab, MIN_AB_FOR_XSTATS);
       return raw === null ? null : lookupInterp(PITCHER_XBA_LOOKUP, raw);
     },
     invert: true,
@@ -463,7 +514,7 @@ export const PITCHER_METRICS_SLASH_AGAINST: MetricDef<PitchLogPitcherTotalsRow>[
   {
     label: "xSLG",
     derive: (r) => {
-      const raw = safeDiv(r.x_bases_sum_allowed, r.total_ab);
+      const raw = safeDivFloor(r.x_bases_sum_allowed, r.total_ab, MIN_AB_FOR_XSTATS);
       return raw === null ? null : lookupInterp(PITCHER_XSLG_LOOKUP, raw);
     },
     invert: true,
@@ -472,7 +523,7 @@ export const PITCHER_METRICS_SLASH_AGAINST: MetricDef<PitchLogPitcherTotalsRow>[
 ];
 
 export const PITCHER_METRICS_BATTED_BALL: MetricDef<PitchLogPitcherTotalsRow>[] = [
-  { label: "Avg EV", derive: (r) => safeDiv(r.ev_sum_allowed, r.batted_balls_allowed_with_ev), invert: true, format: one },
+  { label: "Avg EV", derive: (r) => safeDivFloor(r.ev_sum_allowed, r.batted_balls_allowed_with_ev, MIN_TRACKED_BIP), invert: true, format: one },
   {
     label: "BABIP",
     derive: (r) => {
@@ -482,9 +533,9 @@ export const PITCHER_METRICS_BATTED_BALL: MetricDef<PitchLogPitcherTotalsRow>[] 
     invert: true,
     format: slash,
   },
-  { label: "Hard Hit%", derive: (r) => safeDiv(r.batted_hard_hit_allowed, r.batted_balls_allowed_with_ev), invert: true, format: pct },
-  { label: "Barrel%", derive: (r) => safeDiv(r.batted_barrels_allowed, r.batted_balls_allowed_with_ev), invert: true, format: pct },
-  { label: "GB%", derive: (r) => safeDiv(r.batted_ground_balls_allowed, r.batted_balls_allowed_with_ev), format: pct },
+  { label: "Hard Hit%", derive: (r) => safeDivFloor(r.batted_hard_hit_allowed, r.batted_balls_allowed_with_ev, MIN_TRACKED_BIP), invert: true, format: pct },
+  { label: "Barrel%", derive: (r) => safeDivFloor(r.batted_barrels_allowed, r.batted_balls_allowed_with_ev, MIN_TRACKED_BIP), invert: true, format: pct },
+  { label: "GB%", derive: (r) => safeDivFloor(r.batted_ground_balls_allowed, r.batted_balls_allowed_with_ev, MIN_TRACKED_BIP), format: pct },
   { label: "HR%", derive: (r) => safeDiv(r.hits_hr_allowed, r.total_pa), invert: true, format: pct },
 ];
 
@@ -505,14 +556,15 @@ export const PITCHER_METRICS_DISCIPLINE: MetricDef<PitchLogPitcherTotalsRow>[] =
   },
   { label: "Whiff%", derive: (r) => safeDiv(r.total_whiffs, r.total_swings), format: pct },
   { label: "IZ Whiff%", derive: (r) => safeDiv(r.total_in_zone_whiffs, r.total_in_zone_swings), format: pct },
-  { label: "Chase%", derive: (r) => safeDiv(r.total_chases, r.total_pitches - r.total_in_zone), format: pct },
+  { label: "Chase%", derive: (r) => safeDiv(r.total_chases, r.total_out_of_zone), format: pct },
   {
     label: "CSW%",
     derive: (r) => safeDiv(r.total_called_strikes + r.total_whiffs, r.total_pitches),
     format: pct,
   },
+  { label: "BB%", derive: (r) => safeDiv(r.total_bb, r.total_pa), invert: true, format: pct },
   { label: "Strike%", derive: (r) => safeDiv(r.total_strikes, r.total_pitches), format: pct },
-  { label: "Zone%", derive: (r) => safeDiv(r.total_in_zone, r.total_pitches), format: pct },
+  { label: "Zone%", derive: (r) => safeDiv(r.total_in_zone, r.total_in_zone + r.total_out_of_zone), format: pct },
 ];
 
 // Hitter Slash Line — xStats + BABIP only. Raw AVG/OBP/SLG/OPS/ISO live
@@ -521,7 +573,13 @@ export const HITTER_METRICS_SLASH: MetricDef<PitchLogHitterTotalsRow>[] = [
   {
     label: "xBA",
     derive: (r) => {
-      const raw = safeDiv(r.x_hits_sum, r.ab);
+      // Denominator AB + SAC: Sacs are batted-ball events that COULD
+      // have been hits, so they contribute to x_hits_sum on the
+      // numerator side. Including them in the denominator keeps xBA
+      // bounded by 1.0 (without it, AB=10 + 2 Sac hits-on-contact gives
+      // xBA > 1.0). MLB Statcast convention.
+      const xAb = r.ab + (r.sac ?? 0);
+      const raw = safeDivFloor(r.x_hits_sum, xAb, MIN_AB_FOR_XSTATS);
       return raw === null ? null : lookupInterp(HITTER_XBA_LOOKUP, raw);
     },
     format: slash,
@@ -529,7 +587,8 @@ export const HITTER_METRICS_SLASH: MetricDef<PitchLogHitterTotalsRow>[] = [
   {
     label: "xSLG",
     derive: (r) => {
-      const raw = safeDiv(r.x_bases_sum, r.ab);
+      const xAb = r.ab + (r.sac ?? 0);
+      const raw = safeDivFloor(r.x_bases_sum, xAb, MIN_AB_FOR_XSTATS);
       return raw === null ? null : lookupInterp(HITTER_XSLG_LOOKUP, raw);
     },
     format: slash,
@@ -537,7 +596,7 @@ export const HITTER_METRICS_SLASH: MetricDef<PitchLogHitterTotalsRow>[] = [
   {
     label: "xwOBA",
     derive: (r) => {
-      if (r.x_woba_sum === null) return null;
+      if (r.x_woba_sum === null || (r.ab ?? 0) < MIN_AB_FOR_XSTATS) return null;
       const W_BB = 0.696;
       const W_HBP = 0.726;
       const xwobaNum = r.x_woba_sum + W_BB * r.bb + W_HBP * r.hbp;
@@ -566,9 +625,9 @@ export const HITTER_METRICS_DISCIPLINE: MetricDef<PitchLogHitterTotalsRow>[] = [
   },
   // O-Swing%: chase swings / out-of-zone pitches. Matches Hitter Master's
   // `chase` definition; was previously (chases / swings) which inflated.
-  { label: "Chase%", derive: (r) => safeDiv(r.total_chases, r.total_pitches - r.total_in_zone), invert: true, format: pct },
+  { label: "Chase%", derive: (r) => safeDiv(r.total_chases, r.total_out_of_zone), invert: true, format: pct },
   { label: "IZ Whiff%", derive: (r) => safeDiv(r.total_in_zone_whiffs, r.total_in_zone_swings), invert: true, format: pct },
-  { label: "Zone%", derive: (r) => safeDiv(r.total_in_zone, r.total_pitches), format: pct },
+  { label: "Zone%", derive: (r) => safeDiv(r.total_in_zone, r.total_in_zone + r.total_out_of_zone), format: pct },
   { label: "K%", derive: (r) => safeDiv(r.k, r.pa), invert: true, format: pct },
   { label: "BB%", derive: (r) => safeDiv(r.bb, r.pa), format: pct },
   { label: "HR%", derive: (r) => safeDiv(r.hits_hr, r.pa), format: pct },
@@ -583,7 +642,7 @@ export const HITTER_METRICS_DISCIPLINE_BARS: MetricDef<PitchLogHitterTotalsRow>[
       r.total_swings > 0 ? (r.total_swings - r.total_whiffs) / r.total_swings : null,
     format: pct,
   },
-  { label: "Chase%", derive: (r) => safeDiv(r.total_chases, r.total_pitches - r.total_in_zone), invert: true, format: pct },
+  { label: "Chase%", derive: (r) => safeDiv(r.total_chases, r.total_out_of_zone), invert: true, format: pct },
   { label: "IZ Whiff%", derive: (r) => safeDiv(r.total_in_zone_whiffs, r.total_in_zone_swings), invert: true, format: pct },
   { label: "K%", derive: (r) => safeDiv(r.k, r.pa), invert: true, format: pct },
   { label: "BB%", derive: (r) => safeDiv(r.bb, r.pa), format: pct },
@@ -592,27 +651,27 @@ export const HITTER_METRICS_DISCIPLINE_BARS: MetricDef<PitchLogHitterTotalsRow>[
 
 // Full batted-ball metric list for the rate table (left column).
 // All EV/LA-derived numerators use batted_balls_with_ev as denominator
-// (matches HM's tracked-only convention). Using BIP would crash rates
-// to 33-50% of true value for partially-tracked hitters.
+// (matches HM's tracked-only convention) AND require MIN_TRACKED_BIP
+// before they display — below that the rate is too noisy to trust.
 export const HITTER_METRICS_CONTACT: MetricDef<PitchLogHitterTotalsRow>[] = [
-  { label: "Avg EV", derive: (r) => safeDiv(r.ev_sum, r.batted_balls_with_ev), format: one },
-  { label: "Max EV", derive: (r) => r.max_ev, format: one },
-  { label: "Hard Hit%", derive: (r) => safeDiv(r.batted_hard_hit, r.batted_balls_with_ev), format: pct },
-  { label: "Barrel%", derive: (r) => safeDiv(r.batted_barrels, r.batted_balls_with_ev), format: pct },
-  { label: "LA 10-30%", derive: (r) => safeDiv(r.batted_la_10_to_30, r.batted_balls_with_ev), format: pct },
-  { label: "GB%", derive: (r) => safeDiv(r.batted_ground_balls, r.batted_balls_with_ev), invert: true, format: pct },
-  { label: "LD%", derive: (r) => safeDiv(r.batted_line_drives, r.batted_balls_with_ev), format: pct },
-  { label: "FB%", derive: (r) => safeDiv(r.batted_fly_balls, r.batted_balls_with_ev), format: pct },
+  { label: "Avg EV", derive: (r) => safeDivFloor(r.ev_sum, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: one },
+  { label: "Max EV", derive: (r) => (r.batted_balls_with_ev ?? 0) >= MIN_TRACKED_BIP ? r.max_ev : null, format: one },
+  { label: "Hard Hit%", derive: (r) => safeDivFloor(r.batted_hard_hit, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
+  { label: "Barrel%", derive: (r) => safeDivFloor(r.batted_barrels, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
+  { label: "LA 10-30%", derive: (r) => safeDivFloor(r.batted_la_10_to_30, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
+  { label: "GB%", derive: (r) => safeDivFloor(r.batted_ground_balls, r.batted_balls_with_ev, MIN_TRACKED_BIP), invert: true, format: pct },
+  { label: "LD%", derive: (r) => safeDivFloor(r.batted_line_drives, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
+  { label: "FB%", derive: (r) => safeDivFloor(r.batted_fly_balls, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
 ];
 
 // Percentile-bar subset — drops GB / LD / FB which read better as raw
 // values in the table than as bars (no clear "better is higher").
 export const HITTER_METRICS_CONTACT_BARS: MetricDef<PitchLogHitterTotalsRow>[] = [
-  { label: "Avg EV", derive: (r) => safeDiv(r.ev_sum, r.batted_balls_with_ev), format: one },
-  { label: "Max EV", derive: (r) => r.max_ev, format: one },
-  { label: "Hard Hit%", derive: (r) => safeDiv(r.batted_hard_hit, r.batted_balls_with_ev), format: pct },
-  { label: "Barrel%", derive: (r) => safeDiv(r.batted_barrels, r.batted_balls_with_ev), format: pct },
-  { label: "LA 10-30%", derive: (r) => safeDiv(r.batted_la_10_to_30, r.batted_balls_with_ev), format: pct },
+  { label: "Avg EV", derive: (r) => safeDivFloor(r.ev_sum, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: one },
+  { label: "Max EV", derive: (r) => (r.batted_balls_with_ev ?? 0) >= MIN_TRACKED_BIP ? r.max_ev : null, format: one },
+  { label: "Hard Hit%", derive: (r) => safeDivFloor(r.batted_hard_hit, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
+  { label: "Barrel%", derive: (r) => safeDivFloor(r.batted_barrels, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
+  { label: "LA 10-30%", derive: (r) => safeDivFloor(r.batted_la_10_to_30, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
 ];
 
 void two; // (reserved for future metrics that need 2-decimal formatting)
@@ -701,7 +760,7 @@ export function deriveHitterPitchTypeBreakdowns(
       ops: obp !== null && slg !== null ? obp + slg : null,
       iso: avg !== null && slg !== null ? slg - avg : null,
       whiffPct: safeDiv(r.whiffs, r.swings),
-      chasePct: safeDiv(r.chases, r.pitches - r.in_zone),
+      chasePct: safeDiv(r.chases, r.out_of_zone),
       hardHitPct: safeDiv(r.batted_hard_hit, r.batted_balls_with_ev),
       avgEv: safeDiv(r.ev_sum, r.batted_balls_with_ev),
     };
@@ -725,7 +784,7 @@ export function derivePitchTypeBreakdowns(
     relSide: safeDiv(r.rel_side_sum, r.data_pitches),
     stuffPlus: safeDiv(r.stuff_plus_sum, r.data_pitches),
     whiffPct: safeDiv(r.whiffs, r.swings),
-    chasePct: safeDiv(r.chases, r.pitches - r.in_zone),
+    chasePct: safeDiv(r.chases, r.out_of_zone),
     izWhiffPct: safeDiv(r.in_zone_whiffs, r.in_zone_swings),
     calledStrikePct: safeDiv(r.called_strikes, r.pitches),
     cswPct: safeDiv(r.called_strikes + r.whiffs, r.pitches),
