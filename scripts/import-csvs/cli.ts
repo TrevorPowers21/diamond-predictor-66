@@ -19,6 +19,7 @@ type CliArgs = {
   dryRun: boolean;
   prod: boolean;
   keepFiles: boolean;
+  noProjections: boolean;
 };
 
 function parseArgs(argv: string[]): CliArgs {
@@ -29,6 +30,7 @@ function parseArgs(argv: string[]): CliArgs {
     dryRun: false,
     prod: false,
     keepFiles: false,
+    noProjections: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -44,6 +46,8 @@ function parseArgs(argv: string[]): CliArgs {
       args.prod = true;
     } else if (a === "--keep-files") {
       args.keepFiles = true;
+    } else if (a === "--no-projections") {
+      args.noProjections = true;
     } else if (a === "--help" || a === "-h") {
       printHelp();
       process.exit(0);
@@ -72,6 +76,17 @@ Options:
   --prod           Run against production Supabase. Requires typed "yes-promote-to-prod".
   --keep-files     Don't archive successfully-imported files. Useful for re-running.
                    Default behavior moves files to ~/RSTR IQ Data/imported/<YYYY-MM-DD>/.
+  --no-projections Final-season stat freeze. Updates the raw Master tables
+                   (hitter_master_stats / pitching_stats_storage / SB / SBA)
+                   but preserves everything anchored on the regular-season
+                   build. SKIPS: refreshPaIpFromMaster (WAR + depth tier),
+                   calculateConferenceStuffPlus + computeConferenceEnvRates
+                   (conference baselines), createPredictionsFromMaster +
+                   bulkRecalculatePredictionsLocal (player_predictions
+                   writes), and target_board snapshot invalidation.
+                   RUNS: Master imports, addMissingPlayers, NCAA averages,
+                   compute scores. player_predictions stays bit-for-bit
+                   identical to its pre-import state.
   --help           Show this message.
 
 Environments:
@@ -217,7 +232,7 @@ async function main(): Promise<void> {
 
   console.log(`\n${importable.length} file${importable.length === 1 ? "" : "s"} queued for import.`);
   const { runImports } = await import("./runner.ts");
-  await runImports(results, args.season, args.keepFiles);
+  await runImports(results, args.season, args.keepFiles, args.noProjections);
   process.exit(0);
 }
 
