@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PercentileBar from "@/savant/components/PercentileBar";
+import { StrikeZonePlot } from "@/savant/components/StrikeZonePlot";
+import { usePitchLogPitchLocation } from "@/savant/hooks/usePitchLogPitchLocation";
 import {
   usePitchLogHitterTotals,
   usePitchLogPitcherTotals,
@@ -608,6 +610,53 @@ function TrackingReliabilityBadge({
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Pitcher Location section — Strike Zone + 13-zone xwOBA + Spray field
+// ────────────────────────────────────────────────────────────────────
+
+interface PitcherLocationSectionProps {
+  pitcherId: string;
+  season: number;
+  dimension: PitchLogDimensionKey;
+}
+
+function PitcherLocationSection({
+  pitcherId,
+  season,
+  dimension,
+}: PitcherLocationSectionProps) {
+  const { data: pitches = [], isLoading } = usePitchLogPitchLocation({
+    playerId: pitcherId,
+    role: "pitcher",
+    season,
+    dimension,
+  });
+
+  return (
+    <Panel title="Locations + Outcomes">
+      {isLoading ? (
+        <div className="py-6 text-sm text-white/40">Loading pitches…</div>
+      ) : pitches.length === 0 ? (
+        <div className="py-6 text-sm text-white/40">No pitches for this filter.</div>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <StrikeZonePlot
+            pitches={pitches}
+            title="Strike Zone"
+            subtitle={`${pitches.length.toLocaleString()} pitches · hover for movement`}
+          />
+          <div className="rounded border border-white/10 p-3 text-xs text-white/40">
+            13-zone xwOBA heat (coming next)
+          </div>
+          <div className="rounded border border-white/10 p-3 text-xs text-white/40">
+            Spray field — dot / area % toggle (coming next)
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Pitcher entry
 // ────────────────────────────────────────────────────────────────────
 interface PitcherPitchLogProps {
@@ -702,6 +751,13 @@ export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
             />
           </Panel>
         </>
+      }
+      bottom={
+        <PitcherLocationSection
+          pitcherId={pitcherId}
+          season={season}
+          dimension={dimension}
+        />
       }
     />
   );

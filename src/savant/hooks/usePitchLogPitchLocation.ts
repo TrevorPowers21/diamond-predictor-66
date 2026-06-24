@@ -25,6 +25,9 @@ export interface PitchLocationRow {
   pitch_result: string | null;
   pitch_result_category: string | null;
   release_velocity: number | null;
+  ivb: number | null;
+  hb: number | null;
+  spin: number | null;
   stuff_plus: number | null;
   // Plate location (normalized — see pitchLocationHelpers.ts for conventions)
   px_norm: number | null;
@@ -128,7 +131,7 @@ export function usePitchLogPitchLocation({
       const idCol = role === "hitter" ? "batter_id" : "pitcher_id";
       const cols =
         "uniq_pitch_id, pitch_type, pitch_type_reclassified, pitcher_hand, batter_hand, " +
-        "pitch_result, pitch_result_category, release_velocity, stuff_plus, " +
+        "pitch_result, pitch_result_category, release_velocity, ivb, hb, spin, stuff_plus, " +
         "px_norm, pz_norm, " +
         "exit_velocity, launch_angle, spray_ang, distance, " +
         "x_avg, x_slg, x_woba, is_batted_ball_in_play";
