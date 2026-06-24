@@ -530,16 +530,33 @@ export async function runImports(
     err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  if (noProjections) {
-    step("refreshPaIpFromMaster");
-    warn(`SKIPPED — --no-projections flag set. WAR + depth-tier gauges anchored on regular-season PA/IP stay intact.`);
+  // refreshPaIpFromMaster is lock-aware in --no-projections mode:
+  // if the regular season is locked (Master.regular_season_pa is populated
+  // on a meaningful number of rows), TB depth-tier seed already reads from
+  // the locked value, so refreshing players.pa to postseason-inclusive is
+  // safe — display surfaces show the latest total while role math reads
+  // the frozen lock. If lock isn't set, we skip to preserve regular-season
+  // PA/IP.
+  step("refreshPaIpFromMaster");
+  let lockIsSet = false;
+  try {
+    const { data, error } = await (supabase as any)
+      .from("Hitter Master")
+      .select("regular_season_pa")
+      .eq("Season", season)
+      .not("regular_season_pa", "is", null)
+      .limit(1);
+    if (!error && data && data.length > 0) lockIsSet = true;
+  } catch { /* ignore — treat as not locked */ }
+
+  if (noProjections && !lockIsSet) {
+    warn(`SKIPPED — --no-projections set and regular season NOT locked. Hitter/Pitching Master.regular_season_pa/_ip is empty, so depth-tier seed would read postseason-inclusive PA. Run AdminDashboard "Lock Regular Season" first, then re-run.`);
   } else {
-    // Refresh existing players' pa/ip from Master so depth-role derives off real
-    // counts. addMissingPlayers only INSERTs new source_player_ids — existing
-    // players' pa/ip stay frozen at first-insert values without this step. Manifests
-    // most painfully on TWPs (ip=null → depth-role falls back to weekend_starter
-    // at 85 IP regardless of actual usage).
-    step("refreshPaIpFromMaster");
+    // Either projections allowed OR lock is set (TB depth seed reads locked
+    // regular-season values, so postseason-inclusive players.pa is safe).
+    if (noProjections && lockIsSet) {
+      ok(`Lock detected — refreshing players.pa/players.ip safely (TB depth seed reads from Master.regular_season_pa).`);
+    }
     try {
       const start = Date.now();
       const res = await refreshPaIpFromMaster(season);
