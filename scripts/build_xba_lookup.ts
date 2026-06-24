@@ -46,21 +46,25 @@ interface Bucket {
 }
 
 async function fetchAllBattedBalls(): Promise<Bucket[]> {
-  console.log("Scanning pitch_log for batted balls...");
+  console.log("Scanning pitch_log for batted balls (keyset pagination on uniq_pitch_id)...");
   const buckets = new Map<string, Bucket>();
-  // Supabase PostgREST caps default responses at 1000. We page by that size
-  // and only stop when an empty page returns.
+  // Keyset pagination — OFFSET-based pagination times out at ~77K rows because
+  // Postgres re-scans from row 0 each page. Keyset ordered by uniq_pitch_id PK
+  // is index-only and constant-time per page.
   const PAGE = 1000;
-  let from = 0;
+  let lastId = "";
   let total = 0;
   while (true) {
-    const { data, error } = await (supabase as any)
+    let query = (supabase as any)
       .from("pitch_log")
-      .select("exit_velocity, launch_angle, pitch_result_category")
+      .select("uniq_pitch_id, exit_velocity, launch_angle, pitch_result_category")
       .eq("is_batted_ball_in_play", true)
       .not("exit_velocity", "is", null)
       .not("launch_angle", "is", null)
-      .range(from, from + PAGE - 1);
+      .order("uniq_pitch_id", { ascending: true })
+      .limit(PAGE);
+    if (lastId) query = query.gt("uniq_pitch_id", lastId);
+    const { data, error } = await query;
     if (error) {
       console.error("Query error:", error);
       break;
@@ -84,9 +88,9 @@ async function fetchAllBattedBalls(): Promise<Bucket[]> {
       else b.n_out++;
     }
     total += data.length;
+    lastId = data[data.length - 1].uniq_pitch_id;
     if (total % 50000 === 0) console.log(`  scanned ${total.toLocaleString()}...`);
     if (data.length < PAGE) break;
-    from += PAGE;
   }
   console.log(`Scanned ${total.toLocaleString()} batted balls into ${buckets.size} buckets.\n`);
   return Array.from(buckets.values());
