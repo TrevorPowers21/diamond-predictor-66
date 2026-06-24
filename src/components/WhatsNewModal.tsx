@@ -3,7 +3,7 @@ import { Sparkles, ArrowLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const STORAGE_KEY = "rstr_iq_whats_new_seen_v5";
+const STORAGE_KEY = "rstr_iq_whats_new_seen_v6";
 
 type Feature = {
   title: string;
@@ -19,6 +19,38 @@ type Release = {
 };
 
 const RELEASES: Release[] = [
+  {
+    date: "2026-06-23",
+    headline: "Comprehensive 2026 statistical analysis — filter every D1 player by velocity, Stuff+, handedness, and more",
+    features: [
+      {
+        title: "New Stats Tab on Every Player Profile",
+        tagline:
+          "Every D1 hitter and pitcher now has a Stats tab on their profile that breaks their full 2026 season down across the splits that actually matter to a coach. See the same player in 16 different lenses — vs LHP, vs RHP, vs 92+ velo, vs fastballs, vs breaking balls, vs offspeed, vs the top half of hitters, against 100+ Stuff+ arms, and more. Each filter re-renders the slash line, plate discipline, contact quality, and percentile bars vs the qualified D1 pop in place.",
+        details: [
+          "Hitter splits: vs LHP, vs RHP, vs 92+ velo, vs fastball / breaking / offspeed, vs 100+ Stuff+ arms, vs 105+ Stuff+ arms.",
+          "Pitcher splits: same handedness + velocity + pitch-family lenses, plus vs the top 25% of hitters by quality.",
+          "Percentile bars on every rate metric show where the player ranks against the full ~3,600 qualified D1 hitters or pitchers, recomputed for each filter slice.",
+          "NCAA Avg reference shown next to each bar is now a true weighted league average (total hits / total AB across every qualified player) instead of the median player — matches the way you actually talk about league AVG with your staff.",
+        ],
+      },
+      {
+        title: "Statcast-Style Expected Stats: xBA, xSLG, xwOBA",
+        tagline:
+          "Every batted ball this season has been bucketed by Exit Velocity and Launch Angle, with hit probability derived from actual 2026 D1 outcomes. The new Expected Stats panel surfaces xBA, xSLG, and xwOBA for hitters, plus xBA-against and xSLG-against for pitchers — calibrated to this season's distribution, not borrowed MLB numbers.",
+        details: [
+          "Tells you whether a hitter's .333 average is backed by .333-quality contact or running hot on weak liners that found grass.",
+          "On the pitcher side, an arm whose BAA is .180 but whose xBA-against is .240 has been benefiting from team defense — surfaces that gap so you can pressure-test the line.",
+          "Tracking-reliability badge on the panel header — partial-tracking players (yellow PARTIAL chip) or low-tracking players (red LOW TRACKING chip) get flagged so you know when contact-quality numbers are based on a thin sample.",
+        ],
+      },
+    ],
+    whatElse: [
+      "Tracking-reliability check is applied to xStats too — partial-tracking players get fallback to actual outcomes so xBA isn't artificially deflated by missing radar data.",
+      "Pitcher Profile Stuff+ overview now reads from the same source as the Stats page, so the headline number and the per-pitch breakdown agree.",
+      "Pitch arsenal panel on Pitcher Profile reads from the 2026 pitch-level source, so every offering a pitcher threw shows up with the right usage %, Stuff+, and Whiff%.",
+    ],
+  },
   {
     date: "2026-06-14",
     headline: "Team Builder target board is now a true shopping list",

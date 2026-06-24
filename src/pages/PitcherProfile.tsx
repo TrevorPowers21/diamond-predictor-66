@@ -26,6 +26,9 @@ import { useConferenceStats } from "@/hooks/useConferenceStats";
 import { downloadSinglePlayerReport, type ReportPlayer } from "@/components/ScoutingReport";
 import { AiScoutingReportBody } from "@/components/AiScoutingReport";
 import { useScoutingReport } from "@/hooks/useScoutingReport";
+import { usePitchLog2026PitcherRates } from "@/hooks/usePitchLog2026PitcherRates";
+import { usePitchLog2026PitcherPop } from "@/hooks/usePitchLog2026PitcherPop";
+import { percentileRank } from "@/savant/lib/percentile";
 import CoachNotes from "@/components/CoachNotes";
 import { ABSComparisonTable } from "@/components/ABSComparisonTable";
 import { useCoachNotes } from "@/hooks/useCoachNotes";
@@ -41,6 +44,7 @@ import { generatePitcherReport } from "@/lib/scoutingReportGenerator";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
 import { MarketPayLogButton } from "@/components/MarketPayLogButton";
+import PlayerPageTabs from "@/components/PlayerPageTabs";
 import { PortalTeamCards } from "@/components/PortalTeamCards";
 import {
   computePitcherWar,
@@ -129,6 +133,9 @@ const PITCH_TYPE_LABELS: Record<string, string> = {
   "4S FB": "4-Seam FB",
   "FOUR-SEAM": "4-Seam FB",
   "FF": "4-Seam FB",
+  // pitch_log_pitcher_by_pitch_type uses these long labels
+  "4-Seam Fastball": "4-Seam FB",
+  "4-SEAM FASTBALL": "4-Seam FB",
   SI: "Sinker",
   SINKER: "Sinker",
   Sinker: "Sinker",
@@ -158,7 +165,22 @@ const PITCH_TYPE_LABELS: Record<string, string> = {
   FS: "Splitter",
 };
 
-const PITCH_DISPLAY_ORDER = ["4S", "4S FB", "SI", "SINKER", "Sinker", "CT", "CUTTER", "Cutter", "GYRO SLIDER", "Gyro Slider", "SL", "SLIDER", "Slider", "SWP", "SWEEPER", "Sweeper", "CB", "CURVEBALL", "Curveball", "CH", "CHANGE-UP", "Change-up", "SP", "SPLITTER", "Splitter"] as const;
+// Pitch arsenal sort order: fastball variants → cutter → slider family
+// (gyro / sweeper / slider) → curveball → off-speed (change-up / splitter).
+// Includes legacy short codes ("4S", "SI"...), legacy all-caps from
+// pre-2026 PSP-I, and the modern mixed-case pitch_log labels
+// ("4-Seam Fastball", "Sinker"...) so both display layers sort correctly.
+const PITCH_DISPLAY_ORDER = [
+  "4S", "4S FB", "4-SEAM FASTBALL", "4-Seam Fastball",
+  "SI", "SINKER", "Sinker",
+  "CT", "CUTTER", "Cutter",
+  "GYRO SLIDER", "Gyro Slider",
+  "SL", "SLIDER", "Slider",
+  "SWP", "SWEEPER", "Sweeper",
+  "CB", "CURVEBALL", "Curveball",
+  "CH", "CHANGE-UP", "Change-up", "Changeup", "CHANGEUP",
+  "SP", "SPLITTER", "Splitter",
+] as const;
 
 const PITCHER_PROFILE_STORAGE_OVERRIDE_KEY = "pitcher_profile_projection_overrides_v1";
 const getPitchingPvfForRole = (
@@ -405,6 +427,15 @@ export default function PitcherProfile() {
 
   const { data: aiScoutingReport } = useScoutingReport(player?.id, "pitcher");
 
+  // pitch_log 2026 pitcher rates + league pop for percentile-rank scouting
+  // grades (aligns PitcherProfile with the Pitcher Stats page percentile bars).
+  // Internal `enabled` guards prevent fetching until the player query resolves;
+  // pop hook fetches once per session (30-min cache).
+  const pitchLog2026PitcherRatesQuery = usePitchLog2026PitcherRates(
+    (player as any)?.source_player_id ?? null,
+  );
+  const pitchLog2026PitcherPopQuery = usePitchLog2026PitcherPop();
+
   const { data: seasonStats = [] } = useQuery({
     queryKey: ["pitcher-profile-season-stats", id],
     enabled: !!id && isDbRoute,
@@ -593,13 +624,56 @@ export default function PitcherProfile() {
 
       const seasonsToQuery = arsenalCombineSeasons.seasons;
 
-      // Primary: pull from pitcher_stuff_plus_inputs across all blended seasons
-      const { data: stuffRows, error } = await (supabase as any)
-        .from("pitcher_stuff_plus_inputs")
-        .select("season, source_player_id, hand, pitch_type, pitches, whiff_pct, stuff_plus")
-        .eq("source_player_id", sourceId)
-        .in("season", seasonsToQuery)
-        .order("pitches", { ascending: false });
+      // PITCH_LOG (Switch #1, 2026-06-23): for the 2026 portion of the
+      // arsenal, prefer pitch_log over PSP-I. PSP-I drops pitches that
+      // didn't survive the Stuff+ pipeline (Cody Howard's 4-Seam Fastball
+      // is missing entirely from PSP-I despite being 57.8% of his
+      // pitches), so usage% re-normalizes against a partial subset and
+      // misleads coaches. pitch_log counts every pitch. Prior seasons
+      // still come from PSP-I until/unless we backfill the pipeline.
+      const pitcherThrowsHand = (player as any)?.throws_hand
+        ?? (player as any)?.ThrowHand
+        ?? "R";
+      let plog2026Rows: any[] = [];
+      if (seasonsToQuery.includes(2026)) {
+        const { data: plog } = await (supabase as any)
+          .from("pitch_log_pitcher_by_pitch_type")
+          .select("pitch_type_reclassified, pitches, swings, whiffs, stuff_plus_sum, data_pitches")
+          .eq("pitcher_id", sourceId)
+          .eq("season", 2026)
+          .eq("dimension_key", "all");
+        plog2026Rows = (plog ?? [])
+          .filter((r: any) => r.pitch_type_reclassified && r.pitches > 0)
+          .map((r: any) => ({
+            season: 2026,
+            source_player_id: sourceId,
+            hand: pitcherThrowsHand,
+            pitch_type: r.pitch_type_reclassified,
+            pitches: r.pitches,
+            whiff_pct: r.swings > 0 ? (r.whiffs / r.swings) * 100 : null,
+            stuff_plus: r.data_pitches > 0 ? r.stuff_plus_sum / r.data_pitches : null,
+          }));
+      }
+
+      // Pull PSP-I for the seasons NOT covered by pitch_log (i.e., prior
+      // seasons in a blend). Skip 2026 PSP-I when pitch_log returned rows.
+      const pspSeasonsToQuery = plog2026Rows.length > 0
+        ? seasonsToQuery.filter((s) => s !== 2026)
+        : seasonsToQuery;
+
+      let pspRows: any[] = [];
+      if (pspSeasonsToQuery.length > 0) {
+        const { data } = await (supabase as any)
+          .from("pitcher_stuff_plus_inputs")
+          .select("season, source_player_id, hand, pitch_type, pitches, whiff_pct, stuff_plus")
+          .eq("source_player_id", sourceId)
+          .in("season", pspSeasonsToQuery)
+          .order("pitches", { ascending: false });
+        pspRows = data ?? [];
+      }
+
+      const stuffRows = [...plog2026Rows, ...pspRows];
+      const error = null;
 
       if (!error && stuffRows && stuffRows.length > 0) {
         // Aggregate per (pitch_type, hand): sum pitches, pitch-weighted stuff_plus and whiff_pct
@@ -1361,7 +1435,10 @@ export default function PitcherProfile() {
         const pitchCount = row.total_pitches == null ? null : Number(row.total_pitches);
         const usagePct = pitchCount != null && totalAll != null && totalAll > 0 ? (pitchCount / totalAll) * 100 : null;
         return {
-          pitchType: String(row.pitch_type || "").trim().toUpperCase(),
+          // Preserve case from the data source — pitch_log returns
+          // "4-Seam Fastball" etc. PSP-I returns mixed case. Display
+          // them as-is rather than shouting "4-SEAM FASTBALL" at coaches.
+          pitchType: String(row.pitch_type || "").trim(),
           hand: row.hand ?? null,
           stuffPlus: row.stuff_plus == null ? null : Number(row.stuff_plus),
           usagePct,
@@ -1448,6 +1525,7 @@ export default function PitcherProfile() {
   return (
     <DashboardLayout>
       <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
+        {id && <PlayerPageTabs playerId={id} kind="pitcher" />}
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
@@ -1540,8 +1618,8 @@ export default function PitcherProfile() {
                       market_value: projectedPitching.marketValue,
                       nil_value: projectedPitching.marketValue,
                       overall_pr_plus: internalPowerRatings?.overallPlus,
-                      stuff_plus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
-                      whiff_pct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                      stuff_plus: pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus,
+                      whiff_pct: pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct,
                       // Stf+ stays client-computed until next computeAndStoreScores
                       // populates stuff_score. Other 3 read from pred (1=1).
                       stuff_score: internalPowerRatings?.scores?.stuff,
@@ -1575,8 +1653,8 @@ export default function PitcherProfile() {
                           whip: (masterRow as any)?.whip, k9: (masterRow as any)?.k9,
                           bb9: (masterRow as any)?.bb9, hr9: (masterRow as any)?.hr9,
                           ip: (masterRow as any)?.combined_ip ?? (masterRow as any)?.ip ?? (masterRow as any)?.IP,
-                          stuffPlus: (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
-                          whiffPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                          stuffPlus: pitchArsenal.overallStuffPlus ?? (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus,
+                          whiffPct: pitchArsenal.overallWhiffPct ?? (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct,
                           izWhiffPct: (projectionSourceRow as any)?.in_zone_whiff_pct ?? internalPowerRatings?.metrics?.izWhiff,
                           chasePct: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase,
                           bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb,
@@ -1606,8 +1684,8 @@ export default function PitcherProfile() {
                       careerSeasons: pitcherMasterSeasons as any[],
                       ip: (masterRow as any)?.combined_ip ?? (masterRow as any)?.ip ?? (masterRow as any)?.IP ?? null,
                       classYear: displayClass || undefined,
-                      stuffPlus: (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
-                      whiffPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                      stuffPlus: pitchArsenal.overallStuffPlus ?? (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus,
+                      whiffPct: pitchArsenal.overallWhiffPct ?? (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct,
                       bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb,
                       chase: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase,
                       barrel: (projectionSourceRow as any)?.barrel_pct ?? internalPowerRatings?.metrics?.barrel,
@@ -1719,8 +1797,8 @@ export default function PitcherProfile() {
                     nil_value: projectedPitching.marketValue,
                     overall_pr_plus: internalPowerRatings?.overallPlus,
                     // Scouting scores
-                    stuff_plus: (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
-                    whiff_pct: (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                    stuff_plus: pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus,
+                    whiff_pct: pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct,
                     // Stf+ stays client-computed until next computeAndStoreScores
                     // populates stuff_score. Other 3 read from pred (1=1).
                     stuff_score: internalPowerRatings?.scores?.stuff,
@@ -1762,8 +1840,8 @@ export default function PitcherProfile() {
                         whip: (masterRow as any)?.whip, k9: (masterRow as any)?.k9,
                         bb9: (masterRow as any)?.bb9, hr9: (masterRow as any)?.hr9,
                         ip: (masterRow as any)?.combined_ip ?? (masterRow as any)?.ip ?? (masterRow as any)?.IP,
-                        stuffPlus: (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
-                        whiffPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                        stuffPlus: pitchArsenal.overallStuffPlus ?? (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus,
+                        whiffPct: pitchArsenal.overallWhiffPct ?? (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct,
                         izWhiffPct: (projectionSourceRow as any)?.in_zone_whiff_pct ?? internalPowerRatings?.metrics?.izWhiff,
                         chasePct: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase,
                         bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb,
@@ -1793,8 +1871,8 @@ export default function PitcherProfile() {
                     careerSeasons: pitcherMasterSeasons as any[],
                     ip: (masterRow as any)?.combined_ip ?? (masterRow as any)?.ip ?? (masterRow as any)?.IP ?? null,
                     classYear: displayClass || undefined,
-                    stuffPlus: (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
-                    whiffPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                    stuffPlus: pitchArsenal.overallStuffPlus ?? (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus,
+                    whiffPct: pitchArsenal.overallWhiffPct ?? (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct,
                     bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb,
                     chase: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase,
                     barrel: (projectionSourceRow as any)?.barrel_pct ?? internalPowerRatings?.metrics?.barrel,
@@ -1840,11 +1918,8 @@ export default function PitcherProfile() {
             </Card>
 
             {(() => {
-              const sp = (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus;
-              const combinedUsedForOverview = !!(masterRow as any)?.combined_used;
-              const wp = combinedUsedForOverview
-                ? (pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null)
-                : ((masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct);
+              const sp = pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus;
+              const wp = pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null;
               const hasArsenal = pitchArsenal.rows.length > 0;
               const hasAnySignal = sp != null || wp != null || hasArsenal;
               if (!hasAnySignal) {
@@ -1877,7 +1952,14 @@ export default function PitcherProfile() {
                 <CardContent className="px-4 pb-4">
                   <div className="grid grid-cols-2 gap-3">
                     {(() => {
-                      const sp = (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus;
+                      // Stuff+ on the Stuff+ Overview card uses the
+                      // direct pitch_log totals value (stuff_plus_sum /
+                      // stuff_plus_data_pitches) — exactly what Stats
+                      // shows — so the two surfaces report the same
+                      // number to coaches. Arsenal-derived weighted is
+                      // the fallback (close but not identical), then PM.
+                      const plOverall = pitchLog2026PitcherRatesQuery.data?.stuffPlus ?? null;
+                      const sp = plOverall ?? pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus;
                       const tierStyle = sp == null ? { border: "#162241", bg: "#0d1a30", text: "#8a94a6" }
                         : sp >= 103 ? { border: "hsl(142,71%,45%,0.3)", bg: "hsl(142,71%,45%,0.12)", text: "hsl(142,71%,35%)" }
                         : sp >= 98 ? { border: "hsl(200,80%,50%,0.3)", bg: "hsl(200,80%,50%,0.12)", text: "hsl(200,80%,35%)" }
@@ -1892,11 +1974,15 @@ export default function PitcherProfile() {
                       );
                     })()}
                     {(() => {
-                      // For pullback pitchers (combined_used), prefer arsenal-derived whiff% which is blend-aware.
-                      const combinedUsedForOverview = !!(masterRow as any)?.combined_used;
-                      const wp = combinedUsedForOverview
-                        ? (pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null)
-                        : ((masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct);
+                      // Whiff% on the Stuff+ Overview card uses the
+                      // direct pitch_log overall (total_whiffs /
+                      // total_swings) — exactly what the Pitcher Stats
+                      // page shows — so the two surfaces report the
+                      // same number to coaches. Per-pitch weighted
+                      // arsenal Whiff% is a fallback (close but not
+                      // identical to direct overall), then PM stored.
+                      const plOverall = pitchLog2026PitcherRatesQuery.data?.whiff ?? null;
+                      const wp = plOverall ?? pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null;
                       const tierStyle = wp == null ? { border: "#162241", bg: "#0d1a30", text: "#8a94a6" }
                         : wp >= 27 ? { border: "hsl(142,71%,45%,0.3)", bg: "hsl(142,71%,45%,0.12)", text: "hsl(142,71%,35%)" }
                         : wp >= 21 ? { border: "hsl(200,80%,50%,0.3)", bg: "hsl(200,80%,50%,0.12)", text: "hsl(200,80%,35%)" }
@@ -2187,10 +2273,31 @@ export default function PitcherProfile() {
               </CardHeader>
               <CardContent className="px-4 pb-4">
                 <div className="grid grid-cols-4 gap-2">
-                  <ScoutGrade value={internalPowerRatings?.scores?.stuff ?? null} fullLabel="Stuff+" />
-                  <ScoutGrade value={internalPowerRatings?.scores?.whiff ?? null} fullLabel="Whiff%" />
-                  <ScoutGrade value={internalPowerRatings?.scores?.bb ?? null} fullLabel="BB%" />
-                  <ScoutGrade value={internalPowerRatings?.scores?.barrel ?? null} fullLabel="Barrel%" />
+                  {(() => {
+                    // Switch #5 alignment 2026-06-23: replace normal-distribution
+                    // scoring (scoreFromMetric vs static p_ncaa_avg baselines)
+                    // with live percentile rank against the qualified pitch_log
+                    // 2026 pitcher population. Same methodology and same pop
+                    // the Pitcher Stats page percentile bars use, so a coach
+                    // sees the same percentile on Overview and Stats.
+                    // Fallback: stored / normal-dist when pop or rates not yet loaded.
+                    const plRates = pitchLog2026PitcherRatesQuery.data;
+                    const plPop = pitchLog2026PitcherPopQuery.data ?? [];
+                    const livePercentile = plRates?.hasData && plPop.length > 0 ? {
+                      stuff: percentileRank(plRates.stuffPlus, plPop.map(p => p.stuffPlus)),
+                      whiff: percentileRank(plRates.whiff, plPop.map(p => p.whiff)),
+                      bb: percentileRank(plRates.bb, plPop.map(p => p.bb), { invert: true }),
+                      barrel: percentileRank(plRates.barrel, plPop.map(p => p.barrel), { invert: true }),
+                    } : null;
+                    return (
+                      <>
+                        <ScoutGrade value={livePercentile?.stuff ?? internalPowerRatings?.scores?.stuff ?? null} fullLabel="Stuff+" />
+                        <ScoutGrade value={livePercentile?.whiff ?? internalPowerRatings?.scores?.whiff ?? null} fullLabel="Whiff%" />
+                        <ScoutGrade value={livePercentile?.bb ?? internalPowerRatings?.scores?.bb ?? null} fullLabel="BB%" />
+                        <ScoutGrade value={livePercentile?.barrel ?? internalPowerRatings?.scores?.barrel ?? null} fullLabel="Barrel%" />
+                      </>
+                    );
+                  })()}
                 </div>
               </CardContent>
             </Card>
@@ -2261,8 +2368,8 @@ export default function PitcherProfile() {
                 // shows arsenal-quality tier (N/A if no TrackMan).
                 return <JucoPitcherRiskCard input={{
                   projectedPrvPlus: prvForRisk,
-                  stuffPlus: (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
-                  missPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                  stuffPlus: pitchArsenal.overallStuffPlus ?? (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus,
+                  missPct: pitchArsenal.overallWhiffPct ?? (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct,
                   bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb ?? null,
                   chasePct: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase ?? null,
                   barrelPct: (projectionSourceRow as any)?.barrel_pct ?? internalPowerRatings?.metrics?.barrel ?? null,
@@ -2285,8 +2392,8 @@ export default function PitcherProfile() {
                 confHitterTalentPlus: confHTP,
                 careerSeasons: pitcherMasterSeasons as any[],
                 ip: (masterRow as any)?.combined_ip ?? (masterRow as any)?.ip ?? (masterRow as any)?.IP ?? null, classYear: displayClass || undefined,
-                stuffPlus: (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
-                whiffPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                stuffPlus: pitchArsenal.overallStuffPlus ?? (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus,
+                whiffPct: pitchArsenal.overallWhiffPct ?? (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct,
                 bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb,
                 chase: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase,
                 barrel: (projectionSourceRow as any)?.barrel_pct ?? internalPowerRatings?.metrics?.barrel,
@@ -2320,8 +2427,8 @@ export default function PitcherProfile() {
                 whip: (masterRow as any)?.whip, k9: (masterRow as any)?.k9,
                 bb9: (masterRow as any)?.bb9, hr9: (masterRow as any)?.hr9,
                 ip: (masterRow as any)?.combined_ip ?? (masterRow as any)?.ip ?? (masterRow as any)?.IP,
-                stuffPlus: (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus ?? pitchArsenal.overallStuffPlus,
-                whiffPct: (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct ?? pitchArsenal.overallWhiffPct,
+                stuffPlus: pitchArsenal.overallStuffPlus ?? (projectionSourceRow as any)?.stuffPlus ?? (masterRow as any)?.stuffPlus,
+                whiffPct: pitchArsenal.overallWhiffPct ?? (projectionSourceRow as any)?.miss_pct ?? (masterRow as any)?.miss_pct,
                 izWhiffPct: (projectionSourceRow as any)?.in_zone_whiff_pct ?? internalPowerRatings?.metrics?.izWhiff,
                 chasePct: (projectionSourceRow as any)?.chase_pct ?? internalPowerRatings?.metrics?.chase,
                 bbPct: (projectionSourceRow as any)?.bb_pct ?? internalPowerRatings?.metrics?.bb,

@@ -18,9 +18,13 @@ import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useHitterSeedData } from "@/hooks/useHitterSeedData";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
+import { usePitchLog2026HitterRates } from "@/hooks/usePitchLog2026HitterRates";
+import { usePitchLog2026HitterPop } from "@/hooks/usePitchLog2026HitterPop";
+import { percentileRank } from "@/savant/lib/percentile";
 import { recalculatePredictionById } from "@/lib/predictionEngine";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
 import { MarketPayLogButton } from "@/components/MarketPayLogButton";
+import PlayerPageTabs from "@/components/PlayerPageTabs";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
 import { useTeamsTable } from "@/hooks/useTeamsTable";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
@@ -248,6 +252,21 @@ export default function PlayerProfile() {
   });
 
   const { data: aiScoutingReport } = useScoutingReport(player?.id, "hitter");
+
+  // pitch_log 2026 hitter rates — invoked unconditionally up here so the
+  // hook call order is stable across the !player early return below.
+  // Internal `enabled: !!sourcePlayerId` guard prevents fetching until
+  // the player query resolves.
+  const pitchLogRatesQuery = usePitchLog2026HitterRates(
+    (player as any)?.source_player_id ?? null,
+  );
+
+  // pitch_log 2026 qualified hitter population for percentile-rank
+  // scouting grades (Switch #5 alignment 2026-06-23). Cached for the
+  // session — one fetch shared across all Profile views. Lets the
+  // scouting card display percentile ranks that match the Season Stats
+  // page percentile bars exactly.
+  const pitchLogPopQuery = usePitchLog2026HitterPop();
 
   const { data: predictions = [], isLoading: isPredictionsLoading } = useQuery({
     queryKey: ["player-predictions", id, effectiveTeamId],
@@ -780,21 +799,70 @@ export default function PlayerProfile() {
   // Falls back to seedPowerDerived (2025) when no Hitter Master row exists for the selected season
   const activeSeasonRow = (hitterMasterSeasons as any[]).find((r) => Number(r.Season) === effectiveSeason) || null;
 
+  // pitch_log hook intentionally consumed here (after the !player early
+  // return). The actual useQuery call lives ABOVE that return — see the
+  // `pitchLogRatesQuery` line in the top hook section. React requires
+  // hook call order to be stable across renders, so we read its data
+  // here but invoke it earlier.
+  const pitchLogRates = pitchLogRatesQuery.data;
+  const pitchLogPop = pitchLogPopQuery.data ?? [];
+
+  // Switch #5 alignment (2026-06-23): replace normal-distribution scoring
+  // with live percentile rank against the pitch_log qualified population.
+  // This makes the Overview scouting grade EQUAL the percentile shown on
+  // the Season Stats page percentile bars (e.g., Hudson Brown's contact
+  // grade here matches his contact% rank on Stats).
+  const pitchLogPercentileGrades = pitchLogRates?.hasData && pitchLogPop.length > 0
+    ? {
+        contactScore: percentileRank(pitchLogRates.contact, pitchLogPop.map(p => p.contact)),
+        chaseScore: percentileRank(pitchLogRates.chase, pitchLogPop.map(p => p.chase), { invert: true }),
+        barrelScore: percentileRank(pitchLogRates.barrel, pitchLogPop.map(p => p.barrel)),
+        avgEVScore: percentileRank(pitchLogRates.avgExitVelo, pitchLogPop.map(p => p.avgExitVelo)),
+        bbScore: percentileRank(pitchLogRates.bb, pitchLogPop.map(p => p.bb)),
+        lineDriveScore: percentileRank(pitchLogRates.lineDrive, pitchLogPop.map(p => p.lineDrive)),
+        popUpScore: percentileRank(pitchLogRates.popUp, pitchLogPop.map(p => p.popUp), { invert: true }),
+        laScore: percentileRank(pitchLogRates.la1030, pitchLogPop.map(p => p.la1030)),
+        gbScore: percentileRank(pitchLogRates.gb, pitchLogPop.map(p => p.gb), { invert: true }),
+      }
+    : null;
+
+  // Legacy normal-distribution scoring (fallback when pop is still loading).
+  const pitchLogPowerDerived = pitchLogRates?.hasData
+    ? computeHitterPowerRatings({
+        contact: pitchLogRates.contact,
+        lineDrive: pitchLogRates.lineDrive,
+        avgExitVelo: pitchLogRates.avgExitVelo,
+        popUp: pitchLogRates.popUp,
+        bb: pitchLogRates.bb,
+        chase: pitchLogRates.chase,
+        barrel: pitchLogRates.barrel,
+        ev90: pitchLogRates.ev90,
+        pull: pitchLogRates.pull,
+        la10_30: pitchLogRates.la10_30,
+        gb: pitchLogRates.gb,
+      } as any)
+    : null;
+
   const activeSeasonScoutingGrades = activeSeasonRow ? {
-    // Trust the stored Hitter Master.X_score (populated by computeAndStoreScores).
-    // No client-side derivation fallback — null displays as "—" instead of risking
-    // divergence from the canonical precomputed value.
-    barrelScore: activeSeasonRow.barrel_score ?? null,
-    avgEVScore: activeSeasonRow.avg_ev_score ?? null,
-    contactScore: activeSeasonRow.contact_score ?? null,
-    chaseScore: activeSeasonRow.chase_score ?? null,
-    bbScore: activeSeasonRow.bb_score ?? seedPowerDerived?.bbScore ?? null,
-    lineDriveScore: activeSeasonRow.line_drive_score ?? seedPowerDerived?.lineDriveScore ?? null,
-    popUpScore: activeSeasonRow.pop_up_score ?? seedPowerDerived?.popUpScore ?? null,
+    // Priority chain per metric:
+    //   pitch_log percentile rank (matches Season Stats bars exactly)
+    //   → pitch_log normal-dist score (only when pop is still loading)
+    //   → stored Hitter Master.X_score (computeAndStoreScores output)
+    //   → seedPowerDerived (2025 carry-forward).
+    barrelScore: pitchLogPercentileGrades?.barrelScore ?? pitchLogPowerDerived?.barrelScore ?? activeSeasonRow.barrel_score ?? null,
+    avgEVScore: pitchLogPercentileGrades?.avgEVScore ?? pitchLogPowerDerived?.avgEVScore ?? activeSeasonRow.avg_ev_score ?? null,
+    contactScore: pitchLogPercentileGrades?.contactScore ?? pitchLogPowerDerived?.contactScore ?? activeSeasonRow.contact_score ?? null,
+    chaseScore: pitchLogPercentileGrades?.chaseScore ?? pitchLogPowerDerived?.chaseScore ?? activeSeasonRow.chase_score ?? null,
+    bbScore: pitchLogPercentileGrades?.bbScore ?? pitchLogPowerDerived?.bbScore ?? activeSeasonRow.bb_score ?? seedPowerDerived?.bbScore ?? null,
+    lineDriveScore: pitchLogPercentileGrades?.lineDriveScore ?? pitchLogPowerDerived?.lineDriveScore ?? activeSeasonRow.line_drive_score ?? seedPowerDerived?.lineDriveScore ?? null,
+    popUpScore: pitchLogPercentileGrades?.popUpScore ?? pitchLogPowerDerived?.popUpScore ?? activeSeasonRow.pop_up_score ?? seedPowerDerived?.popUpScore ?? null,
+    // ev90 + pull stay on stored HM — pitch_log can't derive them yet.
     ev90Score: activeSeasonRow.ev90_score ?? seedPowerDerived?.ev90Score ?? null,
     pullScore: activeSeasonRow.pull_score ?? seedPowerDerived?.pullScore ?? null,
-    laScore: activeSeasonRow.la_score ?? seedPowerDerived?.laScore ?? null,
-    gbScore: activeSeasonRow.gb_score ?? seedPowerDerived?.gbScore ?? null,
+    laScore: pitchLogPercentileGrades?.laScore ?? pitchLogPowerDerived?.laScore ?? activeSeasonRow.la_score ?? seedPowerDerived?.laScore ?? null,
+    gbScore: pitchLogPercentileGrades?.gbScore ?? pitchLogPowerDerived?.gbScore ?? activeSeasonRow.gb_score ?? seedPowerDerived?.gbScore ?? null,
+    // Overall power-rating roll-ups stay on stored HM (these feed
+    // pWAR / market-value paths Trevor flagged as untouchable).
     baPlus: activeSeasonRow.ba_power_rating ?? seedPowerDerived?.baPlus ?? null,
     obpPlus: activeSeasonRow.obp_power_rating ?? seedPowerDerived?.obpPlus ?? null,
     isoPlus: activeSeasonRow.iso_power_rating ?? seedPowerDerived?.isoPlus ?? null,
@@ -905,6 +973,7 @@ export default function PlayerProfile() {
   return (
     <DashboardLayout>
       <div className="space-y-4 max-w-[1400px] mx-auto">
+        {id && <PlayerPageTabs playerId={id} kind="player" />}
         {/* Back + Header */}
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => returnTo ? navigate(returnTo) : navigate(-1)}>
@@ -1424,16 +1493,28 @@ export default function PlayerProfile() {
                       {(hitterMasterSeasons as any[])
                         .sort((a, b) => Number(a.Season) - Number(b.Season))
                         .map((row: any, i: number) => {
-                          const ops = row.OBP != null && row.SLG != null ? (Number(row.OBP) + Number(row.SLG)) : null;
-                          const iso = row.SLG != null && row.AVG != null ? (Number(row.SLG) - Number(row.AVG)) : null;
+                          // Switch #6 (2026-06-23): for 2026 specifically,
+                          // prefer pitch_log-derived slash + PA. HM's stored
+                          // 2026 row was snapshotted pre-postseason; pitch_log
+                          // includes the May 22-June 16 series. e.g., Hudson
+                          // Brown HM has 177 PA / .341 AVG vs pl 200 PA / .333.
+                          // Falls back to HM when pitch_log has no row.
+                          const isCurrentSeason = Number(row.Season) === 2026;
+                          const pl = isCurrentSeason ? pitchLogRates : null;
+                          const pa = pl?.pa ?? row.pa ?? null;
+                          const avg = pl?.avg ?? (row.AVG != null ? Number(row.AVG) : null);
+                          const obp = pl?.obp ?? (row.OBP != null ? Number(row.OBP) : null);
+                          const slg = pl?.slg ?? (row.SLG != null ? Number(row.SLG) : null);
+                          const ops = obp != null && slg != null ? obp + slg : null;
+                          const iso = avg != null && slg != null ? slg - avg : null;
                           return (
                             <tr key={row.Season} className={`border-b border-[#162241]/60 last:border-0 transition-colors duration-150 hover:bg-[#162241]/40 ${i % 2 === 1 ? "bg-[#0d1a30]" : ""}`}>
                               <td className="py-1.5 pr-1 font-semibold text-white">{row.Season}</td>
                               <td className="py-1.5 px-1 text-[#8a94a6] truncate max-w-[60px]">{teamAbbrev(row.Team, row.TeamID)}</td>
-                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.pa ?? "—"}</td>
-                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.AVG != null ? Number(row.AVG).toFixed(3) : "—"}</td>
-                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.OBP != null ? Number(row.OBP).toFixed(3) : "—"}</td>
-                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{row.SLG != null ? Number(row.SLG).toFixed(3) : "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{pa ?? "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{avg != null ? avg.toFixed(3) : "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{obp != null ? obp.toFixed(3) : "—"}</td>
+                              <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{slg != null ? slg.toFixed(3) : "—"}</td>
                               <td className="py-1.5 px-1 text-right tabular-nums text-slate-200">{ops != null ? ops.toFixed(3) : "—"}</td>
                               <td className="py-1.5 pl-1 text-right tabular-nums text-slate-200">{iso != null ? iso.toFixed(3) : "—"}</td>
                             </tr>

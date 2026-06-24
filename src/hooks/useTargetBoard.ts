@@ -11,6 +11,7 @@ export type PortalStatus = "NOT IN PORTAL" | "WATCHING" | "IN PORTAL" | "COMMITT
 export interface TargetBoardRow {
   id: string;
   player_id: string;
+  source_player_id: string | null;
   notes: string | null;
   added_at: string;
   // joined from players
@@ -50,7 +51,7 @@ export function useTargetBoard() {
     enabled: !!user?.id && !!effectiveTeamId,
     queryFn: async () => {
       const { data, error } = await tb()
-        .select("id, player_id, notes, added_at, players!inner(first_name, last_name, team, conference, position, class_year, portal_status, bats_hand, division)")
+        .select("id, player_id, notes, added_at, players!inner(first_name, last_name, team, conference, position, class_year, portal_status, bats_hand, division, source_player_id)")
         // Team-scoped only — every coach on the team sees the same board.
         .eq("customer_team_id", effectiveTeamId!)
         .order("added_at", { ascending: false });
@@ -60,6 +61,7 @@ export function useTargetBoard() {
       return (data || []).map((row: any) => ({
         id: row.id,
         player_id: row.player_id,
+        source_player_id: row.players.source_player_id ?? null,
         notes: row.notes,
         added_at: row.added_at,
         first_name: row.players.first_name,

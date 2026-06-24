@@ -30,6 +30,8 @@ import DevWeights from "./pages/DevWeights";
 import PlayerComparison from "./pages/PlayerComparison";
 import PlayerProfile from "./pages/PlayerProfile";
 import PitcherProfile from "./pages/PitcherProfile";
+import PlayerStatsPage from "./pages/PlayerStatsPage";
+import PitcherStatsPage from "./pages/PitcherStatsPage";
 import TeamBuilder from "./pages/TeamBuilder";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminTeams from "./pages/admin/AdminTeams";
@@ -92,7 +94,9 @@ const App = () => (
             {/* <Route path="/dashboard/nil" element={<ProtectedRoute><NilValuations /></ProtectedRoute>} /> */}
             <Route path="/dashboard/compare" element={<ProtectedRoute><PlayerComparison /></ProtectedRoute>} />
             <Route path="/dashboard/player/:id" element={<ProtectedRoute><PlayerProfile /></ProtectedRoute>} />
+            <Route path="/dashboard/player/:id/stats" element={<ProtectedRoute><PlayerStatsPage /></ProtectedRoute>} />
             <Route path="/dashboard/pitcher/:id" element={<ProtectedRoute><PitcherProfile /></ProtectedRoute>} />
+            <Route path="/dashboard/pitcher/:id/stats" element={<ProtectedRoute><PitcherStatsPage /></ProtectedRoute>} />
             <Route path="/dashboard/team-builder" element={<ProtectedRoute><TeamBuilder /></ProtectedRoute>} />
             <Route path="/dashboard/targets" element={<ProtectedRoute><Targets /></ProtectedRoute>} />
             {/* Legacy /dashboard/high-follow URL still works — renders the standalone page so bookmarks don't break. */}

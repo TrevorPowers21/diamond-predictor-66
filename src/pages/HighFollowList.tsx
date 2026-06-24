@@ -9,6 +9,9 @@ import { Search, X, ArrowUpDown, Star } from "lucide-react";
 import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { cn } from "@/lib/utils";
 import { useHighFollow, type HighFollowRow } from "@/hooks/useHighFollow";
+import { usePitchLog2026HitterPop } from "@/hooks/usePitchLog2026HitterPop";
+import { usePitchLog2026PitcherPop } from "@/hooks/usePitchLog2026PitcherPop";
+import { percentileRank } from "@/savant/lib/percentile";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { profileRouteFor } from "@/lib/profileRoutes";
@@ -83,6 +86,56 @@ interface HighFollowListProps {
 export default function HighFollowList({ embedded = false }: HighFollowListProps = {}) {
   const { list, isLoading, removePlayer } = useHighFollow();
   const { effectiveTeamId } = useAuth();
+
+  // Live pitch_log percentile-rank scout chips (same as Target Board and
+  // Player Dashboard). Falls back to stored prediction columns when pop
+  // or pitch_log row isn't available. Display-only; no fetch changes.
+  const { data: hitterPop = [] } = usePitchLog2026HitterPop();
+  const { data: pitcherPop = [] } = usePitchLog2026PitcherPop();
+  const hitterPopBySourceId = useMemo(() => {
+    const m = new Map<string, (typeof hitterPop)[number]>();
+    for (const r of hitterPop) m.set(r.sourcePlayerId, r);
+    return m;
+  }, [hitterPop]);
+  const pitcherPopBySourceId = useMemo(() => {
+    const m = new Map<string, (typeof pitcherPop)[number]>();
+    for (const r of pitcherPop) m.set(r.sourcePlayerId, r);
+    return m;
+  }, [pitcherPop]);
+  const hitterPopArrs = useMemo(() => ({
+    barrel: hitterPop.map(r => r.barrel),
+    ev: hitterPop.map(r => r.avgExitVelo),
+    contact: hitterPop.map(r => r.contact),
+    chase: hitterPop.map(r => r.chase),
+  }), [hitterPop]);
+  const pitcherPopArrs = useMemo(() => ({
+    stuff: pitcherPop.map(r => r.stuffPlus),
+    whiff: pitcherPop.map(r => r.whiff),
+    bb: pitcherPop.map(r => r.bb),
+    barrel: pitcherPop.map(r => r.barrel),
+  }), [pitcherPop]);
+  const liveHitterScores = (sourceId: string | null | undefined) => {
+    if (!sourceId || hitterPop.length === 0) return null;
+    const row = hitterPopBySourceId.get(String(sourceId));
+    if (!row) return null;
+    return {
+      barrel: percentileRank(row.barrel, hitterPopArrs.barrel),
+      ev: percentileRank(row.avgExitVelo, hitterPopArrs.ev),
+      contact: percentileRank(row.contact, hitterPopArrs.contact),
+      chase: percentileRank(row.chase, hitterPopArrs.chase, { invert: true }),
+    };
+  };
+  const livePitcherScores = (sourceId: string | null | undefined) => {
+    if (!sourceId || pitcherPop.length === 0) return null;
+    const row = pitcherPopBySourceId.get(String(sourceId));
+    if (!row) return null;
+    return {
+      stuff: percentileRank(row.stuffPlus, pitcherPopArrs.stuff),
+      whiff: percentileRank(row.whiff, pitcherPopArrs.whiff),
+      bb: percentileRank(row.bb, pitcherPopArrs.bb, { invert: true }),
+      barrel: percentileRank(row.barrel, pitcherPopArrs.barrel, { invert: true }),
+    };
+  };
   const [search, setSearch] = useState("");
   const [positionFilters, setPositionFilters] = useState<Set<string>>(new Set());
   const [typeFilter, setTypeFilter] = useState<"hitter" | "pitcher">("hitter");
@@ -528,25 +581,27 @@ export default function HighFollowList({ embedded = false }: HighFollowListProps
                             {/* Scouting */}
                             <TableCell className="text-center">
                               <div className="flex gap-0.5 justify-center flex-wrap">
-                                {isP ? (
-                                  <>
-                                    {/* Stf+ stays client-computed until next computeAndStoreScores
-                                        run populates stuff_score. Other 3 read from pred (1=1). */}
-                                    <ScoutMini label="Stf+" value={r.pitcherProjection?.scores.stuff} />
-                                    <ScoutMini label="Whf" value={pred?.whiff_score} />
-                                    <ScoutMini label="BB" value={pred?.bb_score} />
-                                    <ScoutMini label="Brl" value={pred?.barrel_score} />
-                                  </>
-                                ) : (
-                                  <>
-                                    {/* Stored prediction scores only — 1=1 with Hitter Master via
-                                        propagate_hitter_scores_to_predictions(). No HM fallback. */}
-                                    <ScoutMini label="Brl" value={pred?.barrel_score} />
-                                    <ScoutMini label="EV" value={pred?.ev_score} />
-                                    <ScoutMini label="Con" value={pred?.contact_score} />
-                                    <ScoutMini label="Chs" value={pred?.chase_score} />
-                                  </>
-                                )}
+                                {isP ? (() => {
+                                  const live = livePitcherScores(r.hf.source_player_id);
+                                  return (
+                                    <>
+                                      <ScoutMini label="Stf+" value={live?.stuff ?? r.pitcherProjection?.scores.stuff} />
+                                      <ScoutMini label="Whf" value={live?.whiff ?? pred?.whiff_score} />
+                                      <ScoutMini label="BB" value={live?.bb ?? pred?.bb_score} />
+                                      <ScoutMini label="Brl" value={live?.barrel ?? pred?.barrel_score} />
+                                    </>
+                                  );
+                                })() : (() => {
+                                  const live = liveHitterScores(r.hf.source_player_id);
+                                  return (
+                                    <>
+                                      <ScoutMini label="Brl" value={live?.barrel ?? pred?.barrel_score} />
+                                      <ScoutMini label="EV" value={live?.ev ?? pred?.ev_score} />
+                                      <ScoutMini label="Con" value={live?.contact ?? pred?.contact_score} />
+                                      <ScoutMini label="Chs" value={live?.chase ?? pred?.chase_score} />
+                                    </>
+                                  );
+                                })()}
                               </div>
                             </TableCell>
 

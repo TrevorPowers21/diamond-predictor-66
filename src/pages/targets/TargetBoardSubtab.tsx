@@ -11,6 +11,9 @@ import {
   GripVertical,
 } from "lucide-react";
 import { useTargetBoard, type TargetBoardRow } from "@/hooks/useTargetBoard";
+import { usePitchLog2026HitterPop } from "@/hooks/usePitchLog2026HitterPop";
+import { usePitchLog2026PitcherPop } from "@/hooks/usePitchLog2026PitcherPop";
+import { percentileRank } from "@/savant/lib/percentile";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent } from "@/components/ui/card";
@@ -214,6 +217,59 @@ function SortableRow({ id, children }: SortableRowProps) {
 export default function TargetBoardSubtab() {
   const { board, isLoading, removePlayer } = useTargetBoard();
   const { effectiveTeamId } = useAuth();
+
+  // Live pitch_log percentile-rank scout chips. Cached pop hooks (30 min)
+  // shared with PlayerProfile / PitcherProfile / Stats / Player Dashboard
+  // so the same player sees the same percentile rank across every surface.
+  // Falls back to stored prediction scores when pop or pitch_log row is
+  // missing (JUCO / D2 / off-tracked players). Pure display override —
+  // no data fetching path changes.
+  const { data: hitterPop = [] } = usePitchLog2026HitterPop();
+  const { data: pitcherPop = [] } = usePitchLog2026PitcherPop();
+  const hitterPopBySourceId = useMemo(() => {
+    const m = new Map<string, (typeof hitterPop)[number]>();
+    for (const r of hitterPop) m.set(r.sourcePlayerId, r);
+    return m;
+  }, [hitterPop]);
+  const pitcherPopBySourceId = useMemo(() => {
+    const m = new Map<string, (typeof pitcherPop)[number]>();
+    for (const r of pitcherPop) m.set(r.sourcePlayerId, r);
+    return m;
+  }, [pitcherPop]);
+  const hitterPopArrs = useMemo(() => ({
+    barrel: hitterPop.map(r => r.barrel),
+    ev: hitterPop.map(r => r.avgExitVelo),
+    contact: hitterPop.map(r => r.contact),
+    chase: hitterPop.map(r => r.chase),
+  }), [hitterPop]);
+  const pitcherPopArrs = useMemo(() => ({
+    stuff: pitcherPop.map(r => r.stuffPlus),
+    whiff: pitcherPop.map(r => r.whiff),
+    bb: pitcherPop.map(r => r.bb),
+    barrel: pitcherPop.map(r => r.barrel),
+  }), [pitcherPop]);
+  const liveHitterScores = (sourceId: string | null | undefined) => {
+    if (!sourceId || hitterPop.length === 0) return null;
+    const row = hitterPopBySourceId.get(String(sourceId));
+    if (!row) return null;
+    return {
+      barrel: percentileRank(row.barrel, hitterPopArrs.barrel),
+      ev: percentileRank(row.avgExitVelo, hitterPopArrs.ev),
+      contact: percentileRank(row.contact, hitterPopArrs.contact),
+      chase: percentileRank(row.chase, hitterPopArrs.chase, { invert: true }),
+    };
+  };
+  const livePitcherScores = (sourceId: string | null | undefined) => {
+    if (!sourceId || pitcherPop.length === 0) return null;
+    const row = pitcherPopBySourceId.get(String(sourceId));
+    if (!row) return null;
+    return {
+      stuff: percentileRank(row.stuffPlus, pitcherPopArrs.stuff),
+      whiff: percentileRank(row.whiff, pitcherPopArrs.whiff),
+      bb: percentileRank(row.bb, pitcherPopArrs.bb, { invert: true }),
+      barrel: percentileRank(row.barrel, pitcherPopArrs.barrel, { invert: true }),
+    };
+  };
   const [viewType, setViewType] = useState<ViewType>("hitter");
   const [hitterMode, setHitterMode] = useState<HitterMode>("overall");
   const [search, setSearch] = useState("");
@@ -525,10 +581,21 @@ export default function TargetBoardSubtab() {
                         </TableCell>
                         <TableCell className="text-center p-1">
                           <div className="flex gap-0.5 justify-center flex-wrap">
-                            {(pred?.hitter_barrel_score ?? pred?.barrel_score) != null && <ScoutMiniBox label="Brl" value={pred?.hitter_barrel_score ?? pred?.barrel_score ?? null} />}
-                            {pred?.ev_score != null && <ScoutMiniBox label="EV" value={pred.ev_score} />}
-                            {pred?.contact_score != null && <ScoutMiniBox label="Con" value={pred.contact_score} />}
-                            {pred?.chase_score != null && <ScoutMiniBox label="Chs" value={pred.chase_score} />}
+                            {(() => {
+                              const live = liveHitterScores(r.source_player_id);
+                              const brl = live?.barrel ?? pred?.hitter_barrel_score ?? pred?.barrel_score ?? null;
+                              const ev = live?.ev ?? pred?.ev_score ?? null;
+                              const con = live?.contact ?? pred?.contact_score ?? null;
+                              const chs = live?.chase ?? pred?.chase_score ?? null;
+                              return (
+                                <>
+                                  {brl != null && <ScoutMiniBox label="Brl" value={brl} />}
+                                  {ev != null && <ScoutMiniBox label="EV" value={ev} />}
+                                  {con != null && <ScoutMiniBox label="Con" value={con} />}
+                                  {chs != null && <ScoutMiniBox label="Chs" value={chs} />}
+                                </>
+                              );
+                            })()}
                           </div>
                         </TableCell>
                         <TableCell className="text-center p-0">
@@ -635,10 +702,21 @@ export default function TargetBoardSubtab() {
                         </TableCell>
                         <TableCell className="text-center p-1">
                           <div className="flex gap-0.5 justify-center flex-wrap">
-                            {pred?.stuff_score != null && <ScoutMiniBox label="Stf+" value={pred.stuff_score} />}
-                            {pred?.whiff_score != null && <ScoutMiniBox label="Whf" value={pred.whiff_score} />}
-                            {pred?.bb_score != null && <ScoutMiniBox label="BB%" value={pred.bb_score} />}
-                            {(pred?.pitcher_barrel_score ?? pred?.barrel_score) != null && <ScoutMiniBox label="Brl" value={pred?.pitcher_barrel_score ?? pred?.barrel_score ?? null} />}
+                            {(() => {
+                              const live = livePitcherScores(r.source_player_id);
+                              const stf = live?.stuff ?? pred?.stuff_score ?? null;
+                              const whf = live?.whiff ?? pred?.whiff_score ?? null;
+                              const bb = live?.bb ?? pred?.bb_score ?? null;
+                              const brl = live?.barrel ?? pred?.pitcher_barrel_score ?? pred?.barrel_score ?? null;
+                              return (
+                                <>
+                                  {stf != null && <ScoutMiniBox label="Stf+" value={stf} />}
+                                  {whf != null && <ScoutMiniBox label="Whf" value={whf} />}
+                                  {bb != null && <ScoutMiniBox label="BB%" value={bb} />}
+                                  {brl != null && <ScoutMiniBox label="Brl" value={brl} />}
+                                </>
+                              );
+                            })()}
                           </div>
                         </TableCell>
                         <TableCell className="text-center p-0">
