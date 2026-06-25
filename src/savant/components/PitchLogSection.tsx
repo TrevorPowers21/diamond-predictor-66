@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PercentileBar from "@/savant/components/PercentileBar";
 import { StrikeZonePlot } from "@/savant/components/StrikeZonePlot";
+import { PitchMovementPlot } from "@/savant/components/PitchMovementPlot";
+import { PitchZoneXwoba } from "@/savant/components/PitchZoneXwoba";
+import { PitchZoneUsage } from "@/savant/components/PitchZoneUsage";
+import { PitchZoneWhiff } from "@/savant/components/PitchZoneWhiff";
+import { PitchUsagePie } from "@/savant/components/PitchUsagePie";
+import { PerPitchSuccessTable } from "@/savant/components/PerPitchSuccessTable";
 import { usePitchLogPitchLocation } from "@/savant/hooks/usePitchLogPitchLocation";
 import {
   usePitchLogHitterTotals,
@@ -11,6 +17,7 @@ import { usePitchLogHitterByPitchType } from "@/savant/hooks/usePitchLogHitterBy
 import { usePitcherMaster } from "@/savant/hooks/usePitcherMaster";
 import {
   usePitchLogHitterPopulation,
+  usePitchLogByPitchTypePopulation,
   usePitchLogPitcherPopulation,
 } from "@/savant/hooks/usePitchLogPopulation";
 import { percentileRank } from "@/savant/lib/percentile";
@@ -57,6 +64,270 @@ interface DimensionPickerProps {
   options: readonly DimensionOption[];
   value: PitchLogDimensionKey;
   onChange: (next: PitchLogDimensionKey) => void;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Pitch-type picker (Visuals tab — page-wide filter).
+// Mirrors DimensionPicker styling: Oswald label, gold dot, navy chrome.
+// Default state shows just "PITCH TYPE"; once a type is chosen it
+// shows that pitch's name. "ALL" resets to no filter.
+// ────────────────────────────────────────────────────────────────────
+interface PitchTypePickerProps {
+  pitchTypes: readonly string[];
+  value: string | null; // null = all
+  onChange: (next: string | null) => void;
+}
+
+function PitchTypePicker({ pitchTypes, value, onChange }: PitchTypePickerProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [open]);
+  const label = value ?? "Pitch Type";
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex cursor-pointer items-center gap-2 border px-3 py-1.5 font-[Oswald] text-sm font-bold uppercase tracking-wider transition-colors duration-150 hover:bg-[#D4AF37]/[0.08]"
+        style={{ backgroundColor: "transparent", borderColor: NAVY_BORDER, color: "#FFFFFF" }}
+      >
+        <span style={{ color: GOLD }}>●</span>
+        {label}
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 12 12"
+          fill="none"
+          className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          style={{ color: GOLD }}
+        >
+          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 top-full z-20 mt-1 min-w-[200px] overflow-hidden border shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]"
+          style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
+        >
+          <button
+            type="button"
+            onClick={() => { onChange(null); setOpen(false); }}
+            className="block w-full cursor-pointer px-4 py-2 text-left font-[Oswald] text-sm font-bold leading-none transition-colors duration-150 hover:bg-[#D4AF37]/[0.1]"
+            style={{
+              color: value == null ? GOLD : "#FFFFFF",
+              backgroundColor: value == null ? "rgba(212,175,55,0.06)" : "transparent",
+            }}
+          >
+            All
+          </button>
+          {pitchTypes.map((pt) => {
+            const isActive = pt === value;
+            return (
+              <button
+                key={pt}
+                type="button"
+                onClick={() => { onChange(pt); setOpen(false); }}
+                className="block w-full cursor-pointer px-4 py-2 text-left font-[Oswald] text-sm font-bold leading-none transition-colors duration-150 hover:bg-[#D4AF37]/[0.1]"
+                style={{
+                  color: isActive ? GOLD : "#FFFFFF",
+                  backgroundColor: isActive ? "rgba(212,175,55,0.06)" : "transparent",
+                }}
+              >
+                {pt}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Zone-height picker (Visuals tab — page-wide filter).
+// In-zone slices only: upper / middle / lower thirds of the strike zone.
+// Above/below the zone could be added later if there's a use case;
+// for now we keep it focused on in-zone filtering.
+// Uses pz_norm: > 1/3 = upper, |pz_norm| ≤ 1/3 = middle, < −1/3 = lower.
+// ────────────────────────────────────────────────────────────────────
+type ZoneHeightKey = "all" | "upper" | "middle" | "lower";
+
+const ZONE_HEIGHT_OPTIONS: Array<{ key: ZoneHeightKey; label: string }> = [
+  { key: "all", label: "Height" },
+  { key: "upper", label: "Upper" },
+  { key: "middle", label: "Middle" },
+  { key: "lower", label: "Lower" },
+];
+
+interface ZoneHeightPickerProps {
+  value: ZoneHeightKey;
+  onChange: (next: ZoneHeightKey) => void;
+}
+
+function ZoneHeightPicker({ value, onChange }: ZoneHeightPickerProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [open]);
+  const label = value === "all" ? "Height" : ZONE_HEIGHT_OPTIONS.find((o) => o.key === value)?.label ?? "Height";
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex cursor-pointer items-center gap-2 border px-3 py-1.5 font-[Oswald] text-sm font-bold uppercase tracking-wider transition-colors duration-150 hover:bg-[#D4AF37]/[0.08]"
+        style={{ backgroundColor: "transparent", borderColor: NAVY_BORDER, color: "#FFFFFF" }}
+      >
+        <span style={{ color: GOLD }}>●</span>
+        {label}
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 12 12"
+          fill="none"
+          className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          style={{ color: GOLD }}
+        >
+          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 top-full z-20 mt-1 min-w-[160px] overflow-hidden border shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]"
+          style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
+        >
+          {ZONE_HEIGHT_OPTIONS.map((o) => {
+            const isActive = o.key === value;
+            return (
+              <button
+                key={o.key}
+                type="button"
+                onClick={() => { onChange(o.key); setOpen(false); }}
+                className="block w-full cursor-pointer px-4 py-2 text-left font-[Oswald] text-sm font-bold leading-none transition-colors duration-150 hover:bg-[#D4AF37]/[0.1]"
+                style={{
+                  color: isActive ? GOLD : "#FFFFFF",
+                  backgroundColor: isActive ? "rgba(212,175,55,0.06)" : "transparent",
+                }}
+              >
+                {o.key === "all" ? "All Heights" : o.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function passesZoneHeight(pzNorm: number | null, height: ZoneHeightKey): boolean {
+  if (height === "all") return true;
+  if (pzNorm == null) return false;
+  if (height === "upper") return pzNorm > 1 / 3 && pzNorm <= 1;
+  if (height === "middle") return pzNorm >= -1 / 3 && pzNorm <= 1 / 3;
+  if (height === "lower") return pzNorm < -1 / 3 && pzNorm >= -1;
+  return true;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Zone-side picker — horizontal companion to ZoneHeightPicker.
+// In-zone slices only: left / middle / right thirds (catcher view).
+// Uses px_norm: < −1/3 = left, |px_norm| ≤ 1/3 = middle, > 1/3 = right.
+// ────────────────────────────────────────────────────────────────────
+type ZoneSideKey = "all" | "left" | "middle" | "right";
+
+const ZONE_SIDE_OPTIONS: Array<{ key: ZoneSideKey; label: string }> = [
+  { key: "all", label: "Side" },
+  { key: "left", label: "Left" },
+  { key: "middle", label: "Middle" },
+  { key: "right", label: "Right" },
+];
+
+interface ZoneSidePickerProps {
+  value: ZoneSideKey;
+  onChange: (next: ZoneSideKey) => void;
+}
+
+function ZoneSidePicker({ value, onChange }: ZoneSidePickerProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [open]);
+  const label = value === "all" ? "Side" : ZONE_SIDE_OPTIONS.find((o) => o.key === value)?.label ?? "Side";
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex cursor-pointer items-center gap-2 border px-3 py-1.5 font-[Oswald] text-sm font-bold uppercase tracking-wider transition-colors duration-150 hover:bg-[#D4AF37]/[0.08]"
+        style={{ backgroundColor: "transparent", borderColor: NAVY_BORDER, color: "#FFFFFF" }}
+      >
+        <span style={{ color: GOLD }}>●</span>
+        {label}
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 12 12"
+          fill="none"
+          className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          style={{ color: GOLD }}
+        >
+          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 top-full z-20 mt-1 min-w-[160px] overflow-hidden border shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]"
+          style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
+        >
+          {ZONE_SIDE_OPTIONS.map((o) => {
+            const isActive = o.key === value;
+            return (
+              <button
+                key={o.key}
+                type="button"
+                onClick={() => { onChange(o.key); setOpen(false); }}
+                className="block w-full cursor-pointer px-4 py-2 text-left font-[Oswald] text-sm font-bold leading-none transition-colors duration-150 hover:bg-[#D4AF37]/[0.1]"
+                style={{
+                  color: isActive ? GOLD : "#FFFFFF",
+                  backgroundColor: isActive ? "rgba(212,175,55,0.06)" : "transparent",
+                }}
+              >
+                {o.key === "all" ? "All Sides" : o.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function passesZoneSide(pxNorm: number | null, side: ZoneSideKey): boolean {
+  if (side === "all") return true;
+  if (pxNorm == null) return false;
+  if (side === "left") return pxNorm < -1 / 3 && pxNorm >= -1;
+  if (side === "middle") return pxNorm >= -1 / 3 && pxNorm <= 1 / 3;
+  if (side === "right") return pxNorm > 1 / 3 && pxNorm <= 1;
+  return true;
 }
 
 function DimensionPicker({ options, value, onChange }: DimensionPickerProps) {
@@ -127,11 +398,15 @@ interface StatChipProps {
   label: string;
   value: string;
   emphasize?: boolean;
+  /** Optional small footnote under the value — used to flag stats like
+   *  IP/ERA/FIP that come from season-final Pitching Master and don't
+   *  respond to Visuals filters. */
+  note?: string;
 }
-function StatChip({ label, value, emphasize }: StatChipProps) {
+function StatChip({ label, value, emphasize, note }: StatChipProps) {
   return (
     <div
-      className="flex min-w-[108px] flex-col items-center gap-2 border px-4 py-3.5 transition-colors duration-150"
+      className="relative flex min-w-[108px] flex-col items-center gap-2 border px-4 py-3.5 transition-colors duration-150"
       style={{
         borderColor: emphasize ? "rgba(212,175,55,0.35)" : NAVY_BORDER,
         backgroundColor: NAVY_CARD,
@@ -146,6 +421,11 @@ function StatChip({ label, value, emphasize }: StatChipProps) {
       >
         {value}
       </div>
+      {note && (
+        <div className="pointer-events-none absolute bottom-0.5 left-0 right-0 text-center font-[Archivo_Narrow] text-[7px] font-semibold uppercase tracking-[0.08em] text-white/35">
+          {note}
+        </div>
+      )}
     </div>
   );
 }
@@ -198,9 +478,9 @@ function PitcherStatsLine({
   return (
     <div className="flex flex-wrap gap-2">
       {/* Season aggregates (static — from Pitching Master, NOT filter-aware) */}
-      <StatChip label="IP" value={pm?.IP != null ? pm.IP.toFixed(1) : "—"} emphasize />
-      <StatChip label="ERA" value={pm?.ERA != null ? pm.ERA.toFixed(2) : "—"} emphasize />
-      <StatChip label="FIP" value={pm?.FIP != null ? pm.FIP.toFixed(2) : "—"} emphasize />
+      <StatChip label="IP" value={pm?.IP != null ? pm.IP.toFixed(1) : "—"} emphasize note="*full season" />
+      <StatChip label="ERA" value={pm?.ERA != null ? pm.ERA.toFixed(2) : "—"} emphasize note="*full season" />
+      <StatChip label="FIP" value={pm?.FIP != null ? pm.FIP.toFixed(2) : "—"} emphasize note="*full season" />
       {/* Filter-aware (recomputes from pitch_log per active dimension) */}
       <StatChip label="WHIP" value={whip != null ? whip.toFixed(2) : "—"} />
       <StatChip label="K" value={`${row.total_k}`} />
@@ -223,12 +503,33 @@ function GroupHeader({ children }: { children: React.ReactNode }) {
   );
 }
 
-function PitcherPitchTypeTable({ breakdowns }: { breakdowns: PitchTypeBreakdown[] }) {
+function PitcherPitchTypeTable({
+  breakdowns,
+  filterPitchType = null,
+  minUsagePct = 0.03,
+}: {
+  breakdowns: PitchTypeBreakdown[];
+  filterPitchType?: string | null;
+  minUsagePct?: number;
+}) {
   if (breakdowns.length === 0) {
     return <div className="py-4 text-sm text-white/40">No per-pitch data for this filter.</div>;
   }
+  // Same filter rules as PerPitchSuccessTable: when a specific pitch
+  // type is filtered, show only that one; otherwise hide rows below the
+  // usage threshold.
+  const visibleBreakdowns = filterPitchType
+    ? breakdowns.filter((b) => b.pitchType === filterPitchType)
+    : breakdowns.filter((b) => (b.usagePct ?? 0) >= minUsagePct);
+  const hiddenCount = breakdowns.length - visibleBreakdowns.length;
+
   return (
     <div className="overflow-x-auto">
+      {hiddenCount > 0 && !filterPitchType && (
+        <div className="mb-2 font-[Archivo_Narrow] text-[10px] uppercase tracking-wider text-white/30">
+          {hiddenCount} below {(minUsagePct * 100).toFixed(0)}% usage hidden
+        </div>
+      )}
       <table className="w-full min-w-[640px] text-sm">
         <thead>
           <tr className="border-b text-left font-[Oswald] text-[11px] uppercase tracking-wider text-white/55" style={{ borderColor: TABLE_HEADER_BORDER }}>
@@ -248,7 +549,7 @@ function PitcherPitchTypeTable({ breakdowns }: { breakdowns: PitchTypeBreakdown[
           </tr>
         </thead>
         <tbody>
-          {breakdowns.map((b) => (
+          {visibleBreakdowns.map((b) => (
             <tr key={b.pitchType} className="border-b font-[Oswald] text-sm text-white transition-colors duration-150 hover:bg-white/[0.03]" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
               <td className="py-2 pr-3 font-bold">{b.pitchType}</td>
               <td className="py-2 pr-3 text-right tabular-nums">{b.pitches.toLocaleString()}</td>
@@ -507,9 +808,22 @@ interface PageShellProps {
   topStats: React.ReactNode;
   left: React.ReactNode;
   right: React.ReactNode;
-  /** Optional full-width section rendered below the two-column body (e.g. per-pitch table). */
-  bottom?: React.ReactNode;
+  /**
+   * Optional Visuals tab content (charts, heatmaps, spray fields).
+   * When provided, the page renders a Stats/Visuals tab strip below
+   * the top stats row. Stats tab = the two-column body; Visuals tab
+   * = this content.
+   */
+  visuals?: React.ReactNode;
+  /**
+   * Optional element rendered inline with the tab strip on the right
+   * (e.g. the Visuals pitch-type picker). Only shown when the tab strip
+   * is active (visuals is provided).
+   */
+  tabExtra?: React.ReactNode;
 }
+type PitchLogTab = "stats" | "visuals";
+
 function PageShell({
   picker,
   sampleCount,
@@ -517,8 +831,18 @@ function PageShell({
   topStats,
   left,
   right,
-  bottom,
+  visuals,
+  tabExtra,
 }: PageShellProps) {
+  const [tab, setTab] = useState<PitchLogTab>("stats");
+
+  const statsBody = (
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.4fr_1fr]">
+      <div className="space-y-6">{left}</div>
+      <div className="space-y-6">{right}</div>
+    </div>
+  );
+
   return (
     <div className="space-y-5">
       {/* Filter + counts row */}
@@ -535,14 +859,46 @@ function PageShell({
       {/* Top stats line */}
       <div>{topStats}</div>
 
-      {/* Two-column body — children render their OWN cards so multiple stacked
-          panels stay visually separated. */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.4fr_1fr]">
-        <div className="space-y-6">{left}</div>
-        <div className="space-y-6">{right}</div>
-      </div>
+      {visuals ? (
+        <>
+          {/* Stats / Visuals tab strip + inline filter slot (right side) */}
+          <div
+            className="flex items-end justify-between gap-3 border-b"
+            style={{ borderColor: NAVY_BORDER }}
+          >
+            <div className="flex items-end gap-1">
+              {([
+                { key: "stats" as const, label: "Stats" },
+                { key: "visuals" as const, label: "Visuals" },
+              ]).map((t) => {
+                const active = tab === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setTab(t.key)}
+                    className="cursor-pointer px-5 py-2 font-[Oswald] text-[13px] font-semibold uppercase tracking-[0.14em] transition-colors duration-150"
+                    style={{
+                      color: active ? GOLD : "rgba(255,255,255,0.55)",
+                      borderBottom: active ? `2px solid ${GOLD}` : "2px solid transparent",
+                      marginBottom: "-1px",
+                    }}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+            {tab === "visuals" && tabExtra && (
+              <div className="pb-1.5">{tabExtra}</div>
+            )}
+          </div>
 
-      {bottom && <div className="space-y-6">{bottom}</div>}
+          {tab === "stats" ? statsBody : <div className="space-y-6">{visuals}</div>}
+        </>
+      ) : (
+        statsBody
+      )}
     </div>
   );
 }
@@ -617,12 +973,79 @@ interface PitcherLocationSectionProps {
   pitcherId: string;
   season: number;
   dimension: PitchLogDimensionKey;
+  /** Active page-wide pitch-type filter; null = all pitch types. */
+  filterPitchType: string | null;
+  /** Active zone-height filter (upper/middle/lower of strike zone) */
+  filterZoneHeight: ZoneHeightKey;
+  /** Active zone-side filter (left/middle/right, catcher view) */
+  filterZoneSide: ZoneSideKey;
+  /** Pre-aggregated per-pitch-type breakdowns (same source as the Stats
+   *  tab table) — passed straight to the Per-Pitch Success table. */
+  breakdowns: PitchTypeBreakdown[];
+  /** Full NCAA population of by-pitch-type rows for percentile coloring. */
+  byTypePopulation: import("@/savant/hooks/usePitchLogByPitchType").PitchLogByPitchTypeRow[];
+}
+
+/**
+ * Wraps a Visuals section with an Oswald-uppercase header bar (per
+ * DESIGN.md "Roster Intelligence System" — Oswald section headers,
+ * sharp corners, 1px navy borders). Each section hosts a row of
+ * chart cards on white canvas.
+ */
+function VisualsSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center gap-2 border-b pb-2" style={{ borderColor: NAVY_BORDER }}>
+        <span className="h-3 w-0.5" style={{ backgroundColor: GOLD }} />
+        <h3 className="font-[Oswald] text-[13px] font-bold uppercase tracking-[0.18em] text-white">
+          {title}
+        </h3>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * Placeholder card for charts not yet built. Uses the same white-canvas
+ * shape as built charts so the page composition reads correctly during
+ * development.
+ */
+function VisualsPlaceholder({ title, hint }: { title: string; hint: string }) {
+  return (
+    <div
+      className="flex h-[462px] flex-col border bg-white"
+      style={{ borderColor: "#E5E5E5" }}
+    >
+      <div className="border-b px-3 py-2" style={{ borderColor: "#E5E5E5" }}>
+        <h4 className="font-[Oswald] text-[14px] font-semibold uppercase tracking-wider text-slate-900">
+          {title}
+        </h4>
+      </div>
+      <div className="flex flex-1 items-center justify-center px-4 text-center">
+        <p className="font-[Archivo_Narrow] text-[12px] uppercase tracking-wider text-slate-400">
+          {hint}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 function PitcherLocationSection({
   pitcherId,
   season,
   dimension,
+  filterPitchType,
+  filterZoneHeight,
+  filterZoneSide,
+  breakdowns,
+  byTypePopulation,
 }: PitcherLocationSectionProps) {
   const { data: pitches = [], isLoading } = usePitchLogPitchLocation({
     playerId: pitcherId,
@@ -631,28 +1054,77 @@ function PitcherLocationSection({
     dimension,
   });
 
+  const filteredPitches = useMemo(() => {
+    let out = pitches;
+    if (filterPitchType != null) {
+      out = out.filter((p) => p.pitch_type_reclassified === filterPitchType);
+    }
+    if (filterZoneHeight !== "all") {
+      out = out.filter((p) => passesZoneHeight(p.pz_norm, filterZoneHeight));
+    }
+    if (filterZoneSide !== "all") {
+      out = out.filter((p) => passesZoneSide(p.px_norm, filterZoneSide));
+    }
+    return out;
+  }, [pitches, filterPitchType, filterZoneHeight, filterZoneSide]);
+
+  if (isLoading) {
+    return <div className="py-6 text-sm text-white/40">Loading pitches…</div>;
+  }
+  if (pitches.length === 0) {
+    return <div className="py-6 text-sm text-white/40">No pitches for this filter.</div>;
+  }
+
   return (
-    <Panel title="Locations + Outcomes">
-      {isLoading ? (
-        <div className="py-6 text-sm text-white/40">Loading pitches…</div>
-      ) : pitches.length === 0 ? (
-        <div className="py-6 text-sm text-white/40">No pitches for this filter.</div>
-      ) : (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <StrikeZonePlot
-            pitches={pitches}
-            title="Strike Zone"
-            subtitle={`${pitches.length.toLocaleString()} pitches · hover for movement`}
-          />
-          <div className="rounded border border-white/10 p-3 text-xs text-white/40">
-            13-zone xwOBA heat (coming next)
-          </div>
-          <div className="rounded border border-white/10 p-3 text-xs text-white/40">
-            Spray field — dot / area % toggle (coming next)
-          </div>
+    <div className="space-y-6">
+      {/* ── Pitch Location ───────────────────────────────────────────── */}
+      <VisualsSection title="Pitch Location">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <StrikeZonePlot pitches={filteredPitches} title="Strike Zone Density" width={360} height={462} />
+          <PitchZoneUsage pitches={filteredPitches} title="13-Zone Usage" />
+          <PitchUsagePie breakdowns={breakdowns} title="Pitch Usage" />
         </div>
-      )}
-    </Panel>
+      </VisualsSection>
+
+      {/* ── Pitch Quality ────────────────────────────────────────────── */}
+      <VisualsSection title="Pitch Quality">
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <PitchMovementPlot pitches={filteredPitches} title="Movement Profile" />
+            <PitchZoneWhiff pitches={filteredPitches} title="13-Zone Whiff%" />
+            <PitchZoneXwoba pitches={filteredPitches} title="13-Zone xwOBA" />
+          </div>
+          <PerPitchSuccessTable
+            breakdowns={breakdowns}
+            population={byTypePopulation}
+            title="Per-Pitch Success"
+            filterPitchType={filterPitchType}
+          />
+        </div>
+      </VisualsSection>
+
+      {/* ── Batted Ball ──────────────────────────────────────────────── */}
+      <VisualsSection title="Batted Ball">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <VisualsPlaceholder
+            title="Spray Field — Zones"
+            hint="Field rendering deferred — Python pipeline + component scaffolded, geometry needs work"
+          />
+          <VisualsPlaceholder
+            title="Spray Field — Dots"
+            hint="Same — coming back to this"
+          />
+        </div>
+      </VisualsSection>
+
+      {/* ── Trends ───────────────────────────────────────────────────── */}
+      <VisualsSection title="Trends">
+        <VisualsPlaceholder
+          title="Rolling xwOBA"
+          hint="15-game / 50-PA rolling window · coming next"
+        />
+      </VisualsSection>
+    </div>
   );
 }
 
@@ -666,9 +1138,13 @@ interface PitcherPitchLogProps {
 
 export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
   const [dimension, setDimension] = useState<PitchLogDimensionKey>("all");
+  const [filterPitchType, setFilterPitchType] = useState<string | null>(null);
+  const [filterZoneHeight, setFilterZoneHeight] = useState<ZoneHeightKey>("all");
+  const [filterZoneSide, setFilterZoneSide] = useState<ZoneSideKey>("all");
   const { data: totalsRow } = usePitchLogPitcherTotals(pitcherId, season, dimension);
   const { data: byTypeRows = [] } = usePitchLogByPitchType(pitcherId, season, dimension);
   const { data: population = [] } = usePitchLogPitcherPopulation(season, dimension);
+  const { data: byTypePopulation = [] } = usePitchLogByPitchTypePopulation(season, dimension);
   const { data: pmRow } = usePitcherMaster(pitcherId, season);
 
   const qualifiedPop = useMemo(
@@ -677,8 +1153,27 @@ export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
   );
   const breakdowns = derivePitchTypeBreakdowns(byTypeRows);
 
+  // Pitch types available to filter — derived from breakdowns (already
+  // sorted by usage descending) so the most-used pitches appear at the top.
+  const pitchTypes = useMemo(
+    () => breakdowns.map((b) => b.pitchType).filter((pt): pt is string => Boolean(pt)),
+    [breakdowns],
+  );
+
   const picker = (
     <DimensionPicker options={PITCHER_DIMENSIONS} value={dimension} onChange={setDimension} />
+  );
+
+  const pitchTypePicker = (
+    <div className="flex items-center gap-2">
+      <PitchTypePicker
+        pitchTypes={pitchTypes}
+        value={filterPitchType}
+        onChange={setFilterPitchType}
+      />
+      <ZoneHeightPicker value={filterZoneHeight} onChange={setFilterZoneHeight} />
+      <ZoneSidePicker value={filterZoneSide} onChange={setFilterZoneSide} />
+    </div>
   );
 
   if (!totalsRow) {
@@ -730,7 +1225,10 @@ export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
             />
           </Panel>
           <Panel title="Per-Pitch Breakdown">
-            <PitcherPitchTypeTable breakdowns={breakdowns} />
+            <PitcherPitchTypeTable
+              breakdowns={breakdowns}
+              filterPitchType={filterPitchType}
+            />
           </Panel>
         </>
       }
@@ -752,13 +1250,19 @@ export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
           </Panel>
         </>
       }
-      bottom={
+      visuals={
         <PitcherLocationSection
           pitcherId={pitcherId}
           season={season}
           dimension={dimension}
+          filterPitchType={filterPitchType}
+          filterZoneHeight={filterZoneHeight}
+          filterZoneSide={filterZoneSide}
+          breakdowns={breakdowns}
+          byTypePopulation={byTypePopulation}
         />
       }
+      tabExtra={pitchTypePicker}
     />
   );
 }

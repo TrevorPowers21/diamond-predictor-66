@@ -166,6 +166,68 @@ export const PITCH_TYPE_COLOR: Record<string, string> = {
   "Splitter": "#3BACAC",
 };
 
+// ── NCAA 2026 D1 pitch-type movement averages ────────────────────────────
+//
+// Computed from pitch_log on staging 2026-06-24 (~2M tracked pitches).
+// Per (pitch_type_reclassified, pitcher_hand): mean + 1-sigma std of IVB
+// and HB. Used as reference overlays on the Movement Profile plot — each
+// pitch type renders as a hatched ellipse so a pitcher's individual
+// pitches can be compared against the league baseline.
+//
+// HB convention (from pitcher's view, matching the reference plot):
+//   positive HB = toward 3B side
+//   negative HB = toward 1B side
+// IVB convention:
+//   positive IVB = more rise
+//   negative IVB = more drop
+
+export interface MovementAvg {
+  ivb: number;
+  hb: number;
+  ivbStd: number;
+  hbStd: number;
+  n: number;
+}
+
+export const NCAA_MOVEMENT_AVERAGES: Record<string, Record<"L" | "R", MovementAvg>> = {
+  "4-Seam Fastball": {
+    L: { ivb: 15.92, hb: -10.51, ivbStd: 4.53, hbStd: 5.37, n: 228841 },
+    R: { ivb: 16.00, hb: 10.19, ivbStd: 4.93, hbStd: 5.42, n: 665785 },
+  },
+  "Change-up": {
+    L: { ivb: 7.17, hb: -13.01, ivbStd: 5.46, hbStd: 6.30, n: 68454 },
+    R: { ivb: 6.26, hb: 13.35, ivbStd: 5.57, hbStd: 6.14, n: 159070 },
+  },
+  "Curveball": {
+    L: { ivb: -12.34, hb: 10.20, ivbStd: 3.21, hbStd: 5.23, n: 25415 },
+    R: { ivb: -12.41, hb: -10.14, ivbStd: 3.31, hbStd: 5.26, n: 85842 },
+  },
+  "Cutter": {
+    L: { ivb: 7.04, hb: 2.68, ivbStd: 3.21, hbStd: 7.34, n: 43155 },
+    R: { ivb: 7.32, hb: -3.16, ivbStd: 3.24, hbStd: 6.76, n: 164519 },
+  },
+  "Gyro Slider": {
+    L: { ivb: 0.88, hb: 2.92, ivbStd: 2.16, hbStd: 2.75, n: 37595 },
+    R: { ivb: 1.08, hb: -3.00, ivbStd: 2.22, hbStd: 2.65, n: 122864 },
+  },
+  "Sinker": {
+    L: { ivb: 9.18, hb: -15.85, ivbStd: 4.54, hbStd: 4.15, n: 41878 },
+    R: { ivb: 8.36, hb: 16.37, ivbStd: 5.08, hbStd: 4.20, n: 115313 },
+  },
+  "Slider": {
+    L: { ivb: -3.62, hb: 8.09, ivbStd: 3.02, hbStd: 6.02, n: 40745 },
+    R: { ivb: -3.57, hb: -8.05, ivbStd: 3.11, hbStd: 6.02, n: 125656 },
+  },
+  "Splitter": {
+    L: { ivb: 5.62, hb: -8.58, ivbStd: 5.87, hbStd: 6.21, n: 1468 },
+    R: { ivb: 4.80, hb: 9.01, ivbStd: 5.63, hbStd: 5.70, n: 12770 },
+  },
+  "Sweeper": {
+    L: { ivb: -0.62, hb: 15.01, ivbStd: 2.08, hbStd: 3.04, n: 16110 },
+    R: { ivb: -0.52, hb: -15.29, ivbStd: 2.09, hbStd: 3.10, n: 54491 },
+  },
+};
+
 // ── Batted-ball outcome color palette ────────────────────────────────────
 export const OUTCOME_COLOR: Record<string, string> = {
   "Single": "#22C55E",

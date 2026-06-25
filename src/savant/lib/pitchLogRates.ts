@@ -280,8 +280,29 @@ export interface PitchTypeBreakdown {
   cswPct: number | null;
   /** Hard Hit% allowed: (95+ EV balls in play) / balls in play, this pitch type only. */
   hardHitPct: number | null;
+  /** Barrel% allowed: (95+ EV AND 10–35° LA) / balls in play, this pitch type only. */
+  barrelPct: number | null;
   /** Avg EV against (all balls in play with EV tracking). */
   avgEv: number | null;
+  /**
+   * xwOBA against, this pitch type only — per plate appearance.
+   * Numerator: x_woba_sum_allowed (BIP contributions, TruMedia x_woba +
+   * fallback to outcome linear weight) + walks × 0.696 + HBPs × 0.726.
+   * Denominator: PA = walks + HBPs + Ks + batted-balls-in-play.
+   */
+  xWoba: number | null;
+  /**
+   * Run Value per 100 pitches (MLB linear weights, pitcher's perspective).
+   * Negative = pitcher saved runs. Used for percentile coloring so small-
+   * sample dominant pitches still grade elite. See computeRv100.
+   */
+  rv100: number | null;
+  /**
+   * Total Run Value across all pitches of this type (sum, not per-100).
+   * Whole number — matches the MLB Savant pitch-arsenal headline metric.
+   * Same sign convention: negative = pitcher saved runs.
+   */
+  rvTotal: number | null;
 }
 
 // ───────────────────────────────────────────────────────────────────
@@ -789,6 +810,106 @@ export function derivePitchTypeBreakdowns(
     calledStrikePct: safeDiv(r.called_strikes, r.pitches),
     cswPct: safeDiv(r.called_strikes + r.whiffs, r.pitches),
     hardHitPct: safeDiv(r.batted_hard_hit_allowed, r.batted_balls_allowed_with_ev),
+    barrelPct: safeDiv(r.batted_barrels_allowed, r.batted_balls_allowed_with_ev),
     avgEv: safeDiv(r.ev_sum_allowed, r.batted_balls_allowed_with_ev),
+    xWoba: computeXwoba(r),
+    rv100: computeRv100(r),
+    rvTotal: computeRvTotal(r),
   }));
+}
+
+/**
+ * Per-pitch-type xwOBA against. Combines the BIP-only x_woba_sum_allowed
+ * with walk and HBP linear weights so the numerator covers all PA-ending
+ * pitches. Denominator is PA (walks + HBPs + Ks + BIPs in play).
+ */
+function computeXwoba(r: PitchLogByPitchTypeRow): number | null {
+  const pa =
+    (r.walks_caused ?? 0) +
+    (r.hbps_caused ?? 0) +
+    (r.strikeouts_caused ?? 0) +
+    r.batted_balls_allowed_in_play;
+  if (pa === 0) return null;
+  const numerator =
+    (r.x_woba_sum_allowed ?? 0) +
+    (r.walks_caused ?? 0) * 0.696 +
+    (r.hbps_caused ?? 0) * 0.726;
+  return numerator / pa;
+}
+
+/**
+ * Run Value sum from OFFENSE perspective (positive = runs added to
+ * offense). Terminal-event pitches (walks, HBPs, Ks, hits, BIP outs)
+ * get their full PA-outcome linear weights. Non-terminal pitches get
+ * the MLB count-averaged per-pitch weights.
+ *
+ * Why separate terminal from non-terminal:
+ *  - A walk is +0.319 runs (event weight); the underlying ball pitch
+ *    is +0.062 (per-pitch averaged). If we counted both we'd
+ *    double-count. We subtract walks_caused from balls and apply the
+ *    walk weight to walks_caused.
+ *  - Same for HBPs (separate column already; not in balls/strikes).
+ *  - Same for Ks split by looking vs swinging — looking Ks subtract
+ *    from called_strikes, swinging Ks subtract from whiffs.
+ *  - BIP outs are all batted_balls_allowed_in_play minus the hits.
+ */
+function rvOffenseSum(r: PitchLogByPitchTypeRow): number {
+  // Terminal-event counts (PA-ending pitches)
+  const walks = r.walks_caused ?? 0;
+  const hbps = r.hbps_caused ?? 0;
+  const lookingKs = r.looking_strikeouts ?? 0;
+  const swingingKs = r.swinging_strikeouts ?? 0;
+  const totalKs = lookingKs + swingingKs; // === r.strikeouts_caused
+
+  const singles = r.hits_single_allowed ?? 0;
+  const doubles = r.hits_double_allowed ?? 0;
+  const triples = r.hits_triple_allowed ?? 0;
+  const hrs = r.hits_hr_allowed ?? 0;
+  const bipOuts = Math.max(
+    0,
+    (r.batted_balls_allowed_in_play ?? 0) - (singles + doubles + triples + hrs),
+  );
+
+  // Non-terminal pitch counts — subtract the terminal subset
+  const nonTerminalBalls = Math.max(0, (r.balls ?? 0) - walks);
+  const nonTerminalCS = Math.max(0, (r.called_strikes ?? 0) - lookingKs);
+  const nonTerminalWhiffs = Math.max(0, (r.whiffs ?? 0) - swingingKs);
+  const fouls = r.fouls ?? 0;
+
+  return (
+    // Non-terminal per-pitch averaged weights
+    nonTerminalBalls * 0.062 +
+    nonTerminalCS * -0.066 +
+    nonTerminalWhiffs * -0.118 +
+    fouls * -0.038 +
+    // Terminal event weights (PA-ending pitches)
+    walks * 0.319 +
+    hbps * 0.732 +
+    totalKs * -0.243 +
+    singles * 0.475 +
+    doubles * 0.766 +
+    triples * 1.034 +
+    hrs * 1.405 +
+    bipOuts * -0.243
+  );
+}
+
+/**
+ * RV/100 in PITCHER perspective — negated so positive = pitcher saved
+ * runs (the convention coaches expect). Used for percentile coloring;
+ * the displayed value is the total RV (whole number).
+ */
+function computeRv100(r: PitchLogByPitchTypeRow): number | null {
+  if (r.pitches === 0) return null;
+  return -(rvOffenseSum(r) / r.pitches) * 100;
+}
+
+/**
+ * Total RV in PITCHER perspective — whole-number sum across all pitches
+ * of this type. Positive = pitcher saved runs. Matches the MLB Savant
+ * pitch-arsenal headline value.
+ */
+function computeRvTotal(r: PitchLogByPitchTypeRow): number | null {
+  if (r.pitches === 0) return null;
+  return -rvOffenseSum(r);
 }

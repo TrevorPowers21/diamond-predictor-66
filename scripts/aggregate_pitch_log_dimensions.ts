@@ -265,6 +265,8 @@ INSERT INTO public.pitch_log_pitcher_by_pitch_type (
   pitcher_id, season, pitch_type_reclassified, dimension_key,
   pitches, swings, whiffs, in_zone, in_zone_swings, in_zone_whiffs, out_of_zone,
   chases, called_strikes,
+  balls, fouls, hbps_caused, walks_caused, strikeouts_caused,
+  looking_strikeouts, swinging_strikeouts,
   data_pitches, velo_pitches,
   stuff_plus_sum,
   velo_sum, ivb_sum, hb_sum, extension_sum, spin_sum, rel_height_sum, rel_side_sum,
@@ -288,6 +290,16 @@ SELECT
   COUNT(*) FILTER (WHERE is_in_zone IS FALSE) AS out_of_zone,
   COUNT(*) FILTER (WHERE is_chase) AS chases,
   COUNT(*) FILTER (WHERE pitch_result = 'Strike Looking') AS called_strikes,
+  -- RV components: per-pitch event counts (Ball / Foul) + terminal HBP.
+  -- Walks and Ks aren't separately stored — their values are absorbed
+  -- into the per-pitch ball / whiff / called-strike weights.
+  COUNT(*) FILTER (WHERE pitch_result = 'Ball') AS balls,
+  COUNT(*) FILTER (WHERE pitch_result = 'Foul') AS fouls,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'HBP') AS hbps_caused,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'Walk') AS walks_caused,
+  COUNT(*) FILTER (WHERE pitch_result_category = 'Strikeout') AS strikeouts_caused,
+  COUNT(*) FILTER (WHERE pitch_result = 'Strikeout (Looking)') AS looking_strikeouts,
+  COUNT(*) FILTER (WHERE pitch_result = 'Strikeout (Swinging)') AS swinging_strikeouts,
   COUNT(*) FILTER (WHERE is_data) AS data_pitches,
   COUNT(*) FILTER (WHERE has_velo) AS velo_pitches,
   SUM(stuff_plus) AS stuff_plus_sum,
@@ -351,6 +363,13 @@ ON CONFLICT (pitcher_id, season, pitch_type_reclassified, dimension_key) DO UPDA
   in_zone_whiffs = EXCLUDED.in_zone_whiffs,
   chases = EXCLUDED.chases,
   called_strikes = EXCLUDED.called_strikes,
+  balls = EXCLUDED.balls,
+  fouls = EXCLUDED.fouls,
+  hbps_caused = EXCLUDED.hbps_caused,
+  walks_caused = EXCLUDED.walks_caused,
+  strikeouts_caused = EXCLUDED.strikeouts_caused,
+  looking_strikeouts = EXCLUDED.looking_strikeouts,
+  swinging_strikeouts = EXCLUDED.swinging_strikeouts,
   data_pitches = EXCLUDED.data_pitches,
   velo_pitches = EXCLUDED.velo_pitches,
   stuff_plus_sum = EXCLUDED.stuff_plus_sum,
@@ -613,6 +632,10 @@ ON CONFLICT (batter_id, season, dimension_key) DO UPDATE SET
 
 async function main(): Promise<void> {
   const apply = process.argv.includes("--apply");
+  const skipKeysArg = process.argv.find((a) => a.startsWith("--skip="));
+  const skipKeys = new Set(skipKeysArg ? skipKeysArg.slice("--skip=".length).split(",") : []);
+  const emitSqlDirArg = process.argv.find((a) => a.startsWith("--emit-sql="));
+  const emitSqlDir = emitSqlDirArg ? emitSqlDirArg.slice("--emit-sql=".length) : null;
   const url = process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
@@ -621,16 +644,49 @@ async function main(): Promise<void> {
   }
   const supabase = createClient(url, key, { auth: { persistSession: false } });
 
-  const tasks: Array<{ label: string; sql: string }> = [];
+  // Pre-resolve the heavy IN-subquery for vs_top_hitters. The Hitter Master
+  // subquery inflates statement time past the gateway 125s timeout. Pulling
+  // the IDs (a few hundred) into TS and inlining as a literal IN list
+  // lets Postgres handle it in seconds.
+  const topHittersDim = DIMENSIONS.find((d) => d.key === "vs_top_hitters");
+  if (topHittersDim) {
+    console.log("Pre-resolving vs_top_hitters source_player_ids from Hitter Master...");
+    const { data, error } = await (supabase as any)
+      .from("Hitter Master")
+      .select("source_player_id")
+      .eq("Season", 2026)
+      .gte("pa", 100)
+      .gte("overall_power_rating", 120.8)
+      .not("overall_power_rating", "is", null);
+    if (error) { console.error(`failed: ${error.message}`); process.exit(1); }
+    const ids = (data ?? []).map((r: any) => r.source_player_id).filter(Boolean);
+    console.log(`  resolved ${ids.length} top-quartile hitter IDs`);
+    if (ids.length === 0) { console.error("zero top hitters — abort"); process.exit(1); }
+    const literal = ids.map((id: string) => `'${String(id).replace(/'/g, "''")}'`).join(",");
+    topHittersDim.pitcher_filter = `batter_id IN (${literal})`;
+  }
+
+  const tasks: Array<{ label: string; key: string; sql: string }> = [];
   for (const dim of DIMENSIONS) {
     if (dim.pitcher_filter) {
-      tasks.push({ label: `${dim.key} → pitcher_totals`, sql: pitcherTotalsSQL(dim) });
-      tasks.push({ label: `${dim.key} → pitcher_by_pitch_type`, sql: pitcherByPitchTypeSQL(dim) });
+      tasks.push({ label: `${dim.key} → pitcher_totals`, key: dim.key, sql: pitcherTotalsSQL(dim) });
+      tasks.push({ label: `${dim.key} → pitcher_by_pitch_type`, key: dim.key, sql: pitcherByPitchTypeSQL(dim) });
     }
     if (dim.hitter_filter) {
-      tasks.push({ label: `${dim.key} → hitter_totals`, sql: hitterTotalsSQL(dim) });
-      tasks.push({ label: `${dim.key} → hitter_by_pitch_type`, sql: hitterByPitchTypeSQL(dim) });
+      tasks.push({ label: `${dim.key} → hitter_totals`, key: dim.key, sql: hitterTotalsSQL(dim) });
+      tasks.push({ label: `${dim.key} → hitter_by_pitch_type`, key: dim.key, sql: hitterByPitchTypeSQL(dim) });
     }
+  }
+
+  if (emitSqlDir) {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    mkdirSync(emitSqlDir, { recursive: true });
+    for (const t of tasks) {
+      const fname = `${t.label.replace(/[^a-zA-Z0-9]+/g, "_")}.sql`;
+      writeFileSync(`${emitSqlDir}/${fname}`, t.sql);
+    }
+    console.log(`Emitted ${tasks.length} SQL files to ${emitSqlDir}`);
+    return;
   }
 
   console.log(`Total aggregations: ${tasks.length} across ${DIMENSIONS.length} dimensions`);
@@ -642,7 +698,11 @@ async function main(): Promise<void> {
 
   const startTotal = process.hrtime.bigint();
   for (let i = 0; i < tasks.length; i++) {
-    const { label, sql } = tasks[i];
+    const { label, sql, key } = tasks[i];
+    if (skipKeys.has(key)) {
+      console.log(`\n[${i + 1}/${tasks.length}] ${label}  SKIPPED (via --skip)`);
+      continue;
+    }
     console.log(`\n[${i + 1}/${tasks.length}] ${label}`);
     const start = process.hrtime.bigint();
     const { error } = await (supabase as any).rpc("exec_sql", { sql });

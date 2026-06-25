@@ -28,6 +28,11 @@ import {
   ZONE_PZNORM_MIN,
 } from "@/savant/lib/pitchLocationHelpers";
 
+// Design tokens — see design-system/rstr-iq/MASTER.md
+const GOLD = "#D4AF37";
+const NAVY_CARD = "#0a1428";
+const NAVY_BORDER = "#1f2d52";
+
 interface StrikeZonePlotProps {
   /** Per-pitch rows. Plot ignores rows where px_norm or pz_norm is null. */
   pitches: PitchLocationRow[];
@@ -37,6 +42,10 @@ interface StrikeZonePlotProps {
   title?: string;
   /** Optional sub-title (e.g. filter context). */
   subtitle?: string;
+  /** Optional explicit container height. When set, the view bounds
+   *  extend vertically to fill the height so the strike zone stays
+   *  centered. Used to match neighboring panels in the grid. */
+  height?: number;
 }
 
 interface ScreenPitch {
@@ -51,35 +60,111 @@ export function StrikeZonePlot({
   width = 320,
   title,
   subtitle,
+  height: explicitHeight,
 }: StrikeZonePlotProps) {
-  // Aspect ratio: visible canvas is roughly (Δpx-norm) : (Δpz-norm). Add a
-  // little vertical headroom for the title row.
+  // Visible canvas aspect ratio comes from view bounds (Δpx-norm) :
+  // (Δpz-norm). When the parent supplies an explicit height, we extend
+  // the vertical view range proportionally so the strike zone stays
+  // centered + properly sized, but the canvas grows to match.
   const xRange = VIEW_PXNORM_MAX - VIEW_PXNORM_MIN;
-  const yRange = VIEW_PZNORM_MAX - VIEW_PZNORM_MIN;
-  const height = Math.round(width * (yRange / xRange));
+  const baseYRange = VIEW_PZNORM_MAX - VIEW_PZNORM_MIN;
+  const height = explicitHeight ?? Math.round(width * (baseYRange / xRange));
+  // Effective Y range scales with the explicit height — extra height
+  // gives more vertical breathing room without distorting the strike
+  // zone box itself.
+  const yRange = (height / width) * xRange;
+  const yMin = -(yRange / 2);
+  const yMax = yRange / 2;
 
   // Map normalized coords → SVG pixel coords. PZNorm increases UP in the
   // strike zone but SVG y increases DOWN, so we flip.
   const xToPx = (pxNorm: number) =>
     ((pxNorm - VIEW_PXNORM_MIN) / xRange) * width;
   const yToPx = (pzNorm: number) =>
-    height - ((pzNorm - VIEW_PZNORM_MIN) / yRange) * height;
+    height - ((pzNorm - yMin) / yRange) * height;
+
+  // Outlier filter — drop pitches with tracking values 6x or more outside
+  // the standard zone. Allows wild pitches + extreme chase but cuts the
+  // egregious tracking errors that would explode the canvas scale.
+  const OUTLIER_THRESHOLD = 6;
+  const validPitches = useMemo(
+    () =>
+      pitches.filter(
+        (p) =>
+          p.px_norm != null &&
+          p.pz_norm != null &&
+          Math.abs(p.px_norm) <= OUTLIER_THRESHOLD &&
+          Math.abs(p.pz_norm) <= OUTLIER_THRESHOLD,
+      ),
+    [pitches],
+  );
+  const droppedOutliers = pitches.filter((p) => p.px_norm != null && p.pz_norm != null).length - validPitches.length;
 
   // Pre-project the dots once per render so hover lookups are O(1).
   const screenPitches = useMemo<ScreenPitch[]>(
     () =>
-      pitches
-        .filter((p) => p.px_norm != null && p.pz_norm != null)
-        .map((p) => ({
-          row: p,
-          cx: xToPx(p.px_norm!),
-          cy: yToPx(p.pz_norm!),
-          color: PITCH_TYPE_COLOR[p.pitch_type_reclassified ?? ""] ?? "#9CA3AF",
-        })),
+      validPitches.map((p) => ({
+        row: p,
+        cx: xToPx(p.px_norm!),
+        cy: yToPx(p.pz_norm!),
+        color: PITCH_TYPE_COLOR[p.pitch_type_reclassified ?? ""] ?? "#9CA3AF",
+      })),
     // xToPx / yToPx are derived from width / height which are stable per render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pitches, width, height],
+    [validPitches, width, height],
   );
+
+  // Density heatmap — proper 2D Kernel Density Estimation. Each grid
+  // cell sums gaussian contributions from every pitch within a 3-sigma
+  // radius, producing one continuous smooth surface (matching the
+  // TruMedia "pitch frequency" look) rather than a sparse field of
+  // isolated cells. Performance: ~grid×pitches with a distance cutoff
+  // → still under 50ms for typical pitcher samples (~600-2000 pitches).
+  const heatmapCells = useMemo(() => {
+    const GRID = 64;
+    const cellW = width / GRID;
+    const cellH = height / GRID;
+    const density = new Float32Array(GRID * GRID);
+
+    // Bandwidth controls the smoothness of the kernel. ~8% of the canvas
+    // dimension gives a TruMedia-style blob — broad enough that any
+    // single cell averages over ~25-50 pitches, eliminating speckle.
+    const bandwidth = Math.min(width, height) * 0.08;
+    const bw2 = 2 * bandwidth * bandwidth;
+    const maxDist2 = bw2 * 4.5; // 3-sigma cutoff (kernels beyond this contribute ~negligibly)
+
+    for (let iy = 0; iy < GRID; iy++) {
+      const cellCy = (iy + 0.5) * cellH;
+      for (let ix = 0; ix < GRID; ix++) {
+        const cellCx = (ix + 0.5) * cellW;
+        let d = 0;
+        for (const p of screenPitches) {
+          const dx = cellCx - p.cx;
+          const dy = cellCy - p.cy;
+          const dist2 = dx * dx + dy * dy;
+          if (dist2 < maxDist2) {
+            d += Math.exp(-dist2 / bw2);
+          }
+        }
+        density[iy * GRID + ix] = d;
+      }
+    }
+
+    // Normalize and emit cells. Skip rendering zero-density cells so SVG
+    // stays light.
+    let max = 0;
+    for (let i = 0; i < density.length; i++) if (density[i] > max) max = density[i];
+    const cells: Array<{ x: number; y: number; w: number; h: number; density: number }> = [];
+    if (max <= 0) return cells;
+    for (let iy = 0; iy < GRID; iy++) {
+      for (let ix = 0; ix < GRID; ix++) {
+        const d = density[iy * GRID + ix] / max;
+        if (d <= 0.001) continue;
+        cells.push({ x: ix * cellW, y: iy * cellH, w: cellW + 0.6, h: cellH + 0.6, density: d });
+      }
+    }
+    return cells;
+  }, [screenPitches, width, height]);
 
   // Hover state — track which dot is active so we can render a tooltip + a
   // ring around it. uniq_pitch_id is the stable key.
@@ -95,117 +180,160 @@ export function StrikeZonePlot({
     height: yToPx(ZONE_PZNORM_MIN) - yToPx(ZONE_PZNORM_MAX),
   };
 
+  // Extended (shadow / chase) zone — dashed box at PXNorm ±1.5, PZNorm ±1.5.
+  // Visual reference for "what's reasonable to swing at" without committing
+  // to the literal Statcast shadow band cutoffs.
+  const SHADOW = 1.5;
+  const shadowRect = {
+    x: xToPx(-SHADOW),
+    y: yToPx(SHADOW),
+    width: xToPx(SHADOW) - xToPx(-SHADOW),
+    height: yToPx(-SHADOW) - yToPx(SHADOW),
+  };
+
+  // Home plate — a pentagon at the bottom-center of the canvas. Sized
+  // proportional to the canvas so it scales with width.
+  const plate = {
+    cx: width / 2,
+    cy: height - 18,
+    halfW: Math.max(18, width * 0.07),
+    pointDip: 8,
+  };
+  const platePath = [
+    `M ${plate.cx - plate.halfW} ${plate.cy - 6}`,
+    `L ${plate.cx + plate.halfW} ${plate.cy - 6}`,
+    `L ${plate.cx + plate.halfW * 0.85} ${plate.cy + 2}`,
+    `L ${plate.cx} ${plate.cy + plate.pointDip}`,
+    `L ${plate.cx - plate.halfW * 0.85} ${plate.cy + 2}`,
+    `Z`,
+  ].join(" ");
+
   return (
     <div className="flex flex-col items-stretch">
       {title && (
         <div className="mb-2 flex items-baseline justify-between">
-          <h4 className="text-sm font-semibold text-white tracking-wide">{title}</h4>
-          {subtitle && <span className="text-[11px] text-white/55">{subtitle}</span>}
+          <h4
+            className="font-[Oswald] text-[12px] font-bold uppercase tracking-[0.22em]"
+            style={{ color: GOLD }}
+          >
+            {title}
+          </h4>
+          {subtitle && (
+            <span className="text-[11px] text-white/55 tabular-nums">
+              {subtitle}
+              {droppedOutliers > 0 && (
+                <span
+                  className="ml-2 text-white/35"
+                  title={`${droppedOutliers} tracking-outlier pitch${droppedOutliers === 1 ? "" : "es"} excluded from the plot`}
+                >
+                  · {droppedOutliers} outlier{droppedOutliers === 1 ? "" : "s"} hidden
+                </span>
+              )}
+            </span>
+          )}
         </div>
       )}
-      <div className="relative" style={{ width, height }}>
+      <div
+        className="relative border"
+        style={{ width, height, backgroundColor: "#FFFFFF", borderColor: NAVY_BORDER }}
+      >
         <svg
           width={width}
           height={height}
           viewBox={`0 0 ${width} ${height}`}
-          style={{ background: "rgba(7, 14, 31, 0.5)", borderRadius: 6 }}
           role="img"
           aria-label="Strike zone scatter plot of pitches"
         >
-          {/* Strike zone box */}
+          {/* Density heatmap — the primary visualization. The colormap
+              itself handles the white → blue → red transition, so cells
+              render at full opacity and the perimeter shows blue color
+              (matching the TruMedia "pitch frequency" gradient look). */}
+          {heatmapCells.map((c, i) => (
+            <rect
+              key={i}
+              x={c.x}
+              y={c.y}
+              width={c.w}
+              height={c.h}
+              fill={densityToColor(c.density)}
+              fillOpacity={c.density > 0 ? 1 : 0}
+            />
+          ))}
+
+          {/* Extended chase / shadow zone (dashed) — visual reference. */}
+          <rect
+            x={shadowRect.x}
+            y={shadowRect.y}
+            width={shadowRect.width}
+            height={shadowRect.height}
+            fill="none"
+            stroke="#0F172A"
+            strokeWidth={1.75}
+            strokeDasharray="7 5"
+            opacity={0.85}
+          />
+
+          {/* Strike zone box — black so it pops on the heatmap. */}
           <rect
             x={zoneRect.x}
             y={zoneRect.y}
             width={zoneRect.width}
             height={zoneRect.height}
             fill="none"
-            stroke="#D4AF37"
-            strokeWidth={1.5}
-            opacity={0.85}
+            stroke="#0F172A"
+            strokeWidth={3}
           />
-          {/* 9-box subdivision (thin lines) */}
-          {[1 / 3, 2 / 3].map((t) => {
-            const x = zoneRect.x + zoneRect.width * t;
-            return (
-              <line
-                key={`v-${t}`}
-                x1={x}
-                y1={zoneRect.y}
-                x2={x}
-                y2={zoneRect.y + zoneRect.height}
-                stroke="#D4AF37"
-                strokeWidth={0.5}
-                opacity={0.35}
-              />
-            );
-          })}
-          {[1 / 3, 2 / 3].map((t) => {
-            const y = zoneRect.y + zoneRect.height * t;
-            return (
-              <line
-                key={`h-${t}`}
-                x1={zoneRect.x}
-                y1={y}
-                x2={zoneRect.x + zoneRect.width}
-                y2={y}
-                stroke="#D4AF37"
-                strokeWidth={0.5}
-                opacity={0.35}
-              />
-            );
-          })}
 
-          {/* Pitch dots */}
-          {screenPitches.map((p, i) => (
-            <circle
-              key={p.row.uniq_pitch_id}
-              cx={p.cx}
-              cy={p.cy}
-              r={hoverIdx === i ? 6 : 4}
-              fill={p.color}
-              fillOpacity={hoverIdx === i ? 1 : 0.75}
-              stroke={hoverIdx === i ? "#FFFFFF" : "rgba(255,255,255,0.3)"}
-              strokeWidth={hoverIdx === i ? 1.5 : 0.5}
-              onMouseEnter={() => setHoverIdx(i)}
-              onMouseLeave={() => setHoverIdx(null)}
-              style={{ cursor: "pointer" }}
-            />
-          ))}
+          {/* Home plate at the bottom */}
+          <path d={platePath} fill="#0F172A" stroke="#0F172A" strokeWidth={1} opacity={0.85} />
         </svg>
 
         {/* Tooltip */}
         {hoverPitch && (
           <div
-            className="pointer-events-none absolute z-10 rounded border bg-black/85 px-2 py-1.5 text-[11px] leading-tight text-white shadow-lg"
+            className="pointer-events-none absolute z-10 border px-2.5 py-2 text-[11px] leading-tight text-white shadow-xl tabular-nums"
             style={{
-              left: Math.min(hoverPitch.cx + 10, width - 160),
-              top: Math.max(hoverPitch.cy - 70, 0),
+              left: Math.min(hoverPitch.cx + 10, width - 170),
+              top: Math.max(hoverPitch.cy - 80, 6),
+              backgroundColor: "rgba(4, 8, 16, 0.95)",
               borderColor: hoverPitch.color,
-              width: 160,
+              width: 170,
             }}
           >
-            <div className="font-semibold" style={{ color: hoverPitch.color }}>
+            <div
+              className="font-[Oswald] text-[11px] font-bold uppercase tracking-wider"
+              style={{ color: hoverPitch.color }}
+            >
               {hoverPitch.row.pitch_type_reclassified ?? hoverPitch.row.pitch_type ?? "—"}
             </div>
-            <div className="text-white/80">
-              {hoverPitch.row.release_velocity != null
-                ? `${hoverPitch.row.release_velocity.toFixed(1)} mph`
-                : "—"}
+            <div className="mt-0.5 text-white">
+              <span className="font-semibold">
+                {hoverPitch.row.release_velocity != null
+                  ? `${hoverPitch.row.release_velocity.toFixed(1)}`
+                  : "—"}
+              </span>
+              <span className="text-white/50"> mph</span>
               {hoverPitch.row.spin != null && (
                 <span className="text-white/55"> · {Math.round(hoverPitch.row.spin)} rpm</span>
               )}
             </div>
-            <div className="mt-0.5 text-white/70">
+            <div className="mt-0.5 text-white/75">
               IVB{" "}
-              {hoverPitch.row.ivb != null ? hoverPitch.row.ivb.toFixed(1) : "—"}
-              {" · "}
+              <span className="text-white">
+                {hoverPitch.row.ivb != null ? hoverPitch.row.ivb.toFixed(1) : "—"}
+              </span>
+              <span className="px-1.5 text-white/35">·</span>
               HB{" "}
-              {hoverPitch.row.hb != null ? hoverPitch.row.hb.toFixed(1) : "—"}
+              <span className="text-white">
+                {hoverPitch.row.hb != null ? hoverPitch.row.hb.toFixed(1) : "—"}
+              </span>
             </div>
-            <div className="mt-1 text-white/60">
-              {hoverPitch.row.pitch_result ?? "—"}
+            <div className="mt-1.5 flex items-center justify-between gap-2 border-t pt-1.5" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+              <span className="text-white/70">{hoverPitch.row.pitch_result ?? "—"}</span>
               {hoverPitch.row.stuff_plus != null && (
-                <span className="ml-2">Stuff+ {hoverPitch.row.stuff_plus.toFixed(0)}</span>
+                <span className="text-white/85">
+                  Stuff+ <span className="font-semibold" style={{ color: GOLD }}>{hoverPitch.row.stuff_plus.toFixed(0)}</span>
+                </span>
               )}
             </div>
           </div>
@@ -213,4 +341,48 @@ export function StrikeZonePlot({
       </div>
     </div>
   );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Density colormap — vivid Stitch palette (variant 2)
+// ────────────────────────────────────────────────────────────────────
+//
+// Derived from Stitch design pass project 17717741894289957208 / screen
+// ca5731ced01c44d2. Replaces the previous pastel ramp with fully saturated
+// thermal-scan colors that pop off the white canvas. Smooth interpolation
+// between stops so the gradient flows but each band has a clear identity.
+//
+// Color stops (density → color):
+//   0.00 — white                  #FFFFFF
+//   0.04 — vivid sky blue         #0EA5E9
+//   0.18 — vivid blue             #2563EB
+//   0.32 — emerald green          #10B981
+//   0.48 — bright yellow          #FACC15
+//   0.65 — vivid orange           #F97316
+//   0.82 — pure red               #EF4444
+//   1.00 — deep crimson           #991B1B
+function densityToColor(density: number): string {
+  const d = Math.max(0, Math.min(1, density));
+  const stops: Array<[number, [number, number, number]]> = [
+    [0.0, [255, 255, 255]],
+    [0.04, [14, 165, 233]],
+    [0.18, [37, 99, 235]],
+    [0.32, [16, 185, 129]],
+    [0.48, [250, 204, 21]],
+    [0.65, [249, 115, 22]],
+    [0.82, [239, 68, 68]],
+    [1.0, [153, 27, 27]],
+  ];
+  for (let i = 1; i < stops.length; i++) {
+    if (d <= stops[i][0]) {
+      const [t0, c0] = stops[i - 1];
+      const [t1, c1] = stops[i];
+      const tNorm = (d - t0) / (t1 - t0);
+      const r = Math.round(c0[0] + (c1[0] - c0[0]) * tNorm);
+      const g = Math.round(c0[1] + (c1[1] - c0[1]) * tNorm);
+      const b = Math.round(c0[2] + (c1[2] - c0[2]) * tNorm);
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+  }
+  return "rgb(153, 27, 27)";
 }

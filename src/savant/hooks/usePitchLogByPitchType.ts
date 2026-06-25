@@ -15,6 +15,13 @@ export interface PitchLogByPitchTypeRow {
   in_zone_whiffs: number;
   chases: number;
   called_strikes: number;
+  balls: number;
+  fouls: number;
+  hbps_caused: number;
+  walks_caused: number;
+  strikeouts_caused: number;
+  looking_strikeouts: number;
+  swinging_strikeouts: number;
   data_pitches: number;
   velo_pitches: number;
   stuff_plus_sum: number | null;
