@@ -64,6 +64,10 @@ type LoadBuildParams = {
   setBuildLoadDone?: (done: boolean) => void;
 };
 
+// True when the position_slot (or player position) indicates a pitcher row.
+const isPitcherSlot = (slot: string | null | undefined): boolean =>
+  /^(SP|RP|CL|P|LHP|RHP)/i.test(String(slot || ""));
+
 export function useLoadBuild({
   builds,
   allPlayersForSearch,
@@ -133,7 +137,47 @@ export function useLoadBuild({
           .filter((id): id is string => isUuid(id));
 
         let playerMap: Record<string, any> = {};
+        // Keyed as `${player_id}|H` or `${player_id}|P` so each side of a TWP
+        // (two-way player) stores and retrieves its own snapshot/prediction
+        // independently. Non-TWP players have exactly one entry.
         let predictionMap: Record<string, any> = {};
+
+        // ── Snapshot map ──────────────────────────────────────────────────────
+        // player_snapshot is populated at build-save time (and at default build
+        // creation). When present and non-empty, it lets us skip the live
+        // player_predictions query entirely for that player row.
+        //
+        // Key scheme: `${pid}|H` for hitter rows, `${pid}|P` for pitcher rows.
+        // This prevents TWP sides from overwriting each other.
+        const snapshotMap: Record<string, any> = {};
+        for (const bp of players) {
+          const pid = typeof bp.player_id === "string" ? bp.player_id.trim() : bp.player_id;
+          if (!pid) continue;
+          const snap = bp.player_snapshot as any;
+          // Reject snapshots saved before predictions resolved (all-null stats).
+          // Exclude o_war alone — a stale partial snapshot can write o_war=0
+          // while leaving p_avg/p_era null, which would falsely pass this gate.
+          const hasData = snap && (
+            snap.p_avg != null || snap.p_era != null || snap.p_war != null
+          );
+          if (hasData) {
+            const side = isPitcherSlot(bp.position_slot) ? "P" : "H";
+            snapshotMap[`${pid}|${side}`] = snap;
+          }
+        }
+
+        // Only fetch player_predictions for rows that don't have a valid snapshot.
+        const idsNeedingPred = [...new Set(
+          players
+            .filter((bp) => {
+              const pid = typeof bp.player_id === "string" ? bp.player_id.trim() : bp.player_id;
+              if (!isUuid(pid)) return false;
+              const side = isPitcherSlot(bp.position_slot) ? "P" : "H";
+              return !snapshotMap[`${pid}|${side}`];
+            })
+            .map((bp) => typeof bp.player_id === "string" ? bp.player_id.trim() : bp.player_id)
+            .filter((id): id is string => isUuid(id))
+        )];
 
         if (playerIds.length > 0) {
           const { data: pData, error: pErr } = await supabase
@@ -151,67 +195,104 @@ export function useLoadBuild({
             playerMap[p.id] = p;
           });
 
-          let predQuery = supabase
-            .from("player_predictions")
-            .select(
-              // Pitcher columns added alongside the hitter ones (p_war,
-              // projected_ip, pitcher_depth_role, twp_*_market_value) so
-              // saved builds with pitcher returners hydrate with the data
-              // playerProjection needs to render pWAR / market value.
-              // Mirrors the column set the add-from-target-search path
-              // already fetches at add-time. Non-destructive — these
-              // columns exist on player_predictions; we just weren't
-              // asking for them on the load path.
-              "id, player_id, customer_team_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, pitcher_depth_role, projected_ip",
-            )
-            .eq("season", PROJECTION_SEASON)
-            .in("player_id", playerIds)
-            .in("variant", ["regular", "precomputed"])
-            .in("status", ["active", "departed"]);
-          predQuery = applyTeamScopeFilter(predQuery as any, effectiveTeamId);
-          const { data: predData, error: predErr } = await predQuery;
-          if (predErr) {
-            console.error("TeamBuilder loadBuild predictions fetch failed:", predErr);
-          }
-
-          const grouped = new Map<string, any[]>();
-          for (const row of predData || []) {
-            const pid = String(row.player_id || "");
-            if (!pid) continue;
-            const list = grouped.get(pid) || [];
-            list.push(row);
-            grouped.set(pid, list);
-          }
-          for (const [pid, rows] of grouped.entries()) {
-            const player = playerMap[pid];
-            if (!player) continue;
-            // Prefer team-scoped precomputed row when active team has one so
-            // saved builds reflect the customer team's tuned equation.
-            const teamScoped = pickPreferredPrediction(rows as any[], effectiveTeamId);
-            if (teamScoped && (teamScoped as any).customer_team_id === effectiveTeamId) {
-              predictionMap[pid] = teamScoped;
-              continue;
+          if (idsNeedingPred.length > 0) {
+            let predQuery = supabase
+              .from("player_predictions")
+              .select(
+                // Pitcher columns added alongside the hitter ones (p_war,
+                // projected_ip, pitcher_depth_role, twp_*_market_value) so
+                // saved builds with pitcher returners hydrate with the data
+                // playerProjection needs to render pWAR / market value.
+                // Mirrors the column set the add-from-target-search path
+                // already fetches at add-time. Non-destructive — these
+                // columns exist on player_predictions; we just weren't
+                // asking for them on the load path.
+                "id, player_id, customer_team_id, from_avg, from_obp, from_slg, from_era, from_fip, from_whip, from_k9, from_bb9, from_hr9, p_avg, p_obp, p_slg, p_ops, p_iso, p_wrc_plus, p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, pitcher_role, power_rating_plus, class_transition, dev_aggressiveness, model_type, status, variant, updated_at, o_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, pitcher_depth_role, projected_ip",
+              )
+              .eq("season", PROJECTION_SEASON)
+              .in("player_id", idsNeedingPred)
+              .in("variant", ["regular", "precomputed"])
+              .in("status", ["active", "departed"]);
+            predQuery = applyTeamScopeFilter(predQuery as any, effectiveTeamId);
+            const { data: predData, error: predErr } = await predQuery;
+            if (predErr) {
+              console.error("TeamBuilder loadBuild predictions fetch failed:", predErr);
             }
-            const preds = rows.filter(
-              (r: any) => r.variant === "regular" && (r.status === "active" || r.status === "departed"),
-            );
-            if (preds.length === 0) continue;
-            let best = preds[0];
-            for (const row of preds) {
-              if (!best) { best = row; continue; }
-              const rowScore = scorePredictionLikeDashboard(row, false);
-              const bestScore = scorePredictionLikeDashboard(best, false);
-              if (rowScore > bestScore) best = row;
-              else if (rowScore === bestScore) {
-                if (
-                  new Date(row.updated_at || 0).getTime() >
-                  new Date(best.updated_at || 0).getTime()
-                ) {
-                  best = row;
+
+            // ── Prediction map ────────────────────────────────────────────────
+            // Group rows by player_id, then store under a side-keyed key:
+            //   `${pid}|H` → hitter prediction (pitcher_role = null)
+            //   `${pid}|P` → pitcher prediction (pitcher_role = 'SP'/'RP')
+            //
+            // For TWPs this gives each side its own prediction.
+            // For non-TWPs we infer the side from the player's natural position
+            // (not from pitcher_role, which can be null even for pitcher players).
+            const grouped = new Map<string, any[]>();
+            for (const row of predData || []) {
+              const pid = String(row.player_id || "");
+              if (!pid) continue;
+              const list = grouped.get(pid) || [];
+              list.push(row);
+              grouped.set(pid, list);
+            }
+
+            // Pick the best row from a candidate set using team-scoped then
+            // global scoring, mirroring the dashboard preference order.
+            const pickBest = (rows: any[]): any | null => {
+              if (rows.length === 0) return null;
+              const teamRow = effectiveTeamId
+                ? rows.find((r: any) => r.customer_team_id === effectiveTeamId && r.variant === "precomputed")
+                : null;
+              if (teamRow) return teamRow;
+              const globals = rows.filter(
+                (r: any) => r.variant === "regular" && (r.status === "active" || r.status === "departed"),
+              );
+              if (globals.length === 0) return rows[0] ?? null;
+              let best = globals[0];
+              for (const row of globals) {
+                if (!best) { best = row; continue; }
+                const rowScore = scorePredictionLikeDashboard(row, false);
+                const bestScore = scorePredictionLikeDashboard(best, false);
+                if (rowScore > bestScore) best = row;
+                else if (rowScore === bestScore) {
+                  if (new Date(row.updated_at || 0).getTime() > new Date(best.updated_at || 0).getTime()) {
+                    best = row;
+                  }
                 }
               }
+              return best;
+            };
+
+            for (const [pid, rows] of grouped.entries()) {
+              const player = playerMap[pid];
+              if (!player) continue;
+              const isTwp = (player as any)?.is_twp ?? false;
+              // Split on pitcher_role for all players, not just TWPs. Without
+              // this, scorePredictionLikeDashboard picks the hitter-model row
+              // for pure pitchers (it scores higher because p_avg etc. are
+              // populated), leaving p_era null on the pitcher slot.
+              const hitterRows = rows.filter((r: any) => r.pitcher_role == null);
+              const pitcherRows = rows.filter((r: any) => r.pitcher_role != null);
+              if (isTwp) {
+                // TWP: each side gets its own prediction. Fall back to the full
+                // row set when a dedicated side-specific row doesn't exist — the
+                // pitcher-model row carries both hitter and pitcher stats for TWPs.
+                const hPick = pickBest(hitterRows.length > 0 ? hitterRows : rows);
+                const pPick = pickBest(pitcherRows.length > 0 ? pitcherRows : rows);
+                if (hPick) predictionMap[`${pid}|H`] = hPick;
+                if (pPick) predictionMap[`${pid}|P`] = pPick;
+              } else {
+                // Non-TWP: infer side from the player's natural position.
+                const playerPos = String((player as any)?.position ?? "");
+                const side = isPitcherSlot(playerPos) ? "P" : "H";
+                // Prefer the model row matching the side; fall back to full set.
+                const candidates = side === "P"
+                  ? (pitcherRows.length > 0 ? pitcherRows : rows)
+                  : (hitterRows.length > 0 ? hitterRows : rows);
+                const best = pickBest(candidates);
+                if (best) predictionMap[`${pid}|${side}`] = best;
+              }
             }
-            predictionMap[pid] = best;
           }
         }
 
@@ -295,9 +376,17 @@ export function useLoadBuild({
                 const pd = normalizedPlayerId
                   ? playerMap[normalizedPlayerId] || recoveredPlayer || null
                   : null;
-                const activePred = normalizedPlayerId
-                  ? predictionMap[normalizedPlayerId] ?? null
+
+                // Side-keyed lookup: snapshot first (zero extra query), then
+                // live prediction for rows where snapshot is absent or stale.
+                const bpSide = isPitcherSlot(bp.position_slot) ? "P" : "H";
+                const snapshot = normalizedPlayerId
+                  ? snapshotMap[`${normalizedPlayerId}|${bpSide}`] ?? null
                   : null;
+                const activePred = snapshot ?? (normalizedPlayerId
+                  ? predictionMap[`${normalizedPlayerId}|${bpSide}`] ?? null
+                  : null);
+
                 const localPlayerRaw =
                   !pd && meta.localPlayer
                     ? {
@@ -375,26 +464,23 @@ export function useLoadBuild({
                   roster_status:
                     meta.rosterStatus ??
                     ((bp.source as string) === "portal" ? "target" : "returner"),
-                  // depth_role recomputed from current PA/IP. Saved builds from
-                  // before 2026-05-20 baked in "bench" for hitters when seasonUsage
-                  // was empty at save time; PA-based recompute fixes that.
                   depth_role: (() => {
+                    // Coach override always wins.
+                    if (meta.depthRole) return meta.depthRole;
                     if (isPitcherRow) {
                       const ip =
                         pd?.source_player_id
                           ? pitchingStatsByNameTeam.bySourceId.get(pd.source_player_id)?.ip ?? null
                           : null;
-                      if (ip != null) {
-                        return defaultPitcherDepthRoleFromIp(
-                          ip,
-                          inferredRole === "SP" ? "SP" : "RP",
-                        );
-                      }
-                      return (
-                        meta.depthRole ??
-                        defaultPitcherDepthRoleFromIp(null, inferredRole === "SP" ? "SP" : "RP")
+                      return defaultPitcherDepthRoleFromIp(
+                        ip,
+                        inferredRole === "SP" ? "SP" : "RP",
                       );
                     }
+                    // For hitters: prefer hitter_depth_role from snapshot — it
+                    // reflects the tier used at precompute time so the overlay
+                    // starts at 1× with no PA mismatch.
+                    if (snapshot?.hitter_depth_role) return snapshot.hitter_depth_role;
                     const hNameKey = pd
                       ? `${normalizeName(`${pd.first_name || ""} ${pd.last_name || ""}`.trim())}|${normalizeName(pd.team || "")}`
                       : null;
@@ -402,10 +488,8 @@ export function useLoadBuild({
                       (pd?.id ? seasonUsage.hitterAb?.get(pd.id) : null) ??
                       (hNameKey ? seasonUsage.hitterAbByNameTeam?.get(hNameKey) : null) ??
                       null;
-                    if (hitterAb != null && hitterAb > 0) {
-                      return defaultHitterDepthRoleFromPa(hitterAb);
-                    }
-                    return meta.depthRole ?? "everyday_starter";
+                    if (hitterAb != null && hitterAb > 0) return defaultHitterDepthRoleFromPa(hitterAb);
+                    return "everyday_starter";
                   })(),
                   class_transition: meta.classTransitionOverridden
                     ? meta.classTransition ?? "SJ"
