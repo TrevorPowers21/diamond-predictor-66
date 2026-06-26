@@ -282,7 +282,28 @@ function MetricCard({ title, value, subtitle }: { title: string; value: string; 
   );
 }
 
-function ScoutGrade({ value, fullLabel }: { value: number | null; fullLabel: string }) {
+function pitcherOrdinalSuffix(n: number): string {
+  const r = Math.round(n);
+  const mod100 = r % 100;
+  if (mod100 >= 11 && mod100 <= 13) return "th";
+  switch (r % 10) {
+    case 1: return "st";
+    case 2: return "nd";
+    case 3: return "rd";
+    default: return "th";
+  }
+}
+
+function pitcherOrdinalFull(n: number): string {
+  return `${Math.round(n)}${pitcherOrdinalSuffix(n)}`;
+}
+
+function ScoutGrade({ value, fullLabel, rawStat, unit }: {
+  value: number | null;
+  fullLabel: string;
+  rawStat?: number | null;
+  unit?: string;
+}) {
   // Treat 0 as missing — percentile scores are 0-100 and a literal 0 is almost
   // always a missing-data sentinel (e.g., JUCO arms with exit_vel = 0).
   if (value == null || value === 0) {
@@ -295,9 +316,9 @@ function ScoutGrade({ value, fullLabel }: { value: number | null; fullLabel: str
     );
   }
   const tier =
-    value >= 90 ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]" :
-    value >= 75 ? "bg-[hsl(142,71%,45%,0.12)] text-[hsl(142,71%,35%)] border-[hsl(142,71%,45%,0.25)]" :
-    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,35%)] border-[hsl(200,80%,50%,0.25)]" :
+    value >= 90 ? "bg-[hsl(142,71%,45%,0.15)] text-[hsl(142,71%,45%)] border-[hsl(142,71%,45%,0.30)]" :
+    value >= 75 ? "bg-[hsl(188,90%,42%,0.15)] text-[hsl(188,90%,48%)] border-[hsl(188,90%,42%,0.30)]" :
+    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,42%)] border-[hsl(200,80%,50%,0.25)]" :
     value >= 45 ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]" :
     value >= 35 ? "bg-[hsl(25,90%,50%,0.12)] text-[hsl(25,90%,38%)] border-[hsl(25,90%,50%,0.25)]" :
     "bg-destructive/15 text-destructive border-destructive/30";
@@ -310,8 +331,26 @@ function ScoutGrade({ value, fullLabel }: { value: number | null; fullLabel: str
   return (
     <div className={`rounded-lg border p-3 ${tier}`}>
       <div className="text-xs font-medium opacity-80">{fullLabel}</div>
-      <div className="text-2xl font-bold mt-1">{Math.round(value)}</div>
-      <div className="text-xs font-semibold mt-0.5">{grade}</div>
+      {rawStat != null ? (
+        <>
+          <div className="text-2xl font-bold mt-1 leading-none">
+            {rawStat.toFixed(1)}
+            <span className="text-sm font-semibold opacity-75 ml-0.5">{unit ?? "%"}</span>
+          </div>
+          <div className="border-t border-current opacity-20 mt-1.5 mb-1" />
+          <div className="text-xs font-bold leading-tight">{pitcherOrdinalFull(value)} percentile</div>
+          <div className="text-[10px] font-medium opacity-65 leading-tight">{grade}</div>
+        </>
+      ) : (
+        <>
+          <div className="text-2xl font-bold mt-1 leading-none">
+            {Math.round(value)}<span className="text-sm font-semibold opacity-65 ml-0.5">{pitcherOrdinalSuffix(value)}</span>
+          </div>
+          <div className="text-[10px] font-medium opacity-45 mt-0.5 leading-none">percentile</div>
+          <div className="border-t border-current opacity-20 mt-1.5 mb-1" />
+          <div className="text-xs font-semibold leading-tight">{grade}</div>
+        </>
+      )}
     </div>
   );
 }
@@ -2291,10 +2330,10 @@ export default function PitcherProfile() {
                     } : null;
                     return (
                       <>
-                        <ScoutGrade value={livePercentile?.stuff ?? internalPowerRatings?.scores?.stuff ?? null} fullLabel="Stuff+" />
-                        <ScoutGrade value={livePercentile?.whiff ?? internalPowerRatings?.scores?.whiff ?? null} fullLabel="Whiff%" />
-                        <ScoutGrade value={livePercentile?.bb ?? internalPowerRatings?.scores?.bb ?? null} fullLabel="BB%" />
-                        <ScoutGrade value={livePercentile?.barrel ?? internalPowerRatings?.scores?.barrel ?? null} fullLabel="Barrel%" />
+                        <ScoutGrade value={livePercentile?.stuff ?? internalPowerRatings?.scores?.stuff ?? null} fullLabel="Stuff+" rawStat={plRates?.stuffPlus ?? null} unit="" />
+                        <ScoutGrade value={livePercentile?.whiff ?? internalPowerRatings?.scores?.whiff ?? null} fullLabel="Whiff%" rawStat={plRates?.whiff ?? null} unit="%" />
+                        <ScoutGrade value={livePercentile?.bb ?? internalPowerRatings?.scores?.bb ?? null} fullLabel="BB%" rawStat={plRates?.bb ?? null} unit="%" />
+                        <ScoutGrade value={livePercentile?.barrel ?? internalPowerRatings?.scores?.barrel ?? null} fullLabel="Barrel%" rawStat={plRates?.barrel ?? null} unit="%" />
                       </>
                     );
                   })()}
@@ -2548,10 +2587,10 @@ function HistoricalPitcherView({
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <HistoricalPitcherGrade value={row.whiff_score} fullLabel="Whiff%" />
-              <HistoricalPitcherGrade value={row.bb_score} fullLabel="BB%" />
-              <HistoricalPitcherGrade value={row.barrel_score} fullLabel="Barrel%" />
-              <HistoricalPitcherGrade value={row.hh_score} fullLabel="Hard Hit%" />
+              <HistoricalPitcherGrade value={row.whiff_score} fullLabel="Whiff%" rawStat={row.whiff_pct ?? null} unit="%" />
+              <HistoricalPitcherGrade value={row.bb_score} fullLabel="BB%" rawStat={row.bb_pct ?? null} unit="%" />
+              <HistoricalPitcherGrade value={row.barrel_score} fullLabel="Barrel%" rawStat={row.barrel_pct ?? null} unit="%" />
+              <HistoricalPitcherGrade value={row.hh_score} fullLabel="Hard Hit%" rawStat={row.hard_hit_pct ?? null} unit="%" />
             </div>
             {isAdmin && (
               <>
@@ -2617,7 +2656,12 @@ function HistoricalPitcherView({
   );
 }
 
-function HistoricalPitcherGrade({ value, fullLabel }: { value: number | null; fullLabel: string }) {
+function HistoricalPitcherGrade({ value, fullLabel, rawStat, unit }: {
+  value: number | null;
+  fullLabel: string;
+  rawStat?: number | null;
+  unit?: string;
+}) {
   if (value == null) {
     return (
       <div className="rounded-lg border border-border bg-muted/30 p-3" title={fullLabel}>
@@ -2628,9 +2672,9 @@ function HistoricalPitcherGrade({ value, fullLabel }: { value: number | null; fu
     );
   }
   const tier =
-    value >= 90 ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]" :
-    value >= 75 ? "bg-[hsl(142,71%,45%,0.12)] text-[hsl(142,71%,35%)] border-[hsl(142,71%,45%,0.25)]" :
-    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,35%)] border-[hsl(200,80%,50%,0.25)]" :
+    value >= 90 ? "bg-[hsl(142,71%,45%,0.15)] text-[hsl(142,71%,45%)] border-[hsl(142,71%,45%,0.30)]" :
+    value >= 75 ? "bg-[hsl(188,90%,42%,0.15)] text-[hsl(188,90%,48%)] border-[hsl(188,90%,42%,0.30)]" :
+    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,42%)] border-[hsl(200,80%,50%,0.25)]" :
     value >= 45 ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]" :
     value >= 35 ? "bg-[hsl(25,90%,50%,0.12)] text-[hsl(25,90%,38%)] border-[hsl(25,90%,50%,0.25)]" :
     "bg-destructive/15 text-destructive border-destructive/30";
@@ -2643,8 +2687,26 @@ function HistoricalPitcherGrade({ value, fullLabel }: { value: number | null; fu
   return (
     <div className={`rounded-lg border p-3 ${tier}`}>
       <div className="text-xs font-medium opacity-80">{fullLabel}</div>
-      <div className="text-2xl font-bold mt-1">{Math.round(value)}</div>
-      <div className="text-xs font-semibold mt-0.5">{grade}</div>
+      {rawStat != null ? (
+        <>
+          <div className="text-2xl font-bold mt-1 leading-none">
+            {rawStat.toFixed(1)}
+            <span className="text-sm font-semibold opacity-75 ml-0.5">{unit ?? "%"}</span>
+          </div>
+          <div className="border-t border-current opacity-20 mt-1.5 mb-1" />
+          <div className="text-xs font-bold leading-tight">{pitcherOrdinalFull(value)} percentile</div>
+          <div className="text-[10px] font-medium opacity-65 leading-tight">{grade}</div>
+        </>
+      ) : (
+        <>
+          <div className="text-2xl font-bold mt-1 leading-none">
+            {Math.round(value)}<span className="text-sm font-semibold opacity-65 ml-0.5">{pitcherOrdinalSuffix(value)}</span>
+          </div>
+          <div className="text-[10px] font-medium opacity-45 mt-0.5 leading-none">percentile</div>
+          <div className="border-t border-current opacity-20 mt-1.5 mb-1" />
+          <div className="text-xs font-semibold leading-tight">{grade}</div>
+        </>
+      )}
     </div>
   );
 }
