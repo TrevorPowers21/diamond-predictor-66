@@ -1997,7 +1997,7 @@ export default function PitcherProfile() {
                       // shows — so the two surfaces report the same
                       // number to coaches. Arsenal-derived weighted is
                       // the fallback (close but not identical), then PM.
-                      const plOverall = pitchLog2026PitcherRatesQuery.data?.stuffPlus ?? null;
+                      const plOverall = effectiveSeason === 2026 ? (pitchLog2026PitcherRatesQuery.data?.stuffPlus ?? null) : null;
                       const sp = plOverall ?? pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus;
                       const tierStyle = sp == null ? { border: "#162241", bg: "#0d1a30", text: "#8a94a6" }
                         : sp >= 103 ? { border: "hsl(142,71%,45%,0.3)", bg: "hsl(142,71%,45%,0.12)", text: "hsl(142,71%,35%)" }
@@ -2020,7 +2020,7 @@ export default function PitcherProfile() {
                       // same number to coaches. Per-pitch weighted
                       // arsenal Whiff% is a fallback (close but not
                       // identical to direct overall), then PM stored.
-                      const plOverall = pitchLog2026PitcherRatesQuery.data?.whiff ?? null;
+                      const plOverall = effectiveSeason === 2026 ? (pitchLog2026PitcherRatesQuery.data?.whiff ?? null) : null;
                       const wp = plOverall ?? pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null;
                       const tierStyle = wp == null ? { border: "#162241", bg: "#0d1a30", text: "#8a94a6" }
                         : wp >= 27 ? { border: "hsl(142,71%,45%,0.3)", bg: "hsl(142,71%,45%,0.12)", text: "hsl(142,71%,35%)" }
