@@ -2320,8 +2320,10 @@ export default function PitcherProfile() {
                     // the Pitcher Stats page percentile bars use, so a coach
                     // sees the same percentile on Overview and Stats.
                     // Fallback: stored / normal-dist when pop or rates not yet loaded.
-                    const plRates = pitchLog2026PitcherRatesQuery.data;
-                    const plPop = pitchLog2026PitcherPopQuery.data ?? [];
+                    // Gate live 2026 pitch-log rates on effectiveSeason so switching
+                    // to 2025 falls through to stored masterRow values instead.
+                    const plRates = effectiveSeason === 2026 ? pitchLog2026PitcherRatesQuery.data : null;
+                    const plPop = effectiveSeason === 2026 ? (pitchLog2026PitcherPopQuery.data ?? []) : [];
                     const livePercentile = plRates?.hasData && plPop.length > 0 ? {
                       stuff: percentileRank(plRates.stuffPlus, plPop.map(p => p.stuffPlus)),
                       whiff: percentileRank(plRates.whiff, plPop.map(p => p.whiff)),
@@ -2330,10 +2332,10 @@ export default function PitcherProfile() {
                     } : null;
                     return (
                       <>
-                        <ScoutGrade value={livePercentile?.stuff ?? internalPowerRatings?.scores?.stuff ?? null} fullLabel="Stuff+" rawStat={plRates?.stuffPlus ?? null} unit="" />
-                        <ScoutGrade value={livePercentile?.whiff ?? internalPowerRatings?.scores?.whiff ?? null} fullLabel="Whiff%" rawStat={plRates?.whiff ?? null} unit="%" />
-                        <ScoutGrade value={livePercentile?.bb ?? internalPowerRatings?.scores?.bb ?? null} fullLabel="BB%" rawStat={plRates?.bb ?? null} unit="%" />
-                        <ScoutGrade value={livePercentile?.barrel ?? internalPowerRatings?.scores?.barrel ?? null} fullLabel="Barrel%" rawStat={plRates?.barrel ?? null} unit="%" />
+                        <ScoutGrade value={livePercentile?.stuff ?? internalPowerRatings?.scores?.stuff ?? null} fullLabel="Stuff+" rawStat={(plRates?.stuffPlus ?? internalPowerRatings?.metrics?.stuff) ?? null} unit="" />
+                        <ScoutGrade value={livePercentile?.whiff ?? internalPowerRatings?.scores?.whiff ?? null} fullLabel="Whiff%" rawStat={(plRates?.whiff ?? internalPowerRatings?.metrics?.whiff) ?? null} unit="%" />
+                        <ScoutGrade value={livePercentile?.bb ?? internalPowerRatings?.scores?.bb ?? null} fullLabel="BB%" rawStat={(plRates?.bb ?? internalPowerRatings?.metrics?.bb) ?? null} unit="%" />
+                        <ScoutGrade value={livePercentile?.barrel ?? internalPowerRatings?.scores?.barrel ?? null} fullLabel="Barrel%" rawStat={(plRates?.barrel ?? internalPowerRatings?.metrics?.barrel) ?? null} unit="%" />
                       </>
                     );
                   })()}
