@@ -3,7 +3,7 @@ import { Sparkles, ArrowLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const STORAGE_KEY = "rstr_iq_whats_new_seen_v6";
+const STORAGE_KEY = "rstr_iq_whats_new_seen_v7";
 
 type Feature = {
   title: string;
@@ -19,6 +19,25 @@ type Release = {
 };
 
 const RELEASES: Release[] = [
+  {
+    date: "2026-06-27",
+    headline: "Pitcher profiles now respond correctly when switching between the 2025 and 2026 seasons",
+    features: [
+      {
+        title: "Pitcher Year-Switching Fixed Across All Grade Surfaces",
+        tagline:
+          "Scouting grades and metric values on pitcher profiles now update correctly when you switch between the 2025 and 2026 season views. Previously, Stuff+, Whiff%, BB%, and Barrel% were locked to 2026 pitch-log data regardless of which year was selected.",
+        details: [
+          "2026 view reads live pitch-log data — the same source that powers the Stats tab and the per-pitch arsenal breakdown.",
+          "2025 view falls back to stored Pitching Master values, which are precomputed and season-aware, so the grade reflects what the pitcher actually did that year.",
+          "Fix applies to all four scouting grade tiles (Stuff+, Whiff%, BB%, Barrel%) and to the raw stat values shown beneath each grade.",
+        ],
+      },
+    ],
+    whatElse: [
+      "Pitcher Profile: removed the Stuff+ Overview summary card. The per-pitch arsenal table below it already shows Stuff+ and Whiff% at the pitch-type level — the overview card was redundant.",
+    ],
+  },
   {
     date: "2026-06-23",
     headline: "Comprehensive 2026 statistical analysis — filter every D1 player by velocity, Stuff+, handedness, and more",
