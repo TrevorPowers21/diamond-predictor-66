@@ -3,7 +3,7 @@ import { Sparkles, ArrowLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const STORAGE_KEY = "rstr_iq_whats_new_seen_v6";
+const STORAGE_KEY = "rstr_iq_whats_new_seen_v7";
 
 type Feature = {
   title: string;
@@ -19,6 +19,24 @@ type Release = {
 };
 
 const RELEASES: Release[] = [
+  {
+    date: "2026-06-27",
+    headline: "Scouting grades now show the stat value and D1 percentile rank on every profile",
+    features: [
+      {
+        title: "The Number Behind the Grade, Right on the Profile",
+        tagline:
+          "Each scouting grade tile on a player or pitcher profile now shows the metric value alongside the grade itself — so you can see exactly what's driving the score without digging into the Stats tab.",
+        details: [
+          "Hitters show four grades — Barrel%, Exit Velocity, Contact%, and Chase%. Each tile displays the value next to the percentile rank against every qualified D1 hitter in 2026.",
+          "Pitchers show Stuff+, Whiff%, BB%, and Barrel% with the same treatment — the number that produced the grade is visible directly on the card.",
+          "Percentile ranks are computed against the same qualified D1 population as the Stats tab percentile bars, so the grade on the profile and the bar on the Stats page always agree.",
+          "Switch between 2025 and 2026 on any profile and both the grade and the stat value update to reflect that season's data.",
+        ],
+      },
+    ],
+    whatElse: [],
+  },
   {
     date: "2026-06-23",
     headline: "Comprehensive 2026 statistical analysis — filter every D1 player by velocity, Stuff+, handedness, and more",
@@ -516,22 +534,24 @@ export function WhatsNewModal() {
             ))}
 
             {/* "What else" - same text weight/size as feature details for visual parity. */}
-            <div>
-              <h4
-                className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#D4AF37] mb-2.5"
-                style={{ fontFamily: "'Oswald', sans-serif" }}
-              >
-                What Else
-              </h4>
-              <ul className="space-y-1.5 text-[13px] leading-[1.55]">
-                {currentRelease.whatElse.map((item, i) => (
-                  <li key={i} className="flex gap-2.5">
-                    <span className="text-[#D4AF37] mt-[7px] shrink-0 inline-block w-1 h-1 rounded-full bg-[#D4AF37]" />
-                    <span>{formatWhatElse(item)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {currentRelease.whatElse.length > 0 && (
+              <div>
+                <h4
+                  className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#D4AF37] mb-2.5"
+                  style={{ fontFamily: "'Oswald', sans-serif" }}
+                >
+                  What Else
+                </h4>
+                <ul className="space-y-1.5 text-[13px] leading-[1.55]">
+                  {currentRelease.whatElse.map((item, i) => (
+                    <li key={i} className="flex gap-2.5">
+                      <span className="text-[#D4AF37] mt-[7px] shrink-0 inline-block w-1 h-1 rounded-full bg-[#D4AF37]" />
+                      <span>{formatWhatElse(item)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         ) : (
           <div className="px-6 py-5 space-y-4">
