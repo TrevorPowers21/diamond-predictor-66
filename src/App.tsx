@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, Outlet, useLocation } from "react-router-dom";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import { AuthProvider } from "@/hooks/useAuth";
 import { lazy, Suspense, useEffect, useRef } from "react";
@@ -75,12 +75,88 @@ function PostHogPageView() {
   return null;
 }
 
+// Root layout wraps all routes so PostHogPageView has access to useLocation.
+function RootLayout() {
+  return (
+    <>
+      <PostHogPageView />
+      <Outlet />
+    </>
+  );
+}
+
+const router = createBrowserRouter([
+  {
+    element: <RootLayout />,
+    children: [
+      { path: "/", element: <Index /> },
+      { path: "/auth", element: <Auth /> },
+      { path: "/dashboard", element: <ProtectedRoute><Dashboard /></ProtectedRoute> },
+      { path: "/dashboard/portal", element: <ProtectedRoute><TransferPortal /></ProtectedRoute> },
+      { path: "/dashboard/returning", element: <ProtectedRoute><ReturningPlayers /></ProtectedRoute> },
+      { path: "/dashboard/war-room", element: <ProtectedRoute><WarRoom /></ProtectedRoute> },
+      { path: "/dashboard/dev-weights", element: <ProtectedRoute><DevWeights /></ProtectedRoute> },
+      // { path: "/dashboard/nil", element: <ProtectedRoute><NilValuations /></ProtectedRoute> },
+      { path: "/dashboard/compare", element: <ProtectedRoute><PlayerComparison /></ProtectedRoute> },
+      { path: "/dashboard/player/:id", element: <ProtectedRoute><PlayerProfile /></ProtectedRoute> },
+      { path: "/dashboard/player/:id/stats", element: <ProtectedRoute><PlayerStatsPage /></ProtectedRoute> },
+      { path: "/dashboard/pitcher/:id", element: <ProtectedRoute><PitcherProfile /></ProtectedRoute> },
+      { path: "/dashboard/pitcher/:id/stats", element: <ProtectedRoute><PitcherStatsPage /></ProtectedRoute> },
+      { path: "/dashboard/team-builder", element: <ProtectedRoute><TeamBuilder /></ProtectedRoute> },
+      { path: "/dashboard/targets", element: <ProtectedRoute><Targets /></ProtectedRoute> },
+      // Legacy /dashboard/high-follow URL still works — renders the standalone page so bookmarks don't break.
+      { path: "/dashboard/high-follow", element: <ProtectedRoute><HighFollowList /></ProtectedRoute> },
+      { path: "/dashboard/admin", element: <ProtectedRoute><AdminDashboard /></ProtectedRoute> },
+      { path: "/dashboard/settings", element: <ProtectedRoute><Settings /></ProtectedRoute> },
+      {
+        path: "/dashboard/admin/teams",
+        element: (
+          <ProtectedRoute>
+            <RoleGuard allow={["superadmin"]}><AdminTeams /></RoleGuard>
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "/dashboard/admin/users",
+        element: (
+          <ProtectedRoute>
+            <RoleGuard allow={["superadmin", "team_admin"]}><AdminUsers /></RoleGuard>
+          </ProtectedRoute>
+        ),
+      },
+      { path: "/dashboard/*", element: <ProtectedRoute><Dashboard /></ProtectedRoute> },
+      // Savant — internal only. Gated by SavantRoute (auth + email allowlist).
+      {
+        path: "/savant",
+        element: (
+          <ProtectedRoute>
+            <Suspense fallback={null}>
+              <SavantRoute><SavantLayout /></SavantRoute>
+            </Suspense>
+          </ProtectedRoute>
+        ),
+        children: [
+          { index: true, element: <Suspense fallback={null}><SavantHome /></Suspense> },
+          { path: "leaderboards", element: <Suspense fallback={null}><SavantLeaderboards /></Suspense> },
+          { path: "conferences", element: <Suspense fallback={null}><SavantConferenceStats /></Suspense> },
+          { path: "teams", element: <Suspense fallback={null}><SavantTeamsList /></Suspense> },
+          { path: "team/:id", element: <Suspense fallback={null}><SavantTeamProfile /></Suspense> },
+          { path: "hitter/:id", element: <Suspense fallback={null}><SavantHitterPage /></Suspense> },
+          { path: "pitcher/:id", element: <Suspense fallback={null}><SavantPitcherPage /></Suspense> },
+        ],
+      },
+      { path: "*", element: <NotFound /> },
+    ],
+  },
+]);
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <TooltipProvider>
         <Toaster />
         <Sonner />
+<<<<<<< HEAD
         <SpeedInsights />
         <BrowserRouter>
           <PostHogPageView />
@@ -144,6 +220,9 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
+=======
+        <RouterProvider router={router} />
+>>>>>>> 7f545ce (feat: Team Builder save flow, depth fix, default build seeding)
       </TooltipProvider>
     </AuthProvider>
   </QueryClientProvider>

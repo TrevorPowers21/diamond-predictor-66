@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { Plus, UserPlus, Users, Palette } from "lucide-react";
 import { inviteUserToTeam } from "@/lib/inviteUser";
-import { CURRENT_SEASON } from "@/lib/seasonConstants";
+import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { lookupSchoolColors } from "@/lib/schoolColors";
 import { extractColorsFromFile } from "@/lib/extractLogoColors";
 
@@ -344,7 +344,7 @@ function CreateTeamDialog({
     const trimmedLogo = logoUrl.trim();
     const trimmedDisplay = displayName.trim();
     const trimmedMascot = mascot.trim();
-    const { error } = await supabase
+    const { data: newTeam, error } = await supabase
       .from("customer_teams")
       .insert({
         name: name.trim(),
@@ -357,13 +357,62 @@ function CreateTeamDialog({
         mascot: trimmedMascot || null,
         primary_color: trimmedDisplay || trimmedMascot ? primaryColor : null,
         secondary_color: trimmedDisplay || trimmedMascot ? secondaryColor : null,
-      });
+      })
+      .select("id, name, school_team_id")
+      .single();
     setSubmitting(false);
-    if (error) {
-      toast.error(`Could not create team: ${error.message}`);
+    if (error || !newTeam) {
+      toast.error(`Could not create team: ${error?.message}`);
       return;
     }
-    toast.success(`Created team "${name.trim()}"`);
+
+    // Seed a default build from returners so coaches see a roster on first login.
+    // Predictions load dynamically; this just creates the roster structure.
+    void (async () => {
+      let schoolName: string = newTeam.name;
+      if ((newTeam as any).school_team_id) {
+        const { data: ttRow } = await supabase
+          .from("Teams Table")
+          .select("abbreviation")
+          .eq("id", (newTeam as any).school_team_id)
+          .maybeSingle();
+        if ((ttRow as any)?.abbreviation) schoolName = (ttRow as any).abbreviation;
+      }
+      const { data: returners } = await supabase
+        .from("players")
+        .select("id, position")
+        .ilike("team", schoolName)
+        .eq("transfer_portal", false);
+      if (!returners || returners.length === 0) return;
+      const { data: build } = await supabase
+        .from("team_builds")
+        .insert({
+          customer_team_id: newTeam.id,
+          team: schoolName,
+          name: "Default Build",
+          is_default: true,
+          academic_year: PROJECTION_SEASON,
+          total_budget: 0,
+          depth_assignments: {},
+          depth_placeholders: {},
+        })
+        .select("id")
+        .single();
+      if (!build) return;
+      await supabase.from("team_build_players").insert(
+        returners.map((p: any) => ({
+          build_id: (build as any).id,
+          player_id: p.id,
+          source: "returner",
+          position_slot: p.position ?? null,
+          nil_value: null,
+          player_snapshot: null,
+          included_in_roster: true,
+        }))
+      );
+    })();
+
+    toast.success(`Created team "${newTeam.name}"`);
     reset();
     onCreated();
   };
