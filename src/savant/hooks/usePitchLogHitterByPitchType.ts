@@ -24,6 +24,11 @@ export interface PitchLogHitterByPitchTypeRow {
   in_zone_swings: number;
   in_zone_whiffs: number;
   fouls: number;
+  // RV (offense run value) components — added 2026-06-29; populated post-merge.
+  balls: number;
+  called_strikes: number;
+  looking_strikeouts: number;
+  swinging_strikeouts: number;
   batted_balls_in_play: number;
   batted_barrels: number;
   batted_hard_hit: number;

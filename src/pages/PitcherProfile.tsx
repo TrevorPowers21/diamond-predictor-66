@@ -905,6 +905,56 @@ export default function PitcherProfile() {
 
   const pitchingEq = usePitchingEquationWeights();
 
+  // Internal power ratings read pitch_log FIRST (2026), Pitching Master second.
+  // The 2026 TruMedia master export can have null sub-metrics (e.g. in_zone_pct
+  // for Volantis), which blanks the rating; pitch_log carries them all.
+  const pitcherSourceId =
+    (player as any)?.source_player_id ?? (id && /^\d+$/.test(id) ? id : null);
+  const { data: pitchLogTotalsRow } = useQuery({
+    queryKey: ["pitcher-profile-pitchlog-totals", pitcherSourceId, effectiveSeason],
+    enabled: !!pitcherSourceId && effectiveSeason === 2026,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("pitch_log_pitcher_totals")
+        .select("*")
+        .eq("pitcher_id", pitcherSourceId as string)
+        .eq("season", 2026)
+        .eq("dimension_key", "all")
+        .maybeSingle();
+      if (error) throw error;
+      return data ?? null;
+    },
+  });
+
+  const pitchLogMetrics = useMemo(() => {
+    const r = pitchLogTotalsRow as any;
+    if (!r) return null;
+    const div = (n: number | null, d: number | null) =>
+      d != null && d > 0 ? (n ?? 0) / d : null;
+    const pc = (n: number | null, d: number | null) => {
+      const v = div(n, d);
+      return v == null ? null : v * 100;
+    };
+    const ev = r.batted_balls_allowed_with_ev;
+    return {
+      stuff: div(r.stuff_plus_sum, r.stuff_plus_data_pitches),
+      whiff: pc(r.total_whiffs, r.total_swings),
+      bb: pc(r.total_bb, r.total_pa),
+      hh: pc(r.batted_hard_hit_allowed, ev),
+      izWhiff: pc(r.total_in_zone_whiffs, r.total_in_zone_swings),
+      chase: pc(r.total_chases, r.total_out_of_zone),
+      barrel: pc(r.batted_barrels_allowed, ev),
+      ld: pc(r.batted_line_drives_allowed, ev),
+      avgEv: div(r.ev_sum_allowed, ev),
+      gb: pc(r.batted_ground_balls_allowed, ev),
+      iz: pc(r.total_in_zone, r.total_in_zone + r.total_out_of_zone),
+      ev90: r.ev_90_allowed == null ? null : Number(r.ev_90_allowed),
+      // Directional pull% (matches HM HPull% scale), not pull-air.
+      pull: pc(r.batted_pull_allowed, r.batted_pull_allowed + r.batted_center_allowed + r.batted_oppo_allowed),
+      la1030: pc(r.batted_la_10_to_30_allowed, ev),
+    };
+  }, [pitchLogTotalsRow]);
+
   const parseNum = (v: string | undefined) => {
     const s = (v || "").replace(/[%,$]/g, "").trim();
     if (s === "") return null;
@@ -932,21 +982,23 @@ export default function PitcherProfile() {
 
   const internalPowerRatings = useMemo(() => {
     if (!powerRatingsRow) return null;
+    // pitch_log FIRST, Pitching Master second (per-metric fallback).
+    const pl = pitchLogMetrics;
     const metrics = {
-      stuff: parseNum(powerRatingsRow[2]),
-      whiff: parseNum(powerRatingsRow[3]),
-      bb: parseNum(powerRatingsRow[4]),
-      hh: parseNum(powerRatingsRow[5]),
-      izWhiff: parseNum(powerRatingsRow[6]),
-      chase: parseNum(powerRatingsRow[7]),
-      barrel: parseNum(powerRatingsRow[8]),
-      ld: parseNum(powerRatingsRow[9]),
-      avgEv: parseNum(powerRatingsRow[10]),
-      gb: parseNum(powerRatingsRow[11]),
-      iz: parseNum(powerRatingsRow[12]),
-      ev90: parseNum(powerRatingsRow[13]),
-      pull: parseNum(powerRatingsRow[14]),
-      la1030: parseNum(powerRatingsRow[15]),
+      stuff: pl?.stuff ?? parseNum(powerRatingsRow[2]),
+      whiff: pl?.whiff ?? parseNum(powerRatingsRow[3]),
+      bb: pl?.bb ?? parseNum(powerRatingsRow[4]),
+      hh: pl?.hh ?? parseNum(powerRatingsRow[5]),
+      izWhiff: pl?.izWhiff ?? parseNum(powerRatingsRow[6]),
+      chase: pl?.chase ?? parseNum(powerRatingsRow[7]),
+      barrel: pl?.barrel ?? parseNum(powerRatingsRow[8]),
+      ld: pl?.ld ?? parseNum(powerRatingsRow[9]),
+      avgEv: pl?.avgEv ?? parseNum(powerRatingsRow[10]),
+      gb: pl?.gb ?? parseNum(powerRatingsRow[11]),
+      iz: pl?.iz ?? parseNum(powerRatingsRow[12]),
+      ev90: pl?.ev90 ?? parseNum(powerRatingsRow[13]),
+      pull: pl?.pull ?? parseNum(powerRatingsRow[14]),
+      la1030: pl?.la1030 ?? parseNum(powerRatingsRow[15]),
     };
     const storedScores = {
       stuff: parseNum(powerRatingsRow[16]),
@@ -1053,7 +1105,7 @@ export default function PitcherProfile() {
           (OVERALL_PITCHER_POWER_WEIGHTS.hr9 * hr9Plus);
 
     return { metrics, scores, eraPlus, whipPlus, k9Plus, bb9Plus, hr9Plus, fipPlus, overallPlus };
-  }, [pitchingEq, powerRatingsRow]);
+  }, [pitchingEq, powerRatingsRow, pitchLogMetrics]);
 
   const latestStats = useMemo(() => seasonStats[0] || null, [seasonStats]);
   // Use the same prediction picker TB uses (pickPreferredPrediction):
@@ -1956,90 +2008,6 @@ export default function PitcherProfile() {
               </CardContent>
             </Card>
 
-            {(() => {
-              const sp = pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus;
-              const wp = pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null;
-              const hasArsenal = pitchArsenal.rows.length > 0;
-              const hasAnySignal = sp != null || wp != null || hasArsenal;
-              if (!hasAnySignal) {
-                // No TrackMan capture at all — render a single full-width N/A
-                // card instead of hiding the section entirely. Common for the
-                // ~79% of JUCO arms without per-pitch data.
-                return (
-                  <Card className="border-[#162241] bg-[#0a1428]">
-                    <CardHeader className="pb-1 pt-3 px-4">
-                      <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Stuff+ Overview</CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-4 pb-4">
-                      <div className="rounded-lg border border-[#162241] bg-[#0d1a30] p-4 text-center min-h-[94px] flex flex-col justify-center">
-                        <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Stuff+</div>
-                        <div className="text-3xl font-bold tracking-tight mt-1 text-[#8a94a6]">N/A</div>
-                        <div className="text-[10px] text-[#5a6478] mt-1">No TrackMan capture for this pitcher</div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              }
-              return null;
-            })()}
-
-            {pitchArsenal.rows.length > 0 && (
-              <Card className="border-[#162241] bg-[#0a1428]">
-                <CardHeader className="pb-1 pt-3 px-4">
-                  <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Stuff+ Overview</CardTitle>
-                </CardHeader>
-                <CardContent className="px-4 pb-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    {(() => {
-                      // Stuff+ on the Stuff+ Overview card uses the
-                      // direct pitch_log totals value (stuff_plus_sum /
-                      // stuff_plus_data_pitches) — exactly what Stats
-                      // shows — so the two surfaces report the same
-                      // number to coaches. Arsenal-derived weighted is
-                      // the fallback (close but not identical), then PM.
-                      const plOverall = pitchLog2026PitcherRatesQuery.data?.stuffPlus ?? null;
-                      const sp = plOverall ?? pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus;
-                      const tierStyle = sp == null ? { border: "#162241", bg: "#0d1a30", text: "#8a94a6" }
-                        : sp >= 103 ? { border: "hsl(142,71%,45%,0.3)", bg: "hsl(142,71%,45%,0.12)", text: "hsl(142,71%,35%)" }
-                        : sp >= 98 ? { border: "hsl(200,80%,50%,0.3)", bg: "hsl(200,80%,50%,0.12)", text: "hsl(200,80%,35%)" }
-                        : sp >= 93 ? { border: "hsl(var(--warning)/0.3)", bg: "hsl(var(--warning)/0.15)", text: "hsl(var(--warning))" }
-                        : { border: "hsl(0,72%,51%,0.3)", bg: "hsl(0,72%,51%,0.12)", text: "hsl(0,72%,41%)" };
-                      return (
-                        <div className="rounded-lg border p-4 text-center" style={{ borderColor: tierStyle.border, backgroundColor: tierStyle.bg }}>
-                          <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Stuff+</div>
-                          <div className="text-3xl font-bold tracking-tight mt-1" style={{ color: tierStyle.text }}>{sp == null ? "N/A" : Math.round(sp).toString()}</div>
-                          <div className="text-[10px] text-[#5a6478] mt-1">Avg: 100</div>
-                        </div>
-                      );
-                    })()}
-                    {(() => {
-                      // Whiff% on the Stuff+ Overview card uses the
-                      // direct pitch_log overall (total_whiffs /
-                      // total_swings) — exactly what the Pitcher Stats
-                      // page shows — so the two surfaces report the
-                      // same number to coaches. Per-pitch weighted
-                      // arsenal Whiff% is a fallback (close but not
-                      // identical to direct overall), then PM stored.
-                      const plOverall = pitchLog2026PitcherRatesQuery.data?.whiff ?? null;
-                      const wp = plOverall ?? pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null;
-                      const tierStyle = wp == null ? { border: "#162241", bg: "#0d1a30", text: "#8a94a6" }
-                        : wp >= 27 ? { border: "hsl(142,71%,45%,0.3)", bg: "hsl(142,71%,45%,0.12)", text: "hsl(142,71%,35%)" }
-                        : wp >= 21 ? { border: "hsl(200,80%,50%,0.3)", bg: "hsl(200,80%,50%,0.12)", text: "hsl(200,80%,35%)" }
-                        : wp >= 16 ? { border: "hsl(var(--warning)/0.3)", bg: "hsl(var(--warning)/0.15)", text: "hsl(var(--warning))" }
-                        : { border: "hsl(0,72%,51%,0.3)", bg: "hsl(0,72%,51%,0.12)", text: "hsl(0,72%,41%)" };
-                      return (
-                        <div className="rounded-lg border p-4 text-center" style={{ borderColor: tierStyle.border, backgroundColor: tierStyle.bg }}>
-                          <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Whiff%</div>
-                          <div className="text-3xl font-bold tracking-tight mt-1" style={{ color: tierStyle.text }}>{wp == null ? "—" : `${wp.toFixed(1)}%`}</div>
-                          <div className="text-[10px] text-[#5a6478] mt-1">Avg: 22.9%</div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
             {/* Career Stats Table */}
             <Card className="border-[#162241] bg-[#0a1428]">
               <CardHeader className="pb-1 pt-3 px-4">
@@ -2160,7 +2128,7 @@ export default function PitcherProfile() {
                     ))}
                   </div>
                   <div className="border-t border-[#162241] pt-4">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-[#8a94a6] mb-3">2025 Input Metrics</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-[#8a94a6] mb-3">{effectiveSeason} Input Metrics{pitchLogMetrics ? " · pitch log" : ""}</p>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
                       {[
                         ["Stuff+", internalPowerRatings?.metrics.stuff],
@@ -2320,8 +2288,10 @@ export default function PitcherProfile() {
                     // the Pitcher Stats page percentile bars use, so a coach
                     // sees the same percentile on Overview and Stats.
                     // Fallback: stored / normal-dist when pop or rates not yet loaded.
-                    const plRates = pitchLog2026PitcherRatesQuery.data;
-                    const plPop = pitchLog2026PitcherPopQuery.data ?? [];
+                    // Gate live 2026 pitch-log rates on effectiveSeason so switching
+                    // to 2025 falls through to stored masterRow values instead.
+                    const plRates = effectiveSeason === 2026 ? pitchLog2026PitcherRatesQuery.data : null;
+                    const plPop = effectiveSeason === 2026 ? (pitchLog2026PitcherPopQuery.data ?? []) : [];
                     const livePercentile = plRates?.hasData && plPop.length > 0 ? {
                       stuff: percentileRank(plRates.stuffPlus, plPop.map(p => p.stuffPlus)),
                       whiff: percentileRank(plRates.whiff, plPop.map(p => p.whiff)),
@@ -2330,10 +2300,10 @@ export default function PitcherProfile() {
                     } : null;
                     return (
                       <>
-                        <ScoutGrade value={livePercentile?.stuff ?? internalPowerRatings?.scores?.stuff ?? null} fullLabel="Stuff+" rawStat={plRates?.stuffPlus ?? null} unit="" />
-                        <ScoutGrade value={livePercentile?.whiff ?? internalPowerRatings?.scores?.whiff ?? null} fullLabel="Whiff%" rawStat={plRates?.whiff ?? null} unit="%" />
-                        <ScoutGrade value={livePercentile?.bb ?? internalPowerRatings?.scores?.bb ?? null} fullLabel="BB%" rawStat={plRates?.bb ?? null} unit="%" />
-                        <ScoutGrade value={livePercentile?.barrel ?? internalPowerRatings?.scores?.barrel ?? null} fullLabel="Barrel%" rawStat={plRates?.barrel ?? null} unit="%" />
+                        <ScoutGrade value={livePercentile?.stuff ?? internalPowerRatings?.scores?.stuff ?? null} fullLabel="Stuff+" rawStat={(plRates?.stuffPlus ?? internalPowerRatings?.metrics?.stuff) ?? null} unit="" />
+                        <ScoutGrade value={livePercentile?.whiff ?? internalPowerRatings?.scores?.whiff ?? null} fullLabel="Whiff%" rawStat={(plRates?.whiff ?? internalPowerRatings?.metrics?.whiff) ?? null} unit="%" />
+                        <ScoutGrade value={livePercentile?.bb ?? internalPowerRatings?.scores?.bb ?? null} fullLabel="BB%" rawStat={(plRates?.bb ?? internalPowerRatings?.metrics?.bb) ?? null} unit="%" />
+                        <ScoutGrade value={livePercentile?.barrel ?? internalPowerRatings?.scores?.barrel ?? null} fullLabel="Barrel%" rawStat={(plRates?.barrel ?? internalPowerRatings?.metrics?.barrel) ?? null} unit="%" />
                       </>
                     );
                   })()}

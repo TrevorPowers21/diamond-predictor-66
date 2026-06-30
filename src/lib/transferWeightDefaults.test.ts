@@ -123,9 +123,12 @@ describe("transferWeightsForSource", () => {
   it("returns D1 defaults for empty string", () => {
     expect(transferWeightsForSource("")).toBe(TRANSFER_WEIGHT_DEFAULTS);
   });
-  it("returns D1 defaults for any other D1 division string", () => {
+  it("returns D1 defaults for any other (non-JUCO) division string", () => {
     expect(transferWeightsForSource("NCAA_D1")).toBe(TRANSFER_WEIGHT_DEFAULTS);
-    expect(transferWeightsForSource("D2")).toBe(TRANSFER_WEIGHT_DEFAULTS);
+  });
+  it("routes D2 sources through JUCO weights (D2 ≈ JUCO competition level)", () => {
+    // D2-engine work intentionally routes D2 through the JUCO path; D1 is unaffected.
+    expect(transferWeightsForSource("D2")).toBe(JUCO_TRANSFER_WEIGHTS);
   });
 
   describe("JUCO weights vs D1 weights structural differences", () => {

@@ -1,0 +1,20 @@
+{
+  "foul_distance_ft": 330,
+  "outfield_distance_ft": 400,
+  "axes_extent_ft": {
+    "x_min": -251.34523779156066,
+    "x_max": 251.34523779156066,
+    "y_min": -18,
+    "y_max": 418
+  },
+  "home_plate_fraction": {
+    "x": 0.5,
+    "y": 0.9587155963302753
+  },
+  "ft_per_fraction": {
+    "x": 502.6904755831213,
+    "y": 436
+  },
+  "projection": "x = distance * sin(spray_ang_rad), y = distance * cos(spray_ang_rad)",
+  "spray_ang_convention": "TruMedia: 0 = straight CF, negative = LF (3B side), positive = RF (1B side); foul lines at \u00b145\u00b0"
+}

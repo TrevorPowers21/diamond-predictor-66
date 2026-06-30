@@ -3,7 +3,7 @@ import { Sparkles, ArrowLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const STORAGE_KEY = "rstr_iq_whats_new_seen_v6";
+const STORAGE_KEY = "rstr_iq_whats_new_seen_v8";
 
 type Feature = {
   title: string;
@@ -19,6 +19,56 @@ type Release = {
 };
 
 const RELEASES: Release[] = [
+  {
+    date: "2026-06-29",
+    headline: "A full Visuals tab, deeper stat filters, and per-pitch run value on every 2026 profile",
+    features: [
+      {
+        title: "New Visuals Tab: Spray Charts, Zone Heat Maps, and Batted-Ball Profiles",
+        tagline:
+          "Every hitter and pitcher profile now has a Visuals tab that turns the season into pictures. See where a hitter sprays the ball, which zones they punish, and where pitchers live and miss, each colored by the metric that matters and all responsive to the same filters as the Stats tab.",
+        details: [
+          "Spray field plots every batted ball by result (1B, 2B, 3B, HR) and trajectory (ground ball, line drive, fly ball, pop up), with exit velocity, launch angle, result, and xwOBA on hover. Click a result in the legend to isolate just those balls.",
+          "13-zone heat maps color each zone by xwOBA, Whiff%, or average exit velocity. Hitter charts flip the scale so red always means good for the hitter, the opposite of the pitcher view.",
+          "Strike-zone scatter shows every pitch by location with hover-for-movement, so command and shape read at a glance.",
+          "Comprehensive Ball Flight panel splits contact into pull, straight, and oppo crossed with ground and air (the most telling read on a hitter's game power), with a 2026 line and an NCAA-average line side by side.",
+        ],
+      },
+      {
+        title: "Run Value and Expected Stats for Every Pitch Type",
+        tagline:
+          "The vs Pitch Type table now grades performance against each offering with Run Value, the single number for how much a pitch type helped or hurt, alongside the full expected-stat line.",
+        details: [
+          "Run Value and RV per 100 pitches by pitch type, color-coded so the best and worst offerings jump off the page.",
+          "BA, SLG, ISO, wOBA plus xBA, xSLG, xwOBA, Whiff%, Chase%, exit velocity, Hard Hit%, and Barrel%, all broken out per pitch type.",
+          "The Per-Pitch Success table on the Stats tab highlights elite average exit velocity in gold, so standout contact reads instantly.",
+        ],
+      },
+    ],
+    whatElse: [
+      "More filters: Pitch Type, Location (upper / middle / lower third and left / middle / right), and Batted Ball Type are all multi-select now, so you can stack a slice like breaking balls, lower third, ground balls in one view.",
+      "The Full Tracking reliability badge sits on the top table only, so the read is clear without repeating down the page.",
+      "Every Visuals panel respects the active split (vs LHP, vs fastball, vs top hitters, and the rest), so the picture always matches the filter you set.",
+    ],
+  },
+  {
+    date: "2026-06-27",
+    headline: "Scouting grades now show the stat value and D1 percentile rank on every profile",
+    features: [
+      {
+        title: "The Number Behind the Grade, Right on the Profile",
+        tagline:
+          "Each scouting grade tile on a player or pitcher profile now shows the metric value alongside the grade itself — so you can see exactly what's driving the score without digging into the Stats tab.",
+        details: [
+          "Hitters show four grades — Barrel%, Exit Velocity, Contact%, and Chase%. Each tile displays the value next to the percentile rank against every qualified D1 hitter in 2026.",
+          "Pitchers show Stuff+, Whiff%, BB%, and Barrel% with the same treatment — the number that produced the grade is visible directly on the card.",
+          "Percentile ranks are computed against the same qualified D1 population as the Stats tab percentile bars, so the grade on the profile and the bar on the Stats page always agree.",
+          "Switch between 2025 and 2026 on any profile and both the grade and the stat value update to reflect that season's data.",
+        ],
+      },
+    ],
+    whatElse: [],
+  },
   {
     date: "2026-06-23",
     headline: "Comprehensive 2026 statistical analysis — filter every D1 player by velocity, Stuff+, handedness, and more",
@@ -516,22 +566,24 @@ export function WhatsNewModal() {
             ))}
 
             {/* "What else" - same text weight/size as feature details for visual parity. */}
-            <div>
-              <h4
-                className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#D4AF37] mb-2.5"
-                style={{ fontFamily: "'Oswald', sans-serif" }}
-              >
-                What Else
-              </h4>
-              <ul className="space-y-1.5 text-[13px] leading-[1.55]">
-                {currentRelease.whatElse.map((item, i) => (
-                  <li key={i} className="flex gap-2.5">
-                    <span className="text-[#D4AF37] mt-[7px] shrink-0 inline-block w-1 h-1 rounded-full bg-[#D4AF37]" />
-                    <span>{formatWhatElse(item)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {currentRelease.whatElse.length > 0 && (
+              <div>
+                <h4
+                  className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#D4AF37] mb-2.5"
+                  style={{ fontFamily: "'Oswald', sans-serif" }}
+                >
+                  What Else
+                </h4>
+                <ul className="space-y-1.5 text-[13px] leading-[1.55]">
+                  {currentRelease.whatElse.map((item, i) => (
+                    <li key={i} className="flex gap-2.5">
+                      <span className="text-[#D4AF37] mt-[7px] shrink-0 inline-block w-1 h-1 rounded-full bg-[#D4AF37]" />
+                      <span>{formatWhatElse(item)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         ) : (
           <div className="px-6 py-5 space-y-4">
