@@ -2145,8 +2145,8 @@ export default function TeamBuilder() {
         const toTeamRow = teamByKey.get(normalizeKey(selectedTeam)) || null;
         const fromTeamRow = row.team ? (teamByKey.get(normalizeKey(row.team)) || null) : null;
         const fromConference = fromTeamRow?.conference || row.conference || null;
-        const fromConfStats = resolveConferenceStats(fromConference);
-        const toConfStats = resolveConferenceStats(toTeamRow?.conference || null);
+        const fromConfStats = resolveConferenceStats(fromConference, fromTeamRow?.conference_id ?? null);
+        const toConfStats = resolveConferenceStats(toTeamRow?.conference || null, toTeamRow?.conference_id ?? null);
         const lastAvg = row.__seedStats?.avg ?? null;
         const lastObp = row.__seedStats?.obp ?? null;
         const lastSlg = row.__seedStats?.slg ?? null;

@@ -119,7 +119,37 @@ const classTransitionToCurrentYear: Record<string, string> = {
   GR: "GR",
 };
 
-function ScoutGrade({ label, value, fullLabel }: { label: string; value: number | null; fullLabel: string }) {
+function ordinalSuffix(n: number): string {
+  const r = Math.round(n);
+  const mod100 = r % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${r}th`;
+  switch (r % 10) {
+    case 1: return `${r}st`;
+    case 2: return `${r}nd`;
+    case 3: return `${r}rd`;
+    default: return `${r}th`;
+  }
+}
+
+function ordinalSuffixOnly(n: number): string {
+  const r = Math.round(n);
+  const mod100 = r % 100;
+  if (mod100 >= 11 && mod100 <= 13) return "th";
+  switch (r % 10) {
+    case 1: return "st";
+    case 2: return "nd";
+    case 3: return "rd";
+    default: return "th";
+  }
+}
+
+function ScoutGrade({ label, value, fullLabel, rawStat, unit }: {
+  label: string;
+  value: number | null;
+  fullLabel: string;
+  rawStat?: number | null;
+  unit?: string;
+}) {
   // Treat 0 as missing — percentile scores are 0-100, and a literal 0 is almost
   // always a missing-data sentinel (e.g., JUCO arms whose pipeline computed
   // ev_score from an exit_vel that defaulted to 0). Showing "0 / Poor" for
@@ -134,9 +164,9 @@ function ScoutGrade({ label, value, fullLabel }: { label: string; value: number 
     );
   }
   const tier =
-    value >= 90 ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]" :
-    value >= 75 ? "bg-[hsl(142,71%,45%,0.12)] text-[hsl(142,71%,35%)] border-[hsl(142,71%,45%,0.25)]" :
-    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,35%)] border-[hsl(200,80%,50%,0.25)]" :
+    value >= 90 ? "bg-[hsl(142,71%,45%,0.15)] text-[hsl(142,71%,45%)] border-[hsl(142,71%,45%,0.30)]" :
+    value >= 75 ? "bg-[hsl(188,90%,42%,0.15)] text-[hsl(188,90%,48%)] border-[hsl(188,90%,42%,0.30)]" :
+    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,42%)] border-[hsl(200,80%,50%,0.25)]" :
     value >= 45 ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]" :
     value >= 35 ? "bg-[hsl(25,90%,50%,0.12)] text-[hsl(25,90%,38%)] border-[hsl(25,90%,50%,0.25)]" :
     "bg-destructive/15 text-destructive border-destructive/30";
@@ -149,8 +179,26 @@ function ScoutGrade({ label, value, fullLabel }: { label: string; value: number 
   return (
     <div className={`rounded-lg border p-3 ${tier}`}>
       <div className="text-xs font-medium opacity-80">{fullLabel}</div>
-      <div className="text-2xl font-bold mt-1">{Math.round(value)}</div>
-      <div className="text-xs font-semibold mt-0.5">{grade}</div>
+      {rawStat != null ? (
+        <>
+          <div className="text-2xl font-bold mt-1 leading-none">
+            {rawStat.toFixed(1)}
+            <span className="text-sm font-semibold opacity-75 ml-0.5">{unit ?? "%"}</span>
+          </div>
+          <div className="border-t border-current opacity-20 mt-1.5 mb-1" />
+          <div className="text-xs font-bold leading-tight">{ordinalSuffix(value)} percentile</div>
+          <div className="text-[10px] font-medium opacity-65 leading-tight">{grade}</div>
+        </>
+      ) : (
+        <>
+          <div className="text-2xl font-bold mt-1 leading-none">
+            {Math.round(value)}<span className="text-sm font-semibold opacity-65 ml-0.5">{ordinalSuffixOnly(value)}</span>
+          </div>
+          <div className="text-[10px] font-medium opacity-45 mt-0.5 leading-none">percentile</div>
+          <div className="border-t border-current opacity-20 mt-1.5 mb-1" />
+          <div className="text-xs font-semibold leading-tight">{grade}</div>
+        </>
+      )}
     </div>
   );
 }
@@ -1745,10 +1793,10 @@ export default function PlayerProfile() {
                 </CardHeader>
                 <CardContent className="px-4 pb-4">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <ScoutGrade label="Brl" value={activeSeasonScoutingGrades.barrelScore ?? null} fullLabel="Barrel%" />
-                    <ScoutGrade label="EV" value={activeSeasonScoutingGrades.avgEVScore ?? null} fullLabel="Exit Velo" />
-                    <ScoutGrade label="Con" value={activeSeasonScoutingGrades.contactScore ?? null} fullLabel="Contact%" />
-                    <ScoutGrade label="Chs" value={activeSeasonScoutingGrades.chaseScore ?? null} fullLabel="Chase%" />
+                    <ScoutGrade label="Brl" value={activeSeasonScoutingGrades.barrelScore ?? null} fullLabel="Barrel%" rawStat={(effectiveSeason === 2026 ? pitchLogRates?.barrel : null) ?? (activeSeasonRow as any)?.barrel ?? null} unit="%" />
+                    <ScoutGrade label="EV" value={activeSeasonScoutingGrades.avgEVScore ?? null} fullLabel="Exit Velo" rawStat={(effectiveSeason === 2026 ? pitchLogRates?.avgExitVelo : null) ?? (activeSeasonRow as any)?.avg_exit_velo ?? null} unit="mph" />
+                    <ScoutGrade label="Con" value={activeSeasonScoutingGrades.contactScore ?? null} fullLabel="Contact%" rawStat={(effectiveSeason === 2026 ? pitchLogRates?.contact : null) ?? (activeSeasonRow as any)?.contact ?? null} unit="%" />
+                    <ScoutGrade label="Chs" value={activeSeasonScoutingGrades.chaseScore ?? null} fullLabel="Chase%" rawStat={(effectiveSeason === 2026 ? pitchLogRates?.chase : null) ?? (activeSeasonRow as any)?.chase ?? null} unit="%" />
                   </div>
                   {effectiveSeason === 2026 && projectionSourceRow?.combined_used && (
                     <p className="mt-2 text-[10px] text-[#8a94a6]">*combined {projectionSourceRow.combined_seasons || "multi-season"} sample</p>
@@ -2014,10 +2062,10 @@ function HistoricalHitterView({
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <ScoutGrade label="Brl" value={row.barrel_score ?? null} fullLabel="Barrel%" />
-              <ScoutGrade label="EV"  value={row.avg_ev_score ?? null} fullLabel="Exit Velo" />
-              <ScoutGrade label="Con" value={row.contact_score ?? null} fullLabel="Contact%" />
-              <ScoutGrade label="Chs" value={row.chase_score ?? null} fullLabel="Chase%" />
+              <ScoutGrade label="Brl" value={row.barrel_score ?? null} fullLabel="Barrel%" rawStat={row.barrel ?? null} unit="%" />
+              <ScoutGrade label="EV"  value={row.avg_ev_score ?? null} fullLabel="Exit Velo" rawStat={row.avg_exit_velo ?? null} unit="mph" />
+              <ScoutGrade label="Con" value={row.contact_score ?? null} fullLabel="Contact%" rawStat={row.contact ?? null} unit="%" />
+              <ScoutGrade label="Chs" value={row.chase_score ?? null} fullLabel="Chase%" rawStat={row.chase ?? null} unit="%" />
             </div>
             {isAdmin && (
               <>

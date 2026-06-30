@@ -282,7 +282,28 @@ function MetricCard({ title, value, subtitle }: { title: string; value: string; 
   );
 }
 
-function ScoutGrade({ value, fullLabel }: { value: number | null; fullLabel: string }) {
+function pitcherOrdinalSuffix(n: number): string {
+  const r = Math.round(n);
+  const mod100 = r % 100;
+  if (mod100 >= 11 && mod100 <= 13) return "th";
+  switch (r % 10) {
+    case 1: return "st";
+    case 2: return "nd";
+    case 3: return "rd";
+    default: return "th";
+  }
+}
+
+function pitcherOrdinalFull(n: number): string {
+  return `${Math.round(n)}${pitcherOrdinalSuffix(n)}`;
+}
+
+function ScoutGrade({ value, fullLabel, rawStat, unit }: {
+  value: number | null;
+  fullLabel: string;
+  rawStat?: number | null;
+  unit?: string;
+}) {
   // Treat 0 as missing — percentile scores are 0-100 and a literal 0 is almost
   // always a missing-data sentinel (e.g., JUCO arms with exit_vel = 0).
   if (value == null || value === 0) {
@@ -295,9 +316,9 @@ function ScoutGrade({ value, fullLabel }: { value: number | null; fullLabel: str
     );
   }
   const tier =
-    value >= 90 ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]" :
-    value >= 75 ? "bg-[hsl(142,71%,45%,0.12)] text-[hsl(142,71%,35%)] border-[hsl(142,71%,45%,0.25)]" :
-    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,35%)] border-[hsl(200,80%,50%,0.25)]" :
+    value >= 90 ? "bg-[hsl(142,71%,45%,0.15)] text-[hsl(142,71%,45%)] border-[hsl(142,71%,45%,0.30)]" :
+    value >= 75 ? "bg-[hsl(188,90%,42%,0.15)] text-[hsl(188,90%,48%)] border-[hsl(188,90%,42%,0.30)]" :
+    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,42%)] border-[hsl(200,80%,50%,0.25)]" :
     value >= 45 ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]" :
     value >= 35 ? "bg-[hsl(25,90%,50%,0.12)] text-[hsl(25,90%,38%)] border-[hsl(25,90%,50%,0.25)]" :
     "bg-destructive/15 text-destructive border-destructive/30";
@@ -310,8 +331,26 @@ function ScoutGrade({ value, fullLabel }: { value: number | null; fullLabel: str
   return (
     <div className={`rounded-lg border p-3 ${tier}`}>
       <div className="text-xs font-medium opacity-80">{fullLabel}</div>
-      <div className="text-2xl font-bold mt-1">{Math.round(value)}</div>
-      <div className="text-xs font-semibold mt-0.5">{grade}</div>
+      {rawStat != null ? (
+        <>
+          <div className="text-2xl font-bold mt-1 leading-none">
+            {rawStat.toFixed(1)}
+            <span className="text-sm font-semibold opacity-75 ml-0.5">{unit ?? "%"}</span>
+          </div>
+          <div className="border-t border-current opacity-20 mt-1.5 mb-1" />
+          <div className="text-xs font-bold leading-tight">{pitcherOrdinalFull(value)} percentile</div>
+          <div className="text-[10px] font-medium opacity-65 leading-tight">{grade}</div>
+        </>
+      ) : (
+        <>
+          <div className="text-2xl font-bold mt-1 leading-none">
+            {Math.round(value)}<span className="text-sm font-semibold opacity-65 ml-0.5">{pitcherOrdinalSuffix(value)}</span>
+          </div>
+          <div className="text-[10px] font-medium opacity-45 mt-0.5 leading-none">percentile</div>
+          <div className="border-t border-current opacity-20 mt-1.5 mb-1" />
+          <div className="text-xs font-semibold leading-tight">{grade}</div>
+        </>
+      )}
     </div>
   );
 }
@@ -1969,90 +2008,6 @@ export default function PitcherProfile() {
               </CardContent>
             </Card>
 
-            {(() => {
-              const sp = pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus;
-              const wp = pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null;
-              const hasArsenal = pitchArsenal.rows.length > 0;
-              const hasAnySignal = sp != null || wp != null || hasArsenal;
-              if (!hasAnySignal) {
-                // No TrackMan capture at all — render a single full-width N/A
-                // card instead of hiding the section entirely. Common for the
-                // ~79% of JUCO arms without per-pitch data.
-                return (
-                  <Card className="border-[#162241] bg-[#0a1428]">
-                    <CardHeader className="pb-1 pt-3 px-4">
-                      <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Stuff+ Overview</CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-4 pb-4">
-                      <div className="rounded-lg border border-[#162241] bg-[#0d1a30] p-4 text-center min-h-[94px] flex flex-col justify-center">
-                        <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Stuff+</div>
-                        <div className="text-3xl font-bold tracking-tight mt-1 text-[#8a94a6]">N/A</div>
-                        <div className="text-[10px] text-[#5a6478] mt-1">No TrackMan capture for this pitcher</div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              }
-              return null;
-            })()}
-
-            {pitchArsenal.rows.length > 0 && (
-              <Card className="border-[#162241] bg-[#0a1428]">
-                <CardHeader className="pb-1 pt-3 px-4">
-                  <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37]" style={{ fontFamily: "Oswald, sans-serif" }}>Stuff+ Overview</CardTitle>
-                </CardHeader>
-                <CardContent className="px-4 pb-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    {(() => {
-                      // Stuff+ on the Stuff+ Overview card uses the
-                      // direct pitch_log totals value (stuff_plus_sum /
-                      // stuff_plus_data_pitches) — exactly what Stats
-                      // shows — so the two surfaces report the same
-                      // number to coaches. Arsenal-derived weighted is
-                      // the fallback (close but not identical), then PM.
-                      const plOverall = pitchLog2026PitcherRatesQuery.data?.stuffPlus ?? null;
-                      const sp = plOverall ?? pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus;
-                      const tierStyle = sp == null ? { border: "#162241", bg: "#0d1a30", text: "#8a94a6" }
-                        : sp >= 103 ? { border: "hsl(142,71%,45%,0.3)", bg: "hsl(142,71%,45%,0.12)", text: "hsl(142,71%,35%)" }
-                        : sp >= 98 ? { border: "hsl(200,80%,50%,0.3)", bg: "hsl(200,80%,50%,0.12)", text: "hsl(200,80%,35%)" }
-                        : sp >= 93 ? { border: "hsl(var(--warning)/0.3)", bg: "hsl(var(--warning)/0.15)", text: "hsl(var(--warning))" }
-                        : { border: "hsl(0,72%,51%,0.3)", bg: "hsl(0,72%,51%,0.12)", text: "hsl(0,72%,41%)" };
-                      return (
-                        <div className="rounded-lg border p-4 text-center" style={{ borderColor: tierStyle.border, backgroundColor: tierStyle.bg }}>
-                          <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Stuff+</div>
-                          <div className="text-3xl font-bold tracking-tight mt-1" style={{ color: tierStyle.text }}>{sp == null ? "N/A" : Math.round(sp).toString()}</div>
-                          <div className="text-[10px] text-[#5a6478] mt-1">Avg: 100</div>
-                        </div>
-                      );
-                    })()}
-                    {(() => {
-                      // Whiff% on the Stuff+ Overview card uses the
-                      // direct pitch_log overall (total_whiffs /
-                      // total_swings) — exactly what the Pitcher Stats
-                      // page shows — so the two surfaces report the
-                      // same number to coaches. Per-pitch weighted
-                      // arsenal Whiff% is a fallback (close but not
-                      // identical to direct overall), then PM stored.
-                      const plOverall = pitchLog2026PitcherRatesQuery.data?.whiff ?? null;
-                      const wp = plOverall ?? pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct ?? null;
-                      const tierStyle = wp == null ? { border: "#162241", bg: "#0d1a30", text: "#8a94a6" }
-                        : wp >= 27 ? { border: "hsl(142,71%,45%,0.3)", bg: "hsl(142,71%,45%,0.12)", text: "hsl(142,71%,35%)" }
-                        : wp >= 21 ? { border: "hsl(200,80%,50%,0.3)", bg: "hsl(200,80%,50%,0.12)", text: "hsl(200,80%,35%)" }
-                        : wp >= 16 ? { border: "hsl(var(--warning)/0.3)", bg: "hsl(var(--warning)/0.15)", text: "hsl(var(--warning))" }
-                        : { border: "hsl(0,72%,51%,0.3)", bg: "hsl(0,72%,51%,0.12)", text: "hsl(0,72%,41%)" };
-                      return (
-                        <div className="rounded-lg border p-4 text-center" style={{ borderColor: tierStyle.border, backgroundColor: tierStyle.bg }}>
-                          <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Whiff%</div>
-                          <div className="text-3xl font-bold tracking-tight mt-1" style={{ color: tierStyle.text }}>{wp == null ? "—" : `${wp.toFixed(1)}%`}</div>
-                          <div className="text-[10px] text-[#5a6478] mt-1">Avg: 22.9%</div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
             {/* Career Stats Table */}
             <Card className="border-[#162241] bg-[#0a1428]">
               <CardHeader className="pb-1 pt-3 px-4">
@@ -2333,8 +2288,10 @@ export default function PitcherProfile() {
                     // the Pitcher Stats page percentile bars use, so a coach
                     // sees the same percentile on Overview and Stats.
                     // Fallback: stored / normal-dist when pop or rates not yet loaded.
-                    const plRates = pitchLog2026PitcherRatesQuery.data;
-                    const plPop = pitchLog2026PitcherPopQuery.data ?? [];
+                    // Gate live 2026 pitch-log rates on effectiveSeason so switching
+                    // to 2025 falls through to stored masterRow values instead.
+                    const plRates = effectiveSeason === 2026 ? pitchLog2026PitcherRatesQuery.data : null;
+                    const plPop = effectiveSeason === 2026 ? (pitchLog2026PitcherPopQuery.data ?? []) : [];
                     const livePercentile = plRates?.hasData && plPop.length > 0 ? {
                       stuff: percentileRank(plRates.stuffPlus, plPop.map(p => p.stuffPlus)),
                       whiff: percentileRank(plRates.whiff, plPop.map(p => p.whiff)),
@@ -2343,10 +2300,10 @@ export default function PitcherProfile() {
                     } : null;
                     return (
                       <>
-                        <ScoutGrade value={livePercentile?.stuff ?? internalPowerRatings?.scores?.stuff ?? null} fullLabel="Stuff+" />
-                        <ScoutGrade value={livePercentile?.whiff ?? internalPowerRatings?.scores?.whiff ?? null} fullLabel="Whiff%" />
-                        <ScoutGrade value={livePercentile?.bb ?? internalPowerRatings?.scores?.bb ?? null} fullLabel="BB%" />
-                        <ScoutGrade value={livePercentile?.barrel ?? internalPowerRatings?.scores?.barrel ?? null} fullLabel="Barrel%" />
+                        <ScoutGrade value={livePercentile?.stuff ?? internalPowerRatings?.scores?.stuff ?? null} fullLabel="Stuff+" rawStat={(plRates?.stuffPlus ?? internalPowerRatings?.metrics?.stuff) ?? null} unit="" />
+                        <ScoutGrade value={livePercentile?.whiff ?? internalPowerRatings?.scores?.whiff ?? null} fullLabel="Whiff%" rawStat={(plRates?.whiff ?? internalPowerRatings?.metrics?.whiff) ?? null} unit="%" />
+                        <ScoutGrade value={livePercentile?.bb ?? internalPowerRatings?.scores?.bb ?? null} fullLabel="BB%" rawStat={(plRates?.bb ?? internalPowerRatings?.metrics?.bb) ?? null} unit="%" />
+                        <ScoutGrade value={livePercentile?.barrel ?? internalPowerRatings?.scores?.barrel ?? null} fullLabel="Barrel%" rawStat={(plRates?.barrel ?? internalPowerRatings?.metrics?.barrel) ?? null} unit="%" />
                       </>
                     );
                   })()}
@@ -2600,10 +2557,10 @@ function HistoricalPitcherView({
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <HistoricalPitcherGrade value={row.whiff_score} fullLabel="Whiff%" />
-              <HistoricalPitcherGrade value={row.bb_score} fullLabel="BB%" />
-              <HistoricalPitcherGrade value={row.barrel_score} fullLabel="Barrel%" />
-              <HistoricalPitcherGrade value={row.hh_score} fullLabel="Hard Hit%" />
+              <HistoricalPitcherGrade value={row.whiff_score} fullLabel="Whiff%" rawStat={row.whiff_pct ?? null} unit="%" />
+              <HistoricalPitcherGrade value={row.bb_score} fullLabel="BB%" rawStat={row.bb_pct ?? null} unit="%" />
+              <HistoricalPitcherGrade value={row.barrel_score} fullLabel="Barrel%" rawStat={row.barrel_pct ?? null} unit="%" />
+              <HistoricalPitcherGrade value={row.hh_score} fullLabel="Hard Hit%" rawStat={row.hard_hit_pct ?? null} unit="%" />
             </div>
             {isAdmin && (
               <>
@@ -2669,7 +2626,12 @@ function HistoricalPitcherView({
   );
 }
 
-function HistoricalPitcherGrade({ value, fullLabel }: { value: number | null; fullLabel: string }) {
+function HistoricalPitcherGrade({ value, fullLabel, rawStat, unit }: {
+  value: number | null;
+  fullLabel: string;
+  rawStat?: number | null;
+  unit?: string;
+}) {
   if (value == null) {
     return (
       <div className="rounded-lg border border-border bg-muted/30 p-3" title={fullLabel}>
@@ -2680,9 +2642,9 @@ function HistoricalPitcherGrade({ value, fullLabel }: { value: number | null; fu
     );
   }
   const tier =
-    value >= 90 ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]" :
-    value >= 75 ? "bg-[hsl(142,71%,45%,0.12)] text-[hsl(142,71%,35%)] border-[hsl(142,71%,45%,0.25)]" :
-    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,35%)] border-[hsl(200,80%,50%,0.25)]" :
+    value >= 90 ? "bg-[hsl(142,71%,45%,0.15)] text-[hsl(142,71%,45%)] border-[hsl(142,71%,45%,0.30)]" :
+    value >= 75 ? "bg-[hsl(188,90%,42%,0.15)] text-[hsl(188,90%,48%)] border-[hsl(188,90%,42%,0.30)]" :
+    value >= 60 ? "bg-[hsl(200,80%,50%,0.12)] text-[hsl(200,80%,42%)] border-[hsl(200,80%,50%,0.25)]" :
     value >= 45 ? "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.3)]" :
     value >= 35 ? "bg-[hsl(25,90%,50%,0.12)] text-[hsl(25,90%,38%)] border-[hsl(25,90%,50%,0.25)]" :
     "bg-destructive/15 text-destructive border-destructive/30";
@@ -2695,8 +2657,26 @@ function HistoricalPitcherGrade({ value, fullLabel }: { value: number | null; fu
   return (
     <div className={`rounded-lg border p-3 ${tier}`}>
       <div className="text-xs font-medium opacity-80">{fullLabel}</div>
-      <div className="text-2xl font-bold mt-1">{Math.round(value)}</div>
-      <div className="text-xs font-semibold mt-0.5">{grade}</div>
+      {rawStat != null ? (
+        <>
+          <div className="text-2xl font-bold mt-1 leading-none">
+            {rawStat.toFixed(1)}
+            <span className="text-sm font-semibold opacity-75 ml-0.5">{unit ?? "%"}</span>
+          </div>
+          <div className="border-t border-current opacity-20 mt-1.5 mb-1" />
+          <div className="text-xs font-bold leading-tight">{pitcherOrdinalFull(value)} percentile</div>
+          <div className="text-[10px] font-medium opacity-65 leading-tight">{grade}</div>
+        </>
+      ) : (
+        <>
+          <div className="text-2xl font-bold mt-1 leading-none">
+            {Math.round(value)}<span className="text-sm font-semibold opacity-65 ml-0.5">{pitcherOrdinalSuffix(value)}</span>
+          </div>
+          <div className="text-[10px] font-medium opacity-45 mt-0.5 leading-none">percentile</div>
+          <div className="border-t border-current opacity-20 mt-1.5 mb-1" />
+          <div className="text-xs font-semibold leading-tight">{grade}</div>
+        </>
+      )}
     </div>
   );
 }
