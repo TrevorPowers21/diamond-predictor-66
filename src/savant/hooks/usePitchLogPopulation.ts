@@ -4,6 +4,7 @@ import type {
   PitchLogHitterTotalsRow,
   PitchLogPitcherTotalsRow,
 } from "@/savant/hooks/usePitchLogTotals";
+import type { PitchLogByPitchTypeRow } from "@/savant/hooks/usePitchLogByPitchType";
 import type { PitchLogDimensionKey } from "@/savant/lib/pitchLogRates";
 
 /**
@@ -52,6 +53,33 @@ export function usePitchLogPitcherPopulation(
     queryFn: () =>
       fetchAllPages<PitchLogPitcherTotalsRow>(
         "pitch_log_pitcher_totals",
+        season,
+        dimension,
+      ),
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * Pulls all (pitcher × pitch_type) rows for a given (season, dimension).
+ * Used to compute percentile rank of a row's RV/100, xwOBA, etc. against
+ * NCAA peers WITHIN THE SAME PITCH TYPE — so a 4-Seam's RV is ranked
+ * against other 4-Seams, not against changeups.
+ *
+ * Population size: ~30k rows for 2026 (≈5k pitchers × ~6 pitch types).
+ * A few MB over the wire; cached 30 min.
+ */
+export function usePitchLogByPitchTypePopulation(
+  season: number,
+  dimension: PitchLogDimensionKey,
+) {
+  return useQuery({
+    queryKey: ["pitch_log_by_pitch_type_population", season, dimension],
+    queryFn: () =>
+      fetchAllPages<PitchLogByPitchTypeRow>(
+        "pitch_log_pitcher_by_pitch_type",
         season,
         dimension,
       ),

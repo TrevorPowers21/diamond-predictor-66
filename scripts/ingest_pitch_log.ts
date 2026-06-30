@@ -37,50 +37,96 @@ import { createClient } from "@supabase/supabase-js";
 // ─── 1-indexed → 0-indexed column positions (per docs/PITCH_LOG_BUILD.md §3) ──
 // Numbers come from the TruMedia CSV header position (1-indexed). Subtract 1
 // when accessing the parsed row array.
-const COL = {
-  uniqPitchId: 7,
-  fullName: 9, // pitcher full name
-  x: 11,
-  y: 12,
-  batterHand: 14,
-  pitcherHand: 16,
-  batterAbbrevName: 17,
-  pitcherAbbrevName: 18,
-  date: 19,
-  pitchResult: 21,
-  inn: 22,
-  outs: 23,
-  pitchType: 24,
-  probSL: 29, // called-strike probability 0..1
-  count: 31,
-  gameVenueId: 32,
-  level: 33,
-  home: 38,
-  teamId: 43,
-  opponentId: 44,
-  opponentRuns: 45,
-  totalRuns: 41,
-  currentRuns: 42,
-  opponentCurrentRuns: 46,
-  // Pick the SECOND occurrence of duplicated names
-  pitchingTeamId: 67,
-  battingTeamId: 64,
-  batterId: 65,
-  pitcherId: 68,
-  catchingTeamId: 70,
-  catcherId: 71,
-  catcherAbbrevName: 72,
-  // Pitch metrics block (cols 74–82, 1-indexed)
-  vel: 74,
-  ivb: 75,
-  hb: 76,
-  extension: 77,
-  spin: 78,
-  relHeight: 79,
-  relSide: 80,
-  exitVel: 81,
-  launchAng: 82,
+//
+// Header-name lookup (2026-06-24): TruMedia shifted the CSV layout in the
+// SprayAng + Distance + Pitch Location re-export — Extension/Spin swapped
+// positions, ExitVel/LaunchAng shifted from 81/82 to 85/86, and 7 new
+// fields appended. Hard-coded positions silently corrupt when columns
+// move, so we now resolve each field's position from the header row of
+// each file. Robust to future layout shifts too.
+//
+// FIELD_TO_HEADER maps our internal field name → exact TruMedia header
+// string. resolveColPositions() walks the parsed header row and returns
+// a {field → 1-indexed col position} map for that file. Duplicated names
+// (battingTeamId, pitchingTeamId, etc.) resolve to the LAST occurrence,
+// which matches the existing rule from the column audit.
+const FIELD_TO_HEADER = {
+  uniqPitchId: "uniqPitchId",
+  fullName: "fullName",
+  x: "x",
+  y: "y",
+  batterHand: "batterHand",
+  pitcherHand: "pitcherHand",
+  batterAbbrevName: "batterAbbrevName",
+  pitcherAbbrevName: "pitcherAbbrevName",
+  date: "date",
+  pitchResult: "pitchResult",
+  inn: "inn",
+  outs: "outs",
+  pitchType: "pitchType",
+  probSL: "probSL",
+  count: "count",
+  gameVenueId: "gameVenueId",
+  level: "level",
+  home: "home",
+  teamId: "teamId",
+  opponentId: "opponentId",
+  opponentRuns: "opponentRuns",
+  totalRuns: "totalRuns",
+  currentRuns: "currentRuns",
+  opponentCurrentRuns: "opponentCurrentRuns",
+  // Duplicate names — last-occurrence wins (pitchingTeamId at col 67, etc.)
+  pitchingTeamId: "pitchingTeamId",
+  battingTeamId: "battingTeamId",
+  batterId: "batterId",
+  pitcherId: "pitcherId",
+  catchingTeamId: "catchingTeamId",
+  catcherId: "catcherId",
+  catcherAbbrevName: "catcherAbbrevName",
+  // Pitch metrics
+  vel: "Vel",
+  ivb: "IVB",
+  hb: "HB",
+  extension: "Extension",
+  spin: "Spin",
+  relHeight: "RelHeight",
+  relSide: "RelSide",
+  exitVel: "ExitVel",
+  launchAng: "LaunchAng",
+  // NEW 2026-06-24 fields (only present in re-exported CSVs)
+  pzNorm: "PZNorm",
+  pxNorm: "PXNorm",
+  sprayAng: "SprayAng",
+  distance: "FBDst",
+  xAvg: "xAVG",
+  xSlg: "xSLG",
+  xWoba: "xWOBA",
 } as const;
+
+type FieldName = keyof typeof FIELD_TO_HEADER;
+type ColPositions = Partial<Record<FieldName, number>>;
+
+/**
+ * Walk the parsed header row and return a {field → 1-indexed position}
+ * map. For columns with duplicate header names, last occurrence wins
+ * (matches the rule from docs/PITCH_LOG_BUILD.md §3 for battingTeamId /
+ * pitchingTeamId / etc.). Fields not present in the header are absent
+ * from the result; cell() returns null for those, so old-format CSVs
+ * without the 2026-06-24 fields ingest cleanly with new-field = null.
+ */
+function resolveColPositions(header: string[]): ColPositions {
+  const positions: ColPositions = {};
+  for (let i = 0; i < header.length; i++) {
+    const headerName = header[i].trim();
+    for (const [field, expected] of Object.entries(FIELD_TO_HEADER) as Array<[FieldName, string]>) {
+      if (headerName === expected) {
+        // 1-indexed position (cell() expects 1-indexed)
+        positions[field] = i + 1;
+      }
+    }
+  }
+  return positions;
+}
 
 // ─── CSV parsing ────────────────────────────────────────────────────────────
 function parseCSVRow(line: string): string[] {
@@ -207,18 +253,37 @@ interface PitchLogRow {
   current_runs: number | null;
   opponent_current_runs: number | null;
   opponent_runs: number | null;
+  // NEW 2026-06-24 fields (null when ingesting an old-format CSV)
+  pz_norm: number | null;
+  px_norm: number | null;
+  spray_ang: number | null;
+  distance: number | null;
+  x_avg: number | null;
+  x_slg: number | null;
+  x_woba: number | null;
   csv_source: string;
 }
 
-function buildRecord(row: string[], csvSource: string): PitchLogRow | { skip: string } {
-  const uniqId = textOrNull(cell(row, COL.uniqPitchId));
+/**
+ * Read a field's value from the row using the resolved column positions.
+ * Returns "" (which downstream normalizers treat as null) when the field
+ * isn't in this file's header — so old-format CSVs without the 2026-06-24
+ * fields ingest cleanly with new-field = null.
+ */
+function get(row: string[], cols: ColPositions, field: FieldName): string {
+  const pos = cols[field];
+  return pos == null ? "" : cell(row, pos);
+}
+
+function buildRecord(row: string[], cols: ColPositions, csvSource: string): PitchLogRow | { skip: string } {
+  const uniqId = textOrNull(get(row, cols, "uniqPitchId"));
   if (!uniqId) return { skip: "missing uniq_pitch_id" };
 
-  const dateInfo = parseDateOrNull(cell(row, COL.date));
-  if (!dateInfo) return { skip: `bad date: ${cell(row, COL.date)}` };
+  const dateInfo = parseDateOrNull(get(row, cols, "date"));
+  if (!dateInfo) return { skip: `bad date: ${get(row, cols, "date")}` };
 
-  const pitcherId = textOrNull(cell(row, COL.pitcherId));
-  const batterId = textOrNull(cell(row, COL.batterId));
+  const pitcherId = textOrNull(get(row, cols, "pitcherId"));
+  const batterId = textOrNull(get(row, cols, "batterId"));
   if (!pitcherId) return { skip: "missing pitcher_id" };
   if (!batterId) return { skip: "missing batter_id" };
 
@@ -226,50 +291,58 @@ function buildRecord(row: string[], csvSource: string): PitchLogRow | { skip: st
   // outcome string, etc.). We keep the row anyway — it still counts toward
   // "pitches seen / thrown" denominators even without an outcome. The DB
   // column is nullable, so just pass through null.
-  const pitchResult = textOrNull(cell(row, COL.pitchResult));
+  const pitchResult = textOrNull(get(row, cols, "pitchResult"));
 
   return {
     uniq_pitch_id: uniqId,
     season: dateInfo.season,
     date: dateInfo.iso,
-    game_venue_id: textOrNull(cell(row, COL.gameVenueId)),
-    level: textOrNull(cell(row, COL.level)),
-    home: boolOrNull(cell(row, COL.home)),
-    inn: textOrNull(cell(row, COL.inn)),
-    outs: intOrNull(cell(row, COL.outs)),
+    game_venue_id: textOrNull(get(row, cols, "gameVenueId")),
+    level: textOrNull(get(row, cols, "level")),
+    home: boolOrNull(get(row, cols, "home")),
+    inn: textOrNull(get(row, cols, "inn")),
+    outs: intOrNull(get(row, cols, "outs")),
     pitcher_id: pitcherId,
     batter_id: batterId,
-    catcher_id: textOrNull(cell(row, COL.catcherId)),
-    pitcher_full_name: textOrNull(cell(row, COL.fullName)),
-    pitcher_abbrev_name: textOrNull(cell(row, COL.pitcherAbbrevName)),
-    batter_abbrev_name: textOrNull(cell(row, COL.batterAbbrevName)),
-    catcher_abbrev_name: textOrNull(cell(row, COL.catcherAbbrevName)),
-    pitcher_hand: handOrNull(cell(row, COL.pitcherHand)),
-    batter_hand: handOrNull(cell(row, COL.batterHand)),
-    pitching_team_id: textOrNull(cell(row, COL.pitchingTeamId)),
-    batting_team_id: textOrNull(cell(row, COL.battingTeamId)),
-    catching_team_id: textOrNull(cell(row, COL.catchingTeamId)),
-    team_id: textOrNull(cell(row, COL.teamId)),
-    opponent_id: textOrNull(cell(row, COL.opponentId)),
+    catcher_id: textOrNull(get(row, cols, "catcherId")),
+    pitcher_full_name: textOrNull(get(row, cols, "fullName")),
+    pitcher_abbrev_name: textOrNull(get(row, cols, "pitcherAbbrevName")),
+    batter_abbrev_name: textOrNull(get(row, cols, "batterAbbrevName")),
+    catcher_abbrev_name: textOrNull(get(row, cols, "catcherAbbrevName")),
+    pitcher_hand: handOrNull(get(row, cols, "pitcherHand")),
+    batter_hand: handOrNull(get(row, cols, "batterHand")),
+    pitching_team_id: textOrNull(get(row, cols, "pitchingTeamId")),
+    batting_team_id: textOrNull(get(row, cols, "battingTeamId")),
+    catching_team_id: textOrNull(get(row, cols, "catchingTeamId")),
+    team_id: textOrNull(get(row, cols, "teamId")),
+    opponent_id: textOrNull(get(row, cols, "opponentId")),
     pitch_result: pitchResult,
-    count: textOrNull(cell(row, COL.count)),
-    pitch_type: textOrNull(cell(row, COL.pitchType)),
-    release_velocity: numOrNull(cell(row, COL.vel)),
-    exit_velocity: numOrNull(cell(row, COL.exitVel)),
-    launch_angle: numOrNull(cell(row, COL.launchAng)),
-    cs_prob: numOrNull(cell(row, COL.probSL)),
-    ivb: numOrNull(cell(row, COL.ivb)),
-    hb: numOrNull(cell(row, COL.hb)),
-    extension: numOrNull(cell(row, COL.extension)),
-    spin: numOrNull(cell(row, COL.spin)),
-    rel_height: numOrNull(cell(row, COL.relHeight)),
-    rel_side: numOrNull(cell(row, COL.relSide)),
-    x_loc: numOrNull(cell(row, COL.x)),
-    y_loc: numOrNull(cell(row, COL.y)),
-    total_runs: intOrNull(cell(row, COL.totalRuns)),
-    current_runs: intOrNull(cell(row, COL.currentRuns)),
-    opponent_current_runs: intOrNull(cell(row, COL.opponentCurrentRuns)),
-    opponent_runs: intOrNull(cell(row, COL.opponentRuns)),
+    count: textOrNull(get(row, cols, "count")),
+    pitch_type: textOrNull(get(row, cols, "pitchType")),
+    release_velocity: numOrNull(get(row, cols, "vel")),
+    exit_velocity: numOrNull(get(row, cols, "exitVel")),
+    launch_angle: numOrNull(get(row, cols, "launchAng")),
+    cs_prob: numOrNull(get(row, cols, "probSL")),
+    ivb: numOrNull(get(row, cols, "ivb")),
+    hb: numOrNull(get(row, cols, "hb")),
+    extension: numOrNull(get(row, cols, "extension")),
+    spin: numOrNull(get(row, cols, "spin")),
+    rel_height: numOrNull(get(row, cols, "relHeight")),
+    rel_side: numOrNull(get(row, cols, "relSide")),
+    x_loc: numOrNull(get(row, cols, "x")),
+    y_loc: numOrNull(get(row, cols, "y")),
+    total_runs: intOrNull(get(row, cols, "totalRuns")),
+    current_runs: intOrNull(get(row, cols, "currentRuns")),
+    opponent_current_runs: intOrNull(get(row, cols, "opponentCurrentRuns")),
+    opponent_runs: intOrNull(get(row, cols, "opponentRuns")),
+    // NEW 2026-06-24 fields (null when ingesting an old-format CSV)
+    pz_norm: numOrNull(get(row, cols, "pzNorm")),
+    px_norm: numOrNull(get(row, cols, "pxNorm")),
+    spray_ang: numOrNull(get(row, cols, "sprayAng")),
+    distance: numOrNull(get(row, cols, "distance")),
+    x_avg: numOrNull(get(row, cols, "xAvg")),
+    x_slg: numOrNull(get(row, cols, "xSlg")),
+    x_woba: numOrNull(get(row, cols, "xWoba")),
     csv_source: csvSource,
   };
 }
@@ -309,7 +382,27 @@ async function main(): Promise<void> {
   const header = parseCSVRow(lines[0]);
   console.log(`Columns: ${header.length}`);
   if (header.length < 80) {
-    console.warn(`WARN: header has ${header.length} columns (expected ~84). Continuing anyway.`);
+    console.warn(`WARN: header has ${header.length} columns (expected ~84+). Continuing anyway.`);
+  }
+
+  // ─── Resolve column positions from header (handles layout changes) ───────
+  const cols = resolveColPositions(header);
+  // Spot-check that critical fields were found. Soft warning for new fields
+  // (only present in 2026-06-24+ exports).
+  const critical: FieldName[] = ["uniqPitchId", "date", "pitcherId", "batterId", "pitchType", "vel"];
+  const missingCritical = critical.filter((f) => cols[f] == null);
+  if (missingCritical.length > 0) {
+    console.error(`FATAL: critical headers missing: ${missingCritical.join(", ")}`);
+    process.exit(1);
+  }
+  const newFields: FieldName[] = ["pzNorm", "pxNorm", "sprayAng", "distance", "xAvg", "xSlg", "xWoba"];
+  const presentNew = newFields.filter((f) => cols[f] != null);
+  if (presentNew.length === 0) {
+    console.log(`No new 2026-06-24 fields in header — looks like a pre-re-export file. New columns will be null.`);
+  } else if (presentNew.length < newFields.length) {
+    console.warn(`WARN: partial new-field coverage (${presentNew.length}/${newFields.length}). Missing: ${newFields.filter((f) => cols[f] == null).join(", ")}`);
+  } else {
+    console.log(`✓ All 7 new 2026-06-24 fields found in header (PZNorm/PXNorm/SprayAng/FBDst/xAVG/xSLG/xWOBA).`);
   }
 
   // ─── Build records ───────────────────────────────────────────────────────
@@ -317,7 +410,7 @@ async function main(): Promise<void> {
   const skips: Record<string, number> = {};
   for (let i = 1; i < lines.length; i++) {
     const row = parseCSVRow(lines[i]);
-    const result = buildRecord(row, csvSource);
+    const result = buildRecord(row, cols, csvSource);
     if ("skip" in result) {
       skips[result.skip] = (skips[result.skip] ?? 0) + 1;
       continue;
@@ -340,8 +433,24 @@ async function main(): Promise<void> {
     console.log(`  date / season  = ${r.date} / ${r.season}`);
     console.log(`  pitcher        = ${r.pitcher_full_name} (${r.pitcher_id}, ${r.pitcher_hand})`);
     console.log(`  batter         = ${r.batter_abbrev_name} (${r.batter_id}, ${r.batter_hand})`);
-    console.log(`  pitch          = ${r.pitch_type}, vel=${r.release_velocity}, ivb=${r.ivb}, hb=${r.hb}`);
+    console.log(`  pitch          = ${r.pitch_type}, vel=${r.release_velocity}, ivb=${r.ivb}, hb=${r.hb}, spin=${r.spin}, ext=${r.extension}`);
+    console.log(`  location       = pzNorm=${r.pz_norm}, pxNorm=${r.px_norm}`);
+    console.log(`  batted         = ev=${r.exit_velocity}, la=${r.launch_angle}, sprayAng=${r.spray_ang}, dist=${r.distance}`);
+    console.log(`  TM xStats      = xAvg=${r.x_avg}, xSlg=${r.x_slg}, xWoba=${r.x_woba}`);
     console.log(`  result         = ${r.pitch_result}`);
+  }
+
+  // Show a batted-ball sample too (the new fields really matter on batted balls)
+  const bbSample = records.find((r) => r.exit_velocity != null && r.spray_ang != null);
+  if (bbSample) {
+    console.log(`\nBatted-ball sample (for spray/xStats check):`);
+    console.log(`  uniq_pitch_id  = ${bbSample.uniq_pitch_id}`);
+    console.log(`  batter         = ${bbSample.batter_abbrev_name}`);
+    console.log(`  pitch          = ${bbSample.pitch_type}, vel=${bbSample.release_velocity}`);
+    console.log(`  contact        = ev=${bbSample.exit_velocity}, la=${bbSample.launch_angle}`);
+    console.log(`  spray          = sprayAng=${bbSample.spray_ang}°, dist=${bbSample.distance}ft`);
+    console.log(`  TM xStats      = xAvg=${bbSample.x_avg}, xSlg=${bbSample.x_slg}, xWoba=${bbSample.x_woba}`);
+    console.log(`  result         = ${bbSample.pitch_result}`);
   }
 
   // ─── Quick presence stats ────────────────────────────────────────────────

@@ -225,6 +225,7 @@ export async function runImports(
   results: DetectionResult[],
   season: number,
   keepFiles: boolean = false,
+  noProjections: boolean = false,
 ): Promise<void> {
   const queue = results.filter((r) => r.match && r.supersededBy === undefined);
   if (queue.length === 0) {
@@ -489,6 +490,17 @@ export async function runImports(
   }
 
   console.log(`\n${COLOR.bold}=== Pipeline cascade ===${COLOR.reset}`);
+  if (noProjections) {
+    console.log(`${COLOR.yellow}⚠ --no-projections FLAG ACTIVE${COLOR.reset}`);
+    console.log(`${COLOR.yellow}  Will SKIP every step that touches projection state or its inputs:${COLOR.reset}`);
+    console.log(`${COLOR.yellow}    • refreshPaIpFromMaster       (WAR + depth tier anchored on regular-season PA/IP)${COLOR.reset}`);
+    console.log(`${COLOR.yellow}    • calculateConferenceStuffPlus (regular-season conference baseline)${COLOR.reset}`);
+    console.log(`${COLOR.yellow}    • computeConferenceEnvRates    (regular-season conference env rates)${COLOR.reset}`);
+    console.log(`${COLOR.yellow}    • createPredictionsFromMaster   (player_predictions writes)${COLOR.reset}`);
+    console.log(`${COLOR.yellow}    • bulkRecalculatePredictionsLocal (rate recompute on projections)${COLOR.reset}`);
+    console.log(`${COLOR.yellow}    • target_board snapshot invalidation${COLOR.reset}`);
+    console.log(`${COLOR.yellow}  Will RUN: Master imports, addMissingPlayers, NCAA averages, scores.${COLOR.reset}`);
+  }
 
   // Skip syncMasterToPlayers in the routine CLI cascade. It DELETEs every row
   // in the players table and re-inserts with fresh UUIDs, which cascade-deletes
@@ -518,19 +530,41 @@ export async function runImports(
     err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  // Refresh existing players' pa/ip from Master so depth-role derives off real
-  // counts. addMissingPlayers only INSERTs new source_player_ids — existing
-  // players' pa/ip stay frozen at first-insert values without this step. Manifests
-  // most painfully on TWPs (ip=null → depth-role falls back to weekend_starter
-  // at 85 IP regardless of actual usage).
+  // refreshPaIpFromMaster is lock-aware in --no-projections mode:
+  // if the regular season is locked (Master.regular_season_pa is populated
+  // on a meaningful number of rows), TB depth-tier seed already reads from
+  // the locked value, so refreshing players.pa to postseason-inclusive is
+  // safe — display surfaces show the latest total while role math reads
+  // the frozen lock. If lock isn't set, we skip to preserve regular-season
+  // PA/IP.
   step("refreshPaIpFromMaster");
+  let lockIsSet = false;
   try {
-    const start = Date.now();
-    const res = await refreshPaIpFromMaster(season);
-    ok(`pa updated=${res.paUpdated}, ip updated=${res.ipUpdated}, errors=${res.errors.length} (${timeMs(start)})`);
-    for (const e of res.errors.slice(0, 3)) err(e);
-  } catch (e) {
-    err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
+    const { data, error } = await (supabase as any)
+      .from("Hitter Master")
+      .select("regular_season_pa")
+      .eq("Season", season)
+      .not("regular_season_pa", "is", null)
+      .limit(1);
+    if (!error && data && data.length > 0) lockIsSet = true;
+  } catch { /* ignore — treat as not locked */ }
+
+  if (noProjections && !lockIsSet) {
+    warn(`SKIPPED — --no-projections set and regular season NOT locked. Hitter/Pitching Master.regular_season_pa/_ip is empty, so depth-tier seed would read postseason-inclusive PA. Run AdminDashboard "Lock Regular Season" first, then re-run.`);
+  } else {
+    // Either projections allowed OR lock is set (TB depth seed reads locked
+    // regular-season values, so postseason-inclusive players.pa is safe).
+    if (noProjections && lockIsSet) {
+      ok(`Lock detected — refreshing players.pa/players.ip safely (TB depth seed reads from Master.regular_season_pa).`);
+    }
+    try {
+      const start = Date.now();
+      const res = await refreshPaIpFromMaster(season);
+      ok(`pa updated=${res.paUpdated}, ip updated=${res.ipUpdated}, errors=${res.errors.length} (${timeMs(start)})`);
+      for (const e of res.errors.slice(0, 3)) err(e);
+    } catch (e) {
+      err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   step("computeAndStoreNcaaAverages");
@@ -551,71 +585,97 @@ export async function runImports(
     err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  step("createPredictionsFromMaster");
-  try {
-    const start = Date.now();
-    const res: any = await createPredictionsFromMaster(season);
-    const created = res?.created ?? res?.inserted ?? "?";
-    const errors = res?.errors?.length ?? 0;
-    ok(`created=${created}, errors=${errors} (${timeMs(start)})`);
-    if (Array.isArray(res?.errors)) for (const e of res.errors.slice(0, 3)) err(e);
-  } catch (e) {
-    err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
+  if (noProjections) {
+    step("createPredictionsFromMaster");
+    warn(`SKIPPED — --no-projections flag set. player_predictions left untouched.`);
+  } else {
+    step("createPredictionsFromMaster");
+    try {
+      const start = Date.now();
+      const res: any = await createPredictionsFromMaster(season);
+      const created = res?.created ?? res?.inserted ?? "?";
+      const errors = res?.errors?.length ?? 0;
+      ok(`created=${created}, errors=${errors} (${timeMs(start)})`);
+      if (Array.isArray(res?.errors)) for (const e of res.errors.slice(0, 3)) err(e);
+    } catch (e) {
+      err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   // Conference rollups — refresh per-conf Stuff+ (from rolled-up per-pitcher
   // stuff_plus) and env-rate plusses (from fresh NCAA averages). Runs before
   // bulkRecalc so projection math sees the latest conference data.
-  if (conferenceImported || pitcherImported || stuffInputsImported) {
-    step("calculateConferenceStuffPlus (rollup → Conference Stats.Stuff_plus)");
+  //
+  // SKIPPED in --no-projections mode: conference Stuff+ and env rates were
+  // calibrated on the regular-season distribution. Letting postseason data
+  // shift those baselines would alter the gauges every projection compares
+  // against, and projection state is what --no-projections is trying to
+  // preserve.
+  if (noProjections) {
+    step("calculateConferenceStuffPlus + computeConferenceEnvRates");
+    warn(`SKIPPED — --no-projections flag set. Regular-season conference Stuff+ and env-rate baselines preserved.`);
+  } else {
+    if (conferenceImported || pitcherImported || stuffInputsImported) {
+      step("calculateConferenceStuffPlus (rollup → Conference Stats.Stuff_plus)");
+      try {
+        const start = Date.now();
+        const { report, errors } = await calculateConferenceStuffPlus(season);
+        ok(`${report.written} conferences updated, ${errors.length} errors (${timeMs(start)})`);
+        for (const e of errors.slice(0, 3)) err(e);
+      } catch (e) {
+        err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    if (conferenceImported || hitterImported) {
+      step("computeConferenceEnvRates (ba_plus/obp_plus/iso_plus/slg_plus)");
+      try {
+        const start = Date.now();
+        const res = await computeConferenceEnvRates(season);
+        ok(`${res.updated} updated, ${res.skipped} skipped, ${res.errors.length} errors (${timeMs(start)})`);
+        for (const e of res.errors.slice(0, 3)) err(e);
+      } catch (e) {
+        err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+
+  if (noProjections) {
+    step("bulkRecalculatePredictionsLocal");
+    warn(`SKIPPED — --no-projections flag set. player_predictions left untouched.`);
+  } else {
+    step("bulkRecalculatePredictionsLocal");
     try {
       const start = Date.now();
-      const { report, errors } = await calculateConferenceStuffPlus(season);
-      ok(`${report.written} conferences updated, ${errors.length} errors (${timeMs(start)})`);
-      for (const e of errors.slice(0, 3)) err(e);
+      // No arg → defaults to PROJECTION_SEASON. Predictions are stored on the
+      // projection year (e.g. 2027), not the import year (2026). Passing the
+      // import season here filtered prediction fetches to season=import which
+      // returned 0 rows, silently making this step a no-op.
+      await bulkRecalculatePredictionsLocal();
+      ok(`done (${timeMs(start)})`);
     } catch (e) {
       err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
-  if (conferenceImported || hitterImported) {
-    step("computeConferenceEnvRates (ba_plus/obp_plus/iso_plus/slg_plus)");
+  if (noProjections) {
+    step("Invalidate target_board snapshots");
+    warn(`SKIPPED — --no-projections flag set. Snapshots stay tied to preserved projection state.`);
+  } else {
+    // Invalidate target_board snapshots — projection inputs just changed, so the
+    // stored snapshots are stale. Null them out so TB recomputes fresh on next view.
+    step("Invalidate target_board snapshots");
     try {
       const start = Date.now();
-      const res = await computeConferenceEnvRates(season);
-      ok(`${res.updated} updated, ${res.skipped} skipped, ${res.errors.length} errors (${timeMs(start)})`);
-      for (const e of res.errors.slice(0, 3)) err(e);
+      const { error } = await (supabase as any)
+        .from("target_board")
+        .update({ transfer_snapshot: null })
+        .not("transfer_snapshot", "is", null);
+      if (error) throw error;
+      ok(`snapshots cleared (${timeMs(start)})`);
     } catch (e) {
       err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
     }
-  }
-
-  step("bulkRecalculatePredictionsLocal");
-  try {
-    const start = Date.now();
-    // No arg → defaults to PROJECTION_SEASON. Predictions are stored on the
-    // projection year (e.g. 2027), not the import year (2026). Passing the
-    // import season here filtered prediction fetches to season=import which
-    // returned 0 rows, silently making this step a no-op.
-    await bulkRecalculatePredictionsLocal();
-    ok(`done (${timeMs(start)})`);
-  } catch (e) {
-    err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
-  }
-
-  // Invalidate target_board snapshots — projection inputs just changed, so the
-  // stored snapshots are stale. Null them out so TB recomputes fresh on next view.
-  step("Invalidate target_board snapshots");
-  try {
-    const start = Date.now();
-    const { error } = await (supabase as any)
-      .from("target_board")
-      .update({ transfer_snapshot: null })
-      .not("transfer_snapshot", "is", null);
-    if (error) throw error;
-    ok(`snapshots cleared (${timeMs(start)})`);
-  } catch (e) {
-    err(`Threw: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   // ClassYear blank-fill runs LAST so the writes survive any player-touching

@@ -414,17 +414,18 @@ export default function PitchingPowerRatingsStorageTable({ season }: { season: "
     }
   });
   const [syncing, setSyncing] = useState(false);
+  const [loadingPl, setLoadingPl] = useState(false);
 
   const { data: players = [] } = useQuery({
     queryKey: ["pitching-power-player-directory"],
     queryFn: async () => {
-      const allPlayers: Array<{ id: string; first_name: string; last_name: string; team: string | null; position: string | null }> = [];
+      const allPlayers: Array<{ id: string; first_name: string; last_name: string; team: string | null; position: string | null; source_player_id: string | null }> = [];
       let from = 0;
       const pageSize = 1000;
       while (true) {
         const { data, error } = await supabase
           .from("players")
-          .select("id, first_name, last_name, team, position")
+          .select("id, first_name, last_name, team, position, source_player_id")
           .order("id", { ascending: true })
           .range(from, from + pageSize - 1);
         if (error) throw error;
@@ -527,6 +528,95 @@ export default function PitchingPowerRatingsStorageTable({ season }: { season: "
     persist(nextHeaders, nextRows);
     toast.success(`Imported ${nextRows.length} rows from row 8 (columns A-Q only).`);
   };
+
+  // Populate the grid's sub-metric inputs directly from the 2026 pitch_log
+  // aggregation (dimension 'all') instead of a TruMedia CSV. This is a
+  // preview/calc source only — it writes to local grid state (localStorage),
+  // NOT to player_prediction_internals or the precompute. Maps pitch_log
+  // pitcher_id (= source_player_id) -> player name/team, derives the 14
+  // sub-metrics, then reuses computeScoreColumns for scores + PR+.
+  const loadFromPitchLog = async () => {
+    setLoadingPl(true);
+    try {
+      const idMap = new Map<string, { name: string; team: string }>();
+      for (const p of players) {
+        if (!isPitcherPosition(p.position) || !p.source_player_id) continue;
+        idMap.set(String(p.source_player_id), {
+          name: `${p.first_name || ""} ${p.last_name || ""}`.trim(),
+          team: p.team || "",
+        });
+      }
+
+      const plRows: Record<string, number>[] = [];
+      let from = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("pitch_log_pitcher_totals")
+          .select("*")
+          .eq("dimension_key", "all")
+          .eq("season", 2026)
+          .gte("total_pitches", 1)
+          .order("pitcher_id", { ascending: true })
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        const batch = (data || []) as unknown as Record<string, number>[];
+        plRows.push(...batch);
+        if (batch.length < pageSize) break;
+        from += pageSize;
+      }
+
+      const div = (n: number | null, d: number | null) =>
+        d != null && d > 0 ? (n ?? 0) / d : null;
+      const fmt = (v: number | null, mult = 1, dp = 1) =>
+        v == null ? "" : (v * mult).toFixed(dp);
+
+      const nextRows: PowerRow[] = [];
+      for (const r of plRows) {
+        const who = idMap.get(String(r.pitcher_id));
+        if (!who) continue;
+        const ev = r.batted_balls_allowed_with_ev; // tracked-only denom (matches HM)
+        const base = [...Array(MAX_COLS)].map(() => "");
+        base[0] = who.name;
+        base[1] = who.team;
+        base[2] = fmt(div(r.stuff_plus_sum, r.stuff_plus_data_pitches), 1, 1);       // Stuff+
+        base[3] = fmt(div(r.total_whiffs, r.total_swings), 100);                      // Whiff%
+        base[4] = fmt(div(r.total_bb, r.total_pa), 100);                              // BB%
+        base[5] = fmt(div(r.batted_hard_hit_allowed, ev), 100);                       // HH%
+        base[6] = fmt(div(r.total_in_zone_whiffs, r.total_in_zone_swings), 100);      // IZ Whiff%
+        base[7] = fmt(div(r.total_chases, r.total_out_of_zone), 100);                 // Chase%
+        base[8] = fmt(div(r.batted_barrels_allowed, ev), 100);                        // Barrel%
+        base[9] = fmt(div(r.batted_line_drives_allowed, ev), 100);                    // Line Drive%
+        base[10] = fmt(div(r.ev_sum_allowed, ev), 1, 1);                              // Avg Exit Velo
+        base[11] = fmt(div(r.batted_ground_balls_allowed, ev), 100);                  // GB%
+        base[12] = fmt(div(r.total_in_zone, r.total_in_zone + r.total_out_of_zone), 100); // IZ%
+        base[13] = r.ev_90_allowed == null ? "" : Number(r.ev_90_allowed).toFixed(1); // EV90
+        // Directional pull% (pull / classified-spray balls) — matches HM HPull%
+        // scale (~36.5 baseline), NOT pull-air (~16%). Calibrate exact denom vs HM.
+        base[14] = fmt(div(r.batted_pull_allowed, r.batted_pull_allowed + r.batted_center_allowed + r.batted_oppo_allowed), 100); // Pull%
+        base[15] = fmt(div(r.batted_la_10_to_30_allowed, ev), 100);                   // LA 10-30%
+        nextRows.push({ id: `${season}-pl-${r.pitcher_id}`, values: computeScoreColumns(base) });
+      }
+
+      persist([...FIXED_HEADERS], nextRows);
+      toast.success(`Loaded ${nextRows.length} pitchers from 2026 pitch log.`);
+    } catch (e) {
+      toast.error(`Pitch log load failed: ${(e as Error).message}`);
+    } finally {
+      setLoadingPl(false);
+    }
+  };
+
+  // PRIMARY source: auto-load the grid from 2026 pitch_log on mount (once
+  // players resolve), so pitch_log is the first thing read — not the stale
+  // localStorage/CSV data. Manual "Import CSV" still overrides afterward.
+  const autoLoadedRef = useRef(false);
+  useEffect(() => {
+    if (season !== "2026" || autoLoadedRef.current || players.length === 0) return;
+    autoLoadedRef.current = true;
+    void loadFromPitchLog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [players, season]);
 
   const syncToSupabase = async () => {
     if (rows.length === 0) {
@@ -751,6 +841,15 @@ export default function PitchingPowerRatingsStorageTable({ season }: { season: "
           <Button type="button" variant="outline" onClick={() => fileRef.current?.click()}>
             <Upload className="h-4 w-4 mr-2" />
             Import CSV
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={loadFromPitchLog}
+            disabled={loadingPl || season !== "2026"}
+            title={season !== "2026" ? "Pitch log is 2026 only" : "Compute inputs from 2026 pitch log"}
+          >
+            {loadingPl ? "Loading..." : "Load from Pitch Log"}
           </Button>
           <Button type="button" onClick={syncToSupabase} disabled={syncing || rows.length === 0}>
             {syncing ? "Syncing..." : "Sync to Supabase"}

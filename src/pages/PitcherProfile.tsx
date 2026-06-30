@@ -905,6 +905,56 @@ export default function PitcherProfile() {
 
   const pitchingEq = usePitchingEquationWeights();
 
+  // Internal power ratings read pitch_log FIRST (2026), Pitching Master second.
+  // The 2026 TruMedia master export can have null sub-metrics (e.g. in_zone_pct
+  // for Volantis), which blanks the rating; pitch_log carries them all.
+  const pitcherSourceId =
+    (player as any)?.source_player_id ?? (id && /^\d+$/.test(id) ? id : null);
+  const { data: pitchLogTotalsRow } = useQuery({
+    queryKey: ["pitcher-profile-pitchlog-totals", pitcherSourceId, effectiveSeason],
+    enabled: !!pitcherSourceId && effectiveSeason === 2026,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("pitch_log_pitcher_totals")
+        .select("*")
+        .eq("pitcher_id", pitcherSourceId as string)
+        .eq("season", 2026)
+        .eq("dimension_key", "all")
+        .maybeSingle();
+      if (error) throw error;
+      return data ?? null;
+    },
+  });
+
+  const pitchLogMetrics = useMemo(() => {
+    const r = pitchLogTotalsRow as any;
+    if (!r) return null;
+    const div = (n: number | null, d: number | null) =>
+      d != null && d > 0 ? (n ?? 0) / d : null;
+    const pc = (n: number | null, d: number | null) => {
+      const v = div(n, d);
+      return v == null ? null : v * 100;
+    };
+    const ev = r.batted_balls_allowed_with_ev;
+    return {
+      stuff: div(r.stuff_plus_sum, r.stuff_plus_data_pitches),
+      whiff: pc(r.total_whiffs, r.total_swings),
+      bb: pc(r.total_bb, r.total_pa),
+      hh: pc(r.batted_hard_hit_allowed, ev),
+      izWhiff: pc(r.total_in_zone_whiffs, r.total_in_zone_swings),
+      chase: pc(r.total_chases, r.total_out_of_zone),
+      barrel: pc(r.batted_barrels_allowed, ev),
+      ld: pc(r.batted_line_drives_allowed, ev),
+      avgEv: div(r.ev_sum_allowed, ev),
+      gb: pc(r.batted_ground_balls_allowed, ev),
+      iz: pc(r.total_in_zone, r.total_in_zone + r.total_out_of_zone),
+      ev90: r.ev_90_allowed == null ? null : Number(r.ev_90_allowed),
+      // Directional pull% (matches HM HPull% scale), not pull-air.
+      pull: pc(r.batted_pull_allowed, r.batted_pull_allowed + r.batted_center_allowed + r.batted_oppo_allowed),
+      la1030: pc(r.batted_la_10_to_30_allowed, ev),
+    };
+  }, [pitchLogTotalsRow]);
+
   const parseNum = (v: string | undefined) => {
     const s = (v || "").replace(/[%,$]/g, "").trim();
     if (s === "") return null;
@@ -932,21 +982,23 @@ export default function PitcherProfile() {
 
   const internalPowerRatings = useMemo(() => {
     if (!powerRatingsRow) return null;
+    // pitch_log FIRST, Pitching Master second (per-metric fallback).
+    const pl = pitchLogMetrics;
     const metrics = {
-      stuff: parseNum(powerRatingsRow[2]),
-      whiff: parseNum(powerRatingsRow[3]),
-      bb: parseNum(powerRatingsRow[4]),
-      hh: parseNum(powerRatingsRow[5]),
-      izWhiff: parseNum(powerRatingsRow[6]),
-      chase: parseNum(powerRatingsRow[7]),
-      barrel: parseNum(powerRatingsRow[8]),
-      ld: parseNum(powerRatingsRow[9]),
-      avgEv: parseNum(powerRatingsRow[10]),
-      gb: parseNum(powerRatingsRow[11]),
-      iz: parseNum(powerRatingsRow[12]),
-      ev90: parseNum(powerRatingsRow[13]),
-      pull: parseNum(powerRatingsRow[14]),
-      la1030: parseNum(powerRatingsRow[15]),
+      stuff: pl?.stuff ?? parseNum(powerRatingsRow[2]),
+      whiff: pl?.whiff ?? parseNum(powerRatingsRow[3]),
+      bb: pl?.bb ?? parseNum(powerRatingsRow[4]),
+      hh: pl?.hh ?? parseNum(powerRatingsRow[5]),
+      izWhiff: pl?.izWhiff ?? parseNum(powerRatingsRow[6]),
+      chase: pl?.chase ?? parseNum(powerRatingsRow[7]),
+      barrel: pl?.barrel ?? parseNum(powerRatingsRow[8]),
+      ld: pl?.ld ?? parseNum(powerRatingsRow[9]),
+      avgEv: pl?.avgEv ?? parseNum(powerRatingsRow[10]),
+      gb: pl?.gb ?? parseNum(powerRatingsRow[11]),
+      iz: pl?.iz ?? parseNum(powerRatingsRow[12]),
+      ev90: pl?.ev90 ?? parseNum(powerRatingsRow[13]),
+      pull: pl?.pull ?? parseNum(powerRatingsRow[14]),
+      la1030: pl?.la1030 ?? parseNum(powerRatingsRow[15]),
     };
     const storedScores = {
       stuff: parseNum(powerRatingsRow[16]),
@@ -1053,7 +1105,7 @@ export default function PitcherProfile() {
           (OVERALL_PITCHER_POWER_WEIGHTS.hr9 * hr9Plus);
 
     return { metrics, scores, eraPlus, whipPlus, k9Plus, bb9Plus, hr9Plus, fipPlus, overallPlus };
-  }, [pitchingEq, powerRatingsRow]);
+  }, [pitchingEq, powerRatingsRow, pitchLogMetrics]);
 
   const latestStats = useMemo(() => seasonStats[0] || null, [seasonStats]);
   // Use the same prediction picker TB uses (pickPreferredPrediction):
@@ -2076,7 +2128,7 @@ export default function PitcherProfile() {
                     ))}
                   </div>
                   <div className="border-t border-[#162241] pt-4">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-[#8a94a6] mb-3">2025 Input Metrics</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-[#8a94a6] mb-3">{effectiveSeason} Input Metrics{pitchLogMetrics ? " · pitch log" : ""}</p>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
                       {[
                         ["Stuff+", internalPowerRatings?.metrics.stuff],

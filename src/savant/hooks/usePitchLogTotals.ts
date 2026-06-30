@@ -45,6 +45,13 @@ export interface PitchLogPitcherTotalsRow {
   hits_triple_allowed: number;
   hits_hr_allowed: number;
   total_ab: number;
+  // Spray direction allowed (per-row batted_direction label) + rating inputs.
+  batted_pull_allowed: number;
+  batted_center_allowed: number;
+  batted_oppo_allowed: number;
+  batted_pull_air_allowed: number;
+  batted_la_10_to_30_allowed: number;
+  ev_90_allowed: number | null;
 }
 
 export interface PitchLogHitterTotalsRow {
@@ -86,6 +93,22 @@ export interface PitchLogHitterTotalsRow {
   x_hits_sum: number | null;
   x_bases_sum: number | null;
   x_woba_sum: number | null;
+  // Absolute field sections (per-row hit_location) + direction + rating inputs.
+  batted_far_left: number;
+  batted_left_center: number;
+  batted_center: number;
+  batted_right_center: number;
+  batted_far_right: number;
+  batted_pull: number;
+  batted_oppo: number;
+  batted_pull_air: number;
+  // Direction × trajectory cross-tabs (added 2026-06-29; populated post-merge).
+  batted_pull_ground: number;
+  batted_center_ground: number;
+  batted_center_air: number;
+  batted_oppo_ground: number;
+  batted_oppo_air: number;
+  ev_90: number | null;
 }
 
 const SHARED_QUERY_OPTS = {

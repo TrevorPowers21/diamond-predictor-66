@@ -891,6 +891,10 @@ export default function PlayerProfile() {
       } as any)
     : null;
 
+  // pitch_log power ratings only apply to the 2026 view (the hook always
+  // fetches 2026); gate so a 2025 profile doesn't show 2026-derived ratings.
+  const plPower = effectiveSeason === 2026 ? pitchLogPowerDerived : null;
+  const plRates = effectiveSeason === 2026 && pitchLogRates?.hasData ? pitchLogRates : null;
   const activeSeasonScoutingGrades = activeSeasonRow ? {
     // Priority chain per metric:
     //   pitch_log percentile rank (matches Season Stats bars exactly)
@@ -904,17 +908,20 @@ export default function PlayerProfile() {
     bbScore: pitchLogPercentileGrades?.bbScore ?? pitchLogPowerDerived?.bbScore ?? activeSeasonRow.bb_score ?? seedPowerDerived?.bbScore ?? null,
     lineDriveScore: pitchLogPercentileGrades?.lineDriveScore ?? pitchLogPowerDerived?.lineDriveScore ?? activeSeasonRow.line_drive_score ?? seedPowerDerived?.lineDriveScore ?? null,
     popUpScore: pitchLogPercentileGrades?.popUpScore ?? pitchLogPowerDerived?.popUpScore ?? activeSeasonRow.pop_up_score ?? seedPowerDerived?.popUpScore ?? null,
-    // ev90 + pull stay on stored HM — pitch_log can't derive them yet.
-    ev90Score: activeSeasonRow.ev90_score ?? seedPowerDerived?.ev90Score ?? null,
-    pullScore: activeSeasonRow.pull_score ?? seedPowerDerived?.pullScore ?? null,
+    // ev90 + pull now derive from pitch_log (ev_90 + directional pull
+    // columns added 2026-06-26) — pitch_log first, stored HM fallback.
+    ev90Score: plPower?.ev90Score ?? activeSeasonRow.ev90_score ?? seedPowerDerived?.ev90Score ?? null,
+    pullScore: plPower?.pullScore ?? activeSeasonRow.pull_score ?? seedPowerDerived?.pullScore ?? null,
     laScore: pitchLogPercentileGrades?.laScore ?? pitchLogPowerDerived?.laScore ?? activeSeasonRow.la_score ?? seedPowerDerived?.laScore ?? null,
     gbScore: pitchLogPercentileGrades?.gbScore ?? pitchLogPowerDerived?.gbScore ?? activeSeasonRow.gb_score ?? seedPowerDerived?.gbScore ?? null,
-    // Overall power-rating roll-ups stay on stored HM (these feed
-    // pWAR / market-value paths Trevor flagged as untouchable).
-    baPlus: activeSeasonRow.ba_power_rating ?? seedPowerDerived?.baPlus ?? null,
-    obpPlus: activeSeasonRow.obp_power_rating ?? seedPowerDerived?.obpPlus ?? null,
-    isoPlus: activeSeasonRow.iso_power_rating ?? seedPowerDerived?.isoPlus ?? null,
-    overallPlus: activeSeasonRow.overall_power_rating ?? seedPowerDerived?.overallPlus ?? null,
+    // Overall PR+ roll-ups: pitch_log FIRST for the DISPLAY (mirrors the
+    // pitcher profile). This is display-only — the pWAR / market-value
+    // projection path reads projectionSourceRow.overall_power_rating
+    // (stored) separately, so stored values stay untouched until July.
+    baPlus: plPower?.baPlus ?? activeSeasonRow.ba_power_rating ?? seedPowerDerived?.baPlus ?? null,
+    obpPlus: plPower?.obpPlus ?? activeSeasonRow.obp_power_rating ?? seedPowerDerived?.obpPlus ?? null,
+    isoPlus: plPower?.isoPlus ?? activeSeasonRow.iso_power_rating ?? seedPowerDerived?.isoPlus ?? null,
+    overallPlus: plPower?.overallPlus ?? activeSeasonRow.overall_power_rating ?? seedPowerDerived?.overallPlus ?? null,
   } : seedPowerDerived;
   // Carry 2025 PA forward as expected 2026 PA so projected WAR scales with
   // actual playing-time history. A fringe starter with 100 PA last year
@@ -1657,17 +1664,17 @@ export default function PlayerProfile() {
                         <p className="text-xs font-semibold uppercase tracking-wider text-[#8a94a6] mb-2">{effectiveSeason} Input Metrics</p>
                         <div className="grid grid-cols-2 gap-2">
                           {[
-                            ["Contact %", activeSeasonRow ? (activeSeasonRow as any).contact : seedPowerRow?.contact, "%"],
-                            ["Line Drive %", activeSeasonRow ? (activeSeasonRow as any).line_drive : seedPowerRow?.lineDrive, "%"],
-                            ["Pop-Up %", activeSeasonRow ? (activeSeasonRow as any).pop_up : seedPowerRow?.popUp, "%"],
-                            ["BB %", activeSeasonRow ? (activeSeasonRow as any).bb : seedPowerRow?.bb, "%"],
-                            ["Chase %", activeSeasonRow ? (activeSeasonRow as any).chase : seedPowerRow?.chase, "%"],
-                            ["Barrel %", activeSeasonRow ? (activeSeasonRow as any).barrel : seedPowerRow?.barrel, "%"],
-                            ["Pull %", activeSeasonRow ? (activeSeasonRow as any).pull : seedPowerRow?.pull, "%"],
-                            ["LA 10-30 %", activeSeasonRow ? (activeSeasonRow as any).la_10_30 : seedPowerRow?.la10_30, "%"],
-                            ["GB %", activeSeasonRow ? (activeSeasonRow as any).gb : seedPowerRow?.gb, "%"],
-                            ["Avg Exit Velo", activeSeasonRow ? (activeSeasonRow as any).avg_exit_velo : seedPowerRow?.avgExitVelo, " mph"],
-                            ["EV90", activeSeasonRow ? (activeSeasonRow as any).ev90 : seedPowerRow?.ev90, " mph"],
+                            ["Contact %", plRates?.contact ?? (activeSeasonRow ? (activeSeasonRow as any).contact : seedPowerRow?.contact), "%"],
+                            ["Line Drive %", plRates?.lineDrive ?? (activeSeasonRow ? (activeSeasonRow as any).line_drive : seedPowerRow?.lineDrive), "%"],
+                            ["Pop-Up %", plRates?.popUp ?? (activeSeasonRow ? (activeSeasonRow as any).pop_up : seedPowerRow?.popUp), "%"],
+                            ["BB %", plRates?.bb ?? (activeSeasonRow ? (activeSeasonRow as any).bb : seedPowerRow?.bb), "%"],
+                            ["Chase %", plRates?.chase ?? (activeSeasonRow ? (activeSeasonRow as any).chase : seedPowerRow?.chase), "%"],
+                            ["Barrel %", plRates?.barrel ?? (activeSeasonRow ? (activeSeasonRow as any).barrel : seedPowerRow?.barrel), "%"],
+                            ["Pull %", plRates?.pull ?? (activeSeasonRow ? (activeSeasonRow as any).pull : seedPowerRow?.pull), "%"],
+                            ["LA 10-30 %", plRates?.la10_30 ?? (activeSeasonRow ? (activeSeasonRow as any).la_10_30 : seedPowerRow?.la10_30), "%"],
+                            ["GB %", plRates?.gb ?? (activeSeasonRow ? (activeSeasonRow as any).gb : seedPowerRow?.gb), "%"],
+                            ["Avg Exit Velo", plRates?.avgExitVelo ?? (activeSeasonRow ? (activeSeasonRow as any).avg_exit_velo : seedPowerRow?.avgExitVelo), " mph"],
+                            ["EV90", plRates?.ev90 ?? (activeSeasonRow ? (activeSeasonRow as any).ev90 : seedPowerRow?.ev90), " mph"],
                           ].map(([label, val, suffix]) => (
                             <div key={label as string} className="rounded-lg border border-[#162241] bg-[#0d1a30] p-2.5">
                               <div className="text-[9px] uppercase tracking-wider font-semibold text-[#8a94a6]">{label}</div>
