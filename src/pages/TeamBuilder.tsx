@@ -1883,6 +1883,42 @@ export default function TeamBuilder() {
     onError: (e: any) => toast({ title: "Save failed", description: e.message, variant: "destructive" }),
   });
 
+  // Clone ANY existing build into a fresh coach build — copies its full roster
+  // plus every per-player override (depth/dev-agg/etc. ride along in
+  // production_notes), so a coach doesn't have to redo changes. DB-level copy
+  // of the source's team_build_players rows; no need to load it into the UI.
+  const cloneBuildById = async (sourceId: string, sourceName: string) => {
+    if (!user || !effectiveTeamId) return;
+    try {
+      const [{ data: src }, { data: srcPlayers }] = await Promise.all([
+        supabase.from("team_builds").select("team,total_budget,depth_assignments,depth_placeholders").eq("id", sourceId).single(),
+        supabase.from("team_build_players").select("custom_name,player_id,source,position_slot,depth_order,nil_value,included_in_roster,player_snapshot,production_notes").eq("build_id", sourceId),
+      ]);
+      const { data: nb, error } = await supabase.from("team_builds").insert({
+        user_id: user.id,
+        customer_team_id: effectiveTeamId,
+        name: `${sourceName} (copy)`,
+        team: (src as any)?.team ?? selectedTeam,
+        total_budget: (src as any)?.total_budget ?? 0,
+        depth_assignments: (src as any)?.depth_assignments ?? {},
+        depth_placeholders: (src as any)?.depth_placeholders ?? {},
+        academic_year: PROJECTION_SEASON,
+      }).select("id").single();
+      if (error) throw error;
+      if (srcPlayers && srcPlayers.length > 0) {
+        const rows = (srcPlayers as any[]).map((r) => ({ ...r, build_id: nb.id }));
+        const { error: pErr } = await supabase.from("team_build_players").insert(rows);
+        if (pErr) throw pErr;
+      }
+      queryClient.invalidateQueries({ queryKey: ["team-builds"] });
+      setHasSavedOnce(true);
+      loadBuild(nb.id);
+      toast({ title: `Cloned "${sourceName}"` });
+    } catch (e: any) {
+      toast({ title: "Clone failed", description: e.message, variant: "destructive" });
+    }
+  };
+
   // True when the currently loaded build is a system-managed default build.
   const isDefaultBuild = useMemo(() => {
     if (!selectedBuildId) return false;
@@ -3332,39 +3368,70 @@ export default function TeamBuilder() {
 
         {/* New Build dialog — clone current or start from default */}
         {showNewBuildDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-            <div className="bg-[#0d1a30] border border-[#162241] rounded-xl p-6 w-full max-w-sm shadow-2xl">
-              <h3 className="text-base font-bold text-slate-100 mb-1">Start a new build</h3>
-              <p className="text-sm text-slate-400 mb-5">How would you like to begin?</p>
-              <div className="flex flex-col gap-2">
-                <Button
-                  variant="outline"
-                  className="justify-start"
-                  onClick={() => {
-                    setShowNewBuildDialog(false);
-                    newBuild();
-                  }}
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+            <div
+              className="w-full max-w-md overflow-hidden rounded-lg border border-l-[3px] shadow-2xl"
+              style={{ backgroundColor: "#0a1428", borderColor: "#1f2d52", borderLeftColor: "#D4AF37" }}
+            >
+              {/* Header — gold icon chip + Oswald gold title (app chrome) */}
+              <div className="flex items-center gap-2.5 border-b px-5 pb-4 pt-5" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+                <div
+                  className="flex h-8 w-8 items-center justify-center rounded-md border"
+                  style={{ backgroundColor: "rgba(212,175,55,0.10)", borderColor: "rgba(212,175,55,0.30)" }}
                 >
-                  Start from default roster
-                </Button>
-                {selectedBuildId && !isDefaultBuild && (
-                  <Button
-                    variant="outline"
-                    className="justify-start"
-                    onClick={() => {
-                      setShowNewBuildDialog(false);
-                      saveMutation.mutate({ saveAs: true, nameOverride: `${buildName} (copy)` });
-                    }}
-                  >
-                    Clone &ldquo;{buildName}&rdquo;
-                  </Button>
+                  <Plus className="h-4 w-4" style={{ color: "#D4AF37" }} />
+                </div>
+                <div>
+                  <h3 className="font-[Oswald] text-[16px] font-bold uppercase leading-none tracking-[0.08em]" style={{ color: "#D4AF37" }}>
+                    Start a New Build
+                  </h3>
+                  <p className="mt-1 text-[12px] text-slate-400">Begin fresh, or branch off an existing roster</p>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="px-5 py-4">
+                <button
+                  type="button"
+                  onClick={() => { setShowNewBuildDialog(false); newBuild(); }}
+                  className="flex w-full items-center justify-between gap-3 rounded-md border px-3.5 py-3 text-left cursor-pointer transition-colors duration-150 hover:bg-[#D4AF37]/[0.08]"
+                  style={{ borderColor: "#1f2d52" }}
+                >
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-100">Start from default roster</span>
+                    <span className="block text-[12px] text-slate-500">Your returners, fresh slate</span>
+                  </span>
+                  <span className="shrink-0 font-[Oswald] text-[11px] font-bold uppercase tracking-[0.18em] text-[#D4AF37]">New</span>
+                </button>
+
+                {builds.filter((b: any) => !b.is_default && (b.academic_year === PROJECTION_SEASON || b.academic_year == null)).length > 0 && (
+                  <div className="mt-4">
+                    <div className="mb-1.5 font-[Oswald] text-[11px] font-bold uppercase tracking-[0.22em] text-[#D4AF37]">
+                      Or clone an existing build
+                    </div>
+                    <div className="max-h-[200px] overflow-y-auto rounded-md border" style={{ backgroundColor: "#040810", borderColor: "#1f2d52" }}>
+                      {builds
+                        .filter((b: any) => !b.is_default && (b.academic_year === PROJECTION_SEASON || b.academic_year == null))
+                        .map((b: any) => (
+                          <button
+                            key={b.id}
+                            type="button"
+                            onClick={() => { setShowNewBuildDialog(false); cloneBuildById(b.id, b.name); }}
+                            className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left text-sm text-slate-100 cursor-pointer transition-colors duration-150 hover:bg-[#D4AF37]/[0.08]"
+                            style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+                          >
+                            <span className="truncate">{b.name}</span>
+                            {b.team && <span className="shrink-0 text-[11px] text-slate-500 tabular-nums">{b.team}</span>}
+                          </button>
+                        ))}
+                    </div>
+                  </div>
                 )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="mt-1"
-                  onClick={() => setShowNewBuildDialog(false)}
-                >
+              </div>
+
+              {/* Footer */}
+              <div className="flex justify-end border-t px-5 py-3" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+                <Button variant="ghost" size="sm" onClick={() => setShowNewBuildDialog(false)}>
                   Cancel
                 </Button>
               </div>
