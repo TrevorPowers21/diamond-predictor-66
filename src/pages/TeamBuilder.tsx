@@ -832,6 +832,8 @@ export default function TeamBuilder() {
   const [promptBuildName, setPromptBuildName] = useState("");
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [savedBuildNameDisplay, setSavedBuildNameDisplay] = useState("");
+  const [showRenamePrompt, setShowRenamePrompt] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
   // Tracks the team the depth chart belongs to. When selectedTeam changes
   // (and isn't a load/restore), the team-change effect below clears the
   // depth chart so old indices don't re-bind to whoever happens to land at
@@ -1739,8 +1741,9 @@ export default function TeamBuilder() {
     const coachBuilds = builds.filter((b: any) => !b.is_default);
     const defaultBuilds = builds.filter((b: any) => b.is_default);
     const currentYearCoachBuilds = coachBuilds.filter((b: any) => b.academic_year === PROJECTION_SEASON);
-    const toLoad = (currentYearCoachBuilds[0] ?? coachBuilds[0] ?? defaultBuilds[0]) as { id: string } | undefined;
+    const toLoad = (currentYearCoachBuilds[0] ?? coachBuilds[0] ?? defaultBuilds[0]) as { id: string; is_default?: boolean } | undefined;
     if (!toLoad) return;
+    setHasSavedOnce(!toLoad.is_default);
     loadBuild(toLoad.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveTeamId, selectedBuildId, builds.length, buildsLoading]);
@@ -1950,7 +1953,7 @@ export default function TeamBuilder() {
           customer_team_id: (b as any).customer_team_id,
           team: (b as any).team,
           name: "Unsaved Build",
-          user_id: (b as any).user_id,
+          user_id: user?.id ?? null,
           total_budget: (b as any).total_budget ?? 0,
           depth_assignments: (b as any).depth_assignments ?? {},
           depth_placeholders: (b as any).depth_placeholders ?? {},
@@ -1965,19 +1968,8 @@ export default function TeamBuilder() {
         return null;
       }
       const newBuildId = newBuild.id as string;
-
-      // Copy all player rows to the new build, clearing the DB-assigned ids.
-      const { data: existingPlayers } = await supabase
-        .from("team_build_players")
-        .select("*")
-        .eq("build_id", selectedBuildId);
-      if (existingPlayers && existingPlayers.length > 0) {
-        const copies = existingPlayers.map(({ id: _id, build_id: _bid, ...rest }: any) => ({
-          ...rest,
-          build_id: newBuildId,
-        }));
-        await supabase.from("team_build_players").insert(copies);
-      }
+      // Players are NOT copied from the DB default here — saveMutation writes
+      // the full rosterPlayers state (with all local changes) immediately after.
 
       forkedBuildIdRef.current = newBuildId;
       // Pre-mark the forked build as usage-corrected so the depth corrective
@@ -1993,7 +1985,7 @@ export default function TeamBuilder() {
 
     forkInFlightRef.current = promise;
     return promise;
-  }, [selectedBuildId, builds, supabase, queryClient]);
+  }, [selectedBuildId, builds, supabase, queryClient, user]);
 
   // Silently fork the default build the moment the coach makes their first change,
   // so the default is never mutated and the coach build is ready to receive saves.
@@ -3304,6 +3296,40 @@ export default function TeamBuilder() {
           </div>
         )}
 
+        {/* Rename build dialog */}
+        {showRenamePrompt && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+            <div className="bg-[#0d1a30] border border-[#162241] rounded-xl p-6 w-full max-w-sm shadow-2xl">
+              <h3 className="text-base font-bold text-slate-100 mb-1">Rename build</h3>
+              <input
+                type="text"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && renameValue.trim()) {
+                    saveMutation.mutateAsync({ nameOverride: renameValue.trim() }).then(() => setShowRenamePrompt(false));
+                  }
+                  if (e.key === "Escape") setShowRenamePrompt(false);
+                }}
+                className="w-full bg-[#0a1428] border border-[#162241] rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-[#D4AF37] mb-4"
+                autoFocus
+              />
+              <div className="flex gap-2 justify-end">
+                <Button variant="ghost" size="sm" onClick={() => setShowRenamePrompt(false)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  disabled={saveMutation.isPending || !renameValue.trim()}
+                  onClick={() => {
+                    saveMutation.mutateAsync({ nameOverride: renameValue.trim() }).then(() => setShowRenamePrompt(false));
+                  }}
+                >
+                  {saveMutation.isPending ? "Saving…" : "Rename"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* New Build dialog — clone current or start from default */}
         {showNewBuildDialog && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
@@ -3359,15 +3385,18 @@ export default function TeamBuilder() {
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-[220px]">
               <Label className="text-xs mb-1 block">Load Saved Build</Label>
-              <Select value={selectedBuildId || "new"} onValueChange={(v) => { if (v === "new") { setShowNewBuildDialog(true); } else { setHasSavedOnce(false); loadBuild(v); } }}>
+              <Select value={selectedBuildId || "new"} onValueChange={(v) => { if (v === "new") { setShowNewBuildDialog(true); } else { const b = builds.find((x: any) => x.id === v); setHasSavedOnce(!!(b && !(b as any).is_default)); loadBuild(v); } }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select build…" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="new">+ New Build</SelectItem>
-                  {builds.map((b) => (
+                  {[
+                    ...builds.filter((b: any) => b.is_default && (b.academic_year === PROJECTION_SEASON || b.academic_year == null)),
+                    ...builds.filter((b: any) => !b.is_default && (b.academic_year === PROJECTION_SEASON || b.academic_year == null)),
+                  ].map((b: any) => (
                     <SelectItem key={b.id} value={b.id}>
-                      {b.name}{(b as any).is_default ? " (Default)" : ""} ({b.team})
+                      {b.is_default ? "Default Roster" : b.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -3403,6 +3432,16 @@ export default function TeamBuilder() {
             >
               Save As
             </Button>
+            {selectedBuildId && !isDefaultBuild && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setRenameValue(buildName); setShowRenamePrompt(true); }}
+                disabled={saveMutation.isPending}
+              >
+                Rename
+              </Button>
+            )}
           </div>
         </div>
 
