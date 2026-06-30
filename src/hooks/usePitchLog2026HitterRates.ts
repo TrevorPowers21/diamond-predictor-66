@@ -66,7 +66,7 @@ export function usePitchLog2026HitterRates(sourcePlayerId: string | null) {
       const { data } = await (supabase as any)
         .from("pitch_log_hitter_totals")
         .select(
-          "pa, ab, sac, hits_single, hits_double, hits_triple, hits_hr, bb, hbp, total_pitches, total_swings, total_whiffs, total_in_zone, total_out_of_zone, total_chases, batted_balls_in_play, batted_barrels, ev_sum, batted_balls_with_ev, batted_ground_balls, batted_line_drives, batted_fly_balls, batted_pop_ups, batted_la_10_to_30",
+          "pa, ab, sac, hits_single, hits_double, hits_triple, hits_hr, bb, hbp, total_pitches, total_swings, total_whiffs, total_in_zone, total_out_of_zone, total_chases, batted_balls_in_play, batted_barrels, ev_sum, batted_balls_with_ev, batted_ground_balls, batted_line_drives, batted_fly_balls, batted_pop_ups, batted_la_10_to_30, ev_90, batted_pull, batted_center, batted_oppo",
         )
         .eq("batter_id", sourcePlayerId)
         .eq("season", 2026)
@@ -121,8 +121,15 @@ export function usePitchLog2026HitterRates(sourcePlayerId: string | null) {
         bb: pct(r.bb, r.pa),
         chase: pct(r.total_chases, outOfZone),
         barrel: pct(r.batted_barrels, evDen),
-        ev90: null,  // requires per-pitcher quantile; fall back to HM
-        pull: null,  // requires spray-angle ingest (deferred)
+        // EV90: own 90th-pct EV (percentile_cont from pitch_log). Gated on
+        // the tracked-BIP floor so a p90 off a tiny sample isn't trusted.
+        ev90: evN >= trackedBipFloor && r.ev_90 != null ? Number(r.ev_90) : null,
+        // Directional pull% = pull / (pull+center+oppo), to match HM `pull`
+        // baseline (36.5), NOT pull-air. Hand-resolved per row upstream.
+        pull: (() => {
+          const dir = (r.batted_pull ?? 0) + (r.batted_center ?? 0) + (r.batted_oppo ?? 0);
+          return dir > 0 ? ((r.batted_pull ?? 0) / dir) * 100 : null;
+        })(),
         la10_30: pct(r.batted_la_10_to_30, evDen),
         gb: pct(r.batted_ground_balls, evDen),
         hasData: (r.pa ?? 0) > 0 || bip > 0,

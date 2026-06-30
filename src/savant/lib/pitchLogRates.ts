@@ -680,9 +680,59 @@ export const HITTER_METRICS_CONTACT: MetricDef<PitchLogHitterTotalsRow>[] = [
   { label: "Hard Hit%", derive: (r) => safeDivFloor(r.batted_hard_hit, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
   { label: "Barrel%", derive: (r) => safeDivFloor(r.batted_barrels, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
   { label: "LA 10-30%", derive: (r) => safeDivFloor(r.batted_la_10_to_30, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
+];
+
+// ── Ball Flight profile (trajectory + spray direction) ──────────────
+// AIR = LD + FB + PU (everything not on the ground). Trajectory %s use the
+// tracked-BIP denominator; direction %s use the directional total so Pull +
+// Straight + Oppo ≈ 100. The 5 direction×trajectory cross-tabs (Pull GB%,
+// Straight GB%, Oppo GB%, Straight Air%, Oppo Air%) need new aggregation
+// columns — added once those land. Pull Air% is the headline metric.
+const airBip = (r: PitchLogHitterTotalsRow) =>
+  r.batted_line_drives + r.batted_fly_balls + r.batted_pop_ups;
+const dirTotal = (r: PitchLogHitterTotalsRow) =>
+  r.batted_pull + r.batted_center + r.batted_oppo;
+// Cross-tab %: null (→ "—") until the column is aggregated; otherwise the
+// directional-total share. (safeDivFloor would coerce a missing value to 0%.)
+const xtabPct = (v: number | undefined, r: PitchLogHitterTotalsRow): number | null =>
+  v == null ? null : safeDivFloor(v, dirTotal(r), MIN_TRACKED_BIP);
+
+// Stats-page Ball Flight (condensed). Comprehensive view = _FULL on Visuals.
+export const HITTER_METRICS_BALL_FLIGHT: MetricDef<PitchLogHitterTotalsRow>[] = [
   { label: "GB%", derive: (r) => safeDivFloor(r.batted_ground_balls, r.batted_balls_with_ev, MIN_TRACKED_BIP), invert: true, format: pct },
   { label: "LD%", derive: (r) => safeDivFloor(r.batted_line_drives, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
   { label: "FB%", derive: (r) => safeDivFloor(r.batted_fly_balls, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
+  { label: "Air%", derive: (r) => safeDivFloor(airBip(r), r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
+  { label: "Pull Air%", derive: (r) => safeDivFloor(r.batted_pull_air, dirTotal(r), MIN_TRACKED_BIP), format: pct },
+  { label: "Pull%", derive: (r) => safeDivFloor(r.batted_pull, dirTotal(r), MIN_TRACKED_BIP), format: pct },
+];
+
+// Comprehensive Ball Flight (Visuals table) — full trajectory + direction + cross-tabs.
+export const HITTER_METRICS_BALL_FLIGHT_FULL: MetricDef<PitchLogHitterTotalsRow>[] = [
+  { label: "GB%", derive: (r) => safeDivFloor(r.batted_ground_balls, r.batted_balls_with_ev, MIN_TRACKED_BIP), invert: true, format: pct },
+  { label: "Air%", derive: (r) => safeDivFloor(airBip(r), r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
+  { label: "FB%", derive: (r) => safeDivFloor(r.batted_fly_balls, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
+  { label: "LD%", derive: (r) => safeDivFloor(r.batted_line_drives, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
+  { label: "PU%", derive: (r) => safeDivFloor(r.batted_pop_ups, r.batted_balls_with_ev, MIN_TRACKED_BIP), invert: true, format: pct },
+  { label: "Pull%", derive: (r) => safeDivFloor(r.batted_pull, dirTotal(r), MIN_TRACKED_BIP), format: pct },
+  { label: "Straight%", derive: (r) => safeDivFloor(r.batted_center, dirTotal(r), MIN_TRACKED_BIP), format: pct },
+  { label: "Oppo%", derive: (r) => safeDivFloor(r.batted_oppo, dirTotal(r), MIN_TRACKED_BIP), format: pct },
+  { label: "Pull Air%", derive: (r) => safeDivFloor(r.batted_pull_air, dirTotal(r), MIN_TRACKED_BIP), format: pct },
+  // Direction × trajectory cross-tabs (need aggregation; "—" until populated).
+  { label: "Pull GB%", derive: (r) => xtabPct(r.batted_pull_ground, r), format: pct },
+  { label: "Straight GB%", derive: (r) => xtabPct(r.batted_center_ground, r), format: pct },
+  { label: "Oppo GB%", derive: (r) => xtabPct(r.batted_oppo_ground, r), format: pct },
+  { label: "Straight Air%", derive: (r) => xtabPct(r.batted_center_air, r), format: pct },
+  { label: "Oppo Air%", derive: (r) => xtabPct(r.batted_oppo_air, r), format: pct },
+];
+
+// Bar subset — only the rows with a clear better/worse direction get a
+// percentile bar (Trevor: not every ball-flight metric needs one).
+export const HITTER_METRICS_BALL_FLIGHT_BARS: MetricDef<PitchLogHitterTotalsRow>[] = [
+  { label: "Pull Air%", derive: (r) => safeDivFloor(r.batted_pull_air, dirTotal(r), MIN_TRACKED_BIP), format: pct },
+  { label: "Air%", derive: (r) => safeDivFloor(airBip(r), r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
+  { label: "GB%", derive: (r) => safeDivFloor(r.batted_ground_balls, r.batted_balls_with_ev, MIN_TRACKED_BIP), invert: true, format: pct },
+  { label: "LD%", derive: (r) => safeDivFloor(r.batted_line_drives, r.batted_balls_with_ev, MIN_TRACKED_BIP), format: pct },
 ];
 
 // Percentile-bar subset — drops GB / LD / FB which read better as raw
@@ -760,18 +810,53 @@ export interface HitterPitchTypeBreakdown {
   whiffPct: number | null;
   chasePct: number | null;
   hardHitPct: number | null;
+  barrelPct: number | null;
+  kPct: number | null;
+  hrPct: number | null;
   avgEv: number | null;
+  usagePct: number | null;
+  woba: number | null;
+  xba: number | null;
+  xslg: number | null;
+  xwoba: number | null;
+  /** Offense run value (positive = runs added). Null until RV components land. */
+  rv: number | null;
+  /** Offense RV per 100 pitches. Null until RV components land. */
+  rv100: number | null;
 }
 
 export function deriveHitterPitchTypeBreakdowns(
   rows: PitchLogHitterByPitchTypeRow[],
 ): HitterPitchTypeBreakdown[] {
+  const totalPitches = rows.reduce((sum, r) => sum + r.pitches, 0);
   return rows.map((r) => {
     const hits = r.hits_single + r.hits_double + r.hits_triple + r.hits_hr;
     const tb = r.hits_single + 2 * r.hits_double + 3 * r.hits_triple + 4 * r.hits_hr;
     const avg = safeDiv(hits, r.ab);
     const obp = safeDiv(hits + r.bb + r.hbp, r.ab + r.bb + r.hbp);
     const slg = safeDiv(tb, r.ab);
+    // wOBA denominator (no SF stored per pitch type): AB + BB + HBP.
+    const wobaDen = r.ab + r.bb + r.hbp;
+    const woba =
+      wobaDen > 0
+        ? (0.696 * r.bb +
+            0.726 * r.hbp +
+            0.882 * r.hits_single +
+            1.254 * r.hits_double +
+            1.586 * r.hits_triple +
+            2.041 * r.hits_hr) /
+          wobaDen
+        : null;
+    // Lower floor than season xStats (15): per-pitch-type AB is inherently
+    // small, and this table is raw display (not percentile-ranked).
+    const PER_PITCH_XSTAT_MIN_AB = 5;
+    const xbaRaw = safeDivFloor(r.x_hits_sum, r.ab, PER_PITCH_XSTAT_MIN_AB);
+    const xslgRaw = safeDivFloor(r.x_bases_sum, r.ab, PER_PITCH_XSTAT_MIN_AB);
+    const xwobaRaw =
+      r.x_woba_sum === null || r.ab < PER_PITCH_XSTAT_MIN_AB || wobaDen === 0
+        ? null
+        : (r.x_woba_sum + 0.696 * r.bb + 0.726 * r.hbp) / wobaDen;
+    const rvSum = rvOffenseSumHitter(r);
     return {
       pitchType: r.pitch_type_reclassified,
       pitches: r.pitches,
@@ -783,7 +868,17 @@ export function deriveHitterPitchTypeBreakdowns(
       whiffPct: safeDiv(r.whiffs, r.swings),
       chasePct: safeDiv(r.chases, r.out_of_zone),
       hardHitPct: safeDiv(r.batted_hard_hit, r.batted_balls_with_ev),
+      barrelPct: safeDiv(r.batted_barrels, r.batted_balls_with_ev),
+      kPct: safeDiv(r.k, r.pa),
+      hrPct: safeDiv(r.hits_hr, r.pa),
       avgEv: safeDiv(r.ev_sum, r.batted_balls_with_ev),
+      usagePct: safeDiv(r.pitches, totalPitches),
+      woba,
+      xba: xbaRaw === null ? null : lookupInterp(HITTER_XBA_LOOKUP, xbaRaw),
+      xslg: xslgRaw === null ? null : lookupInterp(HITTER_XSLG_LOOKUP, xslgRaw),
+      xwoba: xwobaRaw === null ? null : lookupInterp(HITTER_XWOBA_LOOKUP, xwobaRaw),
+      rv: rvSum,
+      rv100: rvSum === null || r.pitches === 0 ? null : (rvSum / r.pitches) * 100,
     };
   });
 }
@@ -883,6 +978,45 @@ function rvOffenseSum(r: PitchLogByPitchTypeRow): number {
     nonTerminalWhiffs * -0.118 +
     fouls * -0.038 +
     // Terminal event weights (PA-ending pitches)
+    walks * 0.319 +
+    hbps * 0.732 +
+    totalKs * -0.243 +
+    singles * 0.475 +
+    doubles * 0.766 +
+    triples * 1.034 +
+    hrs * 1.405 +
+    bipOuts * -0.243
+  );
+}
+
+/**
+ * Offense Run Value sum for a HITTER pitch-type row — same linear weights as
+ * rvOffenseSum but reading hitter column names (no `_allowed`/`_caused`).
+ * Positive = runs the hitter added (do NOT negate). Returns null until the RV
+ * components (balls / called_strikes / K-split) are aggregated.
+ */
+function rvOffenseSumHitter(r: PitchLogHitterByPitchTypeRow): number | null {
+  const balls0 = r.balls as number | undefined;
+  if (balls0 == null) return null;
+  const walks = r.bb ?? 0;
+  const hbps = r.hbp ?? 0;
+  const lookingKs = r.looking_strikeouts ?? 0;
+  const swingingKs = r.swinging_strikeouts ?? 0;
+  const totalKs = lookingKs + swingingKs;
+  const singles = r.hits_single ?? 0;
+  const doubles = r.hits_double ?? 0;
+  const triples = r.hits_triple ?? 0;
+  const hrs = r.hits_hr ?? 0;
+  const bipOuts = Math.max(0, (r.batted_balls_in_play ?? 0) - (singles + doubles + triples + hrs));
+  const nonTerminalBalls = Math.max(0, balls0 - walks);
+  const nonTerminalCS = Math.max(0, (r.called_strikes ?? 0) - lookingKs);
+  const nonTerminalWhiffs = Math.max(0, (r.whiffs ?? 0) - swingingKs);
+  const fouls = r.fouls ?? 0;
+  return (
+    nonTerminalBalls * 0.062 +
+    nonTerminalCS * -0.066 +
+    nonTerminalWhiffs * -0.118 +
+    fouls * -0.038 +
     walks * 0.319 +
     hbps * 0.732 +
     totalKs * -0.243 +

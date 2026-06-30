@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PercentileBar from "@/savant/components/PercentileBar";
 import { StrikeZonePlot } from "@/savant/components/StrikeZonePlot";
+import SprayFieldPanel from "@/savant/components/SprayFieldPanel";
 import { PitchMovementPlot } from "@/savant/components/PitchMovementPlot";
 import { PitchZoneXwoba } from "@/savant/components/PitchZoneXwoba";
 import { PitchZoneUsage } from "@/savant/components/PitchZoneUsage";
@@ -20,7 +21,7 @@ import {
   usePitchLogByPitchTypePopulation,
   usePitchLogPitcherPopulation,
 } from "@/savant/hooks/usePitchLogPopulation";
-import { percentileRank } from "@/savant/lib/percentile";
+import { percentileColor, percentileRank } from "@/savant/lib/percentile";
 import {
   type DimensionOption,
   type HitterPitchTypeBreakdown,
@@ -30,6 +31,9 @@ import {
   deriveHitterPitchTypeBreakdowns,
   derivePitchTypeBreakdowns,
   HITTER_DIMENSIONS,
+  HITTER_METRICS_BALL_FLIGHT,
+  HITTER_METRICS_BALL_FLIGHT_BARS,
+  HITTER_METRICS_BALL_FLIGHT_FULL,
   HITTER_METRICS_CONTACT,
   HITTER_METRICS_CONTACT_BARS,
   HITTER_METRICS_DISCIPLINE,
@@ -160,7 +164,7 @@ function PitchTypePicker({ pitchTypes, value, onChange }: PitchTypePickerProps) 
 type ZoneHeightKey = "all" | "upper" | "middle" | "lower";
 
 const ZONE_HEIGHT_OPTIONS: Array<{ key: ZoneHeightKey; label: string }> = [
-  { key: "all", label: "Height" },
+  { key: "all", label: "Vertical" },
   { key: "upper", label: "Upper" },
   { key: "middle", label: "Middle" },
   { key: "lower", label: "Lower" },
@@ -182,7 +186,7 @@ function ZoneHeightPicker({ value, onChange }: ZoneHeightPickerProps) {
     window.addEventListener("mousedown", handler);
     return () => window.removeEventListener("mousedown", handler);
   }, [open]);
-  const label = value === "all" ? "Height" : ZONE_HEIGHT_OPTIONS.find((o) => o.key === value)?.label ?? "Height";
+  const label = value === "all" ? "Vertical" : ZONE_HEIGHT_OPTIONS.find((o) => o.key === value)?.label ?? "Vertical";
   return (
     <div ref={ref} className="relative inline-block">
       <button
@@ -222,7 +226,7 @@ function ZoneHeightPicker({ value, onChange }: ZoneHeightPickerProps) {
                   backgroundColor: isActive ? "rgba(212,175,55,0.06)" : "transparent",
                 }}
               >
-                {o.key === "all" ? "All Heights" : o.label}
+                {o.key === "all" ? "All Vertical" : o.label}
               </button>
             );
           })}
@@ -249,7 +253,7 @@ function passesZoneHeight(pzNorm: number | null, height: ZoneHeightKey): boolean
 type ZoneSideKey = "all" | "left" | "middle" | "right";
 
 const ZONE_SIDE_OPTIONS: Array<{ key: ZoneSideKey; label: string }> = [
-  { key: "all", label: "Side" },
+  { key: "all", label: "Horizontal" },
   { key: "left", label: "Left" },
   { key: "middle", label: "Middle" },
   { key: "right", label: "Right" },
@@ -271,7 +275,7 @@ function ZoneSidePicker({ value, onChange }: ZoneSidePickerProps) {
     window.addEventListener("mousedown", handler);
     return () => window.removeEventListener("mousedown", handler);
   }, [open]);
-  const label = value === "all" ? "Side" : ZONE_SIDE_OPTIONS.find((o) => o.key === value)?.label ?? "Side";
+  const label = value === "all" ? "Horizontal" : ZONE_SIDE_OPTIONS.find((o) => o.key === value)?.label ?? "Horizontal";
   return (
     <div ref={ref} className="relative inline-block">
       <button
@@ -311,7 +315,7 @@ function ZoneSidePicker({ value, onChange }: ZoneSidePickerProps) {
                   backgroundColor: isActive ? "rgba(212,175,55,0.06)" : "transparent",
                 }}
               >
-                {o.key === "all" ? "All Sides" : o.label}
+                {o.key === "all" ? "All Horizontal" : o.label}
               </button>
             );
           })}
@@ -328,6 +332,286 @@ function passesZoneSide(pxNorm: number | null, side: ZoneSideKey): boolean {
   if (side === "middle") return pxNorm >= -1 / 3 && pxNorm <= 1 / 3;
   if (side === "right") return pxNorm > 1 / 3 && pxNorm <= 1;
   return true;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// ──────────────────────────────────
+// Generic multi-select dropdown — checkbox rows, OR semantics, Clear button.
+// Empty selection = no filter. Used for Pitch Type + Batted Ball Type.
+// ──────────────────────────────────
+function MultiSelectPicker<T extends string>({
+  label: baseLabel,
+  options,
+  selected,
+  onChange,
+}: {
+  label: string;
+  options: Array<{ key: T; label: string }>;
+  selected: T[];
+  onChange: (next: T[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [open]);
+  const label = selected.length === 0 ? baseLabel : `${baseLabel} (${selected.length})`;
+  const toggle = (k: T) =>
+    onChange(selected.includes(k) ? selected.filter((x) => x !== k) : [...selected, k]);
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex cursor-pointer items-center gap-2 border px-3 py-1.5 font-[Oswald] text-sm font-bold uppercase tracking-wider transition-colors duration-150 hover:bg-[#D4AF37]/[0.08]"
+        style={{ backgroundColor: "transparent", borderColor: NAVY_BORDER, color: "#FFFFFF" }}
+      >
+        <span style={{ color: GOLD }}>●</span>
+        {label}
+        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`} style={{ color: GOLD }}>
+          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1 min-w-[180px] overflow-hidden border py-1 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+          {selected.length > 0 && (
+            <button type="button" onClick={() => onChange([])} className="mb-1 w-full cursor-pointer px-4 py-1 text-left font-[Oswald] text-[11px] uppercase tracking-wider text-white/45 transition-colors hover:text-white/80">
+              Clear
+            </button>
+          )}
+          {options.map((o) => {
+            const active = selected.includes(o.key);
+            return (
+              <button
+                key={o.key}
+                type="button"
+                onClick={() => toggle(o.key)}
+                className="flex w-full cursor-pointer items-center gap-2 px-4 py-1.5 text-left font-[Oswald] text-sm font-bold leading-none transition-colors duration-150 hover:bg-[#D4AF37]/[0.1]"
+                style={{ color: active ? GOLD : "#FFFFFF" }}
+              >
+                <span className="flex h-3 w-3 shrink-0 items-center justify-center border" style={{ borderColor: active ? GOLD : NAVY_BORDER, backgroundColor: active ? GOLD : "transparent" }}>
+                  {active && (
+                    <svg width="8" height="8" viewBox="0 0 12 12" fill="none">
+                      <path d="M2 6l3 3 5-6" stroke="#040810" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </span>
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────
+// Location picker — combined zone filter. Vertical thirds + horizontal
+// thirds, MULTI-select. Within an axis selections are OR'd; the two axes are
+// AND'd (e.g. Upper 3rd + Left = upper-left). Empty arrays = no filter.
+// ──────────────────────────────────
+const VERTICAL_OPTS: Array<{ key: ZoneHeightKey; label: string }> = [
+  { key: "upper", label: "Upper 3rd" },
+  { key: "middle", label: "Middle 3rd" },
+  { key: "lower", label: "Lower 3rd" },
+];
+const HORIZONTAL_OPTS: Array<{ key: ZoneSideKey; label: string }> = [
+  { key: "left", label: "Left" },
+  { key: "middle", label: "Middle" },
+  { key: "right", label: "Right" },
+];
+
+function passesLocation(
+  pzNorm: number | null,
+  pxNorm: number | null,
+  vertical: ZoneHeightKey[],
+  horizontal: ZoneSideKey[],
+): boolean {
+  const v = vertical.length === 0 || vertical.some((k) => passesZoneHeight(pzNorm, k));
+  const h = horizontal.length === 0 || horizontal.some((k) => passesZoneSide(pxNorm, k));
+  return v && h;
+}
+
+interface LocationPickerProps {
+  vertical: ZoneHeightKey[];
+  horizontal: ZoneSideKey[];
+  onChange: (next: { vertical: ZoneHeightKey[]; horizontal: ZoneSideKey[] }) => void;
+}
+
+function LocationPicker({ vertical, horizontal, onChange }: LocationPickerProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [open]);
+  const count = vertical.length + horizontal.length;
+  const label = count === 0 ? "Location" : `Location (${count})`;
+  const toggleV = (k: ZoneHeightKey) =>
+    onChange({
+      vertical: vertical.includes(k) ? vertical.filter((x) => x !== k) : [...vertical, k],
+      horizontal,
+    });
+  const toggleH = (k: ZoneSideKey) =>
+    onChange({
+      vertical,
+      horizontal: horizontal.includes(k) ? horizontal.filter((x) => x !== k) : [...horizontal, k],
+    });
+  const Row = ({ active, label: l, onClick }: { active: boolean; label: string; onClick: () => void }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full cursor-pointer items-center gap-2 px-4 py-1.5 text-left font-[Oswald] text-sm font-bold leading-none transition-colors duration-150 hover:bg-[#D4AF37]/[0.1]"
+      style={{ color: active ? GOLD : "#FFFFFF" }}
+    >
+      <span
+        className="flex h-3 w-3 shrink-0 items-center justify-center border"
+        style={{ borderColor: active ? GOLD : NAVY_BORDER, backgroundColor: active ? GOLD : "transparent" }}
+      >
+        {active && (
+          <svg width="8" height="8" viewBox="0 0 12 12" fill="none">
+            <path d="M2 6l3 3 5-6" stroke="#040810" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </span>
+      {l}
+    </button>
+  );
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex cursor-pointer items-center gap-2 border px-3 py-1.5 font-[Oswald] text-sm font-bold uppercase tracking-wider transition-colors duration-150 hover:bg-[#D4AF37]/[0.08]"
+        style={{ backgroundColor: "transparent", borderColor: NAVY_BORDER, color: "#FFFFFF" }}
+      >
+        <span style={{ color: GOLD }}>●</span>
+        {label}
+        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`} style={{ color: GOLD }}>
+          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1 min-w-[170px] overflow-hidden border py-1 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]" style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}>
+          {count > 0 && (
+            <button type="button" onClick={() => onChange({ vertical: [], horizontal: [] })} className="mb-1 w-full cursor-pointer px-4 py-1 text-left font-[Oswald] text-[11px] uppercase tracking-wider text-white/45 transition-colors hover:text-white/80">
+              Clear
+            </button>
+          )}
+          <div className="px-4 py-1 font-[Oswald] text-[10px] font-bold uppercase tracking-wider text-white/40">Vertical</div>
+          {VERTICAL_OPTS.map((o) => (
+            <Row key={`v-${o.key}`} active={vertical.includes(o.key)} label={o.label} onClick={() => toggleV(o.key)} />
+          ))}
+          <div className="mt-1 px-4 py-1 font-[Oswald] text-[10px] font-bold uppercase tracking-wider text-white/40">Horizontal</div>
+          {HORIZONTAL_OPTS.map((o) => (
+            <Row key={`h-${o.key}`} active={horizontal.includes(o.key)} label={o.label} onClick={() => toggleH(o.key)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Batted-ball-type picker — filters by trajectory (derived from launch
+// angle). Only batted balls in play carry a launch angle, so picking any
+// type other than "all" implicitly limits to contact.
+//   GB < 5°, LD 5–20°, FB 20–50°, PU ≥ 50°  (matches the GB%/LD%/FB%
+//   thresholds in aggregate_pitch_log_dimensions.ts).
+// ─────────────────────────────────────────────────────────────────
+type BattedBallKey = "all" | "gb" | "ld" | "fb" | "pu";
+
+const BATTED_BALL_OPTIONS: Array<{ key: BattedBallKey; label: string; full: string }> = [
+  { key: "all", label: "Batted Ball Type", full: "All Types" },
+  { key: "gb", label: "Ground", full: "Ground Balls" },
+  { key: "ld", label: "Liner", full: "Line Drives" },
+  { key: "fb", label: "Fly", full: "Fly Balls" },
+  { key: "pu", label: "Pop Up", full: "Pop Ups" },
+];
+
+function passesBattedBall(launchAngle: number | null, key: BattedBallKey): boolean {
+  if (key === "all") return true;
+  if (launchAngle == null) return false;
+  if (key === "gb") return launchAngle < 5;
+  if (key === "ld") return launchAngle >= 5 && launchAngle < 20;
+  if (key === "fb") return launchAngle >= 20 && launchAngle < 50;
+  if (key === "pu") return launchAngle >= 50;
+  return true;
+}
+
+interface BattedBallTypePickerProps {
+  value: BattedBallKey;
+  onChange: (next: BattedBallKey) => void;
+}
+
+function BattedBallTypePicker({ value, onChange }: BattedBallTypePickerProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [open]);
+  const label = value === "all" ? "Batted Ball Type" : BATTED_BALL_OPTIONS.find((o) => o.key === value)?.label ?? "Batted Ball Type";
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex cursor-pointer items-center gap-2 border px-3 py-1.5 font-[Oswald] text-sm font-bold uppercase tracking-wider transition-colors duration-150 hover:bg-[#D4AF37]/[0.08]"
+        style={{ backgroundColor: "transparent", borderColor: NAVY_BORDER, color: "#FFFFFF" }}
+      >
+        <span style={{ color: GOLD }}>●</span>
+        {label}
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 12 12"
+          fill="none"
+          className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          style={{ color: GOLD }}
+        >
+          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 top-full z-20 mt-1 min-w-[160px] overflow-hidden border shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]"
+          style={{ backgroundColor: NAVY_CARD, borderColor: NAVY_BORDER }}
+        >
+          {BATTED_BALL_OPTIONS.map((o) => {
+            const isActive = o.key === value;
+            return (
+              <button
+                key={o.key}
+                type="button"
+                onClick={() => { onChange(o.key); setOpen(false); }}
+                className="block w-full cursor-pointer px-4 py-2 text-left font-[Oswald] text-sm font-bold leading-none transition-colors duration-150 hover:bg-[#D4AF37]/[0.1]"
+                style={{
+                  color: isActive ? GOLD : "#FFFFFF",
+                  backgroundColor: isActive ? "rgba(212,175,55,0.06)" : "transparent",
+                }}
+              >
+                {o.full}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function DimensionPicker({ options, value, onChange }: DimensionPickerProps) {
@@ -402,11 +686,17 @@ interface StatChipProps {
    *  IP/ERA/FIP that come from season-final Pitching Master and don't
    *  respond to Visuals filters. */
   note?: string;
+  /** Narrower chip — same height/font as default, just less width + padding.
+   *  Used by the hitter stat line (10 chips) so it fits one row instead of
+   *  wrapping, while staying visually consistent with the pitcher's chips. */
+  compact?: boolean;
 }
-function StatChip({ label, value, emphasize, note }: StatChipProps) {
+function StatChip({ label, value, emphasize, note, compact }: StatChipProps) {
   return (
     <div
-      className="relative flex min-w-[108px] flex-col items-center gap-2 border px-4 py-3.5 transition-colors duration-150"
+      className={`relative flex flex-col items-center gap-2 border py-3.5 transition-colors duration-150 ${
+        compact ? "min-w-[86px] px-3" : "min-w-[108px] px-4"
+      }`}
       style={{
         borderColor: emphasize ? "rgba(212,175,55,0.35)" : NAVY_BORDER,
         backgroundColor: NAVY_CARD,
@@ -441,17 +731,17 @@ function HitterStatsLine({ row }: { row: import("@/savant/hooks/usePitchLogTotal
   const kPct = safeDiv(row.k, row.pa);
   const bbPct = safeDiv(row.bb, row.pa);
   return (
-    <div className="flex flex-wrap gap-2">
-      <StatChip label="AVG" value={fmtSlash(avg)} emphasize />
-      <StatChip label="OBP" value={fmtSlash(obp)} emphasize />
-      <StatChip label="SLG" value={fmtSlash(slg)} emphasize />
-      <StatChip label="OPS" value={fmtSlash(ops)} emphasize />
-      <StatChip label="ISO" value={fmtSlash(iso)} />
-      <StatChip label="HR" value={`${row.hits_hr}`} />
-      <StatChip label="BB" value={`${row.bb}`} />
-      <StatChip label="K" value={`${row.k}`} />
-      <StatChip label="BB%" value={fmtPct(bbPct)} />
-      <StatChip label="K%" value={fmtPct(kPct)} />
+    <div className="flex flex-wrap gap-1.5">
+      <StatChip label="AVG" value={fmtSlash(avg)} emphasize compact />
+      <StatChip label="OBP" value={fmtSlash(obp)} emphasize compact />
+      <StatChip label="SLG" value={fmtSlash(slg)} emphasize compact />
+      <StatChip label="OPS" value={fmtSlash(ops)} emphasize compact />
+      <StatChip label="ISO" value={fmtSlash(iso)} compact />
+      <StatChip label="HR" value={`${row.hits_hr}`} compact />
+      <StatChip label="BB" value={`${row.bb}`} compact />
+      <StatChip label="K" value={`${row.k}`} compact />
+      <StatChip label="BB%" value={fmtPct(bbPct)} compact />
+      <StatChip label="K%" value={fmtPct(kPct)} compact />
     </div>
   );
 }
@@ -577,42 +867,176 @@ function PitcherPitchTypeTable({
   );
 }
 
-function HitterPitchTypeTable({ breakdowns }: { breakdowns: HitterPitchTypeBreakdown[] }) {
+// Comprehensive Ball Flight table for the Visuals tab — full trajectory +
+// direction + cross-tabs as columns (one row = the player, dimension-level).
+function HitterBallFlightTable({
+  row,
+  population,
+  season,
+}: {
+  row: import("@/savant/hooks/usePitchLogTotals").PitchLogHitterTotalsRow;
+  population: import("@/savant/hooks/usePitchLogTotals").PitchLogHitterTotalsRow[];
+  season: number;
+}) {
+  type BFMetric = (typeof HITTER_METRICS_BALL_FLIGHT_FULL)[number];
+  // NCAA average = mean of each metric across the qualified population.
+  const ncaaAvg = (m: BFMetric): number | null => {
+    const vals = population.map((p) => m.derive(p)).filter((v): v is number => v != null);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  };
+  const tableRows: Array<{ label: string; getVal: (m: BFMetric) => number | null; faded: boolean }> = [
+    { label: String(season), getVal: (m) => m.derive(row), faded: false },
+    { label: "NCAA Avg", getVal: ncaaAvg, faded: true },
+  ];
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[960px] text-sm">
+        <thead>
+          <tr className="border-b text-left font-[Oswald] text-[11px] uppercase tracking-wider text-white/55" style={{ borderColor: TABLE_HEADER_BORDER }}>
+            <th className="py-2 pr-3">Year</th>
+            {HITTER_METRICS_BALL_FLIGHT_FULL.map((m) => (
+              <th key={m.label} className="px-2 py-2 text-center">
+                {m.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {tableRows.map((tr) => (
+            <tr
+              key={tr.label}
+              className={`border-b font-[Oswald] ${tr.faded ? "text-[13px] text-white/40" : "text-[15px] text-white"}`}
+              style={{ borderColor: "rgba(255,255,255,0.05)" }}
+            >
+              <td className="py-2 pr-3 font-bold" style={{ color: tr.faded ? undefined : GOLD }}>
+                {tr.label}
+              </td>
+              {HITTER_METRICS_BALL_FLIGHT_FULL.map((m) => {
+                const v = tr.getVal(m);
+                return (
+                  <td key={m.label} className="px-2 py-2 text-center tabular-nums">
+                    {v == null ? "—" : m.format(v)}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Advanced vs-pitch-type table for the Visuals tab (RV, xStats, …). Wider, so
+// it lives full-width in Visuals — NOT in the Stats grid, where its min-width
+// would push the percentile column off to the side.
+// Hitter RV/100 → red/blue heat. Offense perspective: positive = good for the
+// hitter = red (no flip). Fixed ±3.0 RV/100 scale (provisional) — there's no
+// by-pitch-type hitter population to percentile against yet (the pitcher does;
+// swap to percentileRank when that hook lands). Mirrors the same color ramp.
+function rv100ColorHitter(rv100: number | null): string {
+  if (rv100 == null) return "transparent";
+  const pct = Math.max(0, Math.min(100, 50 + (rv100 / 3.0) * 50));
+  return percentileColor(pct);
+}
+
+function HitterVsPitchTable({ breakdowns }: { breakdowns: HitterPitchTypeBreakdown[] }) {
   if (breakdowns.length === 0) {
     return <div className="py-4 text-sm text-white/40">No per-pitch data for this filter.</div>;
   }
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[640px] text-sm">
+      <table className="w-full min-w-[920px] text-sm">
         <thead>
           <tr className="border-b text-left font-[Oswald] text-[11px] uppercase tracking-wider text-white/55" style={{ borderColor: TABLE_HEADER_BORDER }}>
             <th className="py-2 pr-3">Pitch</th>
-            <th className="py-2 pr-3 text-center">P</th>
-            <th className="py-2 pr-3 text-center">AVG</th>
-            <th className="py-2 pr-3 text-center">OBP</th>
+            <th className="py-2 pr-3 text-center">RV/100</th>
+            <th className="py-2 pr-3 text-center">Run Value</th>
+            <th className="py-2 pr-3 text-center">%</th>
+            <th className="py-2 pr-3 text-center">BA</th>
             <th className="py-2 pr-3 text-center">SLG</th>
-            <th className="py-2 pr-3 text-center">OPS</th>
             <th className="py-2 pr-3 text-center">ISO</th>
+            <th className="py-2 pr-3 text-center">wOBA</th>
+            <th className="py-2 pr-3 text-center">xBA</th>
+            <th className="py-2 pr-3 text-center">xSLG</th>
+            <th className="py-2 pr-3 text-center">xwOBA</th>
             <th className="py-2 pr-3 text-center">Whiff%</th>
             <th className="py-2 pr-3 text-center">Chase%</th>
-            <th className="py-2 pr-3 text-center">Hard Hit%</th>
             <th className="py-2 pr-3 text-center">EV</th>
+            <th className="py-2 pr-3 text-center">Hard Hit%</th>
+            <th className="py-2 pr-3 text-center">Barrel%</th>
           </tr>
         </thead>
         <tbody>
           {breakdowns.map((b) => (
             <tr key={b.pitchType} className="border-b font-[Oswald] text-sm text-white transition-colors duration-150 hover:bg-white/[0.03]" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
               <td className="py-2 pr-3 font-bold">{b.pitchType}</td>
-              <td className="py-2 pr-3 text-center tabular-nums">{b.pitches.toLocaleString()}</td>
+              <td className="py-2 pr-3 text-center tabular-nums">
+                {b.rv100 == null ? "—" : `${b.rv100 > 0 ? "+" : ""}${b.rv100.toFixed(1)}`}
+              </td>
+              <td
+                className="py-2 pr-3 text-center font-bold tabular-nums"
+                style={{ backgroundColor: rv100ColorHitter(b.rv100) }}
+                title={b.rv100 != null ? `${b.rv100 > 0 ? "+" : ""}${b.rv100.toFixed(1)} RV/100` : undefined}
+              >
+                {b.rv == null ? "—" : `${b.rv > 0 ? "+" : ""}${Math.round(b.rv)}`}
+              </td>
+              <td className="py-2 pr-3 text-center tabular-nums">{fmtPct(b.usagePct)}</td>
               <td className="py-2 pr-3 text-center tabular-nums">{fmtSlash(b.avg)}</td>
-              <td className="py-2 pr-3 text-center tabular-nums">{fmtSlash(b.obp)}</td>
               <td className="py-2 pr-3 text-center tabular-nums">{fmtSlash(b.slg)}</td>
-              <td className="py-2 pr-3 text-center tabular-nums">{fmtSlash(b.ops)}</td>
               <td className="py-2 pr-3 text-center tabular-nums">{fmtSlash(b.iso)}</td>
+              <td className="py-2 pr-3 text-center tabular-nums">{fmtSlash(b.woba)}</td>
+              <td className="py-2 pr-3 text-center tabular-nums">{fmtSlash(b.xba)}</td>
+              <td className="py-2 pr-3 text-center tabular-nums">{fmtSlash(b.xslg)}</td>
+              <td className="py-2 pr-3 text-center tabular-nums">{fmtSlash(b.xwoba)}</td>
+              <td className="py-2 pr-3 text-center tabular-nums">{fmtPct(b.whiffPct)}</td>
+              <td className="py-2 pr-3 text-center tabular-nums">{fmtPct(b.chasePct)}</td>
+              <td className="py-2 pr-3 text-center tabular-nums">{fmt1(b.avgEv)}</td>
+              <td className="py-2 pr-3 text-center tabular-nums">{fmtPct(b.hardHitPct)}</td>
+              <td className="py-2 pr-3 text-center tabular-nums">{fmtPct(b.barrelPct)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function HitterPitchTypeTable({ breakdowns }: { breakdowns: HitterPitchTypeBreakdown[] }) {
+  if (breakdowns.length === 0) {
+    return <div className="py-4 text-sm text-white/40">No per-pitch data for this filter.</div>;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[560px] text-sm">
+        <thead>
+          <tr className="border-b text-left font-[Oswald] text-[11px] uppercase tracking-wider text-white/55" style={{ borderColor: TABLE_HEADER_BORDER }}>
+            <th className="py-2 pr-3">Pitch</th>
+            <th className="py-2 pr-3 text-center">EV</th>
+            <th className="py-2 pr-3 text-center">Whiff%</th>
+            <th className="py-2 pr-3 text-center">Chase%</th>
+            <th className="py-2 pr-3 text-center">Hard Hit%</th>
+            <th className="py-2 pr-3 text-center">Barrel%</th>
+            <th className="py-2 pr-3 text-center">K%</th>
+            <th className="py-2 pr-3 text-center">HR%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {breakdowns.map((b) => (
+            <tr key={b.pitchType} className="border-b font-[Oswald] text-sm text-white transition-colors duration-150 hover:bg-white/[0.03]" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+              <td className="py-2 pr-3 font-bold">{b.pitchType}</td>
+              <td
+                className="py-2 pr-3 text-center tabular-nums font-bold"
+                style={{ color: b.avgEv != null && b.avgEv >= 95 ? GOLD : undefined }}
+              >
+                {fmt1(b.avgEv)}
+              </td>
               <td className="py-2 pr-3 text-center tabular-nums">{fmtPct(b.whiffPct)}</td>
               <td className="py-2 pr-3 text-center tabular-nums">{fmtPct(b.chasePct)}</td>
               <td className="py-2 pr-3 text-center tabular-nums">{fmtPct(b.hardHitPct)}</td>
-              <td className="py-2 pr-3 text-center tabular-nums">{fmt1(b.avgEv)}</td>
+              <td className="py-2 pr-3 text-center tabular-nums">{fmtPct(b.barrelPct)}</td>
+              <td className="py-2 pr-3 text-center tabular-nums">{fmtPct(b.kPct)}</td>
+              <td className="py-2 pr-3 text-center tabular-nums">{fmtPct(b.hrPct)}</td>
             </tr>
           ))}
         </tbody>
@@ -837,7 +1261,7 @@ function PageShell({
   const [tab, setTab] = useState<PitchLogTab>("stats");
 
   const statsBody = (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.4fr_1fr]">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.7fr_1fr]">
       <div className="space-y-6">{left}</div>
       <div className="space-y-6">{right}</div>
     </div>
@@ -974,11 +1398,13 @@ interface PitcherLocationSectionProps {
   season: number;
   dimension: PitchLogDimensionKey;
   /** Active page-wide pitch-type filter; null = all pitch types. */
-  filterPitchType: string | null;
-  /** Active zone-height filter (upper/middle/lower of strike zone) */
-  filterZoneHeight: ZoneHeightKey;
-  /** Active zone-side filter (left/middle/right, catcher view) */
-  filterZoneSide: ZoneSideKey;
+  filterPitchTypes: string[];
+  /** Active vertical-third filters (OR). Empty = all heights. */
+  filterVertical: ZoneHeightKey[];
+  /** Active horizontal-third filters (OR). Empty = all sides. */
+  filterHorizontal: ZoneSideKey[];
+  /** Active batted-ball-type filter (ground/line/fly/pop, by launch angle) */
+  filterBattedTypes: BattedBallKey[];
   /** Pre-aggregated per-pitch-type breakdowns (same source as the Stats
    *  tab table) — passed straight to the Per-Pitch Success table. */
   breakdowns: PitchTypeBreakdown[];
@@ -1041,9 +1467,10 @@ function PitcherLocationSection({
   pitcherId,
   season,
   dimension,
-  filterPitchType,
-  filterZoneHeight,
-  filterZoneSide,
+  filterPitchTypes,
+  filterVertical,
+  filterHorizontal,
+  filterBattedTypes,
   breakdowns,
   byTypePopulation,
 }: PitcherLocationSectionProps) {
@@ -1056,17 +1483,17 @@ function PitcherLocationSection({
 
   const filteredPitches = useMemo(() => {
     let out = pitches;
-    if (filterPitchType != null) {
-      out = out.filter((p) => p.pitch_type_reclassified === filterPitchType);
+    if (filterPitchTypes.length) {
+      out = out.filter((p) => filterPitchTypes.includes(p.pitch_type_reclassified ?? ""));
     }
-    if (filterZoneHeight !== "all") {
-      out = out.filter((p) => passesZoneHeight(p.pz_norm, filterZoneHeight));
+    if (filterVertical.length || filterHorizontal.length) {
+      out = out.filter((p) => passesLocation(p.pz_norm, p.px_norm, filterVertical, filterHorizontal));
     }
-    if (filterZoneSide !== "all") {
-      out = out.filter((p) => passesZoneSide(p.px_norm, filterZoneSide));
+    if (filterBattedTypes.length) {
+      out = out.filter((p) => filterBattedTypes.some((k) => passesBattedBall(p.launch_angle, k)));
     }
     return out;
-  }, [pitches, filterPitchType, filterZoneHeight, filterZoneSide]);
+  }, [pitches, filterPitchTypes, filterVertical, filterHorizontal, filterBattedTypes]);
 
   if (isLoading) {
     return <div className="py-6 text-sm text-white/40">Loading pitches…</div>;
@@ -1098,32 +1525,43 @@ function PitcherLocationSection({
             breakdowns={breakdowns}
             population={byTypePopulation}
             title="Per-Pitch Success"
-            filterPitchType={filterPitchType}
+            filterPitchType={filterPitchTypes.length === 1 ? filterPitchTypes[0] : null}
           />
         </div>
       </VisualsSection>
 
       {/* ── Batted Ball ──────────────────────────────────────────────── */}
       <VisualsSection title="Batted Ball">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <VisualsPlaceholder
-            title="Spray Field — Zones"
-            hint="Field rendering deferred — Python pipeline + component scaffolded, geometry needs work"
-          />
-          <VisualsPlaceholder
-            title="Spray Field — Dots"
-            hint="Same — coming back to this"
-          />
+        {/* 2-across to match the bottom-section layout. Avg Exit Velo is folded
+            into the Contact Allowed hover for now; it returns as its own
+            selectable panel with the add/change-data toggle. */}
+        <div className="grid grid-cols-1 gap-10 px-2 pt-2 md:grid-cols-2">
+          <div>
+            <p className="mb-5 text-center font-[Oswald] text-[12px] font-bold uppercase tracking-[0.22em] text-white/70">
+              Spray Chart
+            </p>
+            <SprayFieldPanel pitches={filteredPitches} metric="dots" />
+          </div>
+          <div>
+            <p className="mb-5 text-center font-[Oswald] text-[12px] font-bold uppercase tracking-[0.22em] text-white/70">
+              % of Balls in Play
+            </p>
+            <SprayFieldPanel pitches={filteredPitches} metric="freq" />
+          </div>
         </div>
       </VisualsSection>
 
-      {/* ── Trends ───────────────────────────────────────────────────── */}
+      {/* ── Trends (hidden for now) ──────────────────────────────────────
+          Rolling xwOBA, Baseball-Savant style: order all PAs chronologically
+          (pitch_log.date), plot a TRAILING 50-PA rolling-window average — not
+          per-game. Per-PA xwOBA value: BIP → x_woba, BB → 0.696, HBP → 0.726,
+          K → 0 (matches the season xwOBA formula in pitchLogRates.ts). Dates as
+          x-axis labels; season-avg + league reference lines. Window adjustable.
+          Single line (xwOBA) to start; expected-vs-actual / driver overlays later.
       <VisualsSection title="Trends">
-        <VisualsPlaceholder
-          title="Rolling xwOBA"
-          hint="15-game / 50-PA rolling window · coming next"
-        />
+        <VisualsPlaceholder title="Rolling xwOBA" hint="50-PA rolling window · coming next" />
       </VisualsSection>
+      */}
     </div>
   );
 }
@@ -1138,9 +1576,10 @@ interface PitcherPitchLogProps {
 
 export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
   const [dimension, setDimension] = useState<PitchLogDimensionKey>("all");
-  const [filterPitchType, setFilterPitchType] = useState<string | null>(null);
-  const [filterZoneHeight, setFilterZoneHeight] = useState<ZoneHeightKey>("all");
-  const [filterZoneSide, setFilterZoneSide] = useState<ZoneSideKey>("all");
+  const [filterPitchTypes, setFilterPitchTypes] = useState<string[]>([]);
+  const [filterVertical, setFilterVertical] = useState<ZoneHeightKey[]>([]);
+  const [filterHorizontal, setFilterHorizontal] = useState<ZoneSideKey[]>([]);
+  const [filterBattedTypes, setFilterBattedTypes] = useState<BattedBallKey[]>([]);
   const { data: totalsRow } = usePitchLogPitcherTotals(pitcherId, season, dimension);
   const { data: byTypeRows = [] } = usePitchLogByPitchType(pitcherId, season, dimension);
   const { data: population = [] } = usePitchLogPitcherPopulation(season, dimension);
@@ -1166,13 +1605,26 @@ export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
 
   const pitchTypePicker = (
     <div className="flex items-center gap-2">
-      <PitchTypePicker
-        pitchTypes={pitchTypes}
-        value={filterPitchType}
-        onChange={setFilterPitchType}
+      <MultiSelectPicker
+        label="Pitch Type"
+        options={pitchTypes.map((pt) => ({ key: pt, label: pt }))}
+        selected={filterPitchTypes}
+        onChange={setFilterPitchTypes}
       />
-      <ZoneHeightPicker value={filterZoneHeight} onChange={setFilterZoneHeight} />
-      <ZoneSidePicker value={filterZoneSide} onChange={setFilterZoneSide} />
+      <LocationPicker
+        vertical={filterVertical}
+        horizontal={filterHorizontal}
+        onChange={({ vertical, horizontal }) => {
+          setFilterVertical(vertical);
+          setFilterHorizontal(horizontal);
+        }}
+      />
+      <MultiSelectPicker
+        label="Batted Ball Type"
+        options={BATTED_BALL_OPTIONS.filter((o) => o.key !== "all").map((o) => ({ key: o.key, label: o.full }))}
+        selected={filterBattedTypes}
+        onChange={setFilterBattedTypes}
+      />
     </div>
   );
 
@@ -1200,16 +1652,8 @@ export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
       topStats={<PitcherStatsLine row={totalsRow} pm={pmRow ?? null} />}
       left={
         <>
-          <Panel title="Quality of Stuff">
-            <RateTable
-              metrics={PITCHER_METRICS_DISCIPLINE}
-              playerRow={totalsRow}
-              qualifiedPop={qualifiedPop}
-              weightOf={(r) => r.total_pitches}
-            />
-          </Panel>
           <Panel
-            title="Batted Ball Metrics"
+            title="Quality of Stuff"
             headerBadge={
               <TrackingReliabilityBadge
                 trackedBip={totalsRow.batted_balls_allowed_with_ev ?? 0}
@@ -1217,6 +1661,14 @@ export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
               />
             }
           >
+            <RateTable
+              metrics={PITCHER_METRICS_DISCIPLINE}
+              playerRow={totalsRow}
+              qualifiedPop={qualifiedPop}
+              weightOf={(r) => r.total_pitches}
+            />
+          </Panel>
+          <Panel title="Batted Ball Metrics">
             <RateTable
               metrics={[...PITCHER_METRICS_SLASH_AGAINST, ...PITCHER_METRICS_BATTED_BALL]}
               playerRow={totalsRow}
@@ -1227,7 +1679,7 @@ export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
           <Panel title="Per-Pitch Breakdown">
             <PitcherPitchTypeTable
               breakdowns={breakdowns}
-              filterPitchType={filterPitchType}
+              filterPitchType={filterPitchTypes.length === 1 ? filterPitchTypes[0] : null}
             />
           </Panel>
         </>
@@ -1255,15 +1707,115 @@ export function PitcherPitchLog({ pitcherId, season }: PitcherPitchLogProps) {
           pitcherId={pitcherId}
           season={season}
           dimension={dimension}
-          filterPitchType={filterPitchType}
-          filterZoneHeight={filterZoneHeight}
-          filterZoneSide={filterZoneSide}
+          filterPitchTypes={filterPitchTypes}
+          filterVertical={filterVertical}
+          filterHorizontal={filterHorizontal}
+          filterBattedTypes={filterBattedTypes}
           breakdowns={breakdowns}
           byTypePopulation={byTypePopulation}
         />
       }
       tabExtra={pitchTypePicker}
     />
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Hitter Visuals tab — mirrors PitcherLocationSection, hitter-tilted:
+// Spray Chart on top (where HE hits it), Plate Coverage (13-zone xwOBA /
+// Whiff / Usage — no strike-zone density heatmap), then vs Pitch Type.
+// ────────────────────────────────────────────────────────────────────
+interface HitterLocationSectionProps {
+  batterId: string;
+  season: number;
+  dimension: PitchLogDimensionKey;
+  filterPitchTypes: string[];
+  filterVertical: ZoneHeightKey[];
+  filterHorizontal: ZoneSideKey[];
+  filterBattedTypes: BattedBallKey[];
+  breakdowns: HitterPitchTypeBreakdown[];
+  totalsRow: import("@/savant/hooks/usePitchLogTotals").PitchLogHitterTotalsRow;
+  population: import("@/savant/hooks/usePitchLogTotals").PitchLogHitterTotalsRow[];
+}
+
+function HitterLocationSection({
+  batterId,
+  season,
+  dimension,
+  filterPitchTypes,
+  filterVertical,
+  filterHorizontal,
+  filterBattedTypes,
+  breakdowns,
+  totalsRow,
+  population,
+}: HitterLocationSectionProps) {
+  const { data: pitches = [], isLoading } = usePitchLogPitchLocation({
+    playerId: batterId,
+    role: "hitter",
+    season,
+    dimension,
+  });
+
+  const filteredPitches = useMemo(() => {
+    let out = pitches;
+    if (filterPitchTypes.length) {
+      out = out.filter((p) => filterPitchTypes.includes(p.pitch_type_reclassified ?? ""));
+    }
+    if (filterVertical.length || filterHorizontal.length) {
+      out = out.filter((p) => passesLocation(p.pz_norm, p.px_norm, filterVertical, filterHorizontal));
+    }
+    if (filterBattedTypes.length) {
+      out = out.filter((p) => filterBattedTypes.some((k) => passesBattedBall(p.launch_angle, k)));
+    }
+    return out;
+  }, [pitches, filterPitchTypes, filterVertical, filterHorizontal, filterBattedTypes]);
+
+  if (isLoading) {
+    return <div className="py-6 text-sm text-white/40">Loading pitches…</div>;
+  }
+  if (pitches.length === 0) {
+    return <div className="py-6 text-sm text-white/40">No pitches for this filter.</div>;
+  }
+
+  const sectionLabel = "mb-5 text-center font-[Oswald] text-[12px] font-bold uppercase tracking-[0.22em] text-white/70";
+
+  return (
+    <div className="space-y-6">
+      {/* ── Batted Ball (top — the hitter's spray) ───────────────────── */}
+      <VisualsSection title="Batted Ball">
+        <div className="grid grid-cols-1 gap-10 px-2 pt-2 md:grid-cols-2">
+          <div>
+            <p className={sectionLabel}>Spray Chart</p>
+            <SprayFieldPanel pitches={filteredPitches} metric="dots" />
+          </div>
+          <div>
+            <p className={sectionLabel}>% of Balls in Play</p>
+            <SprayFieldPanel pitches={filteredPitches} metric="freq" />
+          </div>
+        </div>
+      </VisualsSection>
+
+      {/* ── Ball Flight (comprehensive — full profile + cross-tabs) ──── */}
+      <Panel title="Ball Flight">
+        <HitterBallFlightTable row={totalsRow} population={population} season={season} />
+      </Panel>
+
+      {/* ── vs Pitch Type ────────────────────────────────────────────── */}
+      <Panel title="vs Pitch Type">
+        <HitterVsPitchTable breakdowns={breakdowns} />
+      </Panel>
+
+      {/* ── Plate Coverage (13-zone, hitter perspective: colors flipped so
+          red = good; Usage → avg EV per zone) ────────────────────────── */}
+      <VisualsSection title="Plate Coverage">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <PitchZoneXwoba pitches={filteredPitches} title="13-Zone xwOBA" invert />
+          <PitchZoneWhiff pitches={filteredPitches} title="13-Zone Whiff%" invert />
+          <PitchZoneXwoba pitches={filteredPitches} title="13-Zone EV" metric="ev" />
+        </div>
+      </VisualsSection>
+    </div>
   );
 }
 
@@ -1277,6 +1829,10 @@ interface HitterPitchLogProps {
 
 export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
   const [dimension, setDimension] = useState<PitchLogDimensionKey>("all");
+  const [filterPitchTypes, setFilterPitchTypes] = useState<string[]>([]);
+  const [filterVertical, setFilterVertical] = useState<ZoneHeightKey[]>([]);
+  const [filterHorizontal, setFilterHorizontal] = useState<ZoneSideKey[]>([]);
+  const [filterBattedTypes, setFilterBattedTypes] = useState<BattedBallKey[]>([]);
   const { data: row } = usePitchLogHitterTotals(batterId, season, dimension);
   const { data: byTypeRows = [] } = usePitchLogHitterByPitchType(batterId, season, dimension);
   const { data: population = [] } = usePitchLogHitterPopulation(season, dimension);
@@ -1286,9 +1842,38 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
     [population],
   );
   const breakdowns = deriveHitterPitchTypeBreakdowns(byTypeRows);
+  const pitchTypes = useMemo(
+    () => breakdowns.map((b) => b.pitchType).filter((pt): pt is string => Boolean(pt)),
+    [breakdowns],
+  );
 
   const picker = (
     <DimensionPicker options={HITTER_DIMENSIONS} value={dimension} onChange={setDimension} />
+  );
+
+  const filterBar = (
+    <div className="flex items-center gap-2">
+      <MultiSelectPicker
+        label="Pitch Type"
+        options={pitchTypes.map((pt) => ({ key: pt, label: pt }))}
+        selected={filterPitchTypes}
+        onChange={setFilterPitchTypes}
+      />
+      <LocationPicker
+        vertical={filterVertical}
+        horizontal={filterHorizontal}
+        onChange={({ vertical, horizontal }) => {
+          setFilterVertical(vertical);
+          setFilterHorizontal(horizontal);
+        }}
+      />
+      <MultiSelectPicker
+        label="Batted Ball Type"
+        options={BATTED_BALL_OPTIONS.filter((o) => o.key !== "all").map((o) => ({ key: o.key, label: o.full }))}
+        selected={filterBattedTypes}
+        onChange={setFilterBattedTypes}
+      />
+    </div>
   );
 
   if (!row) {
@@ -1339,22 +1924,22 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
               weightOf={(r) => r.pa}
             />
           </Panel>
-          <Panel title="vs Pitch Type">
+          <Panel title="Ball Flight">
+            <RateTable
+              metrics={HITTER_METRICS_BALL_FLIGHT}
+              playerRow={row}
+              qualifiedPop={qualifiedPop}
+              weightOf={(r) => r.batted_balls_with_ev}
+            />
+          </Panel>
+          <Panel title="Per-Pitch Success">
             <HitterPitchTypeTable breakdowns={breakdowns} />
           </Panel>
         </>
       }
       right={
         <>
-          <Panel
-            title="Batted Ball Data"
-            headerBadge={
-              <TrackingReliabilityBadge
-                trackedBip={row.batted_balls_with_ev ?? 0}
-                totalBip={row.batted_balls_in_play ?? 0}
-              />
-            }
-          >
+          <Panel title="Batted Ball Data">
             <BarGroup
               metrics={[...HITTER_METRICS_SLASH, ...HITTER_METRICS_CONTACT_BARS]}
               playerRow={row}
@@ -1364,8 +1949,26 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
           <Panel title="Plate Discipline">
             <BarGroup metrics={HITTER_METRICS_DISCIPLINE_BARS} playerRow={row} qualifiedPop={qualifiedPop} />
           </Panel>
+          <Panel title="Ball Flight">
+            <BarGroup metrics={HITTER_METRICS_BALL_FLIGHT} playerRow={row} qualifiedPop={qualifiedPop} />
+          </Panel>
         </>
       }
+      visuals={
+        <HitterLocationSection
+          batterId={batterId}
+          season={season}
+          dimension={dimension}
+          filterPitchTypes={filterPitchTypes}
+          filterVertical={filterVertical}
+          filterHorizontal={filterHorizontal}
+          filterBattedTypes={filterBattedTypes}
+          breakdowns={breakdowns}
+          totalsRow={row}
+          population={qualifiedPop}
+        />
+      }
+      tabExtra={filterBar}
     />
   );
 }

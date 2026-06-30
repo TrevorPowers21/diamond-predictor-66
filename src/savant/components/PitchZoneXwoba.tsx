@@ -37,6 +37,10 @@ interface PitchZoneXwobaProps {
   width?: number;
   height?: number;
   title?: string;
+  /** Hitter perspective — flip the color scale (high xwOBA = good). */
+  invert?: boolean;
+  /** Color + label by avg EV per zone instead of xwOBA. */
+  metric?: "xwoba" | "ev";
 }
 
 // Strike zone bounds in PXNorm/PZNorm — unit square.
@@ -87,18 +91,28 @@ function xwobaToPercentile(xwoba: number): number {
   return 50 - (50 * (xwoba - 0.335)) / (0.5 - 0.335);
 }
 
-function xwobaToColor(xwoba: number | null): string {
-  if (xwoba == null) return "#F3F4F6"; // pale grey for "no data"
-  return percentileColor(xwobaToPercentile(xwoba));
+function evToPercentile(ev: number): number {
+  // Empirical hitter avg EV: P50 ~88, P95 ~95. 80 -> 0, 96 -> 100.
+  return Math.max(0, Math.min(100, ((ev - 80) / 16) * 100));
+}
+function metricToPercentile(value: number, metric: "xwoba" | "ev"): number {
+  return metric === "ev" ? evToPercentile(value) : xwobaToPercentile(value);
+}
+function xwobaToColor(value: number | null, metric: "xwoba" | "ev", invert = false): string {
+  if (value == null) return "#F3F4F6";
+  let pct = metricToPercentile(value, metric);
+  if (invert) pct = 100 - pct;
+  return percentileColor(pct);
 }
 
 // Same palette but with a higher minimum alpha so the strike-zone cells
 // read as the visual anchor (always at least half-opaque even at the
 // neutral .335 xwOBA mark). Corner cells keep the more transparent
 // fade-to-white for visual hierarchy.
-function strikeZoneCellColor(xwoba: number | null): string {
-  if (xwoba == null) return "#F3F4F6";
-  const pct = xwobaToPercentile(xwoba);
+function strikeZoneCellColor(value: number | null, metric: "xwoba" | "ev", invert = false): string {
+  if (value == null) return "#F3F4F6";
+  let pct = metricToPercentile(value, metric);
+  if (invert) pct = 100 - pct;
   const distance = Math.abs(pct - 50) / 50;
   const alpha = Math.max(0.55, distance);
   if (pct >= 50) return `rgba(200, 52, 30, ${alpha.toFixed(2)})`;
@@ -110,6 +124,8 @@ export function PitchZoneXwoba({
   width = 360,
   height = 462,
   title,
+  invert = false,
+  metric = "xwoba",
 }: PitchZoneXwobaProps) {
   // Aggregate pitches into the 13 zones.
   //
@@ -351,8 +367,8 @@ export function PitchZoneXwoba({
   // smooth opacity/stroke transitions on hover, cursor crosshair.
   const renderCell = (zone: Zone13, x: number, y: number, w: number, h: number) => {
     const stats = cellFor(zone);
-    const avgXwoba = stats && stats.pa > 0 ? stats.xWobaSum / stats.pa : null;
-    const color = strikeZoneCellColor(avgXwoba);
+    const value = metric === "ev" ? (stats && stats.evCount > 0 ? stats.evSum / stats.evCount : null) : (stats && stats.pa > 0 ? stats.xWobaSum / stats.pa : null);
+    const color = strikeZoneCellColor(value, metric, invert);
     const fontSize = Math.min(w, h) > 70 ? 14 : 11;
     return (
       <g
@@ -381,7 +397,7 @@ export function PitchZoneXwoba({
           fontSize={fontSize}
           fill="#0F172A"
         >
-          {avgXwoba != null ? avgXwoba.toFixed(3).replace(/^0/, "") : "—"}
+          {value == null ? "—" : metric === "ev" ? Math.round(value) : value.toFixed(3).replace(/^0/, "")}
         </text>
       </g>
     );
@@ -428,7 +444,7 @@ export function PitchZoneXwoba({
             letterSpacing="0.15em"
             fill="#475569"
           >
-            xwOBA BY ZONE
+            {metric === "ev" ? "EV BY ZONE" : "xwOBA BY ZONE"}
           </text>
 
           {/* L-shaped corner cells — each wraps a zone corner and meets
@@ -437,8 +453,8 @@ export function PitchZoneXwoba({
               zone; hover bumps to 100% with smooth transition. */}
           {cornerCells.map((c) => {
             const stats = cellFor(c.zone);
-            const avgXwoba = stats && stats.pa > 0 ? stats.xWobaSum / stats.pa : null;
-            const color = xwobaToColor(avgXwoba);
+            const value = metric === "ev" ? (stats && stats.evCount > 0 ? stats.evSum / stats.evCount : null) : (stats && stats.pa > 0 ? stats.xWobaSum / stats.pa : null);
+            const color = xwobaToColor(value, metric, invert);
             return (
               <g
                 key={`zone-${c.zone}`}
@@ -463,7 +479,7 @@ export function PitchZoneXwoba({
                   fontSize={13}
                   fill="#0F172A"
                 >
-                  {avgXwoba != null ? avgXwoba.toFixed(3).replace(/^0/, "") : "—"}
+                  {value == null ? "—" : metric === "ev" ? Math.round(value) : value.toFixed(3).replace(/^0/, "")}
                 </text>
               </g>
             );

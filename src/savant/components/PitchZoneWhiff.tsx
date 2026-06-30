@@ -29,6 +29,8 @@ interface PitchZoneWhiffProps {
   width?: number;
   height?: number;
   title?: string;
+  /** Hitter perspective — flip the color scale (low whiff = good). */
+  invert?: boolean;
 }
 
 const ZONE_MIN = -1;
@@ -67,18 +69,20 @@ function whiffToPercentile(whiff: number): number {
   return 50 + (50 * (pct - 25)) / (50 - 25);
 }
 
-function whiffToColor(whiff: number | null): string {
+function whiffToColor(whiff: number | null, invert = false): string {
   if (whiff == null) return "#F3F4F6";
-  const pct = whiffToPercentile(whiff);
+  let pct = whiffToPercentile(whiff);
+  if (invert) pct = 100 - pct;
   const dist = Math.abs(pct - 50) / 50;
   const alpha = Math.max(0.55, dist);
   if (pct >= 50) return `rgba(200, 52, 30, ${alpha.toFixed(2)})`;
   return `rgba(30, 79, 216, ${alpha.toFixed(2)})`;
 }
 
-function cornerWhiffColor(whiff: number | null): string {
+function cornerWhiffColor(whiff: number | null, invert = false): string {
   if (whiff == null) return "#F3F4F6";
-  const pct = whiffToPercentile(whiff);
+  let pct = whiffToPercentile(whiff);
+  if (invert) pct = 100 - pct;
   const dist = Math.abs(pct - 50) / 50;
   const alpha = Math.max(0.3, dist * 0.7);
   if (pct >= 50) return `rgba(200, 52, 30, ${alpha.toFixed(2)})`;
@@ -103,6 +107,7 @@ export function PitchZoneWhiff({
   width = 360,
   height = 462,
   title,
+  invert = false,
 }: PitchZoneWhiffProps) {
   // Aggregate per zone — total swings/whiffs + per pitch type swings/whiffs
   const zoneStats = useMemo(() => {
@@ -235,7 +240,7 @@ export function PitchZoneWhiff({
   const renderInnerCell = (zone: Zone13, x: number, y: number, w: number, h: number) => {
     const s = cellFor(zone);
     const whiff = s && s.swings > 0 ? s.whiffs / s.swings : null;
-    const color = whiffToColor(whiff);
+    const color = whiffToColor(whiff, invert);
     const fontSize = Math.min(w, h) > 70 ? 14 : 11;
     return (
       <g
@@ -304,7 +309,7 @@ export function PitchZoneWhiff({
           {cornerCells.map((c) => {
             const s = cellFor(c.zone);
             const whiff = s && s.swings > 0 ? s.whiffs / s.swings : null;
-            const color = cornerWhiffColor(whiff);
+            const color = cornerWhiffColor(whiff, invert);
             return (
               <g
                 key={`zone-${c.zone}`}

@@ -23,6 +23,10 @@ interface PitchRow {
   uniq_pitch_id: string;
   pitch_result: string | null;
   cs_prob: number | null;
+  spray_ang: number | null;
+  batter_hand: string | null;
+  px_norm: number | null;
+  pz_norm: number | null;
 }
 
 interface DerivedRow {
@@ -36,6 +40,61 @@ interface DerivedRow {
   is_chase: boolean | null;
   is_in_play: boolean;
   is_batted_ball_in_play: boolean;
+  hit_location: string | null;
+  batted_direction: string | null;
+  pitch_zone: string | null;
+}
+
+/**
+ * 13-zone strike-zone location from px_norm/pz_norm. Matches zoneForPitch in
+ * src/savant/components/PitchZone*.tsx EXACTLY (so stored == displayed):
+ *   in-zone unit square -> '1'..'9' (3x3, row0=top pz>1/3, col0=left px<-1/3)
+ *   outside -> 'UL'/'UR'/'LL'/'LR' quadrant by sign; |px|>4 or |pz|>4 -> null.
+ * Absolute (catcher's view), not batter-relative.
+ */
+function pitchZone(px: number | null, pz: number | null): string | null {
+  if (px == null || pz == null) return null;
+  if (Math.abs(px) > 4 || Math.abs(pz) > 4) return null;
+  if (px >= -1 && px <= 1 && pz >= -1 && pz <= 1) {
+    const col = px < -1 / 3 ? 0 : px < 1 / 3 ? 1 : 2;
+    const row = pz > 1 / 3 ? 0 : pz > -1 / 3 ? 1 : 2;
+    return String(row * 3 + col + 1);
+  }
+  if (px <= 0 && pz >= 0) return "UL";
+  if (px >= 0 && pz >= 0) return "UR";
+  if (px <= 0 && pz <= 0) return "LL";
+  return "LR";
+}
+
+/**
+ * Absolute field section of a batted ball from spray_ang.
+ * Cutoffs (locked w/ Trevor): far_left -45..-30, left_center -30..-15,
+ * center -15..15, right_center 15..30, far_right 30..45.
+ */
+function hitLocation(spray: number | null, bip: boolean): string | null {
+  if (!bip || spray == null || spray < -45 || spray > 45) return null;
+  if (spray < -30) return "far_left";
+  if (spray < -15) return "left_center";
+  if (spray <= 15) return "center";
+  if (spray <= 30) return "right_center";
+  return "far_right";
+}
+
+/**
+ * pull | center | oppo from spray_ang + the row's batter_hand. Center band
+ * +/-15 (matches Master HPull%). RHB pulls left (negative), LHB pulls right.
+ * Per-row hand => switch hitters resolve exactly.
+ */
+function battedDirection(
+  spray: number | null,
+  hand: string | null,
+  bip: boolean,
+): string | null {
+  if (!bip || spray == null || hand == null || spray < -45 || spray > 45) return null;
+  if (spray >= -15 && spray <= 15) return "center";
+  if (hand === "R") return spray < -15 ? "pull" : "oppo";
+  if (hand === "L") return spray > 15 ? "pull" : "oppo";
+  return null;
 }
 
 /** Outcomes that count as a "ball put in play" (NOT foul). */
@@ -114,6 +173,9 @@ function derive(row: PitchRow): DerivedRow {
     is_chase: cs == null ? null : swing && cs < 0.5,
     is_in_play: isInPlay(r),
     is_batted_ball_in_play: isInPlay(r),
+    hit_location: hitLocation(row.spray_ang, isInPlay(r)),
+    batted_direction: battedDirection(row.spray_ang, row.batter_hand, isInPlay(r)),
+    pitch_zone: pitchZone(row.px_norm, row.pz_norm),
   };
 }
 
@@ -156,7 +218,7 @@ async function main(): Promise<void> {
   while (true) {
     const sel = (supabase as any)
       .from("pitch_log")
-      .select("uniq_pitch_id, pitch_result, cs_prob")
+      .select("uniq_pitch_id, pitch_result, cs_prob, spray_ang, batter_hand, px_norm, pz_norm")
       .is("is_foul", null)
       .order("uniq_pitch_id", { ascending: true })
       .limit(FETCH_BATCH);

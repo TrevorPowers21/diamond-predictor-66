@@ -200,7 +200,7 @@ export function PerPitchSuccessTable({
                   <td
                     className="py-2 pr-3 text-right tabular-nums font-bold"
                     style={{
-                      color: r.stuffPlus != null && r.stuffPlus >= 105 ? GOLD : undefined,
+                      color: r.stuffPlus != null && r.stuffPlus >= 112 ? GOLD : undefined,
                     }}
                   >
                     {fmtVel(r.stuffPlus)}

@@ -404,7 +404,7 @@ export function PitchMovementPlot({ pitches, width = 360, title }: PitchMovement
                 <span
                   className="font-mono text-[12px] font-semibold leading-tight tabular-nums"
                   style={{
-                    color: activeStats.stuffPlus != null && activeStats.stuffPlus >= 105 ? GOLD : "#FFFFFF",
+                    color: activeStats.stuffPlus != null && activeStats.stuffPlus >= 112 ? GOLD : "#FFFFFF",
                   }}
                 >
                   {activeStats.stuffPlus != null ? activeStats.stuffPlus.toFixed(1) : "—"}
