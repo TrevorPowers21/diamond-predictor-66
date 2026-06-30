@@ -156,73 +156,8 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
-<<<<<<< HEAD
         <SpeedInsights />
-        <BrowserRouter>
-          <PostHogPageView />
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/auth" element={<Auth />} />
-            <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/dashboard/portal" element={<ProtectedRoute><TransferPortal /></ProtectedRoute>} />
-            <Route path="/dashboard/returning" element={<ProtectedRoute><ReturningPlayers /></ProtectedRoute>} />
-            <Route path="/dashboard/war-room" element={<ProtectedRoute><WarRoom /></ProtectedRoute>} />
-            <Route path="/dashboard/dev-weights" element={<ProtectedRoute><DevWeights /></ProtectedRoute>} />
-            {/* NIL Valuations route intentionally disabled for now; keep page for rework later. */}
-            {/* <Route path="/dashboard/nil" element={<ProtectedRoute><NilValuations /></ProtectedRoute>} /> */}
-            <Route path="/dashboard/compare" element={<ProtectedRoute><PlayerComparison /></ProtectedRoute>} />
-            <Route path="/dashboard/player/:id" element={<ProtectedRoute><PlayerProfile /></ProtectedRoute>} />
-            <Route path="/dashboard/player/:id/stats" element={<ProtectedRoute><PlayerStatsPage /></ProtectedRoute>} />
-            <Route path="/dashboard/pitcher/:id" element={<ProtectedRoute><PitcherProfile /></ProtectedRoute>} />
-            <Route path="/dashboard/pitcher/:id/stats" element={<ProtectedRoute><PitcherStatsPage /></ProtectedRoute>} />
-            <Route path="/dashboard/team-builder" element={<ProtectedRoute><TeamBuilder /></ProtectedRoute>} />
-            <Route path="/dashboard/targets" element={<ProtectedRoute><Targets /></ProtectedRoute>} />
-            {/* Legacy /dashboard/high-follow URL still works — renders the standalone page so bookmarks don't break. */}
-            <Route path="/dashboard/high-follow" element={<ProtectedRoute><HighFollowList /></ProtectedRoute>} />
-            <Route path="/dashboard/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
-            <Route path="/dashboard/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-            <Route
-              path="/dashboard/admin/teams"
-              element={
-                <ProtectedRoute>
-                  <RoleGuard allow={["superadmin"]}><AdminTeams /></RoleGuard>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/dashboard/admin/users"
-              element={
-                <ProtectedRoute>
-                  <RoleGuard allow={["superadmin", "team_admin"]}><AdminUsers /></RoleGuard>
-                </ProtectedRoute>
-              }
-            />
-            <Route path="/dashboard/*" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            {/* Savant — internal only. Gated by SavantRoute (auth + email allowlist). */}
-            <Route
-              path="/savant"
-              element={
-                <ProtectedRoute>
-                  <Suspense fallback={null}>
-                    <SavantRoute><SavantLayout /></SavantRoute>
-                  </Suspense>
-                </ProtectedRoute>
-              }
-            >
-              <Route index element={<Suspense fallback={null}><SavantHome /></Suspense>} />
-              <Route path="leaderboards" element={<Suspense fallback={null}><SavantLeaderboards /></Suspense>} />
-              <Route path="conferences" element={<Suspense fallback={null}><SavantConferenceStats /></Suspense>} />
-              <Route path="teams" element={<Suspense fallback={null}><SavantTeamsList /></Suspense>} />
-              <Route path="team/:id" element={<Suspense fallback={null}><SavantTeamProfile /></Suspense>} />
-              <Route path="hitter/:id" element={<Suspense fallback={null}><SavantHitterPage /></Suspense>} />
-              <Route path="pitcher/:id" element={<Suspense fallback={null}><SavantPitcherPage /></Suspense>} />
-            </Route>
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-=======
         <RouterProvider router={router} />
->>>>>>> 7f545ce (feat: Team Builder save flow, depth fix, default build seeding)
       </TooltipProvider>
     </AuthProvider>
   </QueryClientProvider>
