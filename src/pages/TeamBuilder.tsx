@@ -2706,7 +2706,12 @@ export default function TeamBuilder() {
       if (fresh.length === 0) return prev;
       return [...prev, ...fresh];
     });
-    setDirty(true);
+    // __sync rows are injected by the universal-target-board pull (a target
+    // added on Profile/Dashboard/Portal, or the team's shared board loading in)
+    // — NOT a coach edit to this build. They must never mark the build dirty,
+    // otherwise just sitting on a build (or switching to it) spuriously triggers
+    // the save prompt / idle auto-save. Only a real user-initiated add dirties.
+    if (!row?.__sync) setDirty(true);
     setTargetPlayerSearchQuery("");
     setTargetPlayerSearchOpen(false);
     if (row.id && !isOnSupabaseBoard(row.id)) {
