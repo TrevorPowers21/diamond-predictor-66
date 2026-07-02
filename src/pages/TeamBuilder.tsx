@@ -1466,6 +1466,19 @@ export default function TeamBuilder() {
   const [buildLoadDone, setBuildLoadDone] = useState(false);
   const buildLoadDoneRef = useRef(false);
   buildLoadDoneRef.current = buildLoadDone;
+
+  // Universal targets are team-scoped and identical across a team's builds. Cache
+  // the current team's hydrated target rows so switching builds WITHIN a team
+  // carries them over instead of clearing + re-fetching them (which made the
+  // Targets tab reload on every build switch). Scoped by effectiveTeamId; a
+  // team change resets the roster to empty, which we deliberately ignore here so
+  // the cache isn't wiped mid-switch — a cross-team load simply won't match.
+  const preservedTargetsRef = useRef<{ team: string | null; rows: BuildPlayer[] }>({ team: null, rows: [] });
+  useEffect(() => {
+    const targets = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target" && p.player_id);
+    if (targets.length > 0) preservedTargetsRef.current = { team: effectiveTeamId, rows: targets };
+  }, [rosterPlayers, effectiveTeamId]);
+
   const loadBuild = useLoadBuild({
     builds, allPlayersForSearch, selectedTeam, selectedTeamId, effectiveTeamId,
     pitchingMasterRows, pitchingStatsByNameTeam, seasonUsage,
@@ -1473,7 +1486,7 @@ export default function TeamBuilder() {
     setSelectedBuildId, setBuildName, setTotalBudget, setSelectedTeam,
     setDepthAssignments, setDepthPlaceholders, setRosterPlayers, setDirty,
     lastDepthTeamRef, skipAutoSeedOnceRef, autoSeededTeamRef,
-    buildLoadDoneRef, setBuildLoadDone,
+    buildLoadDoneRef, setBuildLoadDone, preservedTargetsRef,
   });
 
   // Auto-load roster when team changes and it's a new build.

@@ -62,6 +62,10 @@ type LoadBuildParams = {
   // Flipped to true after loadBuild finishes setting rosterPlayers. Lets the
   // sync effect re-fire (state, not ref) once the saved build has populated.
   setBuildLoadDone?: (done: boolean) => void;
+  // Current team's hydrated universal-target rows. When the build being loaded
+  // belongs to the same team, these are carried into the new roster so the
+  // Targets tab doesn't clear + re-fetch on every same-team build switch.
+  preservedTargetsRef?: MutableRefObject<{ team: string | null; rows: any[] }>;
 };
 
 // True when the position_slot (or player position) indicates a pitcher row.
@@ -92,6 +96,7 @@ export function useLoadBuild({
   autoSeededTeamRef,
   buildLoadDoneRef,
   setBuildLoadDone,
+  preservedTargetsRef,
 }: LoadBuildParams) {
   return useCallback(
     async (buildId: string) => {
@@ -342,7 +347,7 @@ export function useLoadBuild({
           return null;
         };
 
-        setRosterPlayers(
+        const mappedRosterRows = (
           players
             .map((bp: any) => {
               try {
@@ -529,8 +534,21 @@ export function useLoadBuild({
                 return null;
               }
             })
-            .filter(Boolean) as any[],
+            .filter(Boolean) as any[]
         );
+        // Carry the current team's universal targets across a same-team build
+        // switch so the Targets tab doesn't clear + re-fetch (which caused the
+        // reload on every switch). A cross-team load won't match on team and
+        // falls through to the normal universal-board pull.
+        const carriedTargets = (() => {
+          const cache = preservedTargetsRef?.current;
+          if (!cache || !cache.team || cache.team !== effectiveTeamId) return [] as any[];
+          const keyOf = (rp: any) =>
+            `${rp?.player_id || ""}|${/^(SP|RP|CL|P|LHP|RHP)$/i.test(String(rp?.position_slot || "")) ? "P" : "H"}`;
+          const existing = new Set(mappedRosterRows.map(keyOf));
+          return cache.rows.filter((t: any) => t?.player_id && !existing.has(keyOf(t)));
+        })();
+        setRosterPlayers([...mappedRosterRows, ...carriedTargets]);
       }
       setDirty(false);
       if (buildLoadDoneRef) buildLoadDoneRef.current = true;
