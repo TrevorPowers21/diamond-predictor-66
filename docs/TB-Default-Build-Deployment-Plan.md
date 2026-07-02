@@ -139,6 +139,51 @@ Scenarios 1 and 2 should be tested against real team data (existing prod coaches
 
 ---
 
+## Phase 5.5 — Target Board Consolidation (companion migration)
+
+> Ships on the SAME deploy as the default-build work. Branch:
+> `feature/target-board-consolidation` (built on `feature/default-build-architecture`).
+> Makes the target board universal (team-scoped) instead of frozen per-build.
+> Verified on staging 2026-07-02; user signed off.
+
+**Background.** Targets were stored two ways — per-build `team_build_players`
+rows (`roster_status='target'`, `included_in_roster=false`) AND the universal
+`target_board` table — so each build showed a different, drifting set. Also, the
+universal-board pull was spuriously marking builds `dirty`, triggering save
+prompts + silent fork-from-default on default builds just sitting there.
+
+**What the code does now (committed):**
+- Save no longer persists watchlist targets per-build (only returners + targets
+  the coach pulled onto the roster via `+`, i.e. `included_in_roster=true`).
+- The universal-board pull no longer dirties the build (`__sync`-guarded).
+- Same-team build switches carry targets over instead of clearing + re-fetching
+  (no more reload/lag on switch).
+
+**5.5.1 — Run the data migration on prod (order: after code deploy or with it):**
+```bash
+npm run migrate-targets:prod                 # dry-run — review counts first
+npm run migrate-targets:prod -- --apply      # move per-build watchlist rows → target_board, delete from builds
+```
+Idempotent + additive to `target_board` (check-then-insert). Deletes only the
+exact per-build watchlist rows it migrates. `included_in_roster=true` targets
+(on a build's active roster) are LEFT UNTOUCHED.
+
+**5.5.2 — Sequencing note.** The migration is only durable once the new code is
+live (old code would re-persist targets per-build on the next save). Run it
+during/after the code deploy, not before.
+
+**5.5.3 — Spot-check:** open two builds for the same team → identical target
+board; sit on a default build → no save prompt / no fork; switch builds → targets
+don't reload.
+
+**Rollback:** code revert restores old behavior. The migration is additive to
+`target_board`; the deleted per-build rows were redundant shadows of universal
+entries, so no watchlist data is lost. (If a full reversal is ever needed, the
+per-build rows can be reconstructed from `target_board` — but this should not be
+necessary.)
+
+---
+
 ## Phase 6 — Deploy to Prod
 
 > Only after Phase 5 passes.
@@ -151,6 +196,7 @@ Vercel auto-deploys on push to `main`.
 
 - Login as a coach with an existing build → their build loads as before
 - Login as a team that was just seeded with a default → default loads, first change triggers name prompt
+- Target board is identical across that team's builds; sitting on a default doesn't prompt to save
 
 ---
 
