@@ -1467,16 +1467,24 @@ export default function TeamBuilder() {
   const buildLoadDoneRef = useRef(false);
   buildLoadDoneRef.current = buildLoadDone;
 
-  // Universal targets are team-scoped and identical across a team's builds. Cache
-  // the current team's hydrated target rows so switching builds WITHIN a team
-  // carries them over instead of clearing + re-fetching them (which made the
-  // Targets tab reload on every build switch). Scoped by effectiveTeamId; a
-  // team change resets the roster to empty, which we deliberately ignore here so
-  // the cache isn't wiped mid-switch — a cross-team load simply won't match.
+  // Only WATCHLIST targets (roster_status='target' AND included_in_roster=false)
+  // are universal — the same shared board on every build of a team. Cache those
+  // so switching builds WITHIN a team carries them over instead of clearing +
+  // re-fetching (which made the Targets tab reload on every switch).
+  //
+  // On-roster targets (included_in_roster=true) are BUILD-SPECIFIC — a player the
+  // coach added to build A's roster must NOT appear on build B. They live in each
+  // build's own team_build_players and are loaded per build, so they must never
+  // be carried across a switch. Excluded here.
+  //
+  // Scoped by effectiveTeamId; a team change resets the roster to empty, which we
+  // ignore so the cache isn't wiped mid-switch — a cross-team load won't match.
   const preservedTargetsRef = useRef<{ team: string | null; rows: BuildPlayer[] }>({ team: null, rows: [] });
   useEffect(() => {
-    const targets = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target" && p.player_id);
-    if (targets.length > 0) preservedTargetsRef.current = { team: effectiveTeamId, rows: targets };
+    const watchlist = rosterPlayers.filter(
+      (p) => (p.roster_status || "returner") === "target" && (p as any).included_in_roster === false && p.player_id,
+    );
+    if (watchlist.length > 0) preservedTargetsRef.current = { team: effectiveTeamId, rows: watchlist };
   }, [rosterPlayers, effectiveTeamId]);
 
   const loadBuild = useLoadBuild({
