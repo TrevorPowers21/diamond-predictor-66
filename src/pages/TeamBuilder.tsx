@@ -1823,8 +1823,17 @@ export default function TeamBuilder() {
         buildId = data.id;
       }
 
-      if (rosterPlayers.length > 0) {
-        const rows = rosterPlayers.map((rp) => ({
+      // Target-board consolidation (2026-07): pure watchlist targets
+      // (roster_status='target' AND included_in_roster=false) live ONLY in the
+      // universal target_board — they are NOT persisted per-build, so the board
+      // is identical on every build. A target the coach pulls onto THIS build's
+      // active roster (included_in_roster=true) IS a build-specific decision and
+      // is persisted normally. Returners always persist.
+      const persistableRoster = rosterPlayers.filter(
+        (rp) => !((rp.roster_status ?? "returner") === "target" && (rp as any).included_in_roster === false),
+      );
+      if (persistableRoster.length > 0) {
+        const rows = persistableRoster.map((rp) => ({
           ...(() => {
             const fullName = rp.player ? `${rp.player.first_name || ""} ${rp.player.last_name || ""}`.trim() : "";
             const persistedName = (rp.custom_name && rp.custom_name.trim()) || fullName || getPlayerName(rp) || null;
