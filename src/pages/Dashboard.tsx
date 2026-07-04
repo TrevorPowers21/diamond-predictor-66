@@ -6,10 +6,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { useTargetBoard } from "@/hooks/useTargetBoard";
+import { portalStatusMeta } from "@/components/PortalStatus";
 import { useHighFollow } from "@/hooks/useHighFollow";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Eye, LogIn, X, CheckCircle, TrendingUp, Users, Calendar, Activity, ArrowRight } from "lucide-react";
+import { Eye, LogIn, X, CheckCircle, TrendingUp, Users, Calendar, Activity, ArrowRight, Circle } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import SchoolBanner from "@/components/SchoolBanner";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
@@ -313,98 +314,75 @@ export default function Dashboard() {
     })()
   );
 
-  // Recent portal activity — last 3 days of portal/committed entries, sorted
-  // newest first. Hard 3-day floor at the DB level keeps the feed focused on
-  // "what's new this week" rather than the full active backlog. Anything
-  // older lives on the Transfer Portal page instead.
+  // Top available players — the portal is closed for the season, so instead of a
+  // "what entered this week" feed we rank the best still-UNCOMMITTED players by
+  // projected talent (top hitters by wRC+, top pitchers by pRV+), capped at 50.
+  // Ranked on the GLOBAL 'regular' projection so every player has one comparable
+  // value; recency no longer matters once the portal is shut.
   const { data: portalActivity = [] } = useQuery({
-    queryKey: ["overview-portal-activity-v4", watchedIdsKey, effectiveTeamId],
+    queryKey: ["overview-top-uncommitted-v1", watchedIdsKey, effectiveTeamId],
     staleTime: 60 * 1000,
     refetchOnWindowFocus: false,
     queryFn: async () => {
-      // 3-day floor — anything entered before this drops out of the feed.
-      const floorDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-
-      // Minimum sample to qualify for the feed — filters out 1-IP / 1-PA noise
-      // from the portal pull while still surfacing real early-season prospects.
+      // Minimum sample to qualify — filters out 1-IP / 1-PA portal-pull noise.
       const MIN_HITTER_PA = 25;
       const MIN_PITCHER_IP = 10;
-      const pitcherPositions = "SP,RP,CL,P,LHP,RHP";
-      const minSampleFilter =
-        `and(position.in.(${pitcherPositions}),ip.gte.${MIN_PITCHER_IP}),` +
-        `and(position.not.in.(${pitcherPositions}),pa.gte.${MIN_HITTER_PA})`;
+      const pit = "SP,RP,CL,P,LHP,RHP";
+      const N = 60; // candidates pulled per side before the merge → top 50
+      const playerCols =
+        "id, first_name, last_name, team, from_team, position, portal_status, portal_entry_date, commit_school, commit_date, updated_at";
 
-      const { data: playerRows } = await (supabase as any)
-        .from("players")
-        .select("id, first_name, last_name, team, from_team, position, portal_status, portal_entry_date, commit_school, commit_date, updated_at")
-        .in("portal_status", ["IN PORTAL", "COMMITTED"])
-        .gte("portal_entry_date", floorDate)
-        .or(minSampleFilter)
-        .order("portal_entry_date", { ascending: false, nullsFirst: false })
-        .limit(150);
-      const playerIds = (playerRows || []).map((p: any) => p.id);
-      const { data: predRows } = playerIds.length === 0
-        ? { data: [] }
-        : await (() => {
-            let q = (supabase as any)
-              .from("player_predictions")
-              .select("player_id, customer_team_id, p_wrc_plus, p_rv_plus, variant, status")
-              .eq("season", PROJECTION_SEASON)
-              .in("player_id", playerIds)
-              .in("variant", ["regular", "precomputed"])
-              .in("status", ["active", "departed"]);
-            q = applyTeamScopeFilter(q, effectiveTeamId);
-            return q;
-          })();
-      // Prefer team-scoped precomputed row per player when active team has one.
-      const preferred = dedupePreferredPerPlayer((predRows as any[]) || [], effectiveTeamId);
-      const predByPlayer = new Map<string, { p_wrc_plus: number | null; p_rv_plus: number | null }>();
-      for (const pr of preferred) {
-        predByPlayer.set(pr.player_id as string, { p_wrc_plus: pr.p_wrc_plus, p_rv_plus: pr.p_rv_plus });
-      }
-      const raw = (playerRows || []).map((p: any) => ({
-        players: p,
-        p_wrc_plus: predByPlayer.get(p.id)?.p_wrc_plus ?? null,
-        p_rv_plus: predByPlayer.get(p.id)?.p_rv_plus ?? null,
-      }));
+      // One global 'regular' projection row per player = a single comparable value
+      // the DB can rank on. `players!inner` + status IN PORTAL scopes to uncommitted.
+      const base = () => (supabase as any)
+        .from("player_predictions")
+        .select(`player_id, p_wrc_plus, p_rv_plus, players!inner(${playerCols}, pa, ip)`)
+        .eq("season", PROJECTION_SEASON)
+        .eq("variant", "regular")
+        .is("customer_team_id", null)
+        .in("status", ["active", "departed"])
+        .eq("players.portal_status", "IN PORTAL");
+
+      const [hitters, pitchers] = await Promise.all([
+        base()
+          .not("players.position", "in", `(${pit})`)
+          .gte("players.pa", MIN_HITTER_PA)
+          .not("p_wrc_plus", "is", null)
+          .order("p_wrc_plus", { ascending: false })
+          .limit(N),
+        base()
+          .in("players.position", `(${pit})`)
+          .gte("players.ip", MIN_PITCHER_IP)
+          .not("p_rv_plus", "is", null)
+          .order("p_rv_plus", { ascending: false })
+          .limit(N),
+      ]);
 
       const followSet = new Set(highFollowList.map((p) => p.player_id));
       const boardSet = new Set(targetBoard.map((p) => p.player_id));
-
       const isPitcher = (pos: string | null | undefined) =>
         /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
 
-      // No second filter — the 3-day DB floor IS the floor. Players without
-      // predictions yet (just imported, cascade hasn't run) still show up;
-      // their badge just renders without a metric value.
-      const all = (raw || [])
-        .map((r: any) => ({ ...r.players, p_wrc_plus: r.p_wrc_plus, p_rv_plus: r.p_rv_plus }))
-        .map((p: any) => {
+      const seen = new Set<string>();
+      const all = [...((hitters.data as any[]) || []), ...((pitchers.data as any[]) || [])]
+        .map((r: any) => {
+          const p = r.players;
           const pitcher = isPitcher(p.position);
-          const metric = pitcher ? p.p_rv_plus : p.p_wrc_plus;
           return {
             ...p,
+            p_wrc_plus: r.p_wrc_plus,
+            p_rv_plus: r.p_rv_plus,
             is_pitcher: pitcher,
-            metric_value: metric ?? null,
+            metric_value: (pitcher ? r.p_rv_plus : r.p_wrc_plus) ?? null,
             source: followSet.has(p.id) ? "following" : boardSet.has(p.id) ? "board" : "top",
           };
         })
-        // Hide players we have no 2026 stats for. No prediction at all = no
-        // Hitter/Pitching Master row to compute from = nothing useful for
-        // coaches to act on (Ryan Brown, Connor Misch, etc. — the VA portal
-        // CSV matched a name but we don't track their production).
-        .filter((p: any) => p.p_wrc_plus != null || p.p_rv_plus != null);
+        // A player can have both an active + departed global row — keep the first.
+        .filter((p: any) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
 
-      // Sort: newest portal_entry_date first → within date, watching first
-      // (following/board), then by projected metric desc.
-      const sourceRank = (s: string) => (s === "following" || s === "board" ? 0 : 1);
-      all.sort((a: any, b: any) => {
-        const dateCmp = (b.portal_entry_date || "").localeCompare(a.portal_entry_date || "");
-        if (dateCmp !== 0) return dateCmp;
-        const srcCmp = sourceRank(a.source) - sourceRank(b.source);
-        if (srcCmp !== 0) return srcCmp;
-        return (b.metric_value ?? -Infinity) - (a.metric_value ?? -Infinity);
-      });
+      // Rank purely by projected talent — hitters (wRC+) and pitchers (pRV+) share
+      // the same ~100 baseline, so the '+' value mixes cleanly across both.
+      all.sort((a: any, b: any) => (b.metric_value ?? -Infinity) - (a.metric_value ?? -Infinity));
 
       // Cap at 50 — keeps the scrollable list bounded but allows generous scroll.
       return all.slice(0, 50) as Array<{
@@ -492,25 +470,25 @@ export default function Dashboard() {
               accent="blue"
             />
           </div>
-          {/* Recent Portal Activity — scrollable, prioritized:
-              high-follow/board players first → top portal players by pWRC+ →
-              capped at last-visit timestamp. */}
+          {/* Top Available Players — scrollable, ranked by projected talent.
+              Portal is closed, so this shows the best still-uncommitted players
+              (top hitters by wRC+, top pitchers by pRV+), capped at 50. */}
           <div className="mt-2 rounded-lg border border-border/60 bg-muted/20 px-4 py-2.5">
             <div className="flex items-center justify-between mb-2">
               <span
                 className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#D4AF37]"
                 style={{ fontFamily: "Oswald, sans-serif" }}
               >
-                Recent Portal Activity
+                Top Available Players
               </span>
               <span className="text-[10px] text-muted-foreground font-mono">
                 {portalActivity.length === 0
-                  ? "No updates since your last visit"
-                  : `${portalActivity.length} ${portalActivity.length === 1 ? "update" : "updates"} since your last visit`}
+                  ? "No available players"
+                  : `Top ${portalActivity.length} uncommitted by projection`}
               </span>
             </div>
             {portalActivity.length === 0 ? (
-              <p className="py-3 text-xs text-muted-foreground text-center">Nothing new — check back after the next portal import.</p>
+              <p className="py-3 text-xs text-muted-foreground text-center">No uncommitted players with projections yet.</p>
             ) : (
               <div className="max-h-[280px] overflow-y-auto pr-1 divide-y divide-border/30">
                 {portalActivity.map((p) => {
@@ -713,13 +691,18 @@ export default function Dashboard() {
               ) : (
                 targetBoard.map((row) => {
                   const initials = `${(row.first_name?.[0] || "").toUpperCase()}${(row.last_name?.[0] || "").toUpperCase()}`;
-                  const displayStatus = row.portal_status === "NOT IN PORTAL" ? "WATCHING" : row.portal_status;
-                  const statusConfig = {
-                    "IN PORTAL": { bg: "bg-emerald-500/10", text: "text-emerald-600", icon: LogIn, label: "In Portal" },
-                    "COMMITTED": { bg: "bg-blue-500/10", text: "text-blue-600", icon: CheckCircle, label: "Committed" },
-                    "WATCHING": { bg: "bg-[#D4AF37]/10", text: "text-[#D4AF37]", icon: Eye, label: "Watching" },
-                  }[displayStatus] || { bg: "bg-[#D4AF37]/10", text: "text-[#D4AF37]", icon: Eye, label: "Watching" };
-                  const StatusIcon = statusConfig.icon;
+                  // Show the player's real portal status (matches the profile),
+                  // not a blanket "Watching". Label + colors come from the shared
+                  // source of truth; the icon is Overview-card-specific.
+                  const meta = portalStatusMeta(row.portal_status);
+                  const StatusIcon = {
+                    "IN PORTAL": LogIn,
+                    "COMMITTED": CheckCircle,
+                    "WATCHING": Eye,
+                    "WITHDRAWN": X,
+                    "NOT IN PORTAL": Circle,
+                  }[row.portal_status as string] || Circle;
+                  const statusConfig = { bg: meta.bg, text: meta.text, label: meta.label };
                   return (
                     <div
                       key={row.player_id}
