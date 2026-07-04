@@ -21,33 +21,21 @@ type Release = {
 const RELEASES: Release[] = [
   {
     date: "2026-07-04",
-    headline: "A ready-made roster on every team, and one shared target board for your whole staff",
+    headline: "An improved roster building experience",
     features: [
       {
-        title: "Team Builder Starts From a Ready-Made Roster",
+        title: "An Improved Roster Building Experience",
         tagline:
-          "Every program now has a starting roster built from your returners and projected at your school. If you haven't started a build yet, you open straight into it instead of a blank page, and when you want a fresh start it begins from that same ready roster.",
+          "Team Builder is faster and more consistent across the board, with a saved starting roster for every program, the ability to clone any build, and a target board that stays the same everywhere you work.",
         details: [
-          "Your returning players are already in place and projected for your program, so you can start shaping the 2027 roster from the very first click.",
-          "Your own saved builds always load first. The starting roster is simply the foundation for a fresh start, never a replacement for the work you've saved.",
-          "Add targets and adjust depth and dev on top of it, then save it as your own build whenever you're ready.",
-        ],
-      },
-      {
-        title: "One Shared Target Board for Your Whole Staff",
-        tagline:
-          "Your target board is now a single shared board for your entire staff, and it looks the same on every build you open. A name anyone on your staff adds shows up for everyone, so the whole room is recruiting off the same list.",
-        details: [
-          "Every coach on your staff sees the same target board, so a player one of you adds is right there for all of you.",
-          "The board stays consistent across all of your builds, so your watch list is the same wherever you're working.",
-          "Everything you were already tracking is right where you left it, with the same projections, depth roles, and notes.",
+          "Saved default rosters load your program instantly, so you open Team Builder to a complete roster instead of a blank page.",
+          "Clone any build, including default rosters, to start a new build from a point you already like.",
+          "A universal target board that stays consistent across every one of your builds.",
+          "Faster loading and a smoother, more consistent experience throughout.",
         ],
       },
     ],
-    whatElse: [
-      "Team Builder: moving between your builds is faster and smoother, with your target board ready each time.",
-      "Team Builder: your work saves quietly in the background, so you can move around freely without interruptions.",
-    ],
+    whatElse: [],
   },
   {
     date: "2026-06-29",
