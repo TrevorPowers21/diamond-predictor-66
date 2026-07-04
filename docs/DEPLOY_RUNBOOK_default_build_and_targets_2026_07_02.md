@@ -124,6 +124,36 @@ of universal entries. If ever needed, reconstruct from `target_board`.
 
 ---
 
+## FULL ROLLBACK — one-shot "put it all back"
+
+A single snapshot-and-restore reverts every DATA change (seed + target migration) in one go.
+
+**Before Step 2, take the snapshot** (in-DB backup tables — fast, read-only against live data):
+```bash
+npm run db-migrate -- supabase/rollback/20260704_backup_before_deploy.sql   # confirm --linked = PROD
+```
+Creates `team_builds_bak_20260704`, `team_build_players_bak_20260704`, `target_board_bak_20260704`
+and prints the captured row counts.
+
+**To revert everything (data):**
+```bash
+npm run db-migrate -- supabase/rollback/20260704_restore_from_backup.sql     # confirm --linked = PROD
+```
+Restores the three tables to the exact pre-deploy state (re-adds the 130 migrated watchlist rows,
+drops the seeded default builds, removes the target_board inserts). Transaction-wrapped, all-or-nothing.
+
+**To revert the code:** `git revert` the `staging → main` merge commit → Vercel redeploys the old bundle.
+
+**Columns** (`is_default` / `academic_year`): leave them — inert to the reverted code. (Drop only if
+you truly want the schema pristine; never drop `player_snapshot` — it predates this work.)
+
+**Caveat:** the restore reverts to the *exact* snapshot, so any coach change made AFTER the backup
+(during the deploy window) is also reverted. Deploy off-hours and roll back promptly to keep that
+window near-empty. The verify receipt (`verify-tb:prod`) tells you within seconds whether you even
+need to roll back.
+
+---
+
 ## D. What is explicitly NOT changing (reassurance)
 - **Coach data untouched:** rosters, on-roster transfers, dev-agg (65 overrides), depth
   (898 rows / 21 depth charts), NIL/money, imported freshmen (106) — none are read or
