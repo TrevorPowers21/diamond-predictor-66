@@ -316,11 +316,13 @@ export default function Dashboard() {
 
   // Top available players — the portal is closed, so instead of a "what entered
   // this week" feed we rank the best still-UNCOMMITTED players by their projected
-  // value AT THE LOGGED-IN TEAM: this team's precomputed line when it exists,
-  // falling back to the global 'regular' line for the crossover (players with no
-  // team precompute). Top hitters by wRC+, top pitchers by pRV+, capped at 50.
+  // value AT THE LOGGED-IN TEAM's precompute. Every player in this pool is a
+  // transfer, so every one has a precompute for this team → all use it, none use
+  // global. (Returners use the global line, but they're on the roster, never in
+  // this pool.) The global line is used ONLY when no team is in scope (superadmin
+  // not impersonating). Top hitters by wRC+, top pitchers by pRV+, capped at 50.
   const { data: portalActivity = [] } = useQuery({
-    queryKey: ["overview-top-uncommitted-v2", watchedIdsKey, effectiveTeamId],
+    queryKey: ["overview-top-uncommitted-v3", watchedIdsKey, effectiveTeamId],
     staleTime: 60 * 1000,
     refetchOnWindowFocus: false,
     queryFn: async () => {
@@ -357,45 +359,15 @@ export default function Dashboard() {
       const isPitcher = (pos: string | null | undefined) =>
         /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
 
-      // Top candidates by this team's precompute value AND by global value.
-      const empty = Promise.resolve({ data: [] });
-      const [teamH, teamP, globalH, globalP] = await Promise.all(
-        teamId
-          ? [sideQuery("team", "H"), sideQuery("team", "P"), sideQuery("global", "H"), sideQuery("global", "P")]
-          : [empty, empty, sideQuery("global", "H"), sideQuery("global", "P")],
-      );
-      const teamRows = [...((teamH.data as any[]) || []), ...((teamP.data as any[]) || [])];
-      const globalRows = [...((globalH.data as any[]) || []), ...((globalP.data as any[]) || [])];
-
-      // Rank by the team value. A global row is used ONLY for a TRUE crossover —
-      // a player with no precompute for this team at all. A player whose team
-      // value merely falls outside the top window is dropped, NOT shown at their
-      // (often higher) global value — that mismatch is what made it look like
-      // team-precomputed players were "crossing over" to global.
-      const merged = new Map<string, any>();
-      for (const r of teamRows) if (!merged.has(r.player_id)) merged.set(r.player_id, { ...r, scope: "team" });
-
-      let teamHas = new Set<string>();
-      if (teamId) {
-        const globalIds = [...new Set(globalRows.map((r: any) => r.player_id))];
-        if (globalIds.length) {
-          const { data: hasRows } = await (supabase as any)
-            .from("player_predictions")
-            .select("player_id")
-            .eq("season", PROJECTION_SEASON)
-            .eq("customer_team_id", teamId)
-            .eq("variant", "precomputed")
-            .in("status", ["active", "departed"])
-            .in("player_id", globalIds);
-          teamHas = new Set((hasRows as any[] || []).map((r) => r.player_id));
-        }
-      }
-      for (const r of globalRows) {
-        if (merged.has(r.player_id) || teamHas.has(r.player_id)) continue;
-        merged.set(r.player_id, { ...r, scope: "global" });
-      }
-
-      const all = [...merged.values()].map((r: any) => {
+      // Rank purely on THIS team's precompute (every transfer has one). Global is
+      // used only when there is no team in scope — a customer team never shows a
+      // player at another (global) line.
+      const scope: "team" | "global" = teamId ? "team" : "global";
+      const [hittersRes, pitchersRes] = await Promise.all([sideQuery(scope, "H"), sideQuery(scope, "P")]);
+      const seen = new Set<string>();
+      const all = [...((hittersRes.data as any[]) || []), ...((pitchersRes.data as any[]) || [])]
+        .filter((r: any) => (seen.has(r.player_id) ? false : (seen.add(r.player_id), true)))
+        .map((r: any) => {
         const p = r.players;
         const pitcher = isPitcher(p.position);
         return {
