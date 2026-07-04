@@ -16,8 +16,9 @@ import { writeFileSync } from "fs";
 
 const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || "";
-if (!url.includes("trbvxuoliwrfowibatkm")) { console.error("Refusing: not pointed at prod."); process.exit(1); }
-const sb = createClient(url, key, { auth: { persistSession: false } });
+const ENV = url.includes("trbvxuoliwrfowibatkm") ? "PROD" : "STAGING";
+const OUT = process.argv[2] || "scripts/.prod_rosters.json"; // pass a path for before/after snapshots
+const sb = createClient(url, key, { auth: { persistSession: false } }); // READ-ONLY
 
 const meta = (pn: any) => { try { return JSON.parse(pn || "{}"); } catch { return {}; } };
 const money = (v: any) => (v == null || v === "" ? null : Math.round(Number(v)));
@@ -76,7 +77,7 @@ function kindOf(r: any): string {
     });
     rows.sort((a, b) => (Number(b.onRoster) - Number(a.onRoster)) || String(a.position).localeCompare(String(b.position)) || a.name.localeCompare(b.name));
     return {
-      name: b.name, totalBudget: money(b.total_budget),
+      id: b.id, name: b.name, totalBudget: money(b.total_budget),
       depthAssignments: b.depth_assignments ?? {}, depthPlaceholders: b.depth_placeholders ?? {},
       counts: { onRoster: rows.filter((r) => r.onRoster).length, targetsOffRoster: rows.filter((r) => !r.onRoster).length, imported: rows.filter((r) => r.kind.startsWith("Imported")).length },
       players: rows,
@@ -109,8 +110,9 @@ function kindOf(r: any): string {
     });
   }
 
-  writeFileSync("scripts/.prod_rosters.json", JSON.stringify(out, null, 2));
+  out.env = ENV;
+  writeFileSync(OUT, JSON.stringify(out, null, 2));
   const nB = out.teams.reduce((s: number, t: any) => s + t.builds.length, 0);
   const nP = out.teams.reduce((s: number, t: any) => s + t.builds.reduce((x: number, b: any) => x + b.players.length, 0), 0);
-  console.log(`✅ wrote scripts/.prod_rosters.json — ${out.teams.length} teams, ${nB} builds, ${nP} player rows`);
+  console.log(`✅ [${ENV}] wrote ${OUT} — ${out.teams.length} teams, ${nB} builds, ${nP} player rows`);
 })().catch((e) => { console.error("ERR:", e.message); process.exit(1); });

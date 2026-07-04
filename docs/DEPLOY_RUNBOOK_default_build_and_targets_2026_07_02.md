@@ -72,6 +72,8 @@ It is `ADD COLUMN IF NOT EXISTS`, so it adds the 4 missing pieces and **skips
       `academic_year` / index. No other partial state.
 - [ ] (Optional, recommended) Run the before/after snapshot-verify to get a
       provable-non-destructive receipt.
+- [ ] Capture the pre-deploy roster ground truth for the final reconciliation:
+      `npm run export-rosters:prod -- scripts/.rosters_before.json`
 
 ### STEP 1 — Merge to staging
 ```bash
@@ -121,6 +123,20 @@ npm run migrate-targets:prod -- --apply         # write
       unchanged; `npm run audit-tb:prod` shows watchlist now on the universal board.
 **Rollback:** additive to `target_board`; the deleted per-build rows were redundant shadows
 of universal entries. If ever needed, reconstruct from `target_board`.
+
+### STEP 6 — FINAL RECONCILIATION (post-deploy)
+Snapshot the after-state and diff it against the pre-deploy ground truth. Confirms ONLY the
+expected changes happened (targets → shared board, defaults seeded) and every on-roster player,
+all money/depth/dev-agg, and every build are byte-identical.
+```bash
+npm run export-rosters:prod -- scripts/.rosters_after.json
+npm run compare-rosters -- scripts/.rosters_before.json scripts/.rosters_after.json
+```
+- [ ] **PASS = "UNEXPECTED changes: NONE".** The EXPECTED list should show only per-build targets
+      moving to the shared board + seeded default builds. Any ❌ line = investigate before sign-off
+      (the tool exits non-zero and names the exact team/build/player/field).
+- [ ] This is the reference for the **team-by-team walkthrough** — the EXPECTED list is what you
+      confirm live per program; the UNEXPECTED list should be empty.
 
 ---
 

@@ -41,3 +41,5 @@ scripts/.tb_baseline.json
 scripts/.prod_rosters.json
 Prod_Roster_Ground_Truth_*
 Prod_Target_Boards_*
+scripts/.rosters_before.json
+scripts/.rosters_after.json
