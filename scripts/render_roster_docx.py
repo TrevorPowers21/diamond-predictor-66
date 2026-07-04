@@ -26,13 +26,21 @@ p=d.add_paragraph(); run(p,"RSTR IQ — Prod Roster Ground Truth",20,True,NAVY)
 p=d.add_paragraph(); run(p,f"Complete human-readable snapshot of every Team Builder roster on production · {STAMP} · READ-ONLY",10,False,GOLD)
 p=d.add_paragraph(); run(p,"Purpose: worst-case reference. If any roster looks wrong after deploy, this is the exact 'before' — every player, every on-roster toggle, every dollar — to rebuild or set back by hand.",9.5,False,GREY,True)
 head("How to read this — plain English",13,GOLD,8)
-for k,v in [("Kind","Returner (already on team) · Transfer (portal target) · Imported (recruit/freshman typed in by hand, not in our DB) · Leaving."),
- ("On Roster?","YES = counts toward the team (lineup/rotation, WAR, budget). NO = on the shared Target Board only, not added to this build."),
+for k,v in [("Each build has two sections","ROSTER = players actually on the team (returners, hand-entered imports, and transfers the coach ADDED to the roster). TARGETS = watchlist names on this build, NOT on the roster."),
+ ("Kind","Returner (already on team) · Transfer (from the portal) · Imported (recruit/freshman typed in by hand, not in our DB) · Leaving. A Transfer in the ROSTER section is an in-roster add; a Transfer in the TARGETS section is a watchlist-only target."),
  ("Pos","Position or pitcher-role slot."),("Depth Role","Depth-chart slot — e.g. everyday starter, bench, weekend starter, high-leverage reliever."),
  ("Dev Agg","Development-aggressiveness projection knob. '(set)' = coach overrode it."),("Projected $","System's suggested market value."),
  ("Actual Pay $","What the coach assigned. '(set)' = manually entered (real coach input, most important to preserve).")]:
     pa=d.add_paragraph(style='List Bullet'); run(pa,k+": ",9.5,True); run(pa,v,9.5)
-COLS=["Player","Kind","On Roster?","Pos","Depth Role","Dev Agg","Projected $","Actual Pay $"]; W=[1.9,0.9,0.9,0.7,1.7,0.8,1.1,1.3]
+COLS=["Player","Kind","Pos","Depth Role","Dev Agg","Projected $","Actual Pay $"]; W=[2.0,1.0,0.8,1.8,0.9,1.2,1.4]
+def sub(txt,color): p=d.add_paragraph(); p.space_before=Pt(4); run(p,txt,10,True,color)
+def render_tbl(players):
+    tb=d.add_table(rows=1,cols=len(COLS)); tb.style='Light Grid Accent 1'
+    for i,h in enumerate(COLS): cell=tb.rows[0].cells[i]; cell.width=Inches(W[i]); run(cell.paragraphs[0],h,8.5,True)
+    for pl in players:
+        cs=tb.add_row().cells
+        vals=[pl["name"],KS.get(pl["kind"],pl["kind"]),pl["position"] or "—",pl["depthRole"] or "—",dev(pl),dol(pl["projectedMarketValue"]),pay(pl)]
+        for i,v in enumerate(vals): cs[i].width=Inches(W[i]); run(cs[i].paragraphs[0],str(v),8.5)
 for t in data["teams"]:
     head(t["name"],13,RED if t["name"].startswith("⚠") else NAVY,14)
     if t["coaches"]: p=d.add_paragraph(); run(p,"Coaches: ",9,True,GREY); run(p,", ".join(t["coaches"]),9,False,GREY)
@@ -40,25 +48,24 @@ for t in data["teams"]:
         p=d.add_paragraph(); run(p,f'Shared Target Board ({len(t["teamTargetBoard"])} — same for every build): ',9.5,True,GOLD)
         run(p,"  •  ".join(f'{x["name"]} ({x["from"] or "?"}, {x["position"] or "?"})' for x in t["teamTargetBoard"]),9)
     for b in t["builds"]:
-        c=b["counts"]; p=d.add_paragraph(); p.space_before=Pt(6)
+        c=b["counts"]; p=d.add_paragraph(); p.space_before=Pt(8)
         run(p,f'  BUILD: {b["name"]}',11,True,NAVY)
-        run(p,f'   —   Budget {dol(b["totalBudget"])} · {c["onRoster"]} on roster · {c["targetsOffRoster"]} targets · {c["imported"]} imported',9,False,GREY)
+        run(p,f'   —   Budget {dol(b["totalBudget"])}',9,False,GREY)
         if not b["players"]: run(d.add_paragraph(),"   (no players)",9,i=True,c=GREY); continue
-        tb=d.add_table(rows=1,cols=len(COLS)); tb.style='Light Grid Accent 1'
-        for i,h in enumerate(COLS): cell=tb.rows[0].cells[i]; cell.width=Inches(W[i]); run(cell.paragraphs[0],h,8.5,True)
-        for pl in b["players"]:
-            cs=tb.add_row().cells
-            vals=[pl["name"],KS.get(pl["kind"],pl["kind"]),"Yes" if pl["onRoster"] else "No",pl["position"] or "—",pl["depthRole"] or "—",dev(pl),dol(pl["projectedMarketValue"]),pay(pl)]
-            for i,v in enumerate(vals):
-                cs[i].width=Inches(W[i]); rr=run(cs[i].paragraphs[0],str(v),8.5)
-                if i==2 and not pl["onRoster"]: rr.font.color.rgb=GREY
+        roster=[x for x in b["players"] if x["onRoster"]]; targets=[x for x in b["players"] if not x["onRoster"]]
+        sub(f'   ROSTER — {len(roster)} on the team  (returners + imports + transfer adds)', NAVY)
+        if roster: render_tbl(roster)
+        else: run(d.add_paragraph(),"      (none on the roster yet)",9,i=True,c=GREY)
+        sub(f'   TARGETS — {len(targets)} watchlist on this build  (NOT on the roster)', GOLD)
+        if targets: render_tbl(targets)
+        else: run(d.add_paragraph(),"      (no targets on this build)",9,i=True,c=GREY)
 d.save(f"Prod_Roster_Ground_Truth_{STAMP}.docx")
 with open(f"Prod_Roster_Ground_Truth_{STAMP}.csv","w",newline="") as f:
-    w=csv.writer(f); w.writerow(["Team","Build","Player","Kind","OnRoster","Position","DepthRole","DevAgg","DevAgg_CoachSet","ProjectedMarketValue","ActualPay","ActualPay_CoachSet","ClassTransition","ProjectionTier"])
+    w=csv.writer(f); w.writerow(["Team","Build","Section","Player","Kind","OnRoster","Position","DepthRole","DevAgg","DevAgg_CoachSet","ProjectedMarketValue","ActualPay","ActualPay_CoachSet","ClassTransition","ProjectionTier"])
     for t in data["teams"]:
         for b in t["builds"]:
-            for pl in b["players"]:
-                w.writerow([t["name"],b["name"],pl["name"],pl["kind"],"Yes" if pl["onRoster"] else "No",pl["position"] or "",pl["depthRole"] or "",pl["devAgg"] if pl["devAgg"] is not None else "",pl["devAggByCoach"],pl["projectedMarketValue"] if pl["projectedMarketValue"] is not None else "",pl["actualPay"] if pl["actualPay"] is not None else "",pl["payByCoach"],pl["classTransition"] or "",pl["projectionTier"] or ""])
+            for pl in sorted(b["players"], key=lambda x: (not x["onRoster"], x["position"] or "", x["name"])):
+                w.writerow([t["name"],b["name"],"ROSTER" if pl["onRoster"] else "TARGET",pl["name"],pl["kind"],"Yes" if pl["onRoster"] else "No",pl["position"] or "",pl["depthRole"] or "",pl["devAgg"] if pl["devAgg"] is not None else "",pl["devAggByCoach"],pl["projectedMarketValue"] if pl["projectedMarketValue"] is not None else "",pl["actualPay"] if pl["actualPay"] is not None else "",pl["payByCoach"],pl["classTransition"] or "",pl["projectionTier"] or ""])
 with open(f"Prod_Target_Boards_{STAMP}.csv","w",newline="") as f:
     w=csv.writer(f); w.writerow(["Team","Player","FromSchool","Position"])
     for t in data["teams"]:
