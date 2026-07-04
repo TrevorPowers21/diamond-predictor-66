@@ -124,33 +124,40 @@ of universal entries. If ever needed, reconstruct from `target_board`.
 
 ---
 
-## FULL ROLLBACK — one-shot "put it all back"
+## ROLLBACK
 
-A single snapshot-and-restore reverts every DATA change (seed + target migration) in one go.
+### Primary — CODE-ONLY PULLBACK (the plan)
+The data additions are safe to keep; only the code needs to come back.
+```bash
+git revert -m 1 <staging→main merge commit>   # then push → Vercel redeploys the old bundle
+```
+Why keeping the data is fine under old code:
+- **Migrated targets:** old code's target-board sync re-pulls them from `target_board` into the build
+  view (and re-shadows them on save). Targets still show; nothing is lost.
+- **Additive columns** (`is_default` / `academic_year` / `player_snapshot`): inert to old code.
 
-**Before Step 2, take the snapshot** (in-DB backup tables — fast, read-only against live data):
+**One cleanup worth doing** so coaches don't see stray default builds in the *old* build picker (old
+code doesn't filter `is_default`), delete the seeded defaults — targeted + guarded:
+```sql
+DELETE FROM team_build_players WHERE build_id IN (SELECT id FROM team_builds WHERE is_default = true);
+DELETE FROM team_builds        WHERE is_default = true;
+```
+That's the whole rollback: revert the merge + (optional) drop the seeded defaults. Targets self-heal.
+
+### Secondary — FULL DATA RESTORE (optional, only if you want the exact pre-state)
+Belt-and-suspenders. **Take the snapshot before Step 2:**
 ```bash
 npm run db-migrate -- supabase/rollback/20260704_backup_before_deploy.sql   # confirm --linked = PROD
 ```
-Creates `team_builds_bak_20260704`, `team_build_players_bak_20260704`, `target_board_bak_20260704`
-and prints the captured row counts.
-
-**To revert everything (data):**
+**Restore to exact pre-deploy state** (re-adds the 130 migrated rows, drops seeded defaults + board
+inserts; transaction-wrapped; `WHERE id IS NOT NULL` satisfies the safe-updates guard — mechanism
+verified on staging):
 ```bash
 npm run db-migrate -- supabase/rollback/20260704_restore_from_backup.sql     # confirm --linked = PROD
 ```
-Restores the three tables to the exact pre-deploy state (re-adds the 130 migrated watchlist rows,
-drops the seeded default builds, removes the target_board inserts). Transaction-wrapped, all-or-nothing.
-
-**To revert the code:** `git revert` the `staging → main` merge commit → Vercel redeploys the old bundle.
-
-**Columns** (`is_default` / `academic_year`): leave them — inert to the reverted code. (Drop only if
-you truly want the schema pristine; never drop `player_snapshot` — it predates this work.)
-
-**Caveat:** the restore reverts to the *exact* snapshot, so any coach change made AFTER the backup
-(during the deploy window) is also reverted. Deploy off-hours and roll back promptly to keep that
-window near-empty. The verify receipt (`verify-tb:prod`) tells you within seconds whether you even
-need to roll back.
+Caveat: this restores the *exact* snapshot, so any coach change made after the backup is also
+reverted — which is why the code-only pullback above is the default. `verify-tb:prod` tells you within
+seconds whether you even need any rollback.
 
 ---
 

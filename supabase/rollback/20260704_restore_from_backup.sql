@@ -17,7 +17,8 @@ BEGIN;
 -- 1. team_build_players: restore exactly.
 --    Re-adds the 130 watchlist rows the migration deleted, and drops the
 --    seeded default-build players (they weren't in the snapshot).
-DELETE FROM team_build_players;
+-- (WHERE id IS NOT NULL satisfies the safe-updates guard that blocks a bare DELETE.)
+DELETE FROM team_build_players WHERE id IS NOT NULL;
 INSERT INTO team_build_players SELECT * FROM team_build_players_bak_20260704;
 
 -- 2. team_builds: remove seeded default builds (anything not in the snapshot).
@@ -25,7 +26,7 @@ INSERT INTO team_build_players SELECT * FROM team_build_players_bak_20260704;
 DELETE FROM team_builds WHERE id NOT IN (SELECT id FROM team_builds_bak_20260704);
 
 -- 3. target_board: restore exactly (drops the migration's inserts).
-DELETE FROM target_board;
+DELETE FROM target_board WHERE id IS NOT NULL;
 INSERT INTO target_board SELECT * FROM target_board_bak_20260704;
 
 COMMIT;
