@@ -286,6 +286,11 @@ async function main() {
           snapshot.p_hr9 = pred.p_hr9 ?? null;
           snapshot.p_rv_plus = pred.p_rv_plus ?? null;
           snapshot.p_war = pred.p_war ?? null;
+          // Pitcher market value was previously omitted here, leaving pitcher
+          // snapshots with a null market value. Store it from the picked line.
+          snapshot.market_value = isTwp
+            ? (pred.twp_pitcher_market_value ?? pred.market_value ?? null)
+            : (pred.market_value ?? null);
           snapshot.pitcher_depth_role = pred.pitcher_depth_role ?? null;
           snapshot.pitcher_role = pred.pitcher_role ?? null;
         }
@@ -339,10 +344,12 @@ async function main() {
             null, null, null, "returner", hitterDepth as any,
             classTransition, 0, false, false, null, localPlayer
           ),
-          // Default rosters intentionally carry NO snapshot. The app reads their
-          // projections LIVE, which matches the live projection exactly and avoids
-          // any stored-vs-live drift. Coach builds still snapshot at save time.
-          player_snapshot: null,
+          player_snapshot: pred ? {
+            p_avg: pred.p_avg, p_obp: pred.p_obp, p_slg: pred.p_slg,
+            p_wrc_plus: pred.p_wrc_plus, o_war: pred.o_war,
+            market_value: pred.twp_hitter_market_value ?? pred.market_value,
+            hitter_depth_role: pred.hitter_depth_role,
+          } : null,
         });
 
         playerRows.push({
@@ -357,7 +364,13 @@ async function main() {
             classTransition, 0, false, false, null,
             { ...localPlayer, position: pitcherRole }
           ),
-          player_snapshot: null, // default rosters read live (see note above)
+          player_snapshot: pred ? {
+            p_era: pred.p_era, p_fip: pred.p_fip, p_whip: pred.p_whip,
+            p_k9: pred.p_k9, p_bb9: pred.p_bb9, p_hr9: pred.p_hr9,
+            p_rv_plus: pred.p_rv_plus, p_war: pred.p_war,
+            pitcher_role: pred.pitcher_role, pitcher_depth_role: pred.pitcher_depth_role,
+            market_value: pred.twp_pitcher_market_value ?? pred.market_value,
+          } : null,
         });
       } else {
         const positionSlot = isPitcher
@@ -374,7 +387,7 @@ async function main() {
             null, null, null, "returner", depthRole as any,
             classTransition, 0, false, false, null, localPlayer
           ),
-          player_snapshot: null, // default rosters read live (see note above)
+          player_snapshot: Object.keys(snapshot).length > 0 ? snapshot : null,
         });
       }
     }
