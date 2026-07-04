@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, useBlocker, useLocation, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
@@ -57,13 +57,6 @@ const POSITION_SLOTS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"] as 
 const PITCHER_SLOTS = ["SP1", "SP2", "SP3", "SP4", "SP5", "RP1", "RP2", "RP3", "RP4", "CL"] as const;
 const MAX_DEPTH = 3;
 const DEV_AGGRESSIVENESS_OPTIONS = [0, 0.5, 1] as const;
-// Per-team scoped draft key. Previously a single global key leaked one team's
-// roster into other teams whenever a superadmin switched impersonation or a
-// user logged in as a different customer (the restore effect ran with the
-// previous team's payload). Each customer team now persists its own draft.
-const TEAM_BUILDER_DRAFT_KEY_PREFIX = "team_builder_draft_v3";
-const getDraftKey = (teamId: string | null | undefined): string | null =>
-  teamId ? `${TEAM_BUILDER_DRAFT_KEY_PREFIX}::${teamId}` : null;
 const LEGACY_PITCHING_ROLE_OVERRIDE_KEY = "pitching_role_overrides_v1";
 
 type TransferSnapshot = {
@@ -827,11 +820,20 @@ export default function TeamBuilder() {
   const [totalBudget, setTotalBudget] = useState<number>(0);
   const [rosterPlayers, setRosterPlayers] = useState<BuildPlayer[]>([]);
   const [dirty, setDirty] = useState(false);
+  const [showNewBuildDialog, setShowNewBuildDialog] = useState(false);
   const [programTierMultiplier, setProgramTierMultiplier] = useState<number>(1.2);
   const [programTierConference, setProgramTierConference] = useState<string>("");
   const [fallbackRosterTotalPlayerScore, setFallbackRosterTotalPlayerScore] = useState<number>(DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
   const [depthAssignments, setDepthAssignments] = useState<Record<string, number>>({});
   const [depthPlaceholders, setDepthPlaceholders] = useState<Record<string, "freshman" | "transfer">>({});
+  // True after the coach's first successful save — subsequent dirty navigations
+  // and idle timeouts auto-save silently instead of showing a prompt.
+  const [hasSavedOnce, setHasSavedOnce] = useState(false);
+  const [promptBuildName, setPromptBuildName] = useState("");
+  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [savedBuildNameDisplay, setSavedBuildNameDisplay] = useState("");
+  const [showRenamePrompt, setShowRenamePrompt] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
   // Tracks the team the depth chart belongs to. When selectedTeam changes
   // (and isn't a load/restore), the team-change effect below clears the
   // depth chart so old indices don't re-bind to whoever happens to land at
@@ -849,15 +851,15 @@ export default function TeamBuilder() {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const skipAutoSeedOnceRef = useRef(false);
   const autoSeededTeamRef = useRef<string>("");
+  // Prevents duplicate default-build seeding for the same team while builds === 0.
+  const defaultBuildCreatingForTeamRef = useRef<string | null>(null);
+  // Prevents the auto-load effect from overriding a just-called newBuild().
+  const newBuildPendingRef = useRef(false);
   // Tracks which effectiveTeamId the current in-memory Team Builder state
   // represents. Used to detect customer-team changes (impersonation switch,
   // sign-in as a different customer) and to suppress draft persistence
   // during the transition before the restore effect catches up.
   const stateTeamRef = useRef<string | null>(null);
-  // Set true by the draft restore so the latest-build auto-load effect knows
-  // to back off (an in-progress unsaved draft should win over the saved
-  // build for the same team).
-  const restoredFromDraftRef = useRef(false);
 
   useEffect(() => {
     setTeamSearchQuery(selectedTeam || "");
@@ -1464,6 +1466,27 @@ export default function TeamBuilder() {
   const [buildLoadDone, setBuildLoadDone] = useState(false);
   const buildLoadDoneRef = useRef(false);
   buildLoadDoneRef.current = buildLoadDone;
+
+  // Only WATCHLIST targets (roster_status='target' AND included_in_roster=false)
+  // are universal — the same shared board on every build of a team. Cache those
+  // so switching builds WITHIN a team carries them over instead of clearing +
+  // re-fetching (which made the Targets tab reload on every switch).
+  //
+  // On-roster targets (included_in_roster=true) are BUILD-SPECIFIC — a player the
+  // coach added to build A's roster must NOT appear on build B. They live in each
+  // build's own team_build_players and are loaded per build, so they must never
+  // be carried across a switch. Excluded here.
+  //
+  // Scoped by effectiveTeamId; a team change resets the roster to empty, which we
+  // ignore so the cache isn't wiped mid-switch — a cross-team load won't match.
+  const preservedTargetsRef = useRef<{ team: string | null; rows: BuildPlayer[] }>({ team: null, rows: [] });
+  useEffect(() => {
+    const watchlist = rosterPlayers.filter(
+      (p) => (p.roster_status || "returner") === "target" && (p as any).included_in_roster === false && p.player_id,
+    );
+    if (watchlist.length > 0) preservedTargetsRef.current = { team: effectiveTeamId, rows: watchlist };
+  }, [rosterPlayers, effectiveTeamId]);
+
   const loadBuild = useLoadBuild({
     builds, allPlayersForSearch, selectedTeam, selectedTeamId, effectiveTeamId,
     pitchingMasterRows, pitchingStatsByNameTeam, seasonUsage,
@@ -1471,7 +1494,7 @@ export default function TeamBuilder() {
     setSelectedBuildId, setBuildName, setTotalBudget, setSelectedTeam,
     setDepthAssignments, setDepthPlaceholders, setRosterPlayers, setDirty,
     lastDepthTeamRef, skipAutoSeedOnceRef, autoSeededTeamRef,
-    buildLoadDoneRef, setBuildLoadDone,
+    buildLoadDoneRef, setBuildLoadDone, preservedTargetsRef,
   });
 
   // Auto-load roster when team changes and it's a new build.
@@ -1681,21 +1704,17 @@ export default function TeamBuilder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBuildId, seasonUsage]);
 
-  // Restore unsaved Team Builder draft on mount or whenever the active
-  // customer team changes (login, sign-out, or superadmin impersonation
-  // switch). Per-team scoped key so one team's draft never leaks into
-  // another team's view.
+  // Reset state whenever the active customer team changes (login, sign-out,
+  // or superadmin impersonation switch).
   useEffect(() => {
     if (!effectiveTeamId) {
       stateTeamRef.current = null;
-      restoredFromDraftRef.current = false;
       return;
     }
     if (stateTeamRef.current === effectiveTeamId) return;
 
     // Team changed (or first mount with a team). Clear in-memory state so
-    // the previous team's roster/build never lingers, then attempt to
-    // restore this team's draft.
+    // the previous team's roster/build never lingers.
     setSelectedBuildId(null);
     setBuildName("My Team Build");
     setSelectedTeam("");
@@ -1704,115 +1723,51 @@ export default function TeamBuilder() {
     setDepthAssignments({});
     setDepthPlaceholders({});
     autoSeededTeamRef.current = "";
-    restoredFromDraftRef.current = false;
-
-    try {
-      const draftKey = getDraftKey(effectiveTeamId);
-      const raw = draftKey ? localStorage.getItem(draftKey) : null;
-      if (raw) {
-        const draft = JSON.parse(raw) as {
-          selectedBuildId: string | null;
-          buildName: string;
-          selectedTeam: string;
-          totalBudget: number;
-          rosterPlayers: BuildPlayer[];
-          programTierMultiplier: number;
-          programTierConference: string;
-          fallbackRosterTotalPlayerScore: number;
-          dirty: boolean;
-          depthAssignments?: Record<string, number>;
-          depthPlaceholders?: Record<string, "freshman" | "transfer">;
-        };
-        if (draft) {
-          if (!draft.selectedTeam) {
-            // Empty draft (written before the persist guard was added). Purge
-            // it so the auto-load effect can default to the most-recent build.
-            if (draftKey) localStorage.removeItem(draftKey);
-          } else {
-            setSelectedBuildId(draft.selectedBuildId ?? null);
-            setBuildName(draft.buildName ?? "My Team Build");
-            setSelectedTeam(draft.selectedTeam ?? "");
-            setTotalBudget(Number(draft.totalBudget) || 0);
-            setRosterPlayers(Array.isArray(draft.rosterPlayers) ? draft.rosterPlayers : []);
-            setProgramTierMultiplier(Number(draft.programTierMultiplier) || 1.2);
-            setProgramTierConference(draft.programTierConference ?? "");
-            setFallbackRosterTotalPlayerScore(Number(draft.fallbackRosterTotalPlayerScore) || DEFAULT_PROGRAM_TOTAL_PLAYER_SCORE);
-            setDirty(false);
-            if (draft.depthAssignments) setDepthAssignments(draft.depthAssignments);
-            if (draft.depthPlaceholders) setDepthPlaceholders(draft.depthPlaceholders);
-            skipAutoSeedOnceRef.current = true;
-            autoSeededTeamRef.current = normalizeName(draft.selectedTeam);
-            restoredFromDraftRef.current = true;
-          }
-        }
-      }
-    } catch {
-      // ignore invalid draft payloads
-    }
+    defaultBuildCreatingForTeamRef.current = null;
+    forkedBuildIdRef.current = null;
+    forkInFlightRef.current = null;
+    setHasSavedOnce(false);
 
     stateTeamRef.current = effectiveTeamId;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveTeamId]);
 
-  // Default to most-recent saved build for the current team when no draft
-  // was restored. Trevor's ask: "default to last build specific to that
-  // team if they have one." Only runs after the restore effect (gated by
-  // stateTeamRef catching up) and only when there's no draft to honor.
+  // Default to most-recent saved build for the current team. Trevor's ask:
+  // "default to last build specific to that team if they have one." Only
+  // runs after the team-change effect (gated by stateTeamRef catching up).
+  // When there are no builds yet, seeds local state from returners so the
+  // coach sees a populated roster immediately. The DB record is created when
+  // they save (or when the precompute Edge Function runs for the team).
   useEffect(() => {
     if (!effectiveTeamId) return;
     if (stateTeamRef.current !== effectiveTeamId) return;
-    if (restoredFromDraftRef.current) return;
     if (selectedBuildId) return;
-    if (builds.length === 0) return;
-    const latest = builds[0] as { id: string };
-    loadBuild(latest.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveTeamId, selectedBuildId, builds.length]);
-
-  // Persist Team Builder draft so browser back returns to the same state.
-  // Two guards prevent cross-team leakage:
-  //   1) Scoped key (per effectiveTeamId) so each team has its own draft slot
-  //   2) stateTeamRef must match effectiveTeamId — otherwise the restore
-  //      effect hasn't reset state for the new team yet and we'd write the
-  //      previous team's data into the new team's key.
-  useEffect(() => {
-    if (!effectiveTeamId) return;
-    if (stateTeamRef.current !== effectiveTeamId) return;
-    if (!selectedTeam) return;
-    const draftKey = getDraftKey(effectiveTeamId);
-    if (!draftKey) return;
-    try {
-      const payload = {
-        selectedBuildId,
-        buildName,
-        selectedTeam,
-        totalBudget,
-        rosterPlayers,
-        programTierMultiplier,
-        programTierConference,
-        fallbackRosterTotalPlayerScore,
-        dirty,
-        depthAssignments,
-        depthPlaceholders,
-      };
-      localStorage.setItem(draftKey, JSON.stringify(payload));
-    } catch {
-      // ignore storage quota/access errors
+    if (buildsLoading) return;
+    // If newBuild() was just called, don't override it by loading a saved build.
+    if (newBuildPendingRef.current) {
+      newBuildPendingRef.current = false;
+      return;
     }
-  }, [
-    effectiveTeamId,
-    selectedBuildId,
-    buildName,
-    selectedTeam,
-    totalBudget,
-    rosterPlayers,
-    programTierMultiplier,
-    programTierConference,
-    fallbackRosterTotalPlayerScore,
-    dirty,
-    depthAssignments,
-    depthPlaceholders,
-  ]);
+    if (builds.length === 0) {
+      // No saved builds — seed from returners so the coach sees a roster,
+      // not a blank page. Use the ref guard to run only once per team.
+      if (defaultBuildCreatingForTeamRef.current === effectiveTeamId) return;
+      defaultBuildCreatingForTeamRef.current = effectiveTeamId;
+      newBuild();
+      return;
+    }
+    // Prefer most-recent coach build for the current season; fall back to any
+    // prior-year coach build, then to the most-recent default build.
+    // Builds are sorted updated_at DESC by the query, so [0] is always the latest.
+    const coachBuilds = builds.filter((b: any) => !b.is_default);
+    const defaultBuilds = builds.filter((b: any) => b.is_default);
+    const currentYearCoachBuilds = coachBuilds.filter((b: any) => b.academic_year === PROJECTION_SEASON);
+    const toLoad = (currentYearCoachBuilds[0] ?? coachBuilds[0] ?? defaultBuilds[0]) as { id: string; is_default?: boolean } | undefined;
+    if (!toLoad) return;
+    setHasSavedOnce(!toLoad.is_default);
+    loadBuild(toLoad.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveTeamId, selectedBuildId, builds.length, buildsLoading]);
 
   useEffect(() => {
     if (!selectedTeam) return;
@@ -1858,7 +1813,11 @@ export default function TeamBuilder() {
       if (!user) throw new Error("Not logged in");
       const saveAs = !!opts?.saveAs;
       const targetName = (opts?.nameOverride || buildName || "").trim() || (selectedTeam ? `${selectedTeam} Build` : "My Team Build");
-      let buildId = saveAs ? null : selectedBuildId;
+      // If currently on a default build, silently fork to a coach build first.
+      // Returns the new build ID (or null if already a coach build). We use the
+      // return value directly because React state won't update until next render.
+      const forkedId = await forkFromDefaultIfNeeded();
+      let buildId = saveAs ? null : (forkedId ?? selectedBuildId);
 
       if (buildId) {
         await supabase.from("team_builds").update({
@@ -1879,13 +1838,23 @@ export default function TeamBuilder() {
           total_budget: totalBudget,
           depth_assignments: depthAssignments,
           depth_placeholders: depthPlaceholders,
+          academic_year: PROJECTION_SEASON,
         }).select("id").single();
         if (error) throw error;
         buildId = data.id;
       }
 
-      if (rosterPlayers.length > 0) {
-        const rows = rosterPlayers.map((rp) => ({
+      // Target-board consolidation (2026-07): pure watchlist targets
+      // (roster_status='target' AND included_in_roster=false) live ONLY in the
+      // universal target_board — they are NOT persisted per-build, so the board
+      // is identical on every build. A target the coach pulls onto THIS build's
+      // active roster (included_in_roster=true) IS a build-specific decision and
+      // is persisted normally. Returners always persist.
+      const persistableRoster = rosterPlayers.filter(
+        (rp) => !((rp.roster_status ?? "returner") === "target" && (rp as any).included_in_roster === false),
+      );
+      if (persistableRoster.length > 0) {
+        const rows = persistableRoster.map((rp) => ({
           ...(() => {
             const fullName = rp.player ? `${rp.player.first_name || ""} ${rp.player.last_name || ""}`.trim() : "";
             const persistedName = (rp.custom_name && rp.custom_name.trim()) || fullName || getPlayerName(rp) || null;
@@ -1901,6 +1870,7 @@ export default function TeamBuilder() {
           // Only newly added targets land as false; the "+" toggle on the
           // target board flips this to true.
           included_in_roster: rp.included_in_roster ?? true,
+          player_snapshot: rp.prediction ?? null,
           production_notes: serializeBuildPlayerMeta(
             rp.production_notes,
             rp.team_metrics ?? null,
@@ -1936,14 +1906,187 @@ export default function TeamBuilder() {
       return { buildId, saveAs, targetName };
     },
     onSuccess: (result) => {
+      setHasSavedOnce(true);
       toast({ title: result?.saveAs ? `Build saved as "${result.targetName}"` : "Build saved" });
       queryClient.invalidateQueries({ queryKey: ["team-builds"] });
     },
     onError: (e: any) => toast({ title: "Save failed", description: e.message, variant: "destructive" }),
   });
 
+  // Clone ANY existing build into a fresh coach build — copies its full roster
+  // plus every per-player override (depth/dev-agg/etc. ride along in
+  // production_notes), so a coach doesn't have to redo changes. DB-level copy
+  // of the source's team_build_players rows; no need to load it into the UI.
+  const cloneBuildById = async (sourceId: string, sourceName: string) => {
+    if (!user || !effectiveTeamId) return;
+    try {
+      const [{ data: src }, { data: srcPlayers }] = await Promise.all([
+        supabase.from("team_builds").select("team,total_budget,depth_assignments,depth_placeholders").eq("id", sourceId).single(),
+        supabase.from("team_build_players").select("custom_name,player_id,source,position_slot,depth_order,nil_value,included_in_roster,player_snapshot,production_notes").eq("build_id", sourceId),
+      ]);
+      const { data: nb, error } = await supabase.from("team_builds").insert({
+        user_id: user.id,
+        customer_team_id: effectiveTeamId,
+        name: `${sourceName} (copy)`,
+        team: (src as any)?.team ?? selectedTeam,
+        total_budget: (src as any)?.total_budget ?? 0,
+        depth_assignments: (src as any)?.depth_assignments ?? {},
+        depth_placeholders: (src as any)?.depth_placeholders ?? {},
+        academic_year: PROJECTION_SEASON,
+      }).select("id").single();
+      if (error) throw error;
+      if (srcPlayers && srcPlayers.length > 0) {
+        const rows = (srcPlayers as any[]).map((r) => ({ ...r, build_id: nb.id }));
+        const { error: pErr } = await supabase.from("team_build_players").insert(rows);
+        if (pErr) throw pErr;
+      }
+      queryClient.invalidateQueries({ queryKey: ["team-builds"] });
+      setHasSavedOnce(true);
+      loadBuild(nb.id);
+      toast({ title: `Cloned "${sourceName}"` });
+    } catch (e: any) {
+      toast({ title: "Clone failed", description: e.message, variant: "destructive" });
+    }
+  };
+
+  // True when the currently loaded build is a system-managed default build.
+  const isDefaultBuild = useMemo(() => {
+    if (!selectedBuildId) return false;
+    const b = builds.find((x: any) => x.id === selectedBuildId);
+    return (b as any)?.is_default === true;
+  }, [selectedBuildId, builds]);
+
+  // Season transition banner — shown when the coach has prior-year builds but no
+  // current-season coach build yet. Dismissed per-session.
+  const hasCurrentYearCoachBuild = useMemo(
+    () => builds.some((b: any) => !b.is_default && b.academic_year === PROJECTION_SEASON),
+    [builds],
+  );
+  const hasPriorYearCoachBuild = useMemo(
+    () => builds.some((b: any) => !b.is_default && b.academic_year != null && b.academic_year !== PROJECTION_SEASON),
+    [builds],
+  );
+  const SEASON_BANNER_KEY = `tb_season_banner_dismissed_${PROJECTION_SEASON}`;
+  const [seasonBannerDismissed, setSeasonBannerDismissed] = useState(
+    () => typeof sessionStorage !== "undefined" && sessionStorage.getItem(SEASON_BANNER_KEY) === "1",
+  );
+  const showSeasonBanner = !seasonBannerDismissed && hasPriorYearCoachBuild && !hasCurrentYearCoachBuild;
+  const dismissSeasonBanner = useCallback(() => {
+    sessionStorage.setItem(SEASON_BANNER_KEY, "1");
+    setSeasonBannerDismissed(true);
+  }, [SEASON_BANNER_KEY]);
+
+  const idleSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showSavePrompt, setShowSavePrompt] = useState(false);
+  // After 30s of idle with unsaved changes: prompt on first save, auto-save after that.
+  useEffect(() => {
+    if (idleSaveTimerRef.current) clearTimeout(idleSaveTimerRef.current);
+    if (!dirty) { setShowSavePrompt(false); return; }
+    idleSaveTimerRef.current = setTimeout(() => {
+      if (hasSavedOnce) {
+        saveMutation.mutate({});
+      } else {
+        setPromptBuildName(selectedTeam ? `${selectedTeam} Build` : "My Build");
+        setShowSavePrompt(true);
+      }
+    }, 30_000);
+    return () => {
+      if (idleSaveTimerRef.current) clearTimeout(idleSaveTimerRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, hasSavedOnce]);
+
+  // Ref that prevents duplicate concurrent fork calls. Stores the in-flight
+  // promise so all callers await the same fork operation.
+  const forkInFlightRef = useRef<Promise<string | null> | null>(null);
+  const forkedBuildIdRef = useRef<string | null>(null);
+
+  // Silently forks the current default build into a new coach build.
+  // Returns the new build id if a fork was created, null if no fork needed.
+  // Safe to call multiple times — deduplicates via ref.
+  const forkFromDefaultIfNeeded = useCallback(async (): Promise<string | null> => {
+    if (forkedBuildIdRef.current) return null; // already forked this session
+    if (!selectedBuildId) return null;
+    const b = builds.find((x: any) => x.id === selectedBuildId);
+    if (!(b as any)?.is_default) return null;
+
+    if (forkInFlightRef.current) return forkInFlightRef.current;
+
+    const promise = (async () => {
+      const { data: newBuild, error: buildErr } = await supabase
+        .from("team_builds")
+        .insert([{
+          customer_team_id: (b as any).customer_team_id,
+          team: (b as any).team,
+          name: "Unsaved Build",
+          user_id: user?.id ?? null,
+          total_budget: (b as any).total_budget ?? 0,
+          depth_assignments: (b as any).depth_assignments ?? {},
+          depth_placeholders: (b as any).depth_placeholders ?? {},
+          is_default: false,
+          academic_year: (b as any).academic_year ?? null,
+        }])
+        .select("id")
+        .single();
+      if (buildErr || !newBuild) {
+        console.error("[forkDefault] build insert failed:", buildErr?.message);
+        forkInFlightRef.current = null;
+        return null;
+      }
+      const newBuildId = newBuild.id as string;
+      // Players are NOT copied from the DB default here — saveMutation writes
+      // the full rosterPlayers state (with all local changes) immediately after.
+
+      forkedBuildIdRef.current = newBuildId;
+      // Pre-mark the forked build as usage-corrected so the depth corrective
+      // effect (which fires when selectedBuildId changes) doesn't recompute
+      // depth_role from PA data and overwrite the coach's change that triggered
+      // the fork in the first place.
+      usageCorrectedBuildRef.current = newBuildId;
+      setSelectedBuildId(newBuildId);
+      setBuildName("Unsaved Build");
+      queryClient.invalidateQueries({ queryKey: ["team-builds"] });
+      return newBuildId;
+    })();
+
+    forkInFlightRef.current = promise;
+    return promise;
+  }, [selectedBuildId, builds, supabase, queryClient, user]);
+
+  // Silently fork the default build the moment the coach makes their first change,
+  // so the default is never mutated and the coach build is ready to receive saves.
+  useEffect(() => {
+    if (!dirty || !isDefaultBuild) return;
+    forkFromDefaultIfNeeded();
+  }, [dirty, isDefaultBuild, forkFromDefaultIfNeeded]);
+
+  // Block navigation when there are unsaved changes — prompt coach to save.
+  const blocker = useBlocker(() => dirty);
+
+  // Handle blocked navigation: auto-save silently after first save, prompt first time.
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    if (!dirty) { blocker.proceed(); return; }
+    if (hasSavedOnce) {
+      saveMutation.mutateAsync({})
+        .then(() => blocker.proceed())
+        .catch(() => blocker.proceed());
+    } else {
+      setPromptBuildName(selectedTeam ? `${selectedTeam} Build` : "My Build");
+      setShowSavePrompt(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocker.state]);
+
   const deleteBuildMutation = useMutation({
     mutationFn: async (id: string) => {
+      const b = builds.find((x: any) => x.id === id);
+      if ((b as any)?.is_default) {
+        const confirmed = window.confirm(
+          "You are removing the default roster for this team. This cannot be undone and will affect what coaches see when they first log in.\n\nAre you sure you want to proceed?"
+        );
+        if (!confirmed) return;
+      }
       await supabase.from("team_builds").delete().eq("id", id);
     },
     onSuccess: () => {
@@ -2584,7 +2727,12 @@ export default function TeamBuilder() {
       if (fresh.length === 0) return prev;
       return [...prev, ...fresh];
     });
-    setDirty(true);
+    // __sync rows are injected by the universal-target-board pull (a target
+    // added on Profile/Dashboard/Portal, or the team's shared board loading in)
+    // — NOT a coach edit to this build. They must never mark the build dirty,
+    // otherwise just sitting on a build (or switching to it) spuriously triggers
+    // the save prompt / idle auto-save. Only a real user-initiated add dirties.
+    if (!row?.__sync) setDirty(true);
     setTargetPlayerSearchQuery("");
     setTargetPlayerSearchOpen(false);
     if (row.id && !isOnSupabaseBoard(row.id)) {
@@ -2944,6 +3092,10 @@ export default function TeamBuilder() {
 
   // Class color reads the player's CURRENT class_year (FR/SO/JR/SR/GR),
   const newBuild = () => {
+    // Signal the auto-load effect not to override our fresh state when
+    // selectedBuildId drops to null and triggers the effect's deps.
+    newBuildPendingRef.current = true;
+    setHasSavedOnce(false);
     setSelectedBuildId(null);
     setBuildName("My Team Build");
     setTotalBudget(0);
@@ -3117,6 +3269,210 @@ export default function TeamBuilder() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        {/* Season transition banner */}
+        {showSeasonBanner && (
+          <div className="rounded-lg border border-blue-400/40 bg-blue-950/30 px-4 py-3 flex items-start justify-between gap-3 text-sm">
+            <div className="text-blue-200">
+              <strong className="text-blue-100">New season available.</strong>{" "}
+              Your previous builds are still here, but the default roster has been updated for{" "}
+              {PROJECTION_SEASON}. Click <em>Save As</em> to create your {PROJECTION_SEASON} build.
+            </div>
+            <button
+              className="shrink-0 text-blue-400 hover:text-blue-200 transition-colors text-xs mt-0.5"
+              onClick={dismissSeasonBanner}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+        {/* Save prompt — shown after 15s idle (first time only; after that auto-saves) */}
+        {showSavePrompt && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+            <div className="bg-[#0d1a30] border border-[#162241] rounded-xl p-6 w-full max-w-sm shadow-2xl">
+              <h3 className="text-base font-bold text-slate-100 mb-1">Name your build</h3>
+              <p className="text-sm text-slate-400 mb-4">
+                You've made changes to the roster. Give this build a name and save it to keep your work.
+              </p>
+              <input
+                type="text"
+                value={promptBuildName}
+                onChange={(e) => setPromptBuildName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && promptBuildName.trim()) {
+                    const name = promptBuildName.trim();
+                    saveMutation.mutateAsync({ nameOverride: name }).then(() => {
+                      setShowSavePrompt(false);
+                      setSavedBuildNameDisplay(name);
+                      setShowSaveSuccess(true);
+                    });
+                  }
+                }}
+                placeholder="e.g. 2026 Roster"
+                className="w-full bg-[#0a1428] border border-[#162241] rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-[#D4AF37] mb-4"
+                autoFocus
+              />
+              <div className="flex gap-2 justify-end">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setShowSavePrompt(false);
+                    setDirty(false);
+                    if (blocker.state === "blocked") blocker.proceed();
+                  }}
+                >
+                  Discard
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={saveMutation.isPending || !promptBuildName.trim()}
+                  onClick={async () => {
+                    const name = promptBuildName.trim();
+                    await saveMutation.mutateAsync({ nameOverride: name });
+                    setShowSavePrompt(false);
+                    setSavedBuildNameDisplay(name);
+                    setShowSaveSuccess(true);
+                  }}
+                >
+                  {saveMutation.isPending ? "Saving…" : "Save Build"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Save success confirmation */}
+        {showSaveSuccess && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+            <div className="bg-[#0d1a30] border border-[#162241] rounded-xl p-6 w-full max-w-sm shadow-2xl relative">
+              <button
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-100 transition-colors cursor-pointer"
+                onClick={() => {
+                  setShowSaveSuccess(false);
+                  if (blocker.state === "blocked") blocker.proceed();
+                }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="flex items-center justify-center w-8 h-8 rounded-full bg-green-500/20 border border-green-500/30 shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-green-400"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <h3 className="text-base font-bold text-slate-100">Build saved</h3>
+              </div>
+              <p className="text-sm text-slate-400 pl-11">
+                &ldquo;{savedBuildNameDisplay}&rdquo; has been saved to your account.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Rename build dialog */}
+        {showRenamePrompt && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+            <div className="bg-[#0d1a30] border border-[#162241] rounded-xl p-6 w-full max-w-sm shadow-2xl">
+              <h3 className="text-base font-bold text-slate-100 mb-1">Rename build</h3>
+              <input
+                type="text"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && renameValue.trim()) {
+                    saveMutation.mutateAsync({ nameOverride: renameValue.trim() }).then(() => setShowRenamePrompt(false));
+                  }
+                  if (e.key === "Escape") setShowRenamePrompt(false);
+                }}
+                className="w-full bg-[#0a1428] border border-[#162241] rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-[#D4AF37] mb-4"
+                autoFocus
+              />
+              <div className="flex gap-2 justify-end">
+                <Button variant="ghost" size="sm" onClick={() => setShowRenamePrompt(false)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  disabled={saveMutation.isPending || !renameValue.trim()}
+                  onClick={() => {
+                    saveMutation.mutateAsync({ nameOverride: renameValue.trim() }).then(() => setShowRenamePrompt(false));
+                  }}
+                >
+                  {saveMutation.isPending ? "Saving…" : "Rename"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* New Build dialog — clone current or start from default */}
+        {showNewBuildDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+            <div
+              className="w-full max-w-md overflow-hidden rounded-lg border border-l-[3px] shadow-2xl"
+              style={{ backgroundColor: "#0a1428", borderColor: "#1f2d52", borderLeftColor: "#D4AF37" }}
+            >
+              {/* Header — gold icon chip + Oswald gold title (app chrome) */}
+              <div className="flex items-center gap-2.5 border-b px-5 pb-4 pt-5" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+                <div
+                  className="flex h-8 w-8 items-center justify-center rounded-md border"
+                  style={{ backgroundColor: "rgba(212,175,55,0.10)", borderColor: "rgba(212,175,55,0.30)" }}
+                >
+                  <Plus className="h-4 w-4" style={{ color: "#D4AF37" }} />
+                </div>
+                <div>
+                  <h3 className="font-[Oswald] text-[16px] font-bold uppercase leading-none tracking-[0.08em]" style={{ color: "#D4AF37" }}>
+                    Start a New Build
+                  </h3>
+                  <p className="mt-1 text-[12px] text-slate-400">Begin fresh, or branch off an existing roster</p>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="px-5 py-4">
+                <button
+                  type="button"
+                  onClick={() => { setShowNewBuildDialog(false); newBuild(); }}
+                  className="flex w-full items-center justify-between gap-3 rounded-md border px-3.5 py-3 text-left cursor-pointer transition-colors duration-150 hover:bg-[#D4AF37]/[0.08]"
+                  style={{ borderColor: "#1f2d52" }}
+                >
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-100">Start from default roster</span>
+                    <span className="block text-[12px] text-slate-500">Your returners, fresh slate</span>
+                  </span>
+                  <span className="shrink-0 font-[Oswald] text-[11px] font-bold uppercase tracking-[0.18em] text-[#D4AF37]">New</span>
+                </button>
+
+                {builds.filter((b: any) => !b.is_default && (b.academic_year === PROJECTION_SEASON || b.academic_year == null)).length > 0 && (
+                  <div className="mt-4">
+                    <div className="mb-1.5 font-[Oswald] text-[11px] font-bold uppercase tracking-[0.22em] text-[#D4AF37]">
+                      Or clone an existing build
+                    </div>
+                    <div className="max-h-[200px] overflow-y-auto rounded-md border" style={{ backgroundColor: "#040810", borderColor: "#1f2d52" }}>
+                      {builds
+                        .filter((b: any) => !b.is_default && (b.academic_year === PROJECTION_SEASON || b.academic_year == null))
+                        .map((b: any) => (
+                          <button
+                            key={b.id}
+                            type="button"
+                            onClick={() => { setShowNewBuildDialog(false); cloneBuildById(b.id, b.name); }}
+                            className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left text-sm text-slate-100 cursor-pointer transition-colors duration-150 hover:bg-[#D4AF37]/[0.08]"
+                            style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+                          >
+                            <span className="truncate">{b.name}</span>
+                            {b.team && <span className="shrink-0 text-[11px] text-slate-500 tabular-nums">{b.team}</span>}
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="flex justify-end border-t px-5 py-3" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+                <Button variant="ghost" size="sm" onClick={() => setShowNewBuildDialog(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
         {/* Header — brand Oswald + gold accent, consistent with Overview & Player Dashboard */}
         <div className="rounded-lg border-l-[3px] border-l-[#D4AF37] border-t border-r border-b border-border/60 bg-muted/20 px-4 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
@@ -3131,19 +3487,24 @@ export default function TeamBuilder() {
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-[220px]">
               <Label className="text-xs mb-1 block">Load Saved Build</Label>
-              <Select value={selectedBuildId || "new"} onValueChange={(v) => v === "new" ? newBuild() : loadBuild(v)}>
+              <Select value={selectedBuildId || "new"} onValueChange={(v) => { if (v === "new") { setShowNewBuildDialog(true); } else { const b = builds.find((x: any) => x.id === v); setHasSavedOnce(!!(b && !(b as any).is_default)); loadBuild(v); } }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select build…" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="new">+ New Build</SelectItem>
-                  {builds.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>{b.name} ({b.team})</SelectItem>
+                  {[
+                    ...builds.filter((b: any) => b.is_default && (b.academic_year === PROJECTION_SEASON || b.academic_year == null)),
+                    ...builds.filter((b: any) => !b.is_default && (b.academic_year === PROJECTION_SEASON || b.academic_year == null)),
+                  ].map((b: any) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.is_default ? "Default Roster" : b.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <Button variant="outline" onClick={newBuild}>
+            <Button variant="outline" onClick={() => setShowNewBuildDialog(true)}>
               <Plus className="h-4 w-4 mr-1" /> New Build
             </Button>
             {dirty && (
@@ -3173,6 +3534,16 @@ export default function TeamBuilder() {
             >
               Save As
             </Button>
+            {selectedBuildId && !isDefaultBuild && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setRenameValue(buildName); setShowRenamePrompt(true); }}
+                disabled={saveMutation.isPending}
+              >
+                Rename
+              </Button>
+            )}
           </div>
         </div>
 
