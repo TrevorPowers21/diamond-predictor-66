@@ -314,13 +314,13 @@ export default function Dashboard() {
     })()
   );
 
-  // Top available players — the portal is closed for the season, so instead of a
-  // "what entered this week" feed we rank the best still-UNCOMMITTED players by
-  // projected talent (top hitters by wRC+, top pitchers by pRV+), capped at 50.
-  // Ranked on the GLOBAL 'regular' projection so every player has one comparable
-  // value; recency no longer matters once the portal is shut.
+  // Top available players — the portal is closed, so instead of a "what entered
+  // this week" feed we rank the best still-UNCOMMITTED players by their projected
+  // value AT THE LOGGED-IN TEAM: this team's precomputed line when it exists,
+  // falling back to the global 'regular' line for the crossover (players with no
+  // team precompute). Top hitters by wRC+, top pitchers by pRV+, capped at 50.
   const { data: portalActivity = [] } = useQuery({
-    queryKey: ["overview-top-uncommitted-v1", watchedIdsKey, effectiveTeamId],
+    queryKey: ["overview-top-uncommitted-v2", watchedIdsKey, effectiveTeamId],
     staleTime: 60 * 1000,
     refetchOnWindowFocus: false,
     queryFn: async () => {
@@ -328,59 +328,87 @@ export default function Dashboard() {
       const MIN_HITTER_PA = 25;
       const MIN_PITCHER_IP = 10;
       const pit = "SP,RP,CL,P,LHP,RHP";
-      const N = 60; // candidates pulled per side before the merge → top 50
+      const N = 80; // candidates per (scope × side) before the merge → top 50
       const playerCols =
         "id, first_name, last_name, team, from_team, position, portal_status, portal_entry_date, commit_school, commit_date, updated_at";
+      const teamId = effectiveTeamId;
 
-      // One global 'regular' projection row per player = a single comparable value
-      // the DB can rank on. `players!inner` + status IN PORTAL scopes to uncommitted.
-      const base = () => (supabase as any)
-        .from("player_predictions")
-        .select(`player_id, p_wrc_plus, p_rv_plus, players!inner(${playerCols}, pa, ip)`)
-        .eq("season", PROJECTION_SEASON)
-        .eq("variant", "regular")
-        .is("customer_team_id", null)
-        .in("status", ["active", "departed"])
-        .eq("players.portal_status", "IN PORTAL");
-
-      const [hitters, pitchers] = await Promise.all([
-        base()
-          .not("players.position", "in", `(${pit})`)
-          .gte("players.pa", MIN_HITTER_PA)
-          .not("p_wrc_plus", "is", null)
-          .order("p_wrc_plus", { ascending: false })
-          .limit(N),
-        base()
-          .in("players.position", `(${pit})`)
-          .gte("players.ip", MIN_PITCHER_IP)
-          .not("p_rv_plus", "is", null)
-          .order("p_rv_plus", { ascending: false })
-          .limit(N),
-      ]);
+      // One DB-ordered query per (scope, side). `scope` is either this team's
+      // precomputed rows or the global regular rows; the merge below prefers the
+      // team-precomputed value per player and uses global only on the crossover.
+      const sideQuery = (scope: "team" | "global", side: "H" | "P") => {
+        let q = (supabase as any)
+          .from("player_predictions")
+          .select(`player_id, customer_team_id, variant, p_wrc_plus, p_rv_plus, players!inner(${playerCols}, pa, ip)`)
+          .eq("season", PROJECTION_SEASON)
+          .in("status", ["active", "departed"])
+          .eq("players.portal_status", "IN PORTAL");
+        q = scope === "team"
+          ? q.eq("customer_team_id", teamId).eq("variant", "precomputed")
+          : q.is("customer_team_id", null).eq("variant", "regular");
+        q = side === "H"
+          ? q.not("players.position", "in", `(${pit})`).gte("players.pa", MIN_HITTER_PA).not("p_wrc_plus", "is", null).order("p_wrc_plus", { ascending: false })
+          : q.in("players.position", `(${pit})`).gte("players.ip", MIN_PITCHER_IP).not("p_rv_plus", "is", null).order("p_rv_plus", { ascending: false });
+        return q.limit(N);
+      };
 
       const followSet = new Set(highFollowList.map((p) => p.player_id));
       const boardSet = new Set(targetBoard.map((p) => p.player_id));
       const isPitcher = (pos: string | null | undefined) =>
         /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
 
-      const seen = new Set<string>();
-      const all = [...((hitters.data as any[]) || []), ...((pitchers.data as any[]) || [])]
-        .map((r: any) => {
-          const p = r.players;
-          const pitcher = isPitcher(p.position);
-          return {
-            ...p,
-            p_wrc_plus: r.p_wrc_plus,
-            p_rv_plus: r.p_rv_plus,
-            is_pitcher: pitcher,
-            metric_value: (pitcher ? r.p_rv_plus : r.p_wrc_plus) ?? null,
-            source: followSet.has(p.id) ? "following" : boardSet.has(p.id) ? "board" : "top",
-          };
-        })
-        // A player can have both an active + departed global row — keep the first.
-        .filter((p: any) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
+      // Top candidates by this team's precompute value AND by global value.
+      const empty = Promise.resolve({ data: [] });
+      const [teamH, teamP, globalH, globalP] = await Promise.all(
+        teamId
+          ? [sideQuery("team", "H"), sideQuery("team", "P"), sideQuery("global", "H"), sideQuery("global", "P")]
+          : [empty, empty, sideQuery("global", "H"), sideQuery("global", "P")],
+      );
+      const teamRows = [...((teamH.data as any[]) || []), ...((teamP.data as any[]) || [])];
+      const globalRows = [...((globalH.data as any[]) || []), ...((globalP.data as any[]) || [])];
 
-      // Rank purely by projected talent — hitters (wRC+) and pitchers (pRV+) share
+      // Rank by the team value. A global row is used ONLY for a TRUE crossover —
+      // a player with no precompute for this team at all. A player whose team
+      // value merely falls outside the top window is dropped, NOT shown at their
+      // (often higher) global value — that mismatch is what made it look like
+      // team-precomputed players were "crossing over" to global.
+      const merged = new Map<string, any>();
+      for (const r of teamRows) if (!merged.has(r.player_id)) merged.set(r.player_id, { ...r, scope: "team" });
+
+      let teamHas = new Set<string>();
+      if (teamId) {
+        const globalIds = [...new Set(globalRows.map((r: any) => r.player_id))];
+        if (globalIds.length) {
+          const { data: hasRows } = await (supabase as any)
+            .from("player_predictions")
+            .select("player_id")
+            .eq("season", PROJECTION_SEASON)
+            .eq("customer_team_id", teamId)
+            .eq("variant", "precomputed")
+            .in("status", ["active", "departed"])
+            .in("player_id", globalIds);
+          teamHas = new Set((hasRows as any[] || []).map((r) => r.player_id));
+        }
+      }
+      for (const r of globalRows) {
+        if (merged.has(r.player_id) || teamHas.has(r.player_id)) continue;
+        merged.set(r.player_id, { ...r, scope: "global" });
+      }
+
+      const all = [...merged.values()].map((r: any) => {
+        const p = r.players;
+        const pitcher = isPitcher(p.position);
+        return {
+          ...p,
+          p_wrc_plus: r.p_wrc_plus,
+          p_rv_plus: r.p_rv_plus,
+          is_pitcher: pitcher,
+          metric_value: (pitcher ? r.p_rv_plus : r.p_wrc_plus) ?? null,
+          source: followSet.has(p.id) ? "following" : boardSet.has(p.id) ? "board" : "top",
+        };
+      });
+
+      // Rank by the team-scoped value — hitters (wRC+) and pitchers (pRV+) share
       // the same ~100 baseline, so the '+' value mixes cleanly across both.
       all.sort((a: any, b: any) => (b.metric_value ?? -Infinity) - (a.metric_value ?? -Infinity));
 
