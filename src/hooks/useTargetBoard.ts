@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
@@ -43,13 +44,27 @@ export interface TargetBoardRow {
  * mixing legacy unscoped rows back in.
  */
 export function useTargetBoard() {
-  const { user, effectiveTeamId } = useAuth();
+  const { user, effectiveTeamId, isSuperadmin, availableTeams } = useAuth();
   const qc = useQueryClient();
+
+  // The team every read/write is pinned to. For a coach this is their own
+  // team; for a superadmin it is whichever team they are impersonating. Used
+  // only for a human-readable confirmation — the actual scoping is the
+  // customer_team_id filter below plus the RLS is_team_member() wall.
+  const scopedTeamName = useMemo(
+    () => availableTeams?.find((t) => t.id === effectiveTeamId)?.name ?? null,
+    [availableTeams, effectiveTeamId],
+  );
 
   const { data: board = [], isLoading } = useQuery({
     queryKey: ["target-board", effectiveTeamId ?? null],
     enabled: !!user?.id && !!effectiveTeamId,
     queryFn: async () => {
+      // Hard read gate: never query unscoped. Every read is pinned to exactly
+      // one customer_team_id. A superadmin who is not impersonating a team has
+      // no board in scope, so return empty rather than the whole table — this
+      // is what guarantees a superadmin sees one team at a time, never a blend.
+      if (!effectiveTeamId) return [];
       const { data, error } = await tb()
         .select("id, player_id, notes, added_at, players!inner(first_name, last_name, team, conference, position, class_year, portal_status, bats_hand, division, source_player_id)")
         // Team-scoped only — every coach on the team sees the same board.
@@ -91,7 +106,17 @@ export function useTargetBoard() {
   const addPlayer = useMutation({
     mutationFn: async ({ playerId, silent: _silent }: { playerId: string; silent?: boolean }) => {
       if (!user?.id) throw new Error("Not logged in");
-      if (!effectiveTeamId) throw new Error("No team in scope — impersonate or join a team first");
+      // Superadmin write gate: an add ALWAYS lands on exactly one team — the one
+      // currently in scope. A superadmin who is not impersonating has no team,
+      // so block the write outright instead of storing an orphan/mis-scoped row.
+      // This is why the same add can never fan out to more than one board.
+      if (!effectiveTeamId) {
+        throw new Error(
+          isSuperadmin
+            ? "No team in scope — impersonate a team first so the target lands on that team only"
+            : "No team in scope — join a team first",
+        );
+      }
       const { error } = await tb()
         .insert({
           user_id: user.id,
@@ -105,8 +130,11 @@ export function useTargetBoard() {
       // silent=true suppresses the toast. Used by the TB roster→supabase sync
       // effect, which can fire on every remount; the user-facing add path
       // (PlayerProfile / Dashboard "Add to board" buttons) leaves silent
-      // undefined so they keep their visible confirmation.
-      if (!variables?.silent) toast.success("Added to Target Board");
+      // undefined so they keep their visible confirmation. Name the team so a
+      // superadmin always sees WHICH board received the target.
+      if (!variables?.silent) {
+        toast.success(scopedTeamName ? `Added to ${scopedTeamName} Target Board` : "Added to Target Board");
+      }
     },
     onError: (e: any, variables) => {
       if (e?.message?.includes("duplicate") || e?.code === "23505") {

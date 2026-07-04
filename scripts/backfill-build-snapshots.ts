@@ -144,7 +144,9 @@ async function main() {
   const uniquePlayerIds = [...new Set(rowsWithId.map((bp: any) => bp.player_id as string))];
   console.log(`Loading predictions for ${uniquePlayerIds.length} unique players (season=${PROJECTION_SEASON})...`);
 
-  const PAGE_SIZE = 500;
+  // 100 ids/chunk keeps the ?player_id=in.(…) URL well under the gateway's URI
+  // limit — 500 UUIDs overflowed it and surfaced as an opaque "fetch failed".
+  const PAGE_SIZE = 100;
   let allPredictions: any[] = [];
   for (let i = 0; i < uniquePlayerIds.length; i += PAGE_SIZE) {
     const chunk = uniquePlayerIds.slice(i, i + PAGE_SIZE);
@@ -169,51 +171,62 @@ async function main() {
   }
   console.log(`  Loaded ${allPredictions.length} prediction rows.\n`);
 
-  // 3. Load player metadata to know is_twp and position
-  const { data: playerData, error: playerErr } = await sb
-    .from("players")
-    .select("id, position, is_twp")
-    .in("id", uniquePlayerIds);
-
-  if (playerErr) {
-    console.error(`${C.red}✗ Player fetch error: ${playerErr.message}${C.reset}`);
-    process.exit(1);
-  }
+  // 3. Load player metadata to know is_twp and position (chunked — same URI limit).
   const playerMap = new Map<string, { position: string | null; is_twp: boolean }>();
-  for (const p of playerData || []) {
-    playerMap.set(p.id, { position: p.position ?? null, is_twp: !!p.is_twp });
-  }
-
-  // 4. Build prediction map: one entry per player_id, prefer team-scoped
-  //    precomputed row over global regular.
-  const predMap = new Map<string, any>();
-  // Also build a pitcher-specific map for TWPs (pitcher_role != null)
-  const pitcherPredMap = new Map<string, any>();
-
-  for (const pred of allPredictions) {
-    const key = pred.player_id;
-    const isTeamPrecomputed = pred.variant === "precomputed" && pred.customer_team_id != null;
-    const isGlobalRegular = pred.variant === "regular" && pred.customer_team_id == null;
-    const hasPitcherRole = pred.pitcher_role != null;
-
-    if (hasPitcherRole) {
-      // TWP pitcher side or pitcher-model row
-      const existing = pitcherPredMap.get(key);
-      if (!existing || isTeamPrecomputed) {
-        pitcherPredMap.set(key, pred);
-      } else if (isGlobalRegular && existing.variant !== "precomputed") {
-        pitcherPredMap.set(key, pred);
-      }
-    } else {
-      // Hitter side (or non-TWP player)
-      const existing = predMap.get(key);
-      if (!existing || isTeamPrecomputed) {
-        predMap.set(key, pred);
-      } else if (isGlobalRegular && existing.variant !== "precomputed") {
-        predMap.set(key, pred);
-      }
+  for (let i = 0; i < uniquePlayerIds.length; i += PAGE_SIZE) {
+    const { data: playerData, error: playerErr } = await sb
+      .from("players")
+      .select("id, position, is_twp")
+      .in("id", uniquePlayerIds.slice(i, i + PAGE_SIZE));
+    if (playerErr) {
+      console.error(`${C.red}✗ Player fetch error: ${playerErr.message}${C.reset}`);
+      process.exit(1);
+    }
+    for (const p of playerData || []) {
+      playerMap.set(p.id, { position: p.position ?? null, is_twp: !!p.is_twp });
     }
   }
+
+  // 3b. Map each build to its customer_team_id. A snapshot must be picked with
+  //     the SAME team scope the app reads with: this team's precomputed line →
+  //     global regular → NEVER another team's precompute. A returner has no
+  //     same-team precompute, so it must fall to the global line. Picking a
+  //     global predMap blind to team (the old behavior) grabbed whichever team's
+  //     precompute happened to sort first — the returner-snapshot blend bug.
+  const buildIds = [...new Set(rowsWithId.map((bp: any) => bp.build_id as string))];
+  const buildTeam = new Map<string, string | null>();
+  for (let i = 0; i < buildIds.length; i += PAGE_SIZE) {
+    const { data: bdata, error: bErr } = await sb
+      .from("team_builds")
+      .select("id, customer_team_id")
+      .in("id", buildIds.slice(i, i + PAGE_SIZE));
+    if (bErr) {
+      console.error(`${C.red}✗ Build fetch error: ${bErr.message}${C.reset}`);
+      process.exit(1);
+    }
+    for (const b of bdata || []) buildTeam.set(b.id, b.customer_team_id ?? null);
+  }
+
+  // 4. Group predictions per player (hitter side vs pitcher-model side). The
+  //    per-row loop picks the best row FOR THAT ROW'S TEAM — see predRank/pickPred.
+  const hitterPreds = new Map<string, any[]>();
+  const pitcherPreds = new Map<string, any[]>();
+  for (const pred of allPredictions) {
+    const bucket = pred.pitcher_role != null ? pitcherPreds : hitterPreds;
+    const list = bucket.get(pred.player_id) ?? [];
+    list.push(pred);
+    bucket.set(pred.player_id, list);
+  }
+  const predRank = (p: any, teamId: string | null): number =>
+    (teamId != null && p.customer_team_id === teamId && p.variant === "precomputed") ? 3
+      : (p.customer_team_id == null && p.variant === "regular") ? 2
+        : 1;
+  const pickPred = (list: any[] | undefined, teamId: string | null): any | null => {
+    if (!list || list.length === 0) return null;
+    let best: any = null;
+    for (const p of list) if (!best || predRank(p, teamId) > predRank(best, teamId)) best = p;
+    return best;
+  };
 
   // 5. Build snapshots and update rows
   let updated = 0;
@@ -231,15 +244,16 @@ async function main() {
 
     const bpSide = isPitcherPosition(bp.position_slot) ? "P" : "H";
 
-    // Pick the right prediction row for this slot
+    // Pick the right prediction row for this slot, scoped to THIS build's team.
+    const teamId = buildTeam.get(bp.build_id) ?? null;
     let pred: any = null;
     if (bpSide === "P") {
       // Use pitcher-model row first; fall back to general row if none
-      pred = pitcherPredMap.get(pid) ?? predMap.get(pid) ?? null;
+      pred = pickPred(pitcherPreds.get(pid), teamId) ?? pickPred(hitterPreds.get(pid), teamId) ?? null;
     } else {
       // For TWP hitter rows, also fall back to pitcher-model row — the pitcher-model
       // row carries both hitter and pitcher stats for two-way players.
-      pred = predMap.get(pid) ?? (isTwp ? pitcherPredMap.get(pid) : null) ?? null;
+      pred = pickPred(hitterPreds.get(pid), teamId) ?? (isTwp ? pickPred(pitcherPreds.get(pid), teamId) : null) ?? null;
     }
 
     if (!pred) {

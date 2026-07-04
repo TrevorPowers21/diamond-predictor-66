@@ -24,6 +24,15 @@ const STATUS_CONFIG: Record<PortalStatus, { bg: string; text: string; label: str
   "WITHDRAWN":     { bg: "bg-slate-500/10", text: "text-slate-500", label: "Withdrawn",    dot: "bg-slate-500" },
 };
 
+/**
+ * Single source of truth for portal-status label + colors. Used by the profile
+ * badge AND the target-board surfaces so a player's status reads identically
+ * everywhere (was drifting: boards collapsed everything non-portal to "Watching").
+ */
+export function portalStatusMeta(status?: string | null) {
+  return STATUS_CONFIG[(status as PortalStatus)] || STATUS_CONFIG["NOT IN PORTAL"];
+}
+
 function formatDate(d: string | null | undefined): string | null {
   if (!d) return null;
   const dt = new Date(d);

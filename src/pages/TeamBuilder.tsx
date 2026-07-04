@@ -768,6 +768,29 @@ export default function TeamBuilder() {
     [setSearchParams],
   );
 
+  // Mirror the active build id to ?build= so the URL captured in a player row's
+  // `returnTo` (location.search) carries it. Clicking into a player profile and
+  // hitting back then restores the EXACT build the coach was viewing — default
+  // or coach build — instead of falling back to the latest coach build.
+  const buildMirrorReadyRef = useRef(false);
+  useEffect(() => {
+    // Skip the first run: on mount selectedBuildId is still null, and clearing
+    // ?build= here would wipe the param before the load effect can consume it.
+    if (!buildMirrorReadyRef.current) {
+      buildMirrorReadyRef.current = true;
+      return;
+    }
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        if (selectedBuildId) params.set("build", selectedBuildId);
+        else params.delete("build");
+        return params;
+      },
+      { replace: true },
+    );
+  }, [selectedBuildId, setSearchParams]);
+
   const pitchingEq = useMemo(() => readPitchingWeights(), []);
 
   // Derive pitching conference plus-stats lookup from Supabase conference stats
@@ -1746,6 +1769,16 @@ export default function TeamBuilder() {
     // If newBuild() was just called, don't override it by loading a saved build.
     if (newBuildPendingRef.current) {
       newBuildPendingRef.current = false;
+      return;
+    }
+    // Returning from a player profile (browser back / profile back button) lands
+    // here with ?build=<id> in the URL — pin to that exact build so a default
+    // roster stays a default roster and doesn't jump to the latest coach build.
+    const requestedBuild = searchParams.get("build");
+    if (requestedBuild && builds.some((b: any) => b.id === requestedBuild)) {
+      const b = builds.find((x: any) => x.id === requestedBuild) as any;
+      setHasSavedOnce(!!(b && !b.is_default));
+      loadBuild(requestedBuild);
       return;
     }
     if (builds.length === 0) {

@@ -19,6 +19,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { portalStatusMeta } from "@/components/PortalStatus";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
@@ -482,17 +483,12 @@ export default function TargetBoardSubtab() {
     n == null ? "—" : `$${Math.round(Number(n)).toLocaleString()}`;
 
   const portalBadge = (r: TargetBoardRow) => {
-    const label =
-      r.portal_status === "IN PORTAL" ? "In Portal" : r.portal_status === "COMMITTED" ? "Committed" : "Watching";
-    const color =
-      r.portal_status === "IN PORTAL"
-        ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
-        : r.portal_status === "COMMITTED"
-        ? "text-blue-400 bg-blue-500/10 border-blue-500/30"
-        : "text-[#D4AF37] bg-[#D4AF37]/10 border-[#D4AF37]/30";
+    // Mirror the profile's status exactly (via the shared meta) instead of
+    // collapsing every non-portal player to "Watching".
+    const c = portalStatusMeta(r.portal_status);
     return (
-      <Badge variant="outline" className={`text-[10px] ${color}`}>
-        {label}
+      <Badge variant="outline" className={`text-[10px] ${c.bg} ${c.text} border-current/30`}>
+        {c.label}
       </Badge>
     );
   };
