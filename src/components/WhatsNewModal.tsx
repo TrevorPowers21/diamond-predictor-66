@@ -20,6 +20,24 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    date: "2026-07-04",
+    headline: "An improved roster building experience",
+    features: [
+      {
+        title: "An Improved Roster Building Experience",
+        tagline:
+          "Team Builder is faster and more consistent across the board, with a saved starting roster for every program, the ability to clone any build, and a target board that stays the same everywhere you work.",
+        details: [
+          "Saved default rosters load your program instantly, so you open Team Builder to a complete roster instead of a blank page.",
+          "Clone any build, including default rosters, to start a new build from a point you already like.",
+          "A universal target board that stays consistent across every one of your builds.",
+          "Faster loading and a smoother, more consistent experience throughout.",
+        ],
+      },
+    ],
+    whatElse: [],
+  },
+  {
     date: "2026-06-29",
     headline: "A full Visuals tab, deeper stat filters, and per-pitch run value on every 2026 profile",
     features: [
@@ -484,6 +502,15 @@ export function WhatsNewModal() {
     }
     setView("current");
     setOpen(false);
+    // Force a fresh load when a coach acknowledges a new release (X or "Let's
+    // Go") so anyone who's had the app open across a deploy picks up the latest
+    // build + data instead of working off a stale cache. Runs once per release
+    // (the seen flag above stops the modal, and this reload, from repeating).
+    try {
+      window.location.reload();
+    } catch {
+      // ignore (SSR / unavailable)
+    }
   };
 
   const currentRelease = RELEASES[0];
