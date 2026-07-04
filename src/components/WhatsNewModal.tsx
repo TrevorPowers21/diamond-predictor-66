@@ -502,6 +502,15 @@ export function WhatsNewModal() {
     }
     setView("current");
     setOpen(false);
+    // Force a fresh load when a coach acknowledges a new release (X or "Let's
+    // Go") so anyone who's had the app open across a deploy picks up the latest
+    // build + data instead of working off a stale cache. Runs once per release
+    // (the seen flag above stops the modal, and this reload, from repeating).
+    try {
+      window.location.reload();
+    } catch {
+      // ignore (SSR / unavailable)
+    }
   };
 
   const currentRelease = RELEASES[0];
