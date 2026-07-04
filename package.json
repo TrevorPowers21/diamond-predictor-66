@@ -44,6 +44,7 @@
     "audit-tb:prod": "tsx --env-file-if-exists=.env.production.local scripts/audit_prod_team_builder.ts",
     "verify-tb": "tsx --env-file-if-exists=.env.local scripts/verify_tb_nondestructive.ts",
     "verify-tb:prod": "tsx --env-file-if-exists=.env.production.local scripts/verify_tb_nondestructive.ts",
+    "export-rosters:prod": "tsx --env-file-if-exists=.env.production.local scripts/export_prod_rosters.ts",
     "backfill-build-snapshots": "tsx --env-file-if-exists=.env.local scripts/backfill-build-snapshots.ts",
     "backfill-build-snapshots:prod": "tsx --env-file-if-exists=.env.production.local scripts/backfill-build-snapshots.ts --prod",
     "backfill-2027-hitter-returners": "tsx --env-file-if-exists=.env.local scripts/backfill-2027-hitter-returners.ts",
