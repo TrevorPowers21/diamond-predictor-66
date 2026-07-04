@@ -66,9 +66,10 @@ It is `ADD COLUMN IF NOT EXISTS`, so it adds the 4 missing pieces and **skips
 
 ### PRE-FLIGHT (read-only)
 - [ ] `npm run audit-tb:prod` — capture the baseline (teams/builds/targets/overrides).
-- [ ] Confirm with Peyton how `team_build_players.player_snapshot` got onto prod (a partial
-      apply of `20260612`). Harmless — the migration is `IF NOT EXISTS` — but confirm no
-      other partial state exists.
+- [x] ~~Confirm with Peyton how `team_build_players.player_snapshot` got onto prod~~ —
+      **CONFIRMED 2026-07-04: Peyton applied it (partial apply of `20260612`).** Harmless —
+      the migration is `IF NOT EXISTS`, so Step 2 just adds the remaining `is_default` /
+      `academic_year` / index. No other partial state.
 - [ ] (Optional, recommended) Run the before/after snapshot-verify to get a
       provable-non-destructive receipt.
 
@@ -132,5 +133,5 @@ of universal entries. If ever needed, reconstruct from `target_board`.
 - **Only deletes anywhere** = Step 5's 130 redundant watchlist shadows (data preserved).
 
 ## E. Open items before executing
-1. Peyton confirms the prod `player_snapshot` origin (non-blocking).
+1. ~~Peyton confirms the prod `player_snapshot` origin~~ — ✅ CONFIRMED 2026-07-04 (Peyton applied it).
 2. Build/run the before/after snapshot-verify receipt around Steps 4→5.
