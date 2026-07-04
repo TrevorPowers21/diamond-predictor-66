@@ -1625,15 +1625,19 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
   // p_era null on every pitcher snapshot.
   const hitterPredMap = new Map<string, any>();
   const pitcherPredMap = new Map<string, any>();
+  // Rank so we pick THIS team's precompute first, then the GLOBAL baseline, and
+  // NEVER another team's precompute. A returner has no precompute at their own
+  // school, so they must fall to the global baseline — the earlier condition
+  // could lock onto another team's precompute (this returner's transfer
+  // projection to some OTHER school) and never fall back to global.
+  const predRank = (pred: any): number =>
+    (pred.customer_team_id === customerTeamId && pred.variant === "precomputed") ? 3
+      : (pred.customer_team_id == null && pred.variant === "regular") ? 2
+        : 1;
   for (const pred of predictions) {
-    const key = pred.player_id;
-    const isTeamScoped = pred.customer_team_id === customerTeamId && pred.variant === "precomputed";
-    const isGlobal = pred.customer_team_id == null && pred.variant === "regular";
     const map = pred.pitcher_role != null ? pitcherPredMap : hitterPredMap;
-    const existing = map.get(key);
-    if (!existing || isTeamScoped || (isGlobal && existing.variant !== "precomputed")) {
-      map.set(key, pred);
-    }
+    const existing = map.get(pred.player_id);
+    if (!existing || predRank(pred) > predRank(existing)) map.set(pred.player_id, pred);
   }
 
   // Build player rows with snapshots
