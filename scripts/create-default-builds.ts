@@ -218,23 +218,23 @@ async function main() {
         .in("status", ["active", "departed"])
     );
 
-    // Build prediction map: prefer team-scoped precomputed, fallback to global regular
+    // Build prediction map — MUST match the app's live projection pick exactly, or
+    // the stored snapshot diverges from what the app would compute live and the
+    // default roster shows wrong stats under the stored-first read path.
+    // App order (teamScopedPredictions.pickPreferredPrediction): this team's
+    // precomputed FIRST, then the GLOBAL regular baseline. A returner has NO
+    // precompute at their own school, so they correctly fall to the global
+    // baseline. Another team's precomputed row (this returner's transfer
+    // projection to some OTHER school) must NEVER be chosen — earlier logic could
+    // lock onto one and never fall back to global, which is the bug this fixes.
     const predMap = new Map<string, any>();
+    const predRank = (p: any): number =>
+      (p.customer_team_id === team.id && p.variant === "precomputed") ? 3
+        : (p.customer_team_id == null && p.variant === "regular") ? 2
+          : 1; // other-team precomputed / anything else — last resort only
     for (const pred of predictions) {
-      const key = pred.player_id;
-      const existing = predMap.get(key);
-      const isTeamScoped =
-        pred.customer_team_id === team.id &&
-        pred.variant === "precomputed";
-      const isGlobalReturner =
-        pred.customer_team_id == null && pred.variant === "regular";
-      if (!existing) {
-        predMap.set(key, pred);
-      } else if (isTeamScoped) {
-        predMap.set(key, pred);
-      } else if (isGlobalReturner && existing.variant !== "precomputed") {
-        predMap.set(key, pred);
-      }
+      const existing = predMap.get(pred.player_id);
+      if (!existing || predRank(pred) > predRank(existing)) predMap.set(pred.player_id, pred);
     }
 
     // Build player rows for the build
@@ -286,6 +286,11 @@ async function main() {
           snapshot.p_hr9 = pred.p_hr9 ?? null;
           snapshot.p_rv_plus = pred.p_rv_plus ?? null;
           snapshot.p_war = pred.p_war ?? null;
+          // Pitcher market value was previously omitted here, leaving pitcher
+          // snapshots with a null market value. Store it from the picked line.
+          snapshot.market_value = isTwp
+            ? (pred.twp_pitcher_market_value ?? pred.market_value ?? null)
+            : (pred.market_value ?? null);
           snapshot.pitcher_depth_role = pred.pitcher_depth_role ?? null;
           snapshot.pitcher_role = pred.pitcher_role ?? null;
         }
