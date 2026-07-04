@@ -218,23 +218,23 @@ async function main() {
         .in("status", ["active", "departed"])
     );
 
-    // Build prediction map: prefer team-scoped precomputed, fallback to global regular
+    // Build prediction map — MUST match the app's live projection pick exactly, or
+    // the stored snapshot diverges from what the app would compute live and the
+    // default roster shows wrong stats under the stored-first read path.
+    // App order (teamScopedPredictions.pickPreferredPrediction): this team's
+    // precomputed FIRST, then the GLOBAL regular baseline. A returner has NO
+    // precompute at their own school, so they correctly fall to the global
+    // baseline. Another team's precomputed row (this returner's transfer
+    // projection to some OTHER school) must NEVER be chosen — earlier logic could
+    // lock onto one and never fall back to global, which is the bug this fixes.
     const predMap = new Map<string, any>();
+    const predRank = (p: any): number =>
+      (p.customer_team_id === team.id && p.variant === "precomputed") ? 3
+        : (p.customer_team_id == null && p.variant === "regular") ? 2
+          : 1; // other-team precomputed / anything else — last resort only
     for (const pred of predictions) {
-      const key = pred.player_id;
-      const existing = predMap.get(key);
-      const isTeamScoped =
-        pred.customer_team_id === team.id &&
-        pred.variant === "precomputed";
-      const isGlobalReturner =
-        pred.customer_team_id == null && pred.variant === "regular";
-      if (!existing) {
-        predMap.set(key, pred);
-      } else if (isTeamScoped) {
-        predMap.set(key, pred);
-      } else if (isGlobalReturner && existing.variant !== "precomputed") {
-        predMap.set(key, pred);
-      }
+      const existing = predMap.get(pred.player_id);
+      if (!existing || predRank(pred) > predRank(existing)) predMap.set(pred.player_id, pred);
     }
 
     // Build player rows for the build
@@ -339,12 +339,10 @@ async function main() {
             null, null, null, "returner", hitterDepth as any,
             classTransition, 0, false, false, null, localPlayer
           ),
-          player_snapshot: pred ? {
-            p_avg: pred.p_avg, p_obp: pred.p_obp, p_slg: pred.p_slg,
-            p_wrc_plus: pred.p_wrc_plus, o_war: pred.o_war,
-            market_value: pred.twp_hitter_market_value ?? pred.market_value,
-            hitter_depth_role: pred.hitter_depth_role,
-          } : null,
+          // Default rosters intentionally carry NO snapshot. The app reads their
+          // projections LIVE, which matches the live projection exactly and avoids
+          // any stored-vs-live drift. Coach builds still snapshot at save time.
+          player_snapshot: null,
         });
 
         playerRows.push({
@@ -359,13 +357,7 @@ async function main() {
             classTransition, 0, false, false, null,
             { ...localPlayer, position: pitcherRole }
           ),
-          player_snapshot: pred ? {
-            p_era: pred.p_era, p_fip: pred.p_fip, p_whip: pred.p_whip,
-            p_k9: pred.p_k9, p_bb9: pred.p_bb9, p_hr9: pred.p_hr9,
-            p_rv_plus: pred.p_rv_plus, p_war: pred.p_war,
-            pitcher_role: pred.pitcher_role, pitcher_depth_role: pred.pitcher_depth_role,
-            market_value: pred.twp_pitcher_market_value ?? pred.market_value,
-          } : null,
+          player_snapshot: null, // default rosters read live (see note above)
         });
       } else {
         const positionSlot = isPitcher
@@ -382,7 +374,7 @@ async function main() {
             null, null, null, "returner", depthRole as any,
             classTransition, 0, false, false, null, localPlayer
           ),
-          player_snapshot: Object.keys(snapshot).length > 0 ? snapshot : null,
+          player_snapshot: null, // default rosters read live (see note above)
         });
       }
     }
