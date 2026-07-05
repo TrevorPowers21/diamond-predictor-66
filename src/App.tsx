@@ -25,7 +25,7 @@ const SavantPitcherPage = lazy(() => import("@/savant/pages/PitcherPage"));
 // download it. Do not link to /gm/* from Player Evaluation nav except the toggle.
 const GMRoute = lazy(() => import("@/gm/components/GMRoute"));
 const GMLayout = lazy(() => import("@/gm/components/GMLayout"));
-const GMOverview = lazy(() => import("@/gm/pages/GMOverview"));
+const GMRoster = lazy(() => import("@/gm/pages/GMRoster"));
 import TransferPortal from "./pages/TransferPortal";
 import ReturningPlayers from "./pages/ReturningPlayers";
 import WarRoom from "./pages/WarRoom";
@@ -162,7 +162,7 @@ const router = createBrowserRouter([
           </ProtectedRoute>
         ),
         children: [
-          { index: true, element: <Suspense fallback={null}><GMOverview /></Suspense> },
+          { index: true, element: <Suspense fallback={null}><GMRoster /></Suspense> },
         ],
       },
       { path: "*", element: <NotFound /> },
