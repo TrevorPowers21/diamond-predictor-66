@@ -385,9 +385,27 @@ export function useLoadBuild({
                 // Side-keyed lookup: snapshot first (zero extra query), then
                 // live prediction for rows where snapshot is absent or stale.
                 const bpSide = isPitcherSlot(bp.position_slot) ? "P" : "H";
-                const snapshot = normalizedPlayerId
+                const rawSnapshot = normalizedPlayerId
                   ? snapshotMap[`${normalizedPlayerId}|${bpSide}`] ?? null
                   : null;
+                // A transfer's snapshot IS the team precomputed baseline, but the
+                // stored JSON omits variant/customer_team_id. Without those keys the
+                // transfer overlay path (gate in simulateTransferProjection) can't
+                // recognize the snapshot on first render — it falls to a slow
+                // fallback, then the async live-target query resolves, passes the
+                // gate and corrects the number (the visible oWAR flash on load).
+                // Tag the snapshot with the routing keys it already represents so
+                // first render is correct and the live query is a no-op. Only
+                // transfers: returners use the global regular baseline + the
+                // separate returner path, which doesn't read these keys. We do NOT
+                // add dev_aggressiveness/class_transition here — those are overlay
+                // inputs and storing them would double-apply the session overlay.
+                const rowIsTransfer =
+                  (meta.rosterStatus ?? ((bp.source as string) === "portal" ? "target" : "returner")) === "target";
+                const snapshot =
+                  rawSnapshot && rowIsTransfer && rawSnapshot.variant == null && effectiveTeamId
+                    ? { ...rawSnapshot, variant: "precomputed", customer_team_id: effectiveTeamId }
+                    : rawSnapshot;
                 const activePred = snapshot ?? (normalizedPlayerId
                   ? predictionMap[`${normalizedPlayerId}|${bpSide}`] ?? null
                   : null);
