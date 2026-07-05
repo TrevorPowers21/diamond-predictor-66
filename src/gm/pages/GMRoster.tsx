@@ -11,8 +11,6 @@ import { profileRouteFor } from "@/lib/profileRoutes";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
-// Year in school. GR is a normal ongoing class (not exhausted eligibility).
-const CLASS_OPTIONS = ["FR", "SO", "JR", "SR", "GR", "R-FR", "R-SO", "R-JR", "R-SR"];
 const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
 const num = (n: number | null | undefined, d = 1) => (n == null ? "—" : n.toFixed(d));
 
@@ -94,14 +92,8 @@ export default function GMRoster() {
                     <div className="text-[10px] text-muted-foreground">{r.position || "—"}</div>
                   </TableCell>
                   <TableCell className="py-1.5">
-                    <Select value={r.eligibility_class ?? undefined} onValueChange={(v) => gm.savePlayer(r.player_id, { eligibility_class: v })}>
-                      <SelectTrigger className="h-8 w-[78px] text-xs"><SelectValue placeholder="—" /></SelectTrigger>
-                      <SelectContent>
-                        {(r.eligibility_class && !CLASS_OPTIONS.includes(r.eligibility_class) ? [r.eligibility_class, ...CLASS_OPTIONS] : CLASS_OPTIONS).map((c) => (
-                          <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {/* Read-only here; editing lives on the future player profile. */}
+                    <span className="text-xs font-semibold text-foreground">{r.eligibility_class || "—"}</span>
                   </TableCell>
                   <TableCell className="py-1.5 text-center font-mono text-xs tabular-nums">{num(r.war)}</TableCell>
                   <TableCell className="py-1.5 text-center font-mono text-xs tabular-nums">{money(r.market_value)}</TableCell>
