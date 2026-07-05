@@ -285,6 +285,11 @@ async function main() {
       snapshot.p_hr9 = pred.p_hr9 ?? null;
       snapshot.p_rv_plus = pred.p_rv_plus ?? null;
       snapshot.p_war = pred.p_war ?? null;
+      // Pitcher market value — MUST match create-default-builds. Without this the
+      // pitcher block left market_value unset, so pitcher snapshots had none.
+      snapshot.market_value = isTwp
+        ? (pred.twp_pitcher_market_value ?? pred.market_value ?? null)
+        : (pred.market_value ?? null);
       snapshot.pitcher_depth_role = pred.pitcher_depth_role ?? null;
       snapshot.pitcher_role = pred.pitcher_role ?? null;
     }
