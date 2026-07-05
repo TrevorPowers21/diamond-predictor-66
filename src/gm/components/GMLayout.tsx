@@ -4,15 +4,15 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import TeamSwitcher from "@/components/TeamSwitcher";
-import { ClipboardList, Wallet, StickyNote, GraduationCap, LogOut, Menu, ChevronRight } from "lucide-react";
+import { ClipboardList, LogOut, Menu, ChevronRight } from "lucide-react";
 
-// GM (front office) nav — mirrors the Player Evaluation dashboard chrome, just a
-// different item set. Roster (index) is the two-way-synced team view.
+// GM (front office) nav — mirrors the Player Evaluation dashboard chrome. The GM
+// interface is ONE Team-Builder-style money dashboard (money/eligibility/notes
+// are columns + profile content, not separate pages), so Roster is the view.
+// Budget-allotment settings is a header button, not a nav page (spec §11);
+// player profiles are click-throughs.
 const navItems = [
-  { label: "Roster", href: "/gm", icon: ClipboardList, description: "Money-first roster view" },
-  { label: "Money", href: "/gm/money", icon: Wallet, description: "Budget + pay buckets" },
-  { label: "Notes", href: "/gm/notes", icon: StickyNote, description: "Negotiation notes" },
-  { label: "Eligibility", href: "/gm/eligibility", icon: GraduationCap, description: "Draft + eligibility" },
+  { label: "Roster", href: "/gm", icon: ClipboardList, description: "Money-first team roster" },
 ];
 
 export default function GMLayout() {

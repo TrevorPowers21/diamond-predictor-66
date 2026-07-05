@@ -26,7 +26,6 @@ const SavantPitcherPage = lazy(() => import("@/savant/pages/PitcherPage"));
 const GMRoute = lazy(() => import("@/gm/components/GMRoute"));
 const GMLayout = lazy(() => import("@/gm/components/GMLayout"));
 const GMOverview = lazy(() => import("@/gm/pages/GMOverview"));
-const GMPlaceholder = lazy(() => import("@/gm/pages/GMPlaceholder"));
 import TransferPortal from "./pages/TransferPortal";
 import ReturningPlayers from "./pages/ReturningPlayers";
 import WarRoom from "./pages/WarRoom";
@@ -164,30 +163,6 @@ const router = createBrowserRouter([
         ),
         children: [
           { index: true, element: <Suspense fallback={null}><GMOverview /></Suspense> },
-          {
-            path: "money",
-            element: (
-              <Suspense fallback={null}>
-                <GMPlaceholder title="Money" blurb="Break each player's pay into Rev Share / NIL / Other buckets that roll up to the coach's actual-pay total, plus team budget allocation." />
-              </Suspense>
-            ),
-          },
-          {
-            path: "notes",
-            element: (
-              <Suspense fallback={null}>
-                <GMPlaceholder title="Notes" blurb="Per-player negotiation notes and history — separate from the coach's scouting notes." />
-              </Suspense>
-            ),
-          },
-          {
-            path: "eligibility",
-            element: (
-              <Suspense fallback={null}>
-                <GMPlaceholder title="Eligibility" blurb="Draft year and remaining eligibility, GM-editable per player." />
-              </Suspense>
-            ),
-          },
         ],
       },
       { path: "*", element: <NotFound /> },
