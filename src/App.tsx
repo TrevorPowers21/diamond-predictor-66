@@ -20,6 +20,13 @@ const SavantTeamsList = lazy(() => import("@/savant/pages/TeamsListPage"));
 const SavantTeamProfile = lazy(() => import("@/savant/pages/TeamProfilePage"));
 const SavantHitterPage = lazy(() => import("@/savant/pages/HitterPage"));
 const SavantPitcherPage = lazy(() => import("@/savant/pages/PitcherPage"));
+
+// GM (front office) — gated + lazy-loaded so Player Evaluation users never
+// download it. Do not link to /gm/* from Player Evaluation nav except the toggle.
+const GMRoute = lazy(() => import("@/gm/components/GMRoute"));
+const GMLayout = lazy(() => import("@/gm/components/GMLayout"));
+const GMOverview = lazy(() => import("@/gm/pages/GMOverview"));
+const GMPlaceholder = lazy(() => import("@/gm/pages/GMPlaceholder"));
 import TransferPortal from "./pages/TransferPortal";
 import ReturningPlayers from "./pages/ReturningPlayers";
 import WarRoom from "./pages/WarRoom";
@@ -143,6 +150,44 @@ const router = createBrowserRouter([
           { path: "team/:id", element: <Suspense fallback={null}><SavantTeamProfile /></Suspense> },
           { path: "hitter/:id", element: <Suspense fallback={null}><SavantHitterPage /></Suspense> },
           { path: "pitcher/:id", element: <Suspense fallback={null}><SavantPitcherPage /></Suspense> },
+        ],
+      },
+      // GM (front office) — gated by GMRoute (auth + superadmin/team_admin).
+      {
+        path: "/gm",
+        element: (
+          <ProtectedRoute>
+            <Suspense fallback={null}>
+              <GMRoute><GMLayout /></GMRoute>
+            </Suspense>
+          </ProtectedRoute>
+        ),
+        children: [
+          { index: true, element: <Suspense fallback={null}><GMOverview /></Suspense> },
+          {
+            path: "money",
+            element: (
+              <Suspense fallback={null}>
+                <GMPlaceholder title="Money" blurb="Break each player's pay into Rev Share / NIL / Other buckets that roll up to the coach's actual-pay total, plus team budget allocation." />
+              </Suspense>
+            ),
+          },
+          {
+            path: "notes",
+            element: (
+              <Suspense fallback={null}>
+                <GMPlaceholder title="Notes" blurb="Per-player negotiation notes and history — separate from the coach's scouting notes." />
+              </Suspense>
+            ),
+          },
+          {
+            path: "eligibility",
+            element: (
+              <Suspense fallback={null}>
+                <GMPlaceholder title="Eligibility" blurb="Draft year and remaining eligibility, GM-editable per player." />
+              </Suspense>
+            ),
+          },
         ],
       },
       { path: "*", element: <NotFound /> },

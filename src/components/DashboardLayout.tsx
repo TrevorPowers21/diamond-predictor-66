@@ -20,6 +20,7 @@ import {
   Target,
   Building2,
   UserCog,
+  Briefcase,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -41,6 +42,7 @@ type SystemItem = {
 };
 
 const systemItems: SystemItem[] = [
+  { label: "GM Interface", href: "/gm", icon: Briefcase, requires: "team_admin" },
   { label: "Admin", href: "/dashboard/admin", icon: ShieldCheck },
   { label: "Customer Teams", href: "/dashboard/admin/teams", icon: Building2, requires: "superadmin" },
   { label: "Team Members", href: "/dashboard/admin/users", icon: UserCog, requires: "team_admin" },
