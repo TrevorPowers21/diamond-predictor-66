@@ -88,9 +88,8 @@ export default function GMLayout() {
           <Button variant="ghost" size="icon" className="lg:hidden h-8 w-8" onClick={() => setSidebarOpen(true)}>
             <Menu className="h-4 w-4" />
           </Button>
-          <h1 className="text-sm font-semibold text-muted-foreground">Roster</h1>
-          <div className="ml-auto flex items-center gap-3">
-            <AreaToggle current="gm" />
+          <AreaToggle current="gm" />
+          <div className="ml-auto">
             <TeamSwitcher />
           </div>
         </header>

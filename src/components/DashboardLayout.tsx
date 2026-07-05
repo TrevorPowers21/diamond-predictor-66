@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import TeamSwitcher from "@/components/TeamSwitcher";
-import AreaToggle from "@/components/AreaToggle";
+import AreaToggle, { useHasFrontOfficeAccess } from "@/components/AreaToggle";
 import { WhatsNewModal } from "@/components/WhatsNewModal";
 import {
   Activity,
@@ -53,6 +53,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const hasFrontOffice = useHasFrontOfficeAccess();
 
   const visibleSystemItems = systemItems.filter((item) => {
     if (!item.requires) return true;
@@ -182,11 +184,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           <Button variant="ghost" size="icon" className="lg:hidden h-8 w-8" onClick={() => setSidebarOpen(true)}>
             <Menu className="h-4 w-4" />
           </Button>
-          <h1 className="text-sm font-semibold text-muted-foreground">
-            {[...navItems, ...systemItems].find((i) => i.href === location.pathname)?.label ?? "Dashboard"}
-          </h1>
-          <div className="ml-auto flex items-center gap-3">
+          {hasFrontOffice ? (
             <AreaToggle current="eval" />
+          ) : (
+            <h1 className="text-sm font-semibold text-muted-foreground">
+              {[...navItems, ...systemItems].find((i) => i.href === location.pathname)?.label ?? "Dashboard"}
+            </h1>
+          )}
+          <div className="ml-auto">
             <TeamSwitcher />
           </div>
         </header>

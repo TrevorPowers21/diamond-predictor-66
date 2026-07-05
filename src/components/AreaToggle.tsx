@@ -3,16 +3,22 @@ import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 /**
- * Player Evaluation ⇄ Front Office switch. Lives in the top bar, in line with
- * the "Viewing as" team switcher, on BOTH areas. Segmented control: both options
- * show, the current area is highlighted gold, the other is a clickable link.
- * Only users with Front Office access see it (superadmin / team_admin for now;
- * a dedicated gm_user role is a later migration).
+ * Top-level area tabs — Player Evaluation / Front Office (more to come). Rendered
+ * far-left in the top bar (where the page title used to sit). Styled like a tab
+ * bar: the current area is gold with a gold underline; the others are clickable
+ * links. Designed to grow — add entries to `items`.
+ *
+ * Only users with Front Office access see the tabs (superadmin / team_admin for
+ * now; a dedicated gm_user role is a later migration).
  */
-export default function AreaToggle({ current }: { current: "eval" | "gm" }) {
+export function useHasFrontOfficeAccess() {
   const { isSuperadmin, userTeamRole } = useAuth();
-  const hasFrontOfficeAccess = isSuperadmin || userTeamRole === "team_admin";
-  if (!hasFrontOfficeAccess) return null;
+  return isSuperadmin || userTeamRole === "team_admin";
+}
+
+export default function AreaToggle({ current }: { current: "eval" | "gm" }) {
+  const hasAccess = useHasFrontOfficeAccess();
+  if (!hasAccess) return null;
 
   const items = [
     { key: "eval" as const, label: "Player Evaluation", href: "/dashboard" },
@@ -20,7 +26,9 @@ export default function AreaToggle({ current }: { current: "eval" | "gm" }) {
   ];
 
   return (
-    <div className="inline-flex h-8 items-center rounded-md border border-border/60 bg-muted/30 p-0.5 text-[11px] font-semibold">
+    // self-stretch + -my-2.5 cancel the header's vertical padding so the gold
+    // underline sits flush on the header's bottom border, like a real tab bar.
+    <nav className="flex self-stretch -my-2.5">
       {items.map((it) => {
         const active = it.key === current;
         return (
@@ -28,14 +36,15 @@ export default function AreaToggle({ current }: { current: "eval" | "gm" }) {
             key={it.key}
             to={it.href}
             className={cn(
-              "rounded px-3 py-1 transition-colors duration-150 cursor-pointer whitespace-nowrap",
-              active ? "bg-[#D4AF37] text-[#0a0f1e]" : "text-muted-foreground hover:text-foreground"
+              "relative flex items-center px-3 text-[13px] font-semibold transition-colors duration-150 cursor-pointer whitespace-nowrap",
+              active ? "text-[#D4AF37]" : "text-muted-foreground hover:text-foreground"
             )}
           >
             {it.label}
+            {active && <span className="absolute inset-x-0 bottom-0 h-[2px] bg-[#D4AF37]" />}
           </Link>
         );
       })}
-    </div>
+    </nav>
   );
 }
