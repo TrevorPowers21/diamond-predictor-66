@@ -1667,7 +1667,7 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
         class_transition: "same", dev_aggressiveness: 0,
         class_transition_overridden: false, dev_aggressiveness_overridden: false,
         depth_role: hDepth,
-        player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, market_value: hPred.twp_hitter_market_value ?? hPred.market_value, hitter_depth_role: hPred.hitter_depth_role, class_transition: hPred.class_transition ?? null, dev_aggressiveness: hPred.dev_aggressiveness ?? null } : null,
+        player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, market_value: hPred.twp_hitter_market_value ?? hPred.market_value, hitter_depth_role: hPred.hitter_depth_role } : null,
       });
       playerRows.push({
         player_id: p.id, source: "returner", custom_name: customName,
@@ -1676,7 +1676,7 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
         class_transition: "same", dev_aggressiveness: 0,
         class_transition_overridden: false, dev_aggressiveness_overridden: false,
         depth_role: pDepth,
-        player_snapshot: pPred ? { p_era: pPred.p_era, p_fip: pPred.p_fip, p_whip: pPred.p_whip, p_k9: pPred.p_k9, p_bb9: pPred.p_bb9, p_hr9: pPred.p_hr9, p_rv_plus: pPred.p_rv_plus, p_war: pPred.p_war, pitcher_role: pPred.pitcher_role, market_value: pPred.twp_pitcher_market_value ?? pPred.market_value, class_transition: pPred.class_transition ?? null, dev_aggressiveness: pPred.dev_aggressiveness ?? null } : null,
+        player_snapshot: pPred ? { p_era: pPred.p_era, p_fip: pPred.p_fip, p_whip: pPred.p_whip, p_k9: pPred.p_k9, p_bb9: pPred.p_bb9, p_hr9: pPred.p_hr9, p_rv_plus: pPred.p_rv_plus, p_war: pPred.p_war, pitcher_role: pPred.pitcher_role, market_value: pPred.twp_pitcher_market_value ?? pPred.market_value } : null,
       });
     } else if (isPitcher) {
       const pRole: "SP" | "RP" = pPred?.pitcher_role === "SP" ? "SP" : "RP";
@@ -1687,7 +1687,7 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
         class_transition: "same", dev_aggressiveness: 0,
         class_transition_overridden: false, dev_aggressiveness_overridden: false,
         depth_role: pDepth,
-        player_snapshot: pPred ? { p_era: pPred.p_era, p_fip: pPred.p_fip, p_whip: pPred.p_whip, p_k9: pPred.p_k9, p_bb9: pPred.p_bb9, p_hr9: pPred.p_hr9, p_rv_plus: pPred.p_rv_plus, p_war: pPred.p_war, pitcher_role: pPred.pitcher_role, pitcher_depth_role: pPred.pitcher_depth_role, market_value: pPred.market_value, class_transition: pPred.class_transition ?? null, dev_aggressiveness: pPred.dev_aggressiveness ?? null } : null,
+        player_snapshot: pPred ? { p_era: pPred.p_era, p_fip: pPred.p_fip, p_whip: pPred.p_whip, p_k9: pPred.p_k9, p_bb9: pPred.p_bb9, p_hr9: pPred.p_hr9, p_rv_plus: pPred.p_rv_plus, p_war: pPred.p_war, pitcher_role: pPred.pitcher_role, pitcher_depth_role: pPred.pitcher_depth_role, market_value: pPred.market_value } : null,
       });
     } else {
       const hDepth = validHitterDepths.includes(hPred?.hitter_depth_role) ? hPred.hitter_depth_role : hitterDepthFromPa(p.pa ?? null);
@@ -1697,7 +1697,7 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
         class_transition: "same", dev_aggressiveness: 0,
         class_transition_overridden: false, dev_aggressiveness_overridden: false,
         depth_role: hDepth,
-        player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, market_value: hPred.market_value, hitter_depth_role: hPred.hitter_depth_role, class_transition: hPred.class_transition ?? null, dev_aggressiveness: hPred.dev_aggressiveness ?? null } : null,
+        player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, market_value: hPred.market_value, hitter_depth_role: hPred.hitter_depth_role } : null,
       });
     }
   }

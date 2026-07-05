@@ -293,8 +293,12 @@ async function main() {
       snapshot.pitcher_depth_role = pred.pitcher_depth_role ?? null;
       snapshot.pitcher_role = pred.pitcher_role ?? null;
     }
-    snapshot.class_transition = pred.class_transition ?? null;
-    snapshot.dev_aggressiveness = pred.dev_aggressiveness ?? null;
+    // NOTE: do NOT store class_transition / dev_aggressiveness on the snapshot.
+    // The stored line is the NEUTRAL baseline; the simulation applies the coach's
+    // dev-agg as a session overlay reading storedDevAgg from the snapshot. Storing
+    // the precompute's (non-neutral) dev_aggressiveness made storedDevAgg != the
+    // o_war's actual dev-agg, so the overlay DOUBLE-applied dev-agg. Working
+    // snapshots (default + coach-saved) omit these keys — match that.
 
     // Only write if there's at least one meaningful stat
     const hasStats =
