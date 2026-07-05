@@ -1,20 +1,18 @@
 import { useState, useEffect } from "react";
-import { Link, NavLink, useLocation, useNavigate, Outlet } from "react-router-dom";
+import { useLocation, useNavigate, Outlet } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import TeamSwitcher from "@/components/TeamSwitcher";
-import { ClipboardList, LogOut, Menu, ChevronRight } from "lucide-react";
+import AreaToggle from "@/components/AreaToggle";
+import { LogOut, Menu } from "lucide-react";
 
-// GM (front office) nav — mirrors the Player Evaluation dashboard chrome. The GM
-// interface is ONE Team-Builder-style money dashboard (money/eligibility/notes
-// are columns + profile content, not separate pages), so Roster is the view.
-// Budget-allotment settings is a header button, not a nav page (spec §11);
-// player profiles are click-throughs.
-const navItems = [
-  { label: "Roster", href: "/gm", icon: ClipboardList, description: "Money-first team roster" },
-];
-
+/**
+ * Front Office (GM) shell — same chrome as the Player Evaluation dashboard. The
+ * sidebar's only nav is the Player Evaluation ⇄ Front Office toggle (the GM area
+ * is one Team-Builder-style roster page). Budget-allotment settings will be a
+ * header button; player profiles are click-throughs.
+ */
 export default function GMLayout() {
   const { user, signOut, roles } = useAuth();
   const location = useLocation();
@@ -30,8 +28,6 @@ export default function GMLayout() {
     await signOut();
     navigate("/auth");
   };
-
-  const currentLabel = navItems.find((i) => i.href === location.pathname)?.label ?? "GM Interface";
 
   return (
     <div className="flex h-screen bg-background">
@@ -53,33 +49,8 @@ export default function GMLayout() {
         </div>
         <div className="mx-5 border-t border-[#1a2744]/60" />
 
-        {/* Nav */}
-        <nav className="flex-1 px-3 py-3 space-y-1">
-          <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#4a5568]">Front Office</div>
-          {navItems.map((item) => {
-            const isActive = location.pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                to={item.href}
-                onClick={() => setSidebarOpen(false)}
-                className={cn(
-                  "group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all duration-150 cursor-pointer",
-                  isActive
-                    ? "bg-[#D4AF37]/12 text-[#D4AF37] shadow-[inset_2px_0_0_#D4AF37]"
-                    : "text-[#8892a4] hover:bg-[#111c33] hover:text-[#d0d5dd]"
-                )}
-              >
-                <item.icon className={cn("h-4 w-4 shrink-0", isActive ? "text-[#D4AF37]" : "text-[#5a6478] group-hover:text-[#8892a4]")} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-[13px] font-medium leading-tight">{item.label}</div>
-                  {isActive && <div className="text-[10px] text-[#D4AF37]/60 mt-0.5 leading-tight">{item.description}</div>}
-                </div>
-                {isActive && <ChevronRight className="h-3 w-3 text-[#D4AF37]/40 shrink-0" />}
-              </Link>
-            );
-          })}
-        </nav>
+        {/* The GM area is one page — the area toggle lives in the top bar. */}
+        <nav className="flex-1 px-3 py-3 space-y-1" />
 
         {/* User */}
         <div className="mx-5 border-t border-[#1a2744]/60" />
@@ -117,16 +88,9 @@ export default function GMLayout() {
           <Button variant="ghost" size="icon" className="lg:hidden h-8 w-8" onClick={() => setSidebarOpen(true)}>
             <Menu className="h-4 w-4" />
           </Button>
-          <h1 className="text-sm font-semibold text-muted-foreground">{currentLabel}</h1>
-
-          {/* Player Evaluation ⇄ GM Interface toggle */}
+          <h1 className="text-sm font-semibold text-muted-foreground">Roster</h1>
           <div className="ml-auto flex items-center gap-3">
-            <div className="inline-flex overflow-hidden rounded-full border border-border/60 text-[11px] font-semibold">
-              <NavLink to="/dashboard" className="px-3 py-1 text-muted-foreground transition-colors hover:text-foreground">
-                Player Evaluation
-              </NavLink>
-              <span className="bg-[#D4AF37] px-3 py-1 text-[#0a0f1e]">GM Interface</span>
-            </div>
+            <AreaToggle current="gm" />
             <TeamSwitcher />
           </div>
         </header>

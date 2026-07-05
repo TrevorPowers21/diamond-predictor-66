@@ -4,6 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import TeamSwitcher from "@/components/TeamSwitcher";
+import AreaToggle from "@/components/AreaToggle";
 import { WhatsNewModal } from "@/components/WhatsNewModal";
 import {
   Activity,
@@ -20,7 +21,6 @@ import {
   Target,
   Building2,
   UserCog,
-  Briefcase,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -42,7 +42,6 @@ type SystemItem = {
 };
 
 const systemItems: SystemItem[] = [
-  { label: "GM Interface", href: "/gm", icon: Briefcase, requires: "team_admin" },
   { label: "Admin", href: "/dashboard/admin", icon: ShieldCheck },
   { label: "Customer Teams", href: "/dashboard/admin/teams", icon: Building2, requires: "superadmin" },
   { label: "Team Members", href: "/dashboard/admin/users", icon: UserCog, requires: "team_admin" },
@@ -186,7 +185,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           <h1 className="text-sm font-semibold text-muted-foreground">
             {[...navItems, ...systemItems].find((i) => i.href === location.pathname)?.label ?? "Dashboard"}
           </h1>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-3">
+            <AreaToggle current="eval" />
             <TeamSwitcher />
           </div>
         </header>
