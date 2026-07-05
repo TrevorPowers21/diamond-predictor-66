@@ -15,9 +15,10 @@ CREATE TABLE IF NOT EXISTS public.gm_player_finance (
   actual_pay                  numeric,
   finalized                   boolean NOT NULL DEFAULT false,
   finalized_at                timestamptz,
-  -- eligibility (GM-editable, stored) — year-in-school based; NO draft (that
-  -- lives on the player pages).
-  eligibility_years_remaining integer,
+  -- eligibility (GM/head-coach editable, stored) — year-in-school override on
+  -- top of players.class_year (GR is a normal ongoing class, not exhausted).
+  -- Draft year lives on the player profile, NOT here.
+  eligibility_class           text,
   eligibility_note            text,
   updated_by_user_id          uuid,
   created_at                  timestamptz NOT NULL DEFAULT now(),

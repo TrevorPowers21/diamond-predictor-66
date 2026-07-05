@@ -29,7 +29,7 @@ export interface GmRow {
   other_amount: number | null;
   actual_pay: number | null;
   finalized: boolean;
-  eligibility_years_remaining: number | null;
+  eligibility_class: string | null; // GM/head-coach display (override ?? class_year)
 }
 
 export interface GmBudget {
@@ -75,7 +75,13 @@ export function useGmRoster() {
   });
 
   const defaultBuildId = useMemo(() => builds.find((b) => b.is_default)?.id ?? builds[0]?.id ?? null, [builds]);
-  const activeBuildId = pickedBuildId ?? defaultBuildId;
+  // Guard: the picked build must belong to the CURRENT team's builds. Otherwise a
+  // build selected for one team would leak its roster when impersonating another
+  // (pickedBuildId is component state and doesn't reset on team switch).
+  const activeBuildId = useMemo(
+    () => (pickedBuildId && builds.some((b) => b.id === pickedBuildId) ? pickedBuildId : defaultBuildId),
+    [pickedBuildId, builds, defaultBuildId],
+  );
 
   const key = ["gm-roster", effectiveTeamId ?? null, activeBuildId, season];
   const { data, isLoading } = useQuery({
@@ -126,7 +132,7 @@ export function useGmRoster() {
           other_amount: f.other_amount ?? null,
           actual_pay: f.actual_pay ?? r.nil_value ?? null,
           finalized: !!f.finalized,
-          eligibility_years_remaining: f.eligibility_years_remaining ?? null,
+          eligibility_class: f.eligibility_class ?? p?.class_year ?? null,
         };
       });
       const budget: GmBudget | null = bud
@@ -151,7 +157,7 @@ export function useGmRoster() {
     mutationFn: async ({ playerId, patch }: { playerId: string; patch: Partial<GmRow> }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
       const upsert: any = { customer_team_id: effectiveTeamId, player_id: playerId, season, updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() };
-      for (const k of ["rev_share", "nil_amount", "other_amount", "actual_pay", "eligibility_years_remaining"] as const) {
+      for (const k of ["rev_share", "nil_amount", "other_amount", "actual_pay", "eligibility_class"] as const) {
         if (k in patch) upsert[k] = (patch as any)[k];
       }
       const { error } = await (supabase as any).from("gm_player_finance").upsert(upsert, { onConflict: "customer_team_id,player_id,season" });
