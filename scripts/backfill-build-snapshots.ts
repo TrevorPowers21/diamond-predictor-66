@@ -150,24 +150,35 @@ async function main() {
   let allPredictions: any[] = [];
   for (let i = 0; i < uniquePlayerIds.length; i += PAGE_SIZE) {
     const chunk = uniquePlayerIds.slice(i, i + PAGE_SIZE);
-    const { data: predData, error: predErr } = await sb
-      .from("player_predictions")
-      .select(
-        "player_id, customer_team_id, variant, model_type, status, " +
-        "p_avg, p_obp, p_slg, p_wrc_plus, o_war, market_value, " +
-        "twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, " +
-        "p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, " +
-        "pitcher_role, pitcher_depth_role, class_transition, dev_aggressiveness"
-      )
-      .in("player_id", chunk)
-      .eq("season", PROJECTION_SEASON)
-      .in("status", ["active", "departed"]);
+    // Paginate within the chunk. 100 players × ~13 predictions each (one per
+    // customer team + global) exceeds PostgREST's 1000-row default, which
+    // silently truncated the tail players to zero rows — they then looked like
+    // "no data" and were skipped. Because the truncated tail shifted with
+    // chunk ordering, each run left DIFFERENT builds with null snapshots.
+    let rangeFrom = 0;
+    for (;;) {
+      const { data: predData, error: predErr } = await sb
+        .from("player_predictions")
+        .select(
+          "player_id, customer_team_id, variant, model_type, status, " +
+          "p_avg, p_obp, p_slg, p_wrc_plus, o_war, market_value, " +
+          "twp_hitter_market_value, twp_pitcher_market_value, hitter_depth_role, " +
+          "p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war, " +
+          "pitcher_role, pitcher_depth_role, class_transition, dev_aggressiveness"
+        )
+        .in("player_id", chunk)
+        .eq("season", PROJECTION_SEASON)
+        .in("status", ["active", "departed"])
+        .range(rangeFrom, rangeFrom + 999);
 
-    if (predErr) {
-      console.error(`${C.red}✗ Prediction fetch error: ${predErr.message}${C.reset}`);
-      process.exit(1);
+      if (predErr) {
+        console.error(`${C.red}✗ Prediction fetch error: ${predErr.message}${C.reset}`);
+        process.exit(1);
+      }
+      allPredictions = allPredictions.concat(predData || []);
+      if (!predData || predData.length < 1000) break;
+      rangeFrom += 1000;
     }
-    allPredictions = allPredictions.concat(predData || []);
   }
   console.log(`  Loaded ${allPredictions.length} prediction rows.\n`);
 
