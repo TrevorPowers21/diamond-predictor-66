@@ -1,90 +1,139 @@
-import { Link, useLocation, Outlet } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, NavLink, useLocation, useNavigate, Outlet } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import TeamSwitcher from "@/components/TeamSwitcher";
-import { GOLD, NAVY_BG, NAVY_CARD, NAVY_BORDER } from "@/gm/lib/theme";
+import { ClipboardList, Wallet, StickyNote, GraduationCap, LogOut, Menu, ChevronRight } from "lucide-react";
 
-// GM-interface tabs. Money / Notes / Eligibility are scaffolded placeholders
-// until their phases land; Roster (index) is the two-way-synced team view.
-const TABS = [
-  { label: "Roster", path: "/gm", exact: true },
-  { label: "Money", path: "/gm/money" },
-  { label: "Notes", path: "/gm/notes" },
-  { label: "Eligibility", path: "/gm/eligibility" },
-] as const;
+// GM (front office) nav — mirrors the Player Evaluation dashboard chrome, just a
+// different item set. Roster (index) is the two-way-synced team view.
+const navItems = [
+  { label: "Roster", href: "/gm", icon: ClipboardList, description: "Money-first roster view" },
+  { label: "Money", href: "/gm/money", icon: Wallet, description: "Budget + pay buckets" },
+  { label: "Notes", href: "/gm/notes", icon: StickyNote, description: "Negotiation notes" },
+  { label: "Eligibility", href: "/gm/eligibility", icon: GraduationCap, description: "Draft + eligibility" },
+];
 
 export default function GMLayout() {
+  const { user, signOut, roles } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    setSidebarOpen(false);
+    if (typeof document !== "undefined") document.body.style.pointerEvents = "auto";
+  }, [location.pathname]);
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/auth");
+  };
+
+  const currentLabel = navItems.find((i) => i.href === location.pathname)?.label ?? "GM Interface";
 
   return (
-    <div className="min-h-screen text-white" style={{ backgroundColor: NAVY_BG }}>
-      {/* Header */}
-      <div style={{ background: "linear-gradient(180deg, #0a1428 0%, #040810 100%)" }}>
-        <div className="mx-auto max-w-7xl px-6 pt-6 pb-3">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-[10px] font-bold uppercase tracking-[0.3em]" style={{ color: GOLD }}>
-                RSTR IQ · Front Office
-              </div>
-              <h1
-                className="mt-1 text-4xl font-bold leading-none tracking-tight"
-                style={{ color: "#FFFFFF", fontFamily: "'Oswald', sans-serif" }}
+    <div className="flex h-screen bg-background">
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      {/* Sidebar */}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex w-[260px] flex-col transition-transform duration-200 lg:static lg:translate-x-0",
+          "bg-[#070e1f] text-[#c8cdd5]",
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        {/* Brand */}
+        <div className="flex items-center justify-center px-5 pt-5 pb-3">
+          <img src="/rstr-iq-logo.png" alt="RSTR IQ" className="h-[60px] w-auto" />
+        </div>
+        <div className="mx-5 border-t border-[#1a2744]/60" />
+
+        {/* Nav */}
+        <nav className="flex-1 px-3 py-3 space-y-1">
+          <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#4a5568]">Front Office</div>
+          {navItems.map((item) => {
+            const isActive = location.pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                to={item.href}
+                onClick={() => setSidebarOpen(false)}
+                className={cn(
+                  "group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all duration-150 cursor-pointer",
+                  isActive
+                    ? "bg-[#D4AF37]/12 text-[#D4AF37] shadow-[inset_2px_0_0_#D4AF37]"
+                    : "text-[#8892a4] hover:bg-[#111c33] hover:text-[#d0d5dd]"
+                )}
               >
-                GM Interface
-              </h1>
+                <item.icon className={cn("h-4 w-4 shrink-0", isActive ? "text-[#D4AF37]" : "text-[#5a6478] group-hover:text-[#8892a4]")} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] font-medium leading-tight">{item.label}</div>
+                  {isActive && <div className="text-[10px] text-[#D4AF37]/60 mt-0.5 leading-tight">{item.description}</div>}
+                </div>
+                {isActive && <ChevronRight className="h-3 w-3 text-[#D4AF37]/40 shrink-0" />}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* User */}
+        <div className="mx-5 border-t border-[#1a2744]/60" />
+        <div className="p-4">
+          <div className="flex items-center gap-2.5 mb-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-[#D4AF37]/20 to-[#D4AF37]/5 text-[12px] font-bold text-[#D4AF37] ring-1 ring-[#D4AF37]/20">
+              {(user?.email || "?")[0].toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-medium truncate text-[#8892a4]">{user?.email}</div>
+              {roles.length > 0 && (
+                <div className="flex gap-1.5 mt-0.5">
+                  {roles.map((r) => (
+                    <span key={r} className="text-[9px] font-semibold uppercase tracking-wider text-[#D4AF37]/70 bg-[#D4AF37]/8 px-1.5 py-0.5 rounded">{r}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 text-[#4a5568] hover:text-[#c8cdd5] hover:bg-[#111c33] text-xs h-8 rounded-lg transition-colors duration-150"
+            onClick={handleSignOut}
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            Sign Out
+          </Button>
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <header className="flex items-center gap-3 border-b border-border/60 px-4 py-2.5 lg:px-6 bg-background/80 backdrop-blur-sm">
+          <Button variant="ghost" size="icon" className="lg:hidden h-8 w-8" onClick={() => setSidebarOpen(true)}>
+            <Menu className="h-4 w-4" />
+          </Button>
+          <h1 className="text-sm font-semibold text-muted-foreground">{currentLabel}</h1>
+
+          {/* Player Evaluation ⇄ GM Interface toggle */}
+          <div className="ml-auto flex items-center gap-3">
+            <div className="inline-flex overflow-hidden rounded-full border border-border/60 text-[11px] font-semibold">
+              <NavLink to="/dashboard" className="px-3 py-1 text-muted-foreground transition-colors hover:text-foreground">
+                Player Evaluation
+              </NavLink>
+              <span className="bg-[#D4AF37] px-3 py-1 text-[#0a0f1e]">GM Interface</span>
             </div>
             <TeamSwitcher />
           </div>
+        </header>
 
-          {/* View toggle: Player Evaluation ⇄ GM Interface */}
-          <div
-            className="mt-4 inline-flex overflow-hidden rounded-full border text-[11px] font-bold uppercase tracking-[0.15em]"
-            style={{ borderColor: NAVY_BORDER, backgroundColor: NAVY_CARD }}
-          >
-            <Link
-              to="/dashboard"
-              className="px-4 py-1.5 text-white/45 transition-colors hover:text-white/80"
-              style={{ fontFamily: "'Oswald', sans-serif" }}
-            >
-              Player Evaluation
-            </Link>
-            <span
-              className="px-4 py-1.5"
-              style={{ backgroundColor: GOLD, color: "#0a0f1e", fontFamily: "'Oswald', sans-serif" }}
-            >
-              GM Interface
-            </span>
-          </div>
-        </div>
-
-        {/* Tab bar */}
-        <div className="border-b" style={{ borderColor: NAVY_BORDER }}>
-          <div className="mx-auto max-w-7xl px-6">
-            <nav className="flex gap-0">
-              {TABS.map((tab) => {
-                const isActive = tab.exact
-                  ? location.pathname === tab.path
-                  : location.pathname.startsWith(tab.path);
-                return (
-                  <Link
-                    key={tab.path}
-                    to={tab.path}
-                    className="relative cursor-pointer px-5 py-3 text-[11px] font-bold uppercase tracking-[0.2em] transition-colors duration-150 hover:text-[#E8C24E]"
-                    style={{ color: isActive ? GOLD : "rgba(255,255,255,0.45)", fontFamily: "'Oswald', sans-serif" }}
-                  >
-                    {tab.label}
-                    {isActive && (
-                      <span className="absolute bottom-0 left-0 right-0 h-[2px]" style={{ backgroundColor: GOLD }} />
-                    )}
-                  </Link>
-                );
-              })}
-            </nav>
-          </div>
-        </div>
-      </div>
-
-      {/* Page content */}
-      <div className="mx-auto max-w-7xl px-6 py-6">
-        <Outlet />
+        <main className="flex-1 overflow-auto p-4 lg:p-6">
+          <Outlet />
+        </main>
       </div>
     </div>
   );
