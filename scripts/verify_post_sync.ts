@@ -1,0 +1,10 @@
+import { createClient } from "@supabase/supabase-js";
+const sb = createClient("https://slrxowawbijbjrkozqlj.supabase.co", process.env.STAGING_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
+const { count: mc } = await (sb as any).from("model_config").select("config_key", { count: "exact", head: true }).eq("season", 2026);
+const { count: ai } = await (sb as any).from("ai_scouting_reports").select("id", { count: "exact", head: true });
+const { count: aih } = await (sb as any).from("ai_scouting_reports").select("id", { count: "exact", head: true }).eq("side", "hitter");
+const { count: aip } = await (sb as any).from("ai_scouting_reports").select("id", { count: "exact", head: true }).eq("side", "pitcher");
+console.log(`staging model_config 2026: ${mc} (expected 79)`);
+console.log(`staging ai_scouting_reports total: ${ai} (expected 8109)`);
+console.log(`  hitter: ${aih} (prod had 4221)`);
+console.log(`  pitcher: ${aip} (prod had 3888)`);
