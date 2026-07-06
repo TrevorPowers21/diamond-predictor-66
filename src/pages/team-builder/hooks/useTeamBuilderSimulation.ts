@@ -1516,39 +1516,26 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     if (renderAsPitcher) {
       const projection = playerProjection(p, "pitcher");
       const source: any = projection.shown ?? null;
-      // Stored-only: TWP-aware market_value from the prediction row, or the
-      // snapshot's nil_valuation (target board adds bake stored MV here at
-      // add-time). No live compute, no PTM/PVF re-multiplication — the
-      // precompute pipeline already applied all that.
+      // Market = pWAR × $/WAR × conference tier, recomputed straight from the
+      // row's pWAR — the same equation the engine (pitcherProjection) uses.
+      // PVF is intentionally NOT applied: it's being removed from the pitching
+      // market model (a Friday-starter premium that double-counts innings already
+      // captured in WAR). The engine drops it too, so once 2027 projections rerun
+      // the stored values converge with what's shown here. Stored-MV presence
+      // gates eligibility (independents etc. get no market); a TWP's pitcher side
+      // flows through its own pWAR via the same equation.
       const isTwpPlayer = !!(p.player as any)?.is_twp;
       const storedMv = pickPitcherMarketValue(source, isTwpPlayer);
-      // Market moves with the recomputed pWAR (which already folds in depth-role
-      // innings, SP↔RP rate regression, and dev_agg) relative to the stored
-      // baseline WAR, then PVF — a MARKET-only factor — converts the stored role's
-      // premium to the session role's. Mirrors market = pWAR × $/WAR × tier × pvf
-      // and stays consistent with the pWAR shown in the same row.
-      const srcId = (p.player as any)?.source_player_id ?? null;
-      const pmRole = srcId ? pitchingStatsByNameTeam.bySourceId.get(srcId)?.role : null;
-      const currentRole = effectivePitcherRoleForBuild(p, pmRole);
-      const sessionDepth = normalizePitcherDepthRole(p.depth_role, currentRole);
-      const storedBucket: "SP" | "RP" = source?.pitcher_role === "SP" ? "SP" : "RP";
-      const sessionBucket: "SP" | "RP" =
-        (sessionDepth === "weekend_starter" || sessionDepth === "weekday_starter" || sessionDepth === "swing_starter") ? "SP" : "RP";
-      const pvfStored = pitchingPvfForRole(storedBucket);
-      const pvfNew = pitchingPvfForRole(sessionBucket);
-      const pvfRatioMv = pvfStored > 0 ? pvfNew / pvfStored : 1;
-      // WAR ratio carries the IP + role-regression + dev_agg movement (all baked
-      // into projection.pwar); if the stored baseline WAR is missing or ≤0 the
-      // ratio can't be formed cleanly, so leave MV at stored × pvf.
-      const storedBaselineWar = source?.p_war != null ? Number(source.p_war) : null;
-      const newPwarMv = projection?.pwar;
-      const warRatioMv = (storedBaselineWar != null && storedBaselineWar > 0 && newPwarMv != null && Number.isFinite(newPwarMv))
-        ? Number(newPwarMv) / storedBaselineWar
-        : 1;
-      const overlayScale = warRatioMv * pvfRatioMv;
-      if (storedMv != null && Number.isFinite(storedMv)) return Math.max(0, storedMv * overlayScale);
+      const eligibleForMv = storedMv != null && Number.isFinite(storedMv);
+      const pwarForMv = projection?.pwar;
+      if (eligibleForMv && pwarForMv != null && Number.isFinite(Number(pwarForMv))) {
+        const confForMv = (p.player as any)?.conference ?? (source as any)?.conference ?? null;
+        const tierForMv = getProgramTierMultiplierByConference(confForMv, pitchingTierMultipliers);
+        return Math.max(0, Number(pwarForMv) * pitchingEq.market_dollars_per_war * tierForMv);
+      }
+      if (eligibleForMv) return Math.max(0, Number(storedMv));
       const direct = Number(source?.nil_valuation);
-      if (Number.isFinite(direct)) return Math.max(0, direct * overlayScale);
+      if (Number.isFinite(direct)) return Math.max(0, direct);
       return 0;
     }
     return projectedPlayerScore(p) * nilBasePerOWar;
