@@ -98,6 +98,11 @@ async function main() {
   const isProd = process.argv.includes("--prod");
   const dryRun = process.argv.includes("--dry-run");
   const season = Number(arg("season") || PROJECTION_SEASON);
+  // Optional surgical scope: --source-ids <id,id> restricts the run to those
+  // pitchers only (mirrors recompute-stuff-scoped / precompute_specific_players).
+  // Empty/missing → unchanged bulk behavior over every returner.
+  const sourceIdsFilter = (arg("source-ids") || "")
+    .split(",").map((s) => s.trim()).filter(Boolean);
 
   // Env-detection guard: refuse to write prod unless --prod explicitly passed.
   const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").toLowerCase();
@@ -163,7 +168,13 @@ async function main() {
   // Include pitcher-primary OR is_twp (TWPs appear in both pools).
   // JUCO included here too; the loop forks by division so JUCO bypasses the
   // D1 engine and uses projectJucoReturnerPitcher (passthrough actuals).
-  const pitchers = allPlayers.filter((p) => (pitcherTest(p.position) || p.is_twp));
+  let pitchers = allPlayers.filter((p) => (pitcherTest(p.position) || p.is_twp));
+  if (sourceIdsFilter.length > 0) {
+    const want = new Set(sourceIdsFilter);
+    pitchers = pitchers.filter((p) => want.has(String(p.source_player_id)));
+    console.log(`  ${C.yellow}scoped${C.reset} to ${pitchers.length} pitcher(s) via --source-ids: ${sourceIdsFilter.join(", ")}`);
+    if (pitchers.length === 0) { console.error(`${C.red}✗ No pitchers matched --source-ids. Aborting.${C.reset}`); process.exit(1); }
+  }
   const d1Count = pitchers.filter((p) => !isJuco(p.division)).length;
   const jucoCount = pitchers.filter((p) => isJuco(p.division)).length;
   console.log(`  ${pitchers.length} pitchers total (${d1Count} D1, ${jucoCount} JUCO)`);
