@@ -402,14 +402,16 @@ async function main() {
       continue;
     }
 
-    // Delete existing default build if force
-    if (existingId && force) {
-      await sb.from("team_build_players").delete().eq("build_id", existingId);
-      await sb.from("team_builds").delete().eq("id", existingId);
-      replaced++;
-    }
+    // ── Create-then-swap ────────────────────────────────────────────────────
+    // Build the NEW default fully as is_default=FALSE (so it never shadows the
+    // live one mid-build), verify every row landed, THEN flip it to default and
+    // retire the old one. Any failure deletes the incomplete new build and leaves
+    // the existing default completely untouched — a team can NEVER be left with
+    // zero defaults. (The 2026-07 wipe came from the OLD delete-first order:
+    // it removed the existing default, then rolled the failed recreate back to
+    // nothing.)
 
-    // Create the build
+    // 1. Create the new build, NOT yet default.
     const { data: newBuild, error: buildErr } = await sb
       .from("team_builds")
       .insert({
@@ -420,7 +422,7 @@ async function main() {
         total_budget: 0,
         depth_assignments: {},
         depth_placeholders: {},
-        is_default: true,
+        is_default: false,
         academic_year: academicYear,
       })
       .select("id")
@@ -428,39 +430,68 @@ async function main() {
 
     if (buildErr || !newBuild) {
       console.error(
-        `  ${C.red}✗ FAIL${C.reset}  ${teamLabel}: build insert failed: ${buildErr?.message}`
+        `  ${C.red}✗ FAIL${C.reset}  ${teamLabel}: build insert failed: ${buildErr?.message} (existing default left intact)`
       );
       failed++;
       continue;
     }
-
-    // Insert player rows in chunks of 500
     const buildId = (newBuild as any).id as string;
+
+    // Rollback helper: delete the incomplete new build; existing default untouched.
+    const rollbackNew = async (why: string) => {
+      console.error(
+        `  ${C.red}✗ FAIL${C.reset}  ${teamLabel}: ${why} — rolling back new build, existing default kept`
+      );
+      await sb.from("team_build_players").delete().eq("build_id", buildId);
+      await sb.from("team_builds").delete().eq("id", buildId);
+      failed++;
+    };
+
+    // 2. Insert player rows in chunks of 500.
     const rows = playerRows.map((r) => ({ ...r, build_id: buildId }));
     const CHUNK = 500;
     let insertFailed = false;
     for (let i = 0; i < rows.length; i += CHUNK) {
-      const chunk = rows.slice(i, i + CHUNK);
       const { error: insertErr } = await sb
         .from("team_build_players")
-        .insert(chunk);
+        .insert(rows.slice(i, i + CHUNK));
       if (insertErr) {
-        console.error(
-          `  ${C.red}✗ FAIL${C.reset}  ${teamLabel}: player insert failed at chunk ${i}: ${insertErr.message}`
-        );
-        await sb.from("team_builds").delete().eq("id", buildId);
-        failed++;
+        await rollbackNew(`player insert failed at chunk ${i}: ${insertErr.message}`);
         insertFailed = true;
         break;
       }
     }
+    if (insertFailed) continue;
 
-    if (!insertFailed) {
-      console.log(
-        `  ${C.green}✓ OK${C.reset}   ${teamLabel}: created build ${buildId} with ${rows.length} player rows`
-      );
-      created++;
+    // 3. Verify EVERY row landed before retiring the old default (don't miss any).
+    const { count: landed, error: countErr } = await sb
+      .from("team_build_players")
+      .select("id", { count: "exact", head: true })
+      .eq("build_id", buildId);
+    if (countErr || (landed ?? 0) !== rows.length) {
+      await rollbackNew(`row-count check failed (${landed ?? "?"}/${rows.length})`);
+      continue;
     }
+
+    // 4. Promote new → default FIRST (never a zero-default window), then retire old.
+    const { error: promoteErr } = await sb
+      .from("team_builds")
+      .update({ is_default: true })
+      .eq("id", buildId);
+    if (promoteErr) {
+      await rollbackNew(`promote-to-default failed: ${promoteErr.message}`);
+      continue;
+    }
+    if (existingId) {
+      await sb.from("team_build_players").delete().eq("build_id", existingId);
+      await sb.from("team_builds").delete().eq("id", existingId);
+      replaced++;
+    }
+
+    console.log(
+      `  ${C.green}✓ OK${C.reset}   ${teamLabel}: created build ${buildId} with ${rows.length} player rows${existingId ? " (replaced prior default)" : ""}`
+    );
+    created++;
   }
 
   console.log(`\n${"=".repeat(64)}`);
@@ -477,6 +508,30 @@ async function main() {
   }
   console.log(`  Skipped:  ${skipped}`);
   if (failed) console.log(`  ${C.red}Failed:   ${failed}${C.reset}`);
+
+  // Final safety net — after an apply run, every team must end with exactly one
+  // default build. Make a partial/failed run LOUD so no team is silently missed.
+  if (apply) {
+    const { data: finalDefaults } = await sb
+      .from("team_builds")
+      .select("customer_team_id")
+      .eq("is_default", true)
+      .eq("academic_year", academicYear);
+    const cnt = new Map<string, number>();
+    for (const d of finalDefaults || []) {
+      const k = (d as any).customer_team_id as string;
+      if (k) cnt.set(k, (cnt.get(k) ?? 0) + 1);
+    }
+    const missing = customerTeams.filter((t: any) => (cnt.get(t.id) ?? 0) === 0);
+    const dupes = customerTeams.filter((t: any) => (cnt.get(t.id) ?? 0) > 1);
+    if (missing.length === 0 && dupes.length === 0) {
+      console.log(`  ${C.green}✓ Verified: all ${customerTeams.length} teams have exactly one default build.${C.reset}`);
+    } else {
+      if (missing.length) console.log(`  ${C.red}✗ ${missing.length} team(s) with NO default build: ${missing.map((t: any) => t.name).join(", ")}${C.reset}`);
+      if (dupes.length) console.log(`  ${C.red}✗ ${dupes.length} team(s) with MULTIPLE default builds: ${dupes.map((t: any) => t.name).join(", ")}${C.reset}`);
+      process.exitCode = 1;
+    }
+  }
   console.log("");
 }
 
