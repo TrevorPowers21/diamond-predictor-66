@@ -262,6 +262,33 @@ export function useGmRoster() {
     onError: (e: any) => toast.error(`Budget save failed: ${e.message}`),
   });
 
+  // Finalize the budget from the GM popup: persist the four allotment caps, mark
+  // finalized, then COMMUNICATE the summed total into the coach's Team Builder by
+  // writing team_builds.total_budget for the active build (what the coach's
+  // build reads as its spending budget — useLoadBuild → setTotalBudget).
+  type BudgetCaps = { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null };
+  const commitBudget = useMutation({
+    mutationFn: async (caps: BudgetCaps) => {
+      if (!effectiveTeamId) throw new Error("No team in scope");
+      const total = (caps.rev_share_total ?? 0) + (caps.nil_total ?? 0) + (caps.scholarship_total ?? 0) + (caps.other_total ?? 0);
+      const { error } = await (supabase as any).from("gm_budget").upsert(
+        { customer_team_id: effectiveTeamId, season, ...caps, finalized: true, finalized_at: new Date().toISOString(), updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() },
+        { onConflict: "customer_team_id,season" },
+      );
+      if (error) throw error;
+      if (activeBuildId) {
+        const { error: e2 } = await (supabase as any).from("team_builds").update({ total_budget: total }).eq("id", activeBuildId);
+        if (e2) throw e2;
+      }
+      return total;
+    },
+    onSuccess: (total) => {
+      qc.invalidateQueries({ queryKey: key });
+      toast.success(`Budget finalized — $${Math.round(total).toLocaleString("en-US")} pushed to Team Builder`);
+    },
+    onError: (e: any) => toast.error(`Finalize failed: ${e.message}`),
+  });
+
   return {
     teamName,
     season,
@@ -278,5 +305,7 @@ export function useGmRoster() {
     finalizePlayer: (row: GmRow) => finalizePlayer.mutate(row),
     saveBudget: (patch: Partial<GmBudget>) => saveBudget.mutate(patch),
     finalizeBudget: (finalized: boolean) => saveBudget.mutate({ finalized }),
+    commitBudget: (caps: { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null }) => commitBudget.mutate(caps),
+    isFinalizing: commitBudget.isPending,
   };
 }
