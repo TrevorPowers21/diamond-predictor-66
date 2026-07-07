@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { useGmRoster, type GmBudget, type GmRow } from "@/gm/hooks/useGmRoster";
+import { useGmRoster, type GmBudget, type GmOtherLine, type GmRow } from "@/gm/hooks/useGmRoster";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Check, SlidersHorizontal } from "lucide-react";
+import { Check, Plus, SlidersHorizontal, X } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { cn } from "@/lib/utils";
 
@@ -78,23 +78,41 @@ function DollarInput({ value, onChange }: { value: number | null; onChange: (n: 
 /** Budget-setup popup: the GM edits the four allotments here (nowhere else),
  *  then Finalize sums them and pushes the total into the coach's Team Builder.
  *  The roster boxes stay read-only whole numbers. */
-type BudgetCaps = { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null };
+type OtherDraft = { name: string; amount: number | null };
+type BudgetCaps = { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown: GmOtherLine[] };
 function BudgetDialog({ budget, onSave, onFinalize, pending }: { budget: GmBudget | null; onSave: (caps: BudgetCaps) => void; onFinalize: (caps: BudgetCaps) => void; pending: boolean }) {
   const [open, setOpen] = useState(false);
   const [rev, setRev] = useState<number | null>(null);
   const [nil, setNil] = useState<number | null>(null);
   const [sch, setSch] = useState<number | null>(null);
-  const [other, setOther] = useState<number | null>(null);
+  const [other, setOther] = useState<OtherDraft[]>([]);
   useEffect(() => {
     if (open) {
       setRev(budget?.rev_share_total ?? null);
       setNil(budget?.nil_total ?? null);
       setSch(budget?.scholarship_total ?? null);
-      setOther(budget?.other_total ?? null);
+      // Seed Other from saved lines; fall back to a single line for a legacy
+      // other_total, or one empty row to start.
+      const lines = budget?.other_breakdown;
+      setOther(
+        lines && lines.length
+          ? lines.map((l) => ({ name: l.name, amount: l.amount }))
+          : budget?.other_total
+            ? [{ name: "Other", amount: budget.other_total }]
+            : [{ name: "", amount: null }],
+      );
     }
   }, [open, budget]);
-  const total = (rev ?? 0) + (nil ?? 0) + (sch ?? 0) + (other ?? 0);
-  const caps = (): BudgetCaps => ({ rev_share_total: rev, nil_total: nil, scholarship_total: sch, other_total: other });
+  const otherSum = other.reduce((s, l) => s + (l.amount ?? 0), 0);
+  const total = (rev ?? 0) + (nil ?? 0) + (sch ?? 0) + otherSum;
+  const caps = (): BudgetCaps => ({
+    rev_share_total: rev,
+    nil_total: nil,
+    scholarship_total: sch,
+    other_total: otherSum,
+    other_breakdown: other.filter((l) => l.name.trim() || l.amount != null).map((l) => ({ name: l.name.trim() || "Other", amount: l.amount ?? 0 })),
+  });
+  const setLine = (i: number, patch: Partial<OtherDraft>) => setOther((prev) => prev.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const field = (label: string, val: number | null, set: (n: number | null) => void) => (
     <label className="flex items-center justify-between gap-4">
       <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground" style={OSWALD}>{label}</span>
@@ -114,7 +132,32 @@ function BudgetDialog({ budget, onSave, onFinalize, pending }: { budget: GmBudge
           {field("Revenue Share", rev, setRev)}
           {field("NIL", nil, setNil)}
           {field("Scholarship", sch, setSch)}
-          {field("Other", other, setOther)}
+
+          {/* Other → named funding lines (camps, vendors, donor …) summing to Other. */}
+          <div className="space-y-2 rounded-md border p-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground" style={OSWALD}>Other</span>
+              <span className="text-xs font-mono font-semibold tabular-nums">{money(otherSum)}</span>
+            </div>
+            {other.map((line, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <Input
+                  value={line.name}
+                  placeholder="Source (e.g. Camps)"
+                  className="h-8 flex-1 text-xs"
+                  onChange={(e) => setLine(i, { name: e.target.value })}
+                />
+                <DollarInput value={line.amount} onChange={(n) => setLine(i, { amount: n })} />
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground" onClick={() => setOther((prev) => prev.filter((_, j) => j !== i))}>
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+            <Button variant="outline" size="sm" className="h-7 w-full gap-1.5 text-xs" onClick={() => setOther((prev) => [...prev, { name: "", amount: null }])}>
+              <Plus className="h-3.5 w-3.5" /> Add source
+            </Button>
+          </div>
+
           <div className="flex items-center justify-between border-t pt-3">
             <span className="text-xs font-bold uppercase tracking-wider" style={OSWALD}>Total</span>
             <span className="text-base font-bold font-mono tabular-nums">{money(total)}</span>

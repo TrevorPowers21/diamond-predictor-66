@@ -37,11 +37,17 @@ export interface GmRow {
   eligibility_class: string | null; // GM/head-coach display (override ?? class_year)
 }
 
+export interface GmOtherLine {
+  name: string;
+  amount: number;
+}
+
 export interface GmBudget {
   rev_share_total: number | null;
   nil_total: number | null;
   other_total: number | null;
   scholarship_total: number | null;
+  other_breakdown: GmOtherLine[] | null;
   finalized: boolean;
 }
 
@@ -193,7 +199,7 @@ export function useGmRoster() {
         };
       });
       const budget: GmBudget | null = bud
-        ? { rev_share_total: bud.rev_share_total, nil_total: bud.nil_total, other_total: bud.other_total, scholarship_total: bud.scholarship_total, finalized: !!bud.finalized }
+        ? { rev_share_total: bud.rev_share_total, nil_total: bud.nil_total, other_total: bud.other_total, scholarship_total: bud.scholarship_total, other_breakdown: (bud.other_breakdown as GmOtherLine[] | null) ?? null, finalized: !!bud.finalized }
         : null;
       return { rows, budget };
     },
@@ -266,7 +272,7 @@ export function useGmRoster() {
   // finalized, then COMMUNICATE the summed total into the coach's Team Builder by
   // writing team_builds.total_budget for the active build (what the coach's
   // build reads as its spending budget — useLoadBuild → setTotalBudget).
-  type BudgetCaps = { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null };
+  type BudgetCaps = { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown?: GmOtherLine[] | null };
   const commitBudget = useMutation({
     mutationFn: async (caps: BudgetCaps) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
@@ -305,7 +311,7 @@ export function useGmRoster() {
     finalizePlayer: (row: GmRow) => finalizePlayer.mutate(row),
     saveBudget: (patch: Partial<GmBudget>) => saveBudget.mutate(patch),
     finalizeBudget: (finalized: boolean) => saveBudget.mutate({ finalized }),
-    commitBudget: (caps: { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null }) => commitBudget.mutate(caps),
+    commitBudget: (caps: { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown?: GmOtherLine[] | null }) => commitBudget.mutate(caps),
     isFinalizing: commitBudget.isPending,
   };
 }
