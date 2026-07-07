@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, GripVertical, ExternalLink, X, FileText } from "lucide-react";
+import { Plus, GripVertical, ExternalLink, X, FileText, Phone } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
@@ -52,19 +52,15 @@ function StageSelect({ value, onChange }: { value: RecruitStage; onChange: (s: R
   );
 }
 
-function TierSelect({ value, onChange }: { value: RecruitTier | null; onChange: (t: RecruitTier) => void }) {
+/** Stable, non-editable projection-tier badge. The tier is authored on a scouting
+ *  report (initial or any later one) — never edited inline here. */
+function TierBadge({ value }: { value: RecruitTier | null }) {
   const info = RECRUIT_TIERS.find((t) => t.value === value);
-  return (
-    <Select value={value ?? undefined} onValueChange={(v) => onChange(v as RecruitTier)}>
-      <SelectTrigger className={cn("h-6 w-auto gap-1 rounded border-0 px-2 text-[10px] font-bold uppercase tracking-wider", info ? toneClass(info.tone) : "bg-muted text-muted-foreground")} style={OSWALD}>
-        <SelectValue placeholder="Set Tier" />
-      </SelectTrigger>
-      <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
-    </Select>
-  );
+  if (!info) return null;
+  return <span className={cn("inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", toneClass(info.tone))} style={OSWALD}>{info.label}</span>;
 }
 
-function SortableRecruitCard({ recruit, onRemove, onStageChange, onTierChange, eventCount, onTimeline, reports, onReports }: { recruit: GmRecruit; onRemove: () => void; onStageChange: (s: RecruitStage) => void; onTierChange: (t: RecruitTier) => void; eventCount: number; onTimeline: () => void; reports: GmRecruitReport[]; onReports: () => void }) {
+function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onTimeline, reports, onReports, onContact }: { recruit: GmRecruit; onRemove: () => void; onStageChange: (s: RecruitStage) => void; eventCount: number; onTimeline: () => void; reports: GmRecruitReport[]; onReports: () => void; onContact: () => void }) {
   const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({ id: recruit.id });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.55 : 1, zIndex: isDragging ? 10 : "auto", position: "relative" };
   const name = `${recruit.first_name ?? ""} ${recruit.last_name ?? ""}`.trim() || "Unnamed";
@@ -83,7 +79,7 @@ function SortableRecruitCard({ recruit, onRemove, onStageChange, onTierChange, e
           <div className="mt-0.5 truncate text-xs text-muted-foreground">{locale}{locale && recruit.travel_org ? " · " : ""}{recruit.travel_org}</div>
         )}
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          <TierSelect value={recruit.projection_tier} onChange={onTierChange} />
+          <TierBadge value={recruit.projection_tier} />
           <StageSelect value={recruit.stage} onChange={onStageChange} />
         </div>
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -92,6 +88,9 @@ function SortableRecruitCard({ recruit, onRemove, onStageChange, onTierChange, e
               <ExternalLink className="h-3 w-3" /> Profile
             </a>
           )}
+          <button onClick={onContact} className="inline-flex items-center gap-1 text-xs text-primary hover:underline" title="Contact information">
+            <Phone className="h-3 w-3" /> Contact
+          </button>
           <button onClick={onReports} className="inline-flex items-center gap-1 text-xs text-primary hover:underline" title="Scouting reports">
             <FileText className="h-3 w-3" /> Reports{reports.length > 0 && <span className="tabular-nums">({reports.length})</span>}
           </button>
@@ -109,14 +108,20 @@ export default function GMRecruits() {
   const gm = useGmRecruits();
   const [year, setYear] = useState<number>(YEARS[0]);
   const [addOpen, setAddOpen] = useState(false);
-  const [form, setForm] = useState({ first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage, projection_tier: "" as RecruitTier | "" });
+  const BLANK_FORM = { first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage, projection_tier: "" as RecruitTier | "", phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "" };
+  const [form, setForm] = useState(BLANK_FORM);
   const [timelineRecruit, setTimelineRecruit] = useState<GmRecruit | null>(null);
   const [eventDate, setEventDate] = useState<string>(today);
   const [eventNote, setEventNote] = useState("");
   const [reportsRecruit, setReportsRecruit] = useState<GmRecruit | null>(null);
   const [reportDate, setReportDate] = useState<string>(today);
   const [reportBody, setReportBody] = useState("");
-  const openReports = (r: GmRecruit) => { setReportBody(""); setReportDate(today()); setReportsRecruit(r); };
+  const [reportTier, setReportTier] = useState<RecruitTier | "">("");
+  const openReports = (r: GmRecruit) => { setReportBody(""); setReportDate(today()); setReportTier(r.projection_tier ?? ""); setReportsRecruit(r); };
+  const [contactRecruit, setContactRecruit] = useState<GmRecruit | null>(null);
+  const [contact, setContact] = useState({ phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "" });
+  const openContact = (r: GmRecruit) => { setContact({ phone: r.phone ?? "", email: r.email ?? "", guardian_name: r.guardian_name ?? "", guardian_phone: r.guardian_phone ?? "", coach_name: r.coach_name ?? "", coach_phone: r.coach_phone ?? "" }); setContactRecruit(r); };
+  const saveContact = () => { if (contactRecruit) { gm.updateRecruit(contactRecruit.id, { phone: contact.phone.trim() || null, email: contact.email.trim() || null, guardian_name: contact.guardian_name.trim() || null, guardian_phone: contact.guardian_phone.trim() || null, coach_name: contact.coach_name.trim() || null, coach_phone: contact.coach_phone.trim() || null }); setContactRecruit(null); } };
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const listFor = (t: RecruitType) => gm.recruits.filter((r) => r.class_year === year && r.player_type === t).sort((a, b) => a.sort_order - b.sort_order);
@@ -130,13 +135,14 @@ export default function GMRecruits() {
     gm.reorder(arrayMove(list, oldI, newI).map((r) => r.id));
   };
 
-  const openAdd = () => { setForm({ first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: year, stage: "evaluating", projection_tier: "" }); setAddOpen(true); };
+  const openAdd = () => { setForm({ ...BLANK_FORM, class_year: year }); setAddOpen(true); };
   const submit = () => {
+    const tier = form.projection_tier || null;
     gm.addRecruit({
       class_year: form.class_year,
       player_type: recruitTypeForPosition(form.position),
       stage: form.stage,
-      projection_tier: form.projection_tier || null,
+      projection_tier: tier,
       first_name: form.first_name.trim() || null,
       last_name: form.last_name.trim() || null,
       high_school: form.high_school.trim() || null,
@@ -146,7 +152,13 @@ export default function GMRecruits() {
       notes: null,
       scouting_report_date: null,
       link: form.link.trim() || null,
-    }, form.notes.trim() ? { report_date: today(), body: form.notes.trim() } : undefined);
+      phone: form.phone.trim() || null,
+      email: form.email.trim() || null,
+      guardian_name: form.guardian_name.trim() || null,
+      guardian_phone: form.guardian_phone.trim() || null,
+      coach_name: form.coach_name.trim() || null,
+      coach_phone: form.coach_phone.trim() || null,
+    }, (form.notes.trim() || tier) ? { report_date: today(), body: form.notes.trim(), tier } : undefined);
     setAddOpen(false);
   };
 
@@ -193,7 +205,7 @@ export default function GMRecruits() {
                   <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd(list)}>
                     <SortableContext items={list.map((r) => r.id)} strategy={verticalListSortingStrategy}>
                       <div className="space-y-2">
-                        {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} onTierChange={(t) => gm.updateRecruit(r.id, { projection_tier: t })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} reports={gm.reportsByRecruit.get(r.id) ?? []} onReports={() => openReports(r)} />)}
+                        {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} reports={gm.reportsByRecruit.get(r.id) ?? []} onReports={() => openReports(r)} onContact={() => openContact(r)} />)}
                       </div>
                     </SortableContext>
                   </DndContext>
@@ -235,21 +247,12 @@ export default function GMRecruits() {
                 </Select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Stage</span>
-                <Select value={form.stage} onValueChange={(v) => setForm((f) => ({ ...f, stage: v as RecruitStage }))}>
-                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                  <SelectContent>{RECRUIT_STAGES.map((s) => <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div>
-                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Projection Tier</span>
-                <Select value={form.projection_tier || undefined} onValueChange={(v) => setForm((f) => ({ ...f, projection_tier: v as RecruitTier }))}>
-                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Set tier" /></SelectTrigger>
-                  <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Stage</span>
+              <Select value={form.stage} onValueChange={(v) => setForm((f) => ({ ...f, stage: v as RecruitStage }))}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>{RECRUIT_STAGES.map((s) => <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>)}</SelectContent>
+              </Select>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -269,8 +272,29 @@ export default function GMRecruits() {
               <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Link (PBR / PG)</span>
               <Input value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="https://…" className="h-9 text-sm" />
             </div>
-            <div>
-              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scouting Report</span>
+
+            {/* Contact — shared with the whole staff */}
+            <div className="border-t border-border/40 pt-3">
+              <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Contact</span>
+              <div className="grid grid-cols-2 gap-3">
+                <Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Player phone" className="h-9 text-sm" />
+                <Input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="Player email" className="h-9 text-sm" />
+                <Input value={form.guardian_name} onChange={(e) => setForm((f) => ({ ...f, guardian_name: e.target.value }))} placeholder="Parent / guardian" className="h-9 text-sm" />
+                <Input value={form.guardian_phone} onChange={(e) => setForm((f) => ({ ...f, guardian_phone: e.target.value }))} placeholder="Guardian phone" className="h-9 text-sm" />
+                <Input value={form.coach_name} onChange={(e) => setForm((f) => ({ ...f, coach_name: e.target.value }))} placeholder="HS / travel coach" className="h-9 text-sm" />
+                <Input value={form.coach_phone} onChange={(e) => setForm((f) => ({ ...f, coach_phone: e.target.value }))} placeholder="Coach phone" className="h-9 text-sm" />
+              </div>
+            </div>
+
+            {/* Initial scouting report — authors the projection tier */}
+            <div className="border-t border-border/40 pt-3">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scouting Report</span>
+                <Select value={form.projection_tier || undefined} onValueChange={(v) => setForm((f) => ({ ...f, projection_tier: v as RecruitTier }))}>
+                  <SelectTrigger className="h-7 w-auto gap-1 text-xs"><SelectValue placeholder="Projection tier" /></SelectTrigger>
+                  <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
               <Textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Tools, projection, makeup…" className="min-h-[60px] text-sm" />
             </div>
           </div>
@@ -317,27 +341,76 @@ export default function GMRecruits() {
               {(() => { const info = RECRUIT_TIERS.find((t) => t.value === reportsRecruit?.projection_tier); return info ? <span className={cn("rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", toneClass(info.tone))} style={OSWALD}>{info.label}</span> : null; })()}
             </DialogTitle>
           </DialogHeader>
-          {/* New report */}
+          {/* New report — authors the projection tier for this recruit */}
           <div className="space-y-2 rounded-md border border-border/60 p-2.5">
-            <Input type="date" value={reportDate} onChange={(e) => setReportDate(e.target.value)} className="h-8 w-auto text-xs" />
+            <div className="flex items-center gap-2">
+              <Input type="date" value={reportDate} onChange={(e) => setReportDate(e.target.value)} className="h-8 w-auto text-xs" />
+              <Select value={reportTier || undefined} onValueChange={(v) => setReportTier(v as RecruitTier)}>
+                <SelectTrigger className="h-8 w-auto gap-1 text-xs"><SelectValue placeholder="Projection tier" /></SelectTrigger>
+                <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
             <Textarea value={reportBody} onChange={(e) => setReportBody(e.target.value)} placeholder="Tools, projection, makeup…" className="min-h-[70px] text-sm" />
-            <Button size="sm" className="w-full" disabled={!reportBody.trim()} onClick={() => { if (reportsRecruit) { gm.addReport(reportsRecruit.id, reportDate, reportBody.trim()); setReportBody(""); } }}>Add Report</Button>
+            <Button size="sm" className="w-full" disabled={!reportBody.trim()} onClick={() => { if (reportsRecruit) { gm.addReport(reportsRecruit.id, reportDate, reportBody.trim(), reportTier || null); setReportBody(""); } }}>Add Report</Button>
           </div>
           {/* Report list — each independent */}
           <div className="max-h-[45vh] space-y-2.5 overflow-y-auto">
-            {(gm.reportsByRecruit.get(reportsRecruit?.id ?? "") ?? []).map((r) => (
+            {(gm.reportsByRecruit.get(reportsRecruit?.id ?? "") ?? []).map((r) => {
+              const tier = RECRUIT_TIERS.find((t) => t.value === r.projection_tier);
+              return (
               <div key={r.id} className="rounded-md border border-border/60 bg-muted/20 p-2.5">
                 <div className="flex items-center justify-between">
-                  <div className="text-[11px] text-muted-foreground">{r.author ? `${r.author.split("@")[0]} · ` : ""}{fmtDate(r.report_date)}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-muted-foreground">{r.author ? `${r.author.split("@")[0]} · ` : ""}{fmtDate(r.report_date)}</span>
+                    {tier && <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider", toneClass(tier.tone))} style={OSWALD}>{tier.label}</span>}
+                  </div>
                   <button onClick={() => gm.removeReport(r.id)} className="text-muted-foreground/40 hover:text-destructive" title="Delete"><X className="h-3.5 w-3.5" /></button>
                 </div>
                 <div className="mt-1 whitespace-pre-wrap text-sm text-foreground/90">{r.body}</div>
               </div>
-            ))}
+            ); })}
             {(gm.reportsByRecruit.get(reportsRecruit?.id ?? "") ?? []).length === 0 && (
               <p className="py-3 text-center text-xs text-muted-foreground">No reports yet.</p>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Contact — team-wide; any coach can pull up and edit */}
+      <Dialog open={!!contactRecruit} onOpenChange={(o) => { if (!o) setContactRecruit(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle style={OSWALD}>{`${contactRecruit?.first_name ?? ""} ${contactRecruit?.last_name ?? ""}`.trim() || "Recruit"} — Contact</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-1">
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Player Phone</span>
+              <Input value={contact.phone} onChange={(e) => setContact((c) => ({ ...c, phone: e.target.value }))} className="h-9 text-sm" />
+            </div>
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Player Email</span>
+              <Input value={contact.email} onChange={(e) => setContact((c) => ({ ...c, email: e.target.value }))} className="h-9 text-sm" />
+            </div>
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Parent / Guardian</span>
+              <Input value={contact.guardian_name} onChange={(e) => setContact((c) => ({ ...c, guardian_name: e.target.value }))} className="h-9 text-sm" />
+            </div>
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Guardian Phone</span>
+              <Input value={contact.guardian_phone} onChange={(e) => setContact((c) => ({ ...c, guardian_phone: e.target.value }))} className="h-9 text-sm" />
+            </div>
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>HS / Travel Coach</span>
+              <Input value={contact.coach_name} onChange={(e) => setContact((c) => ({ ...c, coach_name: e.target.value }))} className="h-9 text-sm" />
+            </div>
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Coach Phone</span>
+              <Input value={contact.coach_phone} onChange={(e) => setContact((c) => ({ ...c, coach_phone: e.target.value }))} className="h-9 text-sm" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button size="sm" onClick={saveContact}>Save Contact</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

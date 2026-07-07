@@ -42,9 +42,16 @@ export interface GmRecruit {
   position: string | null;
   notes: string | null; // legacy single scouting report (superseded by gm_recruit_reports)
   scouting_report_date: string | null;
-  projection_tier: RecruitTier | null;
+  projection_tier: RecruitTier | null; // mirror of the latest report's tier — stable card badge
   link: string | null;
   stage: RecruitStage;
+  // Contact — team-wide, any coach on staff can pull these up.
+  phone: string | null;
+  email: string | null;
+  guardian_name: string | null;
+  guardian_phone: string | null;
+  coach_name: string | null;
+  coach_phone: string | null;
   sort_order: number;
 }
 
@@ -65,6 +72,7 @@ export interface GmRecruitReport {
   author: string | null;
   report_date: string; // YYYY-MM-DD
   body: string | null;
+  projection_tier: RecruitTier | null; // the tier this coach assigned in this report
 }
 
 /** Position → recruit section. TWP is its own group. */
@@ -134,7 +142,7 @@ export function useGmRecruits() {
     enabled: !!user?.id && !!effectiveTeamId,
     queryFn: async (): Promise<GmRecruitReport[]> => {
       const { data } = await (supabase as any)
-        .from("gm_recruit_reports").select("id, recruit_id, author, report_date, body")
+        .from("gm_recruit_reports").select("id, recruit_id, author, report_date, body, projection_tier")
         .eq("customer_team_id", effectiveTeamId)
         .order("report_date", { ascending: false }).order("created_at", { ascending: false });
       return (data || []) as GmRecruitReport[];
@@ -147,12 +155,14 @@ export function useGmRecruits() {
   }, [reports]);
 
   const addReport = useMutation({
-    mutationFn: async ({ recruitId, reportDate, body }: { recruitId: string; reportDate: string; body: string }) => {
+    mutationFn: async ({ recruitId, reportDate, body, tier }: { recruitId: string; reportDate: string; body: string; tier?: RecruitTier | null }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
-      const { error } = await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: recruitId, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: reportDate, body: body.trim(), created_by_user_id: user?.id ?? null });
+      const { error } = await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: recruitId, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: reportDate, body: body.trim(), projection_tier: tier ?? null, created_by_user_id: user?.id ?? null });
       if (error) throw error;
+      // A report authors the projection tier — mirror the latest onto the recruit for its stable badge.
+      if (tier) await (supabase as any).from("gm_recruits").update({ projection_tier: tier, updated_at: new Date().toISOString() }).eq("id", recruitId);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: reportsKey }); toast.success("Report added"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: key }); toast.success("Report added"); },
     onError: (e: any) => toast.error(`Add report failed: ${e.message}`),
   });
   const removeReport = useMutation({
@@ -162,14 +172,16 @@ export function useGmRecruits() {
   });
 
   const addRecruit = useMutation({
-    mutationFn: async ({ recruit: r, initialReport }: { recruit: NewRecruit; initialReport?: { report_date: string; body: string } }) => {
+    mutationFn: async ({ recruit: r, initialReport }: { recruit: NewRecruit; initialReport?: { report_date: string; body: string; tier?: RecruitTier | null } }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
       const peers = recruits.filter((x) => x.class_year === r.class_year && x.player_type === r.player_type);
       const nextOrder = peers.length ? Math.max(...peers.map((x) => x.sort_order)) + 1 : 0;
-      const { data: inserted, error } = await (supabase as any).from("gm_recruits").insert({ ...r, customer_team_id: effectiveTeamId, sort_order: nextOrder, created_by_user_id: user?.id ?? null }).select("id").single();
+      // The tier is authored on the initial report; mirror it onto the recruit for its badge.
+      const tier = initialReport?.tier ?? r.projection_tier ?? null;
+      const { data: inserted, error } = await (supabase as any).from("gm_recruits").insert({ ...r, projection_tier: tier, customer_team_id: effectiveTeamId, sort_order: nextOrder, created_by_user_id: user?.id ?? null }).select("id").single();
       if (error) throw error;
       if (initialReport && initialReport.body.trim()) {
-        await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: inserted.id, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: initialReport.report_date, body: initialReport.body.trim(), created_by_user_id: user?.id ?? null });
+        await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: inserted.id, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: initialReport.report_date, body: initialReport.body.trim(), projection_tier: tier, created_by_user_id: user?.id ?? null });
       }
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: reportsKey }); toast.success("Recruit added"); },
@@ -194,20 +206,30 @@ export function useGmRecruits() {
     onError: (e: any) => toast.error(`Remove failed: ${e.message}`),
   });
 
-  // Persist a new order for one (year, type) list.
+  // Persist a new order for one (year, type) list. Optimistically rewrite the
+  // cached sort_order so the card stays where it was dropped — without this the
+  // list re-renders in the old order until the writes land, which reads as the
+  // card snapping back then jumping forward.
   const reorder = useMutation({
     mutationFn: async (orderedIds: string[]) => {
       await Promise.all(orderedIds.map((id, i) => (supabase as any).from("gm_recruits").update({ sort_order: i }).eq("id", id)));
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: key }),
-    onError: (e: any) => toast.error(`Reorder failed: ${e.message}`),
+    onMutate: async (orderedIds: string[]) => {
+      await qc.cancelQueries({ queryKey: key });
+      const prev = qc.getQueryData<GmRecruit[]>(key);
+      const rank = new Map(orderedIds.map((id, i) => [id, i]));
+      qc.setQueryData<GmRecruit[]>(key, (old) => (old ?? []).map((r) => (rank.has(r.id) ? { ...r, sort_order: rank.get(r.id)! } : r)));
+      return { prev };
+    },
+    onError: (e: any, _vars, ctx) => { if (ctx?.prev) qc.setQueryData(key, ctx.prev); toast.error(`Reorder failed: ${e.message}`); },
+    onSettled: () => qc.invalidateQueries({ queryKey: key }),
   });
 
   return {
     recruits,
     years,
     isLoading,
-    addRecruit: (recruit: NewRecruit, initialReport?: { report_date: string; body: string }) => addRecruit.mutate({ recruit, initialReport }),
+    addRecruit: (recruit: NewRecruit, initialReport?: { report_date: string; body: string; tier?: RecruitTier | null }) => addRecruit.mutate({ recruit, initialReport }),
     updateRecruit: (id: string, patch: Partial<NewRecruit>) => updateRecruit.mutate({ id, patch }),
     removeRecruit: (id: string) => removeRecruit.mutate(id),
     reorder: (orderedIds: string[]) => reorder.mutate(orderedIds),
@@ -215,7 +237,7 @@ export function useGmRecruits() {
     addEvent: (recruitId: string, eventDate: string, note: string) => addEvent.mutate({ recruitId, eventDate, note }),
     removeEvent: (id: string) => removeEvent.mutate(id),
     reportsByRecruit,
-    addReport: (recruitId: string, reportDate: string, body: string) => addReport.mutate({ recruitId, reportDate, body }),
+    addReport: (recruitId: string, reportDate: string, body: string, tier?: RecruitTier | null) => addReport.mutate({ recruitId, reportDate, body, tier }),
     removeReport: (id: string) => removeReport.mutate(id),
   };
 }
