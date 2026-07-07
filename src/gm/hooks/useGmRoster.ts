@@ -4,6 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { toast } from "sonner";
+import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { parseBuildPlayerMeta } from "@/pages/team-builder/helpers";
+import { effectivePitcherWar, effectiveHitterWar, effectiveMarket } from "@/lib/effectiveProjection";
 
 const isPitcherPos = (s: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
 
@@ -91,7 +94,7 @@ export function useGmRoster() {
     queryFn: async () => {
       const { data: bps } = await (supabase as any)
         .from("team_build_players")
-        .select("id, player_id, custom_name, position_slot, nil_value, included_in_roster, player_snapshot")
+        .select("id, player_id, custom_name, position_slot, nil_value, included_in_roster, player_snapshot, production_notes")
         .eq("build_id", activeBuildId)
         .eq("included_in_roster", true);
       const rowsRaw = (bps || []).filter((r: any) => r.player_id);
@@ -112,12 +115,31 @@ export function useGmRoster() {
       const { data: bud } = await (supabase as any)
         .from("gm_budget").select("*").eq("customer_team_id", effectiveTeamId).eq("season", season).maybeSingle();
 
+      // Pitching equation weights for the effective-WAR recompute (sync read).
+      const eq = readPitchingWeights();
+
       const rows: GmRow[] = rowsRaw.map((r: any) => {
         const p = pById.get(r.player_id);
         const snap = r.player_snapshot || {};
         const pitcher = isPitcherPos(r.position_slot) || isPitcherPos(p?.position);
         const f = finByPlayer.get(r.player_id) || {};
         const mv = snap.market_value ?? snap.twp_hitter_market_value ?? snap.twp_pitcher_market_value ?? null;
+        const storedWar = pitcher ? (snap.p_war ?? null) : (snap.o_war ?? null);
+
+        // Apply the coach's saved toggles (production_notes) on read so the GM
+        // view matches Team Builder: depth role → innings/PA, dev_agg → rate.
+        // Falls back to the stored baseline when there's no rate to recompute.
+        const meta = parseBuildPlayerMeta(r.production_notes) as any;
+        const devAgg = Number.isFinite(Number(meta?.devAggressiveness)) ? Number(meta.devAggressiveness) : 0;
+        const classTransition = meta?.classTransition ?? "SJ";
+        const sessionDepthRole = pitcher
+          ? (meta?.depthRole ?? (snap.pitcher_role === "SP" ? "weekend_starter" : snap.pitcher_role === "SM" ? "weekday_starter" : undefined))
+          : (meta?.depthRole ?? snap.hitter_depth_role);
+        const effWar = pitcher
+          ? effectivePitcherWar(snap.p_rv_plus, sessionDepthRole, devAgg, classTransition, eq)
+          : effectiveHitterWar(snap.o_war, snap.hitter_depth_role, sessionDepthRole, devAgg, classTransition);
+        const effMarket = effectiveMarket(mv, storedWar, effWar);
+
         return {
           player_id: r.player_id,
           build_player_id: r.id,
@@ -125,8 +147,8 @@ export function useGmRoster() {
           position: p?.position ?? r.position_slot ?? null,
           class_year: p?.class_year ?? null,
           is_pitcher: pitcher,
-          war: pitcher ? (snap.p_war ?? null) : (snap.o_war ?? null),
-          market_value: mv,
+          war: effWar ?? storedWar,
+          market_value: effMarket ?? mv,
           nil_value: r.nil_value ?? null,
           scholarship_amount: f.scholarship_amount ?? null,
           rev_share: f.rev_share ?? null,
