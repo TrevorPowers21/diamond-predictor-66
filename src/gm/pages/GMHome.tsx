@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useGmRoster } from "@/gm/hooks/useGmRoster";
+import SchoolBanner from "@/components/SchoolBanner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Calendar, DollarSign, ClipboardList, Wallet, Users, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -47,17 +48,16 @@ export default function GMHome() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold leading-tight" style={OSWALD}>{gm.teamName ?? "Front Office"}</h2>
-        <p className="text-sm text-muted-foreground">Front Office · Season {gm.season}</p>
-      </div>
+      {/* Team banner — RSTR IQ rotates into the team logo (same as Player Eval). */}
+      <SchoolBanner />
 
       {/* Briefing + tiles — same treatment as the Overview page */}
       <div className="space-y-0">
         <div className="rounded-t-lg border-l-[3px] border-l-[#D4AF37] bg-[#0D1B3E] px-4 py-3 flex items-center flex-wrap gap-x-4 gap-y-1">
           <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#D4AF37]" style={OSWALD}>Front Office Briefing</span>
           <span className="flex items-center gap-1.5 text-xs text-slate-300"><Calendar className="h-3 w-3" />{dateStr}</span>
+          <span className="text-slate-500">·</span>
+          <span className="text-xs text-slate-300">Season {gm.season}</span>
           <span className="text-slate-500">·</span>
           <span className="text-xs text-slate-300">{gm.builds.length} build{gm.builds.length === 1 ? "" : "s"}</span>
           {gm.pendingReasonCount > 0 && (
