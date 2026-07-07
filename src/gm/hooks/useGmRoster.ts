@@ -6,7 +6,7 @@ import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { toast } from "sonner";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { parseBuildPlayerMeta } from "@/pages/team-builder/helpers";
-import { effectivePitcherWar, effectiveHitterWar, effectiveMarket } from "@/lib/effectiveProjection";
+import { effectivePitcherWar, effectiveHitterWar, effectiveMarket, pitcherSessionRole } from "@/lib/effectiveProjection";
 
 const isPitcherPos = (s: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
 
@@ -140,11 +140,19 @@ export function useGmRoster() {
           : effectiveHitterWar(snap.o_war, snap.hitter_depth_role, sessionDepthRole, devAgg, classTransition);
         const effMarket = effectiveMarket(mv, storedWar, effWar);
 
+        // Position label follows the coach's assigned role for pitchers (the SAME
+        // SP/RP bucket that produced the WAR/market above) so an RP moved to a
+        // starter reads as "SP" next to his SP-specific numbers — never a stored
+        // "RP" beside a starter's WAR. Hitters keep their true fielding position.
+        const displayPosition = pitcher
+          ? pitcherSessionRole(sessionDepthRole)
+          : (p?.position ?? r.position_slot ?? null);
+
         return {
           player_id: r.player_id,
           build_player_id: r.id,
           name: p ? `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() : (r.custom_name || "—"),
-          position: p?.position ?? r.position_slot ?? null,
+          position: displayPosition,
           class_year: p?.class_year ?? null,
           is_pitcher: pitcher,
           war: effWar ?? storedWar,

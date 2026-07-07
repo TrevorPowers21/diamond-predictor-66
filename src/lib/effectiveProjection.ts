@@ -25,6 +25,14 @@ import { applyRoleTransitionAdjustment, calcPitchingPlus } from "@/lib/transferP
 
 const STARTER_DEPTH_ROLES = new Set(["weekend_starter", "weekday_starter", "swing_starter"]);
 
+/** The SP/RP bucket a pitcher depth role resolves to — the SAME bucket that
+ *  drives the role-transition regression below. Surfaces so the GM view can
+ *  label the position from the coach's chosen role, guaranteeing the displayed
+ *  role and the (role-specific) WAR/market can never disagree. */
+export function pitcherSessionRole(sessionDepthRole: string | null | undefined): "SP" | "RP" {
+  return STARTER_DEPTH_ROLES.has(String(sessionDepthRole)) ? "SP" : "RP";
+}
+
 const classAdjHitter = (ct: string | null | undefined) => {
   const c = String(ct || "SJ").toUpperCase();
   return c === "FS" ? 0.03 : c === "GR" ? 0.01 : 0.02;
@@ -101,7 +109,7 @@ export function effectivePitcherWar(
   // Step 2 — SP↔RP role transition, only when the role bucket actually changes.
   const storedRole: "SP" | "RP" | "SM" | null =
     snap.pitcher_role === "SP" ? "SP" : snap.pitcher_role === "SM" ? "SM" : snap.pitcher_role === "RP" ? "RP" : null;
-  const sessionRole: "SP" | "RP" = STARTER_DEPTH_ROLES.has(String(sessionDepthRole)) ? "SP" : "RP";
+  const sessionRole: "SP" | "RP" = pitcherSessionRole(sessionDepthRole);
   const ratesPresent = [dEra, dFip, dWhip, dK9, dBb9, dHr9].every((v) => v != null);
   if (storedRole != null && storedRole !== sessionRole && ratesPresent) {
     const curve = {
