@@ -305,11 +305,10 @@ export default function GMRoster() {
           </Select>
         </div>
         <div className="flex items-center gap-2">
-          {b?.finalized && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-500" style={OSWALD}>
-              <Check className="h-3.5 w-3.5" /> Finalized
-            </span>
-          )}
+          {/* Always shown — green once finalized, grey while not. */}
+          <span className={cn("inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider", b?.finalized ? "text-emerald-500" : "text-muted-foreground/50")} style={OSWALD}>
+            <Check className="h-3.5 w-3.5" /> Finalized
+          </span>
           {gm.builds.length > 0 && (
             <Select value={gm.selectedBuildId ?? undefined} onValueChange={(v) => gm.setSelectedBuildId(v)}>
               <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue placeholder="Select build" /></SelectTrigger>
