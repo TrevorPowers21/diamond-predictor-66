@@ -206,7 +206,7 @@ export function useGmRoster() {
 
   const totals = useMemo(() => {
     const sum = (f: (r: GmRow) => number | null) => rows.reduce((s, r) => s + (f(r) ?? 0), 0);
-    return { revUsed: sum((r) => r.rev_share), nilUsed: sum((r) => r.nil_amount), otherUsed: sum((r) => r.other_amount), actualUsed: sum((r) => r.actual_pay) };
+    return { revUsed: sum((r) => r.rev_share), nilUsed: sum((r) => r.nil_amount), otherUsed: sum((r) => r.other_amount), schUsed: sum((r) => r.scholarship_amount), actualUsed: sum((r) => r.actual_pay) };
   }, [rows]);
 
   const savePlayer = useMutation({

@@ -59,6 +59,8 @@ export default function GMRoster() {
   const location = useLocation();
   const returnTo = `${location.pathname}${location.search}`;
   const [editBudget, setEditBudget] = useState(false);
+  // Season selector is display-only for now — data still reads gm.season.
+  const [seasonSel, setSeasonSel] = useState<number>(gm.season);
 
   const section = (title: string, rows: GmRow[]) => {
     const sum = (f: (r: GmRow) => number | null) => rows.reduce((s, r) => s + (f(r) ?? 0), 0);
@@ -148,54 +150,78 @@ export default function GMRoster() {
 
   const b = gm.budget;
   const totalAllot = (b?.rev_share_total ?? 0) + (b?.nil_total ?? 0) + (b?.other_total ?? 0);
-  const bucket = (label: string, used: number, total: number | null, save: ((n: number | null) => void) | null) => (
-    <div className="flex-1 min-w-[150px] px-4 py-3">
+
+  // One budget box. `total`/`save` present → editable allotment (used / cap);
+  // omit them for a plain used-only figure (Scholarship). Over-cap turns red.
+  const box = (label: string, used: number, total: number | null, save: ((n: number | null) => void) | null) => (
+    <Card className="px-4 py-3">
       <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground" style={OSWALD}>{label}</div>
       <div className="mt-1 flex items-baseline gap-1.5">
         <span className="text-sm font-bold font-mono tabular-nums text-foreground">{money(used)}</span>
-        <span className="text-xs text-muted-foreground">/</span>
-        {editBudget && save ? (
-          <MoneyCell value={total} onSave={save} />
-        ) : (
-          <span className={cn("text-xs font-mono tabular-nums", total != null && used > total ? "text-red-500 font-semibold" : "text-muted-foreground")}>{money(total)}</span>
-        )}
+        {(total != null || save) && <span className="text-xs text-muted-foreground">/</span>}
+        {save ? (
+          editBudget ? (
+            <MoneyCell value={total} onSave={save} />
+          ) : (
+            <span className={cn("text-xs font-mono tabular-nums", total != null && used > total ? "text-red-500 font-semibold" : "text-muted-foreground")}>{money(total)}</span>
+          )
+        ) : total != null ? (
+          <span className={cn("text-xs font-mono tabular-nums", used > total ? "text-red-500 font-semibold" : "text-muted-foreground")}>{money(total)}</span>
+        ) : null}
       </div>
-    </div>
+    </Card>
   );
 
   return (
     <div className="space-y-4">
-      {/* Header: team + build filter */}
-      <div className="flex flex-wrap items-center gap-3">
+      {/* Header: team (left) · season + build filters (right) */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold" style={OSWALD}>{gm.teamName ?? "Front Office"}</h2>
-          <p className="text-xs text-muted-foreground">{gm.teamName ? `Season ${gm.season}` : "Pick a team above."}</p>
+          <p className="text-xs text-muted-foreground">{gm.teamName ? "Front Office" : "Pick a team above."}</p>
         </div>
-        {gm.builds.length > 0 && (
-          <Select value={gm.selectedBuildId ?? undefined} onValueChange={(v) => gm.setSelectedBuildId(v)}>
-            <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue placeholder="Select build" /></SelectTrigger>
+        <div className="flex items-center gap-2">
+          {/* Season selector — display only for now; season switching is wired later. */}
+          <Select value={String(seasonSel)} onValueChange={(v) => setSeasonSel(Number(v))}>
+            <SelectTrigger className="h-8 w-[100px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {gm.builds.map((bd) => (
-                <SelectItem key={bd.id} value={bd.id} className="text-xs">{bd.name}</SelectItem>
+              {[gm.season - 1, gm.season, gm.season + 1].map((y) => (
+                <SelectItem key={y} value={String(y)} className="text-xs">{y}</SelectItem>
               ))}
             </SelectContent>
           </Select>
-        )}
+          {gm.builds.length > 0 && (
+            <Select value={gm.selectedBuildId ?? undefined} onValueChange={(v) => gm.setSelectedBuildId(v)}>
+              <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue placeholder="Select build" /></SelectTrigger>
+              <SelectContent>
+                {gm.builds.map((bd) => (
+                  <SelectItem key={bd.id} value={bd.id} className="text-xs">{bd.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
       </div>
 
-      {/* Budget header */}
-      <Card className="flex flex-wrap items-center">
-        {bucket("Revenue Share", gm.totals.revUsed, b?.rev_share_total ?? null, (n) => gm.saveBudget({ rev_share_total: n }))}
-        {bucket("NIL", gm.totals.nilUsed, b?.nil_total ?? null, (n) => gm.saveBudget({ nil_total: n }))}
-        {bucket("Other", gm.totals.otherUsed, b?.other_total ?? null, (n) => gm.saveBudget({ other_total: n }))}
-        {bucket("Total Actual Pay", gm.totals.actualUsed, totalAllot || null, null)}
-        <div className="ml-auto flex items-center gap-2 px-4">
+      {/* Budget — each bucket in its own box: Scholarship · NIL · Other on top,
+          Revenue Share · Total on the second row. */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-end gap-2">
           <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setEditBudget((v) => !v)}>
             <Pencil className="h-3.5 w-3.5" /> {editBudget ? "Done" : "Edit totals"}
           </Button>
           <FinalizeCheck finalized={!!b?.finalized} onClick={() => gm.finalizeBudget(!b?.finalized)} title={b?.finalized ? "Budget finalized — click to unlock" : "Finalize budget"} />
         </div>
-      </Card>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {box("Scholarship", gm.totals.schUsed, null, null)}
+          {box("NIL", gm.totals.nilUsed, b?.nil_total ?? null, (n) => gm.saveBudget({ nil_total: n }))}
+          {box("Other", gm.totals.otherUsed, b?.other_total ?? null, (n) => gm.saveBudget({ other_total: n }))}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {box("Revenue Share", gm.totals.revUsed, b?.rev_share_total ?? null, (n) => gm.saveBudget({ rev_share_total: n }))}
+          {box("Total", gm.totals.actualUsed, totalAllot || null, null)}
+        </div>
+      </div>
 
       {gm.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading roster…</p>
