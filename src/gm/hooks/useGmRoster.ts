@@ -85,10 +85,18 @@ export function useGmRoster() {
   const qc = useQueryClient();
   const season = PROJECTION_SEASON;
   // Selected build lives in the URL (?build=…) so navigating to a player profile
-  // and back restores the same build the user was viewing, not the default.
+  // and back restores the same build. It's also mirrored to localStorage so the
+  // selection carries across GM pages (Dashboard ⇄ Roster) — the working build,
+  // not the default, is what the GM uses moving forward.
+  const buildStorageKey = effectiveTeamId ? `gm-build:${effectiveTeamId}` : null;
   const [searchParams, setSearchParams] = useSearchParams();
-  const pickedBuildId = searchParams.get("build");
-  const setPickedBuildId = (id: string | null) =>
+  const storedBuildId = typeof window !== "undefined" && buildStorageKey ? window.localStorage.getItem(buildStorageKey) : null;
+  const pickedBuildId = searchParams.get("build") ?? storedBuildId;
+  const setPickedBuildId = (id: string | null) => {
+    if (typeof window !== "undefined" && buildStorageKey) {
+      if (id) window.localStorage.setItem(buildStorageKey, id);
+      else window.localStorage.removeItem(buildStorageKey);
+    }
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -98,6 +106,7 @@ export function useGmRoster() {
       },
       { replace: true },
     );
+  };
 
   const teamName = useMemo(
     () => availableTeams?.find((t) => t.id === effectiveTeamId)?.name ?? null,
@@ -121,7 +130,13 @@ export function useGmRoster() {
     },
   });
 
-  const defaultBuildId = useMemo(() => builds.find((b) => b.is_default)?.id ?? builds[0]?.id ?? null, [builds]);
+  // Fallback build when nothing is picked: the most-recent SAVED (non-default)
+  // build — that's the working roster, not the pristine "everyone returns"
+  // default. Falls back to the default only when no working builds exist.
+  const defaultBuildId = useMemo(
+    () => builds.find((b) => !b.is_default)?.id ?? builds.find((b) => b.is_default)?.id ?? builds[0]?.id ?? null,
+    [builds],
+  );
   // Guard: the picked build must belong to the CURRENT team's builds. Otherwise a
   // build selected for one team would leak its roster when impersonating another
   // (pickedBuildId is component state and doesn't reset on team switch).
