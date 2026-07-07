@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Check, Plus, SlidersHorizontal, X } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { cn } from "@/lib/utils";
@@ -80,7 +81,7 @@ function DollarInput({ value, onChange }: { value: number | null; onChange: (n: 
  *  The roster boxes stay read-only whole numbers. */
 type OtherDraft = { name: string; amount: number | null };
 type BudgetCaps = { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown: GmOtherLine[] };
-function BudgetDialog({ budget, onSave, onFinalize, pending }: { budget: GmBudget | null; onSave: (caps: BudgetCaps) => void; onFinalize: (caps: BudgetCaps) => void; pending: boolean }) {
+function BudgetDialog({ budget, onSave, onFinalize }: { budget: GmBudget | null; onSave: (caps: BudgetCaps) => void; onFinalize: (caps: BudgetCaps) => void }) {
   const [open, setOpen] = useState(false);
   const [rev, setRev] = useState<number | null>(null);
   const [nil, setNil] = useState<number | null>(null);
@@ -164,13 +165,29 @@ function BudgetDialog({ budget, onSave, onFinalize, pending }: { budget: GmBudge
           </div>
         </div>
         <DialogFooter className="gap-2 sm:gap-2">
-          {/* Save = GM-only draft (does NOT touch the coach's build). */}
-          <Button variant="outline" size="sm" disabled={pending} onClick={() => { onSave(caps()); setOpen(false); }}>Save</Button>
-          {/* Finalize = save + push the total into the coach's Team Builder. */}
-          <Button size="sm" disabled={pending} onClick={() => { onFinalize(caps()); setOpen(false); }}>Finalize &amp; Push</Button>
+          {/* Save = GM-only draft (this local session). Finalize & Push
+              communicates the total to the coach — routed through a confirm. */}
+          <Button variant="outline" size="sm" onClick={() => { onSave(caps()); setOpen(false); }}>Save</Button>
+          <Button size="sm" onClick={() => { onFinalize(caps()); setOpen(false); }}>Finalize &amp; Push</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The Finalized checkmark — always visible (grey/green). Grey click requests a
+ *  finalize (page-level confirm); green click reopens the budget. */
+function FinalizeToggle({ finalized, onFinalize, onReopen }: { finalized: boolean; onFinalize: () => void; onReopen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => (finalized ? onReopen() : onFinalize())}
+      title={finalized ? "Finalized — click to reopen (does not un-push the coach's budget)" : "Finalize & push the budget to the coach's Team Builder"}
+      className={cn("inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider cursor-pointer transition-colors", finalized ? "text-emerald-500" : "text-muted-foreground/50 hover:text-muted-foreground")}
+      style={OSWALD}
+    >
+      <Check className="h-3.5 w-3.5" /> Finalized
+    </button>
   );
 }
 
@@ -180,6 +197,8 @@ export default function GMRoster() {
   const returnTo = `${location.pathname}${location.search}`;
   // Season selector is display-only for now — data still reads gm.season.
   const [seasonSel, setSeasonSel] = useState<number>(gm.season);
+  // Caps staged for the Finalize & Push confirmation (from popup or checkmark).
+  const [confirmCaps, setConfirmCaps] = useState<BudgetCaps | null>(null);
 
   const section = (title: string, rows: GmRow[]) => {
     const sum = (f: (r: GmRow) => number | null) => rows.reduce((s, r) => s + (f(r) ?? 0), 0);
@@ -237,7 +256,8 @@ export default function GMRoster() {
                   <TableCell className="py-1.5"><MoneyCell value={r.rev_share} onSave={(n) => gm.savePlayer(r.player_id, { rev_share: n })} /></TableCell>
                   <TableCell className="py-1.5"><MoneyCell value={r.nil_amount} onSave={(n) => gm.savePlayer(r.player_id, { nil_amount: n })} /></TableCell>
                   <TableCell className="py-1.5"><MoneyCell value={r.other_amount} onSave={(n) => gm.savePlayer(r.player_id, { other_amount: n })} /></TableCell>
-                  <TableCell className="py-1.5"><MoneyCell value={r.actual_pay} onSave={(n) => gm.savePlayer(r.player_id, { actual_pay: n })} /></TableCell>
+                  {/* Actual Pay is derived (Rev Share + NIL + Other) — read-only. */}
+                  <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums">{money(r.actual_pay)}</TableCell>
                   <TableCell className="py-1.5 text-center">
                     <FinalizeCheck finalized={r.finalized} onClick={() => gm.finalizePlayer(r)} title={r.finalized ? "Finalized pay — click to unlock" : "Finalize pay & sync to Team Builder"} />
                   </TableCell>
@@ -305,10 +325,11 @@ export default function GMRoster() {
           </Select>
         </div>
         <div className="flex items-center gap-2">
-          {/* Always shown — green once finalized, grey while not. */}
-          <span className={cn("inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider", b?.finalized ? "text-emerald-500" : "text-muted-foreground/50")} style={OSWALD}>
-            <Check className="h-3.5 w-3.5" /> Finalized
-          </span>
+          <FinalizeToggle
+            finalized={!!b?.finalized}
+            onFinalize={() => setConfirmCaps({ rev_share_total: b?.rev_share_total ?? null, nil_total: b?.nil_total ?? null, scholarship_total: b?.scholarship_total ?? null, other_total: b?.other_total ?? null, other_breakdown: b?.other_breakdown ?? null })}
+            onReopen={() => gm.finalizeBudget(false)}
+          />
           {gm.builds.length > 0 && (
             <Select value={gm.selectedBuildId ?? undefined} onValueChange={(v) => gm.setSelectedBuildId(v)}>
               <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue placeholder="Select build" /></SelectTrigger>
@@ -322,8 +343,7 @@ export default function GMRoster() {
           <BudgetDialog
             budget={b}
             onSave={(caps) => gm.saveBudget({ ...caps, finalized: false })}
-            onFinalize={(caps) => gm.commitBudget(caps)}
-            pending={gm.isFinalizing}
+            onFinalize={(caps) => setConfirmCaps(caps)}
           />
         </div>
       </div>
@@ -350,6 +370,22 @@ export default function GMRoster() {
           {section("Pitchers", gm.pitchers)}
         </>
       )}
+
+      {/* Shared Finalize & Push confirmation (from the popup or the checkmark). */}
+      <AlertDialog open={!!confirmCaps} onOpenChange={(o) => { if (!o) setConfirmCaps(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle style={OSWALD}>Push budget to Team Builder?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This writes the budget total into the coach's Team Builder and changes the roster budget they build against — they'll see it immediately. Save keeps changes GM-side; this communicates them to the coach.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction disabled={gm.isFinalizing} onClick={() => { if (confirmCaps) gm.commitBudget(confirmCaps); setConfirmCaps(null); }}>Confirm &amp; Push</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

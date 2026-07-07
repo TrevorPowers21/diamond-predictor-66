@@ -189,7 +189,12 @@ export function useGmRoster() {
           rev_share: f.rev_share ?? null,
           nil_amount: f.nil_amount ?? null,
           other_amount: f.other_amount ?? null,
-          actual_pay: f.actual_pay ?? r.nil_value ?? null,
+          // Actual Pay = Rev Share + NIL + Other (Scholarship is aid, NOT pay).
+          // Derived live so the buckets visibly add up; null until any is set.
+          actual_pay:
+            f.rev_share == null && f.nil_amount == null && f.other_amount == null
+              ? null
+              : Number(f.rev_share ?? 0) + Number(f.nil_amount ?? 0) + Number(f.other_amount ?? 0),
           finalized: !!f.finalized,
           // 2027 roster → show the projection-season eligibility (class advanced
           // one year), unless a GM override exists. Coach-added locals are
