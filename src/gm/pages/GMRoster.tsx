@@ -68,13 +68,16 @@ export default function GMRoster() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
-          <Table className="min-w-[1000px]">
+          <Table className="min-w-[1120px]">
             <TableHeader>
-              <TableRow>
-                <TableHead className="sticky left-0 z-20 bg-muted/95 backdrop-blur-sm shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] min-w-[190px]">Player</TableHead>
+              <TableRow style={OSWALD} className="[&_th]:font-bold [&_th]:uppercase [&_th]:tracking-[0.08em] [&_th]:text-[11px] [&_th]:text-muted-foreground">
+
+                <TableHead className="sticky left-0 z-20 bg-muted/95 backdrop-blur-sm shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] min-w-[180px]">Player</TableHead>
                 <TableHead>Eligibility</TableHead>
+                <TableHead className="text-center">Position</TableHead>
                 <TableHead className="text-center">WAR</TableHead>
-                <TableHead className="text-center">Market Value ($)</TableHead>
+                <TableHead className="text-center">Market Value</TableHead>
+                <TableHead className="text-right">Scholarship</TableHead>
                 <TableHead className="text-right">Rev Share</TableHead>
                 <TableHead className="text-right">NIL</TableHead>
                 <TableHead className="text-right">Other</TableHead>
@@ -89,14 +92,20 @@ export default function GMRoster() {
                     <Link to={profileRouteFor(r.player_id, r.position)} className="text-sm font-medium hover:text-primary hover:underline">
                       {r.name}
                     </Link>
-                    <div className="text-[10px] text-muted-foreground">{r.position || "—"}</div>
                   </TableCell>
                   <TableCell className="py-1.5">
                     {/* Read-only here; editing lives on the future player profile. */}
                     <span className="text-xs font-semibold text-foreground">{r.eligibility_class || "—"}</span>
                   </TableCell>
-                  <TableCell className="py-1.5 text-center font-mono text-xs tabular-nums">{num(r.war)}</TableCell>
-                  <TableCell className="py-1.5 text-center font-mono text-xs tabular-nums">{money(r.market_value)}</TableCell>
+                  <TableCell className="py-1.5 text-center">
+                    <span className="text-xs font-semibold text-foreground">{r.position || "—"}</span>
+                  </TableCell>
+                  {/* WAR + Market Value are read-only projections — styled as stats
+                      (mono, no input affordance) to match Team Builder, distinct
+                      from the editable money cells. */}
+                  <TableCell className="py-1.5 text-center font-mono text-sm font-semibold tabular-nums text-foreground">{num(r.war)}</TableCell>
+                  <TableCell className="py-1.5 text-center font-mono text-sm font-semibold tabular-nums text-foreground">{money(r.market_value)}</TableCell>
+                  <TableCell className="py-1.5"><MoneyCell value={r.scholarship_amount} onSave={(n) => gm.savePlayer(r.player_id, { scholarship_amount: n })} /></TableCell>
                   <TableCell className="py-1.5"><MoneyCell value={r.rev_share} onSave={(n) => gm.savePlayer(r.player_id, { rev_share: n })} /></TableCell>
                   <TableCell className="py-1.5"><MoneyCell value={r.nil_amount} onSave={(n) => gm.savePlayer(r.player_id, { nil_amount: n })} /></TableCell>
                   <TableCell className="py-1.5"><MoneyCell value={r.other_amount} onSave={(n) => gm.savePlayer(r.player_id, { other_amount: n })} /></TableCell>
@@ -107,13 +116,15 @@ export default function GMRoster() {
                 </TableRow>
               ))}
               {rows.length === 0 ? (
-                <TableRow><TableCell colSpan={9} className="py-8 text-center text-muted-foreground">No players.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={11} className="py-8 text-center text-muted-foreground">No players.</TableCell></TableRow>
               ) : (
                 <TableRow className="bg-muted/40 font-medium">
                   <TableCell className="sticky left-0 z-10 bg-muted/40 text-right py-2 pr-3 font-semibold">Totals</TableCell>
                   <TableCell />
+                  <TableCell />
                   <TableCell className="text-center font-mono text-sm py-2">{num(sum((r) => r.war), 1)}</TableCell>
                   <TableCell />
+                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => r.scholarship_amount))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => r.rev_share))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => r.nil_amount))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => r.other_amount))}</TableCell>

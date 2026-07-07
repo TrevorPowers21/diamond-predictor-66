@@ -24,6 +24,7 @@ export interface GmRow {
   market_value: number | null;
   nil_value: number | null; // coach's Team Builder actual pay
   // gm_player_finance
+  scholarship_amount: number | null;
   rev_share: number | null;
   nil_amount: number | null;
   other_amount: number | null;
@@ -127,6 +128,7 @@ export function useGmRoster() {
           war: pitcher ? (snap.p_war ?? null) : (snap.o_war ?? null),
           market_value: mv,
           nil_value: r.nil_value ?? null,
+          scholarship_amount: f.scholarship_amount ?? null,
           rev_share: f.rev_share ?? null,
           nil_amount: f.nil_amount ?? null,
           other_amount: f.other_amount ?? null,
@@ -157,7 +159,7 @@ export function useGmRoster() {
     mutationFn: async ({ playerId, patch }: { playerId: string; patch: Partial<GmRow> }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
       const upsert: any = { customer_team_id: effectiveTeamId, player_id: playerId, season, updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() };
-      for (const k of ["rev_share", "nil_amount", "other_amount", "actual_pay", "eligibility_class"] as const) {
+      for (const k of ["scholarship_amount", "rev_share", "nil_amount", "other_amount", "actual_pay", "eligibility_class"] as const) {
         if (k in patch) upsert[k] = (patch as any)[k];
       }
       const { error } = await (supabase as any).from("gm_player_finance").upsert(upsert, { onConflict: "customer_team_id,player_id,season" });
