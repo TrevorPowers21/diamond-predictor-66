@@ -348,7 +348,8 @@ export function useGmRoster() {
   const commitBudget = useMutation({
     mutationFn: async (caps: BudgetCaps) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
-      const total = (caps.rev_share_total ?? 0) + (caps.nil_total ?? 0) + (caps.scholarship_total ?? 0) + (caps.other_total ?? 0);
+      // Scholarship is aid, NOT part of the comp budget — exclude from the total.
+      const total = (caps.rev_share_total ?? 0) + (caps.nil_total ?? 0) + (caps.other_total ?? 0);
       const { error } = await (supabase as any).from("gm_budget").upsert(
         { customer_team_id: effectiveTeamId, season, ...caps, finalized: true, finalized_at: new Date().toISOString(), updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() },
         { onConflict: "customer_team_id,season" },

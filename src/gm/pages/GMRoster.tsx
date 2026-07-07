@@ -129,7 +129,8 @@ function BudgetDialog({ open, onOpenChange, budget, coachTotal, onSave, onFinali
     }
   }, [open, budget]);
   const otherSum = other.reduce((s, l) => s + (l.amount ?? 0), 0);
-  const total = (rev ?? 0) + (nil ?? 0) + (sch ?? 0) + otherSum;
+  // Scholarship is aid, NOT part of the comp budget — excluded from the total.
+  const total = (rev ?? 0) + (nil ?? 0) + otherSum;
   const caps = (): BudgetCaps => ({
     rev_share_total: rev,
     nil_total: nil,
