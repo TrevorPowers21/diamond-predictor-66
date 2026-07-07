@@ -1,8 +1,8 @@
-import { useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DollarSign, TrendingUp, Gauge, Wallet } from "lucide-react";
+import { DollarSign, TrendingUp, Gauge, Wallet, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
@@ -39,6 +39,8 @@ function Tile({ label, value, sub, icon, accent }: { label: string; value: strin
 
 export default function GMAnalytics() {
   const gm = useGmRoster();
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (g: string) => setExpanded((prev) => { const n = new Set(prev); n.has(g) ? n.delete(g) : n.add(g); return n; });
 
   const roster = useMemo(() => [...gm.hitters, ...gm.pitchers], [gm.hitters, gm.pitchers]);
   const totalPay = roster.reduce((s, r) => s + (r.nil_value ?? 0), 0);
@@ -46,18 +48,27 @@ export default function GMAnalytics() {
   const payPerWin = totalWar > 0 ? totalPay / totalWar : null;
   const remaining = (gm.coachTotalBudget ?? 0) - totalPay;
 
-  // Pay by position group.
+  // WAR breakdown (offense vs rotation vs bullpen) + roster-wide efficiency.
+  const hitOwar = gm.hitters.reduce((s, r) => s + (r.war ?? 0), 0);
+  const rotationPwar = gm.pitchers.filter((p) => (p.position || "").toUpperCase() === "SP").reduce((s, r) => s + (r.war ?? 0), 0);
+  const bullpenPwar = gm.pitchers.filter((p) => (p.position || "").toUpperCase() !== "SP").reduce((s, r) => s + (r.war ?? 0), 0);
+  const winsPerM = totalPay > 0 ? totalWar / (totalPay / 1_000_000) : null;
+
+  // Pay by position group — with the players in each group for the dropdown.
   const byGroup = useMemo(() => {
-    const map = new Map<string, { pay: number; war: number; count: number }>();
+    const map = new Map<string, { pay: number; war: number; players: GmRow[] }>();
     for (const r of roster) {
       const g = payGroup(r.position);
-      const e = map.get(g) ?? { pay: 0, war: 0, count: 0 };
+      const e = map.get(g) ?? { pay: 0, war: 0, players: [] };
       e.pay += r.nil_value ?? 0;
       e.war += r.war ?? 0;
-      e.count += 1;
+      e.players.push(r);
       map.set(g, e);
     }
-    return GROUP_ORDER.filter((g) => map.has(g)).map((g) => ({ group: g, ...map.get(g)! }));
+    return GROUP_ORDER.filter((g) => map.has(g)).map((g) => {
+      const e = map.get(g)!;
+      return { group: g, pay: e.pay, war: e.war, count: e.players.length, players: [...e.players].sort((a, b) => (b.war ?? 0) - (a.war ?? 0)) };
+    });
   }, [roster]);
 
   // Cost efficiency per player ($/projected win). Players with no WAR can't be
@@ -97,7 +108,30 @@ export default function GMAnalytics() {
         <Tile label="Remaining" value={money(remaining)} icon={<Wallet className="h-3.5 w-3.5" />} accent={remaining < 0 ? "red" : "emerald"} />
       </div>
 
-      {/* Pay by position group */}
+      {/* WAR breakdown */}
+      <Card className="border-border/60">
+        <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
+          <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>WAR Breakdown</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-border/40 p-0">
+          {[
+            { label: "Hitting oWAR", value: hitOwar },
+            { label: "Rotation pWAR", value: rotationPwar },
+            { label: "Bullpen pWAR", value: bullpenPwar },
+          ].map((x) => (
+            <div key={x.label} className="px-4 py-3">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground/60" style={OSWALD}>{x.label}</div>
+              <div className="mt-1 font-mono text-xl font-bold tabular-nums">{num(x.value, 1)}</div>
+            </div>
+          ))}
+          <div className="px-4 py-3">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Wins / $1M</div>
+            <div className="mt-1 font-mono text-xl font-bold tabular-nums text-[#D4AF37]">{winsPerM == null ? "—" : winsPerM.toFixed(2)}</div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Pay by position group — click a row to see the players in it */}
       <Card className="border-border/60">
         <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
           <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Pay by Position</CardTitle>
@@ -111,22 +145,45 @@ export default function GMAnalytics() {
                 <TableHead className="text-right">Pay</TableHead>
                 <TableHead className="text-right">% of Pay</TableHead>
                 <TableHead className="text-center">WAR</TableHead>
+                <TableHead className="text-right">WAR %</TableHead>
                 <TableHead className="text-right pr-4">$ / Win</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {byGroup.map((g) => (
-                <TableRow key={g.group}>
-                  <TableCell className="py-1.5 text-sm font-medium">{g.group}</TableCell>
-                  <TableCell className="py-1.5 text-center font-mono text-sm tabular-nums">{g.count}</TableCell>
-                  <TableCell className="py-1.5 text-right font-mono text-sm tabular-nums pr-3">{money(g.pay)}</TableCell>
-                  <TableCell className="py-1.5 text-right font-mono text-sm tabular-nums text-muted-foreground">{totalPay > 0 ? `${Math.round((g.pay / totalPay) * 100)}%` : "—"}</TableCell>
-                  <TableCell className="py-1.5 text-center font-mono text-sm tabular-nums">{num(g.war)}</TableCell>
-                  <TableCell className="py-1.5 text-right font-mono text-sm font-semibold tabular-nums pr-4">{money0(g.war > 0 ? g.pay / g.war : null)}</TableCell>
-                </TableRow>
-              ))}
+              {byGroup.map((g) => {
+                const open = expanded.has(g.group);
+                return (
+                  <Fragment key={g.group}>
+                    <TableRow className="cursor-pointer hover:bg-muted/40" onClick={() => toggle(g.group)}>
+                      <TableCell className="py-1.5 text-sm font-medium">
+                        <span className="inline-flex items-center gap-1.5">
+                          <ChevronRight className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", open && "rotate-90")} />
+                          {g.group}
+                        </span>
+                      </TableCell>
+                      <TableCell className="py-1.5 text-center font-mono text-sm tabular-nums">{g.count}</TableCell>
+                      <TableCell className="py-1.5 text-right font-mono text-sm tabular-nums pr-3">{money(g.pay)}</TableCell>
+                      <TableCell className="py-1.5 text-right font-mono text-sm tabular-nums text-muted-foreground">{totalPay > 0 ? `${Math.round((g.pay / totalPay) * 100)}%` : "—"}</TableCell>
+                      <TableCell className="py-1.5 text-center font-mono text-sm tabular-nums">{num(g.war)}</TableCell>
+                      <TableCell className="py-1.5 text-right font-mono text-sm tabular-nums text-muted-foreground">{totalWar > 0 ? `${Math.round((g.war / totalWar) * 100)}%` : "—"}</TableCell>
+                      <TableCell className="py-1.5 text-right font-mono text-sm font-semibold tabular-nums pr-4">{money0(g.war > 0 ? g.pay / g.war : null)}</TableCell>
+                    </TableRow>
+                    {open && g.players.map((p) => (
+                      <TableRow key={p.build_player_id} className="bg-muted/20">
+                        <TableCell className="py-1 pl-9 text-xs text-muted-foreground">{p.name} <span className="text-muted-foreground/60">· {p.position || "—"}</span></TableCell>
+                        <TableCell />
+                        <TableCell className="py-1 text-right font-mono text-xs tabular-nums pr-3">{money(p.nil_value)}</TableCell>
+                        <TableCell />
+                        <TableCell className="py-1 text-center font-mono text-xs tabular-nums">{num(p.war)}</TableCell>
+                        <TableCell />
+                        <TableCell className="py-1 text-right font-mono text-xs tabular-nums pr-4">{money0((p.war ?? 0) > 0 && (p.nil_value ?? 0) > 0 ? (p.nil_value as number) / (p.war as number) : null)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </Fragment>
+                );
+              })}
               {byGroup.length === 0 && (
-                <TableRow><TableCell colSpan={6} className="py-6 text-center text-muted-foreground">No committed pay yet.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="py-6 text-center text-muted-foreground">No committed pay yet.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
