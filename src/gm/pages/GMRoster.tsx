@@ -139,9 +139,9 @@ function BudgetDialog({ open, onOpenChange, budget, coachTotal, onSave, onFinali
     other_breakdown: other.filter((l) => l.name.trim() || l.amount != null).map((l) => ({ name: l.name.trim() || "Other", amount: l.amount ?? 0 })),
   });
   const setLine = (i: number, patch: Partial<OtherDraft>) => setOther((prev) => prev.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  const field = (label: string, val: number | null, set: (n: number | null) => void) => (
+  const field = (label: string, val: number | null, set: (n: number | null) => void, hint?: string) => (
     <label className="flex items-center justify-between gap-4">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground" style={OSWALD}>{label}</span>
+      <span className={cn("text-[11px] font-semibold uppercase tracking-wider text-muted-foreground", hint && "cursor-help")} style={OSWALD} title={hint}>{label}</span>
       <DollarInput value={val} onChange={set} />
     </label>
   );
@@ -152,7 +152,7 @@ function BudgetDialog({ open, onOpenChange, budget, coachTotal, onSave, onFinali
         <div className="space-y-3 py-1">
           {field("Revenue Share", rev, setRev)}
           {field("NIL", nil, setNil)}
-          {field("Scholarship", sch, setSch)}
+          {field("Scholarship", sch, setSch, "Not included in total budget")}
 
           {/* Other → named funding lines (camps, vendors, donor …) summing to Other. */}
           <div className="space-y-2 rounded-md border p-2.5">
@@ -399,9 +399,9 @@ export default function GMRoster() {
   // One budget box — read-only. Shows used / allotment as whole dollars; caps
   // are edited only in the Manage Budget popup. Over-cap turns the used red.
   // `accent` gives the Total box a standing gold highlight.
-  const box = (label: string, used: number, total: number | null, accent?: boolean) => (
+  const box = (label: string, used: number, total: number | null, accent?: boolean, hint?: string) => (
     <Card className={cn("flex flex-col items-center px-4 py-3.5 text-center", accent && "border-[#D4AF37]/55 bg-[#D4AF37]/[0.07]")}>
-      <div className={cn("text-[11px] font-bold uppercase tracking-[0.14em]", accent ? "text-[#D4AF37]" : "text-foreground/75")} style={OSWALD}>{label}</div>
+      <div className={cn("text-[11px] font-bold uppercase tracking-[0.14em]", accent ? "text-[#D4AF37]" : "text-foreground/75", hint && "cursor-help")} style={OSWALD} title={hint}>{label}</div>
       <div className="mt-2 flex items-baseline justify-center gap-1.5">
         <span className={cn("font-mono font-bold tabular-nums leading-none", accent ? "text-3xl text-[#D4AF37]" : "text-2xl text-foreground", total != null && used > total && "text-red-500")}>{money(used)}</span>
         {total != null && (
@@ -487,7 +487,7 @@ export default function GMRoster() {
           Revenue Share · Total on the second row. */}
       <div className="space-y-3">
         <div className="grid grid-cols-3 gap-3">
-          {box("Scholarship", schUsed, effCaps.scholarship_total)}
+          {box("Scholarship", schUsed, effCaps.scholarship_total, false, "Not included in total budget")}
           {box("NIL", nilUsed, effCaps.nil_total)}
           {box("Other", otherUsed, effCaps.other_total)}
         </div>
