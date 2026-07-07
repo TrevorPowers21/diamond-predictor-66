@@ -1,10 +1,12 @@
 import { Fragment, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
-import { useWarBenchmarks } from "@/hooks/useTeamWarSnapshots";
-import { CURRENT_SEASON } from "@/lib/seasonConstants";
+import { useWarBenchmarks, useTeamWarSnapshot, useNationalSeedBenchmark, type TeamWarSnapshot, type WarStatRange } from "@/hooks/useTeamWarSnapshots";
+import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DollarSign, TrendingUp, Gauge, Wallet, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -27,22 +29,6 @@ function payGroup(pos: string | null | undefined): string {
 }
 const GROUP_ORDER = ["Catcher", "Corner Infield", "Middle Infield", "Outfield", "DH / Utility", "Starters", "Relievers", "Other"];
 
-/** Build value vs a benchmark team, with a colored delta. */
-function CompareCell({ label, mine, theirs }: { label: string; mine: number; theirs: number | null }) {
-  const delta = theirs != null ? mine - theirs : null;
-  const color = delta == null || Math.abs(delta) < 0.1 ? "text-muted-foreground" : delta > 0 ? "text-emerald-500" : "text-red-500";
-  return (
-    <div className="px-4 py-3">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground/60" style={OSWALD}>{label}</div>
-      <div className="mt-1 flex items-baseline gap-2">
-        <span className="font-mono text-xl font-bold tabular-nums">{mine.toFixed(1)}</span>
-        {theirs != null && <span className="text-[11px] text-muted-foreground">vs {theirs.toFixed(1)}</span>}
-      </div>
-      {delta != null && <div className={cn("text-[11px] font-semibold tabular-nums", color)}>{delta > 0 ? "+" : ""}{delta.toFixed(1)}</div>}
-    </div>
-  );
-}
-
 function Tile({ label, value, sub, icon, accent }: { label: string; value: string; sub?: string; icon: React.ReactNode; accent?: "gold" | "blue" | "emerald" | "red" }) {
   const color = accent === "gold" ? "text-[#D4AF37]" : accent === "blue" ? "text-blue-400" : accent === "emerald" ? "text-emerald-400" : accent === "red" ? "text-red-400" : "text-white";
   return (
@@ -58,6 +44,7 @@ function Tile({ label, value, sub, icon, accent }: { label: string; value: strin
 
 export default function GMAnalytics() {
   const gm = useGmRoster();
+  const { effectiveTeamId, availableTeams } = useAuth();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (g: string) => setExpanded((prev) => { const n = new Set(prev); n.has(g) ? n.delete(g) : n.add(g); return n; });
 
@@ -67,16 +54,28 @@ export default function GMAnalytics() {
   const payPerWin = totalWar > 0 ? totalPay / totalWar : null;
   const remaining = (gm.coachTotalBudget ?? 0) - totalPay;
 
-  // WAR breakdown (offense vs rotation vs bullpen) + roster-wide efficiency.
-  const hitOwar = gm.hitters.reduce((s, r) => s + (r.war ?? 0), 0);
+  // Build WAR split for the benchmark comparison (top-9 lineup / SP / RP).
   const rotationPwar = gm.pitchers.filter((p) => (p.position || "").toUpperCase() === "SP").reduce((s, r) => s + (r.war ?? 0), 0);
   const bullpenPwar = gm.pitchers.filter((p) => (p.position || "").toUpperCase() !== "SP").reduce((s, r) => s + (r.war ?? 0), 0);
   const lineupOwar = gm.hitters.slice(0, 9).reduce((s, r) => s + (r.war ?? 0), 0); // gm.hitters is sorted by WAR desc
 
-  // Benchmark vs last completed season's champions (national + conference).
-  const { data: benchmarks = [] } = useWarBenchmarks(CURRENT_SEASON);
-  const [benchId, setBenchId] = useState<string | null>(null);
-  const bench = benchmarks.find((b) => b.source_team_id === benchId) ?? benchmarks[0] ?? null;
+  // Team's source_team_id + conference (Teams Table) to key the WAR benchmarks.
+  const schoolTeamId = availableTeams.find((t) => t.id === effectiveTeamId)?.school_team_id ?? null;
+  const { data: teamMeta } = useQuery({
+    queryKey: ["gm-team-meta", schoolTeamId],
+    enabled: !!schoolTeamId,
+    queryFn: async () => {
+      const { data } = await (supabase as any).from("Teams Table").select("source_id, conference").eq("id", schoolTeamId).maybeSingle();
+      return { sourceTeamId: data?.source_id != null ? String(data.source_id) : null, conference: (data?.conference as string | null) ?? null };
+    },
+  });
+  const { data: priorYearSnapshot } = useTeamWarSnapshot(teamMeta?.sourceTeamId ?? null, CURRENT_SEASON);
+  const { data: warBenchmarks = [] } = useWarBenchmarks(CURRENT_SEASON);
+  const { data: nationalSeedBenchmark } = useNationalSeedBenchmark(CURRENT_SEASON, "1-8");
+  const conferenceChampBenchmarks = useMemo(
+    () => (teamMeta?.conference ? warBenchmarks.filter((b) => b.is_conference_champ && b.conference === teamMeta.conference) : []),
+    [warBenchmarks, teamMeta?.conference],
+  );
 
   // Pay by position group — with the players in each group for the dropdown.
   const byGroup = useMemo(() => {
@@ -132,58 +131,103 @@ export default function GMAnalytics() {
         <Tile label="Remaining" value={money(remaining)} icon={<Wallet className="h-3.5 w-3.5" />} accent={remaining < 0 ? "red" : "emerald"} />
       </div>
 
-      {/* WAR breakdown */}
-      <Card className="border-border/60">
-        <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
-          <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>WAR Breakdown</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-3 divide-x divide-border/40 p-0">
-          {[
-            { label: "Hitting oWAR", value: hitOwar },
-            { label: "Rotation pWAR", value: rotationPwar },
-            { label: "Bullpen pWAR", value: bullpenPwar },
-          ].map((x) => (
-            <div key={x.label} className="px-4 py-3">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground/60" style={OSWALD}>{x.label}</div>
-              <div className="mt-1 font-mono text-xl font-bold tabular-nums">{num(x.value, 1)}</div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      {/* WAR Comparison — same design as Team Builder: hero + benchmark table
+          (vs last season · conference champion · national seed range). */}
+      {(() => {
+        type BenchRow =
+          | { kind: "team"; label: string; sublabel?: string; bench: TeamWarSnapshot }
+          | { kind: "range"; label: string; sublabel?: string; range: { total: WarStatRange | null; lineup: WarStatRange | null; rotation: WarStatRange | null; bullpen: WarStatRange | null } };
+        const rows: BenchRow[] = [];
+        if (priorYearSnapshot) rows.push({ kind: "team", label: `${CURRENT_SEASON} Actual — ${priorYearSnapshot.team_name}`, sublabel: "your program last season", bench: priorYearSnapshot });
+        for (const c of conferenceChampBenchmarks) rows.push({ kind: "team", label: `${CURRENT_SEASON} ${c.conference} Champion — ${c.team_name}`, sublabel: conferenceChampBenchmarks.length > 1 ? "split regular-season champ" : undefined, bench: c });
+        if (nationalSeedBenchmark?.totalWar) rows.push({ kind: "range", label: `${CURRENT_SEASON} National Seed Range (1-8)`, sublabel: "min – max across the top 8 seeds", range: { total: nationalSeedBenchmark.totalWar, lineup: nationalSeedBenchmark.lineupOwar, rotation: nationalSeedBenchmark.rotationPwar, bullpen: nationalSeedBenchmark.bullpenPwar } });
 
-      {/* WAR vs top teams — this build's projected WAR against champions */}
-      <Card className="border-border/60">
-        <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40 flex flex-row items-center justify-between gap-3">
-          <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>WAR vs Top Teams</CardTitle>
-          {benchmarks.length > 0 && (
-            <Select value={bench?.source_team_id ?? undefined} onValueChange={setBenchId}>
-              <SelectTrigger className="h-8 w-[240px] text-xs"><SelectValue placeholder="Pick a benchmark" /></SelectTrigger>
-              <SelectContent>
-                {benchmarks.map((b) => (
-                  <SelectItem key={b.source_team_id} value={b.source_team_id} className="text-xs">
-                    {b.team_name}{b.is_national_champ ? " — National Champ" : b.conference ? ` — ${b.conference}` : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </CardHeader>
-        <CardContent className="p-0">
-          {bench ? (
-            <>
-              <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-border/40">
-                <CompareCell label="Total WAR" mine={totalWar} theirs={Number(bench.prorated_total_owar) + Number(bench.prorated_total_pwar)} />
-                <CompareCell label="Lineup oWAR" mine={lineupOwar} theirs={Number(bench.prorated_starting_lineup_owar)} />
-                <CompareCell label="Rotation pWAR" mine={rotationPwar} theirs={Number(bench.prorated_rotation_pwar)} />
-                <CompareCell label="Bullpen pWAR" mine={bullpenPwar} theirs={Number(bench.prorated_bullpen_pwar)} />
+        const priorTotal = priorYearSnapshot ? Number(priorYearSnapshot.prorated_total_owar) + Number(priorYearSnapshot.prorated_total_pwar) : null;
+        const yoyDelta = priorTotal != null ? totalWar - priorTotal : null;
+        const deltaCell = (build: number, bench: number) => {
+          const diff = build - bench, abs = Math.abs(diff);
+          const color = abs < 0.05 ? "text-muted-foreground" : diff > 0 ? "text-emerald-500" : "text-red-500";
+          return <span className={cn("tabular-nums font-semibold", color)}>{diff > 0 ? "+" : diff < 0 ? "−" : ""}{abs.toFixed(2)}</span>;
+        };
+        const rangeText = (r: WarStatRange | null) => (!r ? <span className="text-muted-foreground">—</span> : (
+          <div className="leading-tight"><div className="tabular-nums font-medium">{r.min.toFixed(2)}–{r.max.toFixed(2)}</div><div className="text-[10px] text-muted-foreground tabular-nums">med {r.median.toFixed(2)}</div></div>
+        ));
+        const rangeDelta = (build: number, r: WarStatRange | null) => {
+          if (!r) return <span className="text-muted-foreground">—</span>;
+          if (build >= r.min && build <= r.max) return <span className="tabular-nums font-semibold text-emerald-500">in range</span>;
+          const diff = build - r.median, abs = Math.abs(diff);
+          return <div className="leading-tight"><div className={cn("tabular-nums font-semibold", diff > 0 ? "text-muted-foreground" : "text-red-500")}>{diff > 0 ? "+" : "−"}{abs.toFixed(2)}</div><div className="text-[10px] text-muted-foreground">vs med</div></div>;
+        };
+
+        return (
+          <Card className="border-l-[3px] border-l-[#D4AF37]">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>WAR Comparison — {gm.teamName ?? "Front Office"} {PROJECTION_SEASON} Build</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-5 px-4 py-3 rounded-md bg-card/40 border-l-[3px] border-l-[#D4AF37]">
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Total WAR</div>
+                <div className="flex items-baseline gap-3 mt-1 flex-wrap">
+                  <span className="text-4xl font-bold tabular-nums text-[#D4AF37]" style={OSWALD}>{totalWar.toFixed(2)}</span>
+                  {yoyDelta != null && (
+                    <span className={cn("text-sm font-semibold tabular-nums", Math.abs(yoyDelta) < 0.05 ? "text-muted-foreground" : yoyDelta > 0 ? "text-emerald-500" : "text-red-500")}>{yoyDelta > 0 ? "+" : yoyDelta < 0 ? "−" : ""}{Math.abs(yoyDelta).toFixed(2)} vs {CURRENT_SEASON}</span>
+                  )}
+                </div>
               </div>
-              <p className="px-4 py-2 text-[10px] text-muted-foreground border-t border-border/40">Your projected build vs {bench.team_name}'s prorated (56-game) actual WAR. Green = ahead.</p>
-            </>
-          ) : (
-            <p className="p-4 text-sm text-muted-foreground">No benchmark data available for this season.</p>
-          )}
-        </CardContent>
-      </Card>
+              <div className="grid grid-cols-3 gap-3 mb-5">
+                {[{ l: "Lineup oWAR", v: lineupOwar }, { l: "Rotation pWAR", v: rotationPwar }, { l: "Bullpen pWAR", v: bullpenPwar }].map((x) => (
+                  <div key={x.l} className="rounded-md border border-border/40 border-l-[3px] border-l-[#D4AF37]/60 bg-card/40 px-4 py-3">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">{x.l}</div>
+                    <div className="text-2xl font-bold tabular-nums mt-1" style={OSWALD}>{x.v.toFixed(2)}</div>
+                  </div>
+                ))}
+              </div>
+              {rows.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No benchmarks on file for {gm.teamName ?? "this team"} yet.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-[10px] uppercase tracking-wider text-muted-foreground">
+                        <th className="text-left py-2 pr-4">Compare vs</th>
+                        <th className="text-center py-2 px-4 w-[140px] whitespace-nowrap">Goal Total</th>
+                        <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Δ Total</th>
+                        <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Δ Lineup</th>
+                        <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Δ Rotation</th>
+                        <th className="text-center py-2 px-4 w-[110px] whitespace-nowrap">Δ Bullpen</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, i) =>
+                        row.kind === "team" ? (
+                          <tr key={i} className="border-b last:border-0">
+                            <td className="py-2 pr-4"><div className="font-medium">{row.label}</div>{row.sublabel && <div className="text-[10px] text-muted-foreground italic">{row.sublabel}</div>}</td>
+                            <td className="text-center py-2 px-4 font-mono tabular-nums text-muted-foreground">{(Number(row.bench.prorated_total_owar) + Number(row.bench.prorated_total_pwar)).toFixed(2)}</td>
+                            <td className="text-center py-2 px-4 font-mono">{deltaCell(totalWar, Number(row.bench.prorated_total_owar) + Number(row.bench.prorated_total_pwar))}</td>
+                            <td className="text-center py-2 px-4 font-mono">{deltaCell(lineupOwar, Number(row.bench.prorated_starting_lineup_owar))}</td>
+                            <td className="text-center py-2 px-4 font-mono">{deltaCell(rotationPwar, Number(row.bench.prorated_rotation_pwar))}</td>
+                            <td className="text-center py-2 px-4 font-mono">{deltaCell(bullpenPwar, Number(row.bench.prorated_bullpen_pwar))}</td>
+                          </tr>
+                        ) : (
+                          <tr key={i} className="border-b last:border-0 bg-[#D4AF37]/[0.04]">
+                            <td className="py-2 pr-4"><div className="font-medium">{row.label}</div>{row.sublabel && <div className="text-[10px] text-muted-foreground italic">{row.sublabel}</div>}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeText(row.range.total)}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeDelta(totalWar, row.range.total)}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeDelta(lineupOwar, row.range.lineup)}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeDelta(rotationPwar, row.range.rotation)}</td>
+                            <td className="text-center py-2 px-4 font-mono">{rangeDelta(bullpenPwar, row.range.bullpen)}</td>
+                          </tr>
+                        ),
+                      )}
+                    </tbody>
+                  </table>
+                  <div className="text-[10px] text-muted-foreground mt-2 italic">Your projected build vs prorated 56-game actuals.</div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Pay by position group — click a row to see the players in it */}
       <Card className="border-border/60">
