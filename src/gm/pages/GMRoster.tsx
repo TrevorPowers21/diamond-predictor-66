@@ -82,7 +82,7 @@ function DollarInput({ value, onChange }: { value: number | null; onChange: (n: 
  *  The roster boxes stay read-only whole numbers. */
 type OtherDraft = { name: string; amount: number | null };
 type BudgetCaps = { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown: GmOtherLine[] };
-function BudgetDialog({ budget, onSave, onFinalize }: { budget: GmBudget | null; onSave: (caps: BudgetCaps) => void; onFinalize: (caps: BudgetCaps) => void }) {
+function BudgetDialog({ budget, coachTotal, onSave, onFinalize }: { budget: GmBudget | null; coachTotal: number | null; onSave: (caps: BudgetCaps) => void; onFinalize: (caps: BudgetCaps) => void }) {
   const [open, setOpen] = useState(false);
   const [rev, setRev] = useState<number | null>(null);
   const [nil, setNil] = useState<number | null>(null);
@@ -162,8 +162,14 @@ function BudgetDialog({ budget, onSave, onFinalize }: { budget: GmBudget | null;
 
           <div className="flex items-center justify-between border-t pt-3">
             <span className="text-xs font-bold uppercase tracking-wider" style={OSWALD}>Total</span>
-            <span className="text-base font-bold font-mono tabular-nums">{money(total)}</span>
+            <span className={cn("text-base font-bold font-mono tabular-nums", coachTotal != null && Math.round(total) === Math.round(coachTotal) ? "text-emerald-500" : coachTotal != null && total > 0 ? "text-amber-500" : "text-foreground")}>{money(total)}</span>
           </div>
+          {coachTotal != null && (
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <span className="uppercase tracking-wider" style={OSWALD}>Coach's Budget</span>
+              <span className="font-mono tabular-nums">{money(coachTotal)}</span>
+            </div>
+          )}
         </div>
         <DialogFooter className="gap-2 sm:gap-2">
           {/* Save = GM-only draft (this local session). Finalize & Push
@@ -324,7 +330,9 @@ export default function GMRoster() {
   // Effective caps: local budget draft (unsaved Save) overrides the DB budget.
   const dbCaps: BudgetCaps = { rev_share_total: b?.rev_share_total ?? null, nil_total: b?.nil_total ?? null, scholarship_total: b?.scholarship_total ?? null, other_total: b?.other_total ?? null, other_breakdown: b?.other_breakdown ?? null };
   const effCaps: BudgetCaps = budgetDraft ?? dbCaps;
-  const totalAllot = (effCaps.rev_share_total ?? 0) + (effCaps.nil_total ?? 0) + (effCaps.other_total ?? 0) + (effCaps.scholarship_total ?? 0);
+  // The Total the GM works against is the coach's number (total_budget), which
+  // only changes when the GM Finalizes — exactly like a player's Actual Pay.
+  const coachTotalBudget = gm.coachTotalBudget;
   // Used figures reflect the local row drafts, not just the saved DB values.
   const allRows = [...gm.hitters, ...gm.pitchers];
 
@@ -336,9 +344,10 @@ export default function GMRoster() {
   const posWeightedWar = (r: GmRow) => Number(r.war ?? 0) * getPositionValueMultiplier(r.position);
   const rosterScore = allRows.reduce((s, r) => s + posWeightedWar(r), 0);
   const projectedValue = (r: GmRow): number | null => {
-    if (totalAllot <= 0) return null;
+    const budget = coachTotalBudget ?? 0;
+    if (budget <= 0) return null;
     const denom = Math.max(rosterScore, 33);
-    return denom > 0 ? Math.max(0, (posWeightedWar(r) / denom) * totalAllot) : null;
+    return denom > 0 ? Math.max(0, (posWeightedWar(r) / denom) * budget) : null;
   };
   const usedSum = (f: (m: RowMoney) => number | null) => allRows.reduce((s, r) => s + (f(effMoney(r)) ?? 0), 0);
   const revUsed = usedSum((m) => m.rev_share);
@@ -401,6 +410,7 @@ export default function GMRoster() {
           )}
           <BudgetDialog
             budget={popupBudget}
+            coachTotal={coachTotalBudget}
             onSave={(caps) => setBudgetDraft(caps)}
             onFinalize={(caps) => setConfirmCaps(caps)}
           />
@@ -417,7 +427,7 @@ export default function GMRoster() {
         </div>
         <div className="grid grid-cols-2 gap-3">
           {box("Revenue Share", revUsed, effCaps.rev_share_total)}
-          {box("Total", actualUsed, totalAllot || null, true)}
+          {box("Total", actualUsed, coachTotalBudget, true)}
         </div>
       </div>
 

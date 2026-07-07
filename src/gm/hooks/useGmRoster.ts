@@ -145,6 +145,11 @@ export function useGmRoster() {
       const finByPlayer = new Map<string, any>((fin || []).map((f: any) => [f.player_id, f]));
       const { data: bud } = await (supabase as any)
         .from("gm_budget").select("*").eq("customer_team_id", effectiveTeamId).eq("season", season).maybeSingle();
+      // The coach's total_budget flows one-way INTO the GM (like a player's
+      // nil_value → Actual Pay): it fills the Total until the GM Finalizes.
+      const { data: buildRow } = await (supabase as any)
+        .from("team_builds").select("total_budget").eq("id", activeBuildId).maybeSingle();
+      const coachTotalBudget = buildRow?.total_budget != null ? Number(buildRow.total_budget) : null;
 
       // Pitching equation weights for the effective-WAR recompute (sync read).
       const eq = readPitchingWeights();
@@ -214,12 +219,13 @@ export function useGmRoster() {
       const budget: GmBudget | null = bud
         ? { rev_share_total: bud.rev_share_total, nil_total: bud.nil_total, other_total: bud.other_total, scholarship_total: bud.scholarship_total, other_breakdown: (bud.other_breakdown as GmOtherLine[] | null) ?? null, finalized: !!bud.finalized }
         : null;
-      return { rows, budget };
+      return { rows, budget, coachTotalBudget };
     },
   });
 
   const rows = data?.rows ?? [];
   const budget = data?.budget ?? null;
+  const coachTotalBudget = data?.coachTotalBudget ?? null;
 
   const hitters = useMemo(() => rows.filter((r) => !r.is_pitcher).sort((a, b) => (b.war ?? -Infinity) - (a.war ?? -Infinity)), [rows]);
   const pitchers = useMemo(() => rows.filter((r) => r.is_pitcher).sort((a, b) => (b.war ?? -Infinity) - (a.war ?? -Infinity)), [rows]);
@@ -330,6 +336,7 @@ export function useGmRoster() {
     hitters,
     pitchers,
     budget,
+    coachTotalBudget,
     totals,
     savePlayer: (playerId: string | null, patch: Partial<GmRow>) => savePlayer.mutate({ playerId, patch }),
     finalizePlayer: (row: GmRow, money: RowMoney, finalize: boolean, onDone?: () => void) =>
