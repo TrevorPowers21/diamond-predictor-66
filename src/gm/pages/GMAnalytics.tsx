@@ -52,7 +52,6 @@ export default function GMAnalytics() {
   const hitOwar = gm.hitters.reduce((s, r) => s + (r.war ?? 0), 0);
   const rotationPwar = gm.pitchers.filter((p) => (p.position || "").toUpperCase() === "SP").reduce((s, r) => s + (r.war ?? 0), 0);
   const bullpenPwar = gm.pitchers.filter((p) => (p.position || "").toUpperCase() !== "SP").reduce((s, r) => s + (r.war ?? 0), 0);
-  const winsPerM = totalPay > 0 ? totalWar / (totalPay / 1_000_000) : null;
 
   // Pay by position group — with the players in each group for the dropdown.
   const byGroup = useMemo(() => {
@@ -113,7 +112,7 @@ export default function GMAnalytics() {
         <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
           <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>WAR Breakdown</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-border/40 p-0">
+        <CardContent className="grid grid-cols-3 divide-x divide-border/40 p-0">
           {[
             { label: "Hitting oWAR", value: hitOwar },
             { label: "Rotation pWAR", value: rotationPwar },
@@ -124,10 +123,6 @@ export default function GMAnalytics() {
               <div className="mt-1 font-mono text-xl font-bold tabular-nums">{num(x.value, 1)}</div>
             </div>
           ))}
-          <div className="px-4 py-3">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Wins / $1M</div>
-            <div className="mt-1 font-mono text-xl font-bold tabular-nums text-[#D4AF37]">{winsPerM == null ? "—" : winsPerM.toFixed(2)}</div>
-          </div>
         </CardContent>
       </Card>
 
