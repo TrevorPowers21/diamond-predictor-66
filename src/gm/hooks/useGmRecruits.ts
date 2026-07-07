@@ -47,6 +47,15 @@ export interface GmRecruitEvent {
   note: string | null;
 }
 
+/** One authored scouting report — recruits can have many, independent. */
+export interface GmRecruitReport {
+  id: string;
+  recruit_id: string;
+  author: string | null;
+  report_date: string; // YYYY-MM-DD
+  body: string | null;
+}
+
 /** Position → recruit section. TWP is its own group. */
 export function recruitTypeForPosition(position: string): RecruitType {
   const p = (position || "").toUpperCase();
@@ -107,15 +116,52 @@ export function useGmRecruits() {
     onError: (e: any) => toast.error(`Remove event failed: ${e.message}`),
   });
 
+  // Scouting reports — multiple per recruit, authored + dated, newest first.
+  const reportsKey = ["gm-recruit-reports", effectiveTeamId ?? null];
+  const { data: reports = [] } = useQuery({
+    queryKey: reportsKey,
+    enabled: !!user?.id && !!effectiveTeamId,
+    queryFn: async (): Promise<GmRecruitReport[]> => {
+      const { data } = await (supabase as any)
+        .from("gm_recruit_reports").select("id, recruit_id, author, report_date, body")
+        .eq("customer_team_id", effectiveTeamId)
+        .order("report_date", { ascending: false }).order("created_at", { ascending: false });
+      return (data || []) as GmRecruitReport[];
+    },
+  });
+  const reportsByRecruit = useMemo(() => {
+    const m = new Map<string, GmRecruitReport[]>();
+    for (const r of reports) { const a = m.get(r.recruit_id) ?? []; a.push(r); m.set(r.recruit_id, a); }
+    return m;
+  }, [reports]);
+
+  const addReport = useMutation({
+    mutationFn: async ({ recruitId, reportDate, body }: { recruitId: string; reportDate: string; body: string }) => {
+      if (!effectiveTeamId) throw new Error("No team in scope");
+      const { error } = await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: recruitId, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: reportDate, body: body.trim(), created_by_user_id: user?.id ?? null });
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: reportsKey }); toast.success("Report added"); },
+    onError: (e: any) => toast.error(`Add report failed: ${e.message}`),
+  });
+  const removeReport = useMutation({
+    mutationFn: async (id: string) => { const { error } = await (supabase as any).from("gm_recruit_reports").delete().eq("id", id); if (error) throw error; },
+    onSuccess: () => qc.invalidateQueries({ queryKey: reportsKey }),
+    onError: (e: any) => toast.error(`Remove report failed: ${e.message}`),
+  });
+
   const addRecruit = useMutation({
-    mutationFn: async (r: NewRecruit) => {
+    mutationFn: async ({ recruit: r, initialReport }: { recruit: NewRecruit; initialReport?: { report_date: string; body: string } }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
       const peers = recruits.filter((x) => x.class_year === r.class_year && x.player_type === r.player_type);
       const nextOrder = peers.length ? Math.max(...peers.map((x) => x.sort_order)) + 1 : 0;
-      const { error } = await (supabase as any).from("gm_recruits").insert({ ...r, customer_team_id: effectiveTeamId, sort_order: nextOrder, created_by_user_id: user?.id ?? null });
+      const { data: inserted, error } = await (supabase as any).from("gm_recruits").insert({ ...r, customer_team_id: effectiveTeamId, sort_order: nextOrder, created_by_user_id: user?.id ?? null }).select("id").single();
       if (error) throw error;
+      if (initialReport && initialReport.body.trim()) {
+        await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: inserted.id, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: initialReport.report_date, body: initialReport.body.trim(), created_by_user_id: user?.id ?? null });
+      }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); toast.success("Recruit added"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: reportsKey }); toast.success("Recruit added"); },
     onError: (e: any) => toast.error(`Add failed: ${e.message}`),
   });
 
@@ -150,12 +196,15 @@ export function useGmRecruits() {
     recruits,
     years,
     isLoading,
-    addRecruit: (r: NewRecruit) => addRecruit.mutate(r),
+    addRecruit: (recruit: NewRecruit, initialReport?: { report_date: string; body: string }) => addRecruit.mutate({ recruit, initialReport }),
     updateRecruit: (id: string, patch: Partial<NewRecruit>) => updateRecruit.mutate({ id, patch }),
     removeRecruit: (id: string) => removeRecruit.mutate(id),
     reorder: (orderedIds: string[]) => reorder.mutate(orderedIds),
     eventsByRecruit,
     addEvent: (recruitId: string, eventDate: string, note: string) => addEvent.mutate({ recruitId, eventDate, note }),
     removeEvent: (id: string) => removeEvent.mutate(id),
+    reportsByRecruit,
+    addReport: (recruitId: string, reportDate: string, body: string) => addReport.mutate({ recruitId, reportDate, body }),
+    removeReport: (id: string) => removeReport.mutate(id),
   };
 }

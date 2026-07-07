@@ -4,7 +4,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useGmRecruits, recruitTypeForPosition, RECRUIT_STAGES, type GmRecruit, type RecruitStage, type RecruitType } from "@/gm/hooks/useGmRecruits";
+import { useGmRecruits, recruitTypeForPosition, RECRUIT_STAGES, type GmRecruit, type GmRecruitReport, type RecruitStage, type RecruitType } from "@/gm/hooks/useGmRecruits";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, GripVertical, ExternalLink, X } from "lucide-react";
+import { Plus, GripVertical, ExternalLink, X, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
@@ -52,11 +52,12 @@ function StageSelect({ value, onChange }: { value: RecruitStage; onChange: (s: R
   );
 }
 
-function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onTimeline, onScouting }: { recruit: GmRecruit; onRemove: () => void; onStageChange: (s: RecruitStage) => void; eventCount: number; onTimeline: () => void; onScouting: () => void }) {
+function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onTimeline, reports, onReports }: { recruit: GmRecruit; onRemove: () => void; onStageChange: (s: RecruitStage) => void; eventCount: number; onTimeline: () => void; reports: GmRecruitReport[]; onReports: () => void }) {
   const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({ id: recruit.id });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.55 : 1, zIndex: isDragging ? 10 : "auto", position: "relative" };
   const name = `${recruit.first_name ?? ""} ${recruit.last_name ?? ""}`.trim() || "Unnamed";
-  const locale = [recruit.high_school, recruit.state].filter(Boolean).join(", ");
+  const locale = recruit.high_school ? `${recruit.high_school}${recruit.state ? ` (${recruit.state})` : ""}` : (recruit.state ?? "");
+  const latest = reports[0];
   return (
     <div ref={setNodeRef} style={style} className="flex items-start gap-2 rounded-md border border-border/60 bg-card/40 p-2.5">
       <button {...attributes} {...listeners} className="mt-0.5 cursor-grab text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing" title="Drag to reorder">
@@ -70,21 +71,22 @@ function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onT
         {(locale || recruit.travel_org) && (
           <div className="mt-0.5 truncate text-xs text-muted-foreground">{locale}{locale && recruit.travel_org ? " · " : ""}{recruit.travel_org}</div>
         )}
-        {recruit.notes ? (
-          <button onClick={onScouting} className="mt-1 block w-full text-left" title="Edit scouting report">
-            <div className="text-xs text-foreground/70 line-clamp-2 hover:text-foreground">{recruit.notes}</div>
-            {recruit.scouting_report_date && <div className="mt-0.5 text-[10px] text-muted-foreground/70">Report · {fmtDate(recruit.scouting_report_date)}</div>}
+        {latest?.body && (
+          <button onClick={onReports} className="mt-1 block w-full text-left" title="Scouting reports">
+            <div className="text-xs text-foreground/70 line-clamp-2 hover:text-foreground">{latest.body}</div>
+            <div className="mt-0.5 text-[10px] text-muted-foreground/70">{latest.author ? `${latest.author.split("@")[0]} · ` : ""}{fmtDate(latest.report_date)}</div>
           </button>
-        ) : (
-          <button onClick={onScouting} className="mt-1 text-[11px] text-muted-foreground hover:text-foreground">+ Scouting report</button>
         )}
-        <div className="mt-1.5 flex items-center gap-2">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
           <StageSelect value={recruit.stage} onChange={onStageChange} />
           {recruit.link && (
             <a href={recruit.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
               <ExternalLink className="h-3 w-3" /> Profile
             </a>
           )}
+          <button onClick={onReports} className="inline-flex items-center gap-1 text-xs text-primary hover:underline" title="Scouting reports">
+            <FileText className="h-3 w-3" /> Reports{reports.length > 0 && <span className="tabular-nums">({reports.length})</span>}
+          </button>
           <button onClick={onTimeline} className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" title="Timeline">
             <Plus className="h-3.5 w-3.5" />{eventCount > 0 && <span className="tabular-nums">{eventCount}</span>}
           </button>
@@ -103,14 +105,10 @@ export default function GMRecruits() {
   const [timelineRecruit, setTimelineRecruit] = useState<GmRecruit | null>(null);
   const [eventDate, setEventDate] = useState<string>(today);
   const [eventNote, setEventNote] = useState("");
-  const [scoutingRecruit, setScoutingRecruit] = useState<GmRecruit | null>(null);
-  const [scoutingText, setScoutingText] = useState("");
-  const [scoutingDate, setScoutingDate] = useState<string>(today);
-  const openScouting = (r: GmRecruit) => { setScoutingText(r.notes ?? ""); setScoutingDate(r.scouting_report_date ?? today()); setScoutingRecruit(r); };
-  const saveScouting = () => {
-    if (scoutingRecruit) gm.updateRecruit(scoutingRecruit.id, { notes: scoutingText.trim() || null, scouting_report_date: scoutingText.trim() ? scoutingDate : null });
-    setScoutingRecruit(null);
-  };
+  const [reportsRecruit, setReportsRecruit] = useState<GmRecruit | null>(null);
+  const [reportDate, setReportDate] = useState<string>(today);
+  const [reportBody, setReportBody] = useState("");
+  const openReports = (r: GmRecruit) => { setReportBody(""); setReportDate(today()); setReportsRecruit(r); };
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const listFor = (t: RecruitType) => gm.recruits.filter((r) => r.class_year === year && r.player_type === t).sort((a, b) => a.sort_order - b.sort_order);
@@ -136,10 +134,10 @@ export default function GMRecruits() {
       state: form.state.trim() || null,
       travel_org: form.travel_org.trim() || null,
       position: form.position || null,
-      notes: form.notes.trim() || null,
-      scouting_report_date: form.notes.trim() ? today() : null,
+      notes: null,
+      scouting_report_date: null,
       link: form.link.trim() || null,
-    });
+    }, form.notes.trim() ? { report_date: today(), body: form.notes.trim() } : undefined);
     setAddOpen(false);
   };
 
@@ -186,7 +184,7 @@ export default function GMRecruits() {
                   <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd(list)}>
                     <SortableContext items={list.map((r) => r.id)} strategy={verticalListSortingStrategy}>
                       <div className="space-y-2">
-                        {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} onScouting={() => openScouting(r)} />)}
+                        {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} reports={gm.reportsByRecruit.get(r.id) ?? []} onReports={() => openReports(r)} />)}
                       </div>
                     </SortableContext>
                   </DndContext>
@@ -270,12 +268,6 @@ export default function GMRecruits() {
           <DialogHeader>
             <DialogTitle style={OSWALD}>{`${timelineRecruit?.first_name ?? ""} ${timelineRecruit?.last_name ?? ""}`.trim() || "Recruit"} — Timeline</DialogTitle>
           </DialogHeader>
-          {timelineRecruit?.notes && (
-            <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scouting Report{timelineRecruit.scouting_report_date ? ` · ${fmtDate(timelineRecruit.scouting_report_date)}` : ""}</div>
-              <div className="mt-1 text-sm text-foreground/90">{timelineRecruit.notes}</div>
-            </div>
-          )}
           {/* Add event */}
           <div className="space-y-2 rounded-md border border-border/60 p-2.5">
             <Input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} className="h-8 w-auto text-xs" />
@@ -298,25 +290,33 @@ export default function GMRecruits() {
         </DialogContent>
       </Dialog>
 
-      {/* Scouting report — editable, with a written-on date */}
-      <Dialog open={!!scoutingRecruit} onOpenChange={(o) => { if (!o) setScoutingRecruit(null); }}>
+      {/* Scouting reports — multiple, authored + dated, independent */}
+      <Dialog open={!!reportsRecruit} onOpenChange={(o) => { if (!o) setReportsRecruit(null); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle style={OSWALD}>{`${scoutingRecruit?.first_name ?? ""} ${scoutingRecruit?.last_name ?? ""}`.trim() || "Recruit"} — Scouting Report</DialogTitle>
+            <DialogTitle style={OSWALD}>{`${reportsRecruit?.first_name ?? ""} ${reportsRecruit?.last_name ?? ""}`.trim() || "Recruit"} — Scouting Reports</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 py-1">
-            <div>
-              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Report Date</span>
-              <Input type="date" value={scoutingDate} onChange={(e) => setScoutingDate(e.target.value)} className="h-9 w-auto text-sm" />
-            </div>
-            <div>
-              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Report</span>
-              <Textarea value={scoutingText} onChange={(e) => setScoutingText(e.target.value)} placeholder="Tools, projection, makeup…" className="min-h-[160px] text-sm" />
-            </div>
+          {/* New report */}
+          <div className="space-y-2 rounded-md border border-border/60 p-2.5">
+            <Input type="date" value={reportDate} onChange={(e) => setReportDate(e.target.value)} className="h-8 w-auto text-xs" />
+            <Textarea value={reportBody} onChange={(e) => setReportBody(e.target.value)} placeholder="Tools, projection, makeup…" className="min-h-[70px] text-sm" />
+            <Button size="sm" className="w-full" disabled={!reportBody.trim()} onClick={() => { if (reportsRecruit) { gm.addReport(reportsRecruit.id, reportDate, reportBody.trim()); setReportBody(""); } }}>Add Report</Button>
           </div>
-          <DialogFooter>
-            <Button size="sm" onClick={saveScouting}>Save</Button>
-          </DialogFooter>
+          {/* Report list — each independent */}
+          <div className="max-h-[45vh] space-y-2.5 overflow-y-auto">
+            {(gm.reportsByRecruit.get(reportsRecruit?.id ?? "") ?? []).map((r) => (
+              <div key={r.id} className="rounded-md border border-border/60 bg-muted/20 p-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] text-muted-foreground">{r.author ? `${r.author.split("@")[0]} · ` : ""}{fmtDate(r.report_date)}</div>
+                  <button onClick={() => gm.removeReport(r.id)} className="text-muted-foreground/40 hover:text-destructive" title="Delete"><X className="h-3.5 w-3.5" /></button>
+                </div>
+                <div className="mt-1 whitespace-pre-wrap text-sm text-foreground/90">{r.body}</div>
+              </div>
+            ))}
+            {(gm.reportsByRecruit.get(reportsRecruit?.id ?? "") ?? []).length === 0 && (
+              <p className="py-3 text-center text-xs text-muted-foreground">No reports yet.</p>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
