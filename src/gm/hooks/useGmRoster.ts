@@ -258,7 +258,7 @@ export function useGmRoster() {
       );
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: key }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); toast.success("Budget saved"); },
     onError: (e: any) => toast.error(`Budget save failed: ${e.message}`),
   });
 

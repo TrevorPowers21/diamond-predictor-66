@@ -78,7 +78,8 @@ function DollarInput({ value, onChange }: { value: number | null; onChange: (n: 
 /** Budget-setup popup: the GM edits the four allotments here (nowhere else),
  *  then Finalize sums them and pushes the total into the coach's Team Builder.
  *  The roster boxes stay read-only whole numbers. */
-function BudgetDialog({ budget, onFinalize, pending }: { budget: GmBudget | null; onFinalize: (caps: { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null }) => void; pending: boolean }) {
+type BudgetCaps = { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null };
+function BudgetDialog({ budget, onSave, onFinalize, pending }: { budget: GmBudget | null; onSave: (caps: BudgetCaps) => void; onFinalize: (caps: BudgetCaps) => void; pending: boolean }) {
   const [open, setOpen] = useState(false);
   const [rev, setRev] = useState<number | null>(null);
   const [nil, setNil] = useState<number | null>(null);
@@ -93,6 +94,7 @@ function BudgetDialog({ budget, onFinalize, pending }: { budget: GmBudget | null
     }
   }, [open, budget]);
   const total = (rev ?? 0) + (nil ?? 0) + (sch ?? 0) + (other ?? 0);
+  const caps = (): BudgetCaps => ({ rev_share_total: rev, nil_total: nil, scholarship_total: sch, other_total: other });
   const field = (label: string, val: number | null, set: (n: number | null) => void) => (
     <label className="flex items-center justify-between gap-4">
       <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground" style={OSWALD}>{label}</span>
@@ -118,15 +120,12 @@ function BudgetDialog({ budget, onFinalize, pending }: { budget: GmBudget | null
             <span className="text-base font-bold font-mono tabular-nums">{money(total)}</span>
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="gap-2 sm:gap-2">
           <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button
-            size="sm"
-            disabled={pending}
-            onClick={() => { onFinalize({ rev_share_total: rev, nil_total: nil, scholarship_total: sch, other_total: other }); setOpen(false); }}
-          >
-            Finalize &amp; Push to Team Builder
-          </Button>
+          {/* Save = GM-only draft (does NOT touch the coach's build). */}
+          <Button variant="outline" size="sm" disabled={pending} onClick={() => { onSave(caps()); setOpen(false); }}>Save</Button>
+          {/* Finalize = save + push the total into the coach's Team Builder. */}
+          <Button size="sm" disabled={pending} onClick={() => { onFinalize(caps()); setOpen(false); }}>Finalize &amp; Push</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -286,7 +285,12 @@ export default function GMRoster() {
               <Check className="h-3.5 w-3.5" /> Finalized
             </span>
           )}
-          <BudgetDialog budget={b} onFinalize={(caps) => gm.commitBudget(caps)} pending={gm.isFinalizing} />
+          <BudgetDialog
+            budget={b}
+            onSave={(caps) => gm.saveBudget({ ...caps, finalized: false })}
+            onFinalize={(caps) => gm.commitBudget(caps)}
+            pending={gm.isFinalizing}
+          />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {box("Scholarship", gm.totals.schUsed, b?.scholarship_total ?? null)}
