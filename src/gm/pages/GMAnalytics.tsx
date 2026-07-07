@@ -7,7 +7,7 @@ import { useWarBenchmarks, useTeamWarSnapshot, useNationalSeedBenchmark, type Te
 import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DollarSign, Gauge, Percent, Scale, ChevronRight } from "lucide-react";
+import { DollarSign, Gauge, Percent, Users, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
@@ -55,9 +55,9 @@ export default function GMAnalytics() {
   // Top-5 pay concentration: share of committed pay in the 5 highest-paid.
   const top5Pay = [...roster].sort((a, b) => (b.nil_value ?? 0) - (a.nil_value ?? 0)).slice(0, 5).reduce((s, r) => s + (r.nil_value ?? 0), 0);
   const concentration = totalPay > 0 ? Math.round((top5Pay / totalPay) * 100) : null;
-  // Surplus vs market value: are we paying above/below the roster's market worth.
-  const totalValue = roster.reduce((s, r) => s + (r.market_value ?? 0), 0);
-  const surplus = totalValue - totalPay;
+  // Average committed pay per roster spot.
+  const paidCount = roster.filter((r) => (r.nil_value ?? 0) > 0).length;
+  const avgPay = paidCount > 0 ? totalPay / paidCount : null;
 
   // Build WAR split for the benchmark comparison (top-9 lineup / SP / RP).
   const rotationPwar = gm.pitchers.filter((p) => (p.position || "").toUpperCase() === "SP").reduce((s, r) => s + (r.war ?? 0), 0);
@@ -133,7 +133,7 @@ export default function GMAnalytics() {
         <Tile label="Committed Pay" value={money(totalPay)} icon={<DollarSign className="h-3.5 w-3.5" />} accent="blue" />
         <Tile label="$ / Projected Win" value={money0(payPerWin)} sub="pay per WAR" icon={<Gauge className="h-3.5 w-3.5" />} accent="gold" />
         <Tile label="Top-5 Pay Share" value={concentration == null ? "—" : `${concentration}%`} sub="of committed pay" icon={<Percent className="h-3.5 w-3.5" />} />
-        <Tile label="Surplus vs Value" value={money(surplus)} sub="market value − pay" icon={<Scale className="h-3.5 w-3.5" />} accent={surplus < 0 ? "red" : "emerald"} />
+        <Tile label="Avg $ / Player" value={money0(avgPay)} sub="paid players" icon={<Users className="h-3.5 w-3.5" />} />
       </div>
 
       {/* WAR Comparison — same design as Team Builder: hero + benchmark table
