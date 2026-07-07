@@ -228,17 +228,15 @@ export default function GMRoster() {
   const totalAllot = (b?.rev_share_total ?? 0) + (b?.nil_total ?? 0) + (b?.other_total ?? 0) + (b?.scholarship_total ?? 0);
 
   // One budget box — read-only. Shows used / allotment as whole dollars; caps
-  // are edited only in the Manage Budget popup. Over-cap turns the total red.
-  const box = (label: string, used: number, total: number | null) => (
-    <Card className="px-4 py-3">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground" style={OSWALD}>{label}</div>
-      <div className="mt-1 flex items-baseline gap-1.5">
-        <span className="text-sm font-bold font-mono tabular-nums text-foreground">{money(used)}</span>
+  // are edited only in the Manage Budget popup. Over-cap turns the used red.
+  // `accent` gives the Total box a standing gold highlight.
+  const box = (label: string, used: number, total: number | null, accent?: boolean) => (
+    <Card className={cn("px-4 py-3", accent && "border-[#D4AF37]/55 bg-[#D4AF37]/[0.07]")}>
+      <div className={cn("text-[11px] font-bold uppercase tracking-[0.14em]", accent ? "text-[#D4AF37]" : "text-muted-foreground")} style={OSWALD}>{label}</div>
+      <div className="mt-1.5 flex items-baseline gap-1.5">
+        <span className={cn("font-mono font-bold tabular-nums leading-none", accent ? "text-3xl text-[#D4AF37]" : "text-2xl text-foreground", total != null && used > total && "text-red-500")}>{money(used)}</span>
         {total != null && (
-          <>
-            <span className="text-xs text-muted-foreground">/</span>
-            <span className={cn("text-xs font-mono tabular-nums", used > total ? "text-red-500 font-semibold" : "text-muted-foreground")}>{money(total)}</span>
-          </>
+          <span className={cn("text-xs font-mono tabular-nums", used > total ? "text-red-500 font-semibold" : "text-muted-foreground")}>/ {money(total)}</span>
         )}
       </div>
     </Card>
@@ -277,7 +275,7 @@ export default function GMRoster() {
 
       {/* Budget — each bucket in its own box: Scholarship · NIL · Other on top,
           Revenue Share · Total on the second row. */}
-      <div className="space-y-3">
+      <div className="space-y-3 max-w-3xl">
         <div className="flex items-center justify-end gap-2">
           {b?.finalized && (
             <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-500" style={OSWALD}>
@@ -291,14 +289,14 @@ export default function GMRoster() {
             pending={gm.isFinalizing}
           />
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           {box("Scholarship", gm.totals.schUsed, b?.scholarship_total ?? null)}
           {box("NIL", gm.totals.nilUsed, b?.nil_total ?? null)}
           {box("Other", gm.totals.otherUsed, b?.other_total ?? null)}
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           {box("Revenue Share", gm.totals.revUsed, b?.rev_share_total ?? null)}
-          {box("Total", gm.totals.actualUsed, totalAllot || null)}
+          {box("Total", gm.totals.actualUsed, totalAllot || null, true)}
         </div>
       </div>
 
