@@ -16,6 +16,8 @@ import { Plus, GripVertical, ExternalLink, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
+const today = () => new Date().toISOString().slice(0, 10);
+const fmtDate = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 const POSITIONS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH", "TWP", "RHP", "LHP"] as const;
 const YEARS = [PROJECTION_SEASON, PROJECTION_SEASON + 1, PROJECTION_SEASON + 2, PROJECTION_SEASON + 3];
 const SECTIONS: { type: RecruitType; title: string }[] = [
@@ -50,7 +52,7 @@ function StageSelect({ value, onChange }: { value: RecruitStage; onChange: (s: R
   );
 }
 
-function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onTimeline }: { recruit: GmRecruit; onRemove: () => void; onStageChange: (s: RecruitStage) => void; eventCount: number; onTimeline: () => void }) {
+function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onTimeline, onScouting }: { recruit: GmRecruit; onRemove: () => void; onStageChange: (s: RecruitStage) => void; eventCount: number; onTimeline: () => void; onScouting: () => void }) {
   const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({ id: recruit.id });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.55 : 1, zIndex: isDragging ? 10 : "auto", position: "relative" };
   const name = `${recruit.first_name ?? ""} ${recruit.last_name ?? ""}`.trim() || "Unnamed";
@@ -68,7 +70,14 @@ function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onT
         {(locale || recruit.travel_org) && (
           <div className="mt-0.5 truncate text-xs text-muted-foreground">{locale}{locale && recruit.travel_org ? " · " : ""}{recruit.travel_org}</div>
         )}
-        {recruit.notes && <div className="mt-1 text-xs text-foreground/70 line-clamp-2">{recruit.notes}</div>}
+        {recruit.notes ? (
+          <button onClick={onScouting} className="mt-1 block w-full text-left" title="Edit scouting report">
+            <div className="text-xs text-foreground/70 line-clamp-2 hover:text-foreground">{recruit.notes}</div>
+            {recruit.scouting_report_date && <div className="mt-0.5 text-[10px] text-muted-foreground/70">Report · {fmtDate(recruit.scouting_report_date)}</div>}
+          </button>
+        ) : (
+          <button onClick={onScouting} className="mt-1 text-[11px] text-muted-foreground hover:text-foreground">+ Scouting report</button>
+        )}
         <div className="mt-1.5 flex items-center gap-2">
           <StageSelect value={recruit.stage} onChange={onStageChange} />
           {recruit.link && (
@@ -92,8 +101,16 @@ export default function GMRecruits() {
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState({ first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage });
   const [timelineRecruit, setTimelineRecruit] = useState<GmRecruit | null>(null);
-  const [eventDate, setEventDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [eventDate, setEventDate] = useState<string>(today);
   const [eventNote, setEventNote] = useState("");
+  const [scoutingRecruit, setScoutingRecruit] = useState<GmRecruit | null>(null);
+  const [scoutingText, setScoutingText] = useState("");
+  const [scoutingDate, setScoutingDate] = useState<string>(today);
+  const openScouting = (r: GmRecruit) => { setScoutingText(r.notes ?? ""); setScoutingDate(r.scouting_report_date ?? today()); setScoutingRecruit(r); };
+  const saveScouting = () => {
+    if (scoutingRecruit) gm.updateRecruit(scoutingRecruit.id, { notes: scoutingText.trim() || null, scouting_report_date: scoutingText.trim() ? scoutingDate : null });
+    setScoutingRecruit(null);
+  };
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const listFor = (t: RecruitType) => gm.recruits.filter((r) => r.class_year === year && r.player_type === t).sort((a, b) => a.sort_order - b.sort_order);
@@ -120,6 +137,7 @@ export default function GMRecruits() {
       travel_org: form.travel_org.trim() || null,
       position: form.position || null,
       notes: form.notes.trim() || null,
+      scouting_report_date: form.notes.trim() ? today() : null,
       link: form.link.trim() || null,
     });
     setAddOpen(false);
@@ -168,7 +186,7 @@ export default function GMRecruits() {
                   <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd(list)}>
                     <SortableContext items={list.map((r) => r.id)} strategy={verticalListSortingStrategy}>
                       <div className="space-y-2">
-                        {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(new Date().toISOString().slice(0, 10)); setTimelineRecruit(r); }} />)}
+                        {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} onScouting={() => openScouting(r)} />)}
                       </div>
                     </SortableContext>
                   </DndContext>
@@ -254,7 +272,7 @@ export default function GMRecruits() {
           </DialogHeader>
           {timelineRecruit?.notes && (
             <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scouting Report</div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scouting Report{timelineRecruit.scouting_report_date ? ` · ${fmtDate(timelineRecruit.scouting_report_date)}` : ""}</div>
               <div className="mt-1 text-sm text-foreground/90">{timelineRecruit.notes}</div>
             </div>
           )}
@@ -277,6 +295,28 @@ export default function GMRecruits() {
               <p className="py-3 text-center text-xs text-muted-foreground">No events logged yet.</p>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Scouting report — editable, with a written-on date */}
+      <Dialog open={!!scoutingRecruit} onOpenChange={(o) => { if (!o) setScoutingRecruit(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle style={OSWALD}>{`${scoutingRecruit?.first_name ?? ""} ${scoutingRecruit?.last_name ?? ""}`.trim() || "Recruit"} — Scouting Report</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Report Date</span>
+              <Input type="date" value={scoutingDate} onChange={(e) => setScoutingDate(e.target.value)} className="h-9 w-auto text-sm" />
+            </div>
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Report</span>
+              <Textarea value={scoutingText} onChange={(e) => setScoutingText(e.target.value)} placeholder="Tools, projection, makeup…" className="min-h-[160px] text-sm" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button size="sm" onClick={saveScouting}>Save</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

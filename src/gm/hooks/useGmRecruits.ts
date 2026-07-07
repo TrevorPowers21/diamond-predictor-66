@@ -30,7 +30,8 @@ export interface GmRecruit {
   state: string | null;
   travel_org: string | null;
   position: string | null;
-  notes: string | null;
+  notes: string | null; // scouting report
+  scouting_report_date: string | null; // YYYY-MM-DD
   link: string | null;
   stage: RecruitStage;
   sort_order: number;
