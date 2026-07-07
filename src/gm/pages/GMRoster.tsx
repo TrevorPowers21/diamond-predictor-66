@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { useGmRoster, type GmBudget, type GmOtherLine, type GmRow, type RowMoney } from "@/gm/hooks/useGmRoster";
+import { useGmRoster, DEPARTURE_REASONS, type GmBudget, type GmOtherLine, type GmRow, type RowMoney } from "@/gm/hooks/useGmRoster";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,21 @@ import { cn } from "@/lib/utils";
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
 const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
 const num = (n: number | null | undefined, d = 1) => (n == null ? "—" : n.toFixed(d));
+const REASON_LABEL: Record<string, string> = { draft: "Draft Pick", graduation: "Graduation", transfer: "Transfer", other: "Other" };
+
+/** Departure-reason dropdown (GM-only). */
+function ReasonSelect({ value, onChange }: { value: string | null; onChange: (r: string) => void }) {
+  return (
+    <Select value={value ?? undefined} onValueChange={onChange}>
+      <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue placeholder="Set reason" /></SelectTrigger>
+      <SelectContent>
+        {DEPARTURE_REASONS.map((r) => (
+          <SelectItem key={r} value={r} className="text-xs">{REASON_LABEL[r]}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
 
 /** Currency input: type 8000 → $8,000, no negatives, saves on blur. */
 function MoneyCell({ value, onSave }: { value: number | null; onSave: (n: number | null) => void }) {
@@ -217,6 +232,16 @@ export default function GMRoster() {
   const [buildDialog, setBuildDialog] = useState<null | "new" | "rename">(null);
   const [buildName, setBuildName] = useState("");
   const [buildSource, setBuildSource] = useState<"default" | "current">("current");
+  // Departures: batch reason modal (auto-opens once when reasons are pending) + list.
+  const [reasonModalOpen, setReasonModalOpen] = useState(false);
+  const [departuresOpen, setDeparturesOpen] = useState(false);
+  const reasonPrompted = useRef(false);
+  useEffect(() => {
+    if (gm.pendingReasonCount > 0 && !reasonPrompted.current) {
+      reasonPrompted.current = true;
+      setReasonModalOpen(true);
+    }
+  }, [gm.pendingReasonCount]);
 
   const effMoney = (r: GmRow): RowMoney => {
     const d = rowDrafts[r.build_player_id] ?? {};
@@ -432,6 +457,13 @@ export default function GMRoster() {
           <Button variant="outline" size="icon" className="h-8 w-8" title="Rename current build" disabled={gm.activeBuildIsDefault} onClick={() => { setBuildName(gm.builds.find((b) => b.id === gm.selectedBuildId)?.name ?? ""); setBuildDialog("rename"); }}>
             <Pencil className="h-3.5 w-3.5" />
           </Button>
+          {/* Temporary trigger — folds into GM Settings in the next step. */}
+          <Button variant="outline" size="sm" className="relative h-8 gap-1.5 text-xs" onClick={() => setDeparturesOpen(true)}>
+            Departures
+            {gm.pendingReasonCount > 0 && (
+              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">{gm.pendingReasonCount}</span>
+            )}
+          </Button>
           <BudgetDialog
             budget={popupBudget}
             coachTotal={coachTotalBudget}
@@ -539,6 +571,49 @@ export default function GMRoster() {
               }}
             >{buildDialog === "rename" ? "Save" : "Create"}</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reason batch modal — auto-opens when departures are missing a reason. */}
+      <Dialog open={reasonModalOpen} onOpenChange={setReasonModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle style={OSWALD}>Roster decisions need a reason</DialogTitle></DialogHeader>
+          <div className="max-h-[50vh] space-y-2 overflow-y-auto py-1">
+            {gm.departures.filter((d) => !d.departure_reason).map((d) => (
+              <div key={d.build_player_id} className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{d.name}</div>
+                  <div className="text-xs text-muted-foreground">{d.position || "—"}</div>
+                </div>
+                <ReasonSelect value={null} onChange={(r) => gm.setDepartureReason(d.build_player_id, d.player_id, r)} />
+              </div>
+            ))}
+            {gm.pendingReasonCount === 0 && <p className="py-4 text-center text-sm text-muted-foreground">All departures have a reason.</p>}
+          </div>
+          <DialogFooter><Button size="sm" onClick={() => setReasonModalOpen(false)}>Done</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Departures list — set/change reason, restore to roster. */}
+      <Dialog open={departuresOpen} onOpenChange={setDeparturesOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle style={OSWALD}>Departures</DialogTitle></DialogHeader>
+          <div className="max-h-[55vh] space-y-2 overflow-y-auto py-1">
+            {gm.departures.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">No departures on this build.</p>
+            ) : (
+              gm.departures.map((d) => (
+                <div key={d.build_player_id} className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{d.name}</div>
+                    <div className="text-xs text-muted-foreground">{d.position || "—"}</div>
+                  </div>
+                  <ReasonSelect value={d.departure_reason} onChange={(r) => gm.setDepartureReason(d.build_player_id, d.player_id, r)} />
+                  <Button variant="ghost" size="sm" className="text-xs" onClick={() => gm.restorePlayer(d.build_player_id)}>Restore</Button>
+                </div>
+              ))
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

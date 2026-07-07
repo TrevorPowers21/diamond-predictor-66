@@ -42,6 +42,17 @@ export interface GmOtherLine {
   amount: number;
 }
 
+/** A player removed from a build (departure), with its (maybe-null) reason. */
+export interface GmDeparture {
+  build_player_id: string;
+  player_id: string | null;
+  name: string;
+  position: string | null;
+  departure_reason: string | null;
+}
+
+export const DEPARTURE_REASONS = ["draft", "graduation", "transfer", "other"] as const;
+
 /** The editable money buckets for one roster row. */
 export interface RowMoney {
   scholarship_amount: number | null;
@@ -233,6 +244,44 @@ export function useGmRoster() {
   const budget = data?.budget ?? null;
   const coachTotalBudget = data?.coachTotalBudget ?? null;
 
+  // Departures: rows removed from THIS build (included_in_roster=false), joined to
+  // gm_player_finance for the reason. Reason may be null (pending → batch modal).
+  const departuresKey = ["gm-departures", effectiveTeamId ?? null, activeBuildId, season];
+  const { data: departures = [] } = useQuery({
+    queryKey: departuresKey,
+    enabled: !!user?.id && !!effectiveTeamId && !!activeBuildId,
+    queryFn: async (): Promise<GmDeparture[]> => {
+      const { data: bps } = await (supabase as any)
+        .from("team_build_players").select("id, player_id, custom_name, position_slot")
+        .eq("build_id", activeBuildId).eq("included_in_roster", false);
+      const rowsRaw = bps || [];
+      if (!rowsRaw.length) return [];
+      const bpIds = rowsRaw.map((r: any) => r.id);
+      const finByBp = new Map<string, any>();
+      for (let i = 0; i < bpIds.length; i += 200) {
+        const { data: fin } = await (supabase as any).from("gm_player_finance").select("build_player_id, departure_reason").in("build_player_id", bpIds.slice(i, i + 200));
+        for (const f of fin || []) finByBp.set(f.build_player_id, f);
+      }
+      const pIds = rowsRaw.map((r: any) => r.player_id).filter(Boolean);
+      const pById = new Map<string, any>();
+      for (let i = 0; i < pIds.length; i += 200) {
+        const { data: pl } = await (supabase as any).from("players").select("id, first_name, last_name, position").in("id", pIds.slice(i, i + 200));
+        for (const p of pl || []) pById.set(p.id, p);
+      }
+      return rowsRaw.map((r: any) => {
+        const p = r.player_id ? pById.get(r.player_id) : null;
+        return {
+          build_player_id: r.id,
+          player_id: r.player_id ?? null,
+          name: p ? `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() : (r.custom_name || "—"),
+          position: p?.position ?? r.position_slot ?? null,
+          departure_reason: (finByBp.get(r.id)?.departure_reason as string | null) ?? null,
+        };
+      });
+    },
+  });
+  const pendingReasonCount = departures.filter((d) => !d.departure_reason).length;
+
   const hitters = useMemo(() => rows.filter((r) => !r.is_pitcher).sort((a, b) => (b.war ?? -Infinity) - (a.war ?? -Infinity)), [rows]);
   const pitchers = useMemo(() => rows.filter((r) => r.is_pitcher).sort((a, b) => (b.war ?? -Infinity) - (a.war ?? -Infinity)), [rows]);
 
@@ -414,6 +463,35 @@ export function useGmRoster() {
     onError: (e: any) => toast.error(`Remove failed: ${e.message}`),
   });
 
+  // Set a departure reason (GM-only). Upserts on the build row's finance line.
+  const setDepartureReason = useMutation({
+    mutationFn: async ({ buildPlayerId, playerId, reason }: { buildPlayerId: string; playerId: string | null; reason: string }) => {
+      if (!effectiveTeamId) throw new Error("No team in scope");
+      const { error } = await (supabase as any).from("gm_player_finance").upsert(
+        { build_player_id: buildPlayerId, customer_team_id: effectiveTeamId, player_id: playerId, season, roster_status: "leaving", departure_reason: reason, updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() },
+        { onConflict: "build_player_id" },
+      );
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: departuresKey }),
+    onError: (e: any) => toast.error(`Save reason failed: ${e.message}`),
+  });
+
+  // Restore a departed player back onto the build.
+  const restorePlayer = useMutation({
+    mutationFn: async (buildPlayerId: string) => {
+      const { data: tbp } = await (supabase as any).from("team_build_players").select("production_notes").eq("id", buildPlayerId).maybeSingle();
+      let obj: any = {}; try { obj = JSON.parse(tbp?.production_notes || "{}"); } catch { /* keep {} */ }
+      obj.__team_builder_metrics_v1 = true; obj.rosterStatus = "returner";
+      const { error: e1 } = await (supabase as any).from("team_build_players").update({ included_in_roster: true, production_notes: JSON.stringify(obj) }).eq("id", buildPlayerId);
+      if (e1) throw e1;
+      const { error: e2 } = await (supabase as any).from("gm_player_finance").update({ roster_status: null, departure_reason: null }).eq("build_player_id", buildPlayerId);
+      if (e2) throw e2;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: departuresKey }); qc.invalidateQueries({ queryKey: key }); toast.success("Player restored to roster"); },
+    onError: (e: any) => toast.error(`Restore failed: ${e.message}`),
+  });
+
   return {
     teamName,
     season,
@@ -433,6 +511,10 @@ export function useGmRoster() {
     createBuild: (name: string, sourceBuildId: string) => createBuild.mutate({ name, sourceBuildId }),
     renameBuild: (buildId: string, name: string) => renameBuild.mutate({ buildId, name }),
     removePlayer: (row: GmRow, buildName: string) => removePlayer.mutate({ row, buildName }),
+    departures,
+    pendingReasonCount,
+    setDepartureReason: (buildPlayerId: string, playerId: string | null, reason: string) => setDepartureReason.mutate({ buildPlayerId, playerId, reason }),
+    restorePlayer: (buildPlayerId: string) => restorePlayer.mutate(buildPlayerId),
     saveBudget: (patch: Partial<GmBudget>) => saveBudget.mutate(patch),
     finalizeBudget: (finalized: boolean) => saveBudget.mutate({ finalized }),
     commitBudget: (caps: { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown?: GmOtherLine[] | null }) => commitBudget.mutate(caps),
