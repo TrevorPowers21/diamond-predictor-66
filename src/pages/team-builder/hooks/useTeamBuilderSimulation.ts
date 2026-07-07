@@ -1376,10 +1376,18 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
           p_rv_plus: rtPRvPlus, p_wrc_plus: rtPRvPlus,
         };
       })() : devSource;
-      // Depth / SP↔RP overlay (existing behavior — moves pWAR/MV via IP + PVF
-      // ratios). devAggScale also folds in below to keep one consistent ratio.
-      const storedPWar = source?.p_war != null ? Number(source.p_war) : null;
-      const storedProjectedIp = Number(source?.projected_ip);
+      // pWAR is recomputed FROM the (role- + dev-agg-adjusted) pRV+ at the depth
+      // role's innings — the same f(pRV+, IP) the engine uses. Fixes two defects
+      // in the old storedWAR × ipScale × pvfRatio × devAggScale overlay:
+      //   1. PVF removed from WAR — it's a MARKET factor, never a performance one;
+      //      folding it in let a converted reliever outrank a real starter
+      //      (the RP→SP inversion).
+      //   2. Innings come from the depth-role toggle and WAR is derived from the
+      //      RATE — robust to snapshots that lack projected_ip OR whose stored WAR
+      //      was frozen at a non-natural IP (recomputing from pRV+ corrects both,
+      //      and makes the two render paths converge → no load-time flash).
+      // dev_agg is already in source.p_rv_plus (devSource applies it to the rate),
+      // so WAR inherits it — no separate multiply, which also makes dev_agg exact.
       const sourceIdForPm = (p.player as any)?.source_player_id ?? null;
       const pmRoleForRow = sourceIdForPm ? pitchingStatsByNameTeam.bySourceId.get(sourceIdForPm)?.role : null;
       const currentRoleForRow = effectivePitcherRoleForBuild(p, pmRoleForRow);
@@ -1397,19 +1405,11 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
           default:                      return pitchingEq.pwar_ip_rp;
         }
       })();
-      const ipScaleForRow = Number.isFinite(storedProjectedIp) && storedProjectedIp > 0
-        ? sessionIpForRow / storedProjectedIp
-        : 1;
-      const storedRoleBucketForRow: "SP" | "RP" =
-        (source?.pitcher_role === "SP") ? "SP" : "RP";
-      const sessionRoleBucketForRow: "SP" | "RP" =
-        (sessionDepthRole === "weekend_starter" || sessionDepthRole === "weekday_starter" || sessionDepthRole === "swing_starter") ? "SP" : "RP";
-      const pvfStoredForRow = pitchingPvfForRole(storedRoleBucketForRow);
-      const pvfNewForRow = pitchingPvfForRole(sessionRoleBucketForRow);
-      const pvfRatioForRow = pvfStoredForRow > 0 ? pvfNewForRow / pvfStoredForRow : 1;
-      // devAggScalePitch folds in so dev_agg knob moves pWAR too (mirrors
-      // hitter's depthScale × devAggScale composition).
-      const pwar = storedPWar != null ? storedPWar * ipScaleForRow * pvfRatioForRow * devAggScalePitch : null;
+      const adjRvForWar = source?.p_rv_plus != null ? Number(source.p_rv_plus) : null;
+      const pwar = adjRvForWar != null && Number.isFinite(adjRvForWar)
+        ? ((((adjRvForWar - 100) / 100) * (sessionIpForRow / 9) * pitchingEq.pwar_r_per_9)
+           + ((sessionIpForRow / 9) * pitchingEq.pwar_replacement_runs_per_9)) / pitchingEq.pwar_runs_per_win
+        : null;
       return { sim, shown: source, shownWrc: source?.p_rv_plus ?? source?.p_wrc_plus ?? null, owar: pwar ?? 0, pwar };
     }
     const shownWrc = (() => {
@@ -1516,53 +1516,26 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     if (renderAsPitcher) {
       const projection = playerProjection(p, "pitcher");
       const source: any = projection.shown ?? null;
-      // Stored-only: TWP-aware market_value from the prediction row, or the
-      // snapshot's nil_valuation (target board adds bake stored MV here at
-      // add-time). No live compute, no PTM/PVF re-multiplication — the
-      // precompute pipeline already applied all that.
+      // Market = pWAR × $/WAR × conference tier, recomputed straight from the
+      // row's pWAR — the same equation the engine (pitcherProjection) uses.
+      // PVF is intentionally NOT applied: it's being removed from the pitching
+      // market model (a Friday-starter premium that double-counts innings already
+      // captured in WAR). The engine drops it too, so once 2027 projections rerun
+      // the stored values converge with what's shown here. Stored-MV presence
+      // gates eligibility (independents etc. get no market); a TWP's pitcher side
+      // flows through its own pWAR via the same equation.
       const isTwpPlayer = !!(p.player as any)?.is_twp;
       const storedMv = pickPitcherMarketValue(source, isTwpPlayer);
-      // Apply the same IP-ratio + PVF-ratio overlay the pwar calc uses so the
-      // depth-role knob shifts market value alongside pWAR. Ratios default to 1
-      // when nothing has moved → MV equals stored.
-      const storedProjectedIp = Number(source?.projected_ip);
-      const srcId = (p.player as any)?.source_player_id ?? null;
-      const pmRole = srcId ? pitchingStatsByNameTeam.bySourceId.get(srcId)?.role : null;
-      const currentRole = effectivePitcherRoleForBuild(p, pmRole);
-      const sessionDepth = normalizePitcherDepthRole(p.depth_role, currentRole);
-      const sessionIp = (() => {
-        switch (sessionDepth) {
-          case "weekend_starter":       return pitchingEq.pwar_ip_sp;
-          case "weekday_starter":       return pitchingEq.pwar_ip_sm;
-          case "swing_starter":         return 30;
-          case "workhorse_reliever":    return 50;
-          case "high_leverage_reliever":return 33;
-          case "mid_leverage_reliever": return 20;
-          case "low_impact_reliever":   return 12;
-          case "specialist_reliever":   return 6;
-          default:                      return pitchingEq.pwar_ip_rp;
-        }
-      })();
-      const ipScaleMv = Number.isFinite(storedProjectedIp) && storedProjectedIp > 0 ? sessionIp / storedProjectedIp : 1;
-      const storedBucket: "SP" | "RP" = source?.pitcher_role === "SP" ? "SP" : "RP";
-      const sessionBucket: "SP" | "RP" =
-        (sessionDepth === "weekend_starter" || sessionDepth === "weekday_starter" || sessionDepth === "swing_starter") ? "SP" : "RP";
-      const pvfStored = pitchingPvfForRole(storedBucket);
-      const pvfNew = pitchingPvfForRole(sessionBucket);
-      const pvfRatioMv = pvfStored > 0 ? pvfNew / pvfStored : 1;
-      // devAggScale ratio folds in so the dev_agg knob moves MV. Same formula
-      // and class-adj table as the rate-stat overlay above.
-      const storedDevAggMv = Number.isFinite(Number(source?.dev_aggressiveness)) ? Number(source?.dev_aggressiveness) : 0;
-      const sessionDevAggMv = Number.isFinite(Number(p.dev_aggressiveness)) ? Number(p.dev_aggressiveness) : 0;
-      const ctRawMv = String(p.class_transition || source?.class_transition || "SJ").toUpperCase();
-      const devAggClassAdjMv = ctRawMv === "FS" ? 0.03 : ctRawMv === "JS" ? 0.015 : ctRawMv === "GR" ? 0.01 : 0.02;
-      const storedMultMv = 1 + devAggClassAdjMv + storedDevAggMv * 0.06;
-      const sessionMultMv = 1 + devAggClassAdjMv + sessionDevAggMv * 0.06;
-      const devAggScaleMv = storedMultMv > 0 ? sessionMultMv / storedMultMv : 1;
-      const overlayScale = ipScaleMv * pvfRatioMv * devAggScaleMv;
-      if (storedMv != null && Number.isFinite(storedMv)) return Math.max(0, storedMv * overlayScale);
+      const eligibleForMv = storedMv != null && Number.isFinite(storedMv);
+      const pwarForMv = projection?.pwar;
+      if (eligibleForMv && pwarForMv != null && Number.isFinite(Number(pwarForMv))) {
+        const confForMv = (p.player as any)?.conference ?? (source as any)?.conference ?? null;
+        const tierForMv = getProgramTierMultiplierByConference(confForMv, pitchingTierMultipliers);
+        return Math.max(0, Number(pwarForMv) * pitchingEq.market_dollars_per_war * tierForMv);
+      }
+      if (eligibleForMv) return Math.max(0, Number(storedMv));
       const direct = Number(source?.nil_valuation);
-      if (Number.isFinite(direct)) return Math.max(0, direct * overlayScale);
+      if (Number.isFinite(direct)) return Math.max(0, direct);
       return 0;
     }
     return projectedPlayerScore(p) * nilBasePerOWar;

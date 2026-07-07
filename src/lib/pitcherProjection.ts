@@ -351,10 +351,6 @@ const computePitchingPrPlusFromScores = (
   return { eraPrPlus, fipPrPlus, whipPrPlus, k9PrPlus, hr9PrPlus, bb9PrPlus };
 };
 
-const getPitchingPvfForRole = (
-  role: "SP" | "RP" | "SM",
-  eq: ReturnType<typeof readPitchingWeights>,
-) => (role === "RP" ? eq.market_pvf_reliever : role === "SM" ? eq.market_pvf_weekday_sp : eq.market_pvf_weekend_sp);
 
 const canShowPitchingMarketValue = (team: string | null | undefined, conference: string | null | undefined) => {
   const conf = String(conference || "").trim().toLowerCase();
@@ -492,11 +488,14 @@ export function computePitcherProjection(
   };
   const conferenceForMarket = teamMatch?.name ? (input.conference ?? null) : input.conference;
   const ptm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
-  const pvm = getPitchingPvfForRole(projectedRole, eq);
   const marketEligible = canShowPitchingMarketValue(input.team, conferenceForMarket);
   // Market value floors at $0 — negative WAR shouldn't produce a negative
   // dollar projection. Null stays null (unknown vs zero are different signals).
-  const marketValueRaw = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
+  // PVF (the weekend-starter premium) is intentionally removed from the pitching
+  // market model: it double-counts innings already captured in WAR. Reruns
+  // regenerate stored market values without it, and the Team Builder read path
+  // computes market the same way (pWAR × $/WAR × tier).
+  const marketValueRaw = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm;
   const marketValue = marketValueRaw == null ? null : Math.max(0, marketValueRaw);
 
   return {
