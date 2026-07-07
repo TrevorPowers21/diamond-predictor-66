@@ -6,6 +6,19 @@ import { toast } from "sonner";
 
 export type RecruitType = "hitter" | "pitcher" | "twp";
 
+/** Recruiting funnel, in order. `tone` drives the stage badge color. */
+export const RECRUIT_STAGES = [
+  { value: "evaluating", label: "Evaluating", tone: "muted" },
+  { value: "contacted", label: "Contacted", tone: "blue" },
+  { value: "offered", label: "Offered", tone: "amber" },
+  { value: "unofficial", label: "Unofficial Visit", tone: "amber" },
+  { value: "official", label: "Official Visit", tone: "gold" },
+  { value: "committed", label: "Committed", tone: "green" },
+  { value: "signed", label: "Signed", tone: "green" },
+  { value: "passed", label: "Passed", tone: "red" },
+] as const;
+export type RecruitStage = (typeof RECRUIT_STAGES)[number]["value"];
+
 export interface GmRecruit {
   id: string;
   class_year: number;
@@ -18,6 +31,7 @@ export interface GmRecruit {
   position: string | null;
   notes: string | null;
   link: string | null;
+  stage: RecruitStage;
   sort_order: number;
 }
 

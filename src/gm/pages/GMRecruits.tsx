@@ -4,7 +4,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useGmRecruits, recruitTypeForPosition, type GmRecruit, type RecruitType } from "@/gm/hooks/useGmRecruits";
+import { useGmRecruits, recruitTypeForPosition, RECRUIT_STAGES, type GmRecruit, type RecruitStage, type RecruitType } from "@/gm/hooks/useGmRecruits";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,33 @@ const SECTIONS: { type: RecruitType; title: string }[] = [
   { type: "twp", title: "Two-Way" },
 ];
 
-function SortableRecruitCard({ recruit, onRemove }: { recruit: GmRecruit; onRemove: () => void }) {
+function toneClass(tone: string): string {
+  switch (tone) {
+    case "blue": return "bg-blue-500/15 text-blue-400";
+    case "amber": return "bg-amber-500/15 text-amber-500";
+    case "gold": return "bg-[#D4AF37]/15 text-[#D4AF37]";
+    case "green": return "bg-emerald-500/15 text-emerald-500";
+    case "red": return "bg-red-500/15 text-red-400";
+    default: return "bg-muted text-muted-foreground";
+  }
+}
+
+/** Stage badge that's also the editor — coaches advance the funnel here. */
+function StageSelect({ value, onChange }: { value: RecruitStage; onChange: (s: RecruitStage) => void }) {
+  const info = RECRUIT_STAGES.find((s) => s.value === value) ?? RECRUIT_STAGES[0];
+  return (
+    <Select value={value} onValueChange={(v) => onChange(v as RecruitStage)}>
+      <SelectTrigger className={cn("h-6 w-auto gap-1 rounded border-0 px-2 text-[10px] font-bold uppercase tracking-wider", toneClass(info.tone))} style={OSWALD}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {RECRUIT_STAGES.map((s) => <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function SortableRecruitCard({ recruit, onRemove, onStageChange }: { recruit: GmRecruit; onRemove: () => void; onStageChange: (s: RecruitStage) => void }) {
   const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({ id: recruit.id });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.55 : 1, zIndex: isDragging ? 10 : "auto", position: "relative" };
   const name = `${recruit.first_name ?? ""} ${recruit.last_name ?? ""}`.trim() || "Unnamed";
@@ -43,11 +69,14 @@ function SortableRecruitCard({ recruit, onRemove }: { recruit: GmRecruit; onRemo
           <div className="mt-0.5 truncate text-xs text-muted-foreground">{locale}{locale && recruit.travel_org ? " · " : ""}{recruit.travel_org}</div>
         )}
         {recruit.notes && <div className="mt-1 text-xs text-foreground/80">{recruit.notes}</div>}
-        {recruit.link && (
-          <a href={recruit.link} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline">
-            <ExternalLink className="h-3 w-3" /> Profile
-          </a>
-        )}
+        <div className="mt-1.5 flex items-center gap-2">
+          <StageSelect value={recruit.stage} onChange={onStageChange} />
+          {recruit.link && (
+            <a href={recruit.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+              <ExternalLink className="h-3 w-3" /> Profile
+            </a>
+          )}
+        </div>
       </div>
       <button onClick={onRemove} title="Remove" className="text-muted-foreground/40 hover:text-destructive"><X className="h-3.5 w-3.5" /></button>
     </div>
@@ -58,7 +87,7 @@ export default function GMRecruits() {
   const gm = useGmRecruits();
   const [year, setYear] = useState<number>(YEARS[0]);
   const [addOpen, setAddOpen] = useState(false);
-  const [form, setForm] = useState({ first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0] });
+  const [form, setForm] = useState({ first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage });
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const listFor = (t: RecruitType) => gm.recruits.filter((r) => r.class_year === year && r.player_type === t).sort((a, b) => a.sort_order - b.sort_order);
@@ -72,11 +101,12 @@ export default function GMRecruits() {
     gm.reorder(arrayMove(list, oldI, newI).map((r) => r.id));
   };
 
-  const openAdd = () => { setForm({ first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: year }); setAddOpen(true); };
+  const openAdd = () => { setForm({ first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: year, stage: "evaluating" }); setAddOpen(true); };
   const submit = () => {
     gm.addRecruit({
       class_year: form.class_year,
       player_type: recruitTypeForPosition(form.position),
+      stage: form.stage,
       first_name: form.first_name.trim() || null,
       last_name: form.last_name.trim() || null,
       high_school: form.high_school.trim() || null,
@@ -132,7 +162,7 @@ export default function GMRecruits() {
                   <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd(list)}>
                     <SortableContext items={list.map((r) => r.id)} strategy={verticalListSortingStrategy}>
                       <div className="space-y-2">
-                        {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} />)}
+                        {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} />)}
                       </div>
                     </SortableContext>
                   </DndContext>
