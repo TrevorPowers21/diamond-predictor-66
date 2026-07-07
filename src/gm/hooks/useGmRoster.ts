@@ -333,10 +333,12 @@ export function useGmRoster() {
         const { error: e2 } = await (supabase as any).from("team_build_players").update({ nil_value: actualPay }).eq("id", row.build_player_id);
         if (e2) throw e2;
       }
+      await touchBuild(activeBuildId);
       return { nextFinalized, name: row.name };
     },
     onSuccess: ({ nextFinalized, name }) => {
       qc.invalidateQueries({ queryKey: key });
+      qc.invalidateQueries({ queryKey: ["gm-builds"] });
       if (nextFinalized) toast.success(`Finalized pay for ${name} — synced to Team Builder`);
     },
     onError: (e: any) => toast.error(`Finalize failed: ${e.message}`),
@@ -385,6 +387,14 @@ export function useGmRoster() {
 
   // ── Build management (copy-on-write) ──────────────────────────────────────
   const activeBuildIsDefault = !!builds.find((bd) => bd.id === activeBuildId)?.is_default;
+
+  // Roster/money edits write to CHILD tables (team_build_players,
+  // gm_player_finance), which don't move the parent build's updated_at. Bump it
+  // so "most recent changes" ordering (the fallback build) is accurate.
+  const touchBuild = async (buildId: string | null) => {
+    if (!buildId) return;
+    await (supabase as any).from("team_builds").update({ updated_at: new Date().toISOString() }).eq("id", buildId);
+  };
 
   // Clone a build's roster rows + finance lines into a new named build. Returns
   // the new build id. team_build_players + gm_player_finance carry together so
@@ -471,6 +481,7 @@ export function useGmRoster() {
         { onConflict: "build_player_id" },
       );
       if (e2) throw e2;
+      await touchBuild(targetBuildId);
       return { switched, name: row.name };
     },
     onSuccess: ({ switched, name }) => {
@@ -491,8 +502,9 @@ export function useGmRoster() {
         { onConflict: "build_player_id" },
       );
       if (error) throw error;
+      await touchBuild(activeBuildId);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: departuresKey }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: departuresKey }); qc.invalidateQueries({ queryKey: ["gm-builds"] }); },
     onError: (e: any) => toast.error(`Save reason failed: ${e.message}`),
   });
 
@@ -506,8 +518,9 @@ export function useGmRoster() {
       if (e1) throw e1;
       const { error: e2 } = await (supabase as any).from("gm_player_finance").update({ roster_status: null, departure_reason: null }).eq("build_player_id", buildPlayerId);
       if (e2) throw e2;
+      await touchBuild(activeBuildId);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: departuresKey }); qc.invalidateQueries({ queryKey: key }); toast.success("Player restored to roster"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: departuresKey }); qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ["gm-builds"] }); toast.success("Player restored to roster"); },
     onError: (e: any) => toast.error(`Restore failed: ${e.message}`),
   });
 
@@ -566,6 +579,7 @@ export function useGmRoster() {
         position_slot: position || null, depth_order: 1, included_in_roster: true, production_notes: notes, nil_value: Number(nilValue) || 0,
       });
       if (error) throw error;
+      await touchBuild(targetBuildId);
       return { switched, name: trimmed };
     },
     onSuccess: ({ switched, name }) => {
