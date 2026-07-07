@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
 const POSITIONS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH", "TWP", "RHP", "LHP"] as const;
-const YEARS = [PROJECTION_SEASON + 1, PROJECTION_SEASON + 2, PROJECTION_SEASON + 3, PROJECTION_SEASON + 4];
+const YEARS = [PROJECTION_SEASON, PROJECTION_SEASON + 1, PROJECTION_SEASON + 2, PROJECTION_SEASON + 3];
 const SECTIONS: { type: RecruitType; title: string }[] = [
   { type: "hitter", title: "Position Players" },
   { type: "pitcher", title: "Pitchers" },
