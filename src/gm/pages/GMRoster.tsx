@@ -121,7 +121,6 @@ function BudgetDialog({ budget, onSave, onFinalize, pending }: { budget: GmBudge
           </div>
         </div>
         <DialogFooter className="gap-2 sm:gap-2">
-          <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
           {/* Save = GM-only draft (does NOT touch the coach's build). */}
           <Button variant="outline" size="sm" disabled={pending} onClick={() => { onSave(caps()); setOpen(false); }}>Save</Button>
           {/* Finalize = save + push the total into the coach's Team Builder. */}
