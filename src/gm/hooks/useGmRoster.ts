@@ -136,7 +136,7 @@ export function useGmRoster() {
           ? (meta?.depthRole ?? (snap.pitcher_role === "SP" ? "weekend_starter" : snap.pitcher_role === "SM" ? "weekday_starter" : undefined))
           : (meta?.depthRole ?? snap.hitter_depth_role);
         const effWar = pitcher
-          ? effectivePitcherWar(snap.p_rv_plus, sessionDepthRole, devAgg, classTransition, eq)
+          ? effectivePitcherWar(snap, sessionDepthRole, devAgg, classTransition, eq)
           : effectiveHitterWar(snap.o_war, snap.hitter_depth_role, sessionDepthRole, devAgg, classTransition);
         const effMarket = effectiveMarket(mv, storedWar, effWar);
 

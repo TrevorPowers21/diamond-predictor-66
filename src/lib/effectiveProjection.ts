@@ -21,6 +21,9 @@
  */
 import { paForHitterDepthRole } from "@/lib/depthRoles";
 import type { PitchingEquationWeights } from "@/lib/pitchingEquations";
+import { applyRoleTransitionAdjustment, calcPitchingPlus } from "@/lib/transferPitcherProjection";
+
+const STARTER_DEPTH_ROLES = new Set(["weekend_starter", "weekday_starter", "swing_starter"]);
 
 const classAdjHitter = (ct: string | null | undefined) => {
   const c = String(ct || "SJ").toUpperCase();
@@ -54,21 +57,79 @@ export function pitcherIpForDepthRole(depthRole: string | null | undefined, eq: 
   }
 }
 
-/** Effective pitcher pWAR = f(dev-agg-adjusted pRV+, depth-role IP). */
+/** Snapshot fields the pitcher overlay reads (the frozen neutral rates). */
+export interface PitcherSnapshotRates {
+  p_era?: number | null; p_fip?: number | null; p_whip?: number | null;
+  p_k9?: number | null; p_bb9?: number | null; p_hr9?: number | null;
+  p_rv_plus?: number | null;
+  pitcher_role?: string | null;
+}
+
+/**
+ * Effective pitcher pWAR = f(effective pRV+, depth-role IP), reproducing
+ * useTeamBuilderSimulation exactly:
+ *   1. dev_agg → the six rates (inverse for low-better, direct for K9 + pRV+)
+ *   2. SP↔RP role-transition regression on the dev-adjusted rates (the tiered
+ *      rp_to_sp curve), then re-derive pRV+ from the six +stats
+ *   3. WAR from the effective pRV+ and the depth role's innings
+ * Falls back to a dev-agg-only pRV+ if the individual rates aren't stored.
+ */
 export function effectivePitcherWar(
-  pRvPlus: number | null | undefined,
+  snap: PitcherSnapshotRates,
   sessionDepthRole: string | null | undefined,
   sessionDevAgg: number,
   classTransition: string | null | undefined,
   eq: PitchingEquationWeights,
 ): number | null {
-  if (pRvPlus == null || !Number.isFinite(Number(pRvPlus))) return null;
-  const adjRv = Number(pRvPlus) * devAggScale(sessionDevAgg, 0, classAdjPitcher(classTransition));
+  const basePRv = snap.p_rv_plus;
+  if (basePRv == null || !Number.isFinite(Number(basePRv))) return null;
+
+  const classAdj = classAdjPitcher(classTransition);
+  const dev = devAggScale(sessionDevAgg, 0, classAdj);
+  const inv = dev > 0 ? 1 / dev : 1;
+
+  // Step 1 — dev_agg applied to rates (mirrors devSource).
+  const n = (v: number | null | undefined) => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
+  const dEra = n(snap.p_era) != null ? n(snap.p_era)! * inv : null;
+  const dFip = n(snap.p_fip) != null ? n(snap.p_fip)! * inv : null;
+  const dWhip = n(snap.p_whip) != null ? n(snap.p_whip)! * inv : null;
+  const dK9 = n(snap.p_k9) != null ? n(snap.p_k9)! * dev : null;
+  const dBb9 = n(snap.p_bb9) != null ? n(snap.p_bb9)! * inv : null;
+  const dHr9 = n(snap.p_hr9) != null ? n(snap.p_hr9)! * inv : null;
+  let adjRv = Number(basePRv) * dev;
+
+  // Step 2 — SP↔RP role transition, only when the role bucket actually changes.
+  const storedRole: "SP" | "RP" | "SM" | null =
+    snap.pitcher_role === "SP" ? "SP" : snap.pitcher_role === "SM" ? "SM" : snap.pitcher_role === "RP" ? "RP" : null;
+  const sessionRole: "SP" | "RP" = STARTER_DEPTH_ROLES.has(String(sessionDepthRole)) ? "SP" : "RP";
+  const ratesPresent = [dEra, dFip, dWhip, dK9, dBb9, dHr9].every((v) => v != null);
+  if (storedRole != null && storedRole !== sessionRole && ratesPresent) {
+    const curve = {
+      tier1Max: eq.rp_to_sp_low_better_tier1_max, tier2Max: eq.rp_to_sp_low_better_tier2_max, tier3Max: eq.rp_to_sp_low_better_tier3_max,
+      tier1Mult: eq.rp_to_sp_low_better_tier1_mult, tier2Mult: eq.rp_to_sp_low_better_tier2_mult, tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
+    };
+    const rtEra = applyRoleTransitionAdjustment(dEra, eq.sp_to_rp_reg_era_pct, storedRole, sessionRole, true, curve);
+    const rtFip = applyRoleTransitionAdjustment(dFip, eq.sp_to_rp_reg_fip_pct, storedRole, sessionRole, true, curve);
+    const rtWhip = applyRoleTransitionAdjustment(dWhip, eq.sp_to_rp_reg_whip_pct, storedRole, sessionRole, true, curve);
+    const rtK9 = applyRoleTransitionAdjustment(dK9, eq.sp_to_rp_reg_k9_pct, storedRole, sessionRole, false, curve);
+    const rtBb9 = applyRoleTransitionAdjustment(dBb9, eq.sp_to_rp_reg_bb9_pct, storedRole, sessionRole, true, curve);
+    const rtHr9 = applyRoleTransitionAdjustment(dHr9, eq.sp_to_rp_reg_hr9_pct, storedRole, sessionRole, true, curve);
+    const eraP = calcPitchingPlus(rtEra, eq.era_plus_ncaa_avg, eq.era_plus_ncaa_sd, eq.era_plus_scale, false);
+    const fipP = calcPitchingPlus(rtFip, eq.fip_plus_ncaa_avg, eq.fip_plus_ncaa_sd, eq.fip_plus_scale, false);
+    const whipP = calcPitchingPlus(rtWhip, eq.whip_plus_ncaa_avg, eq.whip_plus_ncaa_sd, eq.whip_plus_scale, false);
+    const k9P = calcPitchingPlus(rtK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
+    const bb9P = calcPitchingPlus(rtBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
+    const hr9P = calcPitchingPlus(rtHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
+    if ([eraP, fipP, whipP, k9P, bb9P, hr9P].every((v) => v != null)) {
+      adjRv =
+        Number(eraP) * eq.era_plus_weight + Number(fipP) * eq.fip_plus_weight + Number(whipP) * eq.whip_plus_weight +
+        Number(k9P) * eq.k9_plus_weight + Number(bb9P) * eq.bb9_plus_weight + Number(hr9P) * eq.hr9_plus_weight;
+    }
+  }
+
+  // Step 3 — WAR from the effective pRV+ and the depth role's innings.
   const ip = pitcherIpForDepthRole(sessionDepthRole, eq);
-  return (
-    (((adjRv - 100) / 100) * (ip / 9) * eq.pwar_r_per_9 + (ip / 9) * eq.pwar_replacement_runs_per_9) /
-    eq.pwar_runs_per_win
-  );
+  return (((adjRv - 100) / 100) * (ip / 9) * eq.pwar_r_per_9 + (ip / 9) * eq.pwar_replacement_runs_per_9) / eq.pwar_runs_per_win;
 }
 
 /** Effective hitter oWAR = storedOwar × depthScale × devAggScale. */
