@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { useGmRoster, DEPARTURE_REASONS, type GmBudget, type GmOtherLine, type GmRow, type RowMoney } from "@/gm/hooks/useGmRoster";
+import { useGmRoster, DEPARTURE_REASONS, type GmBudget, type GmOtherLine, type GmRow, type LocalProjectionTier, type RowMoney } from "@/gm/hooks/useGmRoster";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
@@ -18,7 +18,14 @@ const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
 const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
 const num = (n: number | null | undefined, d = 1) => (n == null ? "—" : n.toFixed(d));
 const REASON_LABEL: Record<string, string> = { draft: "Draft Pick", graduation: "Graduation", transfer: "Transfer", other: "Other" };
-const ADD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH", "UTL", "SP", "RP"] as const;
+// Matches Team Builder's Add Incoming Freshman position list exactly.
+const ADD_POSITIONS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH", "TWP", "RHP", "LHP"] as const;
+const TIER_OPTIONS: { value: LocalProjectionTier; label: string }[] = [
+  { value: "developmental", label: "Developmental" },
+  { value: "role_player", label: "Role Player" },
+  { value: "contributor", label: "Contributor" },
+  { value: "immediate_impact", label: "Immediate Impact" },
+];
 
 /** Departure-reason dropdown (GM-only). */
 function ReasonSelect({ value, onChange }: { value: string | null; onChange: (r: string) => void }) {
@@ -220,6 +227,8 @@ export default function GMRoster() {
   const [addPlayerOpen, setAddPlayerOpen] = useState(false);
   const [addName, setAddName] = useState("");
   const [addPosition, setAddPosition] = useState("");
+  const [addTier, setAddTier] = useState<LocalProjectionTier>("");
+  const [addNil, setAddNil] = useState<number | null>(null);
   const [addBuildName, setAddBuildName] = useState("");
   const reasonPrompted = useRef(false);
   useEffect(() => {
@@ -438,7 +447,7 @@ export default function GMRoster() {
           <Button variant="outline" size="icon" className="h-8 w-8" title="Rename current build" disabled={gm.activeBuildIsDefault} onClick={() => { setBuildName(gm.builds.find((b) => b.id === gm.selectedBuildId)?.name ?? ""); setBuildDialog("rename"); }}>
             <Pencil className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => { setAddName(""); setAddPosition(""); setAddBuildName(""); setAddPlayerOpen(true); }}>
+          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => { setAddName(""); setAddPosition(""); setAddTier(""); setAddNil(null); setAddBuildName(""); setAddPlayerOpen(true); }}>
             <Plus className="h-3.5 w-3.5" /> Add Player
           </Button>
           <DropdownMenu>
@@ -606,30 +615,49 @@ export default function GMRoster() {
         </div>
       )}
 
-      {/* Add local player (freshman / JUCO — no projection). */}
+      {/* Add Incoming Freshman — mirrors Team Builder's fields + stored shape. */}
       <Dialog open={addPlayerOpen} onOpenChange={setAddPlayerOpen}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle style={OSWALD}>Add Player</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle style={OSWALD}>Add Incoming Freshman</DialogTitle>
+          </DialogHeader>
           <div className="space-y-3 py-1">
-            <Input value={addName} onChange={(e) => setAddName(e.target.value)} placeholder="Player name" className="h-9 text-sm" />
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Position</span>
+            <p className="text-[12px] text-muted-foreground">Add a player with no projected stats. Value can still be tracked. (Transfers with data are added in Team Builder.)</p>
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Player Name</span>
+              <Input value={addName} onChange={(e) => setAddName(e.target.value)} placeholder="First Last" className="h-9 text-sm" />
+            </div>
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Position</span>
               <Select value={addPosition} onValueChange={setAddPosition}>
-                <SelectTrigger className="h-8 flex-1 text-xs"><SelectValue placeholder="Select" /></SelectTrigger>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select position" /></SelectTrigger>
                 <SelectContent>{ADD_POSITIONS.map((p) => <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>)}</SelectContent>
               </Select>
             </div>
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Projection Tier</span>
+              <Select value={addTier || undefined} onValueChange={(v) => setAddTier(v as LocalProjectionTier)}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select tier" /></SelectTrigger>
+                <SelectContent>{TIER_OPTIONS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Initial Value ($)</span>
+              <DollarInput value={addNil} onChange={setAddNil} />
+            </div>
             {gm.activeBuildIsDefault && (
-              <Input value={addBuildName} onChange={(e) => setAddBuildName(e.target.value)} placeholder="New build name (e.g. 2027 Roster)" className="h-9 text-sm" />
+              <div>
+                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>New build name</span>
+                <Input value={addBuildName} onChange={(e) => setAddBuildName(e.target.value)} placeholder="e.g. 2027 Roster" className="h-9 text-sm" />
+              </div>
             )}
-            <p className="text-[11px] text-muted-foreground">Local add — no projection (WAR/Market show blank). Transfers with data are added in Team Builder.</p>
           </div>
           <DialogFooter>
             <Button
               size="sm"
               disabled={!addName.trim() || !addPosition || (gm.activeBuildIsDefault && !addBuildName.trim())}
-              onClick={() => { gm.addLocalPlayer(addName, addPosition, addBuildName); setAddPlayerOpen(false); }}
-            >Add</Button>
+              onClick={() => { gm.addLocalPlayer(addName, addPosition, addTier, addNil ?? 0, addBuildName); setAddPlayerOpen(false); }}
+            >Add To Roster</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

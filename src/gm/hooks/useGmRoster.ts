@@ -6,7 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { toast } from "sonner";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
-import { parseBuildPlayerMeta, projectedEligibilityClass } from "@/pages/team-builder/helpers";
+import { parseBuildPlayerMeta, projectedEligibilityClass, serializeBuildPlayerMeta } from "@/pages/team-builder/helpers";
 import { effectivePitcherWar, effectiveHitterWar, effectiveMarket, pitcherSessionRole } from "@/lib/effectiveProjection";
 
 const isPitcherPos = (s: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
@@ -52,6 +52,9 @@ export interface GmDeparture {
 }
 
 export const DEPARTURE_REASONS = ["draft", "graduation", "transfer", "other"] as const;
+
+/** Projection tiers for an added freshman — matches Team Builder. */
+export type LocalProjectionTier = "" | "developmental" | "role_player" | "contributor" | "immediate_impact";
 
 /** The editable money buckets for one roster row. */
 export interface RowMoney {
@@ -522,7 +525,7 @@ export function useGmRoster() {
   // shows position + financials on both builds. Copy-on-write off the default.
   // Transfers WITH data are added via Team Builder, not here.
   const addLocalPlayer = useMutation({
-    mutationFn: async ({ name, position, buildName }: { name: string; position: string; buildName: string }) => {
+    mutationFn: async ({ name, position, projectionTier, nilValue, buildName }: { name: string; position: string; projectionTier: LocalProjectionTier; nilValue: number; buildName: string }) => {
       if (!effectiveTeamId || !activeBuildId) throw new Error("No team/build in scope");
       let targetBuildId = activeBuildId;
       let switched: string | null = null;
@@ -531,14 +534,20 @@ export function useGmRoster() {
         switched = targetBuildId;
       }
       const trimmed = name.trim();
-      const [first, ...rest] = trimmed.split(/\s+/);
-      const notes = JSON.stringify({
-        __team_builder_metrics_v1: true, rosterStatus: "returner",
-        localPlayer: { first_name: first ?? trimmed, last_name: rest.join(" "), position, team: teamName, from_team: null, conference: null },
-      });
+      const isPitcherPos = /^(SP|RP|CL|P|LHP|RHP)$/i.test(position);
+      // Mirror Team Builder's addIncomingFreshman EXACTLY so the player reads
+      // identically on both sides (source, class_transition FS, depth role,
+      // projection tier, localPlayer shape via the shared serializer).
+      const notes = serializeBuildPlayerMeta(
+        null, null, null, "returner",
+        isPitcherPos ? "specialist_reliever" : "bench",
+        "FS", 0, false, false, null,
+        { first_name: trimmed, last_name: "", position: position || null, team: teamName, from_team: null, conference: null },
+        projectionTier || null, (nilValue || 0) > 0,
+      );
       const { error } = await (supabase as any).from("team_build_players").insert({
-        build_id: targetBuildId, player_id: null, source: "local", custom_name: trimmed,
-        position_slot: position, included_in_roster: true, production_notes: notes, nil_value: null,
+        build_id: targetBuildId, player_id: null, source: "returner", custom_name: trimmed,
+        position_slot: position || null, depth_order: 1, included_in_roster: true, production_notes: notes, nil_value: Number(nilValue) || 0,
       });
       if (error) throw error;
       return { switched, name: trimmed };
@@ -576,7 +585,7 @@ export function useGmRoster() {
     setDepartureReason: (buildPlayerId: string, playerId: string | null, reason: string) => setDepartureReason.mutate({ buildPlayerId, playerId, reason }),
     restorePlayer: (buildPlayerId: string) => restorePlayer.mutate(buildPlayerId),
     finalizeRoster: (buildId: string) => finalizeRoster.mutate(buildId),
-    addLocalPlayer: (name: string, position: string, buildName: string) => addLocalPlayer.mutate({ name, position, buildName }),
+    addLocalPlayer: (name: string, position: string, projectionTier: LocalProjectionTier, nilValue: number, buildName: string) => addLocalPlayer.mutate({ name, position, projectionTier, nilValue, buildName }),
     saveBudget: (patch: Partial<GmBudget>) => saveBudget.mutate(patch),
     finalizeBudget: (finalized: boolean) => saveBudget.mutate({ finalized }),
     commitBudget: (caps: { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown?: GmOtherLine[] | null }) => commitBudget.mutate(caps),
