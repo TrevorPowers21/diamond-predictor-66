@@ -423,8 +423,8 @@ export default function GMRoster() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div>
-            <h2 className="text-lg font-bold" style={OSWALD}>{gm.teamName ?? "Front Office"}</h2>
-            <p className="text-xs text-muted-foreground">{gm.teamName ? "Front Office" : "Pick a team above."}</p>
+            <h2 className="text-2xl font-bold leading-tight" style={OSWALD}>{gm.teamName ?? "Front Office"}</h2>
+            <p className="text-sm text-muted-foreground">{gm.teamName ? "Front Office" : "Pick a team above."}</p>
           </div>
           {/* Season selector — display only for now; season switching is wired later. */}
           <Select value={String(seasonSel)} onValueChange={(v) => setSeasonSel(Number(v))}>
@@ -436,7 +436,7 @@ export default function GMRoster() {
             </SelectContent>
           </Select>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <FinalizeToggle
             finalized={!budgetDraft && !!b?.finalized}
             onFinalize={() => setConfirmCaps(effCaps)}
