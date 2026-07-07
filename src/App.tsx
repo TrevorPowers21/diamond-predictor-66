@@ -26,6 +26,7 @@ const SavantPitcherPage = lazy(() => import("@/savant/pages/PitcherPage"));
 const GMRoute = lazy(() => import("@/gm/components/GMRoute"));
 const GMLayout = lazy(() => import("@/gm/components/GMLayout"));
 const GMRoster = lazy(() => import("@/gm/pages/GMRoster"));
+const GMHome = lazy(() => import("@/gm/pages/GMHome"));
 import TransferPortal from "./pages/TransferPortal";
 import ReturningPlayers from "./pages/ReturningPlayers";
 import WarRoom from "./pages/WarRoom";
@@ -162,7 +163,8 @@ const router = createBrowserRouter([
           </ProtectedRoute>
         ),
         children: [
-          { index: true, element: <Suspense fallback={null}><GMRoster /></Suspense> },
+          { index: true, element: <Suspense fallback={null}><GMHome /></Suspense> },
+          { path: "roster", element: <Suspense fallback={null}><GMRoster /></Suspense> },
         ],
       },
       { path: "*", element: <NotFound /> },

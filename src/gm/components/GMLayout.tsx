@@ -1,11 +1,16 @@
 import { useState, useEffect } from "react";
-import { useLocation, useNavigate, Outlet } from "react-router-dom";
+import { useLocation, useNavigate, Outlet, Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import TeamSwitcher from "@/components/TeamSwitcher";
 import AreaToggle from "@/components/AreaToggle";
-import { LogOut, Menu } from "lucide-react";
+import { LogOut, Menu, LayoutDashboard, Users, ChevronRight } from "lucide-react";
+
+const NAV = [
+  { label: "Home", href: "/gm", icon: LayoutDashboard, description: "Front office overview" },
+  { label: "Roster Management", href: "/gm/roster", icon: Users, description: "Budget, builds & departures" },
+];
 
 /**
  * Front Office (GM) shell — same chrome as the Player Evaluation dashboard. The
@@ -49,8 +54,33 @@ export default function GMLayout() {
         </div>
         <div className="mx-5 border-t border-[#1a2744]/60" />
 
-        {/* The GM area is one page — the area toggle lives in the top bar. */}
-        <nav className="flex-1 px-3 py-3 space-y-1" />
+        {/* Nav */}
+        <nav className="flex-1 px-3 py-3 space-y-1">
+          <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#4a5568]">Navigation</div>
+          {NAV.map((item) => {
+            const isActive = item.href === "/gm" ? location.pathname === "/gm" : location.pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                to={item.href}
+                onClick={() => setSidebarOpen(false)}
+                className={cn(
+                  "group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all duration-150 cursor-pointer",
+                  isActive
+                    ? "bg-[#D4AF37]/12 text-[#D4AF37] shadow-[inset_2px_0_0_#D4AF37]"
+                    : "text-[#8892a4] hover:bg-[#111c33] hover:text-[#d0d5dd]",
+                )}
+              >
+                <item.icon className={cn("h-4 w-4 shrink-0", isActive ? "text-[#D4AF37]" : "text-[#5a6478] group-hover:text-[#8892a4]")} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium leading-tight">{item.label}</div>
+                  {isActive && <div className="mt-0.5 text-[10px] leading-tight text-[#D4AF37]/60">{item.description}</div>}
+                </div>
+                {isActive && <ChevronRight className="h-3 w-3 shrink-0 text-[#D4AF37]/40" />}
+              </Link>
+            );
+          })}
+        </nav>
 
         {/* User */}
         <div className="mx-5 border-t border-[#1a2744]/60" />
