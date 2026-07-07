@@ -261,26 +261,21 @@ export default function GMRoster() {
             </SelectContent>
           </Select>
         </div>
-        {gm.builds.length > 0 && (
-          <Select value={gm.selectedBuildId ?? undefined} onValueChange={(v) => gm.setSelectedBuildId(v)}>
-            <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue placeholder="Select build" /></SelectTrigger>
-            <SelectContent>
-              {gm.builds.map((bd) => (
-                <SelectItem key={bd.id} value={bd.id} className="text-xs">{bd.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
-
-      {/* Budget — each bucket in its own box: Scholarship · NIL · Other on top,
-          Revenue Share · Total on the second row. */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center gap-2">
           {b?.finalized && (
             <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-500" style={OSWALD}>
               <Check className="h-3.5 w-3.5" /> Finalized
             </span>
+          )}
+          {gm.builds.length > 0 && (
+            <Select value={gm.selectedBuildId ?? undefined} onValueChange={(v) => gm.setSelectedBuildId(v)}>
+              <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue placeholder="Select build" /></SelectTrigger>
+              <SelectContent>
+                {gm.builds.map((bd) => (
+                  <SelectItem key={bd.id} value={bd.id} className="text-xs">{bd.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
           <BudgetDialog
             budget={b}
@@ -289,6 +284,11 @@ export default function GMRoster() {
             pending={gm.isFinalizing}
           />
         </div>
+      </div>
+
+      {/* Budget — each bucket in its own box: Scholarship · NIL · Other on top,
+          Revenue Share · Total on the second row. */}
+      <div className="space-y-3">
         <div className="grid grid-cols-3 gap-3">
           {box("Scholarship", gm.totals.schUsed, b?.scholarship_total ?? null)}
           {box("NIL", gm.totals.nilUsed, b?.nil_total ?? null)}
