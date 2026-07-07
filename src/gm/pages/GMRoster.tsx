@@ -6,8 +6,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Check, Copy, Pencil, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
@@ -97,8 +98,7 @@ function DollarInput({ value, onChange }: { value: number | null; onChange: (n: 
  *  The roster boxes stay read-only whole numbers. */
 type OtherDraft = { name: string; amount: number | null };
 type BudgetCaps = { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown: GmOtherLine[] };
-function BudgetDialog({ budget, coachTotal, onSave, onFinalize }: { budget: GmBudget | null; coachTotal: number | null; onSave: (caps: BudgetCaps) => void; onFinalize: (caps: BudgetCaps) => void }) {
-  const [open, setOpen] = useState(false);
+function BudgetDialog({ open, onOpenChange, budget, coachTotal, onSave, onFinalize }: { open: boolean; onOpenChange: (o: boolean) => void; budget: GmBudget | null; coachTotal: number | null; onSave: (caps: BudgetCaps) => void; onFinalize: (caps: BudgetCaps) => void }) {
   const [rev, setRev] = useState<number | null>(null);
   const [nil, setNil] = useState<number | null>(null);
   const [sch, setSch] = useState<number | null>(null);
@@ -137,12 +137,7 @@ function BudgetDialog({ budget, coachTotal, onSave, onFinalize }: { budget: GmBu
     </label>
   );
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
-          <SlidersHorizontal className="h-3.5 w-3.5" /> Manage Budget
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogHeader><DialogTitle style={OSWALD}>Season Budget</DialogTitle></DialogHeader>
         <div className="space-y-3 py-1">
@@ -189,8 +184,8 @@ function BudgetDialog({ budget, coachTotal, onSave, onFinalize }: { budget: GmBu
         <DialogFooter className="gap-2 sm:gap-2">
           {/* Save = GM-only draft (this local session). Finalize & Push
               communicates the total to the coach — routed through a confirm. */}
-          <Button variant="outline" size="sm" onClick={() => { onSave(caps()); setOpen(false); }}>Save</Button>
-          <Button size="sm" onClick={() => { onFinalize(caps()); setOpen(false); }}>Finalize &amp; Push</Button>
+          <Button variant="outline" size="sm" onClick={() => { onSave(caps()); onOpenChange(false); }}>Save</Button>
+          <Button size="sm" onClick={() => { onFinalize(caps()); onOpenChange(false); }}>Finalize &amp; Push</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -235,6 +230,8 @@ export default function GMRoster() {
   // Departures: batch reason modal (auto-opens once when reasons are pending) + list.
   const [reasonModalOpen, setReasonModalOpen] = useState(false);
   const [departuresOpen, setDeparturesOpen] = useState(false);
+  const [budgetOpen, setBudgetOpen] = useState(false);
+  const [finalizeRosterOpen, setFinalizeRosterOpen] = useState(false);
   const reasonPrompted = useRef(false);
   useEffect(() => {
     if (gm.pendingReasonCount > 0 && !reasonPrompted.current) {
@@ -457,14 +454,30 @@ export default function GMRoster() {
           <Button variant="outline" size="icon" className="h-8 w-8" title="Rename current build" disabled={gm.activeBuildIsDefault} onClick={() => { setBuildName(gm.builds.find((b) => b.id === gm.selectedBuildId)?.name ?? ""); setBuildDialog("rename"); }}>
             <Pencil className="h-3.5 w-3.5" />
           </Button>
-          {/* Temporary trigger — folds into GM Settings in the next step. */}
-          <Button variant="outline" size="sm" className="relative h-8 gap-1.5 text-xs" onClick={() => setDeparturesOpen(true)}>
-            Departures
-            {gm.pendingReasonCount > 0 && (
-              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">{gm.pendingReasonCount}</span>
-            )}
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="relative h-8 gap-1.5 text-xs">
+                <SlidersHorizontal className="h-3.5 w-3.5" /> GM Settings
+                {gm.pendingReasonCount > 0 && (
+                  <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">{gm.pendingReasonCount}</span>
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem onClick={() => setBudgetOpen(true)}>Edit Budget</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setDeparturesOpen(true)}>
+                Departures
+                {gm.pendingReasonCount > 0 && (
+                  <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">{gm.pendingReasonCount}</span>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setFinalizeRosterOpen(true)}>Finalize {gm.season} Roster</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <BudgetDialog
+            open={budgetOpen}
+            onOpenChange={setBudgetOpen}
             budget={popupBudget}
             coachTotal={coachTotalBudget}
             onSave={(caps) => setBudgetDraft(caps)}
@@ -573,6 +586,22 @@ export default function GMRoster() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Finalize Roster — lock the active build as next year's default, archive rest. */}
+      <AlertDialog open={finalizeRosterOpen} onOpenChange={setFinalizeRosterOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle style={OSWALD}>Finalize {gm.season} roster?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Locks <span className="font-semibold text-foreground">{gm.builds.find((b) => b.id === gm.selectedBuildId)?.name ?? "this build"}</span> as the {gm.season + 1} default — next year's "everyone returns" baseline. Every other {gm.season} build is archived (recoverable, not deleted). This closes {gm.season} planning.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (gm.selectedBuildId) gm.finalizeRoster(gm.selectedBuildId); setFinalizeRosterOpen(false); }}>Finalize Roster</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Reason batch modal — auto-opens when departures are missing a reason. */}
       <Dialog open={reasonModalOpen} onOpenChange={setReasonModalOpen}>

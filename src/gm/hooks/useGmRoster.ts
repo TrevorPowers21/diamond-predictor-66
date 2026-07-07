@@ -108,12 +108,12 @@ export function useGmRoster() {
     queryFn: async (): Promise<GmBuildOption[]> => {
       const { data } = await (supabase as any)
         .from("team_builds")
-        .select("id, name, is_default, academic_year, updated_at")
+        .select("id, name, is_default, academic_year, updated_at, archived")
         .eq("customer_team_id", effectiveTeamId)
         .order("is_default", { ascending: false })
         .order("updated_at", { ascending: false });
       return (data || [])
-        .filter((b: any) => b.academic_year === season || b.academic_year == null)
+        .filter((b: any) => !b.archived && (b.academic_year === season || b.academic_year == null))
         .map((b: any) => ({ id: b.id, name: b.is_default ? "Default Roster" : b.name, is_default: !!b.is_default }));
     },
   });
@@ -492,6 +492,31 @@ export function useGmRoster() {
     onError: (e: any) => toast.error(`Restore failed: ${e.message}`),
   });
 
+  // Finalize the roster: the chosen build becomes next year's default ("everyone
+  // returns" baseline for season+1); every other current-cycle build (incl. the
+  // old default) is ARCHIVED (recoverable), not deleted.
+  const finalizeRoster = useMutation({
+    mutationFn: async (buildId: string) => {
+      if (!effectiveTeamId) throw new Error("No team in scope");
+      const { error: e1 } = await (supabase as any).from("team_builds")
+        .update({ archived: true, is_default: false })
+        .eq("customer_team_id", effectiveTeamId).neq("id", buildId)
+        .or(`academic_year.eq.${season},academic_year.is.null`);
+      if (e1) throw e1;
+      const { error: e2 } = await (supabase as any).from("team_builds")
+        .update({ is_default: true, academic_year: season + 1, archived: false }).eq("id", buildId);
+      if (e2) throw e2;
+      return season + 1;
+    },
+    onSuccess: (nextYear) => {
+      qc.invalidateQueries({ queryKey: ["gm-builds"] });
+      qc.invalidateQueries({ queryKey: key });
+      setPickedBuildId(null);
+      toast.success(`Roster finalized — locked as the ${nextYear} default`);
+    },
+    onError: (e: any) => toast.error(`Finalize roster failed: ${e.message}`),
+  });
+
   return {
     teamName,
     season,
@@ -515,6 +540,7 @@ export function useGmRoster() {
     pendingReasonCount,
     setDepartureReason: (buildPlayerId: string, playerId: string | null, reason: string) => setDepartureReason.mutate({ buildPlayerId, playerId, reason }),
     restorePlayer: (buildPlayerId: string) => restorePlayer.mutate(buildPlayerId),
+    finalizeRoster: (buildId: string) => finalizeRoster.mutate(buildId),
     saveBudget: (patch: Partial<GmBudget>) => saveBudget.mutate(patch),
     finalizeBudget: (finalized: boolean) => saveBudget.mutate({ finalized }),
     commitBudget: (caps: { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown?: GmOtherLine[] | null }) => commitBudget.mutate(caps),
