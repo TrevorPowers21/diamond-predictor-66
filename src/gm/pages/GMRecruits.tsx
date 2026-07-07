@@ -353,6 +353,29 @@ export default function GMRecruits() {
             <Textarea value={reportBody} onChange={(e) => setReportBody(e.target.value)} placeholder="Tools, projection, makeup…" className="min-h-[70px] text-sm" />
             <Button size="sm" className="w-full" disabled={!reportBody.trim()} onClick={() => { if (reportsRecruit) { gm.addReport(reportsRecruit.id, reportDate, reportBody.trim(), reportTier || null); setReportBody(""); } }}>Add Report</Button>
           </div>
+          {/* Tier by coach — each coach's latest call, side by side to compare */}
+          {(() => {
+            const list = gm.reportsByRecruit.get(reportsRecruit?.id ?? "") ?? []; // newest first
+            const latestByAuthor = new Map<string, GmRecruitReport>();
+            for (const r of list) { if (!r.projection_tier) continue; const a = r.author ?? "—"; if (!latestByAuthor.has(a)) latestByAuthor.set(a, r); }
+            if (latestByAuthor.size === 0) return null;
+            return (
+              <div className="rounded-md border border-border/60 bg-muted/10 p-2.5">
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground" style={OSWALD}>Tier by Coach</div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                  {[...latestByAuthor.entries()].map(([author, r]) => {
+                    const tier = RECRUIT_TIERS.find((t) => t.value === r.projection_tier)!;
+                    return (
+                      <div key={author} className="flex items-center gap-1.5">
+                        <span className="text-xs text-foreground/80">{author.split("@")[0]}</span>
+                        <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider", toneClass(tier.tone))} style={OSWALD}>{tier.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
           {/* Report list — each independent */}
           <div className="max-h-[45vh] space-y-2.5 overflow-y-auto">
             {(gm.reportsByRecruit.get(reportsRecruit?.id ?? "") ?? []).map((r) => {
