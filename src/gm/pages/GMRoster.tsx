@@ -210,8 +210,6 @@ export default function GMRoster() {
     const pick = (k: keyof RowMoney) => (k in d ? d[k] ?? null : ((r[k] as number | null) ?? null));
     return { scholarship_amount: pick("scholarship_amount"), rev_share: pick("rev_share"), nil_amount: pick("nil_amount"), other_amount: pick("other_amount") };
   };
-  const actualPayOf = (m: RowMoney): number | null =>
-    m.rev_share == null && m.nil_amount == null && m.other_amount == null ? null : Number(m.rev_share ?? 0) + Number(m.nil_amount ?? 0) + Number(m.other_amount ?? 0);
   const setRowField = (r: GmRow, field: keyof RowMoney, val: number | null) =>
     setRowDrafts((prev) => ({ ...prev, [r.build_player_id]: { ...prev[r.build_player_id], [field]: val } }));
   const rowDirty = (r: GmRow) => !!rowDrafts[r.build_player_id];
@@ -227,7 +225,7 @@ export default function GMRoster() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
-          <Table className="min-w-[1240px]">
+          <Table className="min-w-[1120px]">
             <TableHeader>
               <TableRow style={OSWALD} className="[&_th]:font-bold [&_th]:uppercase [&_th]:tracking-[0.08em] [&_th]:text-[11px] [&_th]:text-muted-foreground">
 
@@ -236,9 +234,6 @@ export default function GMRoster() {
                 <TableHead className="text-center">Position</TableHead>
                 <TableHead className="text-center">WAR</TableHead>
                 <TableHead className="text-center">Market Value</TableHead>
-                {/* Agreed = the number the coach set with the player (flows in from
-                    Team Builder). The GM allocates the buckets below to match it. */}
-                <TableHead className="text-right">Agreed</TableHead>
                 <TableHead className="text-right">Scholarship</TableHead>
                 <TableHead className="text-right">Rev Share</TableHead>
                 <TableHead className="text-right">NIL</TableHead>
@@ -276,24 +271,15 @@ export default function GMRoster() {
                       from the editable money cells. */}
                   <TableCell className="py-1.5 text-center font-mono text-sm font-semibold tabular-nums text-foreground">{num(r.war)}</TableCell>
                   <TableCell className="py-1.5 text-center font-mono text-sm font-semibold tabular-nums text-foreground">{money(r.market_value)}</TableCell>
-                  {/* Agreed number from the coach — the target the buckets should sum to. */}
-                  <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums text-foreground/90">{money(r.nil_value)}</TableCell>
                   {/* Money edits stay LOCAL (setRowField) until the checkmark writes them. */}
                   <TableCell className="py-1.5"><MoneyCell value={m.scholarship_amount} onSave={(n) => setRowField(r, "scholarship_amount", n)} /></TableCell>
                   <TableCell className="py-1.5"><MoneyCell value={m.rev_share} onSave={(n) => setRowField(r, "rev_share", n)} /></TableCell>
                   <TableCell className="py-1.5"><MoneyCell value={m.nil_amount} onSave={(n) => setRowField(r, "nil_amount", n)} /></TableCell>
                   <TableCell className="py-1.5"><MoneyCell value={m.other_amount} onSave={(n) => setRowField(r, "other_amount", n)} /></TableCell>
-                  {/* Actual Pay = Rev+NIL+Other (read-only). Green when it matches the
-                      coach's Agreed number, amber while it doesn't yet. */}
-                  {(() => {
-                    const ap = actualPayOf(m);
-                    const agreed = r.nil_value;
-                    const matched = ap != null && agreed != null && Math.round(ap) === Math.round(agreed);
-                    const off = ap != null && agreed != null && !matched;
-                    return (
-                      <TableCell className={cn("py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums", matched ? "text-emerald-500" : off ? "text-amber-500" : "text-foreground")}>{money(ap)}</TableCell>
-                    );
-                  })()}
+                  {/* Actual Pay is the coach's agreed number; it ONLY changes when the
+                      GM finalizes (checkmark writes the bucket sum back here + to the
+                      coach). So it reads the authoritative nil_value, not the live buckets. */}
+                  <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums text-foreground">{money(r.nil_value)}</TableCell>
                   <TableCell className="py-1.5 text-center">
                     <FinalizeCheck
                       finalized={shownFinalized}
@@ -305,7 +291,7 @@ export default function GMRoster() {
                 );
               })}
               {rows.length === 0 ? (
-                <TableRow><TableCell colSpan={12} className="py-8 text-center text-muted-foreground">No players.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={11} className="py-8 text-center text-muted-foreground">No players.</TableCell></TableRow>
               ) : (
                 <TableRow className="bg-muted/40 font-medium">
                   <TableCell className="sticky left-0 z-10 bg-muted/40 text-right py-2 pr-3 font-semibold">Totals</TableCell>
@@ -313,12 +299,11 @@ export default function GMRoster() {
                   <TableCell />
                   <TableCell className="text-center font-mono text-sm py-2">{num(sum((r) => r.war), 1)}</TableCell>
                   <TableCell />
-                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => r.nil_value))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).scholarship_amount))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).rev_share))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).nil_amount))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).other_amount))}</TableCell>
-                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => actualPayOf(effMoney(r))))}</TableCell>
+                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => r.nil_value))}</TableCell>
                   <TableCell />
                 </TableRow>
               )}
@@ -341,7 +326,8 @@ export default function GMRoster() {
   const nilUsed = usedSum((m) => m.nil_amount);
   const otherUsed = usedSum((m) => m.other_amount);
   const schUsed = usedSum((m) => m.scholarship_amount);
-  const actualUsed = allRows.reduce((s, r) => s + (actualPayOf(effMoney(r)) ?? 0), 0);
+  // Actual Pay = the authoritative coach number (nil_value); only finalize changes it.
+  const actualUsed = allRows.reduce((s, r) => s + (r.nil_value ?? 0), 0);
   const popupBudget = { ...effCaps, finalized: !!b?.finalized } as GmBudget;
 
   // One budget box — read-only. Shows used / allotment as whole dollars; caps
