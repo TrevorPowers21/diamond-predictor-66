@@ -89,11 +89,16 @@ export default function GMRoster() {
             </TableHeader>
             <TableBody>
               {rows.map((r) => (
-                <TableRow key={r.player_id} className={cn(r.finalized && "bg-emerald-500/[0.04]")}>
+                <TableRow key={r.build_player_id} className={cn(r.finalized && "bg-emerald-500/[0.04]")}>
                   <TableCell className="sticky left-0 z-10 bg-background py-1.5">
-                    <Link to={profileRouteFor(r.player_id, r.position)} state={{ returnTo }} className="text-sm font-medium hover:text-primary hover:underline">
-                      {r.name}
-                    </Link>
+                    {r.player_id ? (
+                      <Link to={profileRouteFor(r.player_id, r.position)} state={{ returnTo }} className="text-sm font-medium hover:text-primary hover:underline">
+                        {r.name}
+                      </Link>
+                    ) : (
+                      // Coach-added recruit — no DB player record, so no profile to link.
+                      <span className="text-sm font-medium">{r.name}</span>
+                    )}
                   </TableCell>
                   <TableCell className="py-1.5">
                     {/* Read-only here; editing lives on the future player profile. */}

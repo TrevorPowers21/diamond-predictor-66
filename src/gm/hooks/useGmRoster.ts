@@ -18,7 +18,7 @@ export interface GmBuildOption {
 }
 
 export interface GmRow {
-  player_id: string;
+  player_id: string | null; // null for coach-added local players (no DB player row)
   build_player_id: string;
   name: string;
   position: string | null;
@@ -111,8 +111,10 @@ export function useGmRoster() {
         .select("id, player_id, custom_name, position_slot, nil_value, included_in_roster, player_snapshot, production_notes")
         .eq("build_id", activeBuildId)
         .eq("included_in_roster", true);
-      const rowsRaw = (bps || []).filter((r: any) => r.player_id);
-      const playerIds = rowsRaw.map((r: any) => r.player_id);
+      // Include coach-added local players (no player_id — they live in
+      // production_notes.localPlayer + custom_name) so freshmen/recruits appear.
+      const rowsRaw = (bps || []).filter((r: any) => r.player_id || r.custom_name);
+      const playerIds = rowsRaw.map((r: any) => r.player_id).filter(Boolean);
 
       const pById = new Map<string, any>();
       for (let i = 0; i < playerIds.length; i += 200) {
@@ -133,17 +135,19 @@ export function useGmRoster() {
       const eq = readPitchingWeights();
 
       const rows: GmRow[] = rowsRaw.map((r: any) => {
-        const p = pById.get(r.player_id);
+        const meta = parseBuildPlayerMeta(r.production_notes) as any;
+        const isLocal = !r.player_id;
+        const local = meta?.localPlayer ?? null;
+        const p = r.player_id ? pById.get(r.player_id) : null;
         const snap = r.player_snapshot || {};
-        const pitcher = isPitcherPos(r.position_slot) || isPitcherPos(p?.position);
-        const f = finByPlayer.get(r.player_id) || {};
+        const pitcher = isPitcherPos(r.position_slot) || isPitcherPos(p?.position) || isPitcherPos(local?.position);
+        const f = (r.player_id ? finByPlayer.get(r.player_id) : null) || {};
         const mv = snap.market_value ?? snap.twp_hitter_market_value ?? snap.twp_pitcher_market_value ?? null;
         const storedWar = pitcher ? (snap.p_war ?? null) : (snap.o_war ?? null);
 
         // Apply the coach's saved toggles (production_notes) on read so the GM
         // view matches Team Builder: depth role → innings/PA, dev_agg → rate.
         // Falls back to the stored baseline when there's no rate to recompute.
-        const meta = parseBuildPlayerMeta(r.production_notes) as any;
         const devAgg = Number.isFinite(Number(meta?.devAggressiveness)) ? Number(meta.devAggressiveness) : 0;
         const classTransition = meta?.classTransition ?? "SJ";
         const sessionDepthRole = pitcher
@@ -158,9 +162,11 @@ export function useGmRoster() {
         // SP/RP bucket that produced the WAR/market above) so an RP moved to a
         // starter reads as "SP" next to his SP-specific numbers — never a stored
         // "RP" beside a starter's WAR. Hitters keep their true fielding position.
-        const displayPosition = pitcher
-          ? pitcherSessionRole(sessionDepthRole)
-          : (p?.position ?? r.position_slot ?? null);
+        const displayPosition = isLocal
+          ? (r.position_slot ?? local?.position ?? null) // recruits: show their raw slot, not a role bucket
+          : pitcher
+            ? pitcherSessionRole(sessionDepthRole)
+            : (p?.position ?? r.position_slot ?? null);
 
         return {
           player_id: r.player_id,
@@ -179,9 +185,10 @@ export function useGmRoster() {
           actual_pay: f.actual_pay ?? r.nil_value ?? null,
           finalized: !!f.finalized,
           // 2027 roster → show the projection-season eligibility (class advanced
-          // one year), unless a GM override exists. Coach-added freshmen (no
-          // class_year, no transition) resolve to FR.
-          eligibility_class: f.eligibility_class ?? projectedEligibilityClass(p?.class_year, meta?.classTransition ?? null),
+          // one year), unless a GM override exists. Coach-added locals are
+          // incoming recruits → FR (their classTransition is a meaningless default).
+          eligibility_class:
+            f.eligibility_class ?? (isLocal ? "FR" : projectedEligibilityClass(p?.class_year, meta?.classTransition ?? null)),
         };
       });
       const budget: GmBudget | null = bud
@@ -203,8 +210,10 @@ export function useGmRoster() {
   }, [rows]);
 
   const savePlayer = useMutation({
-    mutationFn: async ({ playerId, patch }: { playerId: string; patch: Partial<GmRow> }) => {
+    mutationFn: async ({ playerId, patch }: { playerId: string | null; patch: Partial<GmRow> }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
+      // gm_player_finance keys on player_id — coach-added locals have none yet.
+      if (!playerId) throw new Error("Money for added recruits saves once they're linked to a player record");
       const upsert: any = { customer_team_id: effectiveTeamId, player_id: playerId, season, updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() };
       for (const k of ["scholarship_amount", "rev_share", "nil_amount", "other_amount", "actual_pay", "eligibility_class"] as const) {
         if (k in patch) upsert[k] = (patch as any)[k];
@@ -219,6 +228,7 @@ export function useGmRoster() {
   const finalizePlayer = useMutation({
     mutationFn: async (row: GmRow) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
+      if (!row.player_id) throw new Error("Finalize once the recruit is linked to a player record");
       const nextFinalized = !row.finalized;
       const { error } = await (supabase as any).from("gm_player_finance").upsert(
         { customer_team_id: effectiveTeamId, player_id: row.player_id, season, actual_pay: row.actual_pay, finalized: nextFinalized, finalized_at: nextFinalized ? new Date().toISOString() : null, updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() },
@@ -263,7 +273,7 @@ export function useGmRoster() {
     pitchers,
     budget,
     totals,
-    savePlayer: (playerId: string, patch: Partial<GmRow>) => savePlayer.mutate({ playerId, patch }),
+    savePlayer: (playerId: string | null, patch: Partial<GmRow>) => savePlayer.mutate({ playerId, patch }),
     finalizePlayer: (row: GmRow) => finalizePlayer.mutate(row),
     saveBudget: (patch: Partial<GmBudget>) => saveBudget.mutate(patch),
     finalizeBudget: (finalized: boolean) => saveBudget.mutate({ finalized }),
