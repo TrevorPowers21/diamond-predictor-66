@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogT
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Check, Plus, SlidersHorizontal, X } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
+import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
@@ -225,7 +226,7 @@ export default function GMRoster() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
-          <Table className="min-w-[1120px]">
+          <Table className="min-w-[1240px]">
             <TableHeader>
               <TableRow style={OSWALD} className="[&_th]:font-bold [&_th]:uppercase [&_th]:tracking-[0.08em] [&_th]:text-[11px] [&_th]:text-muted-foreground">
 
@@ -234,6 +235,8 @@ export default function GMRoster() {
                 <TableHead className="text-center">Position</TableHead>
                 <TableHead className="text-center">WAR</TableHead>
                 <TableHead className="text-center">Market Value</TableHead>
+                {/* Budget-share projection; falls back to Market Value when no budget. */}
+                <TableHead className="text-center">Projected Value</TableHead>
                 <TableHead className="text-right">Scholarship</TableHead>
                 <TableHead className="text-right">Rev Share</TableHead>
                 <TableHead className="text-right">NIL</TableHead>
@@ -271,6 +274,8 @@ export default function GMRoster() {
                       from the editable money cells. */}
                   <TableCell className="py-1.5 text-center font-mono text-sm font-semibold tabular-nums text-foreground">{num(r.war)}</TableCell>
                   <TableCell className="py-1.5 text-center font-mono text-sm font-semibold tabular-nums text-foreground">{money(r.market_value)}</TableCell>
+                  {/* Projected off the budget; Market Value when no budget is set. */}
+                  <TableCell className="py-1.5 text-center font-mono text-sm font-semibold tabular-nums text-foreground">{money(projectedValue(r) ?? r.market_value)}</TableCell>
                   {/* Money edits stay LOCAL (setRowField) until the checkmark writes them. */}
                   <TableCell className="py-1.5"><MoneyCell value={m.scholarship_amount} onSave={(n) => setRowField(r, "scholarship_amount", n)} /></TableCell>
                   <TableCell className="py-1.5"><MoneyCell value={m.rev_share} onSave={(n) => setRowField(r, "rev_share", n)} /></TableCell>
@@ -291,7 +296,7 @@ export default function GMRoster() {
                 );
               })}
               {rows.length === 0 ? (
-                <TableRow><TableCell colSpan={11} className="py-8 text-center text-muted-foreground">No players.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={12} className="py-8 text-center text-muted-foreground">No players.</TableCell></TableRow>
               ) : (
                 <TableRow className="bg-muted/40 font-medium">
                   <TableCell className="sticky left-0 z-10 bg-muted/40 text-right py-2 pr-3 font-semibold">Totals</TableCell>
@@ -299,6 +304,7 @@ export default function GMRoster() {
                   <TableCell />
                   <TableCell className="text-center font-mono text-sm py-2">{num(sum((r) => r.war), 1)}</TableCell>
                   <TableCell />
+                  <TableCell className="text-center font-mono text-sm py-2">{money(sum((r) => projectedValue(r) ?? r.market_value))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).scholarship_amount))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).rev_share))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).nil_amount))}</TableCell>
@@ -321,6 +327,19 @@ export default function GMRoster() {
   const totalAllot = (effCaps.rev_share_total ?? 0) + (effCaps.nil_total ?? 0) + (effCaps.other_total ?? 0) + (effCaps.scholarship_total ?? 0);
   // Used figures reflect the local row drafts, not just the saved DB values.
   const allRows = [...gm.hitters, ...gm.pitchers];
+
+  // Projected Value = Team Builder's budget-share: a player's position-weighted
+  // WAR as a share of the roster's total, times the total budget. (The program-
+  // tier multiplier cancels in numerator/denominator, so it's omitted; the 33
+  // floor matches TB's RAW_WAR_BENCHMARK.) Null when no budget → fall back to
+  // Market Value.
+  const posWeightedWar = (r: GmRow) => Number(r.war ?? 0) * getPositionValueMultiplier(r.position);
+  const rosterScore = allRows.reduce((s, r) => s + posWeightedWar(r), 0);
+  const projectedValue = (r: GmRow): number | null => {
+    if (totalAllot <= 0) return null;
+    const denom = Math.max(rosterScore, 33);
+    return denom > 0 ? Math.max(0, (posWeightedWar(r) / denom) * totalAllot) : null;
+  };
   const usedSum = (f: (m: RowMoney) => number | null) => allRows.reduce((s, r) => s + (f(effMoney(r)) ?? 0), 0);
   const revUsed = usedSum((m) => m.rev_share);
   const nilUsed = usedSum((m) => m.nil_amount);
