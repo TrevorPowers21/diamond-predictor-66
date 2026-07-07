@@ -5,11 +5,12 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import TeamSwitcher from "@/components/TeamSwitcher";
 import AreaToggle from "@/components/AreaToggle";
-import { LogOut, Menu, LayoutDashboard, Users, ChevronRight } from "lucide-react";
+import { LogOut, Menu, LayoutDashboard, Users, BarChart3, ChevronRight } from "lucide-react";
 
 const NAV = [
   { label: "Dashboard", href: "/gm", icon: LayoutDashboard, description: "Front office overview" },
   { label: "Roster Management", href: "/gm/roster", icon: Users, description: "Budget, builds & departures" },
+  { label: "Program Analytics", href: "/gm/analytics", icon: BarChart3, description: "Pay per position & per win" },
 ];
 
 /**
