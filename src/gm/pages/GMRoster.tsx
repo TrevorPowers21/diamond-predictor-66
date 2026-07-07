@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useGmRoster, DEPARTURE_REASONS, type GmBudget, type GmOtherLine, type GmRow, type LocalProjectionTier, type RowMoney } from "@/gm/hooks/useGmRoster";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Check, Pencil, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
@@ -18,6 +19,19 @@ const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
 const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
 const num = (n: number | null | undefined, d = 1) => (n == null ? "—" : n.toFixed(d));
 const REASON_LABEL: Record<string, string> = { draft: "Draft Pick", graduation: "Graduation", transfer: "Transfer", other: "Other" };
+
+/** A label with an on-hover tooltip (falls back to a plain span when no hint). */
+function HintLabel({ hint, className, style, children }: { hint?: string; className?: string; style?: CSSProperties; children: ReactNode }) {
+  if (!hint) return <span className={className} style={style}>{children}</span>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={cn(className, "cursor-help")} style={style}>{children}</span>
+      </TooltipTrigger>
+      <TooltipContent>{hint}</TooltipContent>
+    </Tooltip>
+  );
+}
 // Matches Team Builder's Add Incoming Freshman position list exactly.
 const ADD_POSITIONS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH", "TWP", "RHP", "LHP"] as const;
 const TIER_OPTIONS: { value: LocalProjectionTier; label: string }[] = [
@@ -141,7 +155,7 @@ function BudgetDialog({ open, onOpenChange, budget, coachTotal, onSave, onFinali
   const setLine = (i: number, patch: Partial<OtherDraft>) => setOther((prev) => prev.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const field = (label: string, val: number | null, set: (n: number | null) => void, hint?: string) => (
     <label className="flex items-center justify-between gap-4">
-      <span className={cn("text-[11px] font-semibold uppercase tracking-wider text-muted-foreground", hint && "cursor-help")} style={OSWALD} title={hint}>{label}</span>
+      <HintLabel hint={hint} style={OSWALD} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</HintLabel>
       <DollarInput value={val} onChange={set} />
     </label>
   );
@@ -401,7 +415,7 @@ export default function GMRoster() {
   // `accent` gives the Total box a standing gold highlight.
   const box = (label: string, used: number, total: number | null, accent?: boolean, hint?: string) => (
     <Card className={cn("flex flex-col items-center px-4 py-3.5 text-center", accent && "border-[#D4AF37]/55 bg-[#D4AF37]/[0.07]")}>
-      <div className={cn("text-[11px] font-bold uppercase tracking-[0.14em]", accent ? "text-[#D4AF37]" : "text-foreground/75", hint && "cursor-help")} style={OSWALD} title={hint}>{label}</div>
+      <HintLabel hint={hint} style={OSWALD} className={cn("text-[11px] font-bold uppercase tracking-[0.14em]", accent ? "text-[#D4AF37]" : "text-foreground/75")}>{label}</HintLabel>
       <div className="mt-2 flex items-baseline justify-center gap-1.5">
         <span className={cn("font-mono font-bold tabular-nums leading-none", accent ? "text-3xl text-[#D4AF37]" : "text-2xl text-foreground", total != null && used > total && "text-red-500")}>{money(used)}</span>
         {total != null && (
