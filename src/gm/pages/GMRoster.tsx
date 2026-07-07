@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Check, Plus, SlidersHorizontal, X } from "lucide-react";
+import { Check, Copy, Pencil, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { cn } from "@/lib/utils";
@@ -211,6 +211,12 @@ export default function GMRoster() {
   // by the row checkmark (rows) or Finalize & Push (budget).
   const [rowDrafts, setRowDrafts] = useState<Record<string, Partial<RowMoney>>>({});
   const [budgetDraft, setBudgetDraft] = useState<BudgetCaps | null>(null);
+  // Remove-player flow + build management dialogs.
+  const [removeRow, setRemoveRow] = useState<GmRow | null>(null);
+  const [removeBuildName, setRemoveBuildName] = useState("");
+  const [buildDialog, setBuildDialog] = useState<null | "new" | "rename">(null);
+  const [buildName, setBuildName] = useState("");
+  const [buildSource, setBuildSource] = useState<"default" | "current">("current");
 
   const effMoney = (r: GmRow): RowMoney => {
     const d = rowDrafts[r.build_player_id] ?? {};
@@ -232,7 +238,7 @@ export default function GMRoster() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
-          <Table className="min-w-[1240px]">
+          <Table className="min-w-[1280px]">
             <TableHeader>
               <TableRow style={OSWALD} className="[&_th]:font-bold [&_th]:uppercase [&_th]:tracking-[0.08em] [&_th]:text-[11px] [&_th]:text-muted-foreground">
 
@@ -249,6 +255,7 @@ export default function GMRoster() {
                 <TableHead className="text-right">Other</TableHead>
                 <TableHead className="text-right">Actual Pay</TableHead>
                 <TableHead className="text-center w-14">Final</TableHead>
+                <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -298,11 +305,20 @@ export default function GMRoster() {
                       title={shownFinalized ? "Finalized — click to reopen" : dirty ? "Save & finalize pay → sync to Team Builder" : "Finalize pay & sync to Team Builder"}
                     />
                   </TableCell>
+                  <TableCell className="py-1.5 text-center">
+                    <button
+                      onClick={() => { setRemoveRow(r); setRemoveBuildName(""); }}
+                      title="Remove from roster"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground/40 hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </TableCell>
                 </TableRow>
                 );
               })}
               {rows.length === 0 ? (
-                <TableRow><TableCell colSpan={12} className="py-8 text-center text-muted-foreground">No players.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={13} className="py-8 text-center text-muted-foreground">No players.</TableCell></TableRow>
               ) : (
                 <TableRow className="bg-muted/40 font-medium">
                   <TableCell className="sticky left-0 z-10 bg-muted/40 text-right py-2 pr-3 font-semibold">Totals</TableCell>
@@ -316,6 +332,7 @@ export default function GMRoster() {
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).nil_amount))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).other_amount))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => r.nil_value))}</TableCell>
+                  <TableCell />
                   <TableCell />
                 </TableRow>
               )}
@@ -400,7 +417,7 @@ export default function GMRoster() {
           />
           {gm.builds.length > 0 && (
             <Select value={gm.selectedBuildId ?? undefined} onValueChange={(v) => gm.setSelectedBuildId(v)}>
-              <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue placeholder="Select build" /></SelectTrigger>
+              <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue placeholder="Select build" /></SelectTrigger>
               <SelectContent>
                 {gm.builds.map((bd) => (
                   <SelectItem key={bd.id} value={bd.id} className="text-xs">{bd.name}</SelectItem>
@@ -408,6 +425,13 @@ export default function GMRoster() {
               </SelectContent>
             </Select>
           )}
+          {/* New build (copy off default or current) + rename current. */}
+          <Button variant="outline" size="icon" className="h-8 w-8" title="New build (copy)" onClick={() => { setBuildName(""); setBuildSource("current"); setBuildDialog("new"); }}>
+            <Copy className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="outline" size="icon" className="h-8 w-8" title="Rename current build" disabled={gm.activeBuildIsDefault} onClick={() => { setBuildName(gm.builds.find((b) => b.id === gm.selectedBuildId)?.name ?? ""); setBuildDialog("rename"); }}>
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
           <BudgetDialog
             budget={popupBudget}
             coachTotal={coachTotalBudget}
@@ -455,6 +479,68 @@ export default function GMRoster() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Remove player — copy-on-write off the default (named) then mark leaving. */}
+      <AlertDialog open={!!removeRow} onOpenChange={(o) => { if (!o) setRemoveRow(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle style={OSWALD}>Remove {removeRow?.name} from roster?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {gm.activeBuildIsDefault
+                ? "You're on the default roster — this starts a new working build off the default (name it below) and marks the player leaving. You'll set the departure reason later."
+                : "The player is marked leaving on this build. You'll set the departure reason later."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {gm.activeBuildIsDefault && (
+            <Input value={removeBuildName} onChange={(e) => setRemoveBuildName(e.target.value)} placeholder="New build name (e.g. 2027 Roster)" className="h-9 text-sm" />
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={gm.activeBuildIsDefault && !removeBuildName.trim()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => { if (removeRow) gm.removePlayer(removeRow, removeBuildName); setRemoveRow(null); }}
+            >Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* New / Rename build. */}
+      <Dialog open={buildDialog != null} onOpenChange={(o) => { if (!o) setBuildDialog(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle style={OSWALD}>{buildDialog === "rename" ? "Rename Build" : "New Build"}</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-1">
+            <Input value={buildName} onChange={(e) => setBuildName(e.target.value)} placeholder="Build name (e.g. 2027 Final Build)" className="h-9 text-sm" />
+            {buildDialog === "new" && (
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Copy from</span>
+                <Select value={buildSource} onValueChange={(v) => setBuildSource(v as "default" | "current")}>
+                  <SelectTrigger className="h-8 flex-1 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="current" className="text-xs">Current build</SelectItem>
+                    <SelectItem value="default" className="text-xs">Default roster</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              size="sm"
+              disabled={!buildName.trim()}
+              onClick={() => {
+                if (buildDialog === "rename" && gm.selectedBuildId) gm.renameBuild(gm.selectedBuildId, buildName);
+                else {
+                  const defaultId = gm.builds.find((b) => b.is_default)?.id;
+                  const source = buildSource === "default" ? defaultId ?? gm.selectedBuildId : gm.selectedBuildId;
+                  if (source) gm.createBuild(buildName, source);
+                }
+                setBuildDialog(null);
+              }}
+            >{buildDialog === "rename" ? "Save" : "Create"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

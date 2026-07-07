@@ -315,6 +315,105 @@ export function useGmRoster() {
     onError: (e: any) => toast.error(`Finalize failed: ${e.message}`),
   });
 
+  // ── Build management (copy-on-write) ──────────────────────────────────────
+  const activeBuildIsDefault = !!builds.find((bd) => bd.id === activeBuildId)?.is_default;
+
+  // Clone a build's roster rows + finance lines into a new named build. Returns
+  // the new build id. team_build_players + gm_player_finance carry together so
+  // scenario copies start identical.
+  const cloneBuildInto = async (name: string, sourceBuildId: string): Promise<string> => {
+    if (!effectiveTeamId) throw new Error("No team in scope");
+    const { data: src } = await (supabase as any).from("team_builds").select("team, academic_year, total_budget, depth_assignments, depth_placeholders").eq("id", sourceBuildId).maybeSingle();
+    const { data: nb, error } = await (supabase as any).from("team_builds").insert({
+      customer_team_id: effectiveTeamId, name: name.trim() || "Untitled Build", is_default: false,
+      team: src?.team ?? null, academic_year: src?.academic_year ?? season, total_budget: src?.total_budget ?? null,
+      depth_assignments: src?.depth_assignments ?? null, depth_placeholders: src?.depth_placeholders ?? null,
+    }).select("id").single();
+    if (error) throw error;
+    const newBuildId = nb.id as string;
+
+    const { data: srcRows } = await (supabase as any).from("team_build_players").select("*").eq("build_id", sourceBuildId);
+    const rows = srcRows || [];
+    if (rows.length) {
+      const clones = rows.map((r: any) => { const c = { ...r }; delete c.id; delete c.created_at; delete c.updated_at; c.build_id = newBuildId; return c; });
+      const { error: e2 } = await (supabase as any).from("team_build_players").insert(clones);
+      if (e2) throw e2;
+    }
+    // Map old→new build_player_id by natural key, then clone finance lines.
+    const keyOf = (r: any) => `${r.player_id ?? "L:" + (r.custom_name ?? "")}|${r.position_slot ?? ""}`;
+    const { data: newRows } = await (supabase as any).from("team_build_players").select("id, player_id, custom_name, position_slot").eq("build_id", newBuildId);
+    const newByKey = new Map<string, string>((newRows || []).map((nr: any) => [keyOf(nr), nr.id]));
+    const oldToNew = new Map<string, string>();
+    for (const sr of rows) { const nid = newByKey.get(keyOf(sr)); if (nid) oldToNew.set(sr.id, nid); }
+    const srcBpIds = rows.map((r: any) => r.id);
+    const srcFin: any[] = [];
+    for (let i = 0; i < srcBpIds.length; i += 200) {
+      const { data: fin } = await (supabase as any).from("gm_player_finance").select("*").in("build_player_id", srcBpIds.slice(i, i + 200));
+      srcFin.push(...(fin || []));
+    }
+    const finClones = srcFin
+      .map((f: any) => { const c = { ...f }; delete c.id; delete c.created_at; delete c.updated_at; c.build_player_id = oldToNew.get(f.build_player_id); return c; })
+      .filter((c: any) => c.build_player_id);
+    if (finClones.length) { const { error: e3 } = await (supabase as any).from("gm_player_finance").insert(finClones); if (e3) throw e3; }
+    return newBuildId;
+  };
+
+  const createBuild = useMutation({
+    mutationFn: async ({ name, sourceBuildId }: { name: string; sourceBuildId: string }) => cloneBuildInto(name, sourceBuildId),
+    onSuccess: (newBuildId) => { qc.invalidateQueries({ queryKey: ["gm-builds"] }); setPickedBuildId(newBuildId); toast.success("Build created"); },
+    onError: (e: any) => toast.error(`Create build failed: ${e.message}`),
+  });
+
+  const renameBuild = useMutation({
+    mutationFn: async ({ buildId, name }: { buildId: string; name: string }) => {
+      const { error } = await (supabase as any).from("team_builds").update({ name: name.trim() }).eq("id", buildId);
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["gm-builds"] }); toast.success("Build renamed"); },
+    onError: (e: any) => toast.error(`Rename failed: ${e.message}`),
+  });
+
+  // Remove a player: copy-on-write off the default first (into a named build),
+  // then mark the row leaving on the working build — included_in_roster=false,
+  // production_notes.rosterStatus=leaving (mirror for TB), and gm_player_finance
+  // roster_status=leaving (reason filled later).
+  const removePlayer = useMutation({
+    mutationFn: async ({ row, buildName }: { row: GmRow; buildName: string }) => {
+      if (!effectiveTeamId || !activeBuildId) throw new Error("No team/build in scope");
+      let targetBuildId = activeBuildId;
+      let targetBpId = row.build_player_id;
+      let switched: string | null = null;
+      if (activeBuildIsDefault) {
+        targetBuildId = await cloneBuildInto(buildName, activeBuildId);
+        switched = targetBuildId;
+        const { data: newRows } = await (supabase as any).from("team_build_players").select("id, player_id, custom_name").eq("build_id", targetBuildId);
+        const match = (newRows || []).find((nr: any) => (row.player_id ? nr.player_id === row.player_id : !nr.player_id && nr.custom_name === row.name));
+        if (!match) throw new Error("Could not locate the cloned roster row");
+        targetBpId = match.id;
+      }
+      // fetch current notes to preserve fields
+      const { data: tbp } = await (supabase as any).from("team_build_players").select("production_notes").eq("id", targetBpId).maybeSingle();
+      let obj: any = {}; try { obj = JSON.parse(tbp?.production_notes || "{}"); } catch { /* keep {} */ }
+      obj.__team_builder_metrics_v1 = true; obj.rosterStatus = "leaving";
+      const { error: e1 } = await (supabase as any).from("team_build_players")
+        .update({ included_in_roster: false, production_notes: JSON.stringify(obj) }).eq("id", targetBpId);
+      if (e1) throw e1;
+      const { error: e2 } = await (supabase as any).from("gm_player_finance").upsert(
+        { build_player_id: targetBpId, customer_team_id: effectiveTeamId, player_id: row.player_id, season, roster_status: "leaving", updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() },
+        { onConflict: "build_player_id" },
+      );
+      if (e2) throw e2;
+      return { switched, name: row.name };
+    },
+    onSuccess: ({ switched, name }) => {
+      qc.invalidateQueries({ queryKey: ["gm-builds"] });
+      qc.invalidateQueries({ queryKey: key });
+      if (switched) setPickedBuildId(switched);
+      toast.success(`Removed ${name} from roster`);
+    },
+    onError: (e: any) => toast.error(`Remove failed: ${e.message}`),
+  });
+
   return {
     teamName,
     season,
@@ -322,6 +421,7 @@ export function useGmRoster() {
     isLoading,
     builds,
     selectedBuildId: activeBuildId,
+    activeBuildIsDefault,
     setSelectedBuildId: setPickedBuildId,
     hitters,
     pitchers,
@@ -330,6 +430,9 @@ export function useGmRoster() {
     totals,
     finalizePlayer: (row: GmRow, money: RowMoney, finalize: boolean, onDone?: () => void) =>
       finalizePlayer.mutate({ row, money, finalize }, onDone ? { onSuccess: () => onDone() } : undefined),
+    createBuild: (name: string, sourceBuildId: string) => createBuild.mutate({ name, sourceBuildId }),
+    renameBuild: (buildId: string, name: string) => renameBuild.mutate({ buildId, name }),
+    removePlayer: (row: GmRow, buildName: string) => removePlayer.mutate({ row, buildName }),
     saveBudget: (patch: Partial<GmBudget>) => saveBudget.mutate(patch),
     finalizeBudget: (finalized: boolean) => saveBudget.mutate({ finalized }),
     commitBudget: (caps: { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown?: GmOtherLine[] | null }) => commitBudget.mutate(caps),
