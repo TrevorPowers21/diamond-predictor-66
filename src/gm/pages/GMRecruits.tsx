@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, GripVertical, ExternalLink, X, History } from "lucide-react";
+import { Plus, GripVertical, ExternalLink, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
@@ -77,7 +77,7 @@ function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onT
             </a>
           )}
           <button onClick={onTimeline} className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" title="Timeline">
-            <History className="h-3.5 w-3.5" />{eventCount > 0 && <span className="tabular-nums">{eventCount}</span>}
+            <Plus className="h-3.5 w-3.5" />{eventCount > 0 && <span className="tabular-nums">{eventCount}</span>}
           </button>
         </div>
       </div>
