@@ -37,6 +37,14 @@ export interface GmRecruit {
 
 export type NewRecruit = Omit<GmRecruit, "id" | "sort_order">;
 
+/** A dated timeline entry logged against a recruit. */
+export interface GmRecruitEvent {
+  id: string;
+  recruit_id: string;
+  event_date: string; // YYYY-MM-DD
+  note: string | null;
+}
+
 /** Position → recruit section. TWP is its own group. */
 export function recruitTypeForPosition(position: string): RecruitType {
   const p = (position || "").toUpperCase();
@@ -61,6 +69,41 @@ export function useGmRecruits() {
   });
 
   const years = useMemo(() => [...new Set(recruits.map((r) => r.class_year))].sort((a, b) => a - b), [recruits]);
+
+  // Timeline events for all this team's recruits, newest first.
+  const eventsKey = ["gm-recruit-events", effectiveTeamId ?? null];
+  const { data: events = [] } = useQuery({
+    queryKey: eventsKey,
+    enabled: !!user?.id && !!effectiveTeamId,
+    queryFn: async (): Promise<GmRecruitEvent[]> => {
+      const { data } = await (supabase as any)
+        .from("gm_recruit_events").select("id, recruit_id, event_date, note")
+        .eq("customer_team_id", effectiveTeamId)
+        .order("event_date", { ascending: false }).order("created_at", { ascending: false });
+      return (data || []) as GmRecruitEvent[];
+    },
+  });
+  const eventsByRecruit = useMemo(() => {
+    const m = new Map<string, GmRecruitEvent[]>();
+    for (const e of events) { const a = m.get(e.recruit_id) ?? []; a.push(e); m.set(e.recruit_id, a); }
+    return m;
+  }, [events]);
+
+  const addEvent = useMutation({
+    mutationFn: async ({ recruitId, eventDate, note }: { recruitId: string; eventDate: string; note: string }) => {
+      if (!effectiveTeamId) throw new Error("No team in scope");
+      const { error } = await (supabase as any).from("gm_recruit_events").insert({ recruit_id: recruitId, customer_team_id: effectiveTeamId, event_date: eventDate, note, created_by_user_id: user?.id ?? null });
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: eventsKey }); toast.success("Event logged"); },
+    onError: (e: any) => toast.error(`Add event failed: ${e.message}`),
+  });
+
+  const removeEvent = useMutation({
+    mutationFn: async (id: string) => { const { error } = await (supabase as any).from("gm_recruit_events").delete().eq("id", id); if (error) throw error; },
+    onSuccess: () => qc.invalidateQueries({ queryKey: eventsKey }),
+    onError: (e: any) => toast.error(`Remove event failed: ${e.message}`),
+  });
 
   const addRecruit = useMutation({
     mutationFn: async (r: NewRecruit) => {
@@ -109,5 +152,8 @@ export function useGmRecruits() {
     updateRecruit: (id: string, patch: Partial<NewRecruit>) => updateRecruit.mutate({ id, patch }),
     removeRecruit: (id: string) => removeRecruit.mutate(id),
     reorder: (orderedIds: string[]) => reorder.mutate(orderedIds),
+    eventsByRecruit,
+    addEvent: (recruitId: string, eventDate: string, note: string) => addEvent.mutate({ recruitId, eventDate, note }),
+    removeEvent: (id: string) => removeEvent.mutate(id),
   };
 }

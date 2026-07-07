@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, GripVertical, ExternalLink, X } from "lucide-react";
+import { Plus, GripVertical, ExternalLink, X, History } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
@@ -50,7 +50,7 @@ function StageSelect({ value, onChange }: { value: RecruitStage; onChange: (s: R
   );
 }
 
-function SortableRecruitCard({ recruit, onRemove, onStageChange }: { recruit: GmRecruit; onRemove: () => void; onStageChange: (s: RecruitStage) => void }) {
+function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onTimeline }: { recruit: GmRecruit; onRemove: () => void; onStageChange: (s: RecruitStage) => void; eventCount: number; onTimeline: () => void }) {
   const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({ id: recruit.id });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.55 : 1, zIndex: isDragging ? 10 : "auto", position: "relative" };
   const name = `${recruit.first_name ?? ""} ${recruit.last_name ?? ""}`.trim() || "Unnamed";
@@ -76,6 +76,9 @@ function SortableRecruitCard({ recruit, onRemove, onStageChange }: { recruit: Gm
               <ExternalLink className="h-3 w-3" /> Profile
             </a>
           )}
+          <button onClick={onTimeline} className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" title="Timeline">
+            <History className="h-3.5 w-3.5" />{eventCount > 0 && <span className="tabular-nums">{eventCount}</span>}
+          </button>
         </div>
       </div>
       <button onClick={onRemove} title="Remove" className="text-muted-foreground/40 hover:text-destructive"><X className="h-3.5 w-3.5" /></button>
@@ -88,6 +91,9 @@ export default function GMRecruits() {
   const [year, setYear] = useState<number>(YEARS[0]);
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState({ first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage });
+  const [timelineRecruit, setTimelineRecruit] = useState<GmRecruit | null>(null);
+  const [eventDate, setEventDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [eventNote, setEventNote] = useState("");
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const listFor = (t: RecruitType) => gm.recruits.filter((r) => r.class_year === year && r.player_type === t).sort((a, b) => a.sort_order - b.sort_order);
@@ -162,7 +168,7 @@ export default function GMRecruits() {
                   <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd(list)}>
                     <SortableContext items={list.map((r) => r.id)} strategy={verticalListSortingStrategy}>
                       <div className="space-y-2">
-                        {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} />)}
+                        {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(new Date().toISOString().slice(0, 10)); setTimelineRecruit(r); }} />)}
                       </div>
                     </SortableContext>
                   </DndContext>
@@ -230,13 +236,47 @@ export default function GMRecruits() {
               <Input value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="https://…" className="h-9 text-sm" />
             </div>
             <div>
-              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Notes</span>
-              <Textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} className="min-h-[60px] text-sm" />
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scouting Report</span>
+              <Textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Tools, projection, makeup…" className="min-h-[60px] text-sm" />
             </div>
           </div>
           <DialogFooter>
             <Button size="sm" disabled={!form.first_name.trim() && !form.last_name.trim()} onClick={submit}>Add To Board</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Recruit timeline — scouting report + dated event log */}
+      <Dialog open={!!timelineRecruit} onOpenChange={(o) => { if (!o) setTimelineRecruit(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle style={OSWALD}>{`${timelineRecruit?.first_name ?? ""} ${timelineRecruit?.last_name ?? ""}`.trim() || "Recruit"} — Timeline</DialogTitle>
+          </DialogHeader>
+          {timelineRecruit?.notes && (
+            <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scouting Report</div>
+              <div className="mt-1 text-sm text-foreground/90">{timelineRecruit.notes}</div>
+            </div>
+          )}
+          {/* Add event */}
+          <div className="space-y-2 rounded-md border border-border/60 p-2.5">
+            <Input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} className="h-8 w-auto text-xs" />
+            <Textarea value={eventNote} onChange={(e) => setEventNote(e.target.value)} placeholder="What happened — call, visit, camp, note…" className="min-h-[50px] text-sm" />
+            <Button size="sm" className="w-full" disabled={!eventNote.trim()} onClick={() => { if (timelineRecruit) { gm.addEvent(timelineRecruit.id, eventDate, eventNote.trim()); setEventNote(""); } }}>Add Event</Button>
+          </div>
+          {/* Timeline */}
+          <div className="max-h-[40vh] space-y-2.5 overflow-y-auto">
+            {(gm.eventsByRecruit.get(timelineRecruit?.id ?? "") ?? []).map((ev) => (
+              <div key={ev.id} className="flex gap-3 border-l-2 border-[#D4AF37]/40 pl-3">
+                <div className="w-20 shrink-0 pt-0.5 text-[11px] tabular-nums text-muted-foreground">{new Date(ev.event_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
+                <div className="flex-1 whitespace-pre-wrap text-sm">{ev.note}</div>
+                <button onClick={() => gm.removeEvent(ev.id)} className="text-muted-foreground/40 hover:text-destructive" title="Delete"><X className="h-3.5 w-3.5" /></button>
+              </div>
+            ))}
+            {(gm.eventsByRecruit.get(timelineRecruit?.id ?? "") ?? []).length === 0 && (
+              <p className="py-3 text-center text-xs text-muted-foreground">No events logged yet.</p>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
