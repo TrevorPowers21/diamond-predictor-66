@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Check, Pencil } from "lucide-react";
+import { Check } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { cn } from "@/lib/utils";
 
@@ -58,7 +58,6 @@ export default function GMRoster() {
   const gm = useGmRoster();
   const location = useLocation();
   const returnTo = `${location.pathname}${location.search}`;
-  const [editBudget, setEditBudget] = useState(false);
   // Season selector is display-only for now — data still reads gm.season.
   const [seasonSel, setSeasonSel] = useState<number>(gm.season);
 
@@ -151,8 +150,8 @@ export default function GMRoster() {
   const b = gm.budget;
   const totalAllot = (b?.rev_share_total ?? 0) + (b?.nil_total ?? 0) + (b?.other_total ?? 0) + (b?.scholarship_total ?? 0);
 
-  // One budget box. `total`/`save` present → editable allotment (used / cap);
-  // omit them for a plain used-only figure (Scholarship). Over-cap turns red.
+  // One budget box. `save` present → the allotment cap is always editable
+  // inline (used / cap); Total has no save (derived). Over-cap turns red.
   const box = (label: string, used: number, total: number | null, save: ((n: number | null) => void) | null) => (
     <Card className="px-4 py-3">
       <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground" style={OSWALD}>{label}</div>
@@ -160,11 +159,7 @@ export default function GMRoster() {
         <span className="text-sm font-bold font-mono tabular-nums text-foreground">{money(used)}</span>
         {(total != null || save) && <span className="text-xs text-muted-foreground">/</span>}
         {save ? (
-          editBudget ? (
-            <MoneyCell value={total} onSave={save} />
-          ) : (
-            <span className={cn("text-xs font-mono tabular-nums", total != null && used > total ? "text-red-500 font-semibold" : "text-muted-foreground")}>{money(total)}</span>
-          )
+          <MoneyCell value={total} onSave={save} />
         ) : total != null ? (
           <span className={cn("text-xs font-mono tabular-nums", used > total ? "text-red-500 font-semibold" : "text-muted-foreground")}>{money(total)}</span>
         ) : null}
@@ -207,10 +202,10 @@ export default function GMRoster() {
           Revenue Share · Total on the second row. */}
       <div className="space-y-3">
         <div className="flex items-center justify-end gap-2">
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setEditBudget((v) => !v)}>
-            <Pencil className="h-3.5 w-3.5" /> {editBudget ? "Done" : "Edit totals"}
-          </Button>
-          <FinalizeCheck finalized={!!b?.finalized} onClick={() => gm.finalizeBudget(!b?.finalized)} title={b?.finalized ? "Budget finalized — click to unlock" : "Finalize budget"} />
+          {/* Finalize = communication trigger to the coach's Team Builder, not a
+              lock — caps stay editable regardless of state. */}
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground" style={OSWALD}>Finalize budget</span>
+          <FinalizeCheck finalized={!!b?.finalized} onClick={() => gm.finalizeBudget(!b?.finalized)} title={b?.finalized ? "Budget finalized — click to reopen" : "Finalize budget & push to Team Builder"} />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {box("Scholarship", gm.totals.schUsed, b?.scholarship_total ?? null, (n) => gm.saveBudget({ scholarship_total: n }))}
