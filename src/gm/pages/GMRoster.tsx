@@ -193,22 +193,6 @@ function BudgetDialog({ open, onOpenChange, budget, coachTotal, onSave, onFinali
   );
 }
 
-/** The Finalized checkmark — always visible (grey/green). Grey click requests a
- *  finalize (page-level confirm); green click reopens the budget. */
-function FinalizeToggle({ finalized, onFinalize, onReopen }: { finalized: boolean; onFinalize: () => void; onReopen: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => (finalized ? onReopen() : onFinalize())}
-      title={finalized ? "Finalized — click to reopen (does not un-push the coach's budget)" : "Finalize & push the budget to the coach's Team Builder"}
-      className={cn("inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider cursor-pointer transition-colors", finalized ? "text-emerald-500" : "text-muted-foreground/50 hover:text-muted-foreground")}
-      style={OSWALD}
-    >
-      <Check className="h-3.5 w-3.5" /> Finalized
-    </button>
-  );
-}
-
 export default function GMRoster() {
   const gm = useGmRoster();
   const location = useLocation();
@@ -437,11 +421,6 @@ export default function GMRoster() {
           </Select>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <FinalizeToggle
-            finalized={!budgetDraft && !!b?.finalized}
-            onFinalize={() => setConfirmCaps(effCaps)}
-            onReopen={() => gm.finalizeBudget(false)}
-          />
           {gm.builds.length > 0 && (
             <Select value={gm.selectedBuildId ?? undefined} onValueChange={(v) => gm.setSelectedBuildId(v)}>
               <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue placeholder="Select build" /></SelectTrigger>
