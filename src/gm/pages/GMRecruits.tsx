@@ -4,7 +4,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useGmRecruits, recruitTypeForPosition, RECRUIT_STAGES, type GmRecruit, type GmRecruitReport, type RecruitStage, type RecruitType } from "@/gm/hooks/useGmRecruits";
+import { useGmRecruits, recruitTypeForPosition, RECRUIT_STAGES, RECRUIT_TIERS, type GmRecruit, type GmRecruitReport, type RecruitStage, type RecruitTier, type RecruitType } from "@/gm/hooks/useGmRecruits";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -52,12 +52,23 @@ function StageSelect({ value, onChange }: { value: RecruitStage; onChange: (s: R
   );
 }
 
-function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onTimeline, reports, onReports }: { recruit: GmRecruit; onRemove: () => void; onStageChange: (s: RecruitStage) => void; eventCount: number; onTimeline: () => void; reports: GmRecruitReport[]; onReports: () => void }) {
+function TierSelect({ value, onChange }: { value: RecruitTier | null; onChange: (t: RecruitTier) => void }) {
+  const info = RECRUIT_TIERS.find((t) => t.value === value);
+  return (
+    <Select value={value ?? undefined} onValueChange={(v) => onChange(v as RecruitTier)}>
+      <SelectTrigger className={cn("h-6 w-auto gap-1 rounded border-0 px-2 text-[10px] font-bold uppercase tracking-wider", info ? toneClass(info.tone) : "bg-muted text-muted-foreground")} style={OSWALD}>
+        <SelectValue placeholder="Set Tier" />
+      </SelectTrigger>
+      <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
+    </Select>
+  );
+}
+
+function SortableRecruitCard({ recruit, onRemove, onStageChange, onTierChange, eventCount, onTimeline, reports, onReports }: { recruit: GmRecruit; onRemove: () => void; onStageChange: (s: RecruitStage) => void; onTierChange: (t: RecruitTier) => void; eventCount: number; onTimeline: () => void; reports: GmRecruitReport[]; onReports: () => void }) {
   const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({ id: recruit.id });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.55 : 1, zIndex: isDragging ? 10 : "auto", position: "relative" };
   const name = `${recruit.first_name ?? ""} ${recruit.last_name ?? ""}`.trim() || "Unnamed";
   const locale = recruit.high_school ? `${recruit.high_school}${recruit.state ? ` (${recruit.state})` : ""}` : (recruit.state ?? "");
-  const latest = reports[0];
   return (
     <div ref={setNodeRef} style={style} className="flex items-start gap-2 rounded-md border border-border/60 bg-card/40 p-2.5">
       <button {...attributes} {...listeners} className="mt-0.5 cursor-grab text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing" title="Drag to reorder">
@@ -71,14 +82,11 @@ function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onT
         {(locale || recruit.travel_org) && (
           <div className="mt-0.5 truncate text-xs text-muted-foreground">{locale}{locale && recruit.travel_org ? " · " : ""}{recruit.travel_org}</div>
         )}
-        {latest?.body && (
-          <button onClick={onReports} className="mt-1 block w-full text-left" title="Scouting reports">
-            <div className="text-xs text-foreground/70 line-clamp-2 hover:text-foreground">{latest.body}</div>
-            <div className="mt-0.5 text-[10px] text-muted-foreground/70">{latest.author ? `${latest.author.split("@")[0]} · ` : ""}{fmtDate(latest.report_date)}</div>
-          </button>
-        )}
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <TierSelect value={recruit.projection_tier} onChange={onTierChange} />
           <StageSelect value={recruit.stage} onChange={onStageChange} />
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
           {recruit.link && (
             <a href={recruit.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
               <ExternalLink className="h-3 w-3" /> Profile
@@ -101,7 +109,7 @@ export default function GMRecruits() {
   const gm = useGmRecruits();
   const [year, setYear] = useState<number>(YEARS[0]);
   const [addOpen, setAddOpen] = useState(false);
-  const [form, setForm] = useState({ first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage });
+  const [form, setForm] = useState({ first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage, projection_tier: "" as RecruitTier | "" });
   const [timelineRecruit, setTimelineRecruit] = useState<GmRecruit | null>(null);
   const [eventDate, setEventDate] = useState<string>(today);
   const [eventNote, setEventNote] = useState("");
@@ -122,12 +130,13 @@ export default function GMRecruits() {
     gm.reorder(arrayMove(list, oldI, newI).map((r) => r.id));
   };
 
-  const openAdd = () => { setForm({ first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: year, stage: "evaluating" }); setAddOpen(true); };
+  const openAdd = () => { setForm({ first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: year, stage: "evaluating", projection_tier: "" }); setAddOpen(true); };
   const submit = () => {
     gm.addRecruit({
       class_year: form.class_year,
       player_type: recruitTypeForPosition(form.position),
       stage: form.stage,
+      projection_tier: form.projection_tier || null,
       first_name: form.first_name.trim() || null,
       last_name: form.last_name.trim() || null,
       high_school: form.high_school.trim() || null,
@@ -184,7 +193,7 @@ export default function GMRecruits() {
                   <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd(list)}>
                     <SortableContext items={list.map((r) => r.id)} strategy={verticalListSortingStrategy}>
                       <div className="space-y-2">
-                        {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} reports={gm.reportsByRecruit.get(r.id) ?? []} onReports={() => openReports(r)} />)}
+                        {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} onTierChange={(t) => gm.updateRecruit(r.id, { projection_tier: t })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} reports={gm.reportsByRecruit.get(r.id) ?? []} onReports={() => openReports(r)} />)}
                       </div>
                     </SortableContext>
                   </DndContext>
@@ -226,12 +235,21 @@ export default function GMRecruits() {
                 </Select>
               </div>
             </div>
-            <div>
-              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Stage</span>
-              <Select value={form.stage} onValueChange={(v) => setForm((f) => ({ ...f, stage: v as RecruitStage }))}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>{RECRUIT_STAGES.map((s) => <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>)}</SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Stage</span>
+                <Select value={form.stage} onValueChange={(v) => setForm((f) => ({ ...f, stage: v as RecruitStage }))}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>{RECRUIT_STAGES.map((s) => <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Projection Tier</span>
+                <Select value={form.projection_tier || undefined} onValueChange={(v) => setForm((f) => ({ ...f, projection_tier: v as RecruitTier }))}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Set tier" /></SelectTrigger>
+                  <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -294,7 +312,10 @@ export default function GMRecruits() {
       <Dialog open={!!reportsRecruit} onOpenChange={(o) => { if (!o) setReportsRecruit(null); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle style={OSWALD}>{`${reportsRecruit?.first_name ?? ""} ${reportsRecruit?.last_name ?? ""}`.trim() || "Recruit"} — Scouting Reports</DialogTitle>
+            <DialogTitle style={OSWALD} className="flex items-center gap-2">
+              <span>{`${reportsRecruit?.first_name ?? ""} ${reportsRecruit?.last_name ?? ""}`.trim() || "Recruit"} — Scouting Reports</span>
+              {(() => { const info = RECRUIT_TIERS.find((t) => t.value === reportsRecruit?.projection_tier); return info ? <span className={cn("rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", toneClass(info.tone))} style={OSWALD}>{info.label}</span> : null; })()}
+            </DialogTitle>
           </DialogHeader>
           {/* New report */}
           <div className="space-y-2 rounded-md border border-border/60 p-2.5">

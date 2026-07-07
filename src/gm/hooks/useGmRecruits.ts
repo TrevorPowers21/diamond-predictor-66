@@ -20,6 +20,16 @@ export const RECRUIT_STAGES = [
 ] as const;
 export type RecruitStage = (typeof RECRUIT_STAGES)[number]["value"];
 
+/** Projection tier for a recruit, high → low. `tone` drives the badge color. */
+export const RECRUIT_TIERS = [
+  { value: "draft_prospect", label: "Draft Prospect", tone: "gold" },
+  { value: "immediate_impact", label: "Immediate Impact", tone: "green" },
+  { value: "contributor", label: "Contributor", tone: "blue" },
+  { value: "role_player", label: "Role Player", tone: "amber" },
+  { value: "developmental", label: "Developmental", tone: "muted" },
+] as const;
+export type RecruitTier = (typeof RECRUIT_TIERS)[number]["value"];
+
 export interface GmRecruit {
   id: string;
   class_year: number;
@@ -30,8 +40,9 @@ export interface GmRecruit {
   state: string | null;
   travel_org: string | null;
   position: string | null;
-  notes: string | null; // scouting report
-  scouting_report_date: string | null; // YYYY-MM-DD
+  notes: string | null; // legacy single scouting report (superseded by gm_recruit_reports)
+  scouting_report_date: string | null;
+  projection_tier: RecruitTier | null;
   link: string | null;
   stage: RecruitStage;
   sort_order: number;
