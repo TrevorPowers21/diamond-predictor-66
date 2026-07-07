@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Check, Copy, Pencil, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { Check, Pencil, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { cn } from "@/lib/utils";
@@ -211,7 +211,7 @@ export default function GMRoster() {
   const [removeBuildName, setRemoveBuildName] = useState("");
   const [buildDialog, setBuildDialog] = useState<null | "new" | "rename">(null);
   const [buildName, setBuildName] = useState("");
-  const [buildSource, setBuildSource] = useState<"default" | "current">("current");
+  const [newBuildOpen, setNewBuildOpen] = useState(false);
   // Departures: batch reason modal (auto-opens once when reasons are pending) + list.
   const [reasonModalOpen, setReasonModalOpen] = useState(false);
   const [departuresOpen, setDeparturesOpen] = useState(false);
@@ -431,9 +431,9 @@ export default function GMRoster() {
               </SelectContent>
             </Select>
           )}
-          {/* New build (copy off default or current) + rename current. */}
-          <Button variant="outline" size="icon" className="h-8 w-8" title="New build (copy)" onClick={() => { setBuildName(""); setBuildSource("current"); setBuildDialog("new"); }}>
-            <Copy className="h-3.5 w-3.5" />
+          {/* New build (matches Team Builder's dialog) + rename current. */}
+          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setNewBuildOpen(true)}>
+            <Plus className="h-3.5 w-3.5" /> New Build
           </Button>
           <Button variant="outline" size="icon" className="h-8 w-8" title="Rename current build" disabled={gm.activeBuildIsDefault} onClick={() => { setBuildName(gm.builds.find((b) => b.id === gm.selectedBuildId)?.name ?? ""); setBuildDialog("rename"); }}>
             <Pencil className="h-3.5 w-3.5" />
@@ -537,42 +537,74 @@ export default function GMRoster() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* New / Rename build. */}
-      <Dialog open={buildDialog != null} onOpenChange={(o) => { if (!o) setBuildDialog(null); }}>
+      {/* Rename build. */}
+      <Dialog open={buildDialog === "rename"} onOpenChange={(o) => { if (!o) setBuildDialog(null); }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle style={OSWALD}>{buildDialog === "rename" ? "Rename Build" : "New Build"}</DialogTitle></DialogHeader>
-          <div className="space-y-3 py-1">
+          <DialogHeader><DialogTitle style={OSWALD}>Rename Build</DialogTitle></DialogHeader>
+          <div className="py-1">
             <Input value={buildName} onChange={(e) => setBuildName(e.target.value)} placeholder="Build name (e.g. 2027 Final Build)" className="h-9 text-sm" />
-            {buildDialog === "new" && (
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Copy from</span>
-                <Select value={buildSource} onValueChange={(v) => setBuildSource(v as "default" | "current")}>
-                  <SelectTrigger className="h-8 flex-1 text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="current" className="text-xs">Current build</SelectItem>
-                    <SelectItem value="default" className="text-xs">Default roster</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
           </div>
           <DialogFooter>
-            <Button
-              size="sm"
-              disabled={!buildName.trim()}
-              onClick={() => {
-                if (buildDialog === "rename" && gm.selectedBuildId) gm.renameBuild(gm.selectedBuildId, buildName);
-                else {
-                  const defaultId = gm.builds.find((b) => b.is_default)?.id;
-                  const source = buildSource === "default" ? defaultId ?? gm.selectedBuildId : gm.selectedBuildId;
-                  if (source) gm.createBuild(buildName, source);
-                }
-                setBuildDialog(null);
-              }}
-            >{buildDialog === "rename" ? "Save" : "Create"}</Button>
+            <Button size="sm" disabled={!buildName.trim()} onClick={() => { if (gm.selectedBuildId) gm.renameBuild(gm.selectedBuildId, buildName); setBuildDialog(null); }}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* New Build — matches the Team Builder dialog (start from default / clone). */}
+      {newBuildOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setNewBuildOpen(false)}>
+          <div
+            className="w-full max-w-md overflow-hidden rounded-lg border border-l-[3px] shadow-2xl"
+            style={{ backgroundColor: "#0a1428", borderColor: "#1f2d52", borderLeftColor: "#D4AF37" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2.5 border-b px-5 pb-4 pt-5" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+              <div className="flex h-8 w-8 items-center justify-center rounded-md border" style={{ backgroundColor: "rgba(212,175,55,0.10)", borderColor: "rgba(212,175,55,0.30)" }}>
+                <Plus className="h-4 w-4" style={{ color: "#D4AF37" }} />
+              </div>
+              <div>
+                <h3 className="font-[Oswald] text-[16px] font-bold uppercase leading-none tracking-[0.08em]" style={{ color: "#D4AF37" }}>Start a New Build</h3>
+                <p className="mt-1 text-[12px] text-slate-400">Begin fresh, or branch off an existing roster</p>
+              </div>
+            </div>
+            <div className="px-5 py-4">
+              <button
+                type="button"
+                onClick={() => { const dId = gm.builds.find((b) => b.is_default)?.id; if (dId) gm.createBuild("New Build", dId); setNewBuildOpen(false); }}
+                className="flex w-full items-center justify-between gap-3 rounded-md border px-3.5 py-3 text-left transition-colors duration-150 hover:bg-[#D4AF37]/[0.08]"
+                style={{ borderColor: "#1f2d52" }}
+              >
+                <span>
+                  <span className="block text-sm font-semibold text-slate-100">Start from default roster</span>
+                  <span className="block text-[12px] text-slate-500">Your returners, fresh slate</span>
+                </span>
+                <span className="shrink-0 font-[Oswald] text-[11px] font-bold uppercase tracking-[0.18em] text-[#D4AF37]">New</span>
+              </button>
+              {gm.builds.filter((b) => !b.is_default).length > 0 && (
+                <div className="mt-4">
+                  <div className="mb-1.5 font-[Oswald] text-[11px] font-bold uppercase tracking-[0.22em] text-[#D4AF37]">Or clone an existing build</div>
+                  <div className="max-h-[200px] overflow-y-auto rounded-md border" style={{ backgroundColor: "#040810", borderColor: "#1f2d52" }}>
+                    {gm.builds.filter((b) => !b.is_default).map((b) => (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => { gm.createBuild(`${b.name} (copy)`, b.id); setNewBuildOpen(false); }}
+                        className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left text-sm text-slate-100 transition-colors duration-150 hover:bg-[#D4AF37]/[0.08]"
+                        style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+                      >
+                        <span className="truncate">{b.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end border-t px-5 py-3" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+              <Button variant="ghost" size="sm" onClick={() => setNewBuildOpen(false)}>Cancel</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add local player (freshman / JUCO — no projection). */}
       <Dialog open={addPlayerOpen} onOpenChange={setAddPlayerOpen}>
