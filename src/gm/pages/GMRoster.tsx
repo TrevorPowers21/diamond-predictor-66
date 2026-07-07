@@ -227,7 +227,7 @@ export default function GMRoster() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
-          <Table className="min-w-[1120px]">
+          <Table className="min-w-[1240px]">
             <TableHeader>
               <TableRow style={OSWALD} className="[&_th]:font-bold [&_th]:uppercase [&_th]:tracking-[0.08em] [&_th]:text-[11px] [&_th]:text-muted-foreground">
 
@@ -236,6 +236,9 @@ export default function GMRoster() {
                 <TableHead className="text-center">Position</TableHead>
                 <TableHead className="text-center">WAR</TableHead>
                 <TableHead className="text-center">Market Value</TableHead>
+                {/* Agreed = the number the coach set with the player (flows in from
+                    Team Builder). The GM allocates the buckets below to match it. */}
+                <TableHead className="text-right">Agreed</TableHead>
                 <TableHead className="text-right">Scholarship</TableHead>
                 <TableHead className="text-right">Rev Share</TableHead>
                 <TableHead className="text-right">NIL</TableHead>
@@ -273,13 +276,24 @@ export default function GMRoster() {
                       from the editable money cells. */}
                   <TableCell className="py-1.5 text-center font-mono text-sm font-semibold tabular-nums text-foreground">{num(r.war)}</TableCell>
                   <TableCell className="py-1.5 text-center font-mono text-sm font-semibold tabular-nums text-foreground">{money(r.market_value)}</TableCell>
+                  {/* Agreed number from the coach — the target the buckets should sum to. */}
+                  <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums text-foreground/90">{money(r.nil_value)}</TableCell>
                   {/* Money edits stay LOCAL (setRowField) until the checkmark writes them. */}
                   <TableCell className="py-1.5"><MoneyCell value={m.scholarship_amount} onSave={(n) => setRowField(r, "scholarship_amount", n)} /></TableCell>
                   <TableCell className="py-1.5"><MoneyCell value={m.rev_share} onSave={(n) => setRowField(r, "rev_share", n)} /></TableCell>
                   <TableCell className="py-1.5"><MoneyCell value={m.nil_amount} onSave={(n) => setRowField(r, "nil_amount", n)} /></TableCell>
                   <TableCell className="py-1.5"><MoneyCell value={m.other_amount} onSave={(n) => setRowField(r, "other_amount", n)} /></TableCell>
-                  {/* Actual Pay is derived (Rev Share + NIL + Other) — read-only. */}
-                  <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums">{money(actualPayOf(m))}</TableCell>
+                  {/* Actual Pay = Rev+NIL+Other (read-only). Green when it matches the
+                      coach's Agreed number, amber while it doesn't yet. */}
+                  {(() => {
+                    const ap = actualPayOf(m);
+                    const agreed = r.nil_value;
+                    const matched = ap != null && agreed != null && Math.round(ap) === Math.round(agreed);
+                    const off = ap != null && agreed != null && !matched;
+                    return (
+                      <TableCell className={cn("py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums", matched ? "text-emerald-500" : off ? "text-amber-500" : "text-foreground")}>{money(ap)}</TableCell>
+                    );
+                  })()}
                   <TableCell className="py-1.5 text-center">
                     <FinalizeCheck
                       finalized={shownFinalized}
@@ -291,7 +305,7 @@ export default function GMRoster() {
                 );
               })}
               {rows.length === 0 ? (
-                <TableRow><TableCell colSpan={11} className="py-8 text-center text-muted-foreground">No players.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={12} className="py-8 text-center text-muted-foreground">No players.</TableCell></TableRow>
               ) : (
                 <TableRow className="bg-muted/40 font-medium">
                   <TableCell className="sticky left-0 z-10 bg-muted/40 text-right py-2 pr-3 font-semibold">Totals</TableCell>
@@ -299,6 +313,7 @@ export default function GMRoster() {
                   <TableCell />
                   <TableCell className="text-center font-mono text-sm py-2">{num(sum((r) => r.war), 1)}</TableCell>
                   <TableCell />
+                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => r.nil_value))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).scholarship_amount))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).rev_share))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).nil_amount))}</TableCell>
