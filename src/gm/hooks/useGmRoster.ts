@@ -517,6 +517,41 @@ export function useGmRoster() {
     onError: (e: any) => toast.error(`Finalize roster failed: ${e.message}`),
   });
 
+  // Add a LOCAL player (freshman / JUCO not in the DB): a team_build_players row
+  // with no player_id, so it has no projection (coach sees null WAR/Market) but
+  // shows position + financials on both builds. Copy-on-write off the default.
+  // Transfers WITH data are added via Team Builder, not here.
+  const addLocalPlayer = useMutation({
+    mutationFn: async ({ name, position, buildName }: { name: string; position: string; buildName: string }) => {
+      if (!effectiveTeamId || !activeBuildId) throw new Error("No team/build in scope");
+      let targetBuildId = activeBuildId;
+      let switched: string | null = null;
+      if (activeBuildIsDefault) {
+        targetBuildId = await cloneBuildInto(buildName, activeBuildId);
+        switched = targetBuildId;
+      }
+      const trimmed = name.trim();
+      const [first, ...rest] = trimmed.split(/\s+/);
+      const notes = JSON.stringify({
+        __team_builder_metrics_v1: true, rosterStatus: "returner",
+        localPlayer: { first_name: first ?? trimmed, last_name: rest.join(" "), position, team: teamName, from_team: null, conference: null },
+      });
+      const { error } = await (supabase as any).from("team_build_players").insert({
+        build_id: targetBuildId, player_id: null, source: "local", custom_name: trimmed,
+        position_slot: position, included_in_roster: true, production_notes: notes, nil_value: null,
+      });
+      if (error) throw error;
+      return { switched, name: trimmed };
+    },
+    onSuccess: ({ switched, name }) => {
+      qc.invalidateQueries({ queryKey: ["gm-builds"] });
+      qc.invalidateQueries({ queryKey: key });
+      if (switched) setPickedBuildId(switched);
+      toast.success(`Added ${name} to roster`);
+    },
+    onError: (e: any) => toast.error(`Add player failed: ${e.message}`),
+  });
+
   return {
     teamName,
     season,
@@ -541,6 +576,7 @@ export function useGmRoster() {
     setDepartureReason: (buildPlayerId: string, playerId: string | null, reason: string) => setDepartureReason.mutate({ buildPlayerId, playerId, reason }),
     restorePlayer: (buildPlayerId: string) => restorePlayer.mutate(buildPlayerId),
     finalizeRoster: (buildId: string) => finalizeRoster.mutate(buildId),
+    addLocalPlayer: (name: string, position: string, buildName: string) => addLocalPlayer.mutate({ name, position, buildName }),
     saveBudget: (patch: Partial<GmBudget>) => saveBudget.mutate(patch),
     finalizeBudget: (finalized: boolean) => saveBudget.mutate({ finalized }),
     commitBudget: (caps: { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown?: GmOtherLine[] | null }) => commitBudget.mutate(caps),
