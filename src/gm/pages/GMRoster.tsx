@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -56,6 +56,8 @@ function FinalizeCheck({ finalized, onClick, title }: { finalized: boolean; onCl
 
 export default function GMRoster() {
   const gm = useGmRoster();
+  const location = useLocation();
+  const returnTo = `${location.pathname}${location.search}`;
   const [editBudget, setEditBudget] = useState(false);
 
   const section = (title: string, rows: GmRow[]) => {
@@ -89,7 +91,7 @@ export default function GMRoster() {
               {rows.map((r) => (
                 <TableRow key={r.player_id} className={cn(r.finalized && "bg-emerald-500/[0.04]")}>
                   <TableCell className="sticky left-0 z-10 bg-background py-1.5">
-                    <Link to={profileRouteFor(r.player_id, r.position)} className="text-sm font-medium hover:text-primary hover:underline">
+                    <Link to={profileRouteFor(r.player_id, r.position)} state={{ returnTo }} className="text-sm font-medium hover:text-primary hover:underline">
                       {r.name}
                     </Link>
                   </TableCell>

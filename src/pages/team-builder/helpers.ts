@@ -170,6 +170,24 @@ export const playerCurrentClass = (p: BuildPlayer | null | undefined): string | 
   return null;
 };
 
+// Eligibility class for the PROJECTION season (one year ahead of the stored
+// class_year, since a build represents next season's roster). A coach's
+// explicit class_transition — whose 2nd letter is the projection-season class —
+// wins; otherwise advance class_year one year. Incoming players with neither
+// (coach-added freshmen: no class_year, no transition) default to FR.
+const CLASS_ADVANCE: Record<string, string> = { FR: "SO", SO: "JR", JR: "SR", SR: "GR", GR: "GR" };
+const TRANSITION_TO_CLASS: Record<string, string> = { FS: "SO", SJ: "JR", JS: "SR", GR: "GR" };
+export const projectedEligibilityClass = (
+  classYear: string | null | undefined,
+  classTransition: string | null | undefined,
+): string => {
+  const ct = String(classTransition || "").toUpperCase();
+  if (TRANSITION_TO_CLASS[ct]) return TRANSITION_TO_CLASS[ct];
+  const cy = String(classYear || "").toUpperCase().replace(/^R-/, "");
+  if (CLASS_ADVANCE[cy]) return CLASS_ADVANCE[cy];
+  return "FR";
+};
+
 // ---------------------------------------------------------------------------
 // Functions migrated from TeamBuilder.tsx inline — canonical home is here.
 // Import these in useLoadBuild and any other hook that needs them.

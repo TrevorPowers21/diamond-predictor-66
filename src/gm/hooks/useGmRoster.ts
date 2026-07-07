@@ -1,11 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { toast } from "sonner";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
-import { parseBuildPlayerMeta } from "@/pages/team-builder/helpers";
+import { parseBuildPlayerMeta, projectedEligibilityClass } from "@/pages/team-builder/helpers";
 import { effectivePitcherWar, effectiveHitterWar, effectiveMarket, pitcherSessionRole } from "@/lib/effectiveProjection";
 
 const isPitcherPos = (s: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
@@ -54,7 +55,20 @@ export function useGmRoster() {
   const { user, effectiveTeamId, availableTeams } = useAuth();
   const qc = useQueryClient();
   const season = PROJECTION_SEASON;
-  const [pickedBuildId, setPickedBuildId] = useState<string | null>(null);
+  // Selected build lives in the URL (?build=…) so navigating to a player profile
+  // and back restores the same build the user was viewing, not the default.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const pickedBuildId = searchParams.get("build");
+  const setPickedBuildId = (id: string | null) =>
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (id) next.set("build", id);
+        else next.delete("build");
+        return next;
+      },
+      { replace: true },
+    );
 
   const teamName = useMemo(
     () => availableTeams?.find((t) => t.id === effectiveTeamId)?.name ?? null,
@@ -164,7 +178,10 @@ export function useGmRoster() {
           other_amount: f.other_amount ?? null,
           actual_pay: f.actual_pay ?? r.nil_value ?? null,
           finalized: !!f.finalized,
-          eligibility_class: f.eligibility_class ?? p?.class_year ?? null,
+          // 2027 roster → show the projection-season eligibility (class advanced
+          // one year), unless a GM override exists. Coach-added freshmen (no
+          // class_year, no transition) resolve to FR.
+          eligibility_class: f.eligibility_class ?? projectedEligibilityClass(p?.class_year, meta?.classTransition ?? null),
         };
       });
       const budget: GmBudget | null = bud
