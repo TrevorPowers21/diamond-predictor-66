@@ -1,7 +1,10 @@
 import { Fragment, useMemo, useState } from "react";
 import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
+import { useWarBenchmarks } from "@/hooks/useTeamWarSnapshots";
+import { CURRENT_SEASON } from "@/lib/seasonConstants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DollarSign, TrendingUp, Gauge, Wallet, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +26,22 @@ function payGroup(pos: string | null | undefined): string {
   return "Other";
 }
 const GROUP_ORDER = ["Catcher", "Corner Infield", "Middle Infield", "Outfield", "DH / Utility", "Starters", "Relievers", "Other"];
+
+/** Build value vs a benchmark team, with a colored delta. */
+function CompareCell({ label, mine, theirs }: { label: string; mine: number; theirs: number | null }) {
+  const delta = theirs != null ? mine - theirs : null;
+  const color = delta == null || Math.abs(delta) < 0.1 ? "text-muted-foreground" : delta > 0 ? "text-emerald-500" : "text-red-500";
+  return (
+    <div className="px-4 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground/60" style={OSWALD}>{label}</div>
+      <div className="mt-1 flex items-baseline gap-2">
+        <span className="font-mono text-xl font-bold tabular-nums">{mine.toFixed(1)}</span>
+        {theirs != null && <span className="text-[11px] text-muted-foreground">vs {theirs.toFixed(1)}</span>}
+      </div>
+      {delta != null && <div className={cn("text-[11px] font-semibold tabular-nums", color)}>{delta > 0 ? "+" : ""}{delta.toFixed(1)}</div>}
+    </div>
+  );
+}
 
 function Tile({ label, value, sub, icon, accent }: { label: string; value: string; sub?: string; icon: React.ReactNode; accent?: "gold" | "blue" | "emerald" | "red" }) {
   const color = accent === "gold" ? "text-[#D4AF37]" : accent === "blue" ? "text-blue-400" : accent === "emerald" ? "text-emerald-400" : accent === "red" ? "text-red-400" : "text-white";
@@ -52,6 +71,12 @@ export default function GMAnalytics() {
   const hitOwar = gm.hitters.reduce((s, r) => s + (r.war ?? 0), 0);
   const rotationPwar = gm.pitchers.filter((p) => (p.position || "").toUpperCase() === "SP").reduce((s, r) => s + (r.war ?? 0), 0);
   const bullpenPwar = gm.pitchers.filter((p) => (p.position || "").toUpperCase() !== "SP").reduce((s, r) => s + (r.war ?? 0), 0);
+  const lineupOwar = gm.hitters.slice(0, 9).reduce((s, r) => s + (r.war ?? 0), 0); // gm.hitters is sorted by WAR desc
+
+  // Benchmark vs last completed season's champions (national + conference).
+  const { data: benchmarks = [] } = useWarBenchmarks(CURRENT_SEASON);
+  const [benchId, setBenchId] = useState<string | null>(null);
+  const bench = benchmarks.find((b) => b.source_team_id === benchId) ?? benchmarks[0] ?? null;
 
   // Pay by position group — with the players in each group for the dropdown.
   const byGroup = useMemo(() => {
@@ -123,6 +148,40 @@ export default function GMAnalytics() {
               <div className="mt-1 font-mono text-xl font-bold tabular-nums">{num(x.value, 1)}</div>
             </div>
           ))}
+        </CardContent>
+      </Card>
+
+      {/* WAR vs top teams — this build's projected WAR against champions */}
+      <Card className="border-border/60">
+        <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40 flex flex-row items-center justify-between gap-3">
+          <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>WAR vs Top Teams</CardTitle>
+          {benchmarks.length > 0 && (
+            <Select value={bench?.source_team_id ?? undefined} onValueChange={setBenchId}>
+              <SelectTrigger className="h-8 w-[240px] text-xs"><SelectValue placeholder="Pick a benchmark" /></SelectTrigger>
+              <SelectContent>
+                {benchmarks.map((b) => (
+                  <SelectItem key={b.source_team_id} value={b.source_team_id} className="text-xs">
+                    {b.team_name}{b.is_national_champ ? " — National Champ" : b.conference ? ` — ${b.conference}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </CardHeader>
+        <CardContent className="p-0">
+          {bench ? (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-border/40">
+                <CompareCell label="Total WAR" mine={totalWar} theirs={Number(bench.prorated_total_owar) + Number(bench.prorated_total_pwar)} />
+                <CompareCell label="Lineup oWAR" mine={lineupOwar} theirs={Number(bench.prorated_starting_lineup_owar)} />
+                <CompareCell label="Rotation pWAR" mine={rotationPwar} theirs={Number(bench.prorated_rotation_pwar)} />
+                <CompareCell label="Bullpen pWAR" mine={bullpenPwar} theirs={Number(bench.prorated_bullpen_pwar)} />
+              </div>
+              <p className="px-4 py-2 text-[10px] text-muted-foreground border-t border-border/40">Your projected build vs {bench.team_name}'s prorated (56-game) actual WAR. Green = ahead.</p>
+            </>
+          ) : (
+            <p className="p-4 text-sm text-muted-foreground">No benchmark data available for this season.</p>
+          )}
         </CardContent>
       </Card>
 
