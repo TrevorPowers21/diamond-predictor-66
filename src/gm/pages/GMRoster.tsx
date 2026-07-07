@@ -149,7 +149,7 @@ export default function GMRoster() {
   };
 
   const b = gm.budget;
-  const totalAllot = (b?.rev_share_total ?? 0) + (b?.nil_total ?? 0) + (b?.other_total ?? 0);
+  const totalAllot = (b?.rev_share_total ?? 0) + (b?.nil_total ?? 0) + (b?.other_total ?? 0) + (b?.scholarship_total ?? 0);
 
   // One budget box. `total`/`save` present → editable allotment (used / cap);
   // omit them for a plain used-only figure (Scholarship). Over-cap turns red.
@@ -174,13 +174,13 @@ export default function GMRoster() {
 
   return (
     <div className="space-y-4">
-      {/* Header: team (left) · season + build filters (right) */}
+      {/* Header: team + season (left) · build filter (right) */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-bold" style={OSWALD}>{gm.teamName ?? "Front Office"}</h2>
-          <p className="text-xs text-muted-foreground">{gm.teamName ? "Front Office" : "Pick a team above."}</p>
-        </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <div>
+            <h2 className="text-lg font-bold" style={OSWALD}>{gm.teamName ?? "Front Office"}</h2>
+            <p className="text-xs text-muted-foreground">{gm.teamName ? "Front Office" : "Pick a team above."}</p>
+          </div>
           {/* Season selector — display only for now; season switching is wired later. */}
           <Select value={String(seasonSel)} onValueChange={(v) => setSeasonSel(Number(v))}>
             <SelectTrigger className="h-8 w-[100px] text-xs"><SelectValue /></SelectTrigger>
@@ -190,17 +190,17 @@ export default function GMRoster() {
               ))}
             </SelectContent>
           </Select>
-          {gm.builds.length > 0 && (
-            <Select value={gm.selectedBuildId ?? undefined} onValueChange={(v) => gm.setSelectedBuildId(v)}>
-              <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue placeholder="Select build" /></SelectTrigger>
-              <SelectContent>
-                {gm.builds.map((bd) => (
-                  <SelectItem key={bd.id} value={bd.id} className="text-xs">{bd.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
         </div>
+        {gm.builds.length > 0 && (
+          <Select value={gm.selectedBuildId ?? undefined} onValueChange={(v) => gm.setSelectedBuildId(v)}>
+            <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue placeholder="Select build" /></SelectTrigger>
+            <SelectContent>
+              {gm.builds.map((bd) => (
+                <SelectItem key={bd.id} value={bd.id} className="text-xs">{bd.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       {/* Budget — each bucket in its own box: Scholarship · NIL · Other on top,
@@ -213,7 +213,7 @@ export default function GMRoster() {
           <FinalizeCheck finalized={!!b?.finalized} onClick={() => gm.finalizeBudget(!b?.finalized)} title={b?.finalized ? "Budget finalized — click to unlock" : "Finalize budget"} />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {box("Scholarship", gm.totals.schUsed, null, null)}
+          {box("Scholarship", gm.totals.schUsed, b?.scholarship_total ?? null, (n) => gm.saveBudget({ scholarship_total: n }))}
           {box("NIL", gm.totals.nilUsed, b?.nil_total ?? null, (n) => gm.saveBudget({ nil_total: n }))}
           {box("Other", gm.totals.otherUsed, b?.other_total ?? null, (n) => gm.saveBudget({ other_total: n }))}
         </div>

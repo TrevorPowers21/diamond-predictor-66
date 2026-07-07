@@ -41,6 +41,7 @@ export interface GmBudget {
   rev_share_total: number | null;
   nil_total: number | null;
   other_total: number | null;
+  scholarship_total: number | null;
   finalized: boolean;
 }
 
@@ -192,7 +193,7 @@ export function useGmRoster() {
         };
       });
       const budget: GmBudget | null = bud
-        ? { rev_share_total: bud.rev_share_total, nil_total: bud.nil_total, other_total: bud.other_total, finalized: !!bud.finalized }
+        ? { rev_share_total: bud.rev_share_total, nil_total: bud.nil_total, other_total: bud.other_total, scholarship_total: bud.scholarship_total, finalized: !!bud.finalized }
         : null;
       return { rows, budget };
     },
