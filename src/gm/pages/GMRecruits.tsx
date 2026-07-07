@@ -68,7 +68,7 @@ function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onT
         {(locale || recruit.travel_org) && (
           <div className="mt-0.5 truncate text-xs text-muted-foreground">{locale}{locale && recruit.travel_org ? " · " : ""}{recruit.travel_org}</div>
         )}
-        {recruit.notes && <div className="mt-1 text-xs text-foreground/80">{recruit.notes}</div>}
+        {recruit.notes && <div className="mt-1 text-xs text-foreground/70 line-clamp-2">{recruit.notes}</div>}
         <div className="mt-1.5 flex items-center gap-2">
           <StageSelect value={recruit.stage} onChange={onStageChange} />
           {recruit.link && (

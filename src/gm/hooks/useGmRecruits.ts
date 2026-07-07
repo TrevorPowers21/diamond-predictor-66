@@ -15,7 +15,8 @@ export const RECRUIT_STAGES = [
   { value: "official", label: "Official Visit", tone: "gold" },
   { value: "committed", label: "Committed", tone: "green" },
   { value: "signed", label: "Signed", tone: "green" },
-  { value: "passed", label: "Passed", tone: "red" },
+  { value: "committed_elsewhere", label: "Committed Elsewhere", tone: "red" },
+  { value: "passed", label: "Passed", tone: "muted" },
 ] as const;
 export type RecruitStage = (typeof RECRUIT_STAGES)[number]["value"];
 
