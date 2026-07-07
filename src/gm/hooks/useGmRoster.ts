@@ -42,6 +42,14 @@ export interface GmOtherLine {
   amount: number;
 }
 
+/** The editable money buckets for one roster row. */
+export interface RowMoney {
+  scholarship_amount: number | null;
+  rev_share: number | null;
+  nil_amount: number | null;
+  other_amount: number | null;
+}
+
 export interface GmBudget {
   rev_share_total: number | null;
   nil_total: number | null;
@@ -237,25 +245,36 @@ export function useGmRoster() {
     onError: (e: any) => toast.error(`Save failed: ${e.message}`),
   });
 
+  // The per-player checkmark is the ONLY write for a row: it persists the row's
+  // (locally-edited) money buckets to gm_player_finance, computes Actual Pay =
+  // Rev Share + NIL + Other (Scholarship excluded), and — when finalizing —
+  // communicates that Actual Pay to the coach's build (team_build_players.nil_value).
   const finalizePlayer = useMutation({
-    mutationFn: async (row: GmRow) => {
+    mutationFn: async ({ row, money, finalize }: { row: GmRow; money: RowMoney; finalize: boolean }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
       if (!row.player_id) throw new Error("Finalize once the recruit is linked to a player record");
-      const nextFinalized = !row.finalized;
+      const nextFinalized = finalize;
+      const rev = money.rev_share, nilA = money.nil_amount, other = money.other_amount;
+      const actualPay = rev == null && nilA == null && other == null ? null : Number(rev ?? 0) + Number(nilA ?? 0) + Number(other ?? 0);
       const { error } = await (supabase as any).from("gm_player_finance").upsert(
-        { customer_team_id: effectiveTeamId, player_id: row.player_id, season, actual_pay: row.actual_pay, finalized: nextFinalized, finalized_at: nextFinalized ? new Date().toISOString() : null, updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() },
+        {
+          customer_team_id: effectiveTeamId, player_id: row.player_id, season,
+          scholarship_amount: money.scholarship_amount, rev_share: rev, nil_amount: nilA, other_amount: other, actual_pay: actualPay,
+          finalized: nextFinalized, finalized_at: nextFinalized ? new Date().toISOString() : null,
+          updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString(),
+        },
         { onConflict: "customer_team_id,player_id,season" },
       );
       if (error) throw error;
       if (nextFinalized) {
-        const { error: e2 } = await (supabase as any).from("team_build_players").update({ nil_value: row.actual_pay }).eq("id", row.build_player_id);
+        const { error: e2 } = await (supabase as any).from("team_build_players").update({ nil_value: actualPay }).eq("id", row.build_player_id);
         if (e2) throw e2;
       }
-      return nextFinalized;
+      return { nextFinalized, name: row.name };
     },
-    onSuccess: (nextFinalized, row) => {
+    onSuccess: ({ nextFinalized, name }) => {
       qc.invalidateQueries({ queryKey: key });
-      if (nextFinalized) toast.success(`Finalized pay for ${row.name} — synced to Team Builder`);
+      if (nextFinalized) toast.success(`Finalized pay for ${name} — synced to Team Builder`);
     },
     onError: (e: any) => toast.error(`Finalize failed: ${e.message}`),
   });
@@ -313,7 +332,8 @@ export function useGmRoster() {
     budget,
     totals,
     savePlayer: (playerId: string | null, patch: Partial<GmRow>) => savePlayer.mutate({ playerId, patch }),
-    finalizePlayer: (row: GmRow) => finalizePlayer.mutate(row),
+    finalizePlayer: (row: GmRow, money: RowMoney, finalize: boolean, onDone?: () => void) =>
+      finalizePlayer.mutate({ row, money, finalize }, onDone ? { onSuccess: () => onDone() } : undefined),
     saveBudget: (patch: Partial<GmBudget>) => saveBudget.mutate(patch),
     finalizeBudget: (finalized: boolean) => saveBudget.mutate({ finalized }),
     commitBudget: (caps: { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown?: GmOtherLine[] | null }) => commitBudget.mutate(caps),

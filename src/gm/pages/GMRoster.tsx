@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { useGmRoster, type GmBudget, type GmOtherLine, type GmRow } from "@/gm/hooks/useGmRoster";
+import { useGmRoster, type GmBudget, type GmOtherLine, type GmRow, type RowMoney } from "@/gm/hooks/useGmRoster";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
@@ -199,6 +199,23 @@ export default function GMRoster() {
   const [seasonSel, setSeasonSel] = useState<number>(gm.season);
   // Caps staged for the Finalize & Push confirmation (from popup or checkmark).
   const [confirmCaps, setConfirmCaps] = useState<BudgetCaps | null>(null);
+  // Local, unsaved edits — money buckets per row and the budget caps. Typing
+  // stays here (shown live) and is only written to the DB / pushed to the coach
+  // by the row checkmark (rows) or Finalize & Push (budget).
+  const [rowDrafts, setRowDrafts] = useState<Record<string, Partial<RowMoney>>>({});
+  const [budgetDraft, setBudgetDraft] = useState<BudgetCaps | null>(null);
+
+  const effMoney = (r: GmRow): RowMoney => {
+    const d = rowDrafts[r.build_player_id] ?? {};
+    const pick = (k: keyof RowMoney) => (k in d ? d[k] ?? null : ((r[k] as number | null) ?? null));
+    return { scholarship_amount: pick("scholarship_amount"), rev_share: pick("rev_share"), nil_amount: pick("nil_amount"), other_amount: pick("other_amount") };
+  };
+  const actualPayOf = (m: RowMoney): number | null =>
+    m.rev_share == null && m.nil_amount == null && m.other_amount == null ? null : Number(m.rev_share ?? 0) + Number(m.nil_amount ?? 0) + Number(m.other_amount ?? 0);
+  const setRowField = (r: GmRow, field: keyof RowMoney, val: number | null) =>
+    setRowDrafts((prev) => ({ ...prev, [r.build_player_id]: { ...prev[r.build_player_id], [field]: val } }));
+  const rowDirty = (r: GmRow) => !!rowDrafts[r.build_player_id];
+  const clearRowDraft = (r: GmRow) => setRowDrafts((prev) => { const n = { ...prev }; delete n[r.build_player_id]; return n; });
 
   const section = (title: string, rows: GmRow[]) => {
     const sum = (f: (r: GmRow) => number | null) => rows.reduce((s, r) => s + (f(r) ?? 0), 0);
@@ -228,8 +245,12 @@ export default function GMRoster() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((r) => (
-                <TableRow key={r.build_player_id} className={cn(r.finalized && "bg-emerald-500/[0.04]")}>
+              {rows.map((r) => {
+                const m = effMoney(r);
+                const dirty = rowDirty(r);
+                const shownFinalized = r.finalized && !dirty; // unsaved edits read as not-finalized
+                return (
+                <TableRow key={r.build_player_id} className={cn(shownFinalized && "bg-emerald-500/[0.04]", dirty && "bg-amber-500/[0.05]")}>
                   <TableCell className="sticky left-0 z-10 bg-background py-1.5">
                     {r.player_id ? (
                       <Link to={profileRouteFor(r.player_id, r.position)} state={{ returnTo }} className="text-sm font-medium hover:text-primary hover:underline">
@@ -252,17 +273,23 @@ export default function GMRoster() {
                       from the editable money cells. */}
                   <TableCell className="py-1.5 text-center font-mono text-sm font-semibold tabular-nums text-foreground">{num(r.war)}</TableCell>
                   <TableCell className="py-1.5 text-center font-mono text-sm font-semibold tabular-nums text-foreground">{money(r.market_value)}</TableCell>
-                  <TableCell className="py-1.5"><MoneyCell value={r.scholarship_amount} onSave={(n) => gm.savePlayer(r.player_id, { scholarship_amount: n })} /></TableCell>
-                  <TableCell className="py-1.5"><MoneyCell value={r.rev_share} onSave={(n) => gm.savePlayer(r.player_id, { rev_share: n })} /></TableCell>
-                  <TableCell className="py-1.5"><MoneyCell value={r.nil_amount} onSave={(n) => gm.savePlayer(r.player_id, { nil_amount: n })} /></TableCell>
-                  <TableCell className="py-1.5"><MoneyCell value={r.other_amount} onSave={(n) => gm.savePlayer(r.player_id, { other_amount: n })} /></TableCell>
+                  {/* Money edits stay LOCAL (setRowField) until the checkmark writes them. */}
+                  <TableCell className="py-1.5"><MoneyCell value={m.scholarship_amount} onSave={(n) => setRowField(r, "scholarship_amount", n)} /></TableCell>
+                  <TableCell className="py-1.5"><MoneyCell value={m.rev_share} onSave={(n) => setRowField(r, "rev_share", n)} /></TableCell>
+                  <TableCell className="py-1.5"><MoneyCell value={m.nil_amount} onSave={(n) => setRowField(r, "nil_amount", n)} /></TableCell>
+                  <TableCell className="py-1.5"><MoneyCell value={m.other_amount} onSave={(n) => setRowField(r, "other_amount", n)} /></TableCell>
                   {/* Actual Pay is derived (Rev Share + NIL + Other) — read-only. */}
-                  <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums">{money(r.actual_pay)}</TableCell>
+                  <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums">{money(actualPayOf(m))}</TableCell>
                   <TableCell className="py-1.5 text-center">
-                    <FinalizeCheck finalized={r.finalized} onClick={() => gm.finalizePlayer(r)} title={r.finalized ? "Finalized pay — click to unlock" : "Finalize pay & sync to Team Builder"} />
+                    <FinalizeCheck
+                      finalized={shownFinalized}
+                      onClick={() => gm.finalizePlayer(r, m, !shownFinalized, () => clearRowDraft(r))}
+                      title={shownFinalized ? "Finalized — click to reopen" : dirty ? "Save & finalize pay → sync to Team Builder" : "Finalize pay & sync to Team Builder"}
+                    />
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
               {rows.length === 0 ? (
                 <TableRow><TableCell colSpan={11} className="py-8 text-center text-muted-foreground">No players.</TableCell></TableRow>
               ) : (
@@ -272,11 +299,11 @@ export default function GMRoster() {
                   <TableCell />
                   <TableCell className="text-center font-mono text-sm py-2">{num(sum((r) => r.war), 1)}</TableCell>
                   <TableCell />
-                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => r.scholarship_amount))}</TableCell>
-                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => r.rev_share))}</TableCell>
-                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => r.nil_amount))}</TableCell>
-                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => r.other_amount))}</TableCell>
-                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => r.actual_pay))}</TableCell>
+                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).scholarship_amount))}</TableCell>
+                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).rev_share))}</TableCell>
+                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).nil_amount))}</TableCell>
+                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).other_amount))}</TableCell>
+                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => actualPayOf(effMoney(r))))}</TableCell>
                   <TableCell />
                 </TableRow>
               )}
@@ -288,7 +315,19 @@ export default function GMRoster() {
   };
 
   const b = gm.budget;
-  const totalAllot = (b?.rev_share_total ?? 0) + (b?.nil_total ?? 0) + (b?.other_total ?? 0) + (b?.scholarship_total ?? 0);
+  // Effective caps: local budget draft (unsaved Save) overrides the DB budget.
+  const dbCaps: BudgetCaps = { rev_share_total: b?.rev_share_total ?? null, nil_total: b?.nil_total ?? null, scholarship_total: b?.scholarship_total ?? null, other_total: b?.other_total ?? null, other_breakdown: b?.other_breakdown ?? null };
+  const effCaps: BudgetCaps = budgetDraft ?? dbCaps;
+  const totalAllot = (effCaps.rev_share_total ?? 0) + (effCaps.nil_total ?? 0) + (effCaps.other_total ?? 0) + (effCaps.scholarship_total ?? 0);
+  // Used figures reflect the local row drafts, not just the saved DB values.
+  const allRows = [...gm.hitters, ...gm.pitchers];
+  const usedSum = (f: (m: RowMoney) => number | null) => allRows.reduce((s, r) => s + (f(effMoney(r)) ?? 0), 0);
+  const revUsed = usedSum((m) => m.rev_share);
+  const nilUsed = usedSum((m) => m.nil_amount);
+  const otherUsed = usedSum((m) => m.other_amount);
+  const schUsed = usedSum((m) => m.scholarship_amount);
+  const actualUsed = allRows.reduce((s, r) => s + (actualPayOf(effMoney(r)) ?? 0), 0);
+  const popupBudget = { ...effCaps, finalized: !!b?.finalized } as GmBudget;
 
   // One budget box — read-only. Shows used / allotment as whole dollars; caps
   // are edited only in the Manage Budget popup. Over-cap turns the used red.
@@ -326,8 +365,8 @@ export default function GMRoster() {
         </div>
         <div className="flex items-center gap-2">
           <FinalizeToggle
-            finalized={!!b?.finalized}
-            onFinalize={() => setConfirmCaps({ rev_share_total: b?.rev_share_total ?? null, nil_total: b?.nil_total ?? null, scholarship_total: b?.scholarship_total ?? null, other_total: b?.other_total ?? null, other_breakdown: b?.other_breakdown ?? null })}
+            finalized={!budgetDraft && !!b?.finalized}
+            onFinalize={() => setConfirmCaps(effCaps)}
             onReopen={() => gm.finalizeBudget(false)}
           />
           {gm.builds.length > 0 && (
@@ -341,8 +380,8 @@ export default function GMRoster() {
             </Select>
           )}
           <BudgetDialog
-            budget={b}
-            onSave={(caps) => gm.saveBudget({ ...caps, finalized: false })}
+            budget={popupBudget}
+            onSave={(caps) => setBudgetDraft(caps)}
             onFinalize={(caps) => setConfirmCaps(caps)}
           />
         </div>
@@ -352,13 +391,13 @@ export default function GMRoster() {
           Revenue Share · Total on the second row. */}
       <div className="space-y-3">
         <div className="grid grid-cols-3 gap-3">
-          {box("Scholarship", gm.totals.schUsed, b?.scholarship_total ?? null)}
-          {box("NIL", gm.totals.nilUsed, b?.nil_total ?? null)}
-          {box("Other", gm.totals.otherUsed, b?.other_total ?? null)}
+          {box("Scholarship", schUsed, effCaps.scholarship_total)}
+          {box("NIL", nilUsed, effCaps.nil_total)}
+          {box("Other", otherUsed, effCaps.other_total)}
         </div>
         <div className="grid grid-cols-2 gap-3">
-          {box("Revenue Share", gm.totals.revUsed, b?.rev_share_total ?? null)}
-          {box("Total", gm.totals.actualUsed, totalAllot || null, true)}
+          {box("Revenue Share", revUsed, effCaps.rev_share_total)}
+          {box("Total", actualUsed, totalAllot || null, true)}
         </div>
       </div>
 
@@ -382,7 +421,7 @@ export default function GMRoster() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction disabled={gm.isFinalizing} onClick={() => { if (confirmCaps) gm.commitBudget(confirmCaps); setConfirmCaps(null); }}>Confirm &amp; Push</AlertDialogAction>
+            <AlertDialogAction disabled={gm.isFinalizing} onClick={() => { if (confirmCaps) gm.commitBudget(confirmCaps); setConfirmCaps(null); setBudgetDraft(null); }}>Confirm &amp; Push</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
