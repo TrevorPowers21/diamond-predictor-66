@@ -231,9 +231,9 @@ export default function GMRoster() {
   // are edited only in the Manage Budget popup. Over-cap turns the used red.
   // `accent` gives the Total box a standing gold highlight.
   const box = (label: string, used: number, total: number | null, accent?: boolean) => (
-    <Card className={cn("px-4 py-3", accent && "border-[#D4AF37]/55 bg-[#D4AF37]/[0.07]")}>
+    <Card className={cn("flex flex-col items-center px-4 py-3.5 text-center", accent && "border-[#D4AF37]/55 bg-[#D4AF37]/[0.07]")}>
       <div className={cn("text-[11px] font-bold uppercase tracking-[0.14em]", accent ? "text-[#D4AF37]" : "text-muted-foreground")} style={OSWALD}>{label}</div>
-      <div className="mt-1.5 flex items-baseline gap-1.5">
+      <div className="mt-2 flex items-baseline justify-center gap-1.5">
         <span className={cn("font-mono font-bold tabular-nums leading-none", accent ? "text-3xl text-[#D4AF37]" : "text-2xl text-foreground", total != null && used > total && "text-red-500")}>{money(used)}</span>
         {total != null && (
           <span className={cn("text-xs font-mono tabular-nums", used > total ? "text-red-500 font-semibold" : "text-muted-foreground")}>/ {money(total)}</span>
@@ -275,7 +275,7 @@ export default function GMRoster() {
 
       {/* Budget — each bucket in its own box: Scholarship · NIL · Other on top,
           Revenue Share · Total on the second row. */}
-      <div className="space-y-3 max-w-3xl">
+      <div className="space-y-3">
         <div className="flex items-center justify-end gap-2">
           {b?.finalized && (
             <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-500" style={OSWALD}>
