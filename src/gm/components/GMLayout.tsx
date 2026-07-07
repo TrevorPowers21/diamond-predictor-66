@@ -8,7 +8,7 @@ import AreaToggle from "@/components/AreaToggle";
 import { LogOut, Menu, LayoutDashboard, Users, ChevronRight } from "lucide-react";
 
 const NAV = [
-  { label: "Home", href: "/gm", icon: LayoutDashboard, description: "Front office overview" },
+  { label: "Dashboard", href: "/gm", icon: LayoutDashboard, description: "Front office overview" },
   { label: "Roster Management", href: "/gm/roster", icon: Users, description: "Budget, builds & departures" },
 ];
 
