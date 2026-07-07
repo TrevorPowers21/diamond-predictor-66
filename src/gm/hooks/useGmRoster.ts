@@ -140,9 +140,15 @@ export function useGmRoster() {
         for (const p of pl || []) pById.set(p.id, p);
       }
 
-      const { data: fin } = await (supabase as any)
-        .from("gm_player_finance").select("*").eq("customer_team_id", effectiveTeamId).eq("season", season);
-      const finByPlayer = new Map<string, any>((fin || []).map((f: any) => [f.player_id, f]));
+      // Finance is now keyed per-build (build_player_id), not season-level, so
+      // scenario builds each hold their own line. Fetch this build's rows.
+      const buildPlayerIds = rowsRaw.map((r: any) => r.id);
+      const finByBp = new Map<string, any>();
+      for (let i = 0; i < buildPlayerIds.length; i += 200) {
+        const { data: fin } = await (supabase as any)
+          .from("gm_player_finance").select("*").in("build_player_id", buildPlayerIds.slice(i, i + 200));
+        for (const f of fin || []) finByBp.set(f.build_player_id, f);
+      }
       const { data: bud } = await (supabase as any)
         .from("gm_budget").select("*").eq("customer_team_id", effectiveTeamId).eq("season", season).maybeSingle();
       // The coach's total_budget flows one-way INTO the GM (like a player's
@@ -161,7 +167,7 @@ export function useGmRoster() {
         const p = r.player_id ? pById.get(r.player_id) : null;
         const snap = r.player_snapshot || {};
         const pitcher = isPitcherPos(r.position_slot) || isPitcherPos(p?.position) || isPitcherPos(local?.position);
-        const f = (r.player_id ? finByPlayer.get(r.player_id) : null) || {};
+        const f = finByBp.get(r.id) || {};
         const mv = snap.market_value ?? snap.twp_hitter_market_value ?? snap.twp_pitcher_market_value ?? null;
         const storedWar = pitcher ? (snap.p_war ?? null) : (snap.o_war ?? null);
 
@@ -235,22 +241,6 @@ export function useGmRoster() {
     return { revUsed: sum((r) => r.rev_share), nilUsed: sum((r) => r.nil_amount), otherUsed: sum((r) => r.other_amount), schUsed: sum((r) => r.scholarship_amount), actualUsed: sum((r) => r.actual_pay) };
   }, [rows]);
 
-  const savePlayer = useMutation({
-    mutationFn: async ({ playerId, patch }: { playerId: string | null; patch: Partial<GmRow> }) => {
-      if (!effectiveTeamId) throw new Error("No team in scope");
-      // gm_player_finance keys on player_id — coach-added locals have none yet.
-      if (!playerId) throw new Error("Money for added recruits saves once they're linked to a player record");
-      const upsert: any = { customer_team_id: effectiveTeamId, player_id: playerId, season, updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() };
-      for (const k of ["scholarship_amount", "rev_share", "nil_amount", "other_amount", "actual_pay", "eligibility_class"] as const) {
-        if (k in patch) upsert[k] = (patch as any)[k];
-      }
-      const { error } = await (supabase as any).from("gm_player_finance").upsert(upsert, { onConflict: "customer_team_id,player_id,season" });
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: key }),
-    onError: (e: any) => toast.error(`Save failed: ${e.message}`),
-  });
-
   // The per-player checkmark is the ONLY write for a row: it persists the row's
   // (locally-edited) money buckets to gm_player_finance, computes Actual Pay =
   // Rev Share + NIL + Other (Scholarship excluded), and — when finalizing —
@@ -258,18 +248,18 @@ export function useGmRoster() {
   const finalizePlayer = useMutation({
     mutationFn: async ({ row, money, finalize }: { row: GmRow; money: RowMoney; finalize: boolean }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
-      if (!row.player_id) throw new Error("Finalize once the recruit is linked to a player record");
       const nextFinalized = finalize;
       const rev = money.rev_share, nilA = money.nil_amount, other = money.other_amount;
       const actualPay = rev == null && nilA == null && other == null ? null : Number(rev ?? 0) + Number(nilA ?? 0) + Number(other ?? 0);
+      // Keyed per-build (build_player_id) — works for local/added players too.
       const { error } = await (supabase as any).from("gm_player_finance").upsert(
         {
-          customer_team_id: effectiveTeamId, player_id: row.player_id, season,
+          build_player_id: row.build_player_id, customer_team_id: effectiveTeamId, player_id: row.player_id, season,
           scholarship_amount: money.scholarship_amount, rev_share: rev, nil_amount: nilA, other_amount: other, actual_pay: actualPay,
           finalized: nextFinalized, finalized_at: nextFinalized ? new Date().toISOString() : null,
           updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString(),
         },
-        { onConflict: "customer_team_id,player_id,season" },
+        { onConflict: "build_player_id" },
       );
       if (error) throw error;
       if (nextFinalized) {
@@ -338,7 +328,6 @@ export function useGmRoster() {
     budget,
     coachTotalBudget,
     totals,
-    savePlayer: (playerId: string | null, patch: Partial<GmRow>) => savePlayer.mutate({ playerId, patch }),
     finalizePlayer: (row: GmRow, money: RowMoney, finalize: boolean, onDone?: () => void) =>
       finalizePlayer.mutate({ row, money, finalize }, onDone ? { onSuccess: () => onDone() } : undefined),
     saveBudget: (patch: Partial<GmBudget>) => saveBudget.mutate(patch),
