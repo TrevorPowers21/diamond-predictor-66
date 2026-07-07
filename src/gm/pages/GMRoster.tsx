@@ -232,7 +232,7 @@ export default function GMRoster() {
   // `accent` gives the Total box a standing gold highlight.
   const box = (label: string, used: number, total: number | null, accent?: boolean) => (
     <Card className={cn("flex flex-col items-center px-4 py-3.5 text-center", accent && "border-[#D4AF37]/55 bg-[#D4AF37]/[0.07]")}>
-      <div className={cn("text-[11px] font-bold uppercase tracking-[0.14em]", accent ? "text-[#D4AF37]" : "text-muted-foreground")} style={OSWALD}>{label}</div>
+      <div className={cn("text-[11px] font-bold uppercase tracking-[0.14em]", accent ? "text-[#D4AF37]" : "text-foreground/75")} style={OSWALD}>{label}</div>
       <div className="mt-2 flex items-baseline justify-center gap-1.5">
         <span className={cn("font-mono font-bold tabular-nums leading-none", accent ? "text-3xl text-[#D4AF37]" : "text-2xl text-foreground", total != null && used > total && "text-red-500")}>{money(used)}</span>
         {total != null && (
