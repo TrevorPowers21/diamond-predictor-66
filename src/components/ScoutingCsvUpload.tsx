@@ -6,7 +6,7 @@ import { computeHitterPowerRatings, computePitchingPowerRatings } from "@/lib/po
 import { calculateStuffPlus, type PitchRow, type PopConstants } from "@/savant/lib/stuffPlusEngine";
 import { supabase } from "@/integrations/supabase/client";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
-import { Upload, Download, FileSpreadsheet } from "lucide-react";
+import { Upload, Download, FileSpreadsheet, CheckCircle2 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Ephemeral scouting-CSV upload. A program exports THEIR OWN licensed data
@@ -187,6 +187,7 @@ export default function ScoutingCsvUpload() {
   const [kind, setKind] = useState<Kind>("hitter");
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<{ n: number; unit: string } | null>(null);
 
   const cols = colsFor(kind);
 
@@ -230,6 +231,7 @@ export default function ScoutingCsvUpload() {
     if (file) fileRef.current && (fileRef.current.value = ""); // allow re-upload of same file
     if (!file) return;
     setBusy(true);
+    setDone(null);
     try {
       const text = await file.text();
       const { headers, rows } = parseCsv(text);
@@ -313,7 +315,9 @@ export default function ScoutingCsvUpload() {
 
       const csv = [outHeaders.join(","), ...outRows.map((r) => r.map(csvEscape).join(","))].join("\n");
       download(`rstr-iq-${kind}-ratings.csv`, csv);
-      toast({ title: `Processed ${computed} ${kind === "stuff" ? "pitches" : kind === "hitter" ? "hitters" : "pitchers"}`, description: "Computed in your browser and downloaded. Nothing was saved to RSTR IQ." });
+      const unit = kind === "stuff" ? "pitches" : kind === "hitter" ? "hitters" : "pitchers";
+      setDone({ n: computed, unit });
+      toast({ title: `Processed ${computed} ${unit}`, description: "Computed in your browser and downloaded. Nothing was saved to RSTR IQ." });
     } catch (err: any) {
       toast({ title: "Couldn't read that file", description: String(err?.message ?? err), variant: "destructive" });
     } finally {
@@ -330,7 +334,7 @@ export default function ScoutingCsvUpload() {
         {/* Type toggle */}
         <div className="flex rounded-md border border-border/60 p-0.5 w-fit">
           {(["hitter", "pitcher", "stuff"] as const).map((k) => (
-            <button key={k} onClick={() => setKind(k)}
+            <button key={k} onClick={() => { setKind(k); setDone(null); }}
               className={`rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${kind === k ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}>
               {KIND_LABEL[k]}
             </button>
@@ -350,6 +354,13 @@ export default function ScoutingCsvUpload() {
           <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={onFile} />
           <Button size="sm" className="gap-1.5" disabled={busy} onClick={() => fileRef.current?.click()}><Upload className="h-4 w-4" /> {busy ? "Processing…" : "Upload CSV"}</Button>
         </div>
+
+        {done && (
+          <div className="flex items-center gap-2.5 rounded-md border border-emerald-500/40 bg-emerald-500/[0.08] px-3 py-2.5 text-sm">
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+            <span><span className="font-semibold text-foreground">Upload completed</span> — processed {done.n} {done.unit}. Results downloaded; nothing was saved.</span>
+          </div>
+        )}
 
         {/* Column key */}
         <div>
