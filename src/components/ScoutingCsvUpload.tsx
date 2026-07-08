@@ -1,0 +1,282 @@
+import { useRef, useState } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import { computeHitterPowerRatings, computePitchingPowerRatings } from "@/lib/powerRatings";
+import { Upload, Download, ShieldCheck, FileSpreadsheet } from "lucide-react";
+
+// ---------------------------------------------------------------------------
+// Ephemeral scouting-CSV upload. A program exports THEIR OWN licensed data
+// from whatever scouting/evaluation service they use, fills our template, and
+// uploads it here. We parse + run the same power-rating math in the browser and
+// hand the results straight back as a download. NOTHING is written to any table
+// or shown elsewhere — the source data never lands in our database.
+// ---------------------------------------------------------------------------
+
+type Kind = "hitter" | "pitcher";
+
+interface Col {
+  label: string;        // our template header
+  key: string;          // engine sub-metric key (or "" for context-only columns)
+  desc: string;
+  aliases?: string[];   // other names a service might use for the same metric
+  required?: boolean;
+}
+
+// Context columns carried through for identification + the full projection layer.
+const HITTER_CONTEXT: Col[] = [
+  { label: "Name", key: "", desc: "Player name", required: true },
+  { label: "Position", key: "", desc: "C, 1B, 2B, SS, 3B, LF, CF, RF, DH" },
+  { label: "Class", key: "", desc: "FR / SO / JR / SR / GR" },
+  { label: "Division", key: "", desc: "D1, D2, or JUCO" },
+  { label: "Conference", key: "", desc: "Their conference / league" },
+  { label: "PA", key: "", desc: "Plate appearances (sample size)" },
+  { label: "AVG", key: "", desc: "Batting average", required: true },
+  { label: "OBP", key: "", desc: "On-base percentage", required: true },
+  { label: "SLG", key: "", desc: "Slugging percentage", required: true },
+];
+// Power-rating inputs (what the model actually scores).
+const HITTER_METRICS: Col[] = [
+  { label: "Contact%", key: "contact", desc: "Contact rate", aliases: ["Contact", "Z-Contact%"] },
+  { label: "LineDrive%", key: "lineDrive", desc: "Line-drive rate", aliases: ["LD%"] },
+  { label: "AvgExitVelo", key: "avgExitVelo", desc: "Average exit velocity (mph)", aliases: ["Avg EV", "Exit Velo"] },
+  { label: "PopUp%", key: "popUp", desc: "Pop-up rate", aliases: ["IFFB%"] },
+  { label: "BB%", key: "bb", desc: "Walk rate", aliases: ["Walk%"] },
+  { label: "Chase%", key: "chase", desc: "Chase rate", aliases: ["O-Swing%"] },
+  { label: "Barrel%", key: "barrel", desc: "Barrel rate", aliases: ["Brl%"] },
+  { label: "EV90", key: "ev90", desc: "90th-percentile exit velo", aliases: ["EV 90", "Max EV"] },
+  { label: "Pull%", key: "pull", desc: "Pull rate" },
+  { label: "LA10-30%", key: "la10_30", desc: "Launch angle 10–30° (sweet-spot) rate", aliases: ["Sweet-Spot%"] },
+  { label: "GB%", key: "gb", desc: "Ground-ball rate" },
+];
+
+const PITCHER_CONTEXT: Col[] = [
+  { label: "Name", key: "", desc: "Player name", required: true },
+  { label: "Throws", key: "", desc: "L / R" },
+  { label: "Class", key: "", desc: "FR / SO / JR / SR / GR" },
+  { label: "Division", key: "", desc: "D1, D2, or JUCO" },
+  { label: "Conference", key: "", desc: "Their conference / league" },
+  { label: "IP", key: "", desc: "Innings pitched (sample size)" },
+  { label: "ERA", key: "", desc: "Earned run average" },
+  { label: "FIP", key: "", desc: "Fielding-independent pitching" },
+  { label: "WHIP", key: "", desc: "Walks + hits per inning" },
+  { label: "K/9", key: "", desc: "Strikeouts per 9" },
+  { label: "BB/9", key: "", desc: "Walks per 9" },
+  { label: "HR/9", key: "", desc: "Home runs per 9" },
+];
+const PITCHER_METRICS: Col[] = [
+  { label: "Whiff%", key: "miss_pct", desc: "Whiff / miss rate", aliases: ["Miss%", "SwStr%"] },
+  { label: "BB%", key: "bb_pct", desc: "Walk rate", aliases: ["Walk%"] },
+  { label: "HardHit%", key: "hard_hit_pct", desc: "Hard-hit rate allowed", aliases: ["HH%"] },
+  { label: "InZoneWhiff%", key: "in_zone_whiff_pct", desc: "In-zone whiff rate", aliases: ["Z-Whiff%", "IZ Whiff%"] },
+  { label: "Chase%", key: "chase_pct", desc: "Chase rate induced", aliases: ["O-Swing%"] },
+  { label: "Barrel%", key: "barrel_pct", desc: "Barrel rate allowed", aliases: ["Brl%"] },
+  { label: "LineDrive%", key: "line_pct", desc: "Line-drive rate allowed", aliases: ["LD%"] },
+  { label: "ExitVelo", key: "exit_vel", desc: "Average exit velo allowed", aliases: ["Avg EV"] },
+  { label: "GB%", key: "ground_pct", desc: "Ground-ball rate", aliases: ["GB%"] },
+  { label: "InZone%", key: "in_zone_pct", desc: "Zone rate", aliases: ["Zone%"] },
+  { label: "Velo90", key: "vel_90th", desc: "90th-percentile velocity", aliases: ["FB Velo", "Max Velo"] },
+  { label: "Pull%", key: "h_pull_pct", desc: "Pull rate allowed" },
+  { label: "LA10-30%", key: "la_10_30_pct", desc: "Launch angle 10–30° rate allowed" },
+  { label: "Stuff+", key: "stuff", desc: "Stuff+ (if your service provides it)", aliases: ["Stuff Plus"] },
+];
+
+const colsFor = (k: Kind) => (k === "hitter" ? [...HITTER_CONTEXT, ...HITTER_METRICS] : [...PITCHER_CONTEXT, ...PITCHER_METRICS]);
+
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+const num = (s: string | undefined): number | null => {
+  if (s == null) return null;
+  const t = s.replace(/[^0-9.\-]/g, "");
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isNaN(n) ? null : n;
+};
+
+// Minimal CSV parser (handles quoted fields + embedded commas).
+function parseCsv(text: string): { headers: string[]; rows: Record<string, string>[] } {
+  const splitLine = (line: string): string[] => {
+    const out: string[] = []; let cur = ""; let q = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (q) { if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+      else if (c === ",") { out.push(cur); cur = ""; }
+      else if (c === '"') q = true;
+      else cur += c;
+    }
+    out.push(cur); return out;
+  };
+  const lines = text.replace(/\r\n/g, "\n").split("\n").filter((l) => l.trim().length);
+  if (!lines.length) return { headers: [], rows: [] };
+  const headers = splitLine(lines[0]).map((h) => h.trim());
+  const rows = lines.slice(1).map((l) => {
+    const cells = splitLine(l);
+    const o: Record<string, string> = {};
+    headers.forEach((h, i) => { o[h] = (cells[i] ?? "").trim(); });
+    return o;
+  });
+  return { headers, rows };
+}
+
+// Map a template column to whichever CSV header matches (label or an alias).
+function resolveHeader(col: Col, headers: string[]): string | null {
+  const wanted = [col.label, ...(col.aliases ?? [])].map(norm);
+  for (const h of headers) if (wanted.includes(norm(h))) return h;
+  return null;
+}
+
+function download(name: string, content: string) {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvEscape(v: string): string {
+  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+export default function ScoutingCsvUpload() {
+  const { toast } = useToast();
+  const [kind, setKind] = useState<Kind>("hitter");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  const cols = colsFor(kind);
+
+  const downloadTemplate = () => {
+    const headers = cols.map((c) => c.label);
+    const sample = cols.map((c) => (c.label === "Name" ? "Sample Player" : ""));
+    download(`rstr-iq-${kind}-scouting-template.csv`, [headers.join(","), sample.join(",")].join("\n"));
+  };
+
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) fileRef.current && (fileRef.current.value = ""); // allow re-upload of same file
+    if (!file) return;
+    setBusy(true);
+    try {
+      const text = await file.text();
+      const { headers, rows } = parseCsv(text);
+      if (!rows.length) { toast({ title: "Empty file", description: "No data rows found in that CSV.", variant: "destructive" }); return; }
+
+      // Validate required columns are present.
+      const missingRequired = cols.filter((c) => c.required && !resolveHeader(c, headers)).map((c) => c.label);
+      if (missingRequired.length) {
+        toast({ title: "Missing required columns", description: `Add: ${missingRequired.join(", ")}. Download the template for the exact headers.`, variant: "destructive" });
+        return;
+      }
+
+      // Map each template column to a header once.
+      const headerFor = new Map<string, string | null>();
+      for (const c of cols) headerFor.set(c.label, resolveHeader(c, headers));
+      const get = (row: Record<string, string>, label: string) => { const h = headerFor.get(label); return h ? row[h] : undefined; };
+
+      // Run the SAME power-rating math the projections/precompute build on —
+      // ephemerally, per row. Nothing is stored.
+      const outHeaders = kind === "hitter"
+        ? ["Name", "Position", "Class", "Division", "Conference", "PA", "BA PR+", "OBP PR+", "ISO PR+"]
+        : ["Name", "Throws", "Class", "Division", "Conference", "IP", "ERA PR+", "FIP PR+", "WHIP PR+", "K9 PR+", "BB9 PR+", "HR9 PR+", "Overall PR+"];
+      const outRows: string[][] = [];
+      let computed = 0;
+
+      for (const row of rows) {
+        const name = get(row, "Name") ?? "";
+        if (!name.trim()) continue;
+        if (kind === "hitter") {
+          const r = computeHitterPowerRatings({
+            contact: num(get(row, "Contact%")), lineDrive: num(get(row, "LineDrive%")), avgExitVelo: num(get(row, "AvgExitVelo")),
+            popUp: num(get(row, "PopUp%")), bb: num(get(row, "BB%")), chase: num(get(row, "Chase%")), barrel: num(get(row, "Barrel%")),
+            ev90: num(get(row, "EV90")), pull: num(get(row, "Pull%")), la10_30: num(get(row, "LA10-30%")), gb: num(get(row, "GB%")),
+          });
+          outRows.push([name, get(row, "Position") ?? "", get(row, "Class") ?? "", get(row, "Division") ?? "", get(row, "Conference") ?? "", get(row, "PA") ?? "",
+            fmt(r.baPlus), fmt(r.obpPlus), fmt(r.isoPlus)]);
+        } else {
+          const r = computePitchingPowerRatings({
+            miss_pct: num(get(row, "Whiff%")), bb_pct: num(get(row, "BB%")), hard_hit_pct: num(get(row, "HardHit%")),
+            in_zone_whiff_pct: num(get(row, "InZoneWhiff%")), chase_pct: num(get(row, "Chase%")), barrel_pct: num(get(row, "Barrel%")),
+            line_pct: num(get(row, "LineDrive%")), exit_vel: num(get(row, "ExitVelo")), ground_pct: num(get(row, "GB%")),
+            in_zone_pct: num(get(row, "InZone%")), vel_90th: num(get(row, "Velo90")), h_pull_pct: num(get(row, "Pull%")), la_10_30_pct: num(get(row, "LA10-30%")),
+          }, num(get(row, "Stuff+")));
+          outRows.push([name, get(row, "Throws") ?? "", get(row, "Class") ?? "", get(row, "Division") ?? "", get(row, "Conference") ?? "", get(row, "IP") ?? "",
+            fmt(r.eraPrPlus), fmt(r.fipPrPlus), fmt(r.whipPrPlus), fmt(r.k9PrPlus), fmt(r.bb9PrPlus), fmt(r.hr9PrPlus), fmt(r.overallPrPlus)]);
+        }
+        computed++;
+      }
+
+      if (!computed) { toast({ title: "No players processed", description: "Rows are missing a Name.", variant: "destructive" }); return; }
+
+      const csv = [outHeaders.join(","), ...outRows.map((r) => r.map(csvEscape).join(","))].join("\n");
+      download(`rstr-iq-${kind}-ratings.csv`, csv);
+      toast({ title: `Processed ${computed} ${kind === "hitter" ? "hitters" : "pitchers"}`, description: "Ratings computed in your browser and downloaded. Nothing was saved to RSTR IQ." });
+    } catch (err: any) {
+      toast({ title: "Couldn't read that file", description: String(err?.message ?? err), variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-lg"><FileSpreadsheet className="h-5 w-5" /> Upload Scouting Data</CardTitle>
+        <CardDescription>Run your own exported evaluation data through the RSTR IQ model.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {/* Privacy / process notice */}
+        <div className="flex gap-3 rounded-md border border-[#D4AF37]/40 bg-[#D4AF37]/[0.06] p-3">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#D4AF37]" />
+          <div className="text-xs text-muted-foreground">
+            <p className="font-semibold text-foreground">Your data stays yours.</p>
+            <p className="mt-1">Export your own licensed data from whatever scouting or evaluation service your program uses — you can pull every player in the country for evaluation purposes. Fill the template below and upload it. The file is read and scored <span className="font-semibold text-foreground">entirely in your browser</span>; the results download straight back to you. RSTR IQ stores nothing and this data never enters our database.</p>
+          </div>
+        </div>
+
+        {/* Type toggle */}
+        <div className="flex rounded-md border border-border/60 p-0.5 w-fit">
+          {(["hitter", "pitcher"] as const).map((k) => (
+            <button key={k} onClick={() => setKind(k)}
+              className={`rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${kind === k ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+              {k === "hitter" ? "Hitters" : "Pitchers"}
+            </button>
+          ))}
+        </div>
+
+        {/* Steps */}
+        <ol className="list-decimal space-y-1.5 pl-5 text-sm text-muted-foreground">
+          <li><span className="font-medium text-foreground">Download the {kind} template</span> and match your export's columns to it — our metric names are below, with common aliases (e.g. Whiff% / Miss%).</li>
+          <li><span className="font-medium text-foreground">Paste your values</span> in; leave any metric you don't have blank (the model falls back where it can).</li>
+          <li><span className="font-medium text-foreground">Upload it</span> — you'll get a ratings file back instantly.</li>
+        </ol>
+
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={downloadTemplate}><Download className="h-4 w-4" /> Download {kind === "hitter" ? "Hitter" : "Pitcher"} Template</Button>
+          <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={onFile} />
+          <Button size="sm" className="gap-1.5" disabled={busy} onClick={() => fileRef.current?.click()}><Upload className="h-4 w-4" /> {busy ? "Processing…" : "Upload CSV"}</Button>
+        </div>
+
+        {/* Column key */}
+        <div>
+          <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Template Columns — {kind === "hitter" ? "Hitters" : "Pitchers"}</div>
+          <div className="max-h-64 overflow-y-auto rounded-md border border-border/50">
+            <table className="w-full text-xs">
+              <tbody className="divide-y divide-border/40">
+                {cols.map((c) => (
+                  <tr key={c.label}>
+                    <td className="whitespace-nowrap px-3 py-1.5 font-mono font-medium text-foreground">{c.label}{c.required && <span className="text-red-400"> *</span>}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{c.desc}{c.aliases?.length ? <span className="text-muted-foreground/60"> · aka {c.aliases.join(", ")}</span> : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-1.5 text-[11px] text-muted-foreground"><span className="text-red-400">*</span> required. Everything else improves the rating if your service exports it.</p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function fmt(v: number | null): string {
+  return v == null ? "" : (Math.round(v * 10) / 10).toString();
+}

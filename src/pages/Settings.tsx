@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, Mail, KeyRound } from "lucide-react";
+import ScoutingCsvUpload from "@/components/ScoutingCsvUpload";
 
 export default function Settings() {
   const { user } = useAuth();
@@ -216,6 +217,8 @@ export default function Settings() {
             )}
           </CardContent>
         </Card>
+
+        <ScoutingCsvUpload />
       </div>
     </DashboardLayout>
   );
