@@ -187,9 +187,8 @@ export default function GMRecruits() {
         return unassigned.length ? [...groups, { key: "unassigned", title: "Unassigned", list: unassigned }] : groups;
       })();
 
-  // Forward class budget — sum the deal across the selected class.
+  // Forward class budget — what we've budgeted (willing to pay) for the class.
   const classRecruits = gm.recruits.filter((r) => r.class_year === year);
-  const classAsking = classRecruits.reduce((s, r) => s + (r.asking_price ?? 0), 0);
   const classWilling = classRecruits.reduce((s, r) => s + (r.target_offer ?? 0), 0);
   const committedWilling = classRecruits.filter((r) => r.stage === "committed" || r.stage === "signed").reduce((s, r) => s + (r.target_offer ?? 0), 0);
 
@@ -275,13 +274,12 @@ export default function GMRecruits() {
         </div>
       </div>
 
-      {/* Class deal budget — forward spend for the selected class */}
-      {(classAsking > 0 || classWilling > 0) && (
+      {/* Class budget — what we've budgeted (willing to pay) for the class */}
+      {classWilling > 0 && (
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border border-[#D4AF37]/40 bg-[#D4AF37]/[0.05] px-4 py-2.5">
           <span className="text-[11px] font-bold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>{year} Class Budget</span>
-          <DealStat label="Willing to Pay" value={money(classWilling)} accent />
+          <DealStat label="Budgeted" value={money(classWilling)} accent />
           <DealStat label="Committed" value={money(committedWilling)} />
-          <DealStat label="Asking (Total)" value={money(classAsking)} />
         </div>
       )}
 

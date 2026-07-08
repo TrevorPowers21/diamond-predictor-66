@@ -7,6 +7,7 @@ import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { toast } from "sonner";
 import { advanceEligibility, serializeBuildPlayerMeta } from "@/pages/team-builder/helpers";
 import { isPitcherPos, loadGmBuildRoster } from "@/gm/lib/loadGmBuildRoster";
+import { logGmActivity } from "@/gm/lib/logGmActivity";
 
 export interface GmBuildOption {
   id: string;
@@ -311,8 +312,9 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         author: user?.email ?? null, body: body.trim(), created_by_user_id: user?.id ?? null,
       });
       if (error) throw error;
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added a note on ${row.name}`);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["gm-player-notes"] }); toast.success("Note added"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["gm-player-notes"] }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Note added"); },
     onError: (e: any) => toast.error(`Add note failed: ${e.message}`),
   });
   const removeNote = useMutation({
@@ -395,10 +397,12 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         const { error: e2 } = await (supabase as any).from("team_builds").update({ total_budget: total }).eq("id", activeBuildId);
         if (e2) throw e2;
       }
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `set the total budget to $${Math.round(total).toLocaleString("en-US")}`);
       return total;
     },
     onSuccess: (total) => {
       qc.invalidateQueries({ queryKey: key });
+      qc.invalidateQueries({ queryKey: ["gm-activity"] });
       toast.success(`Budget finalized — $${Math.round(total).toLocaleString("en-US")} pushed to Team Builder`);
     },
     onError: (e: any) => toast.error(`Finalize failed: ${e.message}`),
@@ -492,11 +496,13 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         { onConflict: "build_player_id" },
       );
       if (e2) throw e2;
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `removed ${row.name} from the roster`);
       return { switched, name: row.name };
     },
     onSuccess: ({ switched, name }) => {
       qc.invalidateQueries({ queryKey: ["gm-builds"] });
       qc.invalidateQueries({ queryKey: key });
+      qc.invalidateQueries({ queryKey: ["gm-activity"] });
       if (switched) setPickedBuildId(switched);
       toast.success(`Removed ${name} from roster`);
     },
@@ -587,11 +593,13 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         position_slot: position || null, depth_order: 1, included_in_roster: true, production_notes: notes, nil_value: Number(nilValue) || 0,
       });
       if (error) throw error;
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added ${trimmed} to the roster`);
       return { switched, name: trimmed };
     },
     onSuccess: ({ switched, name }) => {
       qc.invalidateQueries({ queryKey: ["gm-builds"] });
       qc.invalidateQueries({ queryKey: key });
+      qc.invalidateQueries({ queryKey: ["gm-activity"] });
       if (switched) setPickedBuildId(switched);
       toast.success(`Added ${name} to roster`);
     },

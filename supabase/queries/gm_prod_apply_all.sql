@@ -1,18 +1,12 @@
 -- ============================================================================
 -- GM / FRONT OFFICE — FULL PROD-APPLY BUNDLE
 -- Generated 2026-07-08 from supabase/migrations (timestamp order).
---
--- Every statement is idempotent (IF [NOT] EXISTS / DROP POLICY IF EXISTS),
--- so this is safe to run in full and safe to re-run. Apply on PROD with the
--- Supabase CLI (exec_sql RPC is staging-only):
---     supabase db query --linked --file supabase/queries/gm_prod_apply_all.sql
--- or:  npm run db-migrate supabase/queries/gm_prod_apply_all.sql   (prod-linked)
---
--- After it completes, reload the PostgREST schema cache:
---     NOTIFY pgrst, 'reload schema';
--- Note: team_builds.gm_notes and gm_player_finance.notes/notes_updated_at are
--- superseded by the gm_player_notes table (per-player authored log); the old
--- columns are left in place, unused.
+-- Idempotent (IF [NOT] EXISTS / DROP POLICY IF EXISTS) — safe to run + re-run.
+-- Apply on PROD via CLI (exec_sql is staging-only):
+--   supabase db query --linked --file supabase/queries/gm_prod_apply_all.sql
+-- Then: NOTIFY pgrst, 'reload schema';
+-- Note: team_builds.gm_notes + gm_player_finance.notes/notes_updated_at are
+-- superseded by gm_player_notes (per-player log); old columns left unused.
 -- ============================================================================
 
 
@@ -350,5 +344,29 @@ CREATE POLICY gm_player_notes_all ON public.gm_player_notes
 ALTER TABLE public.gm_recruits
   ADD COLUMN IF NOT EXISTS asking_price numeric,
   ADD COLUMN IF NOT EXISTS target_offer numeric;
+
+-- ----------------------------------------------------------------------------
+-- 20260708160000_gm_activity.sql
+-- ----------------------------------------------------------------------------
+-- Front-office activity log — a team-shared feed of who did what (added a
+-- recruit, removed players, changed the budget, wrote a note/report). Each GM
+-- mutation appends one row; the dashboard reads the most recent.
+CREATE TABLE IF NOT EXISTS public.gm_activity (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_team_id   uuid NOT NULL REFERENCES public.customer_teams(id) ON DELETE CASCADE,
+  actor              text,             -- who did it (email snapshot)
+  action             text NOT NULL,    -- human phrase, e.g. "added a note on Nolan Traeger"
+  created_by_user_id uuid,
+  created_at         timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_gm_activity_team ON public.gm_activity (customer_team_id, created_at DESC);
+
+ALTER TABLE public.gm_activity ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS gm_activity_all ON public.gm_activity;
+CREATE POLICY gm_activity_all ON public.gm_activity
+  FOR ALL TO authenticated
+  USING (public.has_role(auth.uid(), 'superadmin'::public.app_role) OR public.is_team_member(customer_team_id))
+  WITH CHECK (public.has_role(auth.uid(), 'superadmin'::public.app_role) OR public.is_team_member(customer_team_id));
 
 NOTIFY pgrst, 'reload schema';

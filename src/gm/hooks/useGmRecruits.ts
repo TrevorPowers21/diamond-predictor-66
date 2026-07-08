@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { logGmActivity } from "@/gm/lib/logGmActivity";
 import { toast } from "sonner";
 
 export type RecruitType = "hitter" | "pitcher" | "twp";
@@ -163,8 +164,11 @@ export function useGmRecruits() {
       if (error) throw error;
       // A report authors the projection tier — mirror the latest onto the recruit for its stable badge.
       if (tier) await (supabase as any).from("gm_recruits").update({ projection_tier: tier, updated_at: new Date().toISOString() }).eq("id", recruitId);
+      const rec = recruits.find((x) => x.id === recruitId);
+      const nm = rec ? `${rec.first_name ?? ""} ${rec.last_name ?? ""}`.trim() || "a recruit" : "a recruit";
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added a scouting report on ${nm}`);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: key }); toast.success("Report added"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Report added"); },
     onError: (e: any) => toast.error(`Add report failed: ${e.message}`),
   });
   const removeReport = useMutation({
@@ -185,8 +189,10 @@ export function useGmRecruits() {
       if (initialReport && initialReport.body.trim()) {
         await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: inserted.id, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: initialReport.report_date, body: initialReport.body.trim(), projection_tier: tier, created_by_user_id: user?.id ?? null });
       }
+      const nm = `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "a recruit";
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added ${nm} to the recruiting board`);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: reportsKey }); toast.success("Recruit added"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Recruit added"); },
     onError: (e: any) => toast.error(`Add failed: ${e.message}`),
   });
 

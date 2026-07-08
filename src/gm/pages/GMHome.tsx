@@ -1,12 +1,29 @@
 import { Link } from "react-router-dom";
 import { useGmRoster } from "@/gm/hooks/useGmRoster";
+import { useGmActivity } from "@/gm/hooks/useGmActivity";
 import SchoolBanner from "@/components/SchoolBanner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Calendar, DollarSign, ClipboardList, Wallet, Users, ArrowRight } from "lucide-react";
+import { Calendar, DollarSign, ClipboardList, Wallet, Users, ArrowRight, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
 const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
+
+/** "3h ago" / "2d ago" relative time for the activity feed. */
+function timeAgo(iso: string): string {
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const s = Math.max(0, Math.floor((now - then) / 1000));
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+const actorName = (a: string | null) => (a ? a.split("@")[0] : "Someone");
 
 /** Briefing metric tile — mirrors the Player Evaluation Overview tiles. */
 function Tile({ label, value, icon, accent }: { label: string; value: string; icon: React.ReactNode; accent?: "emerald" | "blue" | "gold" | "red" }) {
@@ -39,6 +56,7 @@ function BudgetLine({ label, used, total }: { label: string; used: number; total
 
 export default function GMHome() {
   const gm = useGmRoster();
+  const { activity } = useGmActivity(12);
   const roster = [...gm.hitters, ...gm.pitchers];
   const committed = roster.reduce((s, r) => s + (r.nil_value ?? 0), 0);
   const totalBudget = gm.coachTotalBudget ?? 0;
@@ -74,6 +92,25 @@ export default function GMHome() {
           <Tile label="Roster" value={String(roster.length)} icon={<Users className="h-3.5 w-3.5" />} />
         </div>
       </div>
+
+      {/* Recent activity — the front-office feed, right under the budget briefing */}
+      <Card className="border-border/60">
+        <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40 flex flex-row items-center gap-2">
+          <Activity className="h-3.5 w-3.5 text-[#D4AF37]" />
+          <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Recent Activity</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0 divide-y divide-border/40 max-h-[300px] overflow-y-auto">
+          {activity.length === 0 ? (
+            <p className="px-4 py-6 text-center text-xs text-muted-foreground">No activity yet — moves show up here as your staff makes them.</p>
+          ) : activity.map((a) => (
+            <div key={a.id} className="flex items-center gap-2.5 px-4 py-2">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#D4AF37]" />
+              <span className="flex-1 text-sm text-foreground/90"><span className="font-semibold text-foreground">{actorName(a.actor)}</span> {a.action}</span>
+              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{timeAgo(a.created_at)}</span>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
 
       {/* Two-column card grid */}
       <div className="grid lg:grid-cols-2 gap-4 items-start">
