@@ -3,6 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { computeHitterPowerRatings, computePitchingPowerRatings } from "@/lib/powerRatings";
+import { calculateStuffPlus, type PitchRow, type PopConstants } from "@/savant/lib/stuffPlusEngine";
+import { supabase } from "@/integrations/supabase/client";
+import { CURRENT_SEASON } from "@/lib/seasonConstants";
 import { Upload, Download, FileSpreadsheet } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -13,7 +16,33 @@ import { Upload, Download, FileSpreadsheet } from "lucide-react";
 // or shown elsewhere — the source data never lands in our database.
 // ---------------------------------------------------------------------------
 
-type Kind = "hitter" | "pitcher";
+type Kind = "hitter" | "pitcher" | "stuff";
+const KIND_LABEL: Record<Kind, string> = { hitter: "Hitters", pitcher: "Pitchers", stuff: "Stuff+" };
+
+// Canonical pitch types the Stuff+ engine scores, with light alias mapping.
+const STUFF_PITCH_TYPES = ["4S FB", "Sinker", "Cutter", "Gyro Slider", "Slider", "Sweeper", "Curveball", "Change-up", "Splitter"];
+const PITCH_TYPE_ALIASES: Record<string, string> = {
+  "4seam": "4S FB", "4seamfastball": "4S FB", "fourseam": "4S FB", "ff": "4S FB", "fb": "4S FB", "4sfb": "4S FB", "fastball": "4S FB",
+  "sinker": "Sinker", "si": "Sinker", "twoseam": "Sinker", "2seam": "Sinker",
+  "cutter": "Cutter", "fc": "Cutter",
+  "gyroslider": "Gyro Slider", "gyro": "Gyro Slider",
+  "slider": "Slider", "sl": "Slider",
+  "sweeper": "Sweeper", "sw": "Sweeper",
+  "curveball": "Curveball", "curve": "Curveball", "cb": "Curveball", "cu": "Curveball",
+  "changeup": "Change-up", "change": "Change-up", "ch": "Change-up",
+  "splitter": "Splitter", "split": "Splitter", "fs": "Splitter",
+};
+const canonicalPitchType = (raw: string): string | null => {
+  const t = raw.trim();
+  if (STUFF_PITCH_TYPES.includes(t)) return t;
+  return PITCH_TYPE_ALIASES[t.toLowerCase().replace(/[^a-z0-9]/g, "")] ?? null;
+};
+const canonicalHand = (raw: string): "R" | "L" | null => {
+  const h = raw.trim().toUpperCase();
+  if (h.startsWith("R")) return "R";
+  if (h.startsWith("L")) return "L";
+  return null;
+};
 
 interface Col {
   label: string;        // our template header
@@ -81,7 +110,24 @@ const PITCHER_METRICS: Col[] = [
   { label: "Stuff+", key: "stuff", desc: "Stuff+ (if your service provides it)", aliases: ["Stuff Plus"] },
 ];
 
-const colsFor = (k: Kind) => (k === "hitter" ? [...HITTER_CONTEXT, ...HITTER_METRICS] : [...PITCHER_CONTEXT, ...PITCHER_METRICS]);
+// Stuff+ is per-pitch: one row per pitcher × pitch type, with the pitch shape.
+const STUFF_COLUMNS: Col[] = [
+  { label: "Name", key: "", desc: "Pitcher name", required: true },
+  { label: "Pitch Type", key: "", desc: `One of: ${STUFF_PITCH_TYPES.join(", ")}`, required: true, aliases: ["Pitch"] },
+  { label: "Hand", key: "", desc: "Throwing hand — R or L", required: true, aliases: ["Throws"] },
+  { label: "Velocity", key: "velocity", desc: "Average velocity (mph)", required: true, aliases: ["Velo", "MPH"] },
+  { label: "IVB", key: "ivb", desc: "Induced vertical break (in)", required: true, aliases: ["Induced Vert", "iVB"] },
+  { label: "HB", key: "hb", desc: "Horizontal break (in)", required: true, aliases: ["Horz Break", "HBreak"] },
+  { label: "Spin", key: "spin", desc: "Spin rate (rpm)", aliases: ["Spin Rate", "RPM"] },
+  { label: "Extension", key: "extension", desc: "Release extension (ft)", aliases: ["Ext"] },
+  { label: "ReleaseHeight", key: "rel_height", desc: "Release height (ft)", aliases: ["Rel Height", "RelZ"] },
+  { label: "ReleaseSide", key: "rel_side", desc: "Release side (ft)", aliases: ["Rel Side", "RelX"] },
+];
+
+const colsFor = (k: Kind) =>
+  k === "hitter" ? [...HITTER_CONTEXT, ...HITTER_METRICS]
+    : k === "pitcher" ? [...PITCHER_CONTEXT, ...PITCHER_METRICS]
+      : STUFF_COLUMNS;
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const num = (s: string | undefined): number | null => {
@@ -146,7 +192,7 @@ export default function ScoutingCsvUpload() {
 
   const downloadTemplate = () => {
     const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
-    const title = `RSTR IQ — ${kind === "hitter" ? "Hitter" : "Pitcher"} Scouting Template`;
+    const title = `RSTR IQ — ${KIND_LABEL[kind]} Scouting Template`;
     const headerLine = cols.map((c) => c.label).join(",");
     const rows = cols.map((c) => `
       <tr>
@@ -201,13 +247,28 @@ export default function ScoutingCsvUpload() {
       for (const c of cols) headerFor.set(c.label, resolveHeader(c, headers));
       const get = (row: Record<string, string>, label: string) => { const h = headerFor.get(label); return h ? row[h] : undefined; };
 
-      // Run the SAME power-rating math the projections/precompute build on —
+      // Run the SAME model math the projections/precompute build on —
       // ephemerally, per row. Nothing is stored.
       const outHeaders = kind === "hitter"
         ? ["Name", "Position", "Class", "Division", "Conference", "PA", "BA PR+", "OBP PR+", "ISO PR+"]
-        : ["Name", "Throws", "Class", "Division", "Conference", "IP", "ERA PR+", "FIP PR+", "WHIP PR+", "K9 PR+", "BB9 PR+", "HR9 PR+", "Overall PR+"];
+        : kind === "pitcher"
+          ? ["Name", "Throws", "Class", "Division", "Conference", "IP", "ERA PR+", "FIP PR+", "WHIP PR+", "K9 PR+", "BB9 PR+", "HR9 PR+", "Overall PR+"]
+          : ["Name", "Pitch Type", "Hand", "Stuff+"];
       const outRows: string[][] = [];
       let computed = 0;
+
+      // Stuff+ z-scores each pitch shape against our D1 population baselines.
+      let popMap: Map<string, PopConstants> | null = null;
+      if (kind === "stuff") {
+        const { data: popData, error } = await (supabase as any)
+          .from("pitcher_stuff_plus_ncaa").select("*").eq("season", CURRENT_SEASON).eq("division", "D1");
+        if (error || !popData?.length) {
+          toast({ title: "Couldn't load Stuff+ baselines", description: "The D1 population constants are unavailable right now.", variant: "destructive" });
+          return;
+        }
+        popMap = new Map<string, PopConstants>();
+        for (const p of popData as PopConstants[]) popMap.set(`${p.pitch_type}::${p.hand}`, p);
+      }
 
       for (const row of rows) {
         const name = get(row, "Name") ?? "";
@@ -220,7 +281,7 @@ export default function ScoutingCsvUpload() {
           });
           outRows.push([name, get(row, "Position") ?? "", get(row, "Class") ?? "", get(row, "Division") ?? "", get(row, "Conference") ?? "", get(row, "PA") ?? "",
             fmt(r.baPlus), fmt(r.obpPlus), fmt(r.isoPlus)]);
-        } else {
+        } else if (kind === "pitcher") {
           const r = computePitchingPowerRatings({
             miss_pct: num(get(row, "Whiff%")), bb_pct: num(get(row, "BB%")), hard_hit_pct: num(get(row, "HardHit%")),
             in_zone_whiff_pct: num(get(row, "InZoneWhiff%")), chase_pct: num(get(row, "Chase%")), barrel_pct: num(get(row, "Barrel%")),
@@ -229,15 +290,30 @@ export default function ScoutingCsvUpload() {
           }, num(get(row, "Stuff+")));
           outRows.push([name, get(row, "Throws") ?? "", get(row, "Class") ?? "", get(row, "Division") ?? "", get(row, "Conference") ?? "", get(row, "IP") ?? "",
             fmt(r.eraPrPlus), fmt(r.fipPrPlus), fmt(r.whipPrPlus), fmt(r.k9PrPlus), fmt(r.bb9PrPlus), fmt(r.hr9PrPlus), fmt(r.overallPrPlus)]);
+        } else {
+          const pitchType = canonicalPitchType(get(row, "Pitch Type") ?? "");
+          const hand = canonicalHand(get(row, "Hand") ?? "");
+          if (!pitchType || !hand) continue; // unrecognized pitch type / hand
+          const pop = popMap!.get(`${pitchType}::${hand}`);
+          if (!pop) continue; // no baseline for this pitch type × hand
+          const pitchRow = {
+            id: "", source_player_id: "", pitch_type: pitchType, hand, pitches: 999,
+            velocity: num(get(row, "Velocity")), ivb: num(get(row, "IVB")), hb: num(get(row, "HB")),
+            rel_height: num(get(row, "ReleaseHeight")), rel_side: num(get(row, "ReleaseSide")),
+            extension: num(get(row, "Extension")), spin: num(get(row, "Spin")), fb_ch_velo_diff: null,
+          } as unknown as PitchRow;
+          const result = calculateStuffPlus(pitchType, pitchRow, pop);
+          if (!result) continue;
+          outRows.push([name, pitchType, hand, fmt(result.score)]);
         }
         computed++;
       }
 
-      if (!computed) { toast({ title: "No players processed", description: "Rows are missing a Name.", variant: "destructive" }); return; }
+      if (!computed) { toast({ title: "Nothing processed", description: kind === "stuff" ? "No rows had a recognized pitch type + hand." : "Rows are missing a Name.", variant: "destructive" }); return; }
 
       const csv = [outHeaders.join(","), ...outRows.map((r) => r.map(csvEscape).join(","))].join("\n");
       download(`rstr-iq-${kind}-ratings.csv`, csv);
-      toast({ title: `Processed ${computed} ${kind === "hitter" ? "hitters" : "pitchers"}`, description: "Ratings computed in your browser and downloaded. Nothing was saved to RSTR IQ." });
+      toast({ title: `Processed ${computed} ${kind === "stuff" ? "pitches" : kind === "hitter" ? "hitters" : "pitchers"}`, description: "Computed in your browser and downloaded. Nothing was saved to RSTR IQ." });
     } catch (err: any) {
       toast({ title: "Couldn't read that file", description: String(err?.message ?? err), variant: "destructive" });
     } finally {
@@ -253,10 +329,10 @@ export default function ScoutingCsvUpload() {
       <CardContent className="space-y-5">
         {/* Type toggle */}
         <div className="flex rounded-md border border-border/60 p-0.5 w-fit">
-          {(["hitter", "pitcher"] as const).map((k) => (
+          {(["hitter", "pitcher", "stuff"] as const).map((k) => (
             <button key={k} onClick={() => setKind(k)}
               className={`rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${kind === k ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"}`}>
-              {k === "hitter" ? "Hitters" : "Pitchers"}
+              {KIND_LABEL[k]}
             </button>
           ))}
         </div>
@@ -265,19 +341,19 @@ export default function ScoutingCsvUpload() {
         <ol className="list-decimal space-y-1.5 pl-5 text-sm text-muted-foreground">
           <li><span className="font-medium text-foreground">Export the players you want projected</span> from your scouting service — every player in the country is available for evaluation.</li>
 
-          <li><span className="font-medium text-foreground">Download the {kind} template</span> and match your export's columns to it — our metric names are below, with common aliases (e.g. Whiff% / Miss%). Leave any metric you don't have blank.</li>
+          <li><span className="font-medium text-foreground">Download the {KIND_LABEL[kind]} template</span> and match your export's columns to it — our metric names are below, with common aliases (e.g. Whiff% / Miss%). Leave any metric you don't have blank.</li>
           <li><span className="font-medium text-foreground">Upload it</span> — RSTR IQ runs the projection and hands the results back to you instantly.</li>
         </ol>
 
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={downloadTemplate}><Download className="h-4 w-4" /> Open {kind === "hitter" ? "Hitter" : "Pitcher"} Template</Button>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={downloadTemplate}><Download className="h-4 w-4" /> Open {KIND_LABEL[kind]} Template</Button>
           <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={onFile} />
           <Button size="sm" className="gap-1.5" disabled={busy} onClick={() => fileRef.current?.click()}><Upload className="h-4 w-4" /> {busy ? "Processing…" : "Upload CSV"}</Button>
         </div>
 
         {/* Column key */}
         <div>
-          <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Template Columns — {kind === "hitter" ? "Hitters" : "Pitchers"}</div>
+          <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Template Columns — {KIND_LABEL[kind]}</div>
           <div className="max-h-64 overflow-y-auto rounded-md border border-border/50">
             <table className="w-full text-xs">
               <tbody className="divide-y divide-border/40">
