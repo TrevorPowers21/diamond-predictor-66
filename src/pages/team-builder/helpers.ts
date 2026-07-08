@@ -188,6 +188,33 @@ export const projectedEligibilityClass = (
   return "FR";
 };
 
+// Terminal eligibility classes — a player at one of these has no season of
+// playing eligibility left. Under current NCAA rules that's just R-SR (a
+// redshirt senior past his GR year); this is a config Set rather than an inlined
+// literal because "5 years to play 5" is expected to retire R-SR soon — when it
+// does, empty this Set and SR→GR→(done) becomes the whole story.
+export const EXHAUSTED_ELIGIBILITY = new Set<string>(["R-SR", "RSR"]);
+const ELIGIBILITY_CHAIN = ["FR", "SO", "JR", "SR", "GR"] as const;
+
+// Advance an eligibility class forward `years` seasons for a multi-year roster
+// projection. Returns null when the player has exhausted eligibility — advanced
+// past GR, or already at a terminal class. `years === 0` is a passthrough so the
+// base projection season is byte-identical to the un-aged roster. Unknown labels
+// (e.g. a manual GM override) are kept only at year 0 and never auto-aged.
+export const advanceEligibility = (
+  cls: string | null | undefined,
+  years: number,
+): string | null => {
+  const c = String(cls || "").toUpperCase().trim();
+  if (!c) return years === 0 ? (cls ?? null) : null;
+  if (EXHAUSTED_ELIGIBILITY.has(c)) return years === 0 ? c : null;
+  const idx = (ELIGIBILITY_CHAIN as readonly string[]).indexOf(c);
+  if (idx === -1) return years === 0 ? c : null;
+  const next = idx + years;
+  if (next < 0 || next >= ELIGIBILITY_CHAIN.length) return null;
+  return ELIGIBILITY_CHAIN[next];
+};
+
 // ---------------------------------------------------------------------------
 // Functions migrated from TeamBuilder.tsx inline — canonical home is here.
 // Import these in useLoadBuild and any other hook that needs them.

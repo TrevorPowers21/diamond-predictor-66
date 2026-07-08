@@ -4,7 +4,9 @@ import { useGmRoster, DEPARTURE_REASONS, type GmBudget, type GmOtherLine, type G
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -216,11 +218,13 @@ function BudgetDialog({ open, onOpenChange, budget, coachTotal, onSave, onFinali
 }
 
 export default function GMRoster() {
-  const gm = useGmRoster();
+  // Season selector drives a derived, multi-year forward projection. The base
+  // season (PROJECTION_SEASON) is the live editable roster; later seasons age
+  // eligibility, drop exhausted players, and add committed recruits (read-only).
+  const [seasonSel, setSeasonSel] = useState<number>(PROJECTION_SEASON);
+  const gm = useGmRoster(seasonSel);
   const location = useLocation();
   const returnTo = `${location.pathname}${location.search}`;
-  // Season selector is display-only for now — data still reads gm.season.
-  const [seasonSel, setSeasonSel] = useState<number>(gm.season);
   // Caps staged for the Finalize & Push confirmation (from popup or checkmark).
   const [confirmCaps, setConfirmCaps] = useState<BudgetCaps | null>(null);
   // Local, unsaved edits — money buckets per row and the budget caps. Typing
@@ -238,6 +242,8 @@ export default function GMRoster() {
   const [reasonModalOpen, setReasonModalOpen] = useState(false);
   const [departuresOpen, setDeparturesOpen] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesDraft, setNotesDraft] = useState("");
   const [finalizeRosterOpen, setFinalizeRosterOpen] = useState(false);
   const [addPlayerOpen, setAddPlayerOpen] = useState(false);
   const [addName, setAddName] = useState("");
@@ -301,14 +307,17 @@ export default function GMRoster() {
                 return (
                 <TableRow key={r.build_player_id} className={cn(shownFinalized && "bg-emerald-500/[0.04]", dirty && "bg-amber-500/[0.05]")}>
                   <TableCell className="sticky left-0 z-10 bg-background py-1.5">
-                    {r.player_id ? (
-                      <Link to={profileRouteFor(r.player_id, r.position)} state={{ returnTo }} className="text-sm font-medium hover:text-primary hover:underline">
-                        {r.name}
-                      </Link>
-                    ) : (
-                      // Coach-added recruit — no DB player record, so no profile to link.
-                      <span className="text-sm font-medium">{r.name}</span>
-                    )}
+                    <span className="inline-flex items-center gap-1.5">
+                      {r.player_id ? (
+                        <Link to={profileRouteFor(r.player_id, r.position)} state={{ returnTo }} className="text-sm font-medium hover:text-primary hover:underline">
+                          {r.name}
+                        </Link>
+                      ) : (
+                        // Coach-added local / injected recruit — no DB player record.
+                        <span className="text-sm font-medium">{r.name}</span>
+                      )}
+                      {r.is_recruit && <span className="shrink-0 rounded bg-[#D4AF37]/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Commit</span>}
+                    </span>
                   </TableCell>
                   <TableCell className="py-1.5">
                     {/* Read-only here; editing lives on the future player profile. */}
@@ -324,31 +333,47 @@ export default function GMRoster() {
                   <TableCell className="py-1.5 text-center font-mono text-sm font-semibold tabular-nums text-foreground">{money(r.market_value)}</TableCell>
                   {/* Projected off the budget; Market Value when no budget is set. */}
                   <TableCell className="py-1.5 text-center font-mono text-sm font-semibold tabular-nums text-foreground">{money(projectedValue(r) ?? r.market_value)}</TableCell>
-                  {/* Money edits stay LOCAL (setRowField) until the checkmark writes them. */}
-                  <TableCell className="py-1.5"><MoneyCell value={m.scholarship_amount} onSave={(n) => setRowField(r, "scholarship_amount", n)} /></TableCell>
-                  <TableCell className="py-1.5"><MoneyCell value={m.rev_share} onSave={(n) => setRowField(r, "rev_share", n)} /></TableCell>
-                  <TableCell className="py-1.5"><MoneyCell value={m.nil_amount} onSave={(n) => setRowField(r, "nil_amount", n)} /></TableCell>
-                  <TableCell className="py-1.5"><MoneyCell value={m.other_amount} onSave={(n) => setRowField(r, "other_amount", n)} /></TableCell>
-                  {/* Actual Pay is the coach's agreed number; it ONLY changes when the
-                      GM finalizes (checkmark writes the bucket sum back here + to the
-                      coach). So it reads the authoritative nil_value, not the live buckets. */}
-                  <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums text-foreground">{money(r.nil_value)}</TableCell>
-                  <TableCell className="py-1.5 text-center">
-                    <FinalizeCheck
-                      finalized={shownFinalized}
-                      onClick={() => gm.finalizePlayer(r, m, !shownFinalized, () => clearRowDraft(r))}
-                      title={shownFinalized ? "Finalized — click to reopen" : dirty ? "Save & finalize pay → sync to Team Builder" : "Finalize pay & sync to Team Builder"}
-                    />
-                  </TableCell>
-                  <TableCell className="py-1.5 text-center">
-                    <button
-                      onClick={() => { setRemoveRow(r); setRemoveBuildName(""); }}
-                      title="Remove from roster"
-                      className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground/40 hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </TableCell>
+                  {/* Money edits stay LOCAL (setRowField) until the checkmark writes them.
+                      In a forward projection the money is read-only — you don't negotiate
+                      a hypothetical future roster's pay. */}
+                  {gm.isProjection ? (
+                    <>
+                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.scholarship_amount)}</TableCell>
+                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.rev_share)}</TableCell>
+                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.nil_amount)}</TableCell>
+                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.other_amount)}</TableCell>
+                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums text-foreground">{money(r.nil_value)}</TableCell>
+                      <TableCell />
+                      <TableCell />
+                    </>
+                  ) : (
+                    <>
+                      <TableCell className="py-1.5"><MoneyCell value={m.scholarship_amount} onSave={(n) => setRowField(r, "scholarship_amount", n)} /></TableCell>
+                      <TableCell className="py-1.5"><MoneyCell value={m.rev_share} onSave={(n) => setRowField(r, "rev_share", n)} /></TableCell>
+                      <TableCell className="py-1.5"><MoneyCell value={m.nil_amount} onSave={(n) => setRowField(r, "nil_amount", n)} /></TableCell>
+                      <TableCell className="py-1.5"><MoneyCell value={m.other_amount} onSave={(n) => setRowField(r, "other_amount", n)} /></TableCell>
+                      {/* Actual Pay is the coach's agreed number; it ONLY changes when the
+                          GM finalizes (checkmark writes the bucket sum back here + to the
+                          coach). So it reads the authoritative nil_value, not the live buckets. */}
+                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums text-foreground">{money(r.nil_value)}</TableCell>
+                      <TableCell className="py-1.5 text-center">
+                        <FinalizeCheck
+                          finalized={shownFinalized}
+                          onClick={() => gm.finalizePlayer(r, m, !shownFinalized, () => clearRowDraft(r))}
+                          title={shownFinalized ? "Finalized — click to reopen" : dirty ? "Save & finalize pay → sync to Team Builder" : "Finalize pay & sync to Team Builder"}
+                        />
+                      </TableCell>
+                      <TableCell className="py-1.5 text-center">
+                        <button
+                          onClick={() => { setRemoveRow(r); setRemoveBuildName(""); }}
+                          title="Remove from roster"
+                          className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground/40 hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </TableCell>
+                    </>
+                  )}
                 </TableRow>
                 );
               })}
@@ -434,12 +459,13 @@ export default function GMRoster() {
             <h2 className="text-2xl font-bold leading-tight" style={OSWALD}>{gm.teamName ?? "Front Office"}</h2>
             <p className="text-sm text-muted-foreground">{gm.teamName ? "Front Office" : "Pick a team above."}</p>
           </div>
-          {/* Season selector — display only for now; season switching is wired later. */}
+          {/* Season selector — base season is editable; later seasons are a derived
+              read-only projection (eligibility aged, graduates dropped, commits added). */}
           <Select value={String(seasonSel)} onValueChange={(v) => setSeasonSel(Number(v))}>
             <SelectTrigger className="h-8 w-[100px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {[gm.season - 1, gm.season, gm.season + 1].map((y) => (
-                <SelectItem key={y} value={String(y)} className="text-xs">{y}</SelectItem>
+              {[PROJECTION_SEASON, PROJECTION_SEASON + 1, PROJECTION_SEASON + 2, PROJECTION_SEASON + 3].map((y) => (
+                <SelectItem key={y} value={String(y)} className="text-xs">{y}{y === PROJECTION_SEASON ? "" : " (proj)"}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -462,7 +488,7 @@ export default function GMRoster() {
           <Button variant="outline" size="icon" className="h-8 w-8" title="Rename current build" disabled={gm.activeBuildIsDefault} onClick={() => { setBuildName(gm.builds.find((b) => b.id === gm.selectedBuildId)?.name ?? ""); setBuildDialog("rename"); }}>
             <Pencil className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => { setAddName(""); setAddPosition(""); setAddTier(""); setAddNil(null); setAddBuildName(""); setAddPlayerOpen(true); }}>
+          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" disabled={gm.isProjection} title={gm.isProjection ? "Switch to the base season to edit the roster" : undefined} onClick={() => { setAddName(""); setAddPosition(""); setAddTier(""); setAddNil(null); setAddBuildName(""); setAddPlayerOpen(true); }}>
             <Plus className="h-3.5 w-3.5" /> Add Player
           </Button>
           <DropdownMenu>
@@ -476,6 +502,7 @@ export default function GMRoster() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
               <DropdownMenuItem onClick={() => setBudgetOpen(true)}>Edit Budget</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { setNotesDraft(gm.buildNotes ?? ""); setNotesOpen(true); }}>Build Notes</DropdownMenuItem>
               <DropdownMenuItem onClick={() => setDeparturesOpen(true)}>
                 Departures
                 {gm.pendingReasonCount > 0 && (
@@ -494,6 +521,19 @@ export default function GMRoster() {
             onSave={(caps) => setBudgetDraft(caps)}
             onFinalize={(caps) => setConfirmCaps(caps)}
           />
+          {/* Internal GM notes on this build — the front-office profile. Team-shared. */}
+          <Dialog open={notesOpen} onOpenChange={setNotesOpen}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle style={OSWALD}>Build Notes — {gm.builds.find((b) => b.id === gm.selectedBuildId)?.name ?? "Roster"}</DialogTitle>
+              </DialogHeader>
+              <p className="text-xs text-muted-foreground">Front-office context for this roster scenario — philosophy, priorities, reminders. Visible to your whole staff, not the coach-facing Team Builder.</p>
+              <Textarea value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} placeholder="e.g. Prioritize a left-handed weekend arm; hold ~$300K for a portal bat in December…" className="min-h-[160px] text-sm" />
+              <DialogFooter>
+                <Button size="sm" disabled={gm.isSavingNotes} onClick={() => { gm.saveBuildNotes(notesDraft); setNotesOpen(false); }}>Save Notes</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -510,6 +550,16 @@ export default function GMRoster() {
           {box("Total", actualUsed, coachTotalBudget, true)}
         </div>
       </div>
+
+      {gm.isProjection && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border-l-2 border-[#D4AF37] bg-[#D4AF37]/[0.06] px-3 py-2 text-xs">
+          <span className="font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Projected {seasonSel}</span>
+          <span className="text-muted-foreground">
+            Derived from the {PROJECTION_SEASON} build — eligibility advanced {seasonSel - PROJECTION_SEASON} {seasonSel - PROJECTION_SEASON === 1 ? "year" : "years"}, exhausted players removed
+            {gm.injectedCommitCount > 0 ? `, ${gm.injectedCommitCount} committed ${gm.injectedCommitCount === 1 ? "recruit" : "recruits"} added` : ""}. Read-only.
+          </span>
+        </div>
+      )}
 
       {gm.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading roster…</p>

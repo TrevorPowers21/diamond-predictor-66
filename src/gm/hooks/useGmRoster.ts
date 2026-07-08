@@ -6,7 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { toast } from "sonner";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
-import { parseBuildPlayerMeta, projectedEligibilityClass, serializeBuildPlayerMeta } from "@/pages/team-builder/helpers";
+import { advanceEligibility, parseBuildPlayerMeta, projectedEligibilityClass, serializeBuildPlayerMeta } from "@/pages/team-builder/helpers";
 import { effectivePitcherWar, effectiveHitterWar, effectiveMarket, pitcherSessionRole } from "@/lib/effectiveProjection";
 
 const isPitcherPos = (s: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
@@ -35,6 +35,7 @@ export interface GmRow {
   actual_pay: number | null;
   finalized: boolean;
   eligibility_class: string | null; // GM/head-coach display (override ?? class_year)
+  is_recruit?: boolean; // injected from the recruiting board in a future-season projection
 }
 
 export interface GmOtherLine {
@@ -80,10 +81,14 @@ export interface GmBudget {
  * eligibility edits write to the GM tables; Finalize syncs Actual Pay to the
  * coach's team_build_players.nil_value.
  */
-export function useGmRoster() {
+export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
   const { user, effectiveTeamId, availableTeams } = useAuth();
   const qc = useQueryClient();
   const season = PROJECTION_SEASON;
+  // How many seasons past the base build (2027) we're projecting. 0 = the live,
+  // editable base roster; >0 = a derived, read-only forward projection.
+  const deltaYears = Math.max(0, projectionSeason - PROJECTION_SEASON);
+  const isProjection = deltaYears > 0;
   // Selected build lives in the URL (?build=…) so navigating to a player profile
   // and back restores the same build. It's also mirrored to localStorage so the
   // selection carries across GM pages (Dashboard ⇄ Roster) — the working build,
@@ -183,8 +188,9 @@ export function useGmRoster() {
       // The coach's total_budget flows one-way INTO the GM (like a player's
       // nil_value → Actual Pay): it fills the Total until the GM Finalizes.
       const { data: buildRow } = await (supabase as any)
-        .from("team_builds").select("total_budget").eq("id", activeBuildId).maybeSingle();
+        .from("team_builds").select("total_budget, gm_notes").eq("id", activeBuildId).maybeSingle();
       const coachTotalBudget = buildRow?.total_budget != null ? Number(buildRow.total_budget) : null;
+      const buildNotes = (buildRow?.gm_notes as string | null) ?? null;
 
       // Pitching equation weights for the effective-WAR recompute (sync read).
       const eq = readPitchingWeights();
@@ -254,13 +260,75 @@ export function useGmRoster() {
       const budget: GmBudget | null = bud
         ? { rev_share_total: bud.rev_share_total, nil_total: bud.nil_total, other_total: bud.other_total, scholarship_total: bud.scholarship_total, other_breakdown: (bud.other_breakdown as GmOtherLine[] | null) ?? null, finalized: !!bud.finalized }
         : null;
-      return { rows, budget, coachTotalBudget };
+      return { rows, budget, coachTotalBudget, buildNotes };
     },
   });
 
-  const rows = data?.rows ?? [];
+  const baseRows = data?.rows ?? [];
   const budget = data?.budget ?? null;
   const coachTotalBudget = data?.coachTotalBudget ?? null;
+
+  // Committed/signed recruits from the recruiting board — injected as incoming
+  // freshmen in a future-season projection (a 2028 commit shows up in the 2028
+  // roster as FR, ages to SO in 2029, etc.). Only fetched/used when projecting.
+  const { data: commits = [] } = useQuery({
+    queryKey: ["gm-commits", effectiveTeamId ?? null],
+    enabled: !!user?.id && !!effectiveTeamId && isProjection,
+    queryFn: async () => {
+      const { data: recs } = await (supabase as any)
+        .from("gm_recruits")
+        .select("id, first_name, last_name, position, class_year, projection_tier")
+        .eq("customer_team_id", effectiveTeamId)
+        .in("stage", ["committed", "signed"]);
+      return (recs || []) as { id: string; first_name: string | null; last_name: string | null; position: string | null; class_year: number | null; projection_tier: string | null }[];
+    },
+  });
+
+  // The roster the UI actually renders. At the base season it's the build as-is.
+  // In a forward projection each returner's eligibility advances `deltaYears`,
+  // anyone who exhausts eligibility (past GR, or R-SR) drops off, and committed
+  // recruits whose class has arrived by the target season are added as freshmen.
+  // WAR / market / pay are held at the stored projection — this view is about
+  // roster COMPOSITION by year, not re-pricing a hypothetical future.
+  const rows = useMemo(() => {
+    if (!isProjection) return baseRows;
+    const aged: GmRow[] = [];
+    for (const r of baseRows) {
+      const cls = advanceEligibility(r.eligibility_class, deltaYears);
+      if (cls == null) continue; // exhausted eligibility → off the roster
+      aged.push({ ...r, eligibility_class: cls });
+    }
+    for (const c of commits) {
+      if (c.class_year == null) continue;
+      // Freshman in their class year; only classes that have arrived by the target.
+      if (c.class_year <= PROJECTION_SEASON || c.class_year > projectionSeason) continue;
+      const cls = advanceEligibility("FR", projectionSeason - c.class_year);
+      if (cls == null) continue;
+      const pos = (c.position ?? "").toUpperCase();
+      const pitcher = isPitcherPos(pos);
+      aged.push({
+        player_id: null,
+        build_player_id: `recruit:${c.id}`,
+        name: `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || "Recruit",
+        position: c.position ?? null,
+        class_year: null,
+        is_pitcher: pitcher,
+        war: null,
+        market_value: null,
+        nil_value: null,
+        scholarship_amount: null,
+        rev_share: null,
+        nil_amount: null,
+        other_amount: null,
+        actual_pay: null,
+        finalized: false,
+        eligibility_class: cls,
+        is_recruit: true,
+      });
+    }
+    return aged;
+  }, [isProjection, baseRows, commits, deltaYears, projectionSeason]);
+  const injectedCommitCount = useMemo(() => rows.filter((r) => r.is_recruit).length, [rows]);
 
   // Departures: rows removed from THIS build (included_in_roster=false), joined to
   // gm_player_finance for the reason. Reason may be null (pending → batch modal).
@@ -577,9 +645,28 @@ export function useGmRoster() {
     onError: (e: any) => toast.error(`Add player failed: ${e.message}`),
   });
 
+  // Internal GM notes on the active build — the "front-office profile" for this
+  // roster scenario. Team-scoped (team_builds RLS), so shared across the staff.
+  const saveBuildNotes = useMutation({
+    mutationFn: async (text: string) => {
+      if (!activeBuildId) throw new Error("No build in scope");
+      const { error } = await (supabase as any)
+        .from("team_builds").update({ gm_notes: text.trim() || null }).eq("id", activeBuildId);
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); toast.success("Notes saved"); },
+    onError: (e: any) => toast.error(`Save notes failed: ${e.message}`),
+  });
+
   return {
     teamName,
     season,
+    projectionSeason,
+    isProjection,
+    injectedCommitCount,
+    buildNotes: data?.buildNotes ?? null,
+    saveBuildNotes: (text: string) => saveBuildNotes.mutate(text),
+    isSavingNotes: saveBuildNotes.isPending,
     hasTeam: !!effectiveTeamId,
     isLoading,
     builds,
