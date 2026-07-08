@@ -94,6 +94,8 @@ export default function Settings() {
           <p className="text-sm text-muted-foreground mt-1">Manage your account and security.</p>
         </div>
 
+        <ScoutingCsvUpload />
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
@@ -217,8 +219,6 @@ export default function Settings() {
             )}
           </CardContent>
         </Card>
-
-        <ScoutingCsvUpload />
       </div>
     </DashboardLayout>
   );
