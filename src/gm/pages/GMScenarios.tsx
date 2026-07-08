@@ -15,7 +15,15 @@ import { Crosshair, FlaskConical, GitCompareArrows, MinusCircle, Plus, PlusCircl
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
-const money = (v: number | null | undefined) => (v == null ? "—" : `$${Math.round(v).toLocaleString()}`);
+// Abbreviate money to $K / $M once it gets big, else full dollars.
+const money = (v: number | null | undefined) => {
+  if (v == null) return "—";
+  const sign = v < 0 ? "-" : "";
+  const a = Math.abs(v);
+  if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(2).replace(/\.?0+$/, "")}M`;
+  if (a >= 1e3) return `${sign}$${(a / 1e3).toFixed(1).replace(/\.?0+$/, "")}K`;
+  return `${sign}$${Math.round(a).toLocaleString()}`;
+};
 const num = (v: number | null | undefined, d = 1) => (v == null ? "—" : Number(v).toFixed(d));
 
 interface Loaded { rows: GmRow[]; coachTotalBudget: number | null }
@@ -338,7 +346,7 @@ function StatCell({ label, value, delta, goodWhenPositive, deltaText }: { label:
 // Inline pay/budget editor. Owns its text state; remounts on resetNonce so Reset
 // reseeds it. Commits a number (or null → revert to the real value) on blur/Enter.
 function EditableMoney({ value, edited, onCommit, big }: { value: number; edited: boolean; onCommit: (n: number | null) => void; big?: boolean }) {
-  const fmt = (n: number) => `$${Math.round(n).toLocaleString()}`;
+  const fmt = (n: number) => money(n); // idle shows $K/$M; focus shows raw digits
   const [v, setV] = useState(fmt(value));
   return (
     <input
