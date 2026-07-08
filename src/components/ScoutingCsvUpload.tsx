@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { computeHitterPowerRatings, computePitchingPowerRatings } from "@/lib/powerRatings";
 import { calculateStuffPlus, type PitchRow, type PopConstants } from "@/savant/lib/stuffPlusEngine";
+import { parsePitchTypeAndHandFromFilename } from "@/lib/importStuffPlusInputsCsv";
 import { supabase } from "@/integrations/supabase/client";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
 import { Upload, Download, FileSpreadsheet, CheckCircle2 } from "lucide-react";
@@ -19,30 +20,8 @@ import { Upload, Download, FileSpreadsheet, CheckCircle2 } from "lucide-react";
 type Kind = "hitter" | "pitcher" | "stuff";
 const KIND_LABEL: Record<Kind, string> = { hitter: "Hitters", pitcher: "Pitchers", stuff: "Stuff+" };
 
-// Canonical pitch types the Stuff+ engine scores, with light alias mapping.
+// Pitch types the Stuff+ engine scores (used in the file-name, e.g. "Sinker LHP").
 const STUFF_PITCH_TYPES = ["4S FB", "Sinker", "Cutter", "Gyro Slider", "Slider", "Sweeper", "Curveball", "Change-up", "Splitter"];
-const PITCH_TYPE_ALIASES: Record<string, string> = {
-  "4seam": "4S FB", "4seamfastball": "4S FB", "fourseam": "4S FB", "ff": "4S FB", "fb": "4S FB", "4sfb": "4S FB", "fastball": "4S FB",
-  "sinker": "Sinker", "si": "Sinker", "twoseam": "Sinker", "2seam": "Sinker",
-  "cutter": "Cutter", "fc": "Cutter",
-  "gyroslider": "Gyro Slider", "gyro": "Gyro Slider",
-  "slider": "Slider", "sl": "Slider",
-  "sweeper": "Sweeper", "sw": "Sweeper",
-  "curveball": "Curveball", "curve": "Curveball", "cb": "Curveball", "cu": "Curveball",
-  "changeup": "Change-up", "change": "Change-up", "ch": "Change-up",
-  "splitter": "Splitter", "split": "Splitter", "fs": "Splitter",
-};
-const canonicalPitchType = (raw: string): string | null => {
-  const t = raw.trim();
-  if (STUFF_PITCH_TYPES.includes(t)) return t;
-  return PITCH_TYPE_ALIASES[t.toLowerCase().replace(/[^a-z0-9]/g, "")] ?? null;
-};
-const canonicalHand = (raw: string): "R" | "L" | null => {
-  const h = raw.trim().toUpperCase();
-  if (h.startsWith("R")) return "R";
-  if (h.startsWith("L")) return "L";
-  return null;
-};
 
 interface Col {
   label: string;        // our template header
@@ -111,11 +90,10 @@ const PITCHER_METRICS: Col[] = [
   { label: "Stuff+", key: "stuff", desc: "Stuff+ (if your service provides it)", aliases: ["Stuff Plus"] },
 ];
 
-// Stuff+ is per-pitch: one row per pitcher × pitch type, with the pitch shape.
+// Stuff+ is one file per pitch type × hand (derived from the file NAME, e.g.
+// "Sinker LHP.csv"), with one row per pitcher and that pitch's shape.
 const STUFF_COLUMNS: Col[] = [
   { label: "Name", key: "", desc: "Pitcher name", required: true, aliases: NAME_ALIASES },
-  { label: "Pitch Type", key: "", desc: `One of: ${STUFF_PITCH_TYPES.join(", ")}`, required: true, aliases: ["Pitch", "PitchType"] },
-  { label: "Hand", key: "", desc: "Throwing hand — R or L", required: true, aliases: ["Throws"] },
   { label: "Velocity", key: "velocity", desc: "Average velocity (mph)", required: true, aliases: ["Velo", "MPH"] },
   { label: "IVB", key: "ivb", desc: "Induced vertical break (in)", required: true, aliases: ["Induced Vert", "iVB"] },
   { label: "HB", key: "hb", desc: "Horizontal break (in)", required: true, aliases: ["Horz Break", "HBreak"] },
@@ -207,7 +185,7 @@ export default function ScoutingCsvUpload() {
   .headerline{margin-top:10px;font-family:ui-monospace,Menlo,monospace;font-size:11px;background:#f6f6f6;border:1px solid #eee;border-radius:6px;padding:8px 10px;color:#333;white-space:pre-wrap;word-break:break-all}
 </style></head><body>
   <h1>${esc(title)}</h1>
-  ${kind === "stuff" ? '<p class="sub"><b>Export per pitch and per hand</b> — one row per pitch type, split out by throwing hand. Match your export\'s columns to these; <span class="req">*</span> = required.</p>' : '<p class="sub">Match your export\'s columns to these. <span class="req">*</span> = required; leave anything you don\'t have blank.</p>'}
+  ${kind === "stuff" ? '<p class="sub"><b>One file per pitch type + hand.</b> Name the file with the handedness and pitch type — e.g. “Sinker LHP.csv” or “4S FB RHP.csv” — that’s how the pitch is recognized. Then one row per pitcher; <span class="req">*</span> = required.</p>' : '<p class="sub">Match your export\'s columns to these. <span class="req">*</span> = required; leave anything you don\'t have blank.</p>'}
   <table><thead><tr><th>Column</th><th>Description</th><th>Also known as</th></tr></thead><tbody>${rows}</tbody></table>
   <div class="note">Exact header row (copy into row 1 of your CSV):</div>
   <div class="headerline">${esc(headerLine)}</div>
@@ -242,9 +220,16 @@ export default function ScoutingCsvUpload() {
       // Run the model per row. Ephemeral — results are not surfaced or stored.
       let processed = 0;
 
-      // Stuff+ z-scores each pitch shape against our D1 population baselines.
+      // Stuff+: the pitch type + hand come from the FILE NAME (e.g. "Sinker
+      // LHP.csv"), and it z-scores each shape against our D1 population baselines.
       let popMap: Map<string, PopConstants> | null = null;
+      let filePitch: { pitchType: string; hand: "R" | "L" } | null = null;
       if (kind === "stuff") {
+        filePitch = parsePitchTypeAndHandFromFilename(file.name);
+        if (!filePitch) {
+          toast({ title: "Name the file by pitch and hand", description: "Include the pitch type and handedness in the file name — e.g. “Sinker LHP.csv” or “4S FB RHP.csv”.", variant: "destructive" });
+          return;
+        }
         const { data: popData, error } = await (supabase as any)
           .from("pitcher_stuff_plus_ncaa").select("*").eq("season", CURRENT_SEASON).eq("division", "D1");
         if (error || !popData?.length) {
@@ -272,9 +257,7 @@ export default function ScoutingCsvUpload() {
             in_zone_pct: num(get(row, "InZone%")), vel_90th: num(get(row, "EV90")), h_pull_pct: num(get(row, "Pull%")), la_10_30_pct: num(get(row, "LA10-30%")),
           }, num(get(row, "Stuff+")));
         } else {
-          const pitchType = canonicalPitchType(get(row, "Pitch Type") ?? "");
-          const hand = canonicalHand(get(row, "Hand") ?? "");
-          if (!pitchType || !hand) continue; // unrecognized pitch type / hand
+          const { pitchType, hand } = filePitch!;
           const pop = popMap!.get(`${pitchType}::${hand}`);
           if (!pop) continue; // no baseline for this pitch type × hand
           const pitchRow = {
@@ -317,7 +300,7 @@ export default function ScoutingCsvUpload() {
 
         {/* Steps — how to get projections */}
         <ol className="list-decimal space-y-1.5 pl-5 text-sm text-muted-foreground">
-          <li><span className="font-medium text-foreground">Export the players you want projected</span> from your scouting service — every player in the country is available for evaluation.{kind === "stuff" && <span className="font-medium text-foreground"> Export per pitch and per hand</span>}{kind === "stuff" && " — one row per pitch type, split out by throwing hand (a pitcher's 4S FB, Slider, Change-up, etc. each get their own row)."}</li>
+          <li><span className="font-medium text-foreground">Export the players you want projected</span> from your scouting service — every player in the country is available for evaluation.{kind === "stuff" && <><span className="font-medium text-foreground"> One file per pitch type + hand</span>, and name each file with the handedness and pitch type — e.g. <span className="font-medium text-foreground">“Sinker LHP”</span> or <span className="font-medium text-foreground">“4S FB RHP”</span> — that's how the pitch is recognized.</>}</li>
 
           <li><span className="font-medium text-foreground">Download the {KIND_LABEL[kind]} template</span> and match your export's columns to it — our metric names are below, with common aliases (e.g. Whiff% / Miss%). Leave any metric you don't have blank.</li>
           <li><span className="font-medium text-foreground">Upload it</span> — RSTR IQ runs the projection and hands the results back to you instantly.</li>
