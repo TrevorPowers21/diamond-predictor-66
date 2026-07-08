@@ -57,6 +57,15 @@ function toneClass(tone: string): string {
 }
 
 /** Stage badge that's also the editor — coaches advance the funnel here. */
+function DealStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground" style={OSWALD}>{label}</span>
+      <span className={cn("font-mono text-base font-semibold tabular-nums", accent ? "text-[#D4AF37]" : "text-foreground")}>{value}</span>
+    </div>
+  );
+}
+
 function StageSelect({ value, onChange }: { value: RecruitStage; onChange: (s: RecruitStage) => void }) {
   const info = RECRUIT_STAGES.find((s) => s.value === value) ?? RECRUIT_STAGES[0];
   return (
@@ -178,6 +187,12 @@ export default function GMRecruits() {
         return unassigned.length ? [...groups, { key: "unassigned", title: "Unassigned", list: unassigned }] : groups;
       })();
 
+  // Forward class budget — sum the deal across the selected class.
+  const classRecruits = gm.recruits.filter((r) => r.class_year === year);
+  const classAsking = classRecruits.reduce((s, r) => s + (r.asking_price ?? 0), 0);
+  const classWilling = classRecruits.reduce((s, r) => s + (r.target_offer ?? 0), 0);
+  const committedWilling = classRecruits.filter((r) => r.stage === "committed" || r.stage === "signed").reduce((s, r) => s + (r.target_offer ?? 0), 0);
+
   const onDragEnd = (list: GmRecruit[]) => (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -259,6 +274,16 @@ export default function GMRecruits() {
           ))}
         </div>
       </div>
+
+      {/* Class deal budget — forward spend for the selected class */}
+      {(classAsking > 0 || classWilling > 0) && (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border border-[#D4AF37]/40 bg-[#D4AF37]/[0.05] px-4 py-2.5">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>{year} Class Budget</span>
+          <DealStat label="Willing to Pay" value={money(classWilling)} accent />
+          <DealStat label="Committed" value={money(committedWilling)} />
+          <DealStat label="Asking (Total)" value={money(classAsking)} />
+        </div>
+      )}
 
       {/* Sortable sections — grouped by type or by position */}
       <div className="grid gap-4 lg:grid-cols-3">
