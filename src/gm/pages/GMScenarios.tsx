@@ -106,31 +106,25 @@ export default function GMScenarios() {
           <h2 className="text-2xl font-bold leading-tight" style={OSWALD}>The Situation Room</h2>
           <p className="text-sm text-muted-foreground">{teamName ? `${teamName} · what-if & build compare` : "Pick a team above."}</p>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex rounded-md border border-border/60 p-0.5">
-            {([["whatif", "What-If", FlaskConical], ["compare", "Compare", GitCompareArrows]] as const).map(([m, label, Icon]) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors",
-                  mode === m ? "bg-[#D4AF37]/15 text-[#D4AF37]" : "text-muted-foreground hover:text-foreground",
-                )}
-                style={OSWALD}
-              >
-                <Icon className="h-3.5 w-3.5" /> {label}
-              </button>
-            ))}
-          </div>
-          {/* Directly under the What-If / Compare toggle. */}
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => { setMode("whatif"); setTargetPickerOpen(true); }}>
-            <Crosshair className="h-3.5 w-3.5" /> Add from Target Board
-          </Button>
+        <div className="flex rounded-md border border-border/60 p-0.5">
+          {([["whatif", "What-If", FlaskConical], ["compare", "Compare", GitCompareArrows]] as const).map(([m, label, Icon]) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors",
+                mode === m ? "bg-[#D4AF37]/15 text-[#D4AF37]" : "text-muted-foreground hover:text-foreground",
+              )}
+              style={OSWALD}
+            >
+              <Icon className="h-3.5 w-3.5" /> {label}
+            </button>
+          ))}
         </div>
       </div>
 
       {mode === "whatif"
-        ? <WhatIf roster={qA.data} loading={qA.isLoading} builds={builds} buildId={a} onPick={setBuildA} addedTargets={addedTargets} onRemoveTarget={removeTarget} onClearTargets={() => setAddedTargets([])} />
+        ? <WhatIf roster={qA.data} loading={qA.isLoading} builds={builds} buildId={a} onPick={setBuildA} addedTargets={addedTargets} onRemoveTarget={removeTarget} onClearTargets={() => setAddedTargets([])} onOpenTargetPicker={() => setTargetPickerOpen(true)} />
         : <Compare qA={qA.data} qB={qB.data} loadingA={qA.isLoading} loadingB={qB.isLoading} builds={builds} a={a} b={b} onPickA={setBuildA} onPickB={setBuildB} nameA={nameOf(a)} nameB={nameOf(b)} />}
 
       <TargetPicker open={targetPickerOpen} onOpenChange={setTargetPickerOpen} addedIds={new Set(addedTargets.map((r) => r.player_id!))} onAdd={addTarget} />
@@ -201,7 +195,7 @@ function StatCell({ label, value, delta, goodWhenPositive, deltaText }: { label:
 
 // ─────────────────────────────────────────────────────────────────────────────
 // What-If: one build, drop players, watch WAR + money move. Nothing is saved.
-function WhatIf({ roster, loading, builds, buildId, onPick, addedTargets, onRemoveTarget, onClearTargets }: { roster: Loaded | undefined; loading: boolean; builds: { id: string; name: string }[]; buildId: string | null; onPick: (id: string) => void; addedTargets: GmRow[]; onRemoveTarget: (playerId: string) => void; onClearTargets: () => void }) {
+function WhatIf({ roster, loading, builds, buildId, onPick, addedTargets, onRemoveTarget, onClearTargets, onOpenTargetPicker }: { roster: Loaded | undefined; loading: boolean; builds: { id: string; name: string }[]; buildId: string | null; onPick: (id: string) => void; addedTargets: GmRow[]; onRemoveTarget: (playerId: string) => void; onClearTargets: () => void; onOpenTargetPicker: () => void }) {
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
   // Ephemeral pay overrides, keyed by build_player_id. Absent = use the real
   // nil_value. Nothing here is written to the DB.
@@ -254,9 +248,12 @@ function WhatIf({ roster, loading, builds, buildId, onPick, addedTargets, onRemo
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <BuildPicker label="Build" value={buildId} onChange={(id) => { onPick(id); reset(); }} builds={builds} />
-        {changed && <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={reset}><RotateCcw className="h-3 w-3" /> Reset</Button>}
+        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={onOpenTargetPicker}>
+          <Crosshair className="h-3.5 w-3.5" /> Add from Target Board
+        </Button>
+        {changed && <Button variant="ghost" size="sm" className="ml-auto h-7 gap-1.5 text-xs" onClick={reset}><RotateCcw className="h-3 w-3" /> Reset</Button>}
       </div>
 
       {/* Live delta strip */}
