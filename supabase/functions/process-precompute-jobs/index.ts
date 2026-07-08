@@ -1749,6 +1749,29 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// GM (Front Office) init — idempotent. Runs after the default build so a new
+// team's front office is explicitly ready: a baseline budget row for the
+// projection season + a welcome activity entry. All other GM tables
+// (recruits, notes, per-player finance) self-populate on first write, so
+// nothing else needs seeding. Wrapped by the caller in try/catch — if the GM
+// tables don't exist yet in this environment it's a no-op.
+// ─────────────────────────────────────────────────────────────────────────
+async function ensureGmSetup(supabase: any, customerTeamId: string): Promise<{ seeded: boolean }> {
+  const season = PROJECTION_SEASON_FOR_DEFAULT;
+  const { data: existing } = await supabase
+    .from("gm_budget").select("id").eq("customer_team_id", customerTeamId).eq("season", season).maybeSingle();
+  if (existing) return { seeded: false }; // already initialized (runs after every job)
+
+  await supabase.from("gm_budget").insert({ customer_team_id: customerTeamId, season });
+  await supabase.from("gm_activity").insert({
+    customer_team_id: customerTeamId,
+    actor: null,
+    action: "Front office initialized — roster imported and ready",
+  });
+  return { seeded: true };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // HTTP handler
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -1824,7 +1847,15 @@ Deno.serve(async (req: Request) => {
       console.error("default build refresh failed (non-fatal):", dbErr);
     }
 
-    return new Response(JSON.stringify({ ok: true, jobId: job.id, ...result, defaultBuild: defaultBuildResult }), {
+    // Initialize the team's GM / front office (idempotent, non-fatal).
+    let gmSetupResult: { seeded: boolean } | null = null;
+    try {
+      gmSetupResult = await ensureGmSetup(supabase, job.customer_team_id);
+    } catch (gmErr: any) {
+      console.error("GM setup failed (non-fatal):", gmErr);
+    }
+
+    return new Response(JSON.stringify({ ok: true, jobId: job.id, ...result, defaultBuild: defaultBuildResult, gmSetup: gmSetupResult }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e: any) {
