@@ -67,6 +67,7 @@ export function deriveGmRows(
       finalized: !!f.finalized,
       eligibility_class:
         f.eligibility_class ?? (isLocal ? "FR" : projectedEligibilityClass(p?.class_year, meta?.classTransition ?? null)),
+      notes: f.notes ?? null,
     };
   });
 }
@@ -79,7 +80,7 @@ export function deriveGmRows(
 export async function loadGmBuildRoster(
   buildId: string,
   teamId: string,
-): Promise<{ rows: GmRow[]; coachTotalBudget: number | null; buildNotes: string | null }> {
+): Promise<{ rows: GmRow[]; coachTotalBudget: number | null }> {
   const { data: bps } = await (supabase as any)
     .from("team_build_players")
     .select("id, player_id, custom_name, position_slot, nil_value, included_in_roster, player_snapshot, production_notes")
@@ -106,10 +107,9 @@ export async function loadGmBuildRoster(
   }
 
   const { data: buildRow } = await (supabase as any)
-    .from("team_builds").select("total_budget, gm_notes").eq("id", buildId).maybeSingle();
+    .from("team_builds").select("total_budget").eq("id", buildId).maybeSingle();
   const coachTotalBudget = buildRow?.total_budget != null ? Number(buildRow.total_budget) : null;
-  const buildNotes = (buildRow?.gm_notes as string | null) ?? null;
 
   const rows = deriveGmRows(rowsRaw, pById, finByBp, readPitchingWeights());
-  return { rows, coachTotalBudget, buildNotes };
+  return { rows, coachTotalBudget };
 }

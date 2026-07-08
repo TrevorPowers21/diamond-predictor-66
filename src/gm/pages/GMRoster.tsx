@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Check, Pencil, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { Check, Pencil, Plus, SlidersHorizontal, StickyNote, Trash2, X } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { cn } from "@/lib/utils";
@@ -242,8 +242,10 @@ export default function GMRoster() {
   const [reasonModalOpen, setReasonModalOpen] = useState(false);
   const [departuresOpen, setDeparturesOpen] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
-  const [notesOpen, setNotesOpen] = useState(false);
-  const [notesDraft, setNotesDraft] = useState("");
+  // Per-player note editor.
+  const [noteRow, setNoteRow] = useState<GmRow | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const openNote = (r: GmRow) => { setNoteDraft(r.notes ?? ""); setNoteRow(r); };
   const [finalizeRosterOpen, setFinalizeRosterOpen] = useState(false);
   const [addPlayerOpen, setAddPlayerOpen] = useState(false);
   const [addName, setAddName] = useState("");
@@ -317,6 +319,15 @@ export default function GMRoster() {
                         <span className="text-sm font-medium">{r.name}</span>
                       )}
                       {r.is_recruit && <span className="shrink-0 rounded bg-[#D4AF37]/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Commit</span>}
+                      {!r.is_recruit && (
+                        <button
+                          onClick={() => openNote(r)}
+                          title={r.notes ? "Edit note" : "Add note"}
+                          className={cn("inline-flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors cursor-pointer", r.notes ? "text-[#D4AF37] hover:bg-[#D4AF37]/10" : "text-muted-foreground/30 hover:bg-muted hover:text-muted-foreground")}
+                        >
+                          <StickyNote className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </span>
                   </TableCell>
                   <TableCell className="py-1.5">
@@ -502,7 +513,6 @@ export default function GMRoster() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
               <DropdownMenuItem onClick={() => setBudgetOpen(true)}>Edit Budget</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { setNotesDraft(gm.buildNotes ?? ""); setNotesOpen(true); }}>Build Notes</DropdownMenuItem>
               <DropdownMenuItem onClick={() => setDeparturesOpen(true)}>
                 Departures
                 {gm.pendingReasonCount > 0 && (
@@ -521,16 +531,16 @@ export default function GMRoster() {
             onSave={(caps) => setBudgetDraft(caps)}
             onFinalize={(caps) => setConfirmCaps(caps)}
           />
-          {/* Internal GM notes on this build — the front-office profile. Team-shared. */}
-          <Dialog open={notesOpen} onOpenChange={setNotesOpen}>
+          {/* Per-player GM note — scouting / negotiation context, team-shared. */}
+          <Dialog open={!!noteRow} onOpenChange={(o) => { if (!o) setNoteRow(null); }}>
             <DialogContent className="max-w-md">
               <DialogHeader>
-                <DialogTitle style={OSWALD}>Build Notes — {gm.builds.find((b) => b.id === gm.selectedBuildId)?.name ?? "Roster"}</DialogTitle>
+                <DialogTitle style={OSWALD}>Note — {noteRow?.name ?? "Player"}</DialogTitle>
               </DialogHeader>
-              <p className="text-xs text-muted-foreground">Front-office context for this roster scenario — philosophy, priorities, reminders. Visible to your whole staff, not the coach-facing Team Builder.</p>
-              <Textarea value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} placeholder="e.g. Prioritize a left-handed weekend arm; hold ~$300K for a portal bat in December…" className="min-h-[160px] text-sm" />
+              <p className="text-xs text-muted-foreground">Scouting or negotiation context for this player. Visible to your whole staff, not the coach-facing Team Builder.</p>
+              <Textarea value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="e.g. Wants to play SS, open to $350K; family close to campus…" className="min-h-[140px] text-sm" />
               <DialogFooter>
-                <Button size="sm" disabled={gm.isSavingNotes} onClick={() => { gm.saveBuildNotes(notesDraft); setNotesOpen(false); }}>Save Notes</Button>
+                <Button size="sm" onClick={() => { if (noteRow) gm.saveNote(noteRow, noteDraft); setNoteRow(null); }}>Save Note</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

@@ -1,6 +1,6 @@
 -- ============================================================================
 -- GM / FRONT OFFICE — FULL PROD-APPLY BUNDLE
--- Generated 2026-07-07 from supabase/migrations (timestamp order).
+-- Generated 2026-07-08 from supabase/migrations (timestamp order).
 --
 -- Every statement is idempotent (IF [NOT] EXISTS / DROP POLICY IF EXISTS),
 -- so this is safe to run in full and safe to re-run. Apply on PROD with the
@@ -10,6 +10,8 @@
 --
 -- After it completes, reload the PostgREST schema cache:
 --     NOTIFY pgrst, 'reload schema';
+-- Note: team_builds.gm_notes (per-build) is superseded by
+-- gm_player_finance.notes (per-player); the column is left in place, unused.
 -- ============================================================================
 
 
@@ -290,5 +292,13 @@ ALTER TABLE public.gm_recruit_reports
 ALTER TABLE public.team_builds
   ADD COLUMN IF NOT EXISTS gm_notes text;
 
--- Reload PostgREST so the new tables/columns are queryable immediately.
+-- ----------------------------------------------------------------------------
+-- 20260708120000_gm_player_finance_notes.sql
+-- ----------------------------------------------------------------------------
+-- Per-player GM notes — scouting/negotiation context on an individual roster
+-- row, keyed per build (build_player_id). Supersedes the per-build
+-- team_builds.gm_notes; notes belong on the player, not the whole build.
+ALTER TABLE public.gm_player_finance
+  ADD COLUMN IF NOT EXISTS notes text;
+
 NOTIFY pgrst, 'reload schema';

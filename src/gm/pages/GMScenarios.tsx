@@ -18,7 +18,7 @@ const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
 const money = (v: number | null | undefined) => (v == null ? "—" : `$${Math.round(v).toLocaleString()}`);
 const num = (v: number | null | undefined, d = 1) => (v == null ? "—" : Number(v).toFixed(d));
 
-interface Loaded { rows: GmRow[]; coachTotalBudget: number | null; buildNotes: string | null }
+interface Loaded { rows: GmRow[]; coachTotalBudget: number | null }
 /** One scenario's live totals, reported up so Compare can diff two panels. */
 interface ScenarioReport { name: string; war: number; pay: number; headroom: number | null; count: number; projValue: number }
 
@@ -43,6 +43,7 @@ function targetToRow(t: GmTarget): GmRow {
     actual_pay: null,
     finalized: false,
     eligibility_class: null,
+    notes: null,
     is_added_target: true,
   };
 }

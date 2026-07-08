@@ -32,6 +32,7 @@ export interface GmRow {
   actual_pay: number | null;
   finalized: boolean;
   eligibility_class: string | null; // GM/head-coach display (override ?? class_year)
+  notes: string | null; // per-player GM note (gm_player_finance.notes)
   is_recruit?: boolean; // injected from the recruiting board in a future-season projection
   is_added_target?: boolean; // hypothetically added from the target board in a scenario
 }
@@ -155,13 +156,13 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     queryFn: async () => {
       // Roster rows (with the coach's on-read toggles applied) come from the
       // shared loader so the Scenarios page derives them identically.
-      const { rows, coachTotalBudget, buildNotes } = await loadGmBuildRoster(activeBuildId!, effectiveTeamId!);
+      const { rows, coachTotalBudget } = await loadGmBuildRoster(activeBuildId!, effectiveTeamId!);
       const { data: bud } = await (supabase as any)
         .from("gm_budget").select("*").eq("customer_team_id", effectiveTeamId).eq("season", season).maybeSingle();
       const budget: GmBudget | null = bud
         ? { rev_share_total: bud.rev_share_total, nil_total: bud.nil_total, other_total: bud.other_total, scholarship_total: bud.scholarship_total, other_breakdown: (bud.other_breakdown as GmOtherLine[] | null) ?? null, finalized: !!bud.finalized }
         : null;
-      return { rows, budget, coachTotalBudget, buildNotes };
+      return { rows, budget, coachTotalBudget };
     },
   });
 
@@ -546,17 +547,22 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     onError: (e: any) => toast.error(`Add player failed: ${e.message}`),
   });
 
-  // Internal GM notes on the active build — the "front-office profile" for this
-  // roster scenario. Team-scoped (team_builds RLS), so shared across the staff.
-  const saveBuildNotes = useMutation({
-    mutationFn: async (text: string) => {
-      if (!activeBuildId) throw new Error("No build in scope");
-      const { error } = await (supabase as any)
-        .from("team_builds").update({ gm_notes: text.trim() || null }).eq("id", activeBuildId);
+  // Per-player GM note — scouting/negotiation context on one roster row, keyed
+  // per build (build_player_id) like the money. Team-scoped, shared across staff.
+  const saveNote = useMutation({
+    mutationFn: async ({ row, text }: { row: GmRow; text: string }) => {
+      if (!effectiveTeamId) throw new Error("No team in scope");
+      const { error } = await (supabase as any).from("gm_player_finance").upsert(
+        {
+          build_player_id: row.build_player_id, customer_team_id: effectiveTeamId, player_id: row.player_id, season,
+          notes: text.trim() || null, updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString(),
+        },
+        { onConflict: "build_player_id" },
+      );
       if (error) throw error;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); toast.success("Notes saved"); },
-    onError: (e: any) => toast.error(`Save notes failed: ${e.message}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); toast.success("Note saved"); },
+    onError: (e: any) => toast.error(`Save note failed: ${e.message}`),
   });
 
   return {
@@ -565,9 +571,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     projectionSeason,
     isProjection,
     injectedCommitCount,
-    buildNotes: data?.buildNotes ?? null,
-    saveBuildNotes: (text: string) => saveBuildNotes.mutate(text),
-    isSavingNotes: saveBuildNotes.isPending,
+    saveNote: (row: GmRow, text: string) => saveNote.mutate({ row, text }),
     hasTeam: !!effectiveTeamId,
     isLoading,
     builds,
