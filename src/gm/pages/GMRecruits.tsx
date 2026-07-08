@@ -307,101 +307,103 @@ export default function GMRecruits() {
         ))}
       </div>
 
-      {/* Add recruit */}
+      {/* Add recruit — two columns so it isn't a tall single stack */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto">
           <DialogHeader><DialogTitle style={OSWALD}>Add Recruit</DialogTitle></DialogHeader>
-          <div className="space-y-3 py-1">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>First Name</span>
-                <Input value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} className="h-9 text-sm" />
+          <div className="grid gap-x-6 gap-y-3 py-1 md:grid-cols-2">
+            {/* Left column — identity, location, deal */}
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>First Name</span>
+                  <Input value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} className="h-9 text-sm" />
+                </div>
+                <div>
+                  <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Last Name</span>
+                  <Input value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} className="h-9 text-sm" />
+                </div>
               </div>
-              <div>
-                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Last Name</span>
-                <Input value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} className="h-9 text-sm" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Position</span>
+                  <Select value={form.position} onValueChange={(v) => setForm((f) => ({ ...f, position: v }))}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select" /></SelectTrigger>
+                    <SelectContent>{POSITIONS.map((p) => <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Class Year</span>
+                  <Select value={String(form.class_year)} onValueChange={(v) => setForm((f) => ({ ...f, class_year: Number(v) }))}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>{YEARS.map((y) => <SelectItem key={y} value={String(y)} className="text-xs">{y}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Position</span>
-                <Select value={form.position} onValueChange={(v) => setForm((f) => ({ ...f, position: v }))}>
-                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select" /></SelectTrigger>
-                  <SelectContent>{POSITIONS.map((p) => <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>)}</SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Stage</span>
+                  <Select value={form.stage} onValueChange={(v) => setForm((f) => ({ ...f, stage: v as RecruitStage }))}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>{RECRUIT_STAGES.map((s) => <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>State</span>
+                  <Input value={form.state} onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))} placeholder="e.g. TX" className="h-9 text-sm" />
+                </div>
               </div>
-              <div>
-                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Class Year</span>
-                <Select value={String(form.class_year)} onValueChange={(v) => setForm((f) => ({ ...f, class_year: Number(v) }))}>
-                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                  <SelectContent>{YEARS.map((y) => <SelectItem key={y} value={String(y)} className="text-xs">{y}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div>
-              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Stage</span>
-              <Select value={form.stage} onValueChange={(v) => setForm((f) => ({ ...f, stage: v as RecruitStage }))}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>{RECRUIT_STAGES.map((s) => <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
               <div>
                 <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>High School</span>
                 <Input value={form.high_school} onChange={(e) => setForm((f) => ({ ...f, high_school: e.target.value }))} className="h-9 text-sm" />
               </div>
               <div>
-                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>State</span>
-                <Input value={form.state} onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))} placeholder="e.g. TX" className="h-9 text-sm" />
+                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Travel Organization</span>
+                <Input value={form.travel_org} onChange={(e) => setForm((f) => ({ ...f, travel_org: e.target.value }))} className="h-9 text-sm" />
               </div>
-            </div>
-            <div>
-              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Travel Organization</span>
-              <Input value={form.travel_org} onChange={(e) => setForm((f) => ({ ...f, travel_org: e.target.value }))} className="h-9 text-sm" />
-            </div>
-            <div>
-              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Link (PBR / PG)</span>
-              <Input value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="https://…" className="h-9 text-sm" />
-            </div>
-
-            {/* Deal — asking price + what we're willing to pay */}
-            <div className="border-t border-border/40 pt-3">
-              <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Deal</span>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Asking Price</span>
-                  <Input value={form.asking_price} onChange={(e) => setForm((f) => ({ ...f, asking_price: e.target.value }))} placeholder="e.g. 300000" inputMode="numeric" className="h-9 text-sm" />
-                </div>
-                <div>
-                  <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Willing to Pay</span>
-                  <Input value={form.target_offer} onChange={(e) => setForm((f) => ({ ...f, target_offer: e.target.value }))} placeholder="e.g. 250000" inputMode="numeric" className="h-9 text-sm" />
+              <div>
+                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Link (PBR / PG)</span>
+                <Input value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="https://…" className="h-9 text-sm" />
+              </div>
+              {/* Deal — asking price + what we're willing to pay */}
+              <div className="border-t border-border/40 pt-3">
+                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Deal</span>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Asking Price</span>
+                    <Input value={form.asking_price} onChange={(e) => setForm((f) => ({ ...f, asking_price: e.target.value }))} placeholder="e.g. 300000" inputMode="numeric" className="h-9 text-sm" />
+                  </div>
+                  <div>
+                    <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Willing to Pay</span>
+                    <Input value={form.target_offer} onChange={(e) => setForm((f) => ({ ...f, target_offer: e.target.value }))} placeholder="e.g. 250000" inputMode="numeric" className="h-9 text-sm" />
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Contact — shared with the whole staff */}
-            <div className="border-t border-border/40 pt-3">
-              <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Contact</span>
-              <div className="grid grid-cols-2 gap-3">
-                <Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Player phone" className="h-9 text-sm" />
-                <Input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="Player email" className="h-9 text-sm" />
-                <Input value={form.guardian_name} onChange={(e) => setForm((f) => ({ ...f, guardian_name: e.target.value }))} placeholder="Parent / guardian" className="h-9 text-sm" />
-                <Input value={form.guardian_phone} onChange={(e) => setForm((f) => ({ ...f, guardian_phone: e.target.value }))} placeholder="Guardian phone" className="h-9 text-sm" />
-                <Input value={form.coach_name} onChange={(e) => setForm((f) => ({ ...f, coach_name: e.target.value }))} placeholder="HS / travel coach" className="h-9 text-sm" />
-                <Input value={form.coach_phone} onChange={(e) => setForm((f) => ({ ...f, coach_phone: e.target.value }))} placeholder="Coach phone" className="h-9 text-sm" />
+            {/* Right column — contact + scouting report */}
+            <div className="space-y-3">
+              <div>
+                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Contact</span>
+                <div className="grid grid-cols-2 gap-3">
+                  <Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Player phone" className="h-9 text-sm" />
+                  <Input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="Player email" className="h-9 text-sm" />
+                  <Input value={form.guardian_name} onChange={(e) => setForm((f) => ({ ...f, guardian_name: e.target.value }))} placeholder="Parent / guardian" className="h-9 text-sm" />
+                  <Input value={form.guardian_phone} onChange={(e) => setForm((f) => ({ ...f, guardian_phone: e.target.value }))} placeholder="Guardian phone" className="h-9 text-sm" />
+                  <Input value={form.coach_name} onChange={(e) => setForm((f) => ({ ...f, coach_name: e.target.value }))} placeholder="HS / travel coach" className="h-9 text-sm" />
+                  <Input value={form.coach_phone} onChange={(e) => setForm((f) => ({ ...f, coach_phone: e.target.value }))} placeholder="Coach phone" className="h-9 text-sm" />
+                </div>
               </div>
-            </div>
-
-            {/* Initial scouting report — authors the projection tier */}
-            <div className="border-t border-border/40 pt-3">
-              <div className="mb-1 flex items-center justify-between gap-2">
-                <span className="text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scouting Report</span>
-                <Select value={form.projection_tier || undefined} onValueChange={(v) => setForm((f) => ({ ...f, projection_tier: v as RecruitTier }))}>
-                  <SelectTrigger className="h-7 w-auto gap-1 text-xs"><SelectValue placeholder="Projection tier" /></SelectTrigger>
-                  <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
-                </Select>
+              <div className="border-t border-border/40 pt-3">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scouting Report</span>
+                  <Select value={form.projection_tier || undefined} onValueChange={(v) => setForm((f) => ({ ...f, projection_tier: v as RecruitTier }))}>
+                    <SelectTrigger className="h-7 w-auto gap-1 text-xs"><SelectValue placeholder="Projection tier" /></SelectTrigger>
+                    <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <Textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Tools, projection, makeup…" className="min-h-[168px] text-sm" />
               </div>
-              <Textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Tools, projection, makeup…" className="min-h-[60px] text-sm" />
             </div>
           </div>
           <DialogFooter>
