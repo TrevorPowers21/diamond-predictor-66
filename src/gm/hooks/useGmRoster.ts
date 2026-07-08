@@ -5,11 +5,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { toast } from "sonner";
-import { readPitchingWeights } from "@/lib/pitchingEquations";
-import { advanceEligibility, parseBuildPlayerMeta, projectedEligibilityClass, serializeBuildPlayerMeta } from "@/pages/team-builder/helpers";
-import { effectivePitcherWar, effectiveHitterWar, effectiveMarket, pitcherSessionRole } from "@/lib/effectiveProjection";
-
-const isPitcherPos = (s: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
+import { advanceEligibility, serializeBuildPlayerMeta } from "@/pages/team-builder/helpers";
+import { isPitcherPos, loadGmBuildRoster } from "@/gm/lib/loadGmBuildRoster";
 
 export interface GmBuildOption {
   id: string;
@@ -155,108 +152,11 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     queryKey: key,
     enabled: !!user?.id && !!effectiveTeamId && !!activeBuildId,
     queryFn: async () => {
-      const { data: bps } = await (supabase as any)
-        .from("team_build_players")
-        .select("id, player_id, custom_name, position_slot, nil_value, included_in_roster, player_snapshot, production_notes")
-        .eq("build_id", activeBuildId)
-        .eq("included_in_roster", true);
-      // Include coach-added local players (no player_id — they live in
-      // production_notes.localPlayer + custom_name) so freshmen/recruits appear.
-      const rowsRaw = (bps || []).filter((r: any) => r.player_id || r.custom_name);
-      const playerIds = rowsRaw.map((r: any) => r.player_id).filter(Boolean);
-
-      const pById = new Map<string, any>();
-      for (let i = 0; i < playerIds.length; i += 200) {
-        const { data: pl } = await (supabase as any)
-          .from("players")
-          .select("id, first_name, last_name, position, class_year")
-          .in("id", playerIds.slice(i, i + 200));
-        for (const p of pl || []) pById.set(p.id, p);
-      }
-
-      // Finance is now keyed per-build (build_player_id), not season-level, so
-      // scenario builds each hold their own line. Fetch this build's rows.
-      const buildPlayerIds = rowsRaw.map((r: any) => r.id);
-      const finByBp = new Map<string, any>();
-      for (let i = 0; i < buildPlayerIds.length; i += 200) {
-        const { data: fin } = await (supabase as any)
-          .from("gm_player_finance").select("*").in("build_player_id", buildPlayerIds.slice(i, i + 200));
-        for (const f of fin || []) finByBp.set(f.build_player_id, f);
-      }
+      // Roster rows (with the coach's on-read toggles applied) come from the
+      // shared loader so the Scenarios page derives them identically.
+      const { rows, coachTotalBudget, buildNotes } = await loadGmBuildRoster(activeBuildId!, effectiveTeamId!);
       const { data: bud } = await (supabase as any)
         .from("gm_budget").select("*").eq("customer_team_id", effectiveTeamId).eq("season", season).maybeSingle();
-      // The coach's total_budget flows one-way INTO the GM (like a player's
-      // nil_value → Actual Pay): it fills the Total until the GM Finalizes.
-      const { data: buildRow } = await (supabase as any)
-        .from("team_builds").select("total_budget, gm_notes").eq("id", activeBuildId).maybeSingle();
-      const coachTotalBudget = buildRow?.total_budget != null ? Number(buildRow.total_budget) : null;
-      const buildNotes = (buildRow?.gm_notes as string | null) ?? null;
-
-      // Pitching equation weights for the effective-WAR recompute (sync read).
-      const eq = readPitchingWeights();
-
-      const rows: GmRow[] = rowsRaw.map((r: any) => {
-        const meta = parseBuildPlayerMeta(r.production_notes) as any;
-        const isLocal = !r.player_id;
-        const local = meta?.localPlayer ?? null;
-        const p = r.player_id ? pById.get(r.player_id) : null;
-        const snap = r.player_snapshot || {};
-        const pitcher = isPitcherPos(r.position_slot) || isPitcherPos(p?.position) || isPitcherPos(local?.position);
-        const f = finByBp.get(r.id) || {};
-        const mv = snap.market_value ?? snap.twp_hitter_market_value ?? snap.twp_pitcher_market_value ?? null;
-        const storedWar = pitcher ? (snap.p_war ?? null) : (snap.o_war ?? null);
-
-        // Apply the coach's saved toggles (production_notes) on read so the GM
-        // view matches Team Builder: depth role → innings/PA, dev_agg → rate.
-        // Falls back to the stored baseline when there's no rate to recompute.
-        const devAgg = Number.isFinite(Number(meta?.devAggressiveness)) ? Number(meta.devAggressiveness) : 0;
-        const classTransition = meta?.classTransition ?? "SJ";
-        const sessionDepthRole = pitcher
-          ? (meta?.depthRole ?? (snap.pitcher_role === "SP" ? "weekend_starter" : snap.pitcher_role === "SM" ? "weekday_starter" : undefined))
-          : (meta?.depthRole ?? snap.hitter_depth_role);
-        const effWar = pitcher
-          ? effectivePitcherWar(snap, sessionDepthRole, devAgg, classTransition, eq)
-          : effectiveHitterWar(snap.o_war, snap.hitter_depth_role, sessionDepthRole, devAgg, classTransition);
-        const effMarket = effectiveMarket(mv, storedWar, effWar);
-
-        // Position label follows the coach's assigned role for pitchers (the SAME
-        // SP/RP bucket that produced the WAR/market above) so an RP moved to a
-        // starter reads as "SP" next to his SP-specific numbers — never a stored
-        // "RP" beside a starter's WAR. Hitters keep their true fielding position.
-        const displayPosition = isLocal
-          ? (r.position_slot ?? local?.position ?? null) // recruits: show their raw slot, not a role bucket
-          : pitcher
-            ? pitcherSessionRole(sessionDepthRole)
-            : (p?.position ?? r.position_slot ?? null);
-
-        return {
-          player_id: r.player_id,
-          build_player_id: r.id,
-          name: p ? `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() : (r.custom_name || "—"),
-          position: displayPosition,
-          class_year: p?.class_year ?? null,
-          is_pitcher: pitcher,
-          war: effWar ?? storedWar,
-          market_value: effMarket ?? mv,
-          nil_value: r.nil_value ?? null,
-          scholarship_amount: f.scholarship_amount ?? null,
-          rev_share: f.rev_share ?? null,
-          nil_amount: f.nil_amount ?? null,
-          other_amount: f.other_amount ?? null,
-          // Actual Pay = Rev Share + NIL + Other (Scholarship is aid, NOT pay).
-          // Derived live so the buckets visibly add up; null until any is set.
-          actual_pay:
-            f.rev_share == null && f.nil_amount == null && f.other_amount == null
-              ? null
-              : Number(f.rev_share ?? 0) + Number(f.nil_amount ?? 0) + Number(f.other_amount ?? 0),
-          finalized: !!f.finalized,
-          // 2027 roster → show the projection-season eligibility (class advanced
-          // one year), unless a GM override exists. Coach-added locals are
-          // incoming recruits → FR (their classTransition is a meaningless default).
-          eligibility_class:
-            f.eligibility_class ?? (isLocal ? "FR" : projectedEligibilityClass(p?.class_year, meta?.classTransition ?? null)),
-        };
-      });
       const budget: GmBudget | null = bud
         ? { rev_share_total: bud.rev_share_total, nil_total: bud.nil_total, other_total: bud.other_total, scholarship_total: bud.scholarship_total, other_breakdown: (bud.other_breakdown as GmOtherLine[] | null) ?? null, finalized: !!bud.finalized }
         : null;
@@ -618,13 +518,13 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         switched = targetBuildId;
       }
       const trimmed = name.trim();
-      const isPitcherPos = /^(SP|RP|CL|P|LHP|RHP)$/i.test(position);
+      const posIsPitcher = /^(SP|RP|CL|P|LHP|RHP)$/i.test(position);
       // Mirror Team Builder's addIncomingFreshman EXACTLY so the player reads
       // identically on both sides (source, class_transition FS, depth role,
       // projection tier, localPlayer shape via the shared serializer).
       const notes = serializeBuildPlayerMeta(
         null, null, null, "returner",
-        isPitcherPos ? "specialist_reliever" : "bench",
+        posIsPitcher ? "specialist_reliever" : "bench",
         "FS", 0, false, false, null,
         { first_name: trimmed, last_name: "", position: position || null, team: teamName, from_team: null, conference: null },
         projectionTier || null, (nilValue || 0) > 0,

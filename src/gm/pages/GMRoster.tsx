@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Check, FlaskConical, MinusCircle, Pencil, Plus, PlusCircle, RotateCcw, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { Check, Pencil, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { cn } from "@/lib/utils";
@@ -251,17 +251,6 @@ export default function GMRoster() {
   const [addTier, setAddTier] = useState<LocalProjectionTier>("");
   const [addNil, setAddNil] = useState<number | null>(null);
   const [addBuildName, setAddBuildName] = useState("");
-  // What-If sandbox: ephemeral "take this build and drop a player" toggles. Purely
-  // client-side — nothing is written; it just recomputes WAR + money as if the
-  // excluded rows weren't on the roster, so you can see how removing (say) Carson
-  // Wiggins moves the financials before committing to it.
-  const [whatIf, setWhatIf] = useState(false);
-  const [excluded, setExcluded] = useState<Set<string>>(new Set());
-  const toggleExclude = (id: string) =>
-    setExcluded((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const inScenario = (r: GmRow) => !(whatIf && excluded.has(r.build_player_id));
-  // Reset the sandbox whenever the underlying roster changes out from under it.
-  useEffect(() => { setExcluded(new Set()); setWhatIf(false); }, [gm.selectedBuildId, gm.projectionSeason]);
   const reasonPrompted = useRef(false);
   useEffect(() => {
     if (gm.pendingReasonCount > 0 && !reasonPrompted.current) {
@@ -281,8 +270,7 @@ export default function GMRoster() {
   const clearRowDraft = (r: GmRow) => setRowDrafts((prev) => { const n = { ...prev }; delete n[r.build_player_id]; return n; });
 
   const section = (title: string, rows: GmRow[]) => {
-    // Section totals follow the sandbox: an excluded row drops out of the sum.
-    const sum = (f: (r: GmRow) => number | null) => rows.reduce((s, r) => s + (inScenario(r) ? (f(r) ?? 0) : 0), 0);
+    const sum = (f: (r: GmRow) => number | null) => rows.reduce((s, r) => s + (f(r) ?? 0), 0);
     return (
       <Card>
         <CardHeader className="pb-3">
@@ -316,18 +304,17 @@ export default function GMRoster() {
                 const m = effMoney(r);
                 const dirty = rowDirty(r);
                 const shownFinalized = r.finalized && !dirty; // unsaved edits read as not-finalized
-                const dropped = whatIf && excluded.has(r.build_player_id);
                 return (
-                <TableRow key={r.build_player_id} className={cn(shownFinalized && "bg-emerald-500/[0.04]", dirty && "bg-amber-500/[0.05]", dropped && "opacity-40")}>
+                <TableRow key={r.build_player_id} className={cn(shownFinalized && "bg-emerald-500/[0.04]", dirty && "bg-amber-500/[0.05]")}>
                   <TableCell className="sticky left-0 z-10 bg-background py-1.5">
                     <span className="inline-flex items-center gap-1.5">
                       {r.player_id ? (
-                        <Link to={profileRouteFor(r.player_id, r.position)} state={{ returnTo }} className={cn("text-sm font-medium hover:text-primary hover:underline", dropped && "line-through")}>
+                        <Link to={profileRouteFor(r.player_id, r.position)} state={{ returnTo }} className="text-sm font-medium hover:text-primary hover:underline">
                           {r.name}
                         </Link>
                       ) : (
                         // Coach-added local / injected recruit — no DB player record.
-                        <span className={cn("text-sm font-medium", dropped && "line-through")}>{r.name}</span>
+                        <span className="text-sm font-medium">{r.name}</span>
                       )}
                       {r.is_recruit && <span className="shrink-0 rounded bg-[#D4AF37]/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Commit</span>}
                     </span>
@@ -377,23 +364,13 @@ export default function GMRoster() {
                         />
                       </TableCell>
                       <TableCell className="py-1.5 text-center">
-                        {whatIf ? (
-                          <button
-                            onClick={() => toggleExclude(r.build_player_id)}
-                            title={dropped ? "Add back to scenario" : "Drop from scenario"}
-                            className={cn("inline-flex h-6 w-6 items-center justify-center rounded transition-colors cursor-pointer", dropped ? "text-[#D4AF37] hover:bg-[#D4AF37]/10" : "text-muted-foreground/40 hover:bg-amber-500/10 hover:text-amber-500")}
-                          >
-                            {dropped ? <PlusCircle className="h-3.5 w-3.5" /> : <MinusCircle className="h-3.5 w-3.5" />}
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => { setRemoveRow(r); setRemoveBuildName(""); }}
-                            title="Remove from roster"
-                            className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground/40 hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
+                        <button
+                          onClick={() => { setRemoveRow(r); setRemoveBuildName(""); }}
+                          title="Remove from roster"
+                          className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground/40 hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </TableCell>
                     </>
                   )}
@@ -458,16 +435,6 @@ export default function GMRoster() {
   const actualUsed = allRows.reduce((s, r) => s + (r.nil_value ?? 0), 0);
   const popupBudget = { ...effCaps, finalized: !!b?.finalized } as GmBudget;
 
-  // What-If scenario totals: the same figures recomputed over the rows still IN
-  // the scenario (excluded ones dropped). Deltas are scenario − baseline.
-  const scenRows = allRows.filter(inScenario);
-  const baseWar = allRows.reduce((s, r) => s + (r.war ?? 0), 0);
-  const scenWar = scenRows.reduce((s, r) => s + (r.war ?? 0), 0);
-  const scenPay = scenRows.reduce((s, r) => s + (r.nil_value ?? 0), 0);
-  const baseHeadroom = coachTotalBudget != null ? coachTotalBudget - actualUsed : null;
-  const scenHeadroom = coachTotalBudget != null ? coachTotalBudget - scenPay : null;
-  const droppedCount = allRows.length - scenRows.length;
-
   // One budget box — read-only. Shows used / allotment as whole dollars; caps
   // are edited only in the Manage Budget popup. Over-cap turns the used red.
   // `accent` gives the Total box a standing gold highlight.
@@ -524,17 +491,6 @@ export default function GMRoster() {
           <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" disabled={gm.isProjection} title={gm.isProjection ? "Switch to the base season to edit the roster" : undefined} onClick={() => { setAddName(""); setAddPosition(""); setAddTier(""); setAddNil(null); setAddBuildName(""); setAddPlayerOpen(true); }}>
             <Plus className="h-3.5 w-3.5" /> Add Player
           </Button>
-          {!gm.isProjection && (
-            <Button
-              variant={whatIf ? "default" : "outline"}
-              size="sm"
-              className={cn("h-8 gap-1.5 text-xs", whatIf && "bg-[#D4AF37] text-black hover:bg-[#D4AF37]/90")}
-              title="Drop players and see how WAR + money change — nothing is saved"
-              onClick={() => { setWhatIf((v) => !v); if (whatIf) setExcluded(new Set()); }}
-            >
-              <FlaskConical className="h-3.5 w-3.5" /> What-If
-            </Button>
-          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="relative h-8 gap-1.5 text-xs">
@@ -594,40 +550,6 @@ export default function GMRoster() {
           {box("Total", actualUsed, coachTotalBudget, true)}
         </div>
       </div>
-
-      {whatIf && (() => {
-        const dWar = scenWar - baseWar;
-        const dPay = scenPay - actualUsed;
-        const dRoom = scenHeadroom != null && baseHeadroom != null ? scenHeadroom - baseHeadroom : null;
-        const cell = (label: string, value: string, delta: number | null, goodWhenPositive: boolean, deltaText?: string) => {
-          const tone = delta == null || Math.abs(delta) < 1e-9 ? "text-muted-foreground" : (delta > 0) === goodWhenPositive ? "text-emerald-500" : "text-red-500";
-          return (
-            <div className="flex flex-col">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground" style={OSWALD}>{label}</span>
-              <span className="font-mono text-sm font-semibold tabular-nums text-foreground">{value}</span>
-              {delta != null && Math.abs(delta) > 1e-9 && <span className={cn("font-mono text-[11px] tabular-nums", tone)}>{deltaText}</span>}
-            </div>
-          );
-        };
-        return (
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border border-[#D4AF37]/40 bg-[#D4AF37]/[0.05] px-4 py-3">
-            <div className="flex items-center gap-1.5">
-              <FlaskConical className="h-4 w-4 text-[#D4AF37]" />
-              <span className="text-xs font-bold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>What-If</span>
-            </div>
-            {cell("Total WAR", num(scenWar, 1), dWar, true, `${dWar >= 0 ? "+" : ""}${num(dWar, 1)}`)}
-            {cell("Committed Pay", money(scenPay), dPay, false, `${dPay > 0 ? "+" : ""}${money(dPay)}`)}
-            {scenHeadroom != null && cell("Budget Headroom", money(scenHeadroom), dRoom, true, dRoom != null ? `${dRoom >= 0 ? "+" : ""}${money(dRoom)}` : undefined)}
-            {cell("Roster", `${scenRows.length}`, droppedCount > 0 ? -droppedCount : 0, true, `−${droppedCount}`)}
-            <span className="ml-auto text-[11px] text-muted-foreground">{droppedCount === 0 ? "Drop players below to test a change. Nothing is saved." : `${droppedCount} dropped · nothing saved`}</span>
-            {droppedCount > 0 && (
-              <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setExcluded(new Set())}>
-                <RotateCcw className="h-3 w-3" /> Reset
-              </Button>
-            )}
-          </div>
-        );
-      })()}
 
       {gm.isProjection && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border-l-2 border-[#D4AF37] bg-[#D4AF37]/[0.06] px-3 py-2 text-xs">
