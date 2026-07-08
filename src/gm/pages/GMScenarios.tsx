@@ -259,7 +259,7 @@ function ScenarioPanel({ variant, builds, teamId, userId, defaultBuildId, onRepo
           <StatCell label="Roster" value={`${kept.length}`} delta={dropped > 0 ? -dropped : null} goodWhenPositive={true} deltaText={`−${dropped}`} />
           <StatCell label="Total WAR" value={num(scenWar)} delta={dWar} goodWhenPositive={true} deltaText={`${dWar >= 0 ? "+" : ""}${num(dWar)}`} />
           <StatCell label="Committed Pay" value={money(scenPay)} delta={dPay} goodWhenPositive={false} deltaText={`${dPay > 0 ? "+" : ""}${money(dPay)}`} />
-          {scenHeadroom != null && <StatCell label="Headroom" value={money(scenHeadroom)} delta={dRoom} goodWhenPositive={true} deltaText={dRoom != null ? `${dRoom >= 0 ? "+" : ""}${money(dRoom)}` : undefined} />}
+          {scenHeadroom != null && <StatCell label="Headroom" value={money(Math.abs(scenHeadroom))} valueClassName={scenHeadroom < 0 ? "text-red-500" : undefined} delta={dRoom} goodWhenPositive={true} deltaText={dRoom != null ? `${dRoom >= 0 ? "+" : ""}${money(dRoom)}` : undefined} />}
           <div className="flex flex-col">
             <span className="text-[10px] font-bold uppercase tracking-wider text-[#EAB308]" style={OSWALD}>Total Budget</span>
             {baseBudget == null ? (
@@ -332,13 +332,13 @@ function BuildPicker({ value, onChange, builds, label }: { value: string | null;
   );
 }
 
-function StatCell({ label, value, delta, goodWhenPositive, deltaText }: { label: string; value: string; delta?: number | null; goodWhenPositive?: boolean; deltaText?: string }) {
+function StatCell({ label, value, delta, goodWhenPositive, deltaText, valueClassName }: { label: string; value: string; delta?: number | null; goodWhenPositive?: boolean; deltaText?: string; valueClassName?: string }) {
   const show = delta != null && Math.abs(delta) > 1e-9;
   const tone = !show ? "text-muted-foreground" : (delta! > 0) === goodWhenPositive ? "text-emerald-500" : "text-red-500";
   return (
     <div className="flex flex-col">
       <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground" style={OSWALD}>{label}</span>
-      <span className="font-mono text-lg font-semibold tabular-nums text-foreground">{value}</span>
+      <span className={cn("font-mono text-lg font-semibold tabular-nums text-foreground", valueClassName)}>{value}</span>
       {show && <span className={cn("font-mono text-[11px] tabular-nums", tone)}>{deltaText}</span>}
     </div>
   );
