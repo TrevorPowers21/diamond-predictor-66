@@ -12,7 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, GripVertical, ExternalLink, X, FileText, Phone } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Plus, GripVertical, ExternalLink, X, FileText, Phone, CalendarClock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
@@ -24,6 +25,16 @@ const SECTIONS: { type: RecruitType; title: string }[] = [
   { type: "hitter", title: "Position Players" },
   { type: "pitcher", title: "Pitchers" },
   { type: "twp", title: "Two-Way" },
+];
+
+/** Position-board grouping — how a coach organizes prospects by role on the field. */
+const POSITION_GROUPS: { key: string; title: string; positions: string[] }[] = [
+  { key: "catcher", title: "Catcher", positions: ["C"] },
+  { key: "middle_if", title: "Middle Infield", positions: ["2B", "SS"] },
+  { key: "corner_if", title: "Corner Infield", positions: ["1B", "3B", "DH"] },
+  { key: "outfield", title: "Outfield", positions: ["LF", "CF", "RF", "OF"] },
+  { key: "pitcher", title: "Pitcher", positions: ["RHP", "LHP", "SP", "RP", "P"] },
+  { key: "two_way", title: "Two-Way", positions: ["TWP"] },
 ];
 
 function toneClass(tone: string): string {
@@ -94,9 +105,15 @@ function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onT
           <button onClick={onReports} className="inline-flex items-center gap-1 text-xs text-primary hover:underline" title="Scouting reports">
             <FileText className="h-3 w-3" /> Reports{reports.length > 0 && <span className="tabular-nums">({reports.length})</span>}
           </button>
-          <button onClick={onTimeline} className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" title="Timeline">
-            <Plus className="h-3.5 w-3.5" />{eventCount > 0 && <span className="tabular-nums">{eventCount}</span>}
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" title="Add">
+              <Plus className="h-3.5 w-3.5" />{eventCount > 0 && <span className="tabular-nums">{eventCount}</span>}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem onClick={onReports} className="gap-2 text-xs"><FileText className="h-3.5 w-3.5" /> Add Scouting Report</DropdownMenuItem>
+              <DropdownMenuItem onClick={onTimeline} className="gap-2 text-xs"><CalendarClock className="h-3.5 w-3.5" /> Add Event</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
       <button onClick={onRemove} title="Remove" className="text-muted-foreground/40 hover:text-destructive"><X className="h-3.5 w-3.5" /></button>
@@ -107,6 +124,7 @@ function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onT
 export default function GMRecruits() {
   const gm = useGmRecruits();
   const [year, setYear] = useState<number>(YEARS[0]);
+  const [view, setView] = useState<"type" | "position">("type");
   const [addOpen, setAddOpen] = useState(false);
   const BLANK_FORM = { first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage, projection_tier: "" as RecruitTier | "", phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "" };
   const [form, setForm] = useState(BLANK_FORM);
@@ -125,6 +143,15 @@ export default function GMRecruits() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const listFor = (t: RecruitType) => gm.recruits.filter((r) => r.class_year === year && r.player_type === t).sort((a, b) => a.sort_order - b.sort_order);
+  const listForPositions = (positions: string[]) => gm.recruits.filter((r) => r.class_year === year && positions.includes((r.position ?? "").toUpperCase())).sort((a, b) => a.sort_order - b.sort_order);
+  const groupedPositions = POSITION_GROUPS.flatMap((g) => g.positions);
+  const sections = view === "type"
+    ? SECTIONS.map((s) => ({ key: s.type, title: s.title, list: listFor(s.type) }))
+    : (() => {
+        const groups = POSITION_GROUPS.map((g) => ({ key: g.key, title: g.title, list: listForPositions(g.positions) }));
+        const unassigned = gm.recruits.filter((r) => r.class_year === year && !groupedPositions.includes((r.position ?? "").toUpperCase())).sort((a, b) => a.sort_order - b.sort_order);
+        return unassigned.length ? [...groups, { key: "unassigned", title: "Unassigned", list: unassigned }] : groups;
+      })();
 
   const onDragEnd = (list: GmRecruit[]) => (event: DragEndEvent) => {
     const { active, over } = event;
@@ -172,48 +199,62 @@ export default function GMRecruits() {
         <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={openAdd}><Plus className="h-3.5 w-3.5" /> Add Player</Button>
       </div>
 
-      {/* Class year tabs */}
-      <div className="flex flex-wrap gap-2">
-        {YEARS.map((y) => (
-          <button
-            key={y}
-            onClick={() => setYear(y)}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors",
-              year === y ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/40" : "text-muted-foreground hover:bg-muted",
-            )}
-            style={OSWALD}
-          >
-            {y} Class
-          </button>
-        ))}
+      {/* Class year tabs + view toggle */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {YEARS.map((y) => (
+            <button
+              key={y}
+              onClick={() => setYear(y)}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors",
+                year === y ? "bg-[#D4AF37]/15 text-[#D4AF37] ring-1 ring-[#D4AF37]/40" : "text-muted-foreground hover:bg-muted",
+              )}
+              style={OSWALD}
+            >
+              {y} Class
+            </button>
+          ))}
+        </div>
+        <div className="flex rounded-md border border-border/60 p-0.5">
+          {([["type", "By Type"], ["position", "By Position"]] as const).map(([v, label]) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={cn(
+                "rounded px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider transition-colors",
+                view === v ? "bg-[#D4AF37]/15 text-[#D4AF37]" : "text-muted-foreground hover:text-foreground",
+              )}
+              style={OSWALD}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Three sortable sections */}
+      {/* Sortable sections — grouped by type or by position */}
       <div className="grid gap-4 lg:grid-cols-3">
-        {SECTIONS.map(({ type, title }) => {
-          const list = listFor(type);
-          return (
-            <Card key={type} className="border-border/60">
-              <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
-                <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>{title} ({list.length})</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 p-3">
-                {list.length === 0 ? (
-                  <p className="py-6 text-center text-xs text-muted-foreground">No recruits in this group.</p>
-                ) : (
-                  <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd(list)}>
-                    <SortableContext items={list.map((r) => r.id)} strategy={verticalListSortingStrategy}>
-                      <div className="space-y-2">
-                        {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} reports={gm.reportsByRecruit.get(r.id) ?? []} onReports={() => openReports(r)} onContact={() => openContact(r)} />)}
-                      </div>
-                    </SortableContext>
-                  </DndContext>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
+        {sections.map(({ key, title, list }) => (
+          <Card key={key} className="border-border/60">
+            <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
+              <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>{title} ({list.length})</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 p-3">
+              {list.length === 0 ? (
+                <p className="py-6 text-center text-xs text-muted-foreground">No recruits in this group.</p>
+              ) : (
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd(list)}>
+                  <SortableContext items={list.map((r) => r.id)} strategy={verticalListSortingStrategy}>
+                    <div className="space-y-2">
+                      {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} reports={gm.reportsByRecruit.get(r.id) ?? []} onReports={() => openReports(r)} onContact={() => openContact(r)} />)}
+                    </div>
+                  </SortableContext>
+                </DndContext>
+              )}
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       {/* Add recruit */}
