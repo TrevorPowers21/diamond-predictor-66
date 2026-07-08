@@ -261,7 +261,7 @@ function ScenarioPanel({ variant, builds, teamId, userId, defaultBuildId, onRepo
           <StatCell label="Committed Pay" value={money(scenPay)} delta={dPay} goodWhenPositive={false} deltaText={`${dPay > 0 ? "+" : ""}${money(dPay)}`} />
           {scenHeadroom != null && <StatCell label="Headroom" value={money(scenHeadroom)} delta={dRoom} goodWhenPositive={true} deltaText={dRoom != null ? `${dRoom >= 0 ? "+" : ""}${money(dRoom)}` : undefined} />}
           <div className="flex flex-col">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#5aa9e6]" style={OSWALD}>Total Budget</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#EAB308]" style={OSWALD}>Total Budget</span>
             {baseBudget == null ? (
               <span className="font-mono text-lg font-semibold tabular-nums text-muted-foreground">—</span>
             ) : (
@@ -368,7 +368,7 @@ function EditableMoney({ value, edited, onCommit, big, accent }: { value: number
       className={cn(
         "shrink-0 rounded border bg-muted/40 text-right font-mono tabular-nums outline-none transition-colors hover:border-[#D4AF37]/50 focus:border-[#D4AF37] focus:bg-background focus:ring-1 focus:ring-[#D4AF37]/30",
         big ? "w-32 px-2 py-1 text-lg font-semibold" : "w-24 px-2 py-1 text-xs",
-        edited ? "border-[#D4AF37] text-[#D4AF37]" : accent ? "border-border text-[#5aa9e6]" : "border-border text-foreground",
+        edited ? "border-[#D4AF37] text-[#D4AF37]" : accent ? "border-border text-[#EAB308]" : "border-border text-foreground",
       )}
     />
   );
