@@ -216,7 +216,7 @@ export default function ScoutingCsvUpload() {
   .headerline{margin-top:10px;font-family:ui-monospace,Menlo,monospace;font-size:11px;background:#f6f6f6;border:1px solid #eee;border-radius:6px;padding:8px 10px;color:#333;white-space:pre-wrap;word-break:break-all}
 </style></head><body>
   <h1>${esc(title)}</h1>
-  <p class="sub">Match your export's columns to these. <span class="req">*</span> = required; leave anything you don't have blank.</p>
+  ${kind === "stuff" ? '<p class="sub"><b>Export per pitch and per hand</b> — one row per pitch type, split out by throwing hand. Match your export\'s columns to these; <span class="req">*</span> = required.</p>' : '<p class="sub">Match your export\'s columns to these. <span class="req">*</span> = required; leave anything you don\'t have blank.</p>'}
   <table><thead><tr><th>Column</th><th>Description</th><th>Also known as</th></tr></thead><tbody>${rows}</tbody></table>
   <div class="note">Exact header row (copy into row 1 of your CSV):</div>
   <div class="headerline">${esc(headerLine)}</div>
@@ -339,7 +339,7 @@ export default function ScoutingCsvUpload() {
 
         {/* Steps — how to get projections */}
         <ol className="list-decimal space-y-1.5 pl-5 text-sm text-muted-foreground">
-          <li><span className="font-medium text-foreground">Export the players you want projected</span> from your scouting service — every player in the country is available for evaluation.</li>
+          <li><span className="font-medium text-foreground">Export the players you want projected</span> from your scouting service — every player in the country is available for evaluation.{kind === "stuff" && <span className="font-medium text-foreground"> Export per pitch and per hand</span>}{kind === "stuff" && " — one row per pitch type, split out by throwing hand (a pitcher's 4S FB, Slider, Change-up, etc. each get their own row)."}</li>
 
           <li><span className="font-medium text-foreground">Download the {KIND_LABEL[kind]} template</span> and match your export's columns to it — our metric names are below, with common aliases (e.g. Whiff% / Miss%). Leave any metric you don't have blank.</li>
           <li><span className="font-medium text-foreground">Upload it</span> — RSTR IQ runs the projection and hands the results back to you instantly.</li>
