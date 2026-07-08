@@ -75,7 +75,7 @@ const PITCHER_METRICS: Col[] = [
   { label: "ExitVelo", key: "exit_vel", desc: "Average exit velo allowed", aliases: ["Avg EV"] },
   { label: "GB%", key: "ground_pct", desc: "Ground-ball rate", aliases: ["GB%"] },
   { label: "InZone%", key: "in_zone_pct", desc: "Zone rate", aliases: ["Zone%"] },
-  { label: "Velo90", key: "vel_90th", desc: "90th-percentile velocity", aliases: ["FB Velo", "Max Velo"] },
+  { label: "EV90", key: "vel_90th", desc: "90th-percentile exit velo allowed", aliases: ["EV 90", "Max EV"] },
   { label: "Pull%", key: "h_pull_pct", desc: "Pull rate allowed" },
   { label: "LA10-30%", key: "la_10_30_pct", desc: "Launch angle 10–30° rate allowed" },
   { label: "Stuff+", key: "stuff", desc: "Stuff+ (if your service provides it)", aliases: ["Stuff Plus"] },
@@ -196,7 +196,7 @@ export default function ScoutingCsvUpload() {
             miss_pct: num(get(row, "Whiff%")), bb_pct: num(get(row, "BB%")), hard_hit_pct: num(get(row, "HardHit%")),
             in_zone_whiff_pct: num(get(row, "InZoneWhiff%")), chase_pct: num(get(row, "Chase%")), barrel_pct: num(get(row, "Barrel%")),
             line_pct: num(get(row, "LineDrive%")), exit_vel: num(get(row, "ExitVelo")), ground_pct: num(get(row, "GB%")),
-            in_zone_pct: num(get(row, "InZone%")), vel_90th: num(get(row, "Velo90")), h_pull_pct: num(get(row, "Pull%")), la_10_30_pct: num(get(row, "LA10-30%")),
+            in_zone_pct: num(get(row, "InZone%")), vel_90th: num(get(row, "EV90")), h_pull_pct: num(get(row, "Pull%")), la_10_30_pct: num(get(row, "LA10-30%")),
           }, num(get(row, "Stuff+")));
           outRows.push([name, get(row, "Throws") ?? "", get(row, "Class") ?? "", get(row, "Division") ?? "", get(row, "Conference") ?? "", get(row, "IP") ?? "",
             fmt(r.eraPrPlus), fmt(r.fipPrPlus), fmt(r.whipPrPlus), fmt(r.k9PrPlus), fmt(r.bb9PrPlus), fmt(r.hr9PrPlus), fmt(r.overallPrPlus)]);
