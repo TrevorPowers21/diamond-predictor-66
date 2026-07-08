@@ -13,10 +13,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, GripVertical, ExternalLink, X, FileText, Phone, CalendarClock } from "lucide-react";
+import { Plus, GripVertical, ExternalLink, X, FileText, Phone, CalendarClock, DollarSign } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
+const money = (v: number | null | undefined) => {
+  if (v == null) return "—";
+  const a = Math.abs(v), sign = v < 0 ? "-" : "";
+  if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(2).replace(/\.?0+$/, "")}M`;
+  if (a >= 1e3) return `${sign}$${(a / 1e3).toFixed(1).replace(/\.?0+$/, "")}K`;
+  return `${sign}$${Math.round(a).toLocaleString()}`;
+};
+const parseMoney = (s: string): number | null => { const t = s.replace(/[^0-9.]/g, ""); if (!t) return null; const n = Number(t); return Number.isNaN(n) ? null : n; };
 const today = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 const POSITIONS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH", "TWP", "RHP", "LHP"] as const;
@@ -71,7 +79,7 @@ function TierBadge({ value }: { value: RecruitTier | null }) {
   return <span className={cn("inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", toneClass(info.tone))} style={OSWALD}>{info.label}</span>;
 }
 
-function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onTimeline, reports, onReports, onContact }: { recruit: GmRecruit; onRemove: () => void; onStageChange: (s: RecruitStage) => void; eventCount: number; onTimeline: () => void; reports: GmRecruitReport[]; onReports: () => void; onContact: () => void }) {
+function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onTimeline, reports, onReports, onContact, onDeal }: { recruit: GmRecruit; onRemove: () => void; onStageChange: (s: RecruitStage) => void; eventCount: number; onTimeline: () => void; reports: GmRecruitReport[]; onReports: () => void; onContact: () => void; onDeal: () => void }) {
   const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({ id: recruit.id });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.55 : 1, zIndex: isDragging ? 10 : "auto", position: "relative" };
   const name = `${recruit.first_name ?? ""} ${recruit.last_name ?? ""}`.trim() || "Unnamed";
@@ -93,6 +101,19 @@ function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onT
           <TierBadge value={recruit.projection_tier} />
           <StageSelect value={recruit.stage} onChange={onStageChange} />
         </div>
+        {/* Deal — asking price + what we're willing to pay. Click to edit. */}
+        <button onClick={onDeal} className="mt-1.5 flex items-center gap-2 text-xs hover:opacity-80" title="Edit deal">
+          <DollarSign className="h-3 w-3 text-[#D4AF37]" />
+          {recruit.asking_price == null && recruit.target_offer == null ? (
+            <span className="text-muted-foreground/70">Add deal</span>
+          ) : (
+            <span className="tabular-nums">
+              <span className="text-muted-foreground">Ask</span> <span className="font-semibold text-foreground">{money(recruit.asking_price)}</span>
+              <span className="mx-1.5 text-muted-foreground/40">·</span>
+              <span className="text-muted-foreground">Willing</span> <span className="font-semibold text-[#D4AF37]">{money(recruit.target_offer)}</span>
+            </span>
+          )}
+        </button>
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
           {recruit.link && (
             <a href={recruit.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
@@ -126,7 +147,7 @@ export default function GMRecruits() {
   const [year, setYear] = useState<number>(YEARS[0]);
   const [view, setView] = useState<"type" | "position">("type");
   const [addOpen, setAddOpen] = useState(false);
-  const BLANK_FORM = { first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage, projection_tier: "" as RecruitTier | "", phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "" };
+  const BLANK_FORM = { first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage, projection_tier: "" as RecruitTier | "", phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "", asking_price: "", target_offer: "" };
   const [form, setForm] = useState(BLANK_FORM);
   const [timelineRecruit, setTimelineRecruit] = useState<GmRecruit | null>(null);
   const [eventDate, setEventDate] = useState<string>(today);
@@ -140,6 +161,10 @@ export default function GMRecruits() {
   const [contact, setContact] = useState({ phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "" });
   const openContact = (r: GmRecruit) => { setContact({ phone: r.phone ?? "", email: r.email ?? "", guardian_name: r.guardian_name ?? "", guardian_phone: r.guardian_phone ?? "", coach_name: r.coach_name ?? "", coach_phone: r.coach_phone ?? "" }); setContactRecruit(r); };
   const saveContact = () => { if (contactRecruit) { gm.updateRecruit(contactRecruit.id, { phone: contact.phone.trim() || null, email: contact.email.trim() || null, guardian_name: contact.guardian_name.trim() || null, guardian_phone: contact.guardian_phone.trim() || null, coach_name: contact.coach_name.trim() || null, coach_phone: contact.coach_phone.trim() || null }); setContactRecruit(null); } };
+  const [dealRecruit, setDealRecruit] = useState<GmRecruit | null>(null);
+  const [deal, setDeal] = useState({ asking_price: "", target_offer: "" });
+  const openDeal = (r: GmRecruit) => { setDeal({ asking_price: r.asking_price != null ? String(r.asking_price) : "", target_offer: r.target_offer != null ? String(r.target_offer) : "" }); setDealRecruit(r); };
+  const saveDeal = () => { if (dealRecruit) { gm.updateRecruit(dealRecruit.id, { asking_price: parseMoney(deal.asking_price), target_offer: parseMoney(deal.target_offer) }); setDealRecruit(null); } };
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const listFor = (t: RecruitType) => gm.recruits.filter((r) => r.class_year === year && r.player_type === t).sort((a, b) => a.sort_order - b.sort_order);
@@ -170,6 +195,8 @@ export default function GMRecruits() {
       player_type: recruitTypeForPosition(form.position),
       stage: form.stage,
       projection_tier: tier,
+      asking_price: parseMoney(form.asking_price),
+      target_offer: parseMoney(form.target_offer),
       first_name: form.first_name.trim() || null,
       last_name: form.last_name.trim() || null,
       high_school: form.high_school.trim() || null,
@@ -247,7 +274,7 @@ export default function GMRecruits() {
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd(list)}>
                   <SortableContext items={list.map((r) => r.id)} strategy={verticalListSortingStrategy}>
                     <div className="space-y-2">
-                      {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} reports={gm.reportsByRecruit.get(r.id) ?? []} onReports={() => openReports(r)} onContact={() => openContact(r)} />)}
+                      {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} reports={gm.reportsByRecruit.get(r.id) ?? []} onReports={() => openReports(r)} onContact={() => openContact(r)} onDeal={() => openDeal(r)} />)}
                     </div>
                   </SortableContext>
                 </DndContext>
@@ -312,6 +339,21 @@ export default function GMRecruits() {
             <div>
               <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Link (PBR / PG)</span>
               <Input value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="https://…" className="h-9 text-sm" />
+            </div>
+
+            {/* Deal — asking price + what we're willing to pay */}
+            <div className="border-t border-border/40 pt-3">
+              <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Deal</span>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Asking Price</span>
+                  <Input value={form.asking_price} onChange={(e) => setForm((f) => ({ ...f, asking_price: e.target.value }))} placeholder="e.g. 300000" inputMode="numeric" className="h-9 text-sm" />
+                </div>
+                <div>
+                  <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Willing to Pay</span>
+                  <Input value={form.target_offer} onChange={(e) => setForm((f) => ({ ...f, target_offer: e.target.value }))} placeholder="e.g. 250000" inputMode="numeric" className="h-9 text-sm" />
+                </div>
+              </div>
             </div>
 
             {/* Contact — shared with the whole staff */}
@@ -474,6 +516,30 @@ export default function GMRecruits() {
           </div>
           <DialogFooter>
             <Button size="sm" onClick={saveContact}>Save Contact</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Deal — asking price + willing to pay */}
+      <Dialog open={!!dealRecruit} onOpenChange={(o) => { if (!o) setDealRecruit(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle style={OSWALD}>{`${dealRecruit?.first_name ?? ""} ${dealRecruit?.last_name ?? ""}`.trim() || "Recruit"} — Deal</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-1">
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Asking Price</span>
+              <Input value={deal.asking_price} onChange={(e) => setDeal((d) => ({ ...d, asking_price: e.target.value }))} placeholder="e.g. 300000" inputMode="numeric" className="h-9 text-sm" />
+              <span className="mt-1 block text-[11px] tabular-nums text-muted-foreground">{money(parseMoney(deal.asking_price))}</span>
+            </div>
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Willing to Pay</span>
+              <Input value={deal.target_offer} onChange={(e) => setDeal((d) => ({ ...d, target_offer: e.target.value }))} placeholder="e.g. 250000" inputMode="numeric" className="h-9 text-sm" />
+              <span className="mt-1 block text-[11px] tabular-nums text-[#D4AF37]">{money(parseMoney(deal.target_offer))}</span>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button size="sm" onClick={saveDeal}>Save Deal</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

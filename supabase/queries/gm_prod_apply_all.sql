@@ -340,4 +340,15 @@ CREATE POLICY gm_player_notes_all ON public.gm_player_notes
   USING (public.has_role(auth.uid(), 'superadmin'::public.app_role) OR public.is_team_member(customer_team_id))
   WITH CHECK (public.has_role(auth.uid(), 'superadmin'::public.app_role) OR public.is_team_member(customer_team_id));
 
+-- ----------------------------------------------------------------------------
+-- 20260708150000_gm_recruits_pricing.sql
+-- ----------------------------------------------------------------------------
+-- Recruiting-board money: what the recruit/his camp is asking, and the offer
+-- we're targeting. Used for forward class budgeting and to inject a realistic
+-- expected cost when a committed recruit is projected onto a future roster
+-- (instead of $0).
+ALTER TABLE public.gm_recruits
+  ADD COLUMN IF NOT EXISTS asking_price numeric,
+  ADD COLUMN IF NOT EXISTS target_offer numeric;
+
 NOTIFY pgrst, 'reload schema';

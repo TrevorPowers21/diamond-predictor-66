@@ -43,6 +43,8 @@ export interface GmRecruit {
   notes: string | null; // legacy single scouting report (superseded by gm_recruit_reports)
   scouting_report_date: string | null;
   projection_tier: RecruitTier | null; // mirror of the latest report's tier — stable card badge
+  asking_price: number | null; // what the recruit / his camp is asking
+  target_offer: number | null; // "Willing to Pay" — what we want to pay
   link: string | null;
   stage: RecruitStage;
   // Contact — team-wide, any coach on staff can pull these up.

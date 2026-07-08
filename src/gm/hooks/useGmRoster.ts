@@ -187,10 +187,10 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     queryFn: async () => {
       const { data: recs } = await (supabase as any)
         .from("gm_recruits")
-        .select("id, first_name, last_name, position, class_year, projection_tier")
+        .select("id, first_name, last_name, position, class_year, projection_tier, asking_price, target_offer")
         .eq("customer_team_id", effectiveTeamId)
         .in("stage", ["committed", "signed"]);
-      return (recs || []) as { id: string; first_name: string | null; last_name: string | null; position: string | null; class_year: number | null; projection_tier: string | null }[];
+      return (recs || []) as { id: string; first_name: string | null; last_name: string | null; position: string | null; class_year: number | null; projection_tier: string | null; asking_price: number | null; target_offer: number | null }[];
     },
   });
 
@@ -225,7 +225,8 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         is_pitcher: pitcher,
         war: null,
         market_value: null,
-        nil_value: null,
+        // Expected pay for a projected commit = what we're willing to pay (else the ask).
+        nil_value: c.target_offer ?? c.asking_price ?? null,
         scholarship_amount: null,
         rev_share: null,
         nil_amount: null,
