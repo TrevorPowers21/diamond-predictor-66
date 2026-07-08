@@ -33,6 +33,7 @@ export interface GmRow {
   finalized: boolean;
   eligibility_class: string | null; // GM/head-coach display (override ?? class_year)
   is_recruit?: boolean; // injected from the recruiting board in a future-season projection
+  is_added_target?: boolean; // hypothetically added from the target board in a scenario
 }
 
 export interface GmOtherLine {

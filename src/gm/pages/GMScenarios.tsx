@@ -4,11 +4,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { loadGmBuildRoster } from "@/gm/lib/loadGmBuildRoster";
 import type { GmRow } from "@/gm/hooks/useGmRoster";
+import { useGmTargetBoard, type GmTarget } from "@/gm/hooks/useGmTargetBoard";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FlaskConical, GitCompareArrows, MinusCircle, PlusCircle, RotateCcw } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Crosshair, FlaskConical, GitCompareArrows, MinusCircle, Plus, PlusCircle, RotateCcw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
@@ -26,10 +29,40 @@ const summarize = (rows: GmRow[], coachTotalBudget: number | null): Summary => {
 // Stable identity across builds: real players by id, locals by name.
 const rowKey = (r: GmRow) => r.player_id ?? `local:${r.name.toLowerCase()}`;
 
+// A target board player, shaped as a hypothetical scenario roster row. WAR +
+// market come straight from the precomputed team-scoped projection; pay starts
+// at 0 (you set it). Ephemeral — never written.
+function targetToRow(t: GmTarget): GmRow {
+  return {
+    player_id: t.player_id,
+    build_player_id: `target:${t.player_id}`,
+    name: t.name,
+    position: t.position,
+    class_year: null,
+    is_pitcher: t.is_pitcher,
+    war: t.war,
+    market_value: t.market_value,
+    nil_value: 0,
+    scholarship_amount: null,
+    rev_share: null,
+    nil_amount: null,
+    other_amount: null,
+    actual_pay: null,
+    finalized: false,
+    eligibility_class: null,
+    is_added_target: true,
+  };
+}
+
 export default function GMScenarios() {
   const { user, effectiveTeamId, availableTeams } = useAuth();
   const teamName = availableTeams?.find((t) => t.id === effectiveTeamId)?.name ?? null;
   const [mode, setMode] = useState<"whatif" | "compare">("whatif");
+  // Hypothetical additions from the target board — scenario-only, keyed by player_id.
+  const [addedTargets, setAddedTargets] = useState<GmRow[]>([]);
+  const [targetPickerOpen, setTargetPickerOpen] = useState(false);
+  const addTarget = (t: GmTarget) => setAddedTargets((prev) => (prev.some((r) => r.player_id === t.player_id) ? prev : [...prev, targetToRow(t)]));
+  const removeTarget = (playerId: string) => setAddedTargets((prev) => prev.filter((r) => r.player_id !== playerId));
 
   const { data: builds = [] } = useQuery({
     queryKey: ["gm-scenario-builds", effectiveTeamId ?? null],
@@ -73,27 +106,72 @@ export default function GMScenarios() {
           <h2 className="text-2xl font-bold leading-tight" style={OSWALD}>The Situation Room</h2>
           <p className="text-sm text-muted-foreground">{teamName ? `${teamName} · what-if & build compare` : "Pick a team above."}</p>
         </div>
-        <div className="flex rounded-md border border-border/60 p-0.5">
-          {([["whatif", "What-If", FlaskConical], ["compare", "Compare", GitCompareArrows]] as const).map(([m, label, Icon]) => (
-            <button
-              key={m}
-              onClick={() => setMode(m)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors",
-                mode === m ? "bg-[#D4AF37]/15 text-[#D4AF37]" : "text-muted-foreground hover:text-foreground",
-              )}
-              style={OSWALD}
-            >
-              <Icon className="h-3.5 w-3.5" /> {label}
-            </button>
-          ))}
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex rounded-md border border-border/60 p-0.5">
+            {([["whatif", "What-If", FlaskConical], ["compare", "Compare", GitCompareArrows]] as const).map(([m, label, Icon]) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors",
+                  mode === m ? "bg-[#D4AF37]/15 text-[#D4AF37]" : "text-muted-foreground hover:text-foreground",
+                )}
+                style={OSWALD}
+              >
+                <Icon className="h-3.5 w-3.5" /> {label}
+              </button>
+            ))}
+          </div>
+          {/* Directly under the What-If / Compare toggle. */}
+          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => { setMode("whatif"); setTargetPickerOpen(true); }}>
+            <Crosshair className="h-3.5 w-3.5" /> Add from Target Board
+          </Button>
         </div>
       </div>
 
       {mode === "whatif"
-        ? <WhatIf roster={qA.data} loading={qA.isLoading} builds={builds} buildId={a} onPick={setBuildA} />
+        ? <WhatIf roster={qA.data} loading={qA.isLoading} builds={builds} buildId={a} onPick={setBuildA} addedTargets={addedTargets} onRemoveTarget={removeTarget} onClearTargets={() => setAddedTargets([])} />
         : <Compare qA={qA.data} qB={qB.data} loadingA={qA.isLoading} loadingB={qB.isLoading} builds={builds} a={a} b={b} onPickA={setBuildA} onPickB={setBuildB} nameA={nameOf(a)} nameB={nameOf(b)} />}
+
+      <TargetPicker open={targetPickerOpen} onOpenChange={setTargetPickerOpen} addedIds={new Set(addedTargets.map((r) => r.player_id!))} onAdd={addTarget} />
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Target board picker — the team's shared targets with their team-scoped
+// projection. Add one and it drops into the What-If scenario.
+function TargetPicker({ open, onOpenChange, addedIds, onAdd }: { open: boolean; onOpenChange: (o: boolean) => void; addedIds: Set<string>; onAdd: (t: GmTarget) => void }) {
+  const { targets, isLoading } = useGmTargetBoard();
+  const [q, setQ] = useState("");
+  const filtered = targets.filter((t) => t.name.toLowerCase().includes(q.toLowerCase()) || (t.position ?? "").toLowerCase().includes(q.toLowerCase()) || (t.team ?? "").toLowerCase().includes(q.toLowerCase()));
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle style={OSWALD}>Add from Target Board</DialogTitle></DialogHeader>
+        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search targets…" className="h-9 text-sm" />
+        <div className="max-h-[55vh] space-y-1 overflow-y-auto">
+          {isLoading ? <p className="py-6 text-center text-xs text-muted-foreground">Loading targets…</p>
+            : filtered.length === 0 ? <p className="py-6 text-center text-xs text-muted-foreground">{targets.length === 0 ? "No targets on the board yet." : "No matches."}</p>
+            : filtered.map((t) => {
+              const added = addedIds.has(t.player_id);
+              return (
+                <div key={t.player_id} className="flex items-center gap-2 rounded-md border border-border/50 px-2.5 py-1.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{t.name}</div>
+                    <div className="truncate text-[11px] text-muted-foreground">{[t.position, t.team].filter(Boolean).join(" · ") || "—"}</div>
+                  </div>
+                  <span className="w-12 shrink-0 text-right font-mono text-xs tabular-nums text-foreground">{num(t.war)}</span>
+                  <span className="w-20 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">{money(t.market_value)}</span>
+                  <Button variant={added ? "ghost" : "outline"} size="sm" className="h-7 shrink-0 gap-1 text-xs" disabled={added} onClick={() => onAdd(t)}>
+                    {added ? "Added" : <><Plus className="h-3 w-3" /> Add</>}
+                  </Button>
+                </div>
+              );
+            })}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -123,7 +201,7 @@ function StatCell({ label, value, delta, goodWhenPositive, deltaText }: { label:
 
 // ─────────────────────────────────────────────────────────────────────────────
 // What-If: one build, drop players, watch WAR + money move. Nothing is saved.
-function WhatIf({ roster, loading, builds, buildId, onPick }: { roster: Loaded | undefined; loading: boolean; builds: { id: string; name: string }[]; buildId: string | null; onPick: (id: string) => void }) {
+function WhatIf({ roster, loading, builds, buildId, onPick, addedTargets, onRemoveTarget, onClearTargets }: { roster: Loaded | undefined; loading: boolean; builds: { id: string; name: string }[]; buildId: string | null; onPick: (id: string) => void; addedTargets: GmRow[]; onRemoveTarget: (playerId: string) => void; onClearTargets: () => void }) {
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
   // Ephemeral pay overrides, keyed by build_player_id. Absent = use the real
   // nil_value. Nothing here is written to the DB.
@@ -133,9 +211,13 @@ function WhatIf({ roster, loading, builds, buildId, onPick }: { roster: Loaded |
   const toggle = (id: string) => setExcluded((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const setPay = (id: string, v: number | null) =>
     setPayOverride((prev) => { const n = { ...prev }; if (v == null) delete n[id]; else n[id] = v; return n; });
-  const reset = () => { setExcluded(new Set()); setPayOverride({}); setBudgetOverride(null); setResetNonce((n) => n + 1); };
+  const reset = () => { setExcluded(new Set()); setPayOverride({}); setBudgetOverride(null); onClearTargets(); setResetNonce((n) => n + 1); };
 
-  const rows = roster?.rows ?? [];
+  // Build roster + any hypothetically-added targets (skip a target already on the
+  // build so we never double-count him).
+  const buildRows = roster?.rows ?? [];
+  const onBuild = new Set(buildRows.map((r) => r.player_id).filter(Boolean));
+  const rows = [...buildRows, ...addedTargets.filter((t) => !onBuild.has(t.player_id))];
   const baseBudget = roster?.coachTotalBudget ?? null;
   const budget = budgetOverride ?? baseBudget; // scenario's total budget (editable)
   const payOf = (r: GmRow) => (r.build_player_id in payOverride ? payOverride[r.build_player_id] : (r.nil_value ?? 0));
@@ -152,7 +234,9 @@ function WhatIf({ roster, loading, builds, buildId, onPick }: { roster: Loaded |
     return Math.max(0, (posWeightedWar(r) / Math.max(rosterScore, 33)) * budget);
   };
 
-  const base = summarize(rows, baseBudget);
+  // Baseline is the untouched BUILD (no added targets), so adding a target reads
+  // as a positive WAR/roster delta.
+  const base = summarize(buildRows, baseBudget);
   const scenWar = kept.reduce((s, r) => s + (r.war ?? 0), 0);
   const scenPay = kept.reduce((s, r) => s + payOf(r), 0);
   const scen: Summary = { war: scenWar, pay: scenPay, headroom: budget != null ? budget - scenPay : null, count: kept.length };
@@ -160,9 +244,10 @@ function WhatIf({ roster, loading, builds, buildId, onPick }: { roster: Loaded |
   const dPay = scen.pay - base.pay;
   const dRoom = scen.headroom != null && base.headroom != null ? scen.headroom - base.headroom : null;
   const dBudget = budget != null && baseBudget != null ? budget - baseBudget : null;
-  const dropped = rows.length - kept.length;
+  const dropped = rows.length - kept.length; // excluded rows (added targets use remove, not exclude)
+  const added = rows.length - buildRows.length;
   const repriced = Object.keys(payOverride).length;
-  const changed = dropped > 0 || repriced > 0 || (dBudget != null && Math.abs(dBudget) > 1e-9);
+  const changed = dropped > 0 || added > 0 || repriced > 0 || (dBudget != null && Math.abs(dBudget) > 1e-9);
 
   const hitters = useMemo(() => rows.filter((r) => !r.is_pitcher).sort((x, y) => (y.war ?? -Infinity) - (x.war ?? -Infinity)), [rows]);
   const pitchers = useMemo(() => rows.filter((r) => r.is_pitcher).sort((x, y) => (y.war ?? -Infinity) - (x.war ?? -Infinity)), [rows]);
@@ -191,14 +276,14 @@ function WhatIf({ roster, loading, builds, buildId, onPick }: { roster: Loaded |
           <StatCell label="Committed Pay" value={money(scen.pay)} delta={dPay} goodWhenPositive={false} deltaText={`${dPay > 0 ? "+" : ""}${money(dPay)}`} />
           {scen.headroom != null && <StatCell label="Budget Headroom" value={money(scen.headroom)} delta={dRoom} goodWhenPositive={true} deltaText={dRoom != null ? `${dRoom >= 0 ? "+" : ""}${money(dRoom)}` : undefined} />}
           <StatCell label="Roster" value={`${kept.length}`} delta={dropped > 0 ? -dropped : null} goodWhenPositive={true} deltaText={`−${dropped}`} />
-          <span className="ml-auto text-[11px] text-muted-foreground">{!changed ? "Drop players, edit pay, or set the budget to test a change. Nothing is saved." : `${[dropped ? `${dropped} dropped` : "", repriced ? `${repriced} repriced` : "", dBudget && Math.abs(dBudget) > 1e-9 ? "budget set" : ""].filter(Boolean).join(" · ")} · nothing saved`}</span>
+          <span className="ml-auto text-[11px] text-muted-foreground">{!changed ? "Drop players, add targets, edit pay, or set the budget. Nothing is saved." : `${[added ? `${added} added` : "", dropped ? `${dropped} dropped` : "", repriced ? `${repriced} repriced` : "", dBudget && Math.abs(dBudget) > 1e-9 ? "budget set" : ""].filter(Boolean).join(" · ")} · nothing saved`}</span>
         </CardContent>
       </Card>
 
       {loading ? <p className="text-sm text-muted-foreground">Loading roster…</p> : (
         <div className="grid gap-4 lg:grid-cols-2">
-          <WhatIfList title="Position Players" rows={hitters} excluded={excluded} onToggle={toggle} payOf={payOf} projValue={projValue} onPay={setPay} resetNonce={resetNonce} />
-          <WhatIfList title="Pitchers" rows={pitchers} excluded={excluded} onToggle={toggle} payOf={payOf} projValue={projValue} onPay={setPay} resetNonce={resetNonce} />
+          <WhatIfList title="Position Players" rows={hitters} excluded={excluded} onToggle={toggle} payOf={payOf} projValue={projValue} onPay={setPay} onRemoveTarget={onRemoveTarget} resetNonce={resetNonce} />
+          <WhatIfList title="Pitchers" rows={pitchers} excluded={excluded} onToggle={toggle} payOf={payOf} projValue={projValue} onPay={setPay} onRemoveTarget={onRemoveTarget} resetNonce={resetNonce} />
         </div>
       )}
     </div>
@@ -238,7 +323,7 @@ function EditableMoney({ value, edited, onCommit, big }: { value: number; edited
   );
 }
 
-function WhatIfList({ title, rows, excluded, onToggle, payOf, projValue, onPay, resetNonce }: { title: string; rows: GmRow[]; excluded: Set<string>; onToggle: (id: string) => void; payOf: (r: GmRow) => number; projValue: (r: GmRow) => number | null; onPay: (id: string, v: number | null) => void; resetNonce: number }) {
+function WhatIfList({ title, rows, excluded, onToggle, payOf, projValue, onPay, onRemoveTarget, resetNonce }: { title: string; rows: GmRow[]; excluded: Set<string>; onToggle: (id: string) => void; payOf: (r: GmRow) => number; projValue: (r: GmRow) => number | null; onPay: (id: string, v: number | null) => void; onRemoveTarget: (playerId: string) => void; resetNonce: number }) {
   return (
     <Card>
       <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
@@ -261,15 +346,28 @@ function WhatIfList({ title, rows, excluded, onToggle, payOf, projValue, onPay, 
                 const dropped = excluded.has(r.build_player_id);
                 const edited = Math.round(payOf(r)) !== Math.round(r.nil_value ?? 0);
                 return (
-                  <div key={r.build_player_id} className={cn("flex items-center gap-2 py-1.5 px-1.5", dropped && "opacity-40")}>
-                    <button
-                      onClick={() => onToggle(r.build_player_id)}
-                      title={dropped ? "Add back" : "Drop from scenario"}
-                      className={cn("inline-flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors cursor-pointer", dropped ? "text-[#D4AF37] hover:bg-[#D4AF37]/10" : "text-muted-foreground/40 hover:bg-amber-500/10 hover:text-amber-500")}
-                    >
-                      {dropped ? <PlusCircle className="h-3.5 w-3.5" /> : <MinusCircle className="h-3.5 w-3.5" />}
-                    </button>
-                    <span className={cn("min-w-0 flex-1 truncate text-sm font-medium", dropped && "line-through")}>{r.name}</span>
+                  <div key={r.build_player_id} className={cn("flex items-center gap-2 py-1.5 px-1.5", dropped && "opacity-40", r.is_added_target && "bg-[#D4AF37]/[0.05]")}>
+                    {r.is_added_target ? (
+                      <button
+                        onClick={() => onRemoveTarget(r.player_id!)}
+                        title="Remove target"
+                        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-destructive/10 hover:text-destructive cursor-pointer"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => onToggle(r.build_player_id)}
+                        title={dropped ? "Add back" : "Drop from scenario"}
+                        className={cn("inline-flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors cursor-pointer", dropped ? "text-[#D4AF37] hover:bg-[#D4AF37]/10" : "text-muted-foreground/40 hover:bg-amber-500/10 hover:text-amber-500")}
+                      >
+                        {dropped ? <PlusCircle className="h-3.5 w-3.5" /> : <MinusCircle className="h-3.5 w-3.5" />}
+                      </button>
+                    )}
+                    <span className={cn("min-w-0 flex-1 truncate text-sm font-medium", dropped && "line-through")}>
+                      {r.name}
+                      {r.is_added_target && <span className="ml-1.5 rounded bg-[#D4AF37]/15 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Target</span>}
+                    </span>
                     <span className="w-10 shrink-0 text-center text-[11px] font-semibold text-muted-foreground">{r.position || "—"}</span>
                     <span className="w-12 shrink-0 text-right font-mono text-xs tabular-nums text-foreground">{num(r.war)}</span>
                     {/* Projected Value: what this WAR is worth at the scenario budget. */}
