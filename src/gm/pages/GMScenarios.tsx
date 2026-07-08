@@ -292,14 +292,12 @@ function WhatIf({ roster, loading, builds, buildId, onPick, addedTargets, onRemo
 function EditableMoney({ value, edited, onCommit, big }: { value: number; edited: boolean; onCommit: (n: number | null) => void; big?: boolean }) {
   const fmt = (n: number) => `$${Math.round(n).toLocaleString()}`; // $XXX,XXX
   const [v, setV] = useState(fmt(value));
-  const [focused, setFocused] = useState(false);
   return (
     <input
       value={v}
       onChange={(e) => setV(e.target.value)}
-      onFocus={(e) => { setFocused(true); setV(String(Math.round(value))); requestAnimationFrame(() => e.target.select()); }}
+      onFocus={(e) => { setV(String(Math.round(value))); requestAnimationFrame(() => e.target.select()); }}
       onBlur={() => {
-        setFocused(false);
         const t = v.replace(/[^0-9.]/g, "");
         if (t === "") { onCommit(null); setV(fmt(value)); return; }
         const n = Number(t);
@@ -311,10 +309,9 @@ function EditableMoney({ value, edited, onCommit, big }: { value: number; edited
       inputMode="numeric"
       title="Edit for this scenario (not saved)"
       className={cn(
-        "shrink-0 rounded border bg-transparent text-right font-mono tabular-nums outline-none transition-colors focus:border-[#D4AF37]",
-        big ? "w-32 px-1.5 py-0.5 text-lg font-semibold" : "w-24 px-1.5 py-0.5 text-xs",
-        focused && "border-[#D4AF37]",
-        edited ? "border-[#D4AF37]/60 text-[#D4AF37]" : big ? "border-transparent text-foreground hover:border-border" : "border-transparent text-muted-foreground hover:border-border",
+        "shrink-0 rounded border bg-muted/40 text-right font-mono tabular-nums outline-none transition-colors hover:border-[#D4AF37]/50 focus:border-[#D4AF37] focus:bg-background focus:ring-1 focus:ring-[#D4AF37]/30",
+        big ? "w-32 px-2 py-1 text-lg font-semibold" : "w-24 px-2 py-1 text-xs",
+        edited ? "border-[#D4AF37]/60 text-[#D4AF37]" : big ? "border-border text-foreground" : "border-border text-foreground",
       )}
     />
   );
