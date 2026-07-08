@@ -69,8 +69,12 @@ export interface GmRecruit {
   guardian_phone: string | null;
   coach_name: string | null;
   coach_phone: string | null;
+  extra_contacts: ExtraContact[] | null; // additional numbers (family, 2nd coach, agent…)
   sort_order: number;
 }
+
+/** An ad-hoc extra contact number for a recruit. */
+export interface ExtraContact { label: string; value: string }
 
 export type NewRecruit = Omit<GmRecruit, "id" | "sort_order">;
 

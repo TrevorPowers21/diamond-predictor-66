@@ -4,7 +4,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useGmRecruits, recruitTypeForPosition, RECRUIT_STAGES, RECRUIT_TIERS, RECRUIT_LEVELS, type GmRecruit, type GmRecruitReport, type RecruitStage, type RecruitTier, type RecruitLevel, type RecruitType } from "@/gm/hooks/useGmRecruits";
+import { useGmRecruits, recruitTypeForPosition, RECRUIT_STAGES, RECRUIT_TIERS, RECRUIT_LEVELS, type GmRecruit, type GmRecruitReport, type RecruitStage, type RecruitTier, type RecruitLevel, type RecruitType, type ExtraContact } from "@/gm/hooks/useGmRecruits";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -162,8 +162,11 @@ export default function GMRecruits() {
   const [view, setView] = useState<"type" | "position">("type");
   const [levelFilter, setLevelFilter] = useState<"all" | "hs" | "juco">("all");
   const [addOpen, setAddOpen] = useState(false);
-  const BLANK_FORM = { first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage, projection_tier: "" as RecruitTier | "", phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "", asking_price: "", target_offer: "", level: "hs" as RecruitLevel };
+  const BLANK_FORM = { first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage, projection_tier: "" as RecruitTier | "", phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "", asking_price: "", target_offer: "", level: "hs" as RecruitLevel, extra_contacts: [] as ExtraContact[] };
   const [form, setForm] = useState(BLANK_FORM);
+  const addFormNumber = () => setForm((f) => ({ ...f, extra_contacts: [...f.extra_contacts, { label: "", value: "" }] }));
+  const setFormNumber = (i: number, field: keyof ExtraContact, val: string) => setForm((f) => ({ ...f, extra_contacts: f.extra_contacts.map((c, j) => (j === i ? { ...c, [field]: val } : c)) }));
+  const removeFormNumber = (i: number) => setForm((f) => ({ ...f, extra_contacts: f.extra_contacts.filter((_, j) => j !== i) }));
   const [timelineRecruit, setTimelineRecruit] = useState<GmRecruit | null>(null);
   const [eventDate, setEventDate] = useState<string>(today);
   const [eventNote, setEventNote] = useState("");
@@ -173,9 +176,12 @@ export default function GMRecruits() {
   const [reportTier, setReportTier] = useState<RecruitTier | "">("");
   const openReports = (r: GmRecruit) => { setReportBody(""); setReportDate(today()); setReportTier(r.projection_tier ?? ""); setReportsRecruit(r); };
   const [contactRecruit, setContactRecruit] = useState<GmRecruit | null>(null);
-  const [contact, setContact] = useState({ phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "" });
-  const openContact = (r: GmRecruit) => { setContact({ phone: r.phone ?? "", email: r.email ?? "", guardian_name: r.guardian_name ?? "", guardian_phone: r.guardian_phone ?? "", coach_name: r.coach_name ?? "", coach_phone: r.coach_phone ?? "" }); setContactRecruit(r); };
-  const saveContact = () => { if (contactRecruit) { gm.updateRecruit(contactRecruit.id, { phone: contact.phone.trim() || null, email: contact.email.trim() || null, guardian_name: contact.guardian_name.trim() || null, guardian_phone: contact.guardian_phone.trim() || null, coach_name: contact.coach_name.trim() || null, coach_phone: contact.coach_phone.trim() || null }); setContactRecruit(null); } };
+  const [contact, setContact] = useState({ phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "", extra_contacts: [] as ExtraContact[] });
+  const openContact = (r: GmRecruit) => { setContact({ phone: r.phone ?? "", email: r.email ?? "", guardian_name: r.guardian_name ?? "", guardian_phone: r.guardian_phone ?? "", coach_name: r.coach_name ?? "", coach_phone: r.coach_phone ?? "", extra_contacts: r.extra_contacts ?? [] }); setContactRecruit(r); };
+  const addContactNumber = () => setContact((c) => ({ ...c, extra_contacts: [...c.extra_contacts, { label: "", value: "" }] }));
+  const setContactNumber = (i: number, field: keyof ExtraContact, val: string) => setContact((c) => ({ ...c, extra_contacts: c.extra_contacts.map((x, j) => (j === i ? { ...x, [field]: val } : x)) }));
+  const removeContactNumber = (i: number) => setContact((c) => ({ ...c, extra_contacts: c.extra_contacts.filter((_, j) => j !== i) }));
+  const saveContact = () => { if (contactRecruit) { gm.updateRecruit(contactRecruit.id, { phone: contact.phone.trim() || null, email: contact.email.trim() || null, guardian_name: contact.guardian_name.trim() || null, guardian_phone: contact.guardian_phone.trim() || null, coach_name: contact.coach_name.trim() || null, coach_phone: contact.coach_phone.trim() || null, extra_contacts: contact.extra_contacts.filter((x) => x.value.trim()).map((x) => ({ label: x.label.trim(), value: x.value.trim() })) }); setContactRecruit(null); } };
   const [dealRecruit, setDealRecruit] = useState<GmRecruit | null>(null);
   const [deal, setDeal] = useState({ asking_price: "", target_offer: "" });
   const openDeal = (r: GmRecruit) => { setDeal({ asking_price: r.asking_price != null ? String(r.asking_price) : "", target_offer: r.target_offer != null ? String(r.target_offer) : "" }); setDealRecruit(r); };
@@ -234,6 +240,7 @@ export default function GMRecruits() {
       guardian_phone: form.guardian_phone.trim() || null,
       coach_name: form.coach_name.trim() || null,
       coach_phone: form.coach_phone.trim() || null,
+      extra_contacts: form.extra_contacts.filter((c) => c.value.trim()).map((c) => ({ label: c.label.trim(), value: c.value.trim() })),
     }, (form.notes.trim() || tier) ? { report_date: today(), body: form.notes.trim(), tier } : undefined);
     setAddOpen(false);
   };
@@ -396,12 +403,38 @@ export default function GMRecruits() {
                 <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Travel Organization <span className="text-muted-foreground/50">(optional)</span></span>
                 <Input value={form.travel_org} onChange={(e) => setForm((f) => ({ ...f, travel_org: e.target.value }))} className="h-9 text-sm" />
               </div>
-              <div>
-                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Link (PBR / PG)</span>
-                <Input value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="https://…" className="h-9 text-sm" />
-              </div>
-              {/* Deal — asking price + what we're willing to pay */}
+              {/* Contact — kept with the identity fields on the left */}
               <div className="border-t border-border/40 pt-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Contact</span>
+                  <button type="button" onClick={addFormNumber} className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"><Plus className="h-3 w-3" /> Add Number</button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Player phone" className="h-9 text-sm" />
+                  <Input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="Player email" className="h-9 text-sm" />
+                  <Input value={form.guardian_name} onChange={(e) => setForm((f) => ({ ...f, guardian_name: e.target.value }))} placeholder="Parent / guardian" className="h-9 text-sm" />
+                  <Input value={form.guardian_phone} onChange={(e) => setForm((f) => ({ ...f, guardian_phone: e.target.value }))} placeholder="Guardian phone" className="h-9 text-sm" />
+                  <Input value={form.coach_name} onChange={(e) => setForm((f) => ({ ...f, coach_name: e.target.value }))} placeholder="Coach" className="h-9 text-sm" />
+                  <Input value={form.coach_phone} onChange={(e) => setForm((f) => ({ ...f, coach_phone: e.target.value }))} placeholder="Coach phone" className="h-9 text-sm" />
+                </div>
+                {form.extra_contacts.length > 0 && (
+                  <div className="mt-2 space-y-2">
+                    {form.extra_contacts.map((c, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <Input value={c.label} onChange={(e) => setFormNumber(i, "label", e.target.value)} placeholder="Label (e.g. Dad)" className="h-9 w-28 text-sm" />
+                        <Input value={c.value} onChange={(e) => setFormNumber(i, "value", e.target.value)} placeholder="Phone / email" className="h-9 flex-1 text-sm" />
+                        <button type="button" onClick={() => removeFormNumber(i)} className="text-muted-foreground/40 hover:text-destructive"><X className="h-3.5 w-3.5" /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right column — evaluation: deal, scouting report, link */}
+            <div className="space-y-3">
+              {/* Deal — asking price + what we're willing to pay */}
+              <div>
                 <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Deal</span>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -414,30 +447,22 @@ export default function GMRecruits() {
                   </div>
                 </div>
               </div>
-            </div>
 
-            {/* Right column — contact + scouting report */}
-            <div className="space-y-3">
-              <div>
-                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Contact</span>
-                <div className="grid grid-cols-2 gap-3">
-                  <Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Player phone" className="h-9 text-sm" />
-                  <Input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="Player email" className="h-9 text-sm" />
-                  <Input value={form.guardian_name} onChange={(e) => setForm((f) => ({ ...f, guardian_name: e.target.value }))} placeholder="Parent / guardian" className="h-9 text-sm" />
-                  <Input value={form.guardian_phone} onChange={(e) => setForm((f) => ({ ...f, guardian_phone: e.target.value }))} placeholder="Guardian phone" className="h-9 text-sm" />
-                  <Input value={form.coach_name} onChange={(e) => setForm((f) => ({ ...f, coach_name: e.target.value }))} placeholder="HS / travel coach" className="h-9 text-sm" />
-                  <Input value={form.coach_phone} onChange={(e) => setForm((f) => ({ ...f, coach_phone: e.target.value }))} placeholder="Coach phone" className="h-9 text-sm" />
-                </div>
-              </div>
+              {/* Scouting report — gold header, authors the projection tier */}
               <div className="border-t border-border/40 pt-3">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scouting Report</span>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Scouting Report</span>
                   <Select value={form.projection_tier || undefined} onValueChange={(v) => setForm((f) => ({ ...f, projection_tier: v as RecruitTier }))}>
                     <SelectTrigger className="h-7 w-auto gap-1 text-xs"><SelectValue placeholder="Projection tier" /></SelectTrigger>
                     <SelectContent>{RECRUIT_TIERS.map((t) => <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
-                <Textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Tools, projection, makeup…" className="min-h-[168px] text-sm" />
+                <Textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Tools, projection, makeup…" className="min-h-[130px] text-sm" />
+              </div>
+
+              <div>
+                <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Link (PBR / PG)</span>
+                <Input value={form.link} onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))} placeholder="https://…" className="h-9 text-sm" />
               </div>
             </div>
           </div>
@@ -566,13 +591,27 @@ export default function GMRecruits() {
               <Input value={contact.guardian_phone} onChange={(e) => setContact((c) => ({ ...c, guardian_phone: e.target.value }))} className="h-9 text-sm" />
             </div>
             <div>
-              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>HS / Travel Coach</span>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Coach</span>
               <Input value={contact.coach_name} onChange={(e) => setContact((c) => ({ ...c, coach_name: e.target.value }))} className="h-9 text-sm" />
             </div>
             <div>
               <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Coach Phone</span>
               <Input value={contact.coach_phone} onChange={(e) => setContact((c) => ({ ...c, coach_phone: e.target.value }))} className="h-9 text-sm" />
             </div>
+          </div>
+          {/* Extra numbers — add as many as needed */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Additional Numbers</span>
+              <button type="button" onClick={addContactNumber} className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"><Plus className="h-3 w-3" /> Add Number</button>
+            </div>
+            {contact.extra_contacts.map((c, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Input value={c.label} onChange={(e) => setContactNumber(i, "label", e.target.value)} placeholder="Label (e.g. Dad)" className="h-9 w-28 text-sm" />
+                <Input value={c.value} onChange={(e) => setContactNumber(i, "value", e.target.value)} placeholder="Phone / email" className="h-9 flex-1 text-sm" />
+                <button type="button" onClick={() => removeContactNumber(i)} className="text-muted-foreground/40 hover:text-destructive"><X className="h-3.5 w-3.5" /></button>
+              </div>
+            ))}
           </div>
           <DialogFooter>
             <Button size="sm" onClick={saveContact}>Save Contact</Button>

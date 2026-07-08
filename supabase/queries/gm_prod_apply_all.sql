@@ -7,6 +7,7 @@
 -- Then: NOTIFY pgrst, 'reload schema';
 -- Note: team_builds.gm_notes + gm_player_finance.notes/notes_updated_at are
 -- superseded by gm_player_notes (per-player log); old columns left unused.
+-- gm_recruits.years_remaining is superseded by level (also unused).
 -- ============================================================================
 
 
@@ -379,5 +380,14 @@ CREATE POLICY gm_activity_all ON public.gm_activity
 ALTER TABLE public.gm_recruits
   ADD COLUMN IF NOT EXISTS level           text NOT NULL DEFAULT 'hs',  -- 'hs' | 'juco'
   ADD COLUMN IF NOT EXISTS years_remaining numeric;                     -- eligibility years on arrival (JUCO)
+
+-- ----------------------------------------------------------------------------
+-- 20260708180000_gm_recruits_extra_contacts.sql
+-- ----------------------------------------------------------------------------
+-- Extra contact numbers for a recruit — a flexible list beyond the fixed
+-- player / guardian / coach fields (additional family, second coach, agent,
+-- etc.). Array of { label, value } objects.
+ALTER TABLE public.gm_recruits
+  ADD COLUMN IF NOT EXISTS extra_contacts jsonb;
 
 NOTIFY pgrst, 'reload schema';
