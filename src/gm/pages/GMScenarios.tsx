@@ -253,21 +253,22 @@ function ScenarioPanel({ variant, builds, teamId, userId, defaultBuildId, onRepo
           {changed && <Button variant="ghost" size="sm" className="ml-auto h-7 gap-1.5 text-xs" onClick={reset}><RotateCcw className="h-3 w-3" /> Reset</Button>}
         </div>
 
-        {/* Live totals + editable budget */}
+        {/* Live totals — Roster · WAR · Pay · Headroom, with the editable Total
+            Budget parked at the end (it's a taller input, kept out of the middle). */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-md border border-[#D4AF37]/40 bg-[#D4AF37]/[0.05] p-3">
+          <StatCell label="Roster" value={`${kept.length}`} delta={dropped > 0 ? -dropped : null} goodWhenPositive={true} deltaText={`−${dropped}`} />
           <StatCell label="Total WAR" value={num(scenWar)} delta={dWar} goodWhenPositive={true} deltaText={`${dWar >= 0 ? "+" : ""}${num(dWar)}`} />
+          <StatCell label="Committed Pay" value={money(scenPay)} delta={dPay} goodWhenPositive={false} deltaText={`${dPay > 0 ? "+" : ""}${money(dPay)}`} />
+          {scenHeadroom != null && <StatCell label="Headroom" value={money(scenHeadroom)} delta={dRoom} goodWhenPositive={true} deltaText={dRoom != null ? `${dRoom >= 0 ? "+" : ""}${money(dRoom)}` : undefined} />}
           <div className="flex flex-col">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground" style={OSWALD}>Total Budget</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#5aa9e6]" style={OSWALD}>Total Budget</span>
             {baseBudget == null ? (
               <span className="font-mono text-lg font-semibold tabular-nums text-muted-foreground">—</span>
             ) : (
-              <EditableMoney key={`budget:${resetNonce}`} value={budget ?? 0} edited={dBudget != null && Math.abs(dBudget) > 1e-9} onCommit={(n) => setBudgetOverride(n)} big />
+              <EditableMoney key={`budget:${resetNonce}`} value={budget ?? 0} edited={dBudget != null && Math.abs(dBudget) > 1e-9} onCommit={(n) => setBudgetOverride(n)} big accent />
             )}
             {dBudget != null && Math.abs(dBudget) > 1e-9 && <span className={cn("font-mono text-[11px] tabular-nums", dBudget > 0 ? "text-emerald-500" : "text-red-500")}>{dBudget >= 0 ? "+" : ""}{money(dBudget)}</span>}
           </div>
-          <StatCell label="Committed Pay" value={money(scenPay)} delta={dPay} goodWhenPositive={false} deltaText={`${dPay > 0 ? "+" : ""}${money(dPay)}`} />
-          {scenHeadroom != null && <StatCell label="Headroom" value={money(scenHeadroom)} delta={dRoom} goodWhenPositive={true} deltaText={dRoom != null ? `${dRoom >= 0 ? "+" : ""}${money(dRoom)}` : undefined} />}
-          <StatCell label="Roster" value={`${kept.length}`} delta={dropped > 0 ? -dropped : null} goodWhenPositive={true} deltaText={`−${dropped}`} />
           {!col && <span className="ml-auto text-[11px] text-muted-foreground">{!changed ? "Drop players, add targets, edit pay, or set the budget. Nothing is saved." : `${[added ? `${added} added` : "", dropped ? `${dropped} dropped` : "", repriced ? `${repriced} repriced` : "", dBudget && Math.abs(dBudget) > 1e-9 ? "budget set" : ""].filter(Boolean).join(" · ")} · nothing saved`}</span>}
         </div>
 
@@ -345,7 +346,7 @@ function StatCell({ label, value, delta, goodWhenPositive, deltaText }: { label:
 
 // Inline pay/budget editor. Owns its text state; remounts on resetNonce so Reset
 // reseeds it. Commits a number (or null → revert to the real value) on blur/Enter.
-function EditableMoney({ value, edited, onCommit, big }: { value: number; edited: boolean; onCommit: (n: number | null) => void; big?: boolean }) {
+function EditableMoney({ value, edited, onCommit, big, accent }: { value: number; edited: boolean; onCommit: (n: number | null) => void; big?: boolean; accent?: boolean }) {
   const fmt = (n: number) => money(n); // idle shows $K/$M; focus shows raw digits
   const [v, setV] = useState(fmt(value));
   return (
@@ -367,7 +368,7 @@ function EditableMoney({ value, edited, onCommit, big }: { value: number; edited
       className={cn(
         "shrink-0 rounded border bg-muted/40 text-right font-mono tabular-nums outline-none transition-colors hover:border-[#D4AF37]/50 focus:border-[#D4AF37] focus:bg-background focus:ring-1 focus:ring-[#D4AF37]/30",
         big ? "w-32 px-2 py-1 text-lg font-semibold" : "w-24 px-2 py-1 text-xs",
-        edited ? "border-[#D4AF37]/60 text-[#D4AF37]" : "border-border text-foreground",
+        edited ? "border-[#D4AF37] text-[#D4AF37]" : accent ? "border-border text-[#5aa9e6]" : "border-border text-foreground",
       )}
     />
   );
