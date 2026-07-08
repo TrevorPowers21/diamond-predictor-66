@@ -4,7 +4,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useGmRecruits, recruitTypeForPosition, RECRUIT_STAGES, RECRUIT_TIERS, type GmRecruit, type GmRecruitReport, type RecruitStage, type RecruitTier, type RecruitType } from "@/gm/hooks/useGmRecruits";
+import { useGmRecruits, recruitTypeForPosition, RECRUIT_STAGES, RECRUIT_TIERS, RECRUIT_LEVELS, type GmRecruit, type GmRecruitReport, type RecruitStage, type RecruitTier, type RecruitLevel, type RecruitType } from "@/gm/hooks/useGmRecruits";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -102,6 +102,11 @@ function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onT
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-semibold">{name}</span>
           {recruit.position && <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">{recruit.position}</span>}
+          {recruit.level === "juco" && (
+            <span className="shrink-0 rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-400" title="Junior college">
+              JUCO{recruit.years_remaining != null ? ` · ${recruit.years_remaining}yr` : ""}
+            </span>
+          )}
         </div>
         {(locale || recruit.travel_org) && (
           <div className="mt-0.5 truncate text-xs text-muted-foreground">{locale}{locale && recruit.travel_org ? " · " : ""}{recruit.travel_org}</div>
@@ -155,8 +160,9 @@ export default function GMRecruits() {
   const gm = useGmRecruits();
   const [year, setYear] = useState<number>(YEARS[0]);
   const [view, setView] = useState<"type" | "position">("type");
+  const [levelFilter, setLevelFilter] = useState<"all" | "hs" | "juco">("all");
   const [addOpen, setAddOpen] = useState(false);
-  const BLANK_FORM = { first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage, projection_tier: "" as RecruitTier | "", phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "", asking_price: "", target_offer: "" };
+  const BLANK_FORM = { first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage, projection_tier: "" as RecruitTier | "", phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "", asking_price: "", target_offer: "", level: "hs" as RecruitLevel, years_remaining: "" };
   const [form, setForm] = useState(BLANK_FORM);
   const [timelineRecruit, setTimelineRecruit] = useState<GmRecruit | null>(null);
   const [eventDate, setEventDate] = useState<string>(today);
@@ -176,14 +182,15 @@ export default function GMRecruits() {
   const saveDeal = () => { if (dealRecruit) { gm.updateRecruit(dealRecruit.id, { asking_price: parseMoney(deal.asking_price), target_offer: parseMoney(deal.target_offer) }); setDealRecruit(null); } };
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
-  const listFor = (t: RecruitType) => gm.recruits.filter((r) => r.class_year === year && r.player_type === t).sort((a, b) => a.sort_order - b.sort_order);
-  const listForPositions = (positions: string[]) => gm.recruits.filter((r) => r.class_year === year && positions.includes((r.position ?? "").toUpperCase())).sort((a, b) => a.sort_order - b.sort_order);
+  const matchLevel = (r: GmRecruit) => levelFilter === "all" || r.level === levelFilter;
+  const listFor = (t: RecruitType) => gm.recruits.filter((r) => r.class_year === year && r.player_type === t && matchLevel(r)).sort((a, b) => a.sort_order - b.sort_order);
+  const listForPositions = (positions: string[]) => gm.recruits.filter((r) => r.class_year === year && positions.includes((r.position ?? "").toUpperCase()) && matchLevel(r)).sort((a, b) => a.sort_order - b.sort_order);
   const groupedPositions = POSITION_GROUPS.flatMap((g) => g.positions);
   const sections = view === "type"
     ? SECTIONS.map((s) => ({ key: s.type, title: s.title, list: listFor(s.type) }))
     : (() => {
         const groups = POSITION_GROUPS.map((g) => ({ key: g.key, title: g.title, list: listForPositions(g.positions) }));
-        const unassigned = gm.recruits.filter((r) => r.class_year === year && !groupedPositions.includes((r.position ?? "").toUpperCase())).sort((a, b) => a.sort_order - b.sort_order);
+        const unassigned = gm.recruits.filter((r) => r.class_year === year && matchLevel(r) && !groupedPositions.includes((r.position ?? "").toUpperCase())).sort((a, b) => a.sort_order - b.sort_order);
         return unassigned.length ? [...groups, { key: "unassigned", title: "Unassigned", list: unassigned }] : groups;
       })();
 
@@ -211,6 +218,8 @@ export default function GMRecruits() {
       projection_tier: tier,
       asking_price: parseMoney(form.asking_price),
       target_offer: parseMoney(form.target_offer),
+      level: form.level,
+      years_remaining: form.level === "juco" ? parseMoney(form.years_remaining) : null,
       first_name: form.first_name.trim() || null,
       last_name: form.last_name.trim() || null,
       high_school: form.high_school.trim() || null,
@@ -257,20 +266,38 @@ export default function GMRecruits() {
             </button>
           ))}
         </div>
-        <div className="flex rounded-md border border-border/60 p-0.5">
-          {([["type", "By Type"], ["position", "By Position"]] as const).map(([v, label]) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={cn(
-                "rounded px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider transition-colors",
-                view === v ? "bg-[#D4AF37]/15 text-[#D4AF37]" : "text-muted-foreground hover:text-foreground",
-              )}
-              style={OSWALD}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          {/* HS / JUCO separation */}
+          <div className="flex rounded-md border border-border/60 p-0.5">
+            {([["all", "All"], ["hs", "HS"], ["juco", "JUCO"]] as const).map(([v, label]) => (
+              <button
+                key={v}
+                onClick={() => setLevelFilter(v)}
+                className={cn(
+                  "rounded px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider transition-colors",
+                  levelFilter === v ? "bg-blue-500/15 text-blue-400" : "text-muted-foreground hover:text-foreground",
+                )}
+                style={OSWALD}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="flex rounded-md border border-border/60 p-0.5">
+            {([["type", "By Type"], ["position", "By Position"]] as const).map(([v, label]) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={cn(
+                  "rounded px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider transition-colors",
+                  view === v ? "bg-[#D4AF37]/15 text-[#D4AF37]" : "text-muted-foreground hover:text-foreground",
+                )}
+                style={OSWALD}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -342,12 +369,30 @@ export default function GMRecruits() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
+                  <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Level</span>
+                  <Select value={form.level} onValueChange={(v) => setForm((f) => ({ ...f, level: v as RecruitLevel }))}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>{RECRUIT_LEVELS.map((l) => <SelectItem key={l.value} value={l.value} className="text-xs">{l.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div>
                   <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Stage</span>
                   <Select value={form.stage} onValueChange={(v) => setForm((f) => ({ ...f, stage: v as RecruitStage }))}>
                     <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                     <SelectContent>{RECRUIT_STAGES.map((s) => <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {form.level === "juco" && (
+                  <div>
+                    <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Years Remaining</span>
+                    <Select value={form.years_remaining || undefined} onValueChange={(v) => setForm((f) => ({ ...f, years_remaining: v }))}>
+                      <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select" /></SelectTrigger>
+                      <SelectContent>{["3", "2", "1"].map((y) => <SelectItem key={y} value={y} className="text-xs">{y} year{y === "1" ? "" : "s"}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div>
                   <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>State</span>
                   <Input value={form.state} onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))} placeholder="e.g. TX" className="h-9 text-sm" />

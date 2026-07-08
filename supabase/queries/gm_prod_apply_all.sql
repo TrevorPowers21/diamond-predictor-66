@@ -369,4 +369,15 @@ CREATE POLICY gm_activity_all ON public.gm_activity
   USING (public.has_role(auth.uid(), 'superadmin'::public.app_role) OR public.is_team_member(customer_team_id))
   WITH CHECK (public.has_role(auth.uid(), 'superadmin'::public.app_role) OR public.is_team_member(customer_team_id));
 
+-- ----------------------------------------------------------------------------
+-- 20260708170000_gm_recruits_level.sql
+-- ----------------------------------------------------------------------------
+-- Recruit level (HS vs JUCO) and, for JUCO, how many years of eligibility they
+-- arrive with. A HS commit is a true freshman (full clock); a JUCO commit has
+-- burned time and enters with fewer years — this drives how long they show up
+-- on future-season roster projections.
+ALTER TABLE public.gm_recruits
+  ADD COLUMN IF NOT EXISTS level           text NOT NULL DEFAULT 'hs',  -- 'hs' | 'juco'
+  ADD COLUMN IF NOT EXISTS years_remaining numeric;                     -- eligibility years on arrival (JUCO)
+
 NOTIFY pgrst, 'reload schema';

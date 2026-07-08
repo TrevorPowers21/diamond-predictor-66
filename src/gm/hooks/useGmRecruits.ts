@@ -31,6 +31,13 @@ export const RECRUIT_TIERS = [
 ] as const;
 export type RecruitTier = (typeof RECRUIT_TIERS)[number]["value"];
 
+/** Where the recruit is coming from. JUCO arrivals have burned eligibility. */
+export const RECRUIT_LEVELS = [
+  { value: "hs", label: "High School" },
+  { value: "juco", label: "JUCO" },
+] as const;
+export type RecruitLevel = (typeof RECRUIT_LEVELS)[number]["value"];
+
 export interface GmRecruit {
   id: string;
   class_year: number;
@@ -46,6 +53,8 @@ export interface GmRecruit {
   projection_tier: RecruitTier | null; // mirror of the latest report's tier — stable card badge
   asking_price: number | null; // what the recruit / his camp is asking
   target_offer: number | null; // "Willing to Pay" — what we want to pay
+  level: RecruitLevel; // 'hs' | 'juco'
+  years_remaining: number | null; // eligibility years on arrival (JUCO)
   link: string | null;
   stage: RecruitStage;
   // Contact — team-wide, any coach on staff can pull these up.
