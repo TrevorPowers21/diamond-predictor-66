@@ -147,7 +147,10 @@ export default function ScoutingCsvUpload() {
   const downloadTemplate = () => {
     const headers = cols.map((c) => c.label);
     const sample = cols.map((c) => (c.label === "Name" ? "Sample Player" : ""));
-    download(`rstr-iq-${kind}-scouting-template.csv`, [headers.join(","), sample.join(",")].join("\n"));
+    const csv = [headers.join(","), sample.join(",")].join("\n");
+    // Open the template in a new browser tab (blob) rather than downloading.
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/plain;charset=utf-8" }));
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -241,7 +244,7 @@ export default function ScoutingCsvUpload() {
         </ol>
 
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={downloadTemplate}><Download className="h-4 w-4" /> Download {kind === "hitter" ? "Hitter" : "Pitcher"} Template</Button>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={downloadTemplate}><Download className="h-4 w-4" /> Open {kind === "hitter" ? "Hitter" : "Pitcher"} Template</Button>
           <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={onFile} />
           <Button size="sm" className="gap-1.5" disabled={busy} onClick={() => fileRef.current?.click()}><Upload className="h-4 w-4" /> {busy ? "Processing…" : "Upload CSV"}</Button>
         </div>
