@@ -33,6 +33,7 @@ export interface GmRow {
   finalized: boolean;
   eligibility_class: string | null; // GM/head-coach display (override ?? class_year)
   notes: string | null; // per-player GM note (gm_player_finance.notes)
+  notes_updated_at: string | null; // when the note was last written
   is_recruit?: boolean; // injected from the recruiting board in a future-season projection
   is_added_target?: boolean; // hypothetically added from the target board in a scenario
 }
@@ -552,10 +553,12 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
   const saveNote = useMutation({
     mutationFn: async ({ row, text }: { row: GmRow; text: string }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
+      const trimmed = text.trim();
+      const now = new Date().toISOString();
       const { error } = await (supabase as any).from("gm_player_finance").upsert(
         {
           build_player_id: row.build_player_id, customer_team_id: effectiveTeamId, player_id: row.player_id, season,
-          notes: text.trim() || null, updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString(),
+          notes: trimmed || null, notes_updated_at: trimmed ? now : null, updated_by_user_id: user?.id ?? null, updated_at: now,
         },
         { onConflict: "build_player_id" },
       );

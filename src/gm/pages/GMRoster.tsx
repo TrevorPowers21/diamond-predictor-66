@@ -322,7 +322,7 @@ export default function GMRoster() {
                       {!r.is_recruit && (
                         <button
                           onClick={() => openNote(r)}
-                          title={r.notes ? "Edit note" : "Add note"}
+                          title={r.notes ? `Note${r.notes_updated_at ? ` · ${new Date(r.notes_updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : ""}` : "Add note"}
                           className={cn("inline-flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors cursor-pointer", r.notes ? "text-[#D4AF37] hover:bg-[#D4AF37]/10" : "text-muted-foreground/30 hover:bg-muted hover:text-muted-foreground")}
                         >
                           <StickyNote className="h-3.5 w-3.5" />
@@ -535,7 +535,10 @@ export default function GMRoster() {
           <Dialog open={!!noteRow} onOpenChange={(o) => { if (!o) setNoteRow(null); }}>
             <DialogContent className="max-w-md">
               <DialogHeader>
-                <DialogTitle style={OSWALD}>Note — {noteRow?.name ?? "Player"}</DialogTitle>
+                <DialogTitle style={OSWALD} className="flex items-baseline gap-2">
+                  <span>Note — {noteRow?.name ?? "Player"}</span>
+                  {noteRow?.notes_updated_at && <span className="text-[11px] font-normal text-muted-foreground">Updated {new Date(noteRow.notes_updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>}
+                </DialogTitle>
               </DialogHeader>
               <p className="text-xs text-muted-foreground">Scouting or negotiation context for this player. Visible to your whole staff, not the coach-facing Team Builder.</p>
               <Textarea value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="e.g. Wants to play SS, open to $350K; family close to campus…" className="min-h-[140px] text-sm" />
