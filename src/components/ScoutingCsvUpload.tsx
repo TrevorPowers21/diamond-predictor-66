@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { computeHitterPowerRatings, computePitchingPowerRatings } from "@/lib/powerRatings";
-import { Upload, Download, ShieldCheck, FileSpreadsheet } from "lucide-react";
+import { Upload, Download, FileSpreadsheet } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Ephemeral scouting-CSV upload. A program exports THEIR OWN licensed data
@@ -220,18 +220,9 @@ export default function ScoutingCsvUpload() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg"><FileSpreadsheet className="h-5 w-5" /> Upload Scouting Data</CardTitle>
-        <CardDescription>Run your own exported evaluation data through the RSTR IQ model.</CardDescription>
+        <CardDescription>How to get RSTR IQ projections on any players you're evaluating — from your own exported data.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        {/* Privacy / process notice */}
-        <div className="flex gap-3 rounded-md border border-[#D4AF37]/40 bg-[#D4AF37]/[0.06] p-3">
-          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#D4AF37]" />
-          <div className="text-xs text-muted-foreground">
-            <p className="font-semibold text-foreground">Your data stays yours.</p>
-            <p className="mt-1">Export your own licensed data from whatever scouting or evaluation service your program uses — you can pull every player in the country for evaluation purposes. Fill the template below and upload it. The file is read and scored <span className="font-semibold text-foreground">entirely in your browser</span>; the results download straight back to you. RSTR IQ stores nothing and this data never enters our database.</p>
-          </div>
-        </div>
-
         {/* Type toggle */}
         <div className="flex rounded-md border border-border/60 p-0.5 w-fit">
           {(["hitter", "pitcher"] as const).map((k) => (
@@ -242,11 +233,11 @@ export default function ScoutingCsvUpload() {
           ))}
         </div>
 
-        {/* Steps */}
+        {/* Steps — how to get projections */}
         <ol className="list-decimal space-y-1.5 pl-5 text-sm text-muted-foreground">
-          <li><span className="font-medium text-foreground">Download the {kind} template</span> and match your export's columns to it — our metric names are below, with common aliases (e.g. Whiff% / Miss%).</li>
-          <li><span className="font-medium text-foreground">Paste your values</span> in; leave any metric you don't have blank (the model falls back where it can).</li>
-          <li><span className="font-medium text-foreground">Upload it</span> — you'll get a ratings file back instantly.</li>
+          <li><span className="font-medium text-foreground">Export the players you want projected</span> from your scouting service — any players in the country you're evaluating.</li>
+          <li><span className="font-medium text-foreground">Download the {kind} template</span> and match your export's columns to it — our metric names are below, with common aliases (e.g. Whiff% / Miss%). Leave any metric you don't have blank.</li>
+          <li><span className="font-medium text-foreground">Upload it</span> — RSTR IQ runs the projection and hands the results back to you instantly.</li>
         </ol>
 
         <div className="flex flex-wrap gap-2">
