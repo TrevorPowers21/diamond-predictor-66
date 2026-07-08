@@ -145,11 +145,37 @@ export default function ScoutingCsvUpload() {
   const cols = colsFor(kind);
 
   const downloadTemplate = () => {
-    const headers = cols.map((c) => c.label);
-    const sample = cols.map((c) => (c.label === "Name" ? "Sample Player" : ""));
-    const csv = [headers.join(","), sample.join(",")].join("\n");
-    // Open the template in a new browser tab (blob) rather than downloading.
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/plain;charset=utf-8" }));
+    const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+    const title = `RSTR IQ — ${kind === "hitter" ? "Hitter" : "Pitcher"} Scouting Template`;
+    const headerLine = cols.map((c) => c.label).join(",");
+    const rows = cols.map((c) => `
+      <tr>
+        <td class="col">${esc(c.label)}${c.required ? ' <span class="req">*</span>' : ""}</td>
+        <td>${esc(c.desc)}</td>
+        <td class="alias">${c.aliases?.length ? esc(c.aliases.join(", ")) : "—"}</td>
+      </tr>`).join("");
+    // Open the template as a readable table in a new browser tab (blob).
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
+<style>
+  body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:32px;color:#111;background:#fff;max-width:820px}
+  h1{font-family:Oswald,sans-serif;font-size:22px;margin:0 0 4px}
+  p.sub{color:#666;margin:0 0 20px;font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;text-transform:uppercase;letter-spacing:.06em;font-size:11px;color:#888;border-bottom:2px solid #eee;padding:8px 10px}
+  td{padding:7px 10px;border-bottom:1px solid #f0f0f0;vertical-align:top}
+  td.col{font-family:ui-monospace,Menlo,monospace;font-weight:600;white-space:nowrap}
+  td.alias{color:#888}
+  .req{color:#d33}
+  .note{margin-top:18px;font-size:12px;color:#666}
+  .headerline{margin-top:10px;font-family:ui-monospace,Menlo,monospace;font-size:11px;background:#f6f6f6;border:1px solid #eee;border-radius:6px;padding:8px 10px;color:#333;white-space:pre-wrap;word-break:break-all}
+</style></head><body>
+  <h1>${esc(title)}</h1>
+  <p class="sub">Match your export's columns to these. <span class="req">*</span> = required; leave anything you don't have blank.</p>
+  <table><thead><tr><th>Column</th><th>Description</th><th>Also known as</th></tr></thead><tbody>${rows}</tbody></table>
+  <div class="note">Exact header row (copy into row 1 of your CSV):</div>
+  <div class="headerline">${esc(headerLine)}</div>
+</body></html>`;
+    const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
