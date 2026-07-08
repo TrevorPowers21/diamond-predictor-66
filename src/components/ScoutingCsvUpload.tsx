@@ -234,7 +234,8 @@ export default function ScoutingCsvUpload() {
 
         {/* Steps — how to get projections */}
         <ol className="list-decimal space-y-1.5 pl-5 text-sm text-muted-foreground">
-          <li><span className="font-medium text-foreground">Export the players you want projected</span> from your scouting service — any players in the country you're evaluating.</li>
+          <li><span className="font-medium text-foreground">Export the players you want projected</span> from your scouting service — every player in the country is available for evaluation.</li>
+
           <li><span className="font-medium text-foreground">Download the {kind} template</span> and match your export's columns to it — our metric names are below, with common aliases (e.g. Whiff% / Miss%). Leave any metric you don't have blank.</li>
           <li><span className="font-medium text-foreground">Upload it</span> — RSTR IQ runs the projection and hands the results back to you instantly.</li>
         </ol>
