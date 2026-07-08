@@ -43,8 +43,6 @@ function targetToRow(t: GmTarget): GmRow {
     actual_pay: null,
     finalized: false,
     eligibility_class: null,
-    notes: null,
-    notes_updated_at: null,
     is_added_target: true,
   };
 }

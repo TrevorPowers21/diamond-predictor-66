@@ -32,10 +32,17 @@ export interface GmRow {
   actual_pay: number | null;
   finalized: boolean;
   eligibility_class: string | null; // GM/head-coach display (override ?? class_year)
-  notes: string | null; // per-player GM note (gm_player_finance.notes)
-  notes_updated_at: string | null; // when the note was last written
   is_recruit?: boolean; // injected from the recruiting board in a future-season projection
   is_added_target?: boolean; // hypothetically added from the target board in a scenario
+}
+
+/** One authored, dated GM note on a roster row. Many per player. */
+export interface GmPlayerNote {
+  id: string;
+  build_player_id: string;
+  author: string | null;
+  note_date: string; // YYYY-MM-DD
+  body: string | null;
 }
 
 export interface GmOtherLine {
@@ -270,6 +277,48 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     },
   });
   const pendingReasonCount = departures.filter((d) => !d.departure_reason).length;
+
+  // Per-player GM notes (authored + dated log) for this build's rows.
+  const noteBpIds = useMemo(() => rows.map((r) => r.build_player_id).filter((id) => !id.startsWith("recruit:")), [rows]);
+  const notesKey = ["gm-player-notes", effectiveTeamId ?? null, activeBuildId, noteBpIds];
+  const { data: noteRows = [] } = useQuery({
+    queryKey: notesKey,
+    enabled: !!user?.id && !!effectiveTeamId && noteBpIds.length > 0,
+    queryFn: async (): Promise<GmPlayerNote[]> => {
+      const out: GmPlayerNote[] = [];
+      for (let i = 0; i < noteBpIds.length; i += 200) {
+        const { data } = await (supabase as any)
+          .from("gm_player_notes").select("id, build_player_id, author, note_date, body")
+          .in("build_player_id", noteBpIds.slice(i, i + 200))
+          .order("note_date", { ascending: false }).order("created_at", { ascending: false });
+        for (const n of data || []) out.push(n as GmPlayerNote);
+      }
+      return out;
+    },
+  });
+  const notesByBuildPlayer = useMemo(() => {
+    const m = new Map<string, GmPlayerNote[]>();
+    for (const n of noteRows) { const a = m.get(n.build_player_id) ?? []; a.push(n); m.set(n.build_player_id, a); }
+    return m;
+  }, [noteRows]);
+
+  const addNote = useMutation({
+    mutationFn: async ({ row, body }: { row: GmRow; body: string }) => {
+      if (!effectiveTeamId) throw new Error("No team in scope");
+      const { error } = await (supabase as any).from("gm_player_notes").insert({
+        build_player_id: row.build_player_id, customer_team_id: effectiveTeamId, player_id: row.player_id,
+        author: user?.email ?? null, body: body.trim(), created_by_user_id: user?.id ?? null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["gm-player-notes"] }); toast.success("Note added"); },
+    onError: (e: any) => toast.error(`Add note failed: ${e.message}`),
+  });
+  const removeNote = useMutation({
+    mutationFn: async (id: string) => { const { error } = await (supabase as any).from("gm_player_notes").delete().eq("id", id); if (error) throw error; },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["gm-player-notes"] }),
+    onError: (e: any) => toast.error(`Remove note failed: ${e.message}`),
+  });
 
   const hitters = useMemo(() => rows.filter((r) => !r.is_pitcher).sort((a, b) => (b.war ?? -Infinity) - (a.war ?? -Infinity)), [rows]);
   const pitchers = useMemo(() => rows.filter((r) => r.is_pitcher).sort((a, b) => (b.war ?? -Infinity) - (a.war ?? -Infinity)), [rows]);
@@ -548,33 +597,15 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     onError: (e: any) => toast.error(`Add player failed: ${e.message}`),
   });
 
-  // Per-player GM note — scouting/negotiation context on one roster row, keyed
-  // per build (build_player_id) like the money. Team-scoped, shared across staff.
-  const saveNote = useMutation({
-    mutationFn: async ({ row, text }: { row: GmRow; text: string }) => {
-      if (!effectiveTeamId) throw new Error("No team in scope");
-      const trimmed = text.trim();
-      const now = new Date().toISOString();
-      const { error } = await (supabase as any).from("gm_player_finance").upsert(
-        {
-          build_player_id: row.build_player_id, customer_team_id: effectiveTeamId, player_id: row.player_id, season,
-          notes: trimmed || null, notes_updated_at: trimmed ? now : null, updated_by_user_id: user?.id ?? null, updated_at: now,
-        },
-        { onConflict: "build_player_id" },
-      );
-      if (error) throw error;
-    },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); toast.success("Note saved"); },
-    onError: (e: any) => toast.error(`Save note failed: ${e.message}`),
-  });
-
   return {
     teamName,
     season,
     projectionSeason,
     isProjection,
     injectedCommitCount,
-    saveNote: (row: GmRow, text: string) => saveNote.mutate({ row, text }),
+    notesByBuildPlayer,
+    addNote: (row: GmRow, body: string) => addNote.mutate({ row, body }),
+    removeNote: (id: string) => removeNote.mutate(id),
     hasTeam: !!effectiveTeamId,
     isLoading,
     builds,

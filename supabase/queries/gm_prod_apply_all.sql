@@ -10,8 +10,9 @@
 --
 -- After it completes, reload the PostgREST schema cache:
 --     NOTIFY pgrst, 'reload schema';
--- Note: team_builds.gm_notes (per-build) is superseded by
--- gm_player_finance.notes (per-player); the column is left in place, unused.
+-- Note: team_builds.gm_notes and gm_player_finance.notes/notes_updated_at are
+-- superseded by the gm_player_notes table (per-player authored log); the old
+-- columns are left in place, unused.
 -- ============================================================================
 
 
@@ -309,5 +310,34 @@ ALTER TABLE public.gm_player_finance
 -- finance edit) so it reflects the NOTE's date specifically.
 ALTER TABLE public.gm_player_finance
   ADD COLUMN IF NOT EXISTS notes_updated_at timestamptz;
+
+-- ----------------------------------------------------------------------------
+-- 20260708140000_gm_player_notes.sql
+-- ----------------------------------------------------------------------------
+-- Per-player GM notes as a LOG: multiple entries per roster row, each authored
+-- by whoever wrote it and stamped with the date it was added (assistant writes
+-- one, head coach adds another — both kept). Keyed per build (build_player_id)
+-- like the money. Supersedes the single-field gm_player_finance.notes /
+-- notes_updated_at (left in place, unused).
+CREATE TABLE IF NOT EXISTS public.gm_player_notes (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  build_player_id    uuid NOT NULL REFERENCES public.team_build_players(id) ON DELETE CASCADE,
+  customer_team_id   uuid NOT NULL REFERENCES public.customer_teams(id) ON DELETE CASCADE,
+  player_id          uuid,                             -- audit only (locals have none)
+  author             text,                             -- who wrote it (email/name snapshot)
+  note_date          date NOT NULL DEFAULT current_date,
+  body               text,
+  created_by_user_id uuid,
+  created_at         timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_gm_player_notes_bp ON public.gm_player_notes (build_player_id);
+
+ALTER TABLE public.gm_player_notes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS gm_player_notes_all ON public.gm_player_notes;
+CREATE POLICY gm_player_notes_all ON public.gm_player_notes
+  FOR ALL TO authenticated
+  USING (public.has_role(auth.uid(), 'superadmin'::public.app_role) OR public.is_team_member(customer_team_id))
+  WITH CHECK (public.has_role(auth.uid(), 'superadmin'::public.app_role) OR public.is_team_member(customer_team_id));
 
 NOTIFY pgrst, 'reload schema';

@@ -67,8 +67,6 @@ export function deriveGmRows(
       finalized: !!f.finalized,
       eligibility_class:
         f.eligibility_class ?? (isLocal ? "FR" : projectedEligibilityClass(p?.class_year, meta?.classTransition ?? null)),
-      notes: f.notes ?? null,
-      notes_updated_at: f.notes_updated_at ?? null,
     };
   });
 }

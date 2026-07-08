@@ -242,10 +242,10 @@ export default function GMRoster() {
   const [reasonModalOpen, setReasonModalOpen] = useState(false);
   const [departuresOpen, setDeparturesOpen] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
-  // Per-player note editor.
+  // Per-player notes — authored + dated log (multiple per player).
   const [noteRow, setNoteRow] = useState<GmRow | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
-  const openNote = (r: GmRow) => { setNoteDraft(r.notes ?? ""); setNoteRow(r); };
+  const openNote = (r: GmRow) => { setNoteDraft(""); setNoteRow(r); };
   const [finalizeRosterOpen, setFinalizeRosterOpen] = useState(false);
   const [addPlayerOpen, setAddPlayerOpen] = useState(false);
   const [addName, setAddName] = useState("");
@@ -319,15 +319,19 @@ export default function GMRoster() {
                         <span className="text-sm font-medium">{r.name}</span>
                       )}
                       {r.is_recruit && <span className="shrink-0 rounded bg-[#D4AF37]/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>Commit</span>}
-                      {!r.is_recruit && (
-                        <button
-                          onClick={() => openNote(r)}
-                          title={r.notes ? `Note${r.notes_updated_at ? ` · ${new Date(r.notes_updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : ""}` : "Add note"}
-                          className={cn("inline-flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors cursor-pointer", r.notes ? "text-[#D4AF37] hover:bg-[#D4AF37]/10" : "text-muted-foreground/30 hover:bg-muted hover:text-muted-foreground")}
-                        >
-                          <StickyNote className="h-3.5 w-3.5" />
-                        </button>
-                      )}
+                      {!r.is_recruit && (() => {
+                        const nc = gm.notesByBuildPlayer.get(r.build_player_id)?.length ?? 0;
+                        return (
+                          <button
+                            onClick={() => openNote(r)}
+                            title={nc > 0 ? `${nc} note${nc === 1 ? "" : "s"}` : "Add note"}
+                            className={cn("inline-flex h-5 shrink-0 items-center justify-center gap-0.5 rounded px-0.5 transition-colors cursor-pointer", nc > 0 ? "text-[#D4AF37] hover:bg-[#D4AF37]/10" : "w-5 text-muted-foreground/30 hover:bg-muted hover:text-muted-foreground")}
+                          >
+                            <StickyNote className="h-3.5 w-3.5" />
+                            {nc > 0 && <span className="text-[10px] font-bold tabular-nums">{nc}</span>}
+                          </button>
+                        );
+                      })()}
                     </span>
                   </TableCell>
                   <TableCell className="py-1.5">
@@ -531,20 +535,33 @@ export default function GMRoster() {
             onSave={(caps) => setBudgetDraft(caps)}
             onFinalize={(caps) => setConfirmCaps(caps)}
           />
-          {/* Per-player GM note — scouting / negotiation context, team-shared. */}
+          {/* Per-player notes — authored + dated log, team-shared. */}
           <Dialog open={!!noteRow} onOpenChange={(o) => { if (!o) setNoteRow(null); }}>
             <DialogContent className="max-w-md">
               <DialogHeader>
-                <DialogTitle style={OSWALD} className="flex items-baseline gap-2">
-                  <span>Note — {noteRow?.name ?? "Player"}</span>
-                  {noteRow?.notes_updated_at && <span className="text-[11px] font-normal text-muted-foreground">Updated {new Date(noteRow.notes_updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>}
-                </DialogTitle>
+                <DialogTitle style={OSWALD}>Notes — {noteRow?.name ?? "Player"}</DialogTitle>
               </DialogHeader>
-              <p className="text-xs text-muted-foreground">Scouting or negotiation context for this player. Visible to your whole staff, not the coach-facing Team Builder.</p>
-              <Textarea value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="e.g. Wants to play SS, open to $350K; family close to campus…" className="min-h-[140px] text-sm" />
-              <DialogFooter>
-                <Button size="sm" onClick={() => { if (noteRow) gm.saveNote(noteRow, noteDraft); setNoteRow(null); }}>Save Note</Button>
-              </DialogFooter>
+              <p className="text-xs text-muted-foreground">Scouting or negotiation context. Each note is stamped with the date and who wrote it. Visible to your whole staff, not the coach-facing Team Builder.</p>
+              {/* Add a note */}
+              <div className="space-y-2 rounded-md border border-border/60 p-2.5">
+                <Textarea value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="e.g. Wants to play SS, open to $350K; family close to campus…" className="min-h-[80px] text-sm" />
+                <Button size="sm" className="w-full" disabled={!noteDraft.trim()} onClick={() => { if (noteRow) { gm.addNote(noteRow, noteDraft.trim()); setNoteDraft(""); } }}>Add Note</Button>
+              </div>
+              {/* Existing notes, newest first */}
+              <div className="max-h-[40vh] space-y-2.5 overflow-y-auto">
+                {(gm.notesByBuildPlayer.get(noteRow?.build_player_id ?? "") ?? []).map((n) => (
+                  <div key={n.id} className="rounded-md border border-border/60 bg-muted/20 p-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] text-muted-foreground">{n.author ? `${n.author.split("@")[0]} · ` : ""}{new Date(n.note_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
+                      <button onClick={() => gm.removeNote(n.id)} className="text-muted-foreground/40 hover:text-destructive" title="Delete"><X className="h-3.5 w-3.5" /></button>
+                    </div>
+                    <div className="mt-1 whitespace-pre-wrap text-sm text-foreground/90">{n.body}</div>
+                  </div>
+                ))}
+                {(gm.notesByBuildPlayer.get(noteRow?.build_player_id ?? "") ?? []).length === 0 && (
+                  <p className="py-3 text-center text-xs text-muted-foreground">No notes yet.</p>
+                )}
+              </div>
             </DialogContent>
           </Dialog>
         </div>
