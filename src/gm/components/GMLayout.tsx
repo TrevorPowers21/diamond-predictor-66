@@ -10,7 +10,7 @@ import { LogOut, Menu, LayoutDashboard, Users, BarChart3, ClipboardList, FlaskCo
 const NAV = [
   { label: "Dashboard", href: "/gm", icon: LayoutDashboard, description: "Front office overview" },
   { label: "Roster Management", href: "/gm/roster", icon: Users, description: "Budget, builds & departures" },
-  { label: "Scenarios", href: "/gm/scenarios", icon: FlaskConical, description: "What-if & build compare" },
+  { label: "The Situation Room", href: "/gm/scenarios", icon: FlaskConical, description: "What-if & build compare" },
   { label: "Program Analytics", href: "/gm/analytics", icon: BarChart3, description: "Pay per position & per win" },
   { label: "Recruiting Board", href: "/gm/recruiting", icon: ClipboardList, description: "Future classes & commits" },
 ];

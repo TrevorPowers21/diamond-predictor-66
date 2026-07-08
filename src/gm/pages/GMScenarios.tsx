@@ -69,7 +69,7 @@ export default function GMScenarios() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-bold leading-tight" style={OSWALD}>Scenarios</h2>
+          <h2 className="text-2xl font-bold leading-tight" style={OSWALD}>The Situation Room</h2>
           <p className="text-sm text-muted-foreground">{teamName ? `${teamName} · what-if & build compare` : "Pick a team above."}</p>
         </div>
         <div className="flex rounded-md border border-border/60 p-0.5">
