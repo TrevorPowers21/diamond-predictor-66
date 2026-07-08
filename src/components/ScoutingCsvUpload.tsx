@@ -94,13 +94,13 @@ const PITCHER_METRICS: Col[] = [
 // "Sinker LHP.csv"), with one row per pitcher and that pitch's shape.
 const STUFF_COLUMNS: Col[] = [
   { label: "Name", key: "", desc: "Pitcher name", required: true, aliases: NAME_ALIASES },
-  { label: "Velocity", key: "velocity", desc: "Average velocity (mph)", required: true, aliases: ["Velo", "MPH"] },
-  { label: "IVB", key: "ivb", desc: "Induced vertical break (in)", required: true, aliases: ["Induced Vert", "iVB"] },
-  { label: "HB", key: "hb", desc: "Horizontal break (in)", required: true, aliases: ["Horz Break", "HBreak"] },
+  { label: "Velocity", key: "velocity", desc: "Average velocity (mph)", required: true, aliases: ["Vel", "Velo", "MPH"] },
+  { label: "IVB", key: "ivb", desc: "Induced vertical break (in)", required: true, aliases: ["IndVertBrk", "Induced Vert", "iVB"] },
+  { label: "HB", key: "hb", desc: "Horizontal break (in)", required: true, aliases: ["HorzBrk", "Horz Break", "HBreak"] },
   { label: "Spin", key: "spin", desc: "Spin rate (rpm)", aliases: ["Spin Rate", "RPM"] },
   { label: "Extension", key: "extension", desc: "Release extension (ft)", aliases: ["Ext"] },
-  { label: "ReleaseHeight", key: "rel_height", desc: "Release height (ft)", aliases: ["Rel Height", "RelZ"] },
-  { label: "ReleaseSide", key: "rel_side", desc: "Release side (ft)", aliases: ["Rel Side", "RelX"] },
+  { label: "ReleaseHeight", key: "rel_height", desc: "Release height (ft)", aliases: ["RelHeight", "Rel Height", "RelZ"] },
+  { label: "ReleaseSide", key: "rel_side", desc: "Release side (ft)", aliases: ["RelSide", "Rel Side", "RelX"] },
 ];
 
 const colsFor = (k: Kind) =>
