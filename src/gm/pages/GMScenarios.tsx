@@ -208,25 +208,30 @@ function WhatIf({ roster, loading, builds, buildId, onPick }: { roster: Loaded |
 // Inline pay editor. Owns its text state; remounts on resetNonce so Reset
 // reseeds it. Commits a number (or null → revert to the real value) on blur/Enter.
 function EditableMoney({ value, edited, onCommit, big }: { value: number; edited: boolean; onCommit: (n: number | null) => void; big?: boolean }) {
-  const [v, setV] = useState(String(Math.round(value)));
-  const commit = () => {
-    const t = v.trim();
-    if (t === "") { onCommit(null); return; }
-    const n = Number(t.replace(/[^0-9.]/g, ""));
-    onCommit(Number.isNaN(n) ? null : n);
-  };
+  const fmt = (n: number) => `$${Math.round(n).toLocaleString()}`; // $XXX,XXX
+  const [v, setV] = useState(fmt(value));
+  const [focused, setFocused] = useState(false);
   return (
     <input
       value={v}
       onChange={(e) => setV(e.target.value)}
-      onFocus={(e) => e.currentTarget.select()}
-      onBlur={commit}
+      onFocus={(e) => { setFocused(true); setV(String(Math.round(value))); requestAnimationFrame(() => e.target.select()); }}
+      onBlur={() => {
+        setFocused(false);
+        const t = v.replace(/[^0-9.]/g, "");
+        if (t === "") { onCommit(null); setV(fmt(value)); return; }
+        const n = Number(t);
+        if (Number.isNaN(n)) { setV(fmt(value)); return; }
+        onCommit(n);
+        setV(fmt(n));
+      }}
       onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
       inputMode="numeric"
       title="Edit for this scenario (not saved)"
       className={cn(
         "shrink-0 rounded border bg-transparent text-right font-mono tabular-nums outline-none transition-colors focus:border-[#D4AF37]",
         big ? "w-32 px-1.5 py-0.5 text-lg font-semibold" : "w-24 px-1.5 py-0.5 text-xs",
+        focused && "border-[#D4AF37]",
         edited ? "border-[#D4AF37]/60 text-[#D4AF37]" : big ? "border-transparent text-foreground hover:border-border" : "border-transparent text-muted-foreground hover:border-border",
       )}
     />
