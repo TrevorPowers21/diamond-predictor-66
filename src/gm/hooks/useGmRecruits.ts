@@ -31,12 +31,18 @@ export const RECRUIT_TIERS = [
 ] as const;
 export type RecruitTier = (typeof RECRUIT_TIERS)[number]["value"];
 
-/** Where the recruit is coming from. JUCO arrivals have burned eligibility. */
+/** Where the recruit is coming from + their CURRENT eligibility class. A JUCO
+ *  arrival enters D1 the season after, at current class + 1 (FR JUCO → SO,
+ *  SO JUCO → JR). */
 export const RECRUIT_LEVELS = [
   { value: "hs", label: "High School" },
-  { value: "juco", label: "JUCO" },
+  { value: "juco_fr", label: "FR JUCO" },
+  { value: "juco_so", label: "SO JUCO" },
 ] as const;
 export type RecruitLevel = (typeof RECRUIT_LEVELS)[number]["value"];
+/** Class a recruit ENTERS D1 as (first season): HS → FR, and JUCO is current+1. */
+export const recruitEntryClass = (level: RecruitLevel): string =>
+  level === "juco_fr" ? "SO" : level === "juco_so" ? "JR" : "FR";
 
 export interface GmRecruit {
   id: string;
@@ -53,8 +59,7 @@ export interface GmRecruit {
   projection_tier: RecruitTier | null; // mirror of the latest report's tier — stable card badge
   asking_price: number | null; // what the recruit / his camp is asking
   target_offer: number | null; // "Willing to Pay" — what we want to pay
-  level: RecruitLevel; // 'hs' | 'juco'
-  years_remaining: number | null; // eligibility years on arrival (JUCO)
+  level: RecruitLevel; // 'hs' | 'juco_fr' | 'juco_so'
   link: string | null;
   stage: RecruitStage;
   // Contact — team-wide, any coach on staff can pull these up.

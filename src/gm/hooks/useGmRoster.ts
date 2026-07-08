@@ -188,10 +188,10 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     queryFn: async () => {
       const { data: recs } = await (supabase as any)
         .from("gm_recruits")
-        .select("id, first_name, last_name, position, class_year, projection_tier, asking_price, target_offer, level, years_remaining")
+        .select("id, first_name, last_name, position, class_year, projection_tier, asking_price, target_offer, level")
         .eq("customer_team_id", effectiveTeamId)
         .in("stage", ["committed", "signed"]);
-      return (recs || []) as { id: string; first_name: string | null; last_name: string | null; position: string | null; class_year: number | null; projection_tier: string | null; asking_price: number | null; target_offer: number | null; level: string | null; years_remaining: number | null }[];
+      return (recs || []) as { id: string; first_name: string | null; last_name: string | null; position: string | null; class_year: number | null; projection_tier: string | null; asking_price: number | null; target_offer: number | null; level: string | null }[];
     },
   });
 
@@ -214,11 +214,9 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       // Only classes that have arrived by the target season.
       if (c.class_year <= PROJECTION_SEASON || c.class_year > projectionSeason) continue;
       const yearsIn = projectionSeason - c.class_year; // seasons since arrival
-      const isJuco = (c.level ?? "hs") === "juco";
-      // JUCO commits enter with fewer years — cap their appearance by years
-      // remaining, and start them at the matching class instead of FR.
-      if (isJuco && c.years_remaining != null && yearsIn >= c.years_remaining) continue;
-      const entryClass = isJuco ? (c.years_remaining != null && c.years_remaining >= 4 ? "FR" : c.years_remaining === 3 ? "SO" : c.years_remaining === 1 ? "SR" : "JR") : "FR";
+      // Entry class: HS → FR; JUCO enters at current class + 1 (FR JUCO → SO,
+      // SO JUCO → JR). Advances normally after, dropping once past GR.
+      const entryClass = c.level === "juco_fr" ? "SO" : c.level === "juco_so" ? "JR" : "FR";
       const cls = advanceEligibility(entryClass, yearsIn);
       if (cls == null) continue;
       const pos = (c.position ?? "").toUpperCase();
