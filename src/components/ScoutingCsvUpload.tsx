@@ -53,16 +53,17 @@ interface Col {
 }
 
 // Context columns carried through for identification + the full projection layer.
+const NAME_ALIASES = ["playerFullName", "Player", "Player Name", "Full Name", "Pitcher"];
 const HITTER_CONTEXT: Col[] = [
-  { label: "Name", key: "", desc: "Player name", required: true },
-  { label: "Position", key: "", desc: "C, 1B, 2B, SS, 3B, LF, CF, RF, DH" },
-  { label: "Class", key: "", desc: "FR / SO / JR / SR / GR" },
-  { label: "Division", key: "", desc: "D1, D2, or JUCO" },
-  { label: "Conference", key: "", desc: "Their conference / league" },
+  { label: "Name", key: "", desc: "Player name", required: true, aliases: NAME_ALIASES },
+  { label: "Position", key: "", desc: "C, 1B, 2B, SS, 3B, LF, CF, RF, DH", aliases: ["Pos"] },
+  { label: "Class", key: "", desc: "FR / SO / JR / SR / GR", aliases: ["Yr", "Year"] },
+  { label: "Division", key: "", desc: "D1, D2, or JUCO", aliases: ["Div"] },
+  { label: "Conference", key: "", desc: "Their conference / league", aliases: ["Conf"] },
   { label: "PA", key: "", desc: "Plate appearances (sample size)" },
-  { label: "AVG", key: "", desc: "Batting average", required: true },
-  { label: "OBP", key: "", desc: "On-base percentage", required: true },
-  { label: "SLG", key: "", desc: "Slugging percentage", required: true },
+  { label: "AVG", key: "", desc: "Batting average", required: true, aliases: ["BA", "Batting Average"] },
+  { label: "OBP", key: "", desc: "On-base percentage", required: true, aliases: ["On-Base%", "OB%"] },
+  { label: "SLG", key: "", desc: "Slugging percentage", required: true, aliases: ["Slugging%", "SLUG"] },
 ];
 // Power-rating inputs (what the model actually scores).
 const HITTER_METRICS: Col[] = [
@@ -80,8 +81,8 @@ const HITTER_METRICS: Col[] = [
 ];
 
 const PITCHER_CONTEXT: Col[] = [
-  { label: "Name", key: "", desc: "Player name", required: true },
-  { label: "Throws", key: "", desc: "L / R" },
+  { label: "Name", key: "", desc: "Player name", required: true, aliases: NAME_ALIASES },
+  { label: "Throws", key: "", desc: "L / R", aliases: ["Hand", "T"] },
   { label: "Class", key: "", desc: "FR / SO / JR / SR / GR" },
   { label: "Division", key: "", desc: "D1, D2, or JUCO" },
   { label: "Conference", key: "", desc: "Their conference / league" },
@@ -112,8 +113,8 @@ const PITCHER_METRICS: Col[] = [
 
 // Stuff+ is per-pitch: one row per pitcher × pitch type, with the pitch shape.
 const STUFF_COLUMNS: Col[] = [
-  { label: "Name", key: "", desc: "Pitcher name", required: true },
-  { label: "Pitch Type", key: "", desc: `One of: ${STUFF_PITCH_TYPES.join(", ")}`, required: true, aliases: ["Pitch"] },
+  { label: "Name", key: "", desc: "Pitcher name", required: true, aliases: NAME_ALIASES },
+  { label: "Pitch Type", key: "", desc: `One of: ${STUFF_PITCH_TYPES.join(", ")}`, required: true, aliases: ["Pitch", "PitchType"] },
   { label: "Hand", key: "", desc: "Throwing hand — R or L", required: true, aliases: ["Throws"] },
   { label: "Velocity", key: "velocity", desc: "Average velocity (mph)", required: true, aliases: ["Velo", "MPH"] },
   { label: "IVB", key: "ivb", desc: "Induced vertical break (in)", required: true, aliases: ["Induced Vert", "iVB"] },
