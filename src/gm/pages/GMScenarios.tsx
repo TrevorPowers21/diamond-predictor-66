@@ -124,17 +124,29 @@ function StatCell({ label, value, delta, goodWhenPositive, deltaText }: { label:
 // What-If: one build, drop players, watch WAR + money move. Nothing is saved.
 function WhatIf({ roster, loading, builds, buildId, onPick }: { roster: Loaded | undefined; loading: boolean; builds: { id: string; name: string }[]; buildId: string | null; onPick: (id: string) => void }) {
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  // Ephemeral pay overrides, keyed by build_player_id. Absent = use the real
+  // nil_value. Nothing here is written to the DB.
+  const [payOverride, setPayOverride] = useState<Record<string, number>>({});
+  const [resetNonce, setResetNonce] = useState(0);
   const toggle = (id: string) => setExcluded((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const setPay = (id: string, v: number | null) =>
+    setPayOverride((prev) => { const n = { ...prev }; if (v == null) delete n[id]; else n[id] = v; return n; });
+  const reset = () => { setExcluded(new Set()); setPayOverride({}); setResetNonce((n) => n + 1); };
 
   const rows = roster?.rows ?? [];
   const budget = roster?.coachTotalBudget ?? null;
+  const payOf = (r: GmRow) => (r.build_player_id in payOverride ? payOverride[r.build_player_id] : (r.nil_value ?? 0));
   const kept = rows.filter((r) => !excluded.has(r.build_player_id));
   const base = summarize(rows, budget);
-  const scen = summarize(kept, budget);
+  const scenWar = kept.reduce((s, r) => s + (r.war ?? 0), 0);
+  const scenPay = kept.reduce((s, r) => s + payOf(r), 0);
+  const scen: Summary = { war: scenWar, pay: scenPay, headroom: budget != null ? budget - scenPay : null, count: kept.length };
   const dWar = scen.war - base.war;
   const dPay = scen.pay - base.pay;
   const dRoom = scen.headroom != null && base.headroom != null ? scen.headroom - base.headroom : null;
   const dropped = rows.length - kept.length;
+  const repriced = Object.keys(payOverride).length;
+  const changed = dropped > 0 || repriced > 0;
 
   const hitters = useMemo(() => rows.filter((r) => !r.is_pitcher).sort((x, y) => (y.war ?? -Infinity) - (x.war ?? -Infinity)), [rows]);
   const pitchers = useMemo(() => rows.filter((r) => r.is_pitcher).sort((x, y) => (y.war ?? -Infinity) - (x.war ?? -Infinity)), [rows]);
@@ -142,8 +154,8 @@ function WhatIf({ roster, loading, builds, buildId, onPick }: { roster: Loaded |
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <BuildPicker label="Build" value={buildId} onChange={(id) => { onPick(id); setExcluded(new Set()); }} builds={builds} />
-        {dropped > 0 && <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setExcluded(new Set())}><RotateCcw className="h-3 w-3" /> Reset</Button>}
+        <BuildPicker label="Build" value={buildId} onChange={(id) => { onPick(id); reset(); }} builds={builds} />
+        {changed && <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={reset}><RotateCcw className="h-3 w-3" /> Reset</Button>}
       </div>
 
       {/* Live delta strip */}
@@ -153,21 +165,48 @@ function WhatIf({ roster, loading, builds, buildId, onPick }: { roster: Loaded |
           <StatCell label="Committed Pay" value={money(scen.pay)} delta={dPay} goodWhenPositive={false} deltaText={`${dPay > 0 ? "+" : ""}${money(dPay)}`} />
           {scen.headroom != null && <StatCell label="Budget Headroom" value={money(scen.headroom)} delta={dRoom} goodWhenPositive={true} deltaText={dRoom != null ? `${dRoom >= 0 ? "+" : ""}${money(dRoom)}` : undefined} />}
           <StatCell label="Roster" value={`${kept.length}`} delta={dropped > 0 ? -dropped : null} goodWhenPositive={true} deltaText={`−${dropped}`} />
-          <span className="ml-auto text-[11px] text-muted-foreground">{dropped === 0 ? "Drop players below to test a change. Nothing is saved." : `${dropped} dropped · nothing saved`}</span>
+          <span className="ml-auto text-[11px] text-muted-foreground">{!changed ? "Drop players or edit pay below to test a change. Nothing is saved." : `${[dropped ? `${dropped} dropped` : "", repriced ? `${repriced} repriced` : ""].filter(Boolean).join(" · ")} · nothing saved`}</span>
         </CardContent>
       </Card>
 
       {loading ? <p className="text-sm text-muted-foreground">Loading roster…</p> : (
         <div className="grid gap-4 lg:grid-cols-2">
-          <WhatIfList title="Position Players" rows={hitters} excluded={excluded} onToggle={toggle} />
-          <WhatIfList title="Pitchers" rows={pitchers} excluded={excluded} onToggle={toggle} />
+          <WhatIfList title="Position Players" rows={hitters} excluded={excluded} onToggle={toggle} payOf={payOf} onPay={setPay} resetNonce={resetNonce} />
+          <WhatIfList title="Pitchers" rows={pitchers} excluded={excluded} onToggle={toggle} payOf={payOf} onPay={setPay} resetNonce={resetNonce} />
         </div>
       )}
     </div>
   );
 }
 
-function WhatIfList({ title, rows, excluded, onToggle }: { title: string; rows: GmRow[]; excluded: Set<string>; onToggle: (id: string) => void }) {
+// Inline pay editor. Owns its text state; remounts on resetNonce so Reset
+// reseeds it. Commits a number (or null → revert to the real value) on blur/Enter.
+function EditableMoney({ value, edited, onCommit }: { value: number; edited: boolean; onCommit: (n: number | null) => void }) {
+  const [v, setV] = useState(String(Math.round(value)));
+  const commit = () => {
+    const t = v.trim();
+    if (t === "") { onCommit(null); return; }
+    const n = Number(t.replace(/[^0-9.]/g, ""));
+    onCommit(Number.isNaN(n) ? null : n);
+  };
+  return (
+    <input
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onFocus={(e) => e.currentTarget.select()}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      inputMode="numeric"
+      title="Edit pay for this scenario (not saved)"
+      className={cn(
+        "w-24 shrink-0 rounded border bg-transparent px-1.5 py-0.5 text-right font-mono text-xs tabular-nums outline-none transition-colors focus:border-[#D4AF37]",
+        edited ? "border-[#D4AF37]/60 text-[#D4AF37]" : "border-transparent text-muted-foreground hover:border-border",
+      )}
+    />
+  );
+}
+
+function WhatIfList({ title, rows, excluded, onToggle, payOf, onPay, resetNonce }: { title: string; rows: GmRow[]; excluded: Set<string>; onToggle: (id: string) => void; payOf: (r: GmRow) => number; onPay: (id: string, v: number | null) => void; resetNonce: number }) {
   return (
     <Card>
       <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
@@ -178,6 +217,7 @@ function WhatIfList({ title, rows, excluded, onToggle }: { title: string; rows: 
           <div className="divide-y divide-border/40">
             {rows.map((r) => {
               const dropped = excluded.has(r.build_player_id);
+              const edited = Math.round(payOf(r)) !== Math.round(r.nil_value ?? 0);
               return (
                 <div key={r.build_player_id} className={cn("flex items-center gap-2 py-1.5 px-1.5", dropped && "opacity-40")}>
                   <button
@@ -190,7 +230,9 @@ function WhatIfList({ title, rows, excluded, onToggle }: { title: string; rows: 
                   <span className={cn("min-w-0 flex-1 truncate text-sm font-medium", dropped && "line-through")}>{r.name}</span>
                   <span className="w-10 shrink-0 text-center text-[11px] font-semibold text-muted-foreground">{r.position || "—"}</span>
                   <span className="w-12 shrink-0 text-right font-mono text-xs tabular-nums text-foreground">{num(r.war)}</span>
-                  <span className="w-20 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">{money(r.nil_value)}</span>
+                  {dropped
+                    ? <span className="w-24 shrink-0 pr-1.5 text-right font-mono text-xs tabular-nums text-muted-foreground">{money(payOf(r))}</span>
+                    : <EditableMoney key={`${r.build_player_id}:${resetNonce}`} value={payOf(r)} edited={edited} onCommit={(n) => onPay(r.build_player_id, n)} />}
                 </div>
               );
             })}
