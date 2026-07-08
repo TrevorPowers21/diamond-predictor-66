@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { computeHitterPowerRatings, computePitchingPowerRatings } from "@/lib/powerRatings";
@@ -220,7 +220,6 @@ export default function ScoutingCsvUpload() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg"><FileSpreadsheet className="h-5 w-5" /> Upload Scouting Data</CardTitle>
-        <CardDescription>How to get RSTR IQ projections on any players you're evaluating — from your own exported data.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
         {/* Type toggle */}
