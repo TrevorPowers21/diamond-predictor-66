@@ -255,7 +255,7 @@ function ScenarioPanel({ variant, builds, teamId, userId, defaultBuildId, onRepo
 
         {/* Live totals — Roster · WAR · Pay · Headroom, with the editable Total
             Budget parked at the end (it's a taller input, kept out of the middle). */}
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-md border border-[#D4AF37]/40 bg-[#D4AF37]/[0.05] p-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-md border border-[#D4AF37]/40 bg-[#D4AF37]/[0.05] px-5 py-3">
           <StatCell label="Roster" value={`${kept.length}`} delta={dropped > 0 ? -dropped : null} goodWhenPositive={true} deltaText={`−${dropped}`} />
           <StatCell label="Total WAR" value={num(scenWar)} delta={dWar} goodWhenPositive={true} deltaText={`${dWar >= 0 ? "+" : ""}${num(dWar)}`} />
           <StatCell label="Committed Pay" value={money(scenPay)} delta={dPay} goodWhenPositive={false} deltaText={`${dPay > 0 ? "+" : ""}${money(dPay)}`} />
@@ -269,7 +269,7 @@ function ScenarioPanel({ variant, builds, teamId, userId, defaultBuildId, onRepo
             )}
             {dBudget != null && Math.abs(dBudget) > 1e-9 && <span className={cn("font-mono text-[11px] tabular-nums", dBudget > 0 ? "text-emerald-500" : "text-red-500")}>{dBudget >= 0 ? "+" : ""}{money(dBudget)}</span>}
           </div>
-          {!col && <span className="ml-auto text-[11px] text-muted-foreground">{!changed ? "Drop players, add targets, edit pay, or set the budget. Nothing is saved." : `${[added ? `${added} added` : "", dropped ? `${dropped} dropped` : "", repriced ? `${repriced} repriced` : "", dBudget && Math.abs(dBudget) > 1e-9 ? "budget set" : ""].filter(Boolean).join(" · ")} · nothing saved`}</span>}
+          {!col && <span className="text-[11px] text-muted-foreground">{!changed ? "Drop players, add targets, edit pay, or set the budget. Nothing is saved." : `${[added ? `${added} added` : "", dropped ? `${dropped} dropped` : "", repriced ? `${repriced} repriced` : "", dBudget && Math.abs(dBudget) > 1e-9 ? "budget set" : ""].filter(Boolean).join(" · ")} · nothing saved`}</span>}
         </div>
 
         {isLoading ? <p className="text-sm text-muted-foreground">Loading roster…</p> : (
