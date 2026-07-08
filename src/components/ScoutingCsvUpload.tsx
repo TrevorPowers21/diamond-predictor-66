@@ -171,24 +171,13 @@ function resolveHeader(col: Col, headers: string[]): string | null {
   return null;
 }
 
-function download(name: string, content: string) {
-  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = name; a.click();
-  URL.revokeObjectURL(url);
-}
-
-function csvEscape(v: string): string {
-  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-}
 
 export default function ScoutingCsvUpload() {
   const { toast } = useToast();
   const [kind, setKind] = useState<Kind>("hitter");
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<{ n: number; unit: string } | null>(null);
+  const [done, setDone] = useState(false);
 
   const cols = colsFor(kind);
 
@@ -232,7 +221,7 @@ export default function ScoutingCsvUpload() {
     if (file) fileRef.current && (fileRef.current.value = ""); // allow re-upload of same file
     if (!file) return;
     setBusy(true);
-    setDone(null);
+    setDone(false);
     try {
       const text = await file.text();
       const { headers, rows } = parseCsv(text);
@@ -250,15 +239,8 @@ export default function ScoutingCsvUpload() {
       for (const c of cols) headerFor.set(c.label, resolveHeader(c, headers));
       const get = (row: Record<string, string>, label: string) => { const h = headerFor.get(label); return h ? row[h] : undefined; };
 
-      // Run the SAME model math the projections/precompute build on —
-      // ephemerally, per row. Nothing is stored.
-      const outHeaders = kind === "hitter"
-        ? ["Name", "Position", "Class", "Division", "Conference", "PA", "BA PR+", "OBP PR+", "ISO PR+"]
-        : kind === "pitcher"
-          ? ["Name", "Throws", "Class", "Division", "Conference", "IP", "ERA PR+", "FIP PR+", "WHIP PR+", "K9 PR+", "BB9 PR+", "HR9 PR+", "Overall PR+"]
-          : ["Name", "Pitch Type", "Hand", "Stuff+"];
-      const outRows: string[][] = [];
-      let computed = 0;
+      // Run the model per row. Ephemeral — results are not surfaced or stored.
+      let processed = 0;
 
       // Stuff+ z-scores each pitch shape against our D1 population baselines.
       let popMap: Map<string, PopConstants> | null = null;
@@ -266,7 +248,7 @@ export default function ScoutingCsvUpload() {
         const { data: popData, error } = await (supabase as any)
           .from("pitcher_stuff_plus_ncaa").select("*").eq("season", CURRENT_SEASON).eq("division", "D1");
         if (error || !popData?.length) {
-          toast({ title: "Couldn't load Stuff+ baselines", description: "The D1 population constants are unavailable right now.", variant: "destructive" });
+          toast({ title: "Couldn't process that file", description: "Please try again in a moment.", variant: "destructive" });
           return;
         }
         popMap = new Map<string, PopConstants>();
@@ -277,22 +259,18 @@ export default function ScoutingCsvUpload() {
         const name = get(row, "Name") ?? "";
         if (!name.trim()) continue;
         if (kind === "hitter") {
-          const r = computeHitterPowerRatings({
+          computeHitterPowerRatings({
             contact: num(get(row, "Contact%")), lineDrive: num(get(row, "LineDrive%")), avgExitVelo: num(get(row, "AvgExitVelo")),
             popUp: num(get(row, "PopUp%")), bb: num(get(row, "BB%")), chase: num(get(row, "Chase%")), barrel: num(get(row, "Barrel%")),
             ev90: num(get(row, "EV90")), pull: num(get(row, "Pull%")), la10_30: num(get(row, "LA10-30%")), gb: num(get(row, "GB%")),
           });
-          outRows.push([name, get(row, "Position") ?? "", get(row, "Class") ?? "", get(row, "Division") ?? "", get(row, "Conference") ?? "", get(row, "PA") ?? "",
-            fmt(r.baPlus), fmt(r.obpPlus), fmt(r.isoPlus)]);
         } else if (kind === "pitcher") {
-          const r = computePitchingPowerRatings({
+          computePitchingPowerRatings({
             miss_pct: num(get(row, "Whiff%")), bb_pct: num(get(row, "BB%")), hard_hit_pct: num(get(row, "HardHit%")),
             in_zone_whiff_pct: num(get(row, "InZoneWhiff%")), chase_pct: num(get(row, "Chase%")), barrel_pct: num(get(row, "Barrel%")),
             line_pct: num(get(row, "LineDrive%")), exit_vel: num(get(row, "ExitVelo")), ground_pct: num(get(row, "GB%")),
             in_zone_pct: num(get(row, "InZone%")), vel_90th: num(get(row, "EV90")), h_pull_pct: num(get(row, "Pull%")), la_10_30_pct: num(get(row, "LA10-30%")),
           }, num(get(row, "Stuff+")));
-          outRows.push([name, get(row, "Throws") ?? "", get(row, "Class") ?? "", get(row, "Division") ?? "", get(row, "Conference") ?? "", get(row, "IP") ?? "",
-            fmt(r.eraPrPlus), fmt(r.fipPrPlus), fmt(r.whipPrPlus), fmt(r.k9PrPlus), fmt(r.bb9PrPlus), fmt(r.hr9PrPlus), fmt(r.overallPrPlus)]);
         } else {
           const pitchType = canonicalPitchType(get(row, "Pitch Type") ?? "");
           const hand = canonicalHand(get(row, "Hand") ?? "");
@@ -305,20 +283,15 @@ export default function ScoutingCsvUpload() {
             rel_height: num(get(row, "ReleaseHeight")), rel_side: num(get(row, "ReleaseSide")),
             extension: num(get(row, "Extension")), spin: num(get(row, "Spin")), fb_ch_velo_diff: null,
           } as unknown as PitchRow;
-          const result = calculateStuffPlus(pitchType, pitchRow, pop);
-          if (!result) continue;
-          outRows.push([name, pitchType, hand, fmt(result.score)]);
+          if (!calculateStuffPlus(pitchType, pitchRow, pop)) continue;
         }
-        computed++;
+        processed++;
       }
 
-      if (!computed) { toast({ title: "Nothing processed", description: kind === "stuff" ? "No rows had a recognized pitch type + hand." : "Rows are missing a Name.", variant: "destructive" }); return; }
+      if (!processed) { toast({ title: "Couldn't process that file", description: "Check that it matches the template columns and try again.", variant: "destructive" }); return; }
 
-      const csv = [outHeaders.join(","), ...outRows.map((r) => r.map(csvEscape).join(","))].join("\n");
-      download(`rstr-iq-${kind}-ratings.csv`, csv);
-      const unit = kind === "stuff" ? "pitches" : kind === "hitter" ? "hitters" : "pitchers";
-      setDone({ n: computed, unit });
-      toast({ title: `Processed ${computed} ${unit}`, description: "Computed in your browser and downloaded. Nothing was saved to RSTR IQ." });
+      setDone(true);
+      toast({ title: "Upload complete" });
     } catch (err: any) {
       toast({ title: "Couldn't read that file", description: String(err?.message ?? err), variant: "destructive" });
     } finally {
@@ -359,7 +332,7 @@ export default function ScoutingCsvUpload() {
         {done && (
           <div className="flex items-center gap-2.5 rounded-md border border-emerald-500/40 bg-emerald-500/[0.08] px-3 py-2.5 text-sm">
             <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-            <span><span className="font-semibold text-foreground">Upload completed</span> — processed {done.n} {done.unit}. Results downloaded; nothing was saved.</span>
+            <span className="font-semibold text-foreground">Upload complete</span>
           </div>
         )}
 
@@ -383,8 +356,4 @@ export default function ScoutingCsvUpload() {
       </CardContent>
     </Card>
   );
-}
-
-function fmt(v: number | null): string {
-  return v == null ? "" : (Math.round(v * 10) / 10).toString();
 }
