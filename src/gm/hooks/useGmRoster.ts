@@ -418,6 +418,32 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     onError: (e: any) => toast.error(`Finalize failed: ${e.message}`),
   });
 
+  // Save (draft): persist the roster's money buckets to gm_player_finance so
+  // they survive a refresh — WITHOUT finalizing or pushing anything to the coach.
+  // This is the private working state; Finalize Roster Pay is the only push.
+  const saveRosterDraft = useMutation({
+    mutationFn: async (rowsWithMoney: { row: GmRow; money: RowMoney }[]) => {
+      if (!effectiveTeamId) throw new Error("No team in scope");
+      const now = new Date().toISOString();
+      for (const { row, money } of rowsWithMoney) {
+        if (row.is_recruit || row.is_added_target) continue;
+        const rev = money.rev_share, nilA = money.nil_amount, other = money.other_amount;
+        const actualPay = rev == null && nilA == null && other == null ? null : Number(rev ?? 0) + Number(nilA ?? 0) + Number(other ?? 0);
+        const { error } = await (supabase as any).from("gm_player_finance").upsert(
+          {
+            build_player_id: row.build_player_id, customer_team_id: effectiveTeamId, player_id: row.player_id, season,
+            scholarship_amount: money.scholarship_amount, rev_share: rev, nil_amount: nilA, other_amount: other, actual_pay: actualPay,
+            updated_by_user_id: user?.id ?? null, updated_at: now,
+          },
+          { onConflict: "build_player_id" },
+        );
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); toast.success("Saved — visible only to your staff until you finalize"); },
+    onError: (e: any) => toast.error(`Save failed: ${e.message}`),
+  });
+
   // Finalize the WHOLE roster in one push: every row's Actual Pay → the coach's
   // team_build_players.nil_value + gm_player_finance (finalized), AND the budget
   // caps → team_builds.total_budget. This is the single "push to coach" action.
@@ -698,6 +724,9 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     finalizeRosterPay: (rowsWithMoney: { row: GmRow; money: RowMoney }[], caps: BudgetCaps, onDone?: () => void) =>
       finalizeRosterPay.mutate({ rows: rowsWithMoney, caps }, onDone ? { onSuccess: () => onDone() } : undefined),
     isFinalizingRoster: finalizeRosterPay.isPending,
+    saveRosterDraft: (rowsWithMoney: { row: GmRow; money: RowMoney }[], onDone?: () => void) =>
+      saveRosterDraft.mutate(rowsWithMoney, onDone ? { onSuccess: () => onDone() } : undefined),
+    isSavingDraft: saveRosterDraft.isPending,
     isFinalizing: commitBudget.isPending,
   };
 }

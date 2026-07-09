@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Check, Pencil, Plus, SlidersHorizontal, StickyNote, Trash2, X } from "lucide-react";
+import { Check, Pencil, Plus, Save, SlidersHorizontal, StickyNote, Trash2, X } from "lucide-react";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { cn } from "@/lib/utils";
@@ -82,20 +82,6 @@ function MoneyCell({ value, onSave }: { value: number | null; onSave: (n: number
   );
 }
 
-function FinalizeCheck({ finalized, onClick, title }: { finalized: boolean; onClick: () => void; title: string }) {
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      className={cn(
-        "inline-flex h-6 w-6 items-center justify-center rounded border transition-colors cursor-pointer",
-        finalized ? "border-emerald-500 bg-emerald-500/15 text-emerald-500" : "border-border text-muted-foreground/30 hover:text-muted-foreground/70",
-      )}
-    >
-      <Check className="h-3.5 w-3.5" />
-    </button>
-  );
-}
 
 /** Controlled dollar input for the budget popup — formats as $ while typing. */
 function DollarInput({ value, onChange }: { value: number | null; onChange: (n: number | null) => void }) {
@@ -279,7 +265,7 @@ export default function GMRoster() {
   const setRowField = (r: GmRow, field: keyof RowMoney, val: number | null) =>
     setRowDrafts((prev) => ({ ...prev, [r.build_player_id]: { ...prev[r.build_player_id], [field]: val } }));
   const rowDirty = (r: GmRow) => !!rowDrafts[r.build_player_id];
-  const clearRowDraft = (r: GmRow) => setRowDrafts((prev) => { const n = { ...prev }; delete n[r.build_player_id]; return n; });
+  const hasDrafts = Object.keys(rowDrafts).length > 0;
 
   const section = (title: string, rows: GmRow[]) => {
     const sum = (f: (r: GmRow) => number | null) => rows.reduce((s, r) => s + (f(r) ?? 0), 0);
@@ -307,7 +293,7 @@ export default function GMRoster() {
                 <TableHead className="text-right">NIL</TableHead>
                 <TableHead className="text-right">Other</TableHead>
                 <TableHead className="text-right">Actual Pay</TableHead>
-                <TableHead className="text-center w-14">Final</TableHead>
+                <TableHead className="text-center w-14" title="Pushed to the coach">Pushed</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
@@ -381,12 +367,12 @@ export default function GMRoster() {
                           GM finalizes (checkmark writes the bucket sum back here + to the
                           coach). So it reads the authoritative nil_value, not the live buckets. */}
                       <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums text-foreground">{money(r.nil_value)}</TableCell>
+                      {/* Read-only finalized indicator. Saving is the global Save
+                          button; pushing to the coach is Finalize Roster Pay. */}
                       <TableCell className="py-1.5 text-center">
-                        <FinalizeCheck
-                          finalized={shownFinalized}
-                          onClick={() => gm.finalizePlayer(r, m, !shownFinalized, () => clearRowDraft(r))}
-                          title={shownFinalized ? "Finalized — click to reopen" : dirty ? "Save & finalize pay → sync to Team Builder" : "Finalize pay & sync to Team Builder"}
-                        />
+                        {shownFinalized ? <Check className="mx-auto h-4 w-4 text-emerald-500" aria-label="Pushed to coach" />
+                          : dirty ? <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-500" title="Unsaved">•</span>
+                          : null}
                       </TableCell>
                       <TableCell className="py-1.5 text-center">
                         <button
@@ -515,6 +501,9 @@ export default function GMRoster() {
           </Button>
           <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" disabled={gm.isProjection} title={gm.isProjection ? "Switch to the base season to edit the roster" : undefined} onClick={() => { setAddName(""); setAddPosition(""); setAddTier(""); setAddNil(null); setAddBuildName(""); setAddPlayerOpen(true); }}>
             <Plus className="h-3.5 w-3.5" /> Add Player
+          </Button>
+          <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={gm.isProjection || gm.isSavingDraft || !hasDrafts} title="Save your edits privately (not pushed to the coach)" onClick={() => gm.saveRosterDraft(allRows.map((r) => ({ row: r, money: effMoney(r) })), () => setRowDrafts({}))}>
+            <Save className="h-3.5 w-3.5" /> {gm.isSavingDraft ? "Saving…" : "Save"}
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
