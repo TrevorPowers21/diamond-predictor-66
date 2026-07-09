@@ -13,6 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Check, Pencil, Plus, Save, SlidersHorizontal, StickyNote, Trash2, X } from "lucide-react";
+import PlayerNotesDialog from "@/components/PlayerNotesDialog";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { cn } from "@/lib/utils";
@@ -260,8 +261,7 @@ export default function GMRoster() {
   const [budgetOpen, setBudgetOpen] = useState(false);
   // Per-player notes — authored + dated log (multiple per player).
   const [noteRow, setNoteRow] = useState<GmRow | null>(null);
-  const [noteDraft, setNoteDraft] = useState("");
-  const openNote = (r: GmRow) => { setNoteDraft(""); setNoteRow(r); };
+  const openNote = (r: GmRow) => { setNoteRow(r); };
   // Deep-link from Recent Activity: ?note=<build_player_id> opens that player's notes.
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
@@ -578,35 +578,17 @@ export default function GMRoster() {
             onSave={(caps) => setBudgetDraft(caps)}
             onFinalize={(caps) => setConfirmCaps(caps)}
           />
-          {/* Per-player notes — authored + dated log, team-shared. */}
-          <Dialog open={!!noteRow} onOpenChange={(o) => { if (!o) setNoteRow(null); }}>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle style={OSWALD}>Notes — {noteRow?.name ?? "Player"}</DialogTitle>
-              </DialogHeader>
-              <p className="text-xs text-muted-foreground">Scouting or negotiation context. Each note is stamped with the date and who wrote it. Visible to your whole staff, not the coach-facing Team Builder.</p>
-              {/* Add a note */}
-              <div className="space-y-2 rounded-md border border-border/60 p-2.5">
-                <Textarea value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="e.g. Wants to play SS, open to $350K; family close to campus…" className="min-h-[80px] text-sm" />
-                <Button size="sm" className="w-full" disabled={!noteDraft.trim()} onClick={() => { if (noteRow) { gm.addNote(noteRow, noteDraft.trim()); setNoteDraft(""); } }}>Add Note</Button>
-              </div>
-              {/* Existing notes, newest first */}
-              <div className="max-h-[40vh] space-y-2.5 overflow-y-auto">
-                {(gm.notesByBuildPlayer.get(noteRow?.build_player_id ?? "") ?? []).map((n) => (
-                  <div key={n.id} className="rounded-md border border-border/60 bg-muted/20 p-2.5">
-                    <div className="flex items-center justify-between">
-                      <div className="text-[11px] text-muted-foreground">{n.author ? `${n.author.split("@")[0]} · ` : ""}{new Date(n.note_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
-                      <button onClick={() => gm.removeNote(n.id)} className="text-muted-foreground/40 hover:text-destructive" title="Delete"><X className="h-3.5 w-3.5" /></button>
-                    </div>
-                    <div className="mt-1 whitespace-pre-wrap text-sm text-foreground/90">{n.body}</div>
-                  </div>
-                ))}
-                {(gm.notesByBuildPlayer.get(noteRow?.build_player_id ?? "") ?? []).length === 0 && (
-                  <p className="py-3 text-center text-xs text-muted-foreground">No notes yet.</p>
-                )}
-              </div>
-            </DialogContent>
-          </Dialog>
+          {/* Per-player notes — authored + dated log, team-shared with the coach's
+              Team Builder (same gm_player_notes rows keyed by build_player_id). */}
+          <PlayerNotesDialog
+            open={!!noteRow}
+            onOpenChange={(o) => { if (!o) setNoteRow(null); }}
+            playerName={noteRow?.name ?? "Player"}
+            notes={gm.notesByBuildPlayer.get(noteRow?.build_player_id ?? "") ?? []}
+            onAdd={(body) => { if (noteRow) gm.addNote(noteRow, body); }}
+            onRemove={(id) => gm.removeNote(id)}
+            subtitle="Scouting or negotiation context. Each note is stamped with the date and who wrote it. Shared with your staff and the coach's Team Builder."
+          />
         </div>
       </div>
 

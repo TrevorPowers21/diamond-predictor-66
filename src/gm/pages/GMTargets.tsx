@@ -6,12 +6,11 @@ import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import PlayerNotesDialog from "@/components/PlayerNotesDialog";
 import { ArrowUpDown, Check, ChevronDown, ChevronRight, GripVertical, Plus, Search, StickyNote, Target as TargetIcon, Trash2 } from "lucide-react";
 import { portalStatusMeta } from "@/components/PortalStatus";
 import { profileRouteFor } from "@/lib/profileRoutes";
@@ -85,32 +84,6 @@ function SortableRow({ id, children }: { id: string; children: (h: { listeners: 
   const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({ id });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.55 : 1, position: "relative", zIndex: isDragging ? 10 : "auto" };
   return <TableRow ref={setNodeRef} style={style}>{children({ listeners, attributes, isDragging })}</TableRow>;
-}
-
-/** Authored/dated note log for one target. */
-function NotesDialog({ target, onClose, onAdd, onRemove }: { target: GmTarget | null; onClose: () => void; onAdd: (playerId: string, body: string) => void; onRemove: (id: string) => void }) {
-  const [draft, setDraft] = useState("");
-  if (!target) return null;
-  return (
-    <Dialog open onOpenChange={(o) => { if (!o) { setDraft(""); onClose(); } }}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle style={OSWALD}>Notes — {target.name}</DialogTitle></DialogHeader>
-        <div className="space-y-2 max-h-64 overflow-y-auto">
-          {target.notes.length === 0 ? <p className="text-xs text-muted-foreground py-2">No notes yet.</p> : target.notes.map((n) => (
-            <div key={n.id} className="group rounded-md border border-border/50 px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{(n.author || "—").split("@")[0]} · {new Date(n.note_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                <button className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500 transition" onClick={() => onRemove(n.id)}><Trash2 className="h-3.5 w-3.5" /></button>
-              </div>
-              <p className="mt-1 text-sm text-foreground/90 whitespace-pre-wrap">{n.body}</p>
-            </div>
-          ))}
-        </div>
-        <Textarea value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a note…" className="text-sm" rows={3} />
-        <DialogFooter><Button size="sm" disabled={!draft.trim()} onClick={() => { onAdd(target.player_id, draft); setDraft(""); }}>Add Note</Button></DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 export default function GMTargets() {
@@ -334,7 +307,15 @@ export default function GMTargets() {
         })
       )}
 
-      <NotesDialog target={liveNotesTarget} onClose={() => setNotesFor(null)} onAdd={addNote} onRemove={removeNote} />
+      <PlayerNotesDialog
+        open={!!liveNotesTarget}
+        onOpenChange={(o) => { if (!o) setNotesFor(null); }}
+        playerName={liveNotesTarget?.name ?? "Player"}
+        notes={liveNotesTarget?.notes ?? []}
+        onAdd={(body) => { if (liveNotesTarget) addNote(liveNotesTarget.player_id, body); }}
+        onRemove={(id) => removeNote(id)}
+        subtitle="Scouting or negotiation context. Each note is stamped with the date and who wrote it. Shared with your staff."
+      />
 
       <AlertDialog open={!!confirmAdd} onOpenChange={(o) => { if (!o) setConfirmAdd(null); }}>
         <AlertDialogContent>
