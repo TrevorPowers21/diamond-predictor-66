@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, GripVertical, ExternalLink, X, FileText, Phone, CalendarClock, DollarSign } from "lucide-react";
+import { Plus, GripVertical, ExternalLink, X, FileText, Phone, CalendarClock, DollarSign, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
@@ -118,13 +118,14 @@ function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onT
         {/* Deal — asking price + what we're willing to pay. Click to edit. */}
         <button onClick={onDeal} className="mt-1.5 flex items-center gap-2 text-xs hover:opacity-80" title="Edit deal">
           <DollarSign className="h-3 w-3 text-[#D4AF37]" />
-          {recruit.asking_price == null && recruit.target_offer == null ? (
+          {recruit.asking_price == null && recruit.target_offer == null && recruit.scholarship_pct == null ? (
             <span className="text-muted-foreground/70">Add deal</span>
           ) : (
             <span className="tabular-nums">
               <span className="text-muted-foreground">Ask</span> <span className="font-semibold text-foreground">{money(recruit.asking_price)}</span>
               <span className="mx-1.5 text-muted-foreground/40">·</span>
               <span className="text-muted-foreground">Willing</span> <span className="font-semibold text-[#D4AF37]">{money(recruit.target_offer)}</span>
+              {recruit.scholarship_pct != null && <><span className="mx-1.5 text-muted-foreground/40">·</span><span className="text-muted-foreground">Schol</span> <span className="font-semibold text-foreground">{recruit.scholarship_pct}%</span></>}
             </span>
           )}
         </button>
@@ -162,7 +163,7 @@ export default function GMRecruits() {
   const [view, setView] = useState<"type" | "position">("type");
   const [levelFilter, setLevelFilter] = useState<"all" | "hs" | "juco">("all");
   const [addOpen, setAddOpen] = useState(false);
-  const BLANK_FORM = { first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage, projection_tier: "" as RecruitTier | "", phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "", asking_price: "", target_offer: "", level: "hs" as RecruitLevel, extra_contacts: [] as ExtraContact[] };
+  const BLANK_FORM = { first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage, projection_tier: "" as RecruitTier | "", phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "", asking_price: "", target_offer: "", scholarship_pct: "", level: "hs" as RecruitLevel, extra_contacts: [] as ExtraContact[] };
   const [form, setForm] = useState(BLANK_FORM);
   const addFormNumber = () => setForm((f) => ({ ...f, extra_contacts: [...f.extra_contacts, { label: "", value: "" }] }));
   const setFormNumber = (i: number, field: keyof ExtraContact, val: string) => setForm((f) => ({ ...f, extra_contacts: f.extra_contacts.map((c, j) => (j === i ? { ...c, [field]: val } : c)) }));
@@ -183,9 +184,9 @@ export default function GMRecruits() {
   const removeContactNumber = (i: number) => setContact((c) => ({ ...c, extra_contacts: c.extra_contacts.filter((_, j) => j !== i) }));
   const saveContact = () => { if (contactRecruit) { gm.updateRecruit(contactRecruit.id, { phone: contact.phone.trim() || null, email: contact.email.trim() || null, guardian_name: contact.guardian_name.trim() || null, guardian_phone: contact.guardian_phone.trim() || null, coach_name: contact.coach_name.trim() || null, coach_phone: contact.coach_phone.trim() || null, extra_contacts: contact.extra_contacts.filter((x) => x.value.trim()).map((x) => ({ label: x.label.trim(), value: x.value.trim() })) }); setContactRecruit(null); } };
   const [dealRecruit, setDealRecruit] = useState<GmRecruit | null>(null);
-  const [deal, setDeal] = useState({ asking_price: "", target_offer: "" });
-  const openDeal = (r: GmRecruit) => { setDeal({ asking_price: r.asking_price != null ? String(r.asking_price) : "", target_offer: r.target_offer != null ? String(r.target_offer) : "" }); setDealRecruit(r); };
-  const saveDeal = () => { if (dealRecruit) { gm.updateRecruit(dealRecruit.id, { asking_price: parseMoney(deal.asking_price), target_offer: parseMoney(deal.target_offer) }); setDealRecruit(null); } };
+  const [deal, setDeal] = useState({ asking_price: "", target_offer: "", scholarship_pct: "" });
+  const openDeal = (r: GmRecruit) => { setDeal({ asking_price: r.asking_price != null ? String(r.asking_price) : "", target_offer: r.target_offer != null ? String(r.target_offer) : "", scholarship_pct: r.scholarship_pct != null ? String(r.scholarship_pct) : "" }); setDealRecruit(r); };
+  const saveDeal = () => { if (dealRecruit) { gm.updateRecruit(dealRecruit.id, { asking_price: parseMoney(deal.asking_price), target_offer: parseMoney(deal.target_offer), scholarship_pct: parseMoney(deal.scholarship_pct) }); setDealRecruit(null); } };
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const matchLevel = (r: GmRecruit) => levelFilter === "all" || (levelFilter === "hs" ? r.level === "hs" : r.level !== "hs");
@@ -204,6 +205,18 @@ export default function GMRecruits() {
   const classRecruits = gm.recruits.filter((r) => r.class_year === year);
   const classWilling = classRecruits.reduce((s, r) => s + (r.target_offer ?? 0), 0);
   const committedWilling = classRecruits.filter((r) => r.stage === "committed" || r.stage === "signed").reduce((s, r) => s + (r.target_offer ?? 0), 0);
+  const classSchol = classRecruits.reduce((s, r) => s + (r.scholarship_pct ?? 0), 0) / 100; // equivalencies committed
+  const cfg = gm.configByYear.get(year);
+
+  // Edit Budget (per class year) dialog state.
+  const [budgetOpen, setBudgetOpen] = useState(false);
+  const [budgetDraft, setBudgetDraft] = useState<Record<number, { budget: string; scholarships: string }>>({});
+  const openBudget = () => {
+    const d: Record<number, { budget: string; scholarships: string }> = {};
+    for (const y of YEARS) { const c = gm.configByYear.get(y); d[y] = { budget: c?.budget != null ? String(c.budget) : "", scholarships: c?.scholarships != null ? String(c.scholarships) : "" }; }
+    setBudgetDraft(d); setBudgetOpen(true);
+  };
+  const saveBudget = () => { for (const y of YEARS) { const d = budgetDraft[y]; gm.saveClassConfig({ class_year: y, budget: parseMoney(d?.budget ?? ""), scholarships: parseMoney(d?.scholarships ?? "") }); } setBudgetOpen(false); };
 
   const onDragEnd = (list: GmRecruit[]) => (event: DragEndEvent) => {
     const { active, over } = event;
@@ -224,6 +237,7 @@ export default function GMRecruits() {
       projection_tier: tier,
       asking_price: parseMoney(form.asking_price),
       target_offer: parseMoney(form.target_offer),
+      scholarship_pct: parseMoney(form.scholarship_pct),
       level: form.level,
       first_name: form.first_name.trim() || null,
       last_name: form.last_name.trim() || null,
@@ -252,8 +266,32 @@ export default function GMRecruits() {
           <h2 className="text-2xl font-bold leading-tight" style={OSWALD}>Recruiting Board</h2>
           <p className="text-sm text-muted-foreground">Future classes · HS &amp; JUCO prospects</p>
         </div>
-        <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={openAdd}><Plus className="h-3.5 w-3.5" /> Add Player</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={openBudget}><Settings className="h-3.5 w-3.5" /> Edit Budget</Button>
+          <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={openAdd}><Plus className="h-3.5 w-3.5" /> Add Player</Button>
+        </div>
       </div>
+
+      {/* Edit class budgets + scholarships (per year) */}
+      <Dialog open={budgetOpen} onOpenChange={setBudgetOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle style={OSWALD}>Recruiting Budget by Class</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground">Set the recruiting budget and scholarships available (equivalencies) for each class year.</p>
+          <div className="space-y-3 py-1">
+            <div className="grid grid-cols-[3rem_1fr_1fr] items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground" style={OSWALD}>
+              <span>Class</span><span>Budget ($)</span><span>Scholarships</span>
+            </div>
+            {YEARS.map((y) => (
+              <div key={y} className="grid grid-cols-[3rem_1fr_1fr] items-center gap-2">
+                <span className="text-sm font-semibold tabular-nums">{y}</span>
+                <Input value={budgetDraft[y]?.budget ?? ""} onChange={(e) => setBudgetDraft((d) => ({ ...d, [y]: { ...d[y], budget: e.target.value } }))} placeholder="e.g. 1500000" inputMode="numeric" className="h-9 text-sm" />
+                <Input value={budgetDraft[y]?.scholarships ?? ""} onChange={(e) => setBudgetDraft((d) => ({ ...d, [y]: { ...d[y], scholarships: e.target.value } }))} placeholder="e.g. 11.7" inputMode="decimal" className="h-9 text-sm" />
+              </div>
+            ))}
+          </div>
+          <DialogFooter><Button size="sm" onClick={saveBudget}>Save Budgets</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Class year tabs + view toggle */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -307,12 +345,13 @@ export default function GMRecruits() {
         </div>
       </div>
 
-      {/* Class budget — what we've budgeted (willing to pay) for the class */}
-      {classWilling > 0 && (
+      {/* Class budget — what we've budgeted (willing to pay) vs the target + scholarships */}
+      {(classWilling > 0 || classSchol > 0 || cfg?.budget != null || cfg?.scholarships != null) && (
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border border-[#D4AF37]/40 bg-[#D4AF37]/[0.05] px-4 py-2.5">
           <span className="text-[11px] font-bold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>{year} Class Budget</span>
-          <DealStat label="Budgeted" value={money(classWilling)} accent />
+          <DealStat label="Budgeted" value={`${money(classWilling)}${cfg?.budget != null ? ` / ${money(cfg.budget)}` : ""}`} accent />
           <DealStat label="Committed" value={money(committedWilling)} />
+          <DealStat label="Scholarships" value={`${classSchol.toFixed(1)}${cfg?.scholarships != null ? ` / ${cfg.scholarships}` : ""}`} />
         </div>
       )}
 
@@ -444,6 +483,10 @@ export default function GMRecruits() {
                   <div>
                     <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Willing to Pay</span>
                     <Input value={form.target_offer} onChange={(e) => setForm((f) => ({ ...f, target_offer: e.target.value }))} placeholder="e.g. 250000" inputMode="numeric" className="h-9 text-sm" />
+                  </div>
+                  <div>
+                    <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scholarship %</span>
+                    <Input value={form.scholarship_pct} onChange={(e) => setForm((f) => ({ ...f, scholarship_pct: e.target.value }))} placeholder="e.g. 75" inputMode="numeric" className="h-9 text-sm" />
                   </div>
                 </div>
               </div>
@@ -635,6 +678,10 @@ export default function GMRecruits() {
               <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Willing to Pay</span>
               <Input value={deal.target_offer} onChange={(e) => setDeal((d) => ({ ...d, target_offer: e.target.value }))} placeholder="e.g. 250000" inputMode="numeric" className="h-9 text-sm" />
               <span className="mt-1 block text-[11px] tabular-nums text-[#D4AF37]">{money(parseMoney(deal.target_offer))}</span>
+            </div>
+            <div>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scholarship %</span>
+              <Input value={deal.scholarship_pct} onChange={(e) => setDeal((d) => ({ ...d, scholarship_pct: e.target.value }))} placeholder="e.g. 75" inputMode="numeric" className="h-9 text-sm" />
             </div>
           </div>
           <DialogFooter>

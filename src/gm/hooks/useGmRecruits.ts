@@ -59,6 +59,7 @@ export interface GmRecruit {
   projection_tier: RecruitTier | null; // mirror of the latest report's tier — stable card badge
   asking_price: number | null; // what the recruit / his camp is asking
   target_offer: number | null; // "Willing to Pay" — what we want to pay
+  scholarship_pct: number | null; // % of one scholarship offered
   level: RecruitLevel; // 'hs' | 'juco_fr' | 'juco_so'
   link: string | null;
   stage: RecruitStage;
@@ -103,6 +104,9 @@ export function recruitTypeForPosition(position: string): RecruitType {
   if (["SP", "RP", "CL", "RHP", "LHP", "P"].includes(p)) return "pitcher";
   return "hitter";
 }
+
+/** Per-class-year recruiting config: budget target + scholarships available. */
+export interface GmClassConfig { class_year: number; budget: number | null; scholarships: number | null }
 
 export function useGmRecruits() {
   const { user, effectiveTeamId } = useAuth();
@@ -251,6 +255,36 @@ export function useGmRecruits() {
     onSettled: () => qc.invalidateQueries({ queryKey: key }),
   });
 
+  // Per-class-year budget + scholarships config.
+  const configKey = ["gm-class-config", effectiveTeamId ?? null];
+  const { data: classConfigs = [] } = useQuery({
+    queryKey: configKey,
+    enabled: !!user?.id && !!effectiveTeamId,
+    queryFn: async (): Promise<GmClassConfig[]> => {
+      const { data } = await (supabase as any)
+        .from("gm_class_config").select("class_year, budget, scholarships").eq("customer_team_id", effectiveTeamId);
+      return (data || []) as GmClassConfig[];
+    },
+  });
+  const configByYear = useMemo(() => {
+    const m = new Map<number, GmClassConfig>();
+    for (const c of classConfigs) m.set(c.class_year, c);
+    return m;
+  }, [classConfigs]);
+
+  const saveClassConfig = useMutation({
+    mutationFn: async ({ class_year, budget, scholarships }: GmClassConfig) => {
+      if (!effectiveTeamId) throw new Error("No team in scope");
+      const { error } = await (supabase as any).from("gm_class_config").upsert(
+        { customer_team_id: effectiveTeamId, class_year, budget, scholarships, updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() },
+        { onConflict: "customer_team_id,class_year" },
+      );
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: configKey }); toast.success("Class budget saved"); },
+    onError: (e: any) => toast.error(`Save failed: ${e.message}`),
+  });
+
   return {
     recruits,
     years,
@@ -259,6 +293,8 @@ export function useGmRecruits() {
     updateRecruit: (id: string, patch: Partial<NewRecruit>) => updateRecruit.mutate({ id, patch }),
     removeRecruit: (id: string) => removeRecruit.mutate(id),
     reorder: (orderedIds: string[]) => reorder.mutate(orderedIds),
+    configByYear,
+    saveClassConfig: (cfg: GmClassConfig) => saveClassConfig.mutate(cfg),
     eventsByRecruit,
     addEvent: (recruitId: string, eventDate: string, note: string) => addEvent.mutate({ recruitId, eventDate, note }),
     removeEvent: (id: string) => removeEvent.mutate(id),
