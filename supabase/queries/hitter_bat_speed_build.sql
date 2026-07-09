@@ -20,18 +20,32 @@
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS public.hitter_bat_speed_season (
-  batter_id          text    NOT NULL,
-  season             integer NOT NULL,
-  qualified_bip      integer NOT NULL,
-  bat_speed_floor    numeric,      -- p95 implied bat speed
-  bat_speed_ceiling  numeric,      -- p99 implied bat speed
-  runway             numeric,      -- ceiling - floor
-  squared_up_rate    numeric,      -- % of batted balls with squared_up_pct >= 0.90
-  avg_squared_up_pct numeric,
-  confidence         text,         -- A>=120, B>=60, C>=30 qualified BIP
-  computed_at        timestamptz NOT NULL DEFAULT now(),
+  batter_id             text    NOT NULL,
+  season                integer NOT NULL,
+  qualified_bip         integer NOT NULL,
+  bat_speed_floor       numeric,   -- p95 implied bat speed
+  bat_speed_ceiling     numeric,   -- p99 implied bat speed
+  runway                numeric,   -- ceiling - floor
+  squared_up_rate       numeric,   -- % of batted balls with squared_up_pct >= 0.90
+  avg_squared_up_pct    numeric,
+  confidence            text,      -- A>=120, B>=60, C>=30 qualified BIP
+  -- Population percentile ranks (0-100), per season, matching the app's
+  -- percentileRank convention: round(100 * count(<= value) / n) = cume_dist.
+  -- All better-high (faster bat / more squared-up = higher pct). Runway is
+  -- neutral (bigger spread = higher pct), interpret separately.
+  bat_speed_floor_pct   integer,
+  bat_speed_ceiling_pct integer,
+  runway_pct            integer,
+  squared_up_rate_pct   integer,
+  computed_at           timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (batter_id, season)
 );
+
+-- Additive column backfill for tables created before the percentile columns.
+ALTER TABLE public.hitter_bat_speed_season ADD COLUMN IF NOT EXISTS bat_speed_floor_pct   integer;
+ALTER TABLE public.hitter_bat_speed_season ADD COLUMN IF NOT EXISTS bat_speed_ceiling_pct integer;
+ALTER TABLE public.hitter_bat_speed_season ADD COLUMN IF NOT EXISTS runway_pct            integer;
+ALTER TABLE public.hitter_bat_speed_season ADD COLUMN IF NOT EXISTS squared_up_rate_pct   integer;
 
 ALTER TABLE public.hitter_bat_speed_season ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS hitter_bat_speed_season_read ON public.hitter_bat_speed_season;
@@ -42,7 +56,8 @@ TRUNCATE public.hitter_bat_speed_season;
 
 INSERT INTO public.hitter_bat_speed_season
   (batter_id, season, qualified_bip, bat_speed_floor, bat_speed_ceiling, runway,
-   squared_up_rate, avg_squared_up_pct, confidence)
+   squared_up_rate, avg_squared_up_pct, confidence,
+   bat_speed_floor_pct, bat_speed_ceiling_pct, runway_pct, squared_up_rate_pct)
 WITH base AS (
   SELECT batter_id, season, exit_velocity, release_velocity,
          (exit_velocity - 0.242 * release_velocity) / 1.242 AS implied_bat_speed
@@ -83,19 +98,29 @@ sq AS (   -- squared-up uses each hitter's ceiling as the max-EV denominator
   FROM clean c
   JOIN agg a USING (batter_id, season)
   GROUP BY c.batter_id, c.season
+),
+core AS (
+  SELECT a.batter_id, a.season, a.qualified_bip,
+         ROUND(a.floor_bs::numeric, 1)                     AS bat_speed_floor,
+         ROUND(a.ceiling_bs::numeric, 1)                   AS bat_speed_ceiling,
+         ROUND((a.ceiling_bs - a.floor_bs)::numeric, 1)    AS runway,
+         ROUND(sq.squared_up_rate, 0)                      AS squared_up_rate,
+         ROUND(sq.avg_sq, 3)                               AS avg_squared_up_pct,
+         CASE WHEN a.qualified_bip >= 120 THEN 'A'
+              WHEN a.qualified_bip >= 60  THEN 'B'
+              WHEN a.qualified_bip >= 30  THEN 'C'
+              ELSE 'INSUFFICIENT' END                      AS confidence
+  FROM agg a
+  JOIN sq USING (batter_id, season)
+  WHERE a.qualified_bip >= 30
 )
-SELECT a.batter_id, a.season, a.qualified_bip,
-       ROUND(a.floor_bs::numeric, 1),
-       ROUND(a.ceiling_bs::numeric, 1),
-       ROUND((a.ceiling_bs - a.floor_bs)::numeric, 1),
-       ROUND(sq.squared_up_rate, 0),
-       ROUND(sq.avg_sq, 3),
-       CASE WHEN a.qualified_bip >= 120 THEN 'A'
-            WHEN a.qualified_bip >= 60  THEN 'B'
-            WHEN a.qualified_bip >= 30  THEN 'C'
-            ELSE 'INSUFFICIENT' END
-FROM agg a
-JOIN sq USING (batter_id, season)
-WHERE a.qualified_bip >= 30;
+SELECT batter_id, season, qualified_bip,
+       bat_speed_floor, bat_speed_ceiling, runway, squared_up_rate, avg_squared_up_pct, confidence,
+       -- cume_dist = count(<= value)/n, per season, ×100 → matches percentileRank
+       ROUND(100 * cume_dist() OVER (PARTITION BY season ORDER BY bat_speed_floor))::int   AS bat_speed_floor_pct,
+       ROUND(100 * cume_dist() OVER (PARTITION BY season ORDER BY bat_speed_ceiling))::int AS bat_speed_ceiling_pct,
+       ROUND(100 * cume_dist() OVER (PARTITION BY season ORDER BY runway))::int            AS runway_pct,
+       ROUND(100 * cume_dist() OVER (PARTITION BY season ORDER BY squared_up_rate))::int   AS squared_up_rate_pct
+FROM core;
 
 NOTIFY pgrst, 'reload schema';
