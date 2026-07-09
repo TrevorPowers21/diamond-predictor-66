@@ -22,7 +22,7 @@ import {
   usePitchLogPitcherPopulation,
 } from "@/savant/hooks/usePitchLogPopulation";
 import { percentileColor, percentileRank } from "@/savant/lib/percentile";
-import { useHitterBatSpeed } from "@/savant/hooks/useHitterBatSpeed";
+import { useHitterBatSpeedPopulation } from "@/savant/hooks/useHitterBatSpeed";
 import {
   type DimensionOption,
   type HitterPitchTypeBreakdown,
@@ -718,49 +718,6 @@ function StatChip({ label, value, emphasize, note, compact }: StatChipProps) {
         </div>
       )}
     </div>
-  );
-}
-
-/** A stat chip whose value is colored by its stored population percentile
- *  (same red→blue percentileColor scale the bars use), with the percentile
- *  shown beneath. Used for inferred bat speed + squared-up. */
-function PercentileChip({ label, value, pct, unit }: { label: string; value: string; pct: number | null; unit?: string }) {
-  const color = pct == null ? "#FFFFFF" : percentileColor(pct);
-  return (
-    <div
-      className="relative flex flex-col items-center gap-1.5 border py-3.5 px-4 min-w-[128px]"
-      style={{ borderColor: NAVY_BORDER, backgroundColor: NAVY_CARD }}
-    >
-      <div className="font-[Oswald] text-[11px] font-bold uppercase tracking-[0.22em] text-white/55">{label}</div>
-      <div className="font-[Oswald] text-[28px] font-bold leading-none tabular-nums" style={{ color }}>
-        {value}
-        {unit && <span className="ml-0.5 text-[13px] font-semibold text-white/45">{unit}</span>}
-      </div>
-      <div className="font-[Archivo_Narrow] text-[9px] font-semibold uppercase tracking-[0.08em] text-white/40">
-        {pct == null ? "—" : `${pct}th pct`}
-      </div>
-    </div>
-  );
-}
-
-/** Inferred bat speed (floor = typical) + squared-up %, read from the stored
- *  hitter_bat_speed_season table. Percentile-colored; carries a confidence note
- *  so low-sample (C-tier) hitters read as such. */
-function BatSpeedPanel({ batterId, season }: { batterId: string; season: number }) {
-  const { data } = useHitterBatSpeed(batterId, season);
-  if (!data || data.bat_speed_floor == null) return null;
-  const confNote =
-    data.confidence === "A" ? "high confidence" : data.confidence === "B" ? "moderate confidence" : "low sample";
-  return (
-    <Panel title="Inferred Bat Speed">
-      <div className="flex flex-wrap gap-2">
-        <PercentileChip label="Bat Speed" value={Number(data.bat_speed_floor).toFixed(1)} unit="mph" pct={data.bat_speed_floor_pct} />
-        <PercentileChip label="Squared-Up" value={`${Math.round(Number(data.squared_up_rate ?? 0))}`} unit="%" pct={data.squared_up_rate_pct} />
-      </div>
-      <div className="mt-2 font-[Archivo_Narrow] text-[10px] uppercase tracking-wider text-white/30">
-        Typical (p95) swing speed · {data.qualified_bip} batted balls · {confNote}
-      </div>
-    </Panel>
   );
 }
 
@@ -1880,11 +1837,40 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
   const { data: row } = usePitchLogHitterTotals(batterId, season, dimension);
   const { data: byTypeRows = [] } = usePitchLogHitterByPitchType(batterId, season, dimension);
   const { data: population = [] } = usePitchLogHitterPopulation(season, dimension);
+  const { data: batSpeedPop } = useHitterBatSpeedPopulation(season);
 
   const qualifiedPop = useMemo(
     () => population.filter((r) => r.pa >= HITTER_QUALIFIED_PA),
     [population],
   );
+
+  // Merge inferred bat speed / squared-up (keyed by batter_id) onto the player
+  // row + population so the two new batted-ball rows percentile against the same
+  // field as every other bar. Only shown for the "all pitches" dimension (the
+  // metric is season-total, not split by pitch type / handedness).
+  const showBatSpeed = dimension === "all" && !!batSpeedPop;
+  const augMetric = (r: any) => ({
+    ...r,
+    __bs_floor: batSpeedPop?.get(String(r.batter_id))?.bat_speed_floor ?? null,
+    __bs_sq: batSpeedPop?.get(String(r.batter_id))?.squared_up_rate ?? null,
+  });
+  const augRow = row && showBatSpeed ? augMetric(row) : row;
+  const augPop = useMemo(
+    () => (showBatSpeed ? qualifiedPop.map(augMetric) : qualifiedPop),
+    [qualifiedPop, showBatSpeed, batSpeedPop],
+  );
+  // Insert Inferred Bat Speed + Squared-Up just above Hard Hit% (index 2 of the
+  // contact metrics: after Avg EV / Max EV).
+  const withBatSpeed = (contact: readonly MetricDef<any>[]): MetricDef<any>[] => {
+    if (!showBatSpeed) return contact as MetricDef<any>[];
+    const bs: MetricDef<any>[] = [
+      { label: "Inferred Bat Speed", derive: (r: any) => r.__bs_floor ?? null, format: (v: number) => `${v.toFixed(1)} mph` },
+      { label: "Squared-Up%", derive: (r: any) => r.__bs_sq ?? null, format: (v: number) => `${Math.round(v)}%` },
+    ];
+    return [...contact.slice(0, 2), ...bs, ...contact.slice(2)];
+  };
+  const battedTableMetrics = [...HITTER_METRICS_SLASH, ...withBatSpeed(HITTER_METRICS_CONTACT)] as MetricDef<any>[];
+  const battedBarMetrics = [...HITTER_METRICS_SLASH, ...withBatSpeed(HITTER_METRICS_CONTACT_BARS)] as MetricDef<any>[];
   const breakdowns = deriveHitterPitchTypeBreakdowns(byTypeRows);
   const pitchTypes = useMemo(
     () => breakdowns.map((b) => b.pitchType).filter((pt): pt is string => Boolean(pt)),
@@ -1944,7 +1930,6 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
       topStats={<HitterStatsLine row={row} />}
       left={
         <>
-          <BatSpeedPanel batterId={batterId} season={season} />
           <Panel
             title="Batted Ball Data"
             headerBadge={
@@ -1955,9 +1940,9 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
             }
           >
             <RateTable
-              metrics={[...HITTER_METRICS_SLASH, ...HITTER_METRICS_CONTACT]}
-              playerRow={row}
-              qualifiedPop={qualifiedPop}
+              metrics={battedTableMetrics}
+              playerRow={augRow}
+              qualifiedPop={augPop}
               weightOf={(r) => r.ab + (r.sac ?? 0)}
             />
           </Panel>
@@ -1986,9 +1971,9 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
         <>
           <Panel title="Batted Ball Data">
             <BarGroup
-              metrics={[...HITTER_METRICS_SLASH, ...HITTER_METRICS_CONTACT_BARS]}
-              playerRow={row}
-              qualifiedPop={qualifiedPop}
+              metrics={battedBarMetrics}
+              playerRow={augRow}
+              qualifiedPop={augPop}
             />
           </Panel>
           <Panel title="Plate Discipline">
