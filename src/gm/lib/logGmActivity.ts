@@ -11,6 +11,7 @@ export async function logGmActivity(
   userId: string | null | undefined,
   action: string,
   link?: string | null,
+  refId?: string | null,
 ): Promise<void> {
   if (!teamId) return;
   try {
@@ -19,9 +20,20 @@ export async function logGmActivity(
       actor: actor ?? null,
       action,
       link: link ?? null,
+      ref_id: refId ?? null,
       created_by_user_id: userId ?? null,
     });
   } catch {
     /* activity logging is best-effort */
+  }
+}
+
+/** Remove any activity entries about a deleted record, so the feed stays honest. */
+export async function deleteGmActivityByRef(teamId: string | null | undefined, refId: string): Promise<void> {
+  if (!teamId || !refId) return;
+  try {
+    await (supabase as any).from("gm_activity").delete().eq("customer_team_id", teamId).eq("ref_id", refId);
+  } catch {
+    /* best-effort */
   }
 }

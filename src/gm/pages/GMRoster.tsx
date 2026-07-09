@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useGmRoster, DEPARTURE_REASONS, type GmBudget, type GmOtherLine, type GmRow, type LocalProjectionTier, type RowMoney } from "@/gm/hooks/useGmRoster";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -246,6 +246,15 @@ export default function GMRoster() {
   const [noteRow, setNoteRow] = useState<GmRow | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const openNote = (r: GmRow) => { setNoteDraft(""); setNoteRow(r); };
+  // Deep-link from Recent Activity: ?note=<build_player_id> opens that player's notes.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const noteBp = searchParams.get("note");
+    if (!noteBp) return;
+    const r = [...gm.hitters, ...gm.pitchers].find((x) => x.build_player_id === noteBp);
+    if (r) { openNote(r); setSearchParams((p) => { const n = new URLSearchParams(p); n.delete("note"); return n; }, { replace: true }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, gm.hitters, gm.pitchers]);
   const [finalizeRosterOpen, setFinalizeRosterOpen] = useState(false);
   const [finalizePayOpen, setFinalizePayOpen] = useState(false);
   const [addPlayerOpen, setAddPlayerOpen] = useState(false);

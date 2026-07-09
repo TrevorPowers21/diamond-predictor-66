@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { logGmActivity } from "@/gm/lib/logGmActivity";
+import { logGmActivity, deleteGmActivityByRef } from "@/gm/lib/logGmActivity";
 import { toast } from "sonner";
 
 export type RecruitType = "hitter" | "pitcher" | "twp";
@@ -182,20 +182,24 @@ export function useGmRecruits() {
   const addReport = useMutation({
     mutationFn: async ({ recruitId, reportDate, body, tier }: { recruitId: string; reportDate: string; body: string; tier?: RecruitTier | null }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
-      const { error } = await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: recruitId, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: reportDate, body: body.trim(), projection_tier: tier ?? null, created_by_user_id: user?.id ?? null });
+      const { data: inserted, error } = await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: recruitId, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: reportDate, body: body.trim(), projection_tier: tier ?? null, created_by_user_id: user?.id ?? null }).select("id").single();
       if (error) throw error;
       // A report authors the projection tier — mirror the latest onto the recruit for its stable badge.
       if (tier) await (supabase as any).from("gm_recruits").update({ projection_tier: tier, updated_at: new Date().toISOString() }).eq("id", recruitId);
       const rec = recruits.find((x) => x.id === recruitId);
       const nm = rec ? `${rec.first_name ?? ""} ${rec.last_name ?? ""}`.trim() || "a recruit" : "a recruit";
-      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added a scouting report on ${nm}`, "/gm/recruiting");
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added a scouting report on ${nm}`, `/gm/recruiting?reports=${recruitId}`, inserted?.id ?? null);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Report added"); },
     onError: (e: any) => toast.error(`Add report failed: ${e.message}`),
   });
   const removeReport = useMutation({
-    mutationFn: async (id: string) => { const { error } = await (supabase as any).from("gm_recruit_reports").delete().eq("id", id); if (error) throw error; },
-    onSuccess: () => qc.invalidateQueries({ queryKey: reportsKey }),
+    mutationFn: async (id: string) => {
+      const { error } = await (supabase as any).from("gm_recruit_reports").delete().eq("id", id);
+      if (error) throw error;
+      await deleteGmActivityByRef(effectiveTeamId, id);
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); },
     onError: (e: any) => toast.error(`Remove report failed: ${e.message}`),
   });
 
@@ -212,7 +216,7 @@ export function useGmRecruits() {
         await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: inserted.id, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: initialReport.report_date, body: initialReport.body.trim(), projection_tier: tier, created_by_user_id: user?.id ?? null });
       }
       const nm = `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "a recruit";
-      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added ${nm} to the recruiting board`, "/gm/recruiting");
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added ${nm} to the recruiting board`, `/gm/recruiting?reports=${inserted.id}`, inserted.id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Recruit added"); },
     onError: (e: any) => toast.error(`Add failed: ${e.message}`),
@@ -229,10 +233,15 @@ export function useGmRecruits() {
 
   const removeRecruit = useMutation({
     mutationFn: async (id: string) => {
+      // Also clear activity for the recruit + its scouting reports (report rows
+      // cascade-delete in the DB, but their activity entries don't).
+      const { data: reportRows } = await (supabase as any).from("gm_recruit_reports").select("id").eq("recruit_id", id);
       const { error } = await (supabase as any).from("gm_recruits").delete().eq("id", id);
       if (error) throw error;
+      await deleteGmActivityByRef(effectiveTeamId, id);
+      for (const rr of reportRows || []) await deleteGmActivityByRef(effectiveTeamId, rr.id);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); toast.success("Recruit removed"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Recruit removed"); },
     onError: (e: any) => toast.error(`Remove failed: ${e.message}`),
   });
 

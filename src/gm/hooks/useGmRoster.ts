@@ -7,7 +7,7 @@ import { PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { toast } from "sonner";
 import { advanceEligibility, serializeBuildPlayerMeta } from "@/pages/team-builder/helpers";
 import { isPitcherPos, loadGmBuildRoster } from "@/gm/lib/loadGmBuildRoster";
-import { logGmActivity } from "@/gm/lib/logGmActivity";
+import { logGmActivity, deleteGmActivityByRef } from "@/gm/lib/logGmActivity";
 
 export interface GmBuildOption {
   id: string;
@@ -311,19 +311,24 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
   const addNote = useMutation({
     mutationFn: async ({ row, body }: { row: GmRow; body: string }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
-      const { error } = await (supabase as any).from("gm_player_notes").insert({
+      const { data: inserted, error } = await (supabase as any).from("gm_player_notes").insert({
         build_player_id: row.build_player_id, customer_team_id: effectiveTeamId, player_id: row.player_id,
         author: user?.email ?? null, body: body.trim(), created_by_user_id: user?.id ?? null,
-      });
+      }).select("id").single();
       if (error) throw error;
-      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added a note on ${row.name}`, "/gm/roster");
+      // Link opens the player's note dialog; ref_id = note id so deleting it clears the entry.
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added a note on ${row.name}`, `/gm/roster?note=${row.build_player_id}`, inserted?.id ?? null);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["gm-player-notes"] }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Note added"); },
     onError: (e: any) => toast.error(`Add note failed: ${e.message}`),
   });
   const removeNote = useMutation({
-    mutationFn: async (id: string) => { const { error } = await (supabase as any).from("gm_player_notes").delete().eq("id", id); if (error) throw error; },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["gm-player-notes"] }),
+    mutationFn: async (id: string) => {
+      const { error } = await (supabase as any).from("gm_player_notes").delete().eq("id", id);
+      if (error) throw error;
+      await deleteGmActivityByRef(effectiveTeamId, id);
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["gm-player-notes"] }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); },
     onError: (e: any) => toast.error(`Remove note failed: ${e.message}`),
   });
 

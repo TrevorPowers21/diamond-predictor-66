@@ -1,11 +1,5 @@
--- ============================================================================
--- GM / FRONT OFFICE — FULL PROD-APPLY BUNDLE
--- Generated 2026-07-09 from supabase/migrations (timestamp order).
--- Idempotent — safe to run + re-run. Apply on PROD via CLI (exec_sql staging-only):
---   supabase db query --linked --file supabase/queries/gm_prod_apply_all.sql
--- Then: NOTIFY pgrst, 'reload schema';
--- ============================================================================
-
+-- GM / FRONT OFFICE — FULL PROD-APPLY BUNDLE (2026-07-09)
+-- Idempotent. Apply on PROD via CLI (exec_sql staging-only), then NOTIFY pgrst, 'reload schema';
 
 -- ---- 20260705120000_gm_front_office_finance.sql ----
 -- Front Office (GM) money + eligibility, Path A. Keyed by (customer_team_id,
@@ -375,5 +369,14 @@ CREATE POLICY gm_class_config_all ON public.gm_class_config
   FOR ALL TO authenticated
   USING (public.has_role(auth.uid(), 'superadmin'::public.app_role) OR public.is_team_member(customer_team_id))
   WITH CHECK (public.has_role(auth.uid(), 'superadmin'::public.app_role) OR public.is_team_member(customer_team_id));
+
+-- ---- 20260709140000_gm_activity_ref.sql ----
+-- Reference the record an activity entry is about (note id, report id, recruit
+-- id) so that when that record is deleted we can remove its stale activity from
+-- the feed, and the entry's link can deep-link to open it.
+ALTER TABLE public.gm_activity
+  ADD COLUMN IF NOT EXISTS ref_id text;
+
+CREATE INDEX IF NOT EXISTS idx_gm_activity_ref ON public.gm_activity (ref_id);
 
 NOTIFY pgrst, 'reload schema';

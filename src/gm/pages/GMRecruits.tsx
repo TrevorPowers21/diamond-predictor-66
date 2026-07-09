@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent,
 } from "@dnd-kit/core";
@@ -182,6 +183,15 @@ export default function GMRecruits() {
   const [reportBody, setReportBody] = useState("");
   const [reportTier, setReportTier] = useState<RecruitTier | "">("");
   const openReports = (r: GmRecruit) => { setReportBody(""); setReportDate(today()); setReportTier(r.projection_tier ?? ""); setReportsRecruit(r); };
+  // Deep-link from Recent Activity: ?reports=<recruit_id> opens that recruit's reports.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const rid = searchParams.get("reports");
+    if (!rid) return;
+    const rec = gm.recruits.find((x) => x.id === rid);
+    if (rec) { setYear(rec.class_year); openReports(rec); setSearchParams((p) => { const n = new URLSearchParams(p); n.delete("reports"); return n; }, { replace: true }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, gm.recruits]);
   const [contactRecruit, setContactRecruit] = useState<GmRecruit | null>(null);
   const [contact, setContact] = useState({ phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "", extra_contacts: [] as ExtraContact[] });
   const openContact = (r: GmRecruit) => { setContact({ phone: r.phone ?? "", email: r.email ?? "", guardian_name: r.guardian_name ?? "", guardian_phone: r.guardian_phone ?? "", coach_name: r.coach_name ?? "", coach_phone: r.coach_phone ?? "", extra_contacts: r.extra_contacts ?? [] }); setContactRecruit(r); };
