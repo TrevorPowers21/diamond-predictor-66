@@ -316,8 +316,9 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         author: user?.email ?? null, body: body.trim(), created_by_user_id: user?.id ?? null,
       }).select("id").single();
       if (error) throw error;
-      // Link opens the player's note dialog; ref_id = note id so deleting it clears the entry.
-      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added a note on ${row.name}`, `/gm/roster?note=${row.build_player_id}`, inserted?.id ?? null);
+      // Link opens the player's note dialog (by stable player_id when available,
+      // else the build row); ref_id = note id so deleting it clears the entry.
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added a note on ${row.name}`, `/gm/roster?note=${row.player_id ?? row.build_player_id}`, inserted?.id ?? null);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["gm-player-notes"] }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Note added"); },
     onError: (e: any) => toast.error(`Add note failed: ${e.message}`),

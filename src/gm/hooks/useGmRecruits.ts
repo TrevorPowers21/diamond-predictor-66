@@ -236,10 +236,19 @@ export function useGmRecruits() {
       // Also clear activity for the recruit + its scouting reports (report rows
       // cascade-delete in the DB, but their activity entries don't).
       const { data: reportRows } = await (supabase as any).from("gm_recruit_reports").select("id").eq("recruit_id", id);
+      const rec = recruits.find((x) => x.id === id);
+      const nm = rec ? `${rec.first_name ?? ""} ${rec.last_name ?? ""}`.trim() : "";
       const { error } = await (supabase as any).from("gm_recruits").delete().eq("id", id);
       if (error) throw error;
       await deleteGmActivityByRef(effectiveTeamId, id);
       for (const rr of reportRows || []) await deleteGmActivityByRef(effectiveTeamId, rr.id);
+      // Legacy (pre-ref_id) entries: match by the recruit's name in the phrase.
+      if (nm && effectiveTeamId) {
+        try {
+          await (supabase as any).from("gm_activity").delete().eq("customer_team_id", effectiveTeamId).ilike("action", `%${nm} to the recruiting board`);
+          await (supabase as any).from("gm_activity").delete().eq("customer_team_id", effectiveTeamId).ilike("action", `%scouting report on ${nm}`);
+        } catch { /* best-effort */ }
+      }
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Recruit removed"); },
     onError: (e: any) => toast.error(`Remove failed: ${e.message}`),

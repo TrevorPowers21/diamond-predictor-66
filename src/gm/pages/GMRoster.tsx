@@ -251,7 +251,7 @@ export default function GMRoster() {
   useEffect(() => {
     const noteBp = searchParams.get("note");
     if (!noteBp) return;
-    const r = [...gm.hitters, ...gm.pitchers].find((x) => x.build_player_id === noteBp);
+    const r = [...gm.hitters, ...gm.pitchers].find((x) => x.player_id === noteBp || x.build_player_id === noteBp);
     if (r) { openNote(r); setSearchParams((p) => { const n = new URLSearchParams(p); n.delete("note"); return n; }, { replace: true }); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, gm.hitters, gm.pitchers]);
