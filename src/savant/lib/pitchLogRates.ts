@@ -312,6 +312,8 @@ export interface PitchTypeBreakdown {
 export interface MetricDef<TRow> {
   /** Label displayed on the percentile bar. */
   label: string;
+  /** Optional hover tooltip expanding an abbreviated label (e.g. "I-Bat Speed" → "Inferred Bat Speed"). */
+  hint?: string;
   /** Compute the rate from one aggregation row. */
   derive: (row: TRow) => number | null;
   /** Lower is better (e.g., BB%, whiff% for hitters, AVG-against for pitchers). */

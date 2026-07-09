@@ -5,6 +5,8 @@ interface PercentileBarProps {
   value: number | null;
   percentile: number | null;
   format?: (v: number) => string;
+  /** Hover tooltip (e.g. expand an abbreviated label). */
+  hint?: string;
 }
 
 /**
@@ -14,7 +16,7 @@ interface PercentileBarProps {
  *
  * Per RSTR IQ guardrails: no skeletons or spinners. Missing data renders dim.
  */
-export default function PercentileBar({ label, value, percentile, format }: PercentileBarProps) {
+export default function PercentileBar({ label, value, percentile, format, hint }: PercentileBarProps) {
   const hasData = value != null && percentile != null;
   const fillColor = hasData ? percentileColor(percentile!) : "#3a3a3a";
   const markerColor = hasData ? percentileMarkerColor(percentile!) : "#3a3a3a";
@@ -23,7 +25,10 @@ export default function PercentileBar({ label, value, percentile, format }: Perc
 
   return (
     <div className="grid grid-cols-[130px_1fr_60px] items-center gap-3 py-2">
-      <div className="whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.12em] text-white">
+      <div
+        className={`whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.12em] text-white${hint ? " cursor-help" : ""}`}
+        title={hint}
+      >
         {label}
       </div>
 

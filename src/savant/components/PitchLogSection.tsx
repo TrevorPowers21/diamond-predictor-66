@@ -1118,7 +1118,7 @@ function RateTable<TRow>({ metrics, playerRow, qualifiedPop, weightOf, historica
             .map((r) => m.derive(r))
             .filter((v): v is number => v != null && !Number.isNaN(v)),
         );
-    return { label: m.label, value, ncaa, format: m.format };
+    return { label: m.label, hint: m.hint, value, ncaa, format: m.format };
   });
 
   return (
@@ -1133,7 +1133,7 @@ function RateTable<TRow>({ metrics, playerRow, qualifiedPop, weightOf, historica
               &nbsp;
             </th>
             {cols.map((c) => (
-              <th key={c.label} className="py-2 px-3 text-center whitespace-nowrap">
+              <th key={c.label} className={`py-2 px-3 text-center whitespace-nowrap${c.hint ? " cursor-help" : ""}`} title={c.hint}>
                 {c.label}
               </th>
             ))}
@@ -1213,6 +1213,7 @@ function BarGroup<TRow>({ metrics, playerRow, qualifiedPop }: BarGroupProps<TRow
           <PercentileBar
             key={m.label}
             label={m.label}
+            hint={m.hint}
             value={value}
             percentile={pct}
             format={m.format}
@@ -1864,7 +1865,7 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
   const withBatSpeed = (contact: readonly MetricDef<any>[]): MetricDef<any>[] => {
     if (!showBatSpeed) return contact as MetricDef<any>[];
     const bs: MetricDef<any>[] = [
-      { label: "Inferred Bat Speed", derive: (r: any) => r.__bs_floor ?? null, format: (v: number) => `${v.toFixed(1)} mph` },
+      { label: "I-Bat Speed", hint: "Inferred Bat Speed", derive: (r: any) => r.__bs_floor ?? null, format: (v: number) => `${v.toFixed(1)} mph` },
       { label: "Squared-Up%", derive: (r: any) => r.__bs_sq ?? null, format: (v: number) => `${Math.round(v)}%` },
     ];
     return [...contact.slice(0, 2), ...bs, ...contact.slice(2)];
