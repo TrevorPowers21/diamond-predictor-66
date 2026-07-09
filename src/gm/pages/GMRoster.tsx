@@ -136,12 +136,14 @@ function BudgetDialog({ open, onOpenChange, budget, coachTotal, onSave, onFinali
   const [rev, setRev] = useState<number | null>(null);
   const [nil, setNil] = useState<number | null>(null);
   const [sch, setSch] = useState<number | null>(null);
+  const [schText, setSchText] = useState(""); // text buffer so "11.7" is typeable
   const [other, setOther] = useState<OtherDraft[]>([]);
   useEffect(() => {
     if (open) {
       setRev(budget?.rev_share_total ?? null);
       setNil(budget?.nil_total ?? null);
       setSch(budget?.scholarship_total ?? null);
+      setSchText(budget?.scholarship_total != null ? String(budget.scholarship_total) : "");
       // Seed Other from saved lines; fall back to a single line for a legacy
       // other_total, or one empty row to start.
       const lines = budget?.other_breakdown;
@@ -181,7 +183,7 @@ function BudgetDialog({ open, onOpenChange, budget, coachTotal, onSave, onFinali
           {/* Scholarships is a COUNT of equivalencies (e.g. 11.7), not dollars. */}
           <label className="flex items-center justify-between gap-4">
             <HintLabel hint="Total scholarships available (equivalencies) — not part of the comp budget" style={OSWALD} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Scholarships</HintLabel>
-            <Input value={sch == null ? "" : String(sch)} onChange={(e) => { const t = e.target.value.replace(/[^0-9.]/g, ""); setSch(t === "" ? null : Number(t)); }} inputMode="decimal" placeholder="e.g. 11.7" className="h-8 w-24 text-right text-xs font-mono tabular-nums" />
+            <Input value={schText} onChange={(e) => { const t = e.target.value.replace(/[^0-9.]/g, ""); setSchText(t); setSch(t === "" ? null : Number(t)); }} inputMode="decimal" placeholder="e.g. 11.7 or 35" className="h-8 w-24 text-right text-xs font-mono tabular-nums" />
           </label>
 
           {/* Other → named funding lines (camps, vendors, donor …) summing to Other. */}
@@ -294,6 +296,9 @@ export default function GMRoster() {
     setRowDrafts((prev) => ({ ...prev, [r.build_player_id]: { ...prev[r.build_player_id], [field]: val } }));
   const rowDirty = (r: GmRow) => !!rowDrafts[r.build_player_id];
   const hasDrafts = Object.keys(rowDrafts).length > 0;
+  // Actual Pay = live sum of the pay buckets (Rev + NIL + Other; Scholarship is
+  // aid, excluded) — updates as you type, before Save/Finalize.
+  const rowActual = (r: GmRow) => { const m = effMoney(r); return (m.rev_share ?? 0) + (m.nil_amount ?? 0) + (m.other_amount ?? 0); };
 
   const section = (title: string, rows: GmRow[]) => {
     const sum = (f: (r: GmRow) => number | null) => rows.reduce((s, r) => s + (f(r) ?? 0), 0);
@@ -316,7 +321,7 @@ export default function GMRoster() {
                 <TableHead className="text-center">Market Value</TableHead>
                 {/* Budget-share projection; falls back to Market Value when no budget. */}
                 <TableHead className="text-center">Projected Value</TableHead>
-                <TableHead className="text-right" title="% of one scholarship">Schol %</TableHead>
+                <TableHead className="text-right" title="% of one scholarship">Scholarship</TableHead>
                 <TableHead className="text-right">Rev Share</TableHead>
                 <TableHead className="text-right">NIL</TableHead>
                 <TableHead className="text-right">Other</TableHead>
@@ -381,7 +386,7 @@ export default function GMRoster() {
                       <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.rev_share)}</TableCell>
                       <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.nil_amount)}</TableCell>
                       <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.other_amount)}</TableCell>
-                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums text-foreground">{money(r.nil_value)}</TableCell>
+                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums text-foreground">{money(rowActual(r))}</TableCell>
                       <TableCell />
                       <TableCell />
                     </>
@@ -394,7 +399,7 @@ export default function GMRoster() {
                       {/* Actual Pay is the coach's agreed number; it ONLY changes when the
                           GM finalizes (checkmark writes the bucket sum back here + to the
                           coach). So it reads the authoritative nil_value, not the live buckets. */}
-                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums text-foreground">{money(r.nil_value)}</TableCell>
+                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums text-foreground">{money(rowActual(r))}</TableCell>
                       {/* Read-only finalized indicator. Saving is the global Save
                           button; pushing to the coach is Finalize Roster Pay. */}
                       <TableCell className="py-1.5 text-center">
@@ -430,7 +435,7 @@ export default function GMRoster() {
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).rev_share))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).nil_amount))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).other_amount))}</TableCell>
-                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => r.nil_value))}</TableCell>
+                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => rowActual(r)))}</TableCell>
                   <TableCell />
                   <TableCell />
                 </TableRow>
@@ -471,7 +476,7 @@ export default function GMRoster() {
   const otherUsed = usedSum((m) => m.other_amount);
   const schUsed = usedSum((m) => m.scholarship_amount);
   // Actual Pay = the authoritative coach number (nil_value); only finalize changes it.
-  const actualUsed = allRows.reduce((s, r) => s + (r.nil_value ?? 0), 0);
+  const actualUsed = allRows.reduce((s, r) => s + rowActual(r), 0);
   const popupBudget = { ...effCaps, finalized: !!b?.finalized } as GmBudget;
 
   // One budget box — read-only. Shows used / allotment as whole dollars; caps
