@@ -10,6 +10,7 @@ export async function logGmActivity(
   actor: string | null | undefined,
   userId: string | null | undefined,
   action: string,
+  link?: string | null,
 ): Promise<void> {
   if (!teamId) return;
   try {
@@ -17,6 +18,7 @@ export async function logGmActivity(
       customer_team_id: teamId,
       actor: actor ?? null,
       action,
+      link: link ?? null,
       created_by_user_id: userId ?? null,
     });
   } catch {

@@ -102,13 +102,21 @@ export default function GMHome() {
         <CardContent className="p-0 divide-y divide-border/40 max-h-[300px] overflow-y-auto">
           {activity.length === 0 ? (
             <p className="px-4 py-6 text-center text-xs text-muted-foreground">No activity yet — moves show up here as your staff makes them.</p>
-          ) : activity.map((a) => (
-            <div key={a.id} className="flex items-center gap-2.5 px-4 py-2">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#D4AF37]" />
-              <span className="flex-1 text-sm text-foreground/90"><span className="font-semibold text-foreground">{actorName(a.actor)}</span> {a.action}</span>
-              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{timeAgo(a.created_at)}</span>
-            </div>
-          ))}
+          ) : activity.map((a) => {
+            const body = (
+              <>
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#D4AF37]" />
+                <span className="flex-1 text-sm text-foreground/90"><span className="font-semibold text-foreground">{actorName(a.actor)}</span> {a.action}</span>
+                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{timeAgo(a.created_at)}</span>
+                {a.link && <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground/40 group-hover:text-primary" />}
+              </>
+            );
+            return a.link ? (
+              <Link key={a.id} to={a.link} className="group flex items-center gap-2.5 px-4 py-2 transition-colors hover:bg-muted/40">{body}</Link>
+            ) : (
+              <div key={a.id} className="flex items-center gap-2.5 px-4 py-2">{body}</div>
+            );
+          })}
         </CardContent>
       </Card>
 

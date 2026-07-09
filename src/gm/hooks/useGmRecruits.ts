@@ -184,7 +184,7 @@ export function useGmRecruits() {
       if (tier) await (supabase as any).from("gm_recruits").update({ projection_tier: tier, updated_at: new Date().toISOString() }).eq("id", recruitId);
       const rec = recruits.find((x) => x.id === recruitId);
       const nm = rec ? `${rec.first_name ?? ""} ${rec.last_name ?? ""}`.trim() || "a recruit" : "a recruit";
-      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added a scouting report on ${nm}`);
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added a scouting report on ${nm}`, "/gm/recruiting");
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Report added"); },
     onError: (e: any) => toast.error(`Add report failed: ${e.message}`),
@@ -208,7 +208,7 @@ export function useGmRecruits() {
         await (supabase as any).from("gm_recruit_reports").insert({ recruit_id: inserted.id, customer_team_id: effectiveTeamId, author: user?.email ?? null, report_date: initialReport.report_date, body: initialReport.body.trim(), projection_tier: tier, created_by_user_id: user?.id ?? null });
       }
       const nm = `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "a recruit";
-      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added ${nm} to the recruiting board`);
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added ${nm} to the recruiting board`, "/gm/recruiting");
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: reportsKey }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Recruit added"); },
     onError: (e: any) => toast.error(`Add failed: ${e.message}`),

@@ -6,6 +6,7 @@ export interface GmActivity {
   id: string;
   actor: string | null;
   action: string;
+  link: string | null;
   created_at: string;
 }
 
@@ -17,7 +18,7 @@ export function useGmActivity(limit = 12) {
     enabled: !!user?.id && !!effectiveTeamId,
     queryFn: async (): Promise<GmActivity[]> => {
       const { data } = await (supabase as any)
-        .from("gm_activity").select("id, actor, action, created_at")
+        .from("gm_activity").select("id, actor, action, link, created_at")
         .eq("customer_team_id", effectiveTeamId)
         .order("created_at", { ascending: false })
         .limit(limit);

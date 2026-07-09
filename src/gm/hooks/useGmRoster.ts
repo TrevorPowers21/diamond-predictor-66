@@ -316,7 +316,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         author: user?.email ?? null, body: body.trim(), created_by_user_id: user?.id ?? null,
       });
       if (error) throw error;
-      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added a note on ${row.name}`);
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added a note on ${row.name}`, "/gm/roster");
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["gm-player-notes"] }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Note added"); },
     onError: (e: any) => toast.error(`Add note failed: ${e.message}`),
@@ -401,7 +401,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         const { error: e2 } = await (supabase as any).from("team_builds").update({ total_budget: total }).eq("id", activeBuildId);
         if (e2) throw e2;
       }
-      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `set the total budget to $${Math.round(total).toLocaleString("en-US")}`);
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `set the total budget to $${Math.round(total).toLocaleString("en-US")}`, "/gm/roster");
       return total;
     },
     onSuccess: (total) => {
@@ -500,7 +500,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         { onConflict: "build_player_id" },
       );
       if (e2) throw e2;
-      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `removed ${row.name} from the roster`);
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `removed ${row.name} from the roster`, "/gm/roster");
       return { switched, name: row.name };
     },
     onSuccess: ({ switched, name }) => {
@@ -597,7 +597,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         position_slot: position || null, depth_order: 1, included_in_roster: true, production_notes: notes, nil_value: Number(nilValue) || 0,
       });
       if (error) throw error;
-      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added ${trimmed} to the roster`);
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added ${trimmed} to the roster`, "/gm/roster");
       return { switched, name: trimmed };
     },
     onSuccess: ({ switched, name }) => {
