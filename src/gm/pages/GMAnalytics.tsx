@@ -101,15 +101,17 @@ export default function GMAnalytics() {
 
   // Cost efficiency per player ($/projected win). Players with no WAR can't be
   // priced per win — sorted to the bottom.
+  // $/Win over anyone with projected WAR. A $0-pay contributor is free WAR
+  // (perWin = 0) — the best value on the board — until the coach assigns pay.
   const efficiency = useMemo(() => {
     return roster
-      .map((r) => ({ row: r, perWin: (r.war ?? 0) > 0 && (r.nil_value ?? 0) > 0 ? (r.nil_value as number) / (r.war as number) : null }))
-      .filter((x) => (x.row.nil_value ?? 0) > 0)
-      .sort((a, b) => (a.perWin ?? Infinity) - (b.perWin ?? Infinity));
+      .filter((r) => (r.war ?? 0) > 0)
+      .map((r) => ({ row: r, perWin: (r.nil_value ?? 0) / (r.war as number) }))
+      .sort((a, b) => a.perWin - b.perWin);
   }, [roster]);
 
-  const bestValue = efficiency.filter((x) => x.perWin != null).slice(0, 5);
-  const priciest = efficiency.filter((x) => x.perWin != null).slice(-5).reverse();
+  const bestValue = efficiency.slice(0, 5); // lowest $/win first ($0 = free = best)
+  const priciest = efficiency.filter((x) => (x.row.nil_value ?? 0) > 0).slice(-5).reverse();
 
   const rowLine = (x: { row: GmRow; perWin: number | null }) => (
     <TableRow key={x.row.build_player_id}>
