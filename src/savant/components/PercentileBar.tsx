@@ -26,7 +26,7 @@ export default function PercentileBar({ label, value, percentile, format, hint }
   return (
     <div className="grid grid-cols-[130px_1fr_60px] items-center gap-3 py-2">
       <div
-        className={`whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.12em] text-white${hint ? " cursor-help" : ""}`}
+        className="whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.12em] text-white"
         title={hint}
       >
         {label}

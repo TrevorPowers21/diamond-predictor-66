@@ -22,7 +22,7 @@ import {
   usePitchLogPitcherPopulation,
 } from "@/savant/hooks/usePitchLogPopulation";
 import { percentileColor, percentileRank } from "@/savant/lib/percentile";
-import { useHitterBatSpeedPopulation } from "@/savant/hooks/useHitterBatSpeed";
+import { useHitterBatSpeedPopulation, type HitterBatSpeedLite } from "@/savant/hooks/useHitterBatSpeed";
 import {
   type DimensionOption,
   type HitterPitchTypeBreakdown,
@@ -1133,7 +1133,7 @@ function RateTable<TRow>({ metrics, playerRow, qualifiedPop, weightOf, historica
               &nbsp;
             </th>
             {cols.map((c) => (
-              <th key={c.label} className={`py-2 px-3 text-center whitespace-nowrap${c.hint ? " cursor-help" : ""}`} title={c.hint}>
+              <th key={c.label} className="py-2 px-3 text-center whitespace-nowrap" title={c.hint}>
                 {c.label}
               </th>
             ))}
@@ -1824,6 +1824,39 @@ function HitterLocationSection({
 // ────────────────────────────────────────────────────────────────────
 // Hitter entry
 // ────────────────────────────────────────────────────────────────────
+/** Dedicated Bat Speed panel for the visuals section — the percentile view of
+ *  Inferred Bat Speed (typical p95 swing) + Squared-Up%, ranked against the full
+ *  qualifying-hitter population. Hidden when the hitter didn't clear 30 BIP. */
+function HitterBatSpeedPanel({ batterId, pop }: { batterId: string; pop?: Map<string, HitterBatSpeedLite> }) {
+  const me = pop?.get(String(batterId));
+  if (!pop || !me || me.bat_speed_floor == null) return null;
+  const floors: number[] = [];
+  const sqs: number[] = [];
+  for (const v of pop.values()) {
+    if (v.bat_speed_floor != null) floors.push(v.bat_speed_floor);
+    if (v.squared_up_rate != null) sqs.push(v.squared_up_rate);
+  }
+  return (
+    <Panel title="Bat Speed">
+      <div className="divide-y divide-white/5">
+        <PercentileBar
+          label="I-Bat Speed"
+          hint="Inferred Bat Speed"
+          value={me.bat_speed_floor}
+          percentile={percentileRank(me.bat_speed_floor, floors)}
+          format={(v) => `${v.toFixed(1)} mph`}
+        />
+        <PercentileBar
+          label="Squared-Up%"
+          value={me.squared_up_rate}
+          percentile={me.squared_up_rate != null ? percentileRank(me.squared_up_rate, sqs) : null}
+          format={(v) => `${Math.round(v)}%`}
+        />
+      </div>
+    </Panel>
+  );
+}
+
 interface HitterPitchLogProps {
   batterId: string;
   season: number;
@@ -1845,33 +1878,6 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
     [population],
   );
 
-  // Merge inferred bat speed / squared-up (keyed by batter_id) onto the player
-  // row + population so the two new batted-ball rows percentile against the same
-  // field as every other bar. Only shown for the "all pitches" dimension (the
-  // metric is season-total, not split by pitch type / handedness).
-  const showBatSpeed = dimension === "all" && !!batSpeedPop;
-  const augMetric = (r: any) => ({
-    ...r,
-    __bs_floor: batSpeedPop?.get(String(r.batter_id))?.bat_speed_floor ?? null,
-    __bs_sq: batSpeedPop?.get(String(r.batter_id))?.squared_up_rate ?? null,
-  });
-  const augRow = row && showBatSpeed ? augMetric(row) : row;
-  const augPop = useMemo(
-    () => (showBatSpeed ? qualifiedPop.map(augMetric) : qualifiedPop),
-    [qualifiedPop, showBatSpeed, batSpeedPop],
-  );
-  // Insert Inferred Bat Speed + Squared-Up just above Hard Hit% (index 2 of the
-  // contact metrics: after Avg EV / Max EV).
-  const withBatSpeed = (contact: readonly MetricDef<any>[]): MetricDef<any>[] => {
-    if (!showBatSpeed) return contact as MetricDef<any>[];
-    const bs: MetricDef<any>[] = [
-      { label: "I-Bat Speed", hint: "Inferred Bat Speed", derive: (r: any) => r.__bs_floor ?? null, format: (v: number) => `${v.toFixed(1)} mph` },
-      { label: "Squared-Up%", derive: (r: any) => r.__bs_sq ?? null, format: (v: number) => `${Math.round(v)}%` },
-    ];
-    return [...contact.slice(0, 2), ...bs, ...contact.slice(2)];
-  };
-  const battedTableMetrics = [...HITTER_METRICS_SLASH, ...withBatSpeed(HITTER_METRICS_CONTACT)] as MetricDef<any>[];
-  const battedBarMetrics = [...HITTER_METRICS_SLASH, ...withBatSpeed(HITTER_METRICS_CONTACT_BARS)] as MetricDef<any>[];
   const breakdowns = deriveHitterPitchTypeBreakdowns(byTypeRows);
   const pitchTypes = useMemo(
     () => breakdowns.map((b) => b.pitchType).filter((pt): pt is string => Boolean(pt)),
@@ -1941,9 +1947,9 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
             }
           >
             <RateTable
-              metrics={battedTableMetrics}
-              playerRow={augRow}
-              qualifiedPop={augPop}
+              metrics={[...HITTER_METRICS_SLASH, ...HITTER_METRICS_CONTACT]}
+              playerRow={row}
+              qualifiedPop={qualifiedPop}
               weightOf={(r) => r.ab + (r.sac ?? 0)}
             />
           </Panel>
@@ -1972,9 +1978,9 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
         <>
           <Panel title="Batted Ball Data">
             <BarGroup
-              metrics={battedBarMetrics}
-              playerRow={augRow}
-              qualifiedPop={augPop}
+              metrics={[...HITTER_METRICS_SLASH, ...HITTER_METRICS_CONTACT_BARS]}
+              playerRow={row}
+              qualifiedPop={qualifiedPop}
             />
           </Panel>
           <Panel title="Plate Discipline">
@@ -1986,18 +1992,21 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
         </>
       }
       visuals={
-        <HitterLocationSection
-          batterId={batterId}
-          season={season}
-          dimension={dimension}
-          filterPitchTypes={filterPitchTypes}
-          filterVertical={filterVertical}
-          filterHorizontal={filterHorizontal}
-          filterBattedTypes={filterBattedTypes}
-          breakdowns={breakdowns}
-          totalsRow={row}
-          population={qualifiedPop}
-        />
+        <>
+          <HitterBatSpeedPanel batterId={batterId} pop={batSpeedPop} />
+          <HitterLocationSection
+            batterId={batterId}
+            season={season}
+            dimension={dimension}
+            filterPitchTypes={filterPitchTypes}
+            filterVertical={filterVertical}
+            filterHorizontal={filterHorizontal}
+            filterBattedTypes={filterBattedTypes}
+            breakdowns={breakdowns}
+            totalsRow={row}
+            population={qualifiedPop}
+          />
+        </>
       }
       tabExtra={filterBar}
     />
