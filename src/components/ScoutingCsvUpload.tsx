@@ -298,6 +298,12 @@ export default function ScoutingCsvUpload() {
           ))}
         </div>
 
+        {/* Support line — prominent near the top */}
+        <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/[0.06] px-3 py-2.5 text-sm">
+          <MessageCircle className="h-4 w-4 shrink-0 text-primary" />
+          <span className="text-foreground">Questions, or want an upload demo? <span className="font-semibold">Contact your RSTR IQ rep.</span></span>
+        </div>
+
         {/* Steps — how to get projections */}
         <ol className="list-decimal space-y-1.5 pl-5 text-sm text-muted-foreground">
           <li><span className="font-medium text-foreground">Export the players you want projected</span> from your scouting service — every player in the country is available for evaluation.{kind === "stuff" && <><span className="font-medium text-foreground"> One file per pitch type + hand</span>, and name each file with the handedness and pitch type — e.g. <span className="font-medium text-foreground">“Sinker LHP”</span> or <span className="font-medium text-foreground">“4S FB RHP”</span> — that's how the pitch is recognized.</>}</li>
@@ -335,12 +341,6 @@ export default function ScoutingCsvUpload() {
             </table>
           </div>
           <p className="mt-1.5 text-[11px] text-muted-foreground"><span className="text-red-400">*</span> required. Everything else improves the rating if your service exports it.</p>
-        </div>
-
-        {/* Support line */}
-        <div className="flex items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2.5 text-sm text-muted-foreground">
-          <MessageCircle className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-          <span>Questions, or want an upload demo? Contact your RSTR IQ rep.</span>
         </div>
       </CardContent>
     </Card>
