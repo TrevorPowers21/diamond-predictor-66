@@ -154,8 +154,11 @@ export function useGmTargetBoard() {
         body: body.trim(), created_by_user_id: user?.id ?? null,
       });
       if (error) throw error;
+      const name = board.find((r) => r.player_id === playerId);
+      const nm = name ? `${name.first_name ?? ""} ${name.last_name ?? ""}`.trim() : "a target";
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added a note on ${nm || "a target"} in the target board`, "/gm/targets");
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: notesKey }); toast.success("Note added"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: notesKey }); qc.invalidateQueries({ queryKey: ["gm-activity"] }); toast.success("Note added"); },
     onError: (e: any) => toast.error(`Add note failed: ${e.message}`),
   });
 

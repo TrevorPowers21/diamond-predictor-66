@@ -575,7 +575,7 @@ export default function GMRoster() {
             onOpenChange={setBudgetOpen}
             budget={popupBudget}
             coachTotal={coachTotalBudget}
-            onSave={(caps) => setBudgetDraft(caps)}
+            onSave={(caps) => { setBudgetDraft(caps); gm.saveBudget(caps); }}
             onFinalize={(caps) => setConfirmCaps(caps)}
           />
           {/* Per-player notes — authored + dated log, team-shared with the coach's

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 import { toast } from "sonner";
+import { logGmActivity } from "@/gm/lib/logGmActivity";
 
 // Cast to bypass generated types until supabase types are regenerated
 const tb = () => supabase.from("target_board" as any);
@@ -124,9 +125,18 @@ export function useTargetBoard() {
           customer_team_id: effectiveTeamId,
         });
       if (error) throw error;
+      // Log to the front-office feed (skip silent syncs so remounts don't spam).
+      if (!_silent) {
+        try {
+          const { data: p } = await supabase.from("players").select("first_name, last_name").eq("id", playerId).maybeSingle();
+          const name = p ? `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() : "a player";
+          await logGmActivity(effectiveTeamId, user.email ?? null, user.id, `added ${name || "a player"} to the target board`, "/gm/targets");
+        } catch { /* activity is best-effort */ }
+      }
     },
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ["target-board", effectiveTeamId ?? null] });
+      qc.invalidateQueries({ queryKey: ["gm-activity"] });
       // silent=true suppresses the toast. Used by the TB roster→supabase sync
       // effect, which can fire on every remount; the user-facing add path
       // (PlayerProfile / Dashboard "Add to board" buttons) leaves silent
