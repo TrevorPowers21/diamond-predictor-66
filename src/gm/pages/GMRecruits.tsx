@@ -25,6 +25,12 @@ const money = (v: number | null | undefined) => {
   return `${sign}$${Math.round(a).toLocaleString()}`;
 };
 const parseMoney = (s: string): number | null => { const t = s.replace(/[^0-9.]/g, ""); if (!t) return null; const n = Number(t); return Number.isNaN(n) ? null : n; };
+// Live $ + comma formatting for a dollar text input. Stores the formatted
+// string; parseMoney() strips it back to a number on save.
+const fmtMoneyInput = (s: string): string => { const d = String(s).replace(/[^0-9]/g, ""); return d ? `$${Number(d).toLocaleString()}` : ""; };
+function MoneyInput({ value, onChange, placeholder, className }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string }) {
+  return <Input value={fmtMoneyInput(value)} onChange={(e) => onChange(fmtMoneyInput(e.target.value))} placeholder={placeholder} inputMode="numeric" className={className} />;
+}
 const today = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 const POSITIONS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH", "TWP", "RHP", "LHP"] as const;
@@ -284,7 +290,7 @@ export default function GMRecruits() {
             {YEARS.map((y) => (
               <div key={y} className="grid grid-cols-[3rem_1fr_1fr] items-center gap-2">
                 <span className="text-sm font-semibold tabular-nums">{y}</span>
-                <Input value={budgetDraft[y]?.budget ?? ""} onChange={(e) => setBudgetDraft((d) => ({ ...d, [y]: { ...d[y], budget: e.target.value } }))} placeholder="e.g. 1500000" inputMode="numeric" className="h-9 text-sm" />
+                <MoneyInput value={budgetDraft[y]?.budget ?? ""} onChange={(v) => setBudgetDraft((d) => ({ ...d, [y]: { ...d[y], budget: v } }))} placeholder="$1,500,000" className="h-9 text-sm" />
                 <Input value={budgetDraft[y]?.scholarships ?? ""} onChange={(e) => setBudgetDraft((d) => ({ ...d, [y]: { ...d[y], scholarships: e.target.value } }))} placeholder="e.g. 11.7" inputMode="decimal" className="h-9 text-sm" />
               </div>
             ))}
@@ -478,11 +484,11 @@ export default function GMRecruits() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Asking Price</span>
-                    <Input value={form.asking_price} onChange={(e) => setForm((f) => ({ ...f, asking_price: e.target.value }))} placeholder="e.g. 300000" inputMode="numeric" className="h-9 text-sm" />
+                    <MoneyInput value={form.asking_price} onChange={(v) => setForm((f) => ({ ...f, asking_price: v }))} placeholder="$300,000" className="h-9 text-sm" />
                   </div>
                   <div>
                     <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Willing to Pay</span>
-                    <Input value={form.target_offer} onChange={(e) => setForm((f) => ({ ...f, target_offer: e.target.value }))} placeholder="e.g. 250000" inputMode="numeric" className="h-9 text-sm" />
+                    <MoneyInput value={form.target_offer} onChange={(v) => setForm((f) => ({ ...f, target_offer: v }))} placeholder="$250,000" className="h-9 text-sm" />
                   </div>
                   <div>
                     <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scholarship %</span>
@@ -671,13 +677,11 @@ export default function GMRecruits() {
           <div className="grid grid-cols-2 gap-3 py-1">
             <div>
               <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Asking Price</span>
-              <Input value={deal.asking_price} onChange={(e) => setDeal((d) => ({ ...d, asking_price: e.target.value }))} placeholder="e.g. 300000" inputMode="numeric" className="h-9 text-sm" />
-              <span className="mt-1 block text-[11px] tabular-nums text-muted-foreground">{money(parseMoney(deal.asking_price))}</span>
+              <MoneyInput value={deal.asking_price} onChange={(v) => setDeal((d) => ({ ...d, asking_price: v }))} placeholder="$300,000" className="h-9 text-sm" />
             </div>
             <div>
               <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Willing to Pay</span>
-              <Input value={deal.target_offer} onChange={(e) => setDeal((d) => ({ ...d, target_offer: e.target.value }))} placeholder="e.g. 250000" inputMode="numeric" className="h-9 text-sm" />
-              <span className="mt-1 block text-[11px] tabular-nums text-[#D4AF37]">{money(parseMoney(deal.target_offer))}</span>
+              <MoneyInput value={deal.target_offer} onChange={(v) => setDeal((d) => ({ ...d, target_offer: v }))} placeholder="$250,000" className="h-9 text-sm" />
             </div>
             <div>
               <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Scholarship %</span>
