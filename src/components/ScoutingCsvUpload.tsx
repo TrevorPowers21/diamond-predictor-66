@@ -7,7 +7,7 @@ import { calculateStuffPlus, type PitchRow, type PopConstants } from "@/savant/l
 import { parsePitchTypeAndHandFromFilename } from "@/lib/importStuffPlusInputsCsv";
 import { supabase } from "@/integrations/supabase/client";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
-import { Upload, Download, FileSpreadsheet, CheckCircle2 } from "lucide-react";
+import { Upload, Download, FileSpreadsheet, CheckCircle2, MessageCircle } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Ephemeral scouting-CSV upload. A program exports THEIR OWN licensed data
@@ -335,6 +335,12 @@ export default function ScoutingCsvUpload() {
             </table>
           </div>
           <p className="mt-1.5 text-[11px] text-muted-foreground"><span className="text-red-400">*</span> required. Everything else improves the rating if your service exports it.</p>
+        </div>
+
+        {/* Support line */}
+        <div className="flex items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2.5 text-sm text-muted-foreground">
+          <MessageCircle className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+          <span>Questions, or want an upload demo? Contact your RSTR IQ rep.</span>
         </div>
       </CardContent>
     </Card>
