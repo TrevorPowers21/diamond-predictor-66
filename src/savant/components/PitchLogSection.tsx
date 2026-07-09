@@ -1862,7 +1862,7 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
   const ballFlightMetrics = (
     showBatSpeed
       ? [
-          { label: "I-Bat Speed", hint: "Inferred Bat Speed", derive: (r: any) => r.__bs_floor ?? null, format: (v: number) => `${v.toFixed(1)} mph` },
+          { label: "I-Bat Speed", hint: "Inferred Bat Speed", derive: (r: any) => r.__bs_floor ?? null, format: (v: number) => v.toFixed(1) },
           { label: "Squared-Up%", derive: (r: any) => r.__bs_sq ?? null, format: (v: number) => `${Math.round(v)}%` },
           ...HITTER_METRICS_BALL_FLIGHT,
         ]
