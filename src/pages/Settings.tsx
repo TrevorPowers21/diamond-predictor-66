@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, Mail, KeyRound } from "lucide-react";
+import ScoutingCsvUpload from "@/components/ScoutingCsvUpload";
 
 export default function Settings() {
   const { user } = useAuth();
@@ -92,6 +93,8 @@ export default function Settings() {
           </h1>
           <p className="text-sm text-muted-foreground mt-1">Manage your account and security.</p>
         </div>
+
+        <ScoutingCsvUpload />
 
         <Card>
           <CardHeader>
