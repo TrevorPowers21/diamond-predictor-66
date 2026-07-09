@@ -24,6 +24,10 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 const actorName = (a: string | null) => (a ? a.split("@")[0] : "Someone");
+// Where an activity item links. Uses the stored link, else infers from the
+// action text so pre-existing entries (logged before link was added) still work.
+const activityLink = (a: { link: string | null; action: string }): string =>
+  a.link ?? (/recruit|scouting report|committed|prospect/i.test(a.action) ? "/gm/recruiting" : "/gm/roster");
 
 /** Briefing metric tile — mirrors the Player Evaluation Overview tiles. */
 function Tile({ label, value, icon, accent }: { label: string; value: string; icon: React.ReactNode; accent?: "emerald" | "blue" | "gold" | "red" }) {
@@ -102,21 +106,14 @@ export default function GMHome() {
         <CardContent className="p-0 divide-y divide-border/40 max-h-[300px] overflow-y-auto">
           {activity.length === 0 ? (
             <p className="px-4 py-6 text-center text-xs text-muted-foreground">No activity yet — moves show up here as your staff makes them.</p>
-          ) : activity.map((a) => {
-            const body = (
-              <>
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#D4AF37]" />
-                <span className="flex-1 text-sm text-foreground/90"><span className="font-semibold text-foreground">{actorName(a.actor)}</span> {a.action}</span>
-                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{timeAgo(a.created_at)}</span>
-                {a.link && <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground/40 group-hover:text-primary" />}
-              </>
-            );
-            return a.link ? (
-              <Link key={a.id} to={a.link} className="group flex items-center gap-2.5 px-4 py-2 transition-colors hover:bg-muted/40">{body}</Link>
-            ) : (
-              <div key={a.id} className="flex items-center gap-2.5 px-4 py-2">{body}</div>
-            );
-          })}
+          ) : activity.map((a) => (
+            <Link key={a.id} to={activityLink(a)} className="group flex items-center gap-2.5 px-4 py-2 transition-colors hover:bg-muted/40">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#D4AF37]" />
+              <span className="flex-1 text-sm text-foreground/90"><span className="font-semibold text-foreground">{actorName(a.actor)}</span> {a.action}</span>
+              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{timeAgo(a.created_at)}</span>
+              <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground/40 group-hover:text-primary" />
+            </Link>
+          ))}
         </CardContent>
       </Card>
 
