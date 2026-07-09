@@ -22,6 +22,7 @@ import {
   usePitchLogPitcherPopulation,
 } from "@/savant/hooks/usePitchLogPopulation";
 import { percentileColor, percentileRank } from "@/savant/lib/percentile";
+import { useHitterBatSpeed } from "@/savant/hooks/useHitterBatSpeed";
 import {
   type DimensionOption,
   type HitterPitchTypeBreakdown,
@@ -717,6 +718,49 @@ function StatChip({ label, value, emphasize, note, compact }: StatChipProps) {
         </div>
       )}
     </div>
+  );
+}
+
+/** A stat chip whose value is colored by its stored population percentile
+ *  (same red→blue percentileColor scale the bars use), with the percentile
+ *  shown beneath. Used for inferred bat speed + squared-up. */
+function PercentileChip({ label, value, pct, unit }: { label: string; value: string; pct: number | null; unit?: string }) {
+  const color = pct == null ? "#FFFFFF" : percentileColor(pct);
+  return (
+    <div
+      className="relative flex flex-col items-center gap-1.5 border py-3.5 px-4 min-w-[128px]"
+      style={{ borderColor: NAVY_BORDER, backgroundColor: NAVY_CARD }}
+    >
+      <div className="font-[Oswald] text-[11px] font-bold uppercase tracking-[0.22em] text-white/55">{label}</div>
+      <div className="font-[Oswald] text-[28px] font-bold leading-none tabular-nums" style={{ color }}>
+        {value}
+        {unit && <span className="ml-0.5 text-[13px] font-semibold text-white/45">{unit}</span>}
+      </div>
+      <div className="font-[Archivo_Narrow] text-[9px] font-semibold uppercase tracking-[0.08em] text-white/40">
+        {pct == null ? "—" : `${pct}th pct`}
+      </div>
+    </div>
+  );
+}
+
+/** Inferred bat speed (floor = typical) + squared-up %, read from the stored
+ *  hitter_bat_speed_season table. Percentile-colored; carries a confidence note
+ *  so low-sample (C-tier) hitters read as such. */
+function BatSpeedPanel({ batterId, season }: { batterId: string; season: number }) {
+  const { data } = useHitterBatSpeed(batterId, season);
+  if (!data || data.bat_speed_floor == null) return null;
+  const confNote =
+    data.confidence === "A" ? "high confidence" : data.confidence === "B" ? "moderate confidence" : "low sample";
+  return (
+    <Panel title="Inferred Bat Speed">
+      <div className="flex flex-wrap gap-2">
+        <PercentileChip label="Bat Speed" value={Number(data.bat_speed_floor).toFixed(1)} unit="mph" pct={data.bat_speed_floor_pct} />
+        <PercentileChip label="Squared-Up" value={`${Math.round(Number(data.squared_up_rate ?? 0))}`} unit="%" pct={data.squared_up_rate_pct} />
+      </div>
+      <div className="mt-2 font-[Archivo_Narrow] text-[10px] uppercase tracking-wider text-white/30">
+        Typical (p95) swing speed · {data.qualified_bip} batted balls · {confNote}
+      </div>
+    </Panel>
   );
 }
 
@@ -1900,6 +1944,7 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
       topStats={<HitterStatsLine row={row} />}
       left={
         <>
+          <BatSpeedPanel batterId={batterId} season={season} />
           <Panel
             title="Batted Ball Data"
             headerBadge={
