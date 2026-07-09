@@ -280,13 +280,13 @@ function ScenarioPanel({ variant, builds, teamId, userId, defaultBuildId, onRepo
         )}
       </CardContent>
 
-      <TargetPicker open={pickerOpen} onOpenChange={setPickerOpen} addedIds={new Set(addedTargets.map((r) => r.player_id!))} onAdd={addTarget} />
+      <TargetPicker open={pickerOpen} onOpenChange={setPickerOpen} addedIds={new Set(addedTargets.map((r) => r.player_id!))} rosterIds={onBuild as Set<string>} onAdd={addTarget} />
     </Card>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-function TargetPicker({ open, onOpenChange, addedIds, onAdd }: { open: boolean; onOpenChange: (o: boolean) => void; addedIds: Set<string>; onAdd: (t: GmTarget) => void }) {
+function TargetPicker({ open, onOpenChange, addedIds, rosterIds, onAdd }: { open: boolean; onOpenChange: (o: boolean) => void; addedIds: Set<string>; rosterIds: Set<string>; onAdd: (t: GmTarget) => void }) {
   const { targets, isLoading } = useGmTargetBoard();
   const [q, setQ] = useState("");
   const filtered = targets.filter((t) => t.name.toLowerCase().includes(q.toLowerCase()) || (t.position ?? "").toLowerCase().includes(q.toLowerCase()) || (t.team ?? "").toLowerCase().includes(q.toLowerCase()));
@@ -299,17 +299,21 @@ function TargetPicker({ open, onOpenChange, addedIds, onAdd }: { open: boolean; 
           {isLoading ? <p className="py-6 text-center text-xs text-muted-foreground">Loading targets…</p>
             : filtered.length === 0 ? <p className="py-6 text-center text-xs text-muted-foreground">{targets.length === 0 ? "No targets on the board yet." : "No matches."}</p>
             : filtered.map((t) => {
+              const onRoster = rosterIds.has(t.player_id);
               const added = addedIds.has(t.player_id);
               return (
-                <div key={t.player_id} className="flex items-center gap-2 rounded-md border border-border/50 px-2.5 py-1.5">
+                <div key={t.player_id} className={cn("flex items-center gap-2 rounded-md border border-border/50 px-2.5 py-1.5", onRoster && "opacity-55")}>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{t.name}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-sm font-medium">{t.name}</span>
+                      {onRoster && <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-500">On Roster</span>}
+                    </div>
                     <div className="truncate text-[11px] text-muted-foreground">{[t.position, t.team].filter(Boolean).join(" · ") || "—"}</div>
                   </div>
                   <span className="w-12 shrink-0 text-right font-mono text-xs tabular-nums text-foreground">{num(t.war)}</span>
                   <span className="w-20 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">{money(t.market_value)}</span>
-                  <Button variant={added ? "ghost" : "outline"} size="sm" className="h-7 shrink-0 gap-1 text-xs" disabled={added} onClick={() => onAdd(t)}>
-                    {added ? "Added" : <><Plus className="h-3 w-3" /> Add</>}
+                  <Button variant={added || onRoster ? "ghost" : "outline"} size="sm" className="h-7 shrink-0 gap-1 text-xs" disabled={added || onRoster} onClick={() => onAdd(t)}>
+                    {onRoster ? "On Roster" : added ? "Added" : <><Plus className="h-3 w-3" /> Add</>}
                   </Button>
                 </div>
               );
