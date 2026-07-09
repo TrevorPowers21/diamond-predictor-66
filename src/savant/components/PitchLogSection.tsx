@@ -1862,12 +1862,13 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
   const ballFlightMetrics = (
     showBatSpeed
       ? [
-          ...HITTER_METRICS_BALL_FLIGHT,
           { label: "I-Bat Speed", hint: "Inferred Bat Speed", derive: (r: any) => r.__bs_floor ?? null, format: (v: number) => `${v.toFixed(1)} mph` },
           { label: "Squared-Up%", derive: (r: any) => r.__bs_sq ?? null, format: (v: number) => `${Math.round(v)}%` },
+          ...HITTER_METRICS_BALL_FLIGHT,
         ]
       : HITTER_METRICS_BALL_FLIGHT
   ) as MetricDef<any>[];
+  const ballFlightTitle = showBatSpeed ? "Bat Speed & Ball Flight" : "Ball Flight";
 
   const breakdowns = deriveHitterPitchTypeBreakdowns(byTypeRows);
   const pitchTypes = useMemo(
@@ -1952,7 +1953,7 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
               weightOf={(r) => r.pa}
             />
           </Panel>
-          <Panel title="Ball Flight">
+          <Panel title={ballFlightTitle}>
             <RateTable
               metrics={ballFlightMetrics}
               playerRow={bfRow}
@@ -1977,7 +1978,7 @@ export function HitterPitchLog({ batterId, season }: HitterPitchLogProps) {
           <Panel title="Plate Discipline">
             <BarGroup metrics={HITTER_METRICS_DISCIPLINE_BARS} playerRow={row} qualifiedPop={qualifiedPop} />
           </Panel>
-          <Panel title="Ball Flight">
+          <Panel title={ballFlightTitle}>
             <BarGroup metrics={ballFlightMetrics} playerRow={bfRow} qualifiedPop={bfPop} />
           </Panel>
         </>
