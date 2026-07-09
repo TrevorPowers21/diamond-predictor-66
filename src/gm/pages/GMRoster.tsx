@@ -82,6 +82,30 @@ function MoneyCell({ value, onSave }: { value: number | null; onSave: (n: number
   );
 }
 
+// Scholarship is an equivalency: a % of one scholarship (0–100).
+function PctCell({ value, onSave }: { value: number | null; onSave: (n: number | null) => void }) {
+  const [local, setLocal] = useState<string | null>(null);
+  const display = local != null ? local : value == null ? "" : `${Math.round(value)}%`;
+  return (
+    <Input
+      value={display}
+      inputMode="numeric"
+      placeholder="—"
+      className="h-8 w-20 text-right text-xs font-mono tabular-nums ml-auto"
+      onChange={(e) => { const d = e.target.value.replace(/[^0-9]/g, ""); setLocal(d === "" ? "" : `${Math.min(100, Number(d))}%`); }}
+      onBlur={() => {
+        if (local != null) {
+          const d = local.replace(/[^0-9]/g, "");
+          onSave(d === "" ? null : Math.min(100, Number(d)));
+          setLocal(null);
+        }
+      }}
+    />
+  );
+}
+const pct = (v: number | null | undefined) => (v == null ? "—" : `${Math.round(v)}%`);
+const equiv = (usedPct: number) => (usedPct / 100).toFixed(1); // sum of % → scholarship equivalencies
+
 
 /** Controlled dollar input for the budget popup — formats as $ while typing. */
 function DollarInput({ value, onChange }: { value: number | null; onChange: (n: number | null) => void }) {
@@ -154,7 +178,11 @@ function BudgetDialog({ open, onOpenChange, budget, coachTotal, onSave, onFinali
         <div className="space-y-3 py-1">
           {field("Revenue Share", rev, setRev)}
           {field("NIL", nil, setNil)}
-          {field("Scholarship", sch, setSch, "Not included in total budget")}
+          {/* Scholarships is a COUNT of equivalencies (e.g. 11.7), not dollars. */}
+          <label className="flex items-center justify-between gap-4">
+            <HintLabel hint="Total scholarships available (equivalencies) — not part of the comp budget" style={OSWALD} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Scholarships</HintLabel>
+            <Input value={sch == null ? "" : String(sch)} onChange={(e) => { const t = e.target.value.replace(/[^0-9.]/g, ""); setSch(t === "" ? null : Number(t)); }} inputMode="decimal" placeholder="e.g. 11.7" className="h-8 w-24 text-right text-xs font-mono tabular-nums" />
+          </label>
 
           {/* Other → named funding lines (camps, vendors, donor …) summing to Other. */}
           <div className="space-y-2 rounded-md border p-2.5">
@@ -288,7 +316,7 @@ export default function GMRoster() {
                 <TableHead className="text-center">Market Value</TableHead>
                 {/* Budget-share projection; falls back to Market Value when no budget. */}
                 <TableHead className="text-center">Projected Value</TableHead>
-                <TableHead className="text-right">Scholarship</TableHead>
+                <TableHead className="text-right" title="% of one scholarship">Schol %</TableHead>
                 <TableHead className="text-right">Rev Share</TableHead>
                 <TableHead className="text-right">NIL</TableHead>
                 <TableHead className="text-right">Other</TableHead>
@@ -349,7 +377,7 @@ export default function GMRoster() {
                       a hypothetical future roster's pay. */}
                   {gm.isProjection ? (
                     <>
-                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.scholarship_amount)}</TableCell>
+                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{pct(m.scholarship_amount)}</TableCell>
                       <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.rev_share)}</TableCell>
                       <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.nil_amount)}</TableCell>
                       <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.other_amount)}</TableCell>
@@ -359,7 +387,7 @@ export default function GMRoster() {
                     </>
                   ) : (
                     <>
-                      <TableCell className="py-1.5"><MoneyCell value={m.scholarship_amount} onSave={(n) => setRowField(r, "scholarship_amount", n)} /></TableCell>
+                      <TableCell className="py-1.5"><PctCell value={m.scholarship_amount} onSave={(n) => setRowField(r, "scholarship_amount", n)} /></TableCell>
                       <TableCell className="py-1.5"><MoneyCell value={m.rev_share} onSave={(n) => setRowField(r, "rev_share", n)} /></TableCell>
                       <TableCell className="py-1.5"><MoneyCell value={m.nil_amount} onSave={(n) => setRowField(r, "nil_amount", n)} /></TableCell>
                       <TableCell className="py-1.5"><MoneyCell value={m.other_amount} onSave={(n) => setRowField(r, "other_amount", n)} /></TableCell>
@@ -398,7 +426,7 @@ export default function GMRoster() {
                   <TableCell className="text-center font-mono text-sm py-2">{num(sum((r) => r.war), 1)}</TableCell>
                   <TableCell />
                   <TableCell className="text-center font-mono text-sm py-2">{money(sum((r) => projectedValue(r) ?? r.market_value))}</TableCell>
-                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).scholarship_amount))}</TableCell>
+                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{equiv(sum((r) => effMoney(r).scholarship_amount))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).rev_share))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).nil_amount))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).other_amount))}</TableCell>
@@ -449,13 +477,13 @@ export default function GMRoster() {
   // One budget box — read-only. Shows used / allotment as whole dollars; caps
   // are edited only in the Manage Budget popup. Over-cap turns the used red.
   // `accent` gives the Total box a standing gold highlight.
-  const box = (label: string, used: number, total: number | null, accent?: boolean, hint?: string) => (
+  const box = (label: string, used: number, total: number | null, accent?: boolean, hint?: string, fmt: (n: number) => string = money) => (
     <Card className={cn("flex flex-col items-center px-4 py-3.5 text-center", accent && "border-[#D4AF37]/55 bg-[#D4AF37]/[0.07]")}>
       <HintLabel hint={hint} style={OSWALD} className={cn("text-[11px] font-bold uppercase tracking-[0.14em]", accent ? "text-[#D4AF37]" : "text-foreground/75")}>{label}</HintLabel>
       <div className="mt-2 flex items-baseline justify-center gap-1.5">
-        <span className={cn("font-mono font-bold tabular-nums leading-none", accent ? "text-3xl text-[#D4AF37]" : "text-2xl text-foreground", total != null && used > total && "text-red-500")}>{money(used)}</span>
+        <span className={cn("font-mono font-bold tabular-nums leading-none", accent ? "text-3xl text-[#D4AF37]" : "text-2xl text-foreground", total != null && used > total && "text-red-500")}>{fmt(used)}</span>
         {total != null && (
-          <span className={cn("text-xs font-mono tabular-nums", used > total ? "text-red-500 font-semibold" : "text-muted-foreground")}>/ {money(total)}</span>
+          <span className={cn("text-xs font-mono tabular-nums", used > total ? "text-red-500 font-semibold" : "text-muted-foreground")}>/ {fmt(total)}</span>
         )}
       </div>
     </Card>
@@ -571,7 +599,7 @@ export default function GMRoster() {
           Revenue Share · Total on the second row. */}
       <div className="space-y-3">
         <div className="grid grid-cols-3 gap-3">
-          {box("Scholarship", schUsed, effCaps.scholarship_total, false, "Not included in total budget")}
+          {box("Scholarships", schUsed / 100, effCaps.scholarship_total, false, "Equivalencies used vs. available — not part of the comp budget", (n) => n.toFixed(1))}
           {box("NIL", nilUsed, effCaps.nil_total)}
           {box("Other", otherUsed, effCaps.other_total)}
         </div>

@@ -45,14 +45,14 @@ function Tile({ label, value, icon, accent }: { label: string; value: string; ic
 }
 
 /** One used/allotment line in the budget-breakdown card. */
-function BudgetLine({ label, used, total }: { label: string; used: number; total: number | null }) {
+function BudgetLine({ label, used, total, fmt = money }: { label: string; used: number; total: number | null; fmt?: (n: number) => string }) {
   const over = total != null && used > total;
   return (
     <div className="flex items-center justify-between px-4 py-2.5">
       <span className="text-[11px] font-semibold uppercase tracking-wider text-foreground/75" style={OSWALD}>{label}</span>
       <span className="font-mono text-sm tabular-nums">
-        <span className={cn("font-semibold", over ? "text-red-500" : "text-foreground")}>{money(used)}</span>
-        {total != null && <span className="text-muted-foreground"> / {money(total)}</span>}
+        <span className={cn("font-semibold", over ? "text-red-500" : "text-foreground")}>{fmt(used)}</span>
+        {total != null && <span className="text-muted-foreground"> / {fmt(total)}</span>}
       </span>
     </div>
   );
@@ -128,7 +128,7 @@ export default function GMHome() {
             <BudgetLine label="Revenue Share" used={gm.totals.revUsed} total={b?.rev_share_total ?? null} />
             <BudgetLine label="NIL" used={gm.totals.nilUsed} total={b?.nil_total ?? null} />
             <BudgetLine label="Other" used={gm.totals.otherUsed} total={b?.other_total ?? null} />
-            <BudgetLine label="Scholarship" used={gm.totals.schUsed} total={b?.scholarship_total ?? null} />
+            <BudgetLine label="Scholarships" used={gm.totals.schUsed / 100} total={b?.scholarship_total ?? null} fmt={(n) => n.toFixed(1)} />
           </CardContent>
         </Card>
 
