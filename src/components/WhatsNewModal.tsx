@@ -20,6 +20,24 @@ type Release = {
 
 const RELEASES: Release[] = [
   {
+    date: "2026-07-09",
+    headline: "Inferred bat speed and squared-up rate on every hitter's Stats page",
+    features: [
+      {
+        title: "Inferred Bat Speed and Squared-Up Rate",
+        tagline:
+          "Every qualified 2026 hitter now carries an inferred bat speed and a squared-up rate, derived from their tracked batted balls and ranked against every qualified hitter in the country. Both live at the top of the Bat Speed & Ball Flight panel on the Stats tab.",
+        details: [
+          "Inferred Bat Speed is the hitter's typical (95th percentile) swing speed, backed out of exit velocity and pitch velocity on every tracked batted ball, with ball-flight tracking outliers filtered out first.",
+          "Squared-Up Rate is how often the hitter made flush, on-the-barrel contact, getting near the top of their exit-velocity potential on a swing.",
+          "Both sit at the top of the Bat Speed & Ball Flight panel with a percentile bar colored against every qualified 2026 hitter, so where a bat ranks reads at a glance.",
+          "Hover the I-Bat Speed label to see the full Inferred Bat Speed name.",
+        ],
+      },
+    ],
+    whatElse: [],
+  },
+  {
     date: "2026-07-04",
     headline: "An improved roster building experience",
     features: [
