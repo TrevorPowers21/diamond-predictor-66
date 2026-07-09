@@ -287,18 +287,28 @@ export default function GMRoster() {
     }
   }, [gm.pendingReasonCount]);
 
-  const effMoney = (r: GmRow): RowMoney => {
-    const d = rowDrafts[r.build_player_id] ?? {};
+  const moneyFromDraft = (r: GmRow, d: Partial<RowMoney>): RowMoney => {
     const pick = (k: keyof RowMoney) => (k in d ? d[k] ?? null : ((r[k] as number | null) ?? null));
     return { scholarship_amount: pick("scholarship_amount"), rev_share: pick("rev_share"), nil_amount: pick("nil_amount"), other_amount: pick("other_amount") };
   };
-  const setRowField = (r: GmRow, field: keyof RowMoney, val: number | null) =>
-    setRowDrafts((prev) => ({ ...prev, [r.build_player_id]: { ...prev[r.build_player_id], [field]: val } }));
+  const effMoney = (r: GmRow): RowMoney => moneyFromDraft(r, rowDrafts[r.build_player_id] ?? {});
+  // Every edit auto-saves for this local session (silent draft upsert). No manual
+  // Save needed — it stays until Finalize pushes it to the coach.
+  const setRowField = (r: GmRow, field: keyof RowMoney, val: number | null) => {
+    const nextDraft = { ...(rowDrafts[r.build_player_id] ?? {}), [field]: val };
+    setRowDrafts((prev) => ({ ...prev, [r.build_player_id]: nextDraft }));
+    gm.saveRosterDraft([{ row: r, money: moneyFromDraft(r, nextDraft) }], undefined, true);
+  };
   const rowDirty = (r: GmRow) => !!rowDrafts[r.build_player_id];
   const hasDrafts = Object.keys(rowDrafts).length > 0;
-  // Actual Pay = live sum of the pay buckets (Rev + NIL + Other; Scholarship is
-  // aid, excluded) — updates as you type, before Save/Finalize.
-  const rowActual = (r: GmRow) => { const m = effMoney(r); return (m.rev_share ?? 0) + (m.nil_amount ?? 0) + (m.other_amount ?? 0); };
+  // Actual Pay defaults to the coach's Team-Builder number (nil_value). Once any
+  // pay bucket (Rev / NIL / Other) is entered it becomes their live sum; clear
+  // them all and it falls back to the coach number again.
+  const rowActual = (r: GmRow): number | null => {
+    const m = effMoney(r);
+    const hasBuckets = m.rev_share != null || m.nil_amount != null || m.other_amount != null;
+    return hasBuckets ? (m.rev_share ?? 0) + (m.nil_amount ?? 0) + (m.other_amount ?? 0) : (r.nil_value ?? null);
+  };
 
   const section = (title: string, rows: GmRow[]) => {
     const sum = (f: (r: GmRow) => number | null) => rows.reduce((s, r) => s + (f(r) ?? 0), 0);
@@ -476,7 +486,7 @@ export default function GMRoster() {
   const otherUsed = usedSum((m) => m.other_amount);
   const schUsed = usedSum((m) => m.scholarship_amount);
   // Actual Pay = the authoritative coach number (nil_value); only finalize changes it.
-  const actualUsed = allRows.reduce((s, r) => s + rowActual(r), 0);
+  const actualUsed = allRows.reduce((s, r) => s + (rowActual(r) ?? 0), 0);
   const popupBudget = { ...effCaps, finalized: !!b?.finalized } as GmBudget;
 
   // One budget box — read-only. Shows used / allotment as whole dollars; caps

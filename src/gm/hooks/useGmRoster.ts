@@ -422,7 +422,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
   // they survive a refresh — WITHOUT finalizing or pushing anything to the coach.
   // This is the private working state; Finalize Roster Pay is the only push.
   const saveRosterDraft = useMutation({
-    mutationFn: async (rowsWithMoney: { row: GmRow; money: RowMoney }[]) => {
+    mutationFn: async ({ rows: rowsWithMoney }: { rows: { row: GmRow; money: RowMoney }[]; silent?: boolean }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
       const now = new Date().toISOString();
       for (const { row, money } of rowsWithMoney) {
@@ -440,7 +440,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         if (error) throw error;
       }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); toast.success("Saved — visible only to your staff until you finalize"); },
+    onSuccess: (_d, vars) => { qc.invalidateQueries({ queryKey: key }); if (!vars.silent) toast.success("Saved — visible only to your staff until you finalize"); },
     onError: (e: any) => toast.error(`Save failed: ${e.message}`),
   });
 
@@ -783,8 +783,8 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     finalizeRosterPay: (rowsWithMoney: { row: GmRow; money: RowMoney }[], caps: BudgetCaps, onDone?: () => void) =>
       finalizeRosterPay.mutate({ rows: rowsWithMoney, caps }, onDone ? { onSuccess: () => onDone() } : undefined),
     isFinalizingRoster: finalizeRosterPay.isPending,
-    saveRosterDraft: (rowsWithMoney: { row: GmRow; money: RowMoney }[], onDone?: () => void) =>
-      saveRosterDraft.mutate(rowsWithMoney, onDone ? { onSuccess: () => onDone() } : undefined),
+    saveRosterDraft: (rowsWithMoney: { row: GmRow; money: RowMoney }[], onDone?: () => void, silent?: boolean) =>
+      saveRosterDraft.mutate({ rows: rowsWithMoney, silent }, onDone ? { onSuccess: () => onDone() } : undefined),
     isSavingDraft: saveRosterDraft.isPending,
     isFinalizing: commitBudget.isPending,
   };
