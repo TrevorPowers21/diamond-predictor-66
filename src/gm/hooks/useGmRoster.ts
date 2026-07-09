@@ -412,6 +412,51 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     onError: (e: any) => toast.error(`Finalize failed: ${e.message}`),
   });
 
+  // Finalize the WHOLE roster in one push: every row's Actual Pay → the coach's
+  // team_build_players.nil_value + gm_player_finance (finalized), AND the budget
+  // caps → team_builds.total_budget. This is the single "push to coach" action.
+  const finalizeRosterPay = useMutation({
+    mutationFn: async ({ rows: rowsWithMoney, caps }: { rows: { row: GmRow; money: RowMoney }[]; caps: BudgetCaps }) => {
+      if (!effectiveTeamId) throw new Error("No team in scope");
+      const now = new Date().toISOString();
+      for (const { row, money } of rowsWithMoney) {
+        if (row.is_recruit || row.is_added_target) continue; // injected/hypothetical rows have no finance line
+        const rev = money.rev_share, nilA = money.nil_amount, other = money.other_amount;
+        const actualPay = rev == null && nilA == null && other == null ? null : Number(rev ?? 0) + Number(nilA ?? 0) + Number(other ?? 0);
+        const { error } = await (supabase as any).from("gm_player_finance").upsert(
+          {
+            build_player_id: row.build_player_id, customer_team_id: effectiveTeamId, player_id: row.player_id, season,
+            scholarship_amount: money.scholarship_amount, rev_share: rev, nil_amount: nilA, other_amount: other, actual_pay: actualPay,
+            finalized: true, finalized_at: now, updated_by_user_id: user?.id ?? null, updated_at: now,
+          },
+          { onConflict: "build_player_id" },
+        );
+        if (error) throw error;
+        const { error: e2 } = await (supabase as any).from("team_build_players").update({ nil_value: actualPay }).eq("id", row.build_player_id);
+        if (e2) throw e2;
+      }
+      // Budget totals → coach.
+      const total = (caps.rev_share_total ?? 0) + (caps.nil_total ?? 0) + (caps.other_total ?? 0);
+      const { error: bErr } = await (supabase as any).from("gm_budget").upsert(
+        { customer_team_id: effectiveTeamId, season, ...caps, finalized: true, finalized_at: now, updated_by_user_id: user?.id ?? null, updated_at: now },
+        { onConflict: "customer_team_id,season" },
+      );
+      if (bErr) throw bErr;
+      if (activeBuildId) {
+        const { error: e3 } = await (supabase as any).from("team_builds").update({ total_budget: total }).eq("id", activeBuildId);
+        if (e3) throw e3;
+      }
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, "finalized roster pay and pushed it to the coach", "/gm/roster");
+      return { count: rowsWithMoney.filter((r) => !r.row.is_recruit && !r.row.is_added_target).length, total };
+    },
+    onSuccess: ({ count, total }) => {
+      qc.invalidateQueries({ queryKey: key });
+      qc.invalidateQueries({ queryKey: ["gm-activity"] });
+      toast.success(`Finalized ${count} players + $${Math.round(total).toLocaleString("en-US")} budget — pushed to Team Builder`);
+    },
+    onError: (e: any) => toast.error(`Finalize failed: ${e.message}`),
+  });
+
   // ── Build management (copy-on-write) ──────────────────────────────────────
   const activeBuildIsDefault = !!builds.find((bd) => bd.id === activeBuildId)?.is_default;
 
@@ -644,6 +689,9 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     saveBudget: (patch: Partial<GmBudget>) => saveBudget.mutate(patch),
     finalizeBudget: (finalized: boolean) => saveBudget.mutate({ finalized }),
     commitBudget: (caps: { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown?: GmOtherLine[] | null }) => commitBudget.mutate(caps),
+    finalizeRosterPay: (rowsWithMoney: { row: GmRow; money: RowMoney }[], caps: BudgetCaps, onDone?: () => void) =>
+      finalizeRosterPay.mutate({ rows: rowsWithMoney, caps }, onDone ? { onSuccess: () => onDone() } : undefined),
+    isFinalizingRoster: finalizeRosterPay.isPending,
     isFinalizing: commitBudget.isPending,
   };
 }

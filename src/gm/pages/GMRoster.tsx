@@ -247,6 +247,7 @@ export default function GMRoster() {
   const [noteDraft, setNoteDraft] = useState("");
   const openNote = (r: GmRow) => { setNoteDraft(""); setNoteRow(r); };
   const [finalizeRosterOpen, setFinalizeRosterOpen] = useState(false);
+  const [finalizePayOpen, setFinalizePayOpen] = useState(false);
   const [addPlayerOpen, setAddPlayerOpen] = useState(false);
   const [addName, setAddName] = useState("");
   const [addPosition, setAddPosition] = useState("");
@@ -524,6 +525,7 @@ export default function GMRoster() {
                 )}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              <DropdownMenuItem disabled={gm.isProjection} onClick={() => setFinalizePayOpen(true)}>Finalize Roster Pay → Coach</DropdownMenuItem>
               <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setFinalizeRosterOpen(true)}>Finalize {gm.season} Roster</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -769,6 +771,27 @@ export default function GMRoster() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => { if (gm.selectedBuildId) gm.finalizeRoster(gm.selectedBuildId); setFinalizeRosterOpen(false); }}>Finalize Roster</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Finalize Roster Pay — push every player's Actual Pay + the budget to the coach. */}
+      <AlertDialog open={finalizePayOpen} onOpenChange={setFinalizePayOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle style={OSWALD}>Push roster pay to the coach's view?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This writes <span className="font-semibold text-foreground">every player's Actual Pay</span> and the <span className="font-semibold text-foreground">budget totals</span> to the coach's Team Builder — the numbers they see and plan against. It overwrites what's there now. You can keep editing after; this is just what's currently pushed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={gm.isFinalizingRoster}
+              onClick={() => gm.finalizeRosterPay(allRows.map((r) => ({ row: r, money: effMoney(r) })), effCaps, () => { setRowDrafts({}); setFinalizePayOpen(false); })}
+            >
+              Finalize &amp; Push
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
