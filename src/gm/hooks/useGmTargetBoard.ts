@@ -21,12 +21,18 @@ export interface GmTargetNote {
 export interface GmTarget {
   player_id: string;
   name: string;
+  first_name: string;
+  last_name: string;
   position: string | null;
   team: string | null;
+  conference: string | null;
+  class_year: string | null;
+  portal_status: string;
   is_pitcher: boolean;
   war: number | null;
   market_value: number | null;
   offer: number | null;            // what we're willing to pay (GM-only)
+  asking: number | null;           // what the player is asking (GM-only)
   notes: GmTargetNote[];
   /** Precomputed prediction row — snapshotted onto the build row on Add to Roster. */
   snapshot: Record<string, any> | null;
@@ -44,7 +50,7 @@ export interface GmTarget {
 export function useGmTargetBoard() {
   const { user, effectiveTeamId } = useAuth();
   const qc = useQueryClient();
-  const { board, isLoading: boardLoading } = useTargetBoard();
+  const { board, isLoading: boardLoading, removePlayer } = useTargetBoard();
   const playerIds = useMemo(() => board.map((r) => r.player_id), [board]);
 
   const { data: predByPlayer = new Map<string, any>(), isLoading: predLoading } = useQuery({
@@ -66,14 +72,14 @@ export function useGmTargetBoard() {
   });
 
   const offerKey = ["gm-target-offers", effectiveTeamId ?? null];
-  const { data: offerByPlayer = new Map<string, number>() } = useQuery({
+  const { data: offerByPlayer = new Map<string, { offer: number | null; asking: number | null }>() } = useQuery({
     queryKey: offerKey,
     enabled: !!user?.id && !!effectiveTeamId,
     queryFn: async () => {
       const { data } = await (supabase as any)
-        .from("gm_target_offer").select("player_id, offer_amount").eq("customer_team_id", effectiveTeamId);
-      const m = new Map<string, number>();
-      for (const r of data || []) if (r.offer_amount != null) m.set(r.player_id, Number(r.offer_amount));
+        .from("gm_target_offer").select("player_id, offer_amount, asking_price").eq("customer_team_id", effectiveTeamId);
+      const m = new Map<string, { offer: number | null; asking: number | null }>();
+      for (const r of data || []) m.set(r.player_id, { offer: r.offer_amount != null ? Number(r.offer_amount) : null, asking: r.asking_price != null ? Number(r.asking_price) : null });
       return m;
     },
   });
@@ -103,15 +109,22 @@ export function useGmTargetBoard() {
         const pitcher = isPitcherPos(r.position);
         const war = pitcher ? (pred?.p_war ?? null) : (pred?.o_war ?? null);
         const market = pred?.market_value ?? pred?.twp_hitter_market_value ?? pred?.twp_pitcher_market_value ?? null;
+        const deal = offerByPlayer.get(r.player_id);
         return {
           player_id: r.player_id,
           name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "—",
+          first_name: r.first_name ?? "",
+          last_name: r.last_name ?? "",
           position: r.position,
           team: r.team,
+          conference: r.conference ?? null,
+          class_year: r.class_year ?? null,
+          portal_status: r.portal_status ?? "NOT IN PORTAL",
           is_pitcher: pitcher,
           war,
           market_value: market,
-          offer: offerByPlayer.get(r.player_id) ?? null,
+          offer: deal?.offer ?? null,
+          asking: deal?.asking ?? null,
           notes: notesByPlayer.get(r.player_id) ?? [],
           snapshot: pred ?? null,
         };
@@ -119,17 +132,18 @@ export function useGmTargetBoard() {
     [board, predByPlayer, offerByPlayer, notesByPlayer],
   );
 
-  const saveOffer = useMutation({
-    mutationFn: async ({ playerId, amount }: { playerId: string; amount: number | null }) => {
+  // One upsert for either deal field — pass the column being edited.
+  const saveDeal = useMutation({
+    mutationFn: async ({ playerId, field, amount }: { playerId: string; field: "offer_amount" | "asking_price"; amount: number | null }) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
       const { error } = await (supabase as any).from("gm_target_offer").upsert(
-        { customer_team_id: effectiveTeamId, player_id: playerId, offer_amount: amount, updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() },
+        { customer_team_id: effectiveTeamId, player_id: playerId, [field]: amount, updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() },
         { onConflict: "customer_team_id,player_id" },
       );
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: offerKey }),
-    onError: (e: any) => toast.error(`Save offer failed: ${e.message}`),
+    onError: (e: any) => toast.error(`Save failed: ${e.message}`),
   });
 
   const addNote = useMutation({
@@ -157,8 +171,11 @@ export function useGmTargetBoard() {
   return {
     targets,
     isLoading: boardLoading || predLoading,
-    saveOffer: (playerId: string, amount: number | null) => saveOffer.mutate({ playerId, amount }),
+    saveOffer: (playerId: string, amount: number | null) => saveDeal.mutate({ playerId, field: "offer_amount", amount }),
+    saveAsking: (playerId: string, amount: number | null) => saveDeal.mutate({ playerId, field: "asking_price", amount }),
     addNote: (playerId: string, body: string) => addNote.mutate({ playerId, body }),
     removeNote: (id: string) => removeNote.mutate(id),
+    // Remove from the universal target board (e.g. after they commit elsewhere).
+    removeFromBoard: (playerId: string) => removePlayer(playerId),
   };
 }

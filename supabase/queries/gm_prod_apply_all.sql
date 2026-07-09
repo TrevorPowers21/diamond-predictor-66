@@ -427,4 +427,10 @@ CREATE POLICY gm_target_notes_all ON public.gm_target_notes
   WITH CHECK (public.has_role(auth.uid(), 'superadmin'::public.app_role) OR public.is_team_member(customer_team_id));
 
 
+-- ---- 20260709160000_gm_target_asking.sql ----
+-- Add an "asking price" alongside "willing to pay" on the GM target overlay.
+-- Same (customer_team_id, player_id) row as gm_target_offer.offer_amount.
+ALTER TABLE public.gm_target_offer ADD COLUMN IF NOT EXISTS asking_price numeric;
+
+
 NOTIFY pgrst, 'reload schema';
