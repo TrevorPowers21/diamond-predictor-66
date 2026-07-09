@@ -687,6 +687,61 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     onError: (e: any) => toast.error(`Add player failed: ${e.message}`),
   });
 
+  // Add a TARGET (a real DB player off the shared target board) onto the active
+  // build's roster. Copy-on-write off the default first, snapshot the target's
+  // precomputed projection onto the build row (so both GM and coach read WAR /
+  // Market without a re-run), mark it an incoming "target", and seed nil_value
+  // from what the GM is willing to pay. The coach sees it appear on their build.
+  const addTargetToRoster = useMutation({
+    mutationFn: async ({ playerId, name, position, isPitcher, snapshot, offer, buildName }: {
+      playerId: string; name: string; position: string | null; isPitcher: boolean;
+      snapshot: Record<string, any> | null; offer: number; buildName: string;
+    }) => {
+      if (!effectiveTeamId || !activeBuildId) throw new Error("No team/build in scope");
+      let targetBuildId = activeBuildId;
+      let switched: string | null = null;
+      if (activeBuildIsDefault) {
+        targetBuildId = await cloneBuildInto(buildName, activeBuildId);
+        switched = targetBuildId;
+      }
+      // Guard against a double-add on the same build.
+      const { data: existing } = await (supabase as any).from("team_build_players")
+        .select("id").eq("build_id", targetBuildId).eq("player_id", playerId).maybeSingle();
+      if (existing) throw new Error(`${name} is already on this build`);
+
+      const snap = snapshot ?? {};
+      const depthRole = isPitcher
+        ? (snap.pitcher_role === "SP" ? "weekend_starter" : snap.pitcher_role === "SM" ? "weekday_starter" : "specialist_reliever")
+        : (snap.hitter_depth_role ?? "bench");
+      const notes = serializeBuildPlayerMeta(
+        null, null, null, "target", depthRole as any, "SJ", 0, false, false, null, null, null, (offer || 0) > 0,
+      );
+      const { error } = await (supabase as any).from("team_build_players").insert({
+        build_id: targetBuildId, player_id: playerId, source: "transfer",
+        position_slot: position || null, depth_order: 1, included_in_roster: true,
+        player_snapshot: snap, production_notes: notes, nil_value: Number(offer) || 0,
+      });
+      if (error) throw error;
+      await logGmActivity(effectiveTeamId, user?.email ?? null, user?.id ?? null, `added ${name} to the roster from the target board`, "/gm/roster");
+      return { switched, name };
+    },
+    onSuccess: ({ switched, name }) => {
+      qc.invalidateQueries({ queryKey: ["gm-builds"] });
+      qc.invalidateQueries({ queryKey: key });
+      qc.invalidateQueries({ queryKey: ["gm-activity"] });
+      if (switched) setPickedBuildId(switched);
+      toast.success(`Added ${name} to roster`);
+    },
+    onError: (e: any) => toast.error(`Add to roster failed: ${e.message}`),
+  });
+
+  // player_ids already on the active build's roster (for the target board's
+  // "On Roster" flag).
+  const onBuildPlayerIds = useMemo(
+    () => new Set<string>([...hitters, ...pitchers].map((r) => r.player_id).filter(Boolean) as string[]),
+    [hitters, pitchers],
+  );
+
   return {
     teamName,
     season,
@@ -718,6 +773,10 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     restorePlayer: (buildPlayerId: string) => restorePlayer.mutate(buildPlayerId),
     finalizeRoster: (buildId: string) => finalizeRoster.mutate(buildId),
     addLocalPlayer: (name: string, position: string, projectionTier: LocalProjectionTier, nilValue: number, buildName: string) => addLocalPlayer.mutate({ name, position, projectionTier, nilValue, buildName }),
+    onBuildPlayerIds,
+    addTargetToRoster: (args: { playerId: string; name: string; position: string | null; isPitcher: boolean; snapshot: Record<string, any> | null; offer: number; buildName: string }, onDone?: () => void) =>
+      addTargetToRoster.mutate(args, onDone ? { onSuccess: () => onDone() } : undefined),
+    isAddingTarget: addTargetToRoster.isPending,
     saveBudget: (patch: Partial<GmBudget>) => saveBudget.mutate(patch),
     finalizeBudget: (finalized: boolean) => saveBudget.mutate({ finalized }),
     commitBudget: (caps: { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown?: GmOtherLine[] | null }) => commitBudget.mutate(caps),
