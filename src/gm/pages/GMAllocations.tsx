@@ -148,6 +148,81 @@ function SourceCard({ source, players, alloc, allocated, onRename, onTotal, onDe
   );
 }
 
+type RevRow = { bpid: string; pid: string; name: string; rev: number | null };
+
+/** One column (Hitters or Pitchers) of the Rev Share card: add a player, type
+ *  their amount; only allocated players show, like a vendor card. */
+function RevAllocColumn({ title, rows, onSet }: { title: string; rows: RevRow[]; onSet: (bpid: string, pid: string, amount: number | null) => void }) {
+  const [addOpen, setAddOpen] = useState(false);
+  const allocated = rows.filter((r) => r.rev != null);
+  const unallocated = rows.filter((r) => r.rev == null);
+  return (
+    <div>
+      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</div>
+      {allocated.length === 0 ? (
+        <p className="py-1 text-xs text-muted-foreground">No allocations yet.</p>
+      ) : (
+        <div className="divide-y divide-border/40">
+          {allocated.map((r) => (
+            <div key={r.bpid} className="flex items-center gap-2 py-1.5">
+              <span className="flex-1 truncate text-sm">{r.name}</span>
+              <MoneyInput value={r.rev} onSave={(n) => onSet(r.bpid, r.pid, n)} className="w-24" />
+              <button onClick={() => onSet(r.bpid, r.pid, null)} className="text-muted-foreground/40 hover:text-destructive transition" title="Remove"><X className="h-3.5 w-3.5" /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="pt-2">
+        {addOpen ? (
+          <Select value="" onValueChange={(bpid) => { const r = unallocated.find((x) => x.bpid === bpid); if (r) onSet(r.bpid, r.pid, 0); setAddOpen(false); }}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Pick a player…" /></SelectTrigger>
+            <SelectContent>
+              {unallocated.length === 0 ? <div className="px-2 py-1.5 text-xs text-muted-foreground">All allocated</div>
+                : unallocated.map((r) => <SelectItem key={r.bpid} value={r.bpid} className="text-xs">{r.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        ) : (
+          <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"><Plus className="h-3.5 w-3.5" /> Add player</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Full-width Rev Share box — Total / Allocated / Remaining like a vendor card,
+ *  with Hitters + Pitchers as two add-player columns. */
+function RevShareCard({ hitters, pitchers, total, allocated, onTotal, onSet }: {
+  hitters: RevRow[]; pitchers: RevRow[]; total: number | null; allocated: number;
+  onTotal: (n: number | null) => void; onSet: (bpid: string, pid: string, amount: number | null) => void;
+}) {
+  const remaining = total != null ? total - allocated : null;
+  const over = remaining != null && remaining < 0;
+  return (
+    <Card className="border-border/60">
+      <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
+        <div className="grid grid-cols-3 gap-2 text-center max-w-md ml-auto">
+          <div>
+            <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Total</div>
+            <MoneyInput value={total} onSave={onTotal} placeholder="$0" className="w-full text-center" />
+          </div>
+          <div>
+            <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Allocated</div>
+            <div className="pt-1.5 font-mono text-sm font-semibold tabular-nums">{money(allocated)}</div>
+          </div>
+          <div>
+            <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Remaining</div>
+            <div className={cn("pt-1.5 font-mono text-sm font-semibold tabular-nums", over ? "text-rose-500" : "text-emerald-400")}>{remaining == null ? "—" : money(Math.abs(remaining))}</div>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-x-8 gap-y-4 p-4 md:grid-cols-2">
+        <RevAllocColumn title="Hitters" rows={hitters} onSet={onSet} />
+        <RevAllocColumn title="Pitchers" rows={pitchers} onSet={onSet} />
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function GMAllocations() {
   const gm = useGmRoster();
   const { sources, isLoading, allocBySource, allocatedTotal, addSource, updateSource, removeSource, setAllocation } = useGmAllocations(gm.selectedBuildId);
@@ -161,11 +236,10 @@ export default function GMAllocations() {
   );
   // Rev Share is flat (no categories): a per-player amount stored on the roster
   // (gm_player_finance.rev_share). Edited here, it syncs to Roster Management.
-  const revRows = useMemo(
-    () => [...gm.hitters, ...gm.pitchers].filter((r) => r.player_id).map((r) => ({ bpid: r.build_player_id, pid: r.player_id as string, name: r.name, rev: r.rev_share })),
-    [gm.hitters, gm.pitchers],
-  );
-  const revShareTotal = revRows.reduce((s, r) => s + (r.rev ?? 0), 0);
+  // Split hitters / pitchers into two columns of one full-width card.
+  const revHitters = useMemo(() => gm.hitters.filter((r) => r.player_id).map((r) => ({ bpid: r.build_player_id, pid: r.player_id as string, name: r.name, rev: r.rev_share })), [gm.hitters]);
+  const revPitchers = useMemo(() => gm.pitchers.filter((r) => r.player_id).map((r) => ({ bpid: r.build_player_id, pid: r.player_id as string, name: r.name, rev: r.rev_share })), [gm.pitchers]);
+  const revAllocated = [...revHitters, ...revPitchers].reduce((s, r) => s + (r.rev ?? 0), 0);
 
   const buckets: AllocationBucket[] = ["nil", "other"];
 
@@ -207,25 +281,22 @@ export default function GMAllocations() {
         );
       })()}
 
-      {/* Revenue Share — flat per player, synced with Roster Management. */}
-      {revRows.length > 0 && (
+      {/* Revenue Share — one full-width box, hitters + pitchers in two columns,
+          synced with Roster Management. */}
+      {(revHitters.length + revPitchers.length) > 0 && (
         <div className="space-y-2">
           <div className="flex items-baseline gap-2">
             <h3 className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Revenue Share</h3>
-            <span className="text-[11px] text-muted-foreground">{money(revShareTotal)} total · flat per player, synced with Roster Management</span>
+            <span className="text-[11px] text-muted-foreground">flat per player · synced with Roster Management</span>
           </div>
-          <Card className="border-border/60">
-            <CardContent className="p-3">
-              <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
-                {revRows.map((r) => (
-                  <div key={r.bpid} className="flex items-center gap-2">
-                    <span className="flex-1 truncate text-sm">{r.name}</span>
-                    <MoneyInput value={r.rev} onSave={(n) => gm.setFinanceField(r.bpid, r.pid, "rev_share", n)} />
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          <RevShareCard
+            hitters={revHitters}
+            pitchers={revPitchers}
+            total={gm.budget?.rev_share_total ?? null}
+            allocated={revAllocated}
+            onTotal={(n) => gm.saveBudget({ rev_share_total: n })}
+            onSet={(bpid, pid, amt) => gm.setFinanceField(bpid, pid, "rev_share", amt)}
+          />
         </div>
       )}
 
