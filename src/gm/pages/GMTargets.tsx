@@ -213,7 +213,7 @@ export default function GMTargets() {
                           {onRoster ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-400"><Check className="h-3 w-3" /> On Roster</span>
                           ) : (
-                            <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" disabled={gm.isAddingTarget} onClick={() => setConfirmAdd(t)}><Plus className="h-3.5 w-3.5" /> Add</Button>
+                            <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" disabled={gm.isAddingTarget} onClick={() => setConfirmAdd(t)}><Plus className="h-3.5 w-3.5" /> Add to Roster</Button>
                           )}
                         </TableCell>
                         <TableCell className="w-[36px] p-0 text-center">
