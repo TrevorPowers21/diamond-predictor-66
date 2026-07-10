@@ -159,6 +159,13 @@ export default function GMAllocations() {
     () => [...gm.hitters, ...gm.pitchers].filter((r) => r.player_id).map((r) => ({ player_id: r.player_id as string, name: r.name })),
     [gm.hitters, gm.pitchers],
   );
+  // Rev Share is flat (no categories): a per-player amount stored on the roster
+  // (gm_player_finance.rev_share). Edited here, it syncs to Roster Management.
+  const revRows = useMemo(
+    () => [...gm.hitters, ...gm.pitchers].filter((r) => r.player_id).map((r) => ({ bpid: r.build_player_id, pid: r.player_id as string, name: r.name, rev: r.rev_share })),
+    [gm.hitters, gm.pitchers],
+  );
+  const revShareTotal = revRows.reduce((s, r) => s + (r.rev ?? 0), 0);
 
   const buckets: AllocationBucket[] = ["nil", "other"];
 
@@ -199,6 +206,28 @@ export default function GMAllocations() {
           </div>
         );
       })()}
+
+      {/* Revenue Share — flat per player, synced with Roster Management. */}
+      {revRows.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-baseline gap-2">
+            <h3 className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Revenue Share</h3>
+            <span className="text-[11px] text-muted-foreground">{money(revShareTotal)} total · flat per player, synced with Roster Management</span>
+          </div>
+          <Card className="border-border/60">
+            <CardContent className="p-3">
+              <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
+                {revRows.map((r) => (
+                  <div key={r.bpid} className="flex items-center gap-2">
+                    <span className="flex-1 truncate text-sm">{r.name}</span>
+                    <MoneyInput value={r.rev} onSave={(n) => gm.setFinanceField(r.bpid, r.pid, "rev_share", n)} />
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {isLoading ? (
         <Card className="border-border/60"><CardContent className="py-16 text-center text-sm text-muted-foreground">Loading…</CardContent></Card>

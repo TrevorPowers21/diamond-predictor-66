@@ -449,6 +449,23 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     onError: (e: any) => toast.error(`Save failed: ${e.message}`),
   });
 
+  // Set a single player's Rev Share (or an Unassigned NIL/Other) directly on
+  // gm_player_finance. Used by Funding Sources so Rev Share + the Unassigned
+  // totals stay in sync with the roster (both read this row). Only the passed
+  // column is touched on conflict, so it never clobbers the other buckets.
+  const setFinanceField = useMutation({
+    mutationFn: async ({ buildPlayerId, playerId, field, amount }: { buildPlayerId: string; playerId: string | null; field: "rev_share" | "nil_amount" | "other_amount"; amount: number | null }) => {
+      if (!effectiveTeamId) throw new Error("No team in scope");
+      const { error } = await (supabase as any).from("gm_player_finance").upsert(
+        { build_player_id: buildPlayerId, customer_team_id: effectiveTeamId, player_id: playerId, season, [field]: amount, updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() },
+        { onConflict: "build_player_id" },
+      );
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: key }),
+    onError: (e: any) => toast.error(`Save failed: ${e.message}`),
+  });
+
   // Finalize the WHOLE roster in one push: every row's Actual Pay → the coach's
   // team_build_players.nil_value + gm_player_finance (finalized), AND the budget
   // caps → team_builds.total_budget. This is the single "push to coach" action.
@@ -816,6 +833,8 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     isFinalizingRoster: finalizeRosterPay.isPending,
     saveRosterDraft: (rowsWithMoney: { row: GmRow; money: RowMoney }[], onDone?: () => void, silent?: boolean) =>
       saveRosterDraft.mutate({ rows: rowsWithMoney, silent }, onDone ? { onSuccess: () => onDone() } : undefined),
+    setFinanceField: (buildPlayerId: string, playerId: string | null, field: "rev_share" | "nil_amount" | "other_amount", amount: number | null) =>
+      setFinanceField.mutate({ buildPlayerId, playerId, field, amount }),
     isSavingDraft: saveRosterDraft.isPending,
     isFinalizing: commitBudget.isPending,
   };
