@@ -83,25 +83,29 @@ function MoneyCell({ value, onSave }: { value: number | null; onSave: (n: number
   );
 }
 
-// Scholarship is an equivalency: a % of one scholarship (0–100).
+// Scholarship is an equivalency: a % of one scholarship (0–100). The % sign is
+// pinned inside the box at all times (muted) — you only type the number.
 function PctCell({ value, onSave }: { value: number | null; onSave: (n: number | null) => void }) {
   const [local, setLocal] = useState<string | null>(null);
-  const display = local != null ? local : value == null ? "" : `${Math.round(value)}%`;
+  const display = local != null ? local : value == null ? "" : String(Math.round(value));
   return (
-    <Input
-      value={display}
-      inputMode="numeric"
-      placeholder="—"
-      className="h-8 w-20 text-right text-xs font-mono tabular-nums ml-auto"
-      onChange={(e) => { const d = e.target.value.replace(/[^0-9]/g, ""); setLocal(d === "" ? "" : `${Math.min(100, Number(d))}%`); }}
-      onBlur={() => {
-        if (local != null) {
-          const d = local.replace(/[^0-9]/g, "");
-          onSave(d === "" ? null : Math.min(100, Number(d)));
-          setLocal(null);
-        }
-      }}
-    />
+    <div className="relative ml-auto w-20">
+      <Input
+        value={display}
+        inputMode="numeric"
+        placeholder="0"
+        className="h-8 w-20 pr-5 text-right text-xs font-mono tabular-nums"
+        onChange={(e) => { const d = e.target.value.replace(/[^0-9]/g, ""); setLocal(d === "" ? "" : String(Math.min(100, Number(d)))); }}
+        onBlur={() => {
+          if (local != null) {
+            const d = local.replace(/[^0-9]/g, "");
+            onSave(d === "" ? null : Math.min(100, Number(d)));
+            setLocal(null);
+          }
+        }}
+      />
+      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+    </div>
   );
 }
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${Math.round(v)}%`);
