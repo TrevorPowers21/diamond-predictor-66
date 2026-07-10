@@ -83,7 +83,7 @@ export function deriveGmRows(
 export async function loadGmBuildRoster(
   buildId: string,
   teamId: string,
-): Promise<{ rows: GmRow[]; coachTotalBudget: number | null }> {
+): Promise<{ rows: GmRow[]; coachTotalBudget: number | null; derivedCaps: { nil: number; other: number } }> {
   const { data: bps } = await (supabase as any)
     .from("team_build_players")
     .select("id, player_id, custom_name, position_slot, nil_value, included_in_roster, player_snapshot, production_notes")
@@ -116,8 +116,17 @@ export async function loadGmBuildRoster(
   // Funding-vendor allocations for THIS build, summed per player_id per bucket.
   // Player NIL/Other = Unassigned (gm_player_finance) + these vendor sums.
   const { data: srcRows2 } = await (supabase as any)
-    .from("gm_allocation_source").select("id, bucket").eq("team_build_id", buildId);
+    .from("gm_allocation_source").select("id, bucket, total").eq("team_build_id", buildId);
   const bucketBySource = new Map<string, "nil" | "other">((srcRows2 || []).map((s: any) => [s.id, s.bucket]));
+  // Per-build budget caps are DERIVED: the NIL/Other cap for a build is the sum
+  // of that build's Funding Sources category pools. Funding Sources is the
+  // single source of truth; Edit Budget shows these read-only.
+  const derivedCaps = { nil: 0, other: 0 };
+  for (const s of srcRows2 || []) {
+    if (s.total != null && (s.bucket === "nil" || s.bucket === "other")) {
+      derivedCaps[s.bucket as "nil" | "other"] += Number(s.total);
+    }
+  }
   const vendorByPlayer = new Map<string, { nil: number; other: number }>();
   const srcIds = (srcRows2 || []).map((s: any) => s.id);
   if (srcIds.length) {
@@ -138,5 +147,5 @@ export async function loadGmBuildRoster(
   }
 
   const rows = deriveGmRows(rowsRaw, pById, finByBp, readPitchingWeights(), vendorByPlayer);
-  return { rows, coachTotalBudget };
+  return { rows, coachTotalBudget, derivedCaps };
 }

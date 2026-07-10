@@ -265,15 +265,16 @@ export default function GMAllocations() {
   }, [gm.hitters, gm.pitchers]);
 
   // Program-budget summary — computed the SAME way as Roster Management's budget
-  // boxes so both pages agree. Used = money assigned to players; cap = Edit Budget.
+  // boxes so both pages agree. Used = money assigned to players; cap = the sum of
+  // this build's Funding Sources categories (derived, single source of truth).
   const bucketUsed = useMemo(() => {
     let nil = 0, other = 0;
     for (const r of [...gm.hitters, ...gm.pitchers]) { nil += (r.nil_amount ?? 0) + r.nil_vendor; other += (r.other_amount ?? 0) + r.other_vendor; }
     return { nil, other };
   }, [gm.hitters, gm.pitchers]);
   const revCap = gm.budget?.rev_share_total ?? null;
-  const nilCap = gm.budget?.nil_total ?? null;
-  const otherCap = gm.budget?.other_total ?? null;
+  const nilCap = gm.derivedCaps.nil;
+  const otherCap = gm.derivedCaps.other;
   const totalUsed = revAllocated + bucketUsed.nil + bucketUsed.other;
   const totalCap = ((revCap ?? 0) + (nilCap ?? 0) + (otherCap ?? 0)) || null;
   const hasRoster = gm.hitters.length + gm.pitchers.length > 0;

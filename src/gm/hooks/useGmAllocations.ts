@@ -87,7 +87,8 @@ export function useGmAllocations(buildId: string | null | undefined) {
       });
       if (error) throw error;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: srcKey }); toast.success("Category added"); },
+    // Adding a category changes the build's derived NIL/Other cap (roster query).
+    onSuccess: () => { qc.invalidateQueries({ queryKey: srcKey }); qc.invalidateQueries({ queryKey: ["gm-roster"] }); toast.success("Category added"); },
     onError: (e: any) => toast.error(`Add category failed: ${e.message}`),
   });
 
@@ -96,7 +97,8 @@ export function useGmAllocations(buildId: string | null | undefined) {
       const { error } = await (supabase as any).from("gm_allocation_source").update(patch).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: srcKey }),
+    // Editing a category's pool changes the build's derived NIL/Other cap.
+    onSuccess: () => { qc.invalidateQueries({ queryKey: srcKey }); qc.invalidateQueries({ queryKey: ["gm-roster"] }); },
     onError: (e: any) => toast.error(`Save failed: ${e.message}`),
   });
 

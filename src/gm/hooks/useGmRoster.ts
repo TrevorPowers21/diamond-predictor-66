@@ -169,19 +169,24 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     queryFn: async () => {
       // Roster rows (with the coach's on-read toggles applied) come from the
       // shared loader so the Scenarios page derives them identically.
-      const { rows, coachTotalBudget } = await loadGmBuildRoster(activeBuildId!, effectiveTeamId!);
+      const { rows, coachTotalBudget, derivedCaps } = await loadGmBuildRoster(activeBuildId!, effectiveTeamId!);
       const { data: bud } = await (supabase as any)
         .from("gm_budget").select("*").eq("customer_team_id", effectiveTeamId).eq("season", season).maybeSingle();
+      // NIL/Other caps are DERIVED per-build from the build's Funding Sources
+      // categories (single source of truth) — override whatever's stored so the
+      // roster + Funding Sources reconcile by construction.
       const budget: GmBudget | null = bud
-        ? { rev_share_total: bud.rev_share_total, nil_total: bud.nil_total, other_total: bud.other_total, scholarship_total: bud.scholarship_total, scholarship_mode: (bud.scholarship_mode as ScholarshipMode) ?? "pct", other_breakdown: (bud.other_breakdown as GmOtherLine[] | null) ?? null, finalized: !!bud.finalized }
+        ? { rev_share_total: bud.rev_share_total, nil_total: derivedCaps.nil, other_total: derivedCaps.other, scholarship_total: bud.scholarship_total, scholarship_mode: (bud.scholarship_mode as ScholarshipMode) ?? "pct", other_breakdown: (bud.other_breakdown as GmOtherLine[] | null) ?? null, finalized: !!bud.finalized }
         : null;
-      return { rows, budget, coachTotalBudget };
+      return { rows, budget, coachTotalBudget, derivedCaps };
     },
   });
 
   const baseRows = data?.rows ?? [];
   const budget = data?.budget ?? null;
   const coachTotalBudget = data?.coachTotalBudget ?? null;
+  // Per-build NIL/Other caps derived from the build's Funding Sources categories.
+  const derivedCaps = data?.derivedCaps ?? { nil: 0, other: 0 };
 
   // Committed/signed recruits from the recruiting board — injected as incoming
   // freshmen in a future-season projection (a 2028 commit shows up in the 2028
@@ -810,6 +815,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     hitters,
     pitchers,
     budget,
+    derivedCaps,
     coachTotalBudget,
     totals,
     finalizePlayer: (row: GmRow, money: RowMoney, finalize: boolean, onDone?: () => void) =>
