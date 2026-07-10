@@ -131,8 +131,8 @@ function SourceCard({ source, players, alloc, allocated, bucketName, onRename, o
                 <div key={p.player_id} className="flex items-center gap-2 px-4 py-1.5">
                   <span className="flex-1 truncate text-sm">{p.name}</span>
                   <MoneyInput value={alloc?.get(p.player_id) ?? null} onSave={(n) => onSet(p.player_id, n)} className="w-24" />
-                  {/* Grayed whole-bucket total — additive by default, edit down to absorb into Unassigned. */}
-                  <MoneyInput value={totalFor(p.player_id)} onSave={(n) => onSetTotal(p.player_id, n)} placeholder="—" className="w-24 text-muted-foreground" />
+                  {/* Whole-bucket total — additive by default, edit down to absorb into Unassigned. */}
+                  <MoneyInput value={totalFor(p.player_id)} onSave={(n) => onSetTotal(p.player_id, n)} placeholder="—" className="w-24 font-semibold text-[#D4AF37]" />
                   <button onClick={() => onSet(p.player_id, null)} className="text-muted-foreground/40 hover:text-destructive transition" title="Remove allocation"><X className="h-3.5 w-3.5" /></button>
                 </div>
               ))}

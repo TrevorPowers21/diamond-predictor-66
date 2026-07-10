@@ -105,7 +105,7 @@ export function useGmAllocations(buildId: string | null | undefined) {
       const { error } = await (supabase as any).from("gm_allocation_source").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: srcKey }); qc.invalidateQueries({ queryKey: allocKey }); toast.success("Category removed"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: srcKey }); qc.invalidateQueries({ queryKey: allocKey }); qc.invalidateQueries({ queryKey: ["gm-roster"] }); toast.success("Category removed"); },
     onError: (e: any) => toast.error(`Delete failed: ${e.message}`),
   });
 
@@ -124,7 +124,9 @@ export function useGmAllocations(buildId: string | null | undefined) {
       );
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: allocKey }),
+    // Also refresh the roster so the per-player bucket totals (nil_vendor /
+    // other_vendor) recompute — that's what the grayed total on the cards reads.
+    onSuccess: () => { qc.invalidateQueries({ queryKey: allocKey }); qc.invalidateQueries({ queryKey: ["gm-roster"] }); },
     onError: (e: any) => toast.error(`Save allocation failed: ${e.message}`),
   });
 
