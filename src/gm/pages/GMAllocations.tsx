@@ -149,8 +149,8 @@ function SourceCard({ source, players, alloc, allocated, onRename, onTotal, onDe
 }
 
 export default function GMAllocations() {
-  const { sources, isLoading, allocBySource, allocatedTotal, addSource, updateSource, removeSource, setAllocation } = useGmAllocations();
   const gm = useGmRoster();
+  const { sources, isLoading, allocBySource, allocatedTotal, addSource, updateSource, removeSource, setAllocation } = useGmAllocations(gm.selectedBuildId);
   const [addOpen, setAddOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<GmAllocationSource | null>(null);
 
@@ -169,7 +169,14 @@ export default function GMAllocations() {
           <Wallet className="h-5 w-5 text-[#D4AF37]" />
           <h2 className="text-2xl font-bold leading-tight" style={OSWALD}>Funding Sources</h2>
         </div>
-        <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setAddOpen(true)}><Plus className="h-3.5 w-3.5" /> Add Category</Button>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Build</span>
+          <Select value={gm.selectedBuildId ?? undefined} onValueChange={(v) => gm.setSelectedBuildId(v)}>
+            <SelectTrigger className="h-8 w-[170px] text-xs"><SelectValue placeholder="Select build" /></SelectTrigger>
+            <SelectContent>{gm.builds.map((b) => <SelectItem key={b.id} value={b.id} className="text-xs">{b.name}</SelectItem>)}</SelectContent>
+          </Select>
+          <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setAddOpen(true)}><Plus className="h-3.5 w-3.5" /> Add Category</Button>
+        </div>
       </div>
       <p className="text-xs text-muted-foreground -mt-1">Name a funding category, drop it in a bucket (NIL vendor or Other), set its total, then allocate to players. Remaining tracks against each category's pool.</p>
 

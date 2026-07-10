@@ -529,6 +529,32 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       .map((f: any) => { const c = { ...f }; delete c.id; delete c.created_at; delete c.updated_at; c.build_player_id = oldToNew.get(f.build_player_id); return c; })
       .filter((c: any) => c.build_player_id);
     if (finClones.length) { const { error: e3 } = await (supabase as any).from("gm_player_finance").insert(finClones); if (e3) throw e3; }
+
+    // Clone the funding plan (categories + allocations) so scenario copies start
+    // with the same vendor setup. Allocations are keyed by player_id, so they
+    // carry over as-is once the source ids are remapped to the new build.
+    const { data: srcFunding } = await (supabase as any).from("gm_allocation_source").select("*").eq("team_build_id", sourceBuildId);
+    const fundingSources = srcFunding || [];
+    if (fundingSources.length) {
+      const srcIdMap = new Map<string, string>();
+      for (const s of fundingSources) {
+        const { data: ns } = await (supabase as any).from("gm_allocation_source").insert({
+          customer_team_id: effectiveTeamId, team_build_id: newBuildId, name: s.name, bucket: s.bucket,
+          total: s.total, sort_order: s.sort_order, created_by_user_id: user?.id ?? null,
+        }).select("id").single();
+        if (ns) srcIdMap.set(s.id, ns.id);
+      }
+      const oldSrcIds = fundingSources.map((s: any) => s.id);
+      const srcAllocs: any[] = [];
+      for (let i = 0; i < oldSrcIds.length; i += 200) {
+        const { data: al } = await (supabase as any).from("gm_allocation").select("*").in("source_id", oldSrcIds.slice(i, i + 200));
+        srcAllocs.push(...(al || []));
+      }
+      const allocClones = srcAllocs
+        .map((a: any) => ({ customer_team_id: effectiveTeamId, source_id: srcIdMap.get(a.source_id), player_id: a.player_id, amount: a.amount, updated_by_user_id: user?.id ?? null }))
+        .filter((a: any) => a.source_id);
+      if (allocClones.length) { const { error: e4 } = await (supabase as any).from("gm_allocation").insert(allocClones); if (e4) throw e4; }
+    }
     return newBuildId;
   };
 

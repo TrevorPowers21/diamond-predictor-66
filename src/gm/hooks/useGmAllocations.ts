@@ -21,24 +21,26 @@ export interface GmAllocation {
 }
 
 /**
- * GM funding categories + per-player allocations. A "source" is a named
- * category the GM creates in a bucket (NIL vendor or Other), each with a total
- * pool. Allocations assign part of that pool to a player; remaining = total -
- * SUM(allocations). Team-scoped + shared across the staff.
+ * GM funding categories + per-player allocations, scoped to a single build so
+ * each build carries its own funding plan (scenario planning). A "source" is a
+ * named category in a bucket (NIL vendor or Other) with a total pool.
+ * Allocations assign part of that pool to a player; remaining = total -
+ * SUM(allocations). Team-scoped RLS, shared across the staff.
  */
-export function useGmAllocations() {
+export function useGmAllocations(buildId: string | null | undefined) {
   const { user, effectiveTeamId } = useAuth();
   const qc = useQueryClient();
 
-  const srcKey = ["gm-allocation-sources", effectiveTeamId ?? null];
+  const srcKey = ["gm-allocation-sources", effectiveTeamId ?? null, buildId ?? null];
   const { data: sources = [], isLoading: srcLoading } = useQuery({
     queryKey: srcKey,
-    enabled: !!user?.id && !!effectiveTeamId,
+    enabled: !!user?.id && !!effectiveTeamId && !!buildId,
     queryFn: async (): Promise<GmAllocationSource[]> => {
       const { data, error } = await (supabase as any)
         .from("gm_allocation_source")
         .select("id, name, bucket, total, sort_order")
         .eq("customer_team_id", effectiveTeamId)
+        .eq("team_build_id", buildId)
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true });
       if (error) throw error;
@@ -77,10 +79,10 @@ export function useGmAllocations() {
 
   const addSource = useMutation({
     mutationFn: async ({ name, bucket, total }: { name: string; bucket: AllocationBucket; total: number | null }) => {
-      if (!effectiveTeamId) throw new Error("No team in scope");
+      if (!effectiveTeamId || !buildId) throw new Error("No team/build in scope");
       const nextOrder = sources.length ? Math.max(...sources.map((s) => s.sort_order)) + 1 : 0;
       const { error } = await (supabase as any).from("gm_allocation_source").insert({
-        customer_team_id: effectiveTeamId, name: name.trim(), bucket, total, sort_order: nextOrder,
+        customer_team_id: effectiveTeamId, team_build_id: buildId, name: name.trim(), bucket, total, sort_order: nextOrder,
         created_by_user_id: user?.id ?? null,
       });
       if (error) throw error;
