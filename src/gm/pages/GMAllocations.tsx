@@ -264,6 +264,20 @@ export default function GMAllocations() {
     return m;
   }, [gm.hitters, gm.pitchers]);
 
+  // Program-budget summary — computed the SAME way as Roster Management's budget
+  // boxes so both pages agree. Used = money assigned to players; cap = Edit Budget.
+  const bucketUsed = useMemo(() => {
+    let nil = 0, other = 0;
+    for (const r of [...gm.hitters, ...gm.pitchers]) { nil += (r.nil_amount ?? 0) + r.nil_vendor; other += (r.other_amount ?? 0) + r.other_vendor; }
+    return { nil, other };
+  }, [gm.hitters, gm.pitchers]);
+  const revCap = gm.budget?.rev_share_total ?? null;
+  const nilCap = gm.budget?.nil_total ?? null;
+  const otherCap = gm.budget?.other_total ?? null;
+  const totalUsed = revAllocated + bucketUsed.nil + bucketUsed.other;
+  const totalCap = ((revCap ?? 0) + (nilCap ?? 0) + (otherCap ?? 0)) || null;
+  const hasRoster = gm.hitters.length + gm.pitchers.length > 0;
+
   const buckets: AllocationBucket[] = ["nil", "other"];
 
   return (
@@ -284,22 +298,22 @@ export default function GMAllocations() {
       </div>
       <p className="text-xs text-muted-foreground -mt-1">Name a funding category, drop it in a bucket (NIL vendor or Other), set its total, then allocate to players. Remaining tracks against each category's pool.</p>
 
-      {sources.length > 0 && (() => {
-        const pool = sources.reduce((s, x) => s + (x.total ?? 0), 0);
-        const alloc = sources.reduce((s, x) => s + allocatedTotal(x.id), 0);
-        const remaining = pool - alloc;
-        const tile = (label: string, val: string, accent?: string) => (
-          <div className="px-4 py-3 flex flex-col gap-0.5">
+      {hasRoster && (() => {
+        const tile = (label: string, used: number, cap: number | null, accent?: boolean) => (
+          <div className="flex flex-col gap-0.5 px-4 py-3">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
-            <span className={cn("text-xl font-bold tabular-nums", accent)} style={OSWALD}>{val}</span>
+            <span className="text-xl font-bold tabular-nums" style={OSWALD}>
+              <span className={cn(accent && "text-[#D4AF37]", cap != null && used > cap && "text-rose-500")}>{money(used)}</span>
+              {cap != null && <span className="text-xs font-normal text-muted-foreground"> / {money(cap)}</span>}
+            </span>
           </div>
         );
         return (
-          <div className="grid grid-cols-2 sm:grid-cols-4 rounded-lg border border-border/60 bg-muted/20 divide-x divide-border/50">
-            {tile("Total Pool", money(pool), "text-[#D4AF37]")}
-            {tile("Allocated", money(alloc))}
-            {tile("Remaining", money(Math.abs(remaining)), remaining < 0 ? "text-rose-500" : "text-emerald-400")}
-            {tile("Categories", String(sources.length))}
+          <div className="grid grid-cols-2 divide-x divide-y divide-border/50 rounded-lg border border-border/60 bg-muted/20 sm:grid-cols-4 sm:divide-y-0">
+            {tile("Revenue Share", revAllocated, revCap)}
+            {tile("NIL", bucketUsed.nil, nilCap)}
+            {tile("Other", bucketUsed.other, otherCap)}
+            {tile("Total", totalUsed, totalCap, true)}
           </div>
         );
       })()}
