@@ -67,15 +67,20 @@ function AddCategoryDialog({ open, onOpenChange, onAdd }: { open: boolean; onOpe
   );
 }
 
-function SourceCard({ source, players, alloc, allocated, onRename, onTotal, onDelete, onSet }: {
+function SourceCard({ source, players, alloc, allocated, bucketName, onRename, onTotal, onDelete, onSet, totalFor, onSetTotal }: {
   source: GmAllocationSource;
   players: { player_id: string; name: string }[];
   alloc: Map<string, number> | undefined;
   allocated: number;
+  bucketName: string; // "NIL" | "Other"
   onRename: (name: string) => void;
   onTotal: (n: number | null) => void;
   onDelete: () => void;
   onSet: (playerId: string, amount: number | null) => void;
+  // Player's whole-bucket total (Unassigned + all vendors), editable → adjusts
+  // their Unassigned and wires to Roster Management.
+  totalFor: (playerId: string) => number | null;
+  onSetTotal: (playerId: string, total: number | null) => void;
 }) {
   const [nameDraft, setNameDraft] = useState(source.name);
   const [addOpen, setAddOpen] = useState(false);
@@ -114,15 +119,25 @@ function SourceCard({ source, players, alloc, allocated, onRename, onTotal, onDe
         {allocatedPlayers.length === 0 ? (
           <p className="px-4 py-3 text-center text-xs text-muted-foreground">No allocations yet.</p>
         ) : (
-          <div className="divide-y divide-border/40">
-            {allocatedPlayers.map((p) => (
-              <div key={p.player_id} className="flex items-center gap-2 px-4 py-1.5">
-                <span className="flex-1 truncate text-sm">{p.name}</span>
-                <MoneyInput value={alloc?.get(p.player_id) ?? null} onSave={(n) => onSet(p.player_id, n)} className="w-24" />
-                <button onClick={() => onSet(p.player_id, null)} className="text-muted-foreground/40 hover:text-destructive transition" title="Remove allocation"><X className="h-3.5 w-3.5" /></button>
-              </div>
-            ))}
-          </div>
+          <>
+            <div className="flex items-center gap-2 px-4 pb-1 pt-2 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+              <span className="flex-1" />
+              <span className="w-24 text-right">This Vendor</span>
+              <span className="w-24 text-right">Total {bucketName}</span>
+              <span className="w-[18px]" />
+            </div>
+            <div className="divide-y divide-border/40">
+              {allocatedPlayers.map((p) => (
+                <div key={p.player_id} className="flex items-center gap-2 px-4 py-1.5">
+                  <span className="flex-1 truncate text-sm">{p.name}</span>
+                  <MoneyInput value={alloc?.get(p.player_id) ?? null} onSave={(n) => onSet(p.player_id, n)} className="w-24" />
+                  {/* Grayed whole-bucket total — additive by default, edit down to absorb into Unassigned. */}
+                  <MoneyInput value={totalFor(p.player_id)} onSave={(n) => onSetTotal(p.player_id, n)} placeholder="—" className="w-24 text-muted-foreground" />
+                  <button onClick={() => onSet(p.player_id, null)} className="text-muted-foreground/40 hover:text-destructive transition" title="Remove allocation"><X className="h-3.5 w-3.5" /></button>
+                </div>
+              ))}
+            </div>
+          </>
         )}
         <div className="px-4 py-2 border-t border-border/40">
           {addOpen ? (
@@ -235,6 +250,20 @@ export default function GMAllocations() {
   const revPitchers = useMemo(() => gm.pitchers.filter((r) => r.player_id).map((r) => ({ bpid: r.build_player_id, pid: r.player_id as string, name: r.name, rev: r.rev_share })), [gm.pitchers]);
   const revAllocated = [...revHitters, ...revPitchers].reduce((s, r) => s + (r.rev ?? 0), 0);
 
+  // Per-player bucket totals (Unassigned + vendors) + build_player_id, for the
+  // grayed editable total on the vendor cards. Comes straight off the roster
+  // rows so it stays consistent with Roster Management.
+  const finByPlayer = useMemo(() => {
+    const m = new Map<string, { bpid: string; nilTotal: number | null; otherTotal: number | null; nilVendor: number; otherVendor: number }>();
+    for (const r of [...gm.hitters, ...gm.pitchers]) {
+      if (!r.player_id) continue;
+      const nilTotal = r.nil_amount == null && r.nil_vendor === 0 ? null : (r.nil_amount ?? 0) + r.nil_vendor;
+      const otherTotal = r.other_amount == null && r.other_vendor === 0 ? null : (r.other_amount ?? 0) + r.other_vendor;
+      m.set(r.player_id, { bpid: r.build_player_id, nilTotal, otherTotal, nilVendor: r.nil_vendor, otherVendor: r.other_vendor });
+    }
+    return m;
+  }, [gm.hitters, gm.pitchers]);
+
   const buckets: AllocationBucket[] = ["nil", "other"];
 
   return (
@@ -318,10 +347,17 @@ export default function GMAllocations() {
                     players={players}
                     alloc={allocBySource.get(s.id)}
                     allocated={allocatedTotal(s.id)}
+                    bucketName={bucket === "nil" ? "NIL" : "Other"}
                     onRename={(name) => updateSource(s.id, { name })}
                     onTotal={(n) => updateSource(s.id, { total: n })}
                     onDelete={() => setConfirmDelete(s)}
                     onSet={(pid, amt) => setAllocation(s.id, pid, amt)}
+                    totalFor={(pid) => (bucket === "nil" ? finByPlayer.get(pid)?.nilTotal : finByPlayer.get(pid)?.otherTotal) ?? null}
+                    onSetTotal={(pid, total) => {
+                      const f = finByPlayer.get(pid); if (!f) return;
+                      const vendor = bucket === "nil" ? f.nilVendor : f.otherVendor;
+                      gm.setFinanceField(f.bpid, pid, bucket === "nil" ? "nil_amount" : "other_amount", total == null ? null : Math.max(0, total - vendor));
+                    }}
                   />
                 ))}
               </div>
