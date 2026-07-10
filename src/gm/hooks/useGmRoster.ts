@@ -172,11 +172,11 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       const { rows, coachTotalBudget, derivedCaps } = await loadGmBuildRoster(activeBuildId!, effectiveTeamId!);
       const { data: bud } = await (supabase as any)
         .from("gm_budget").select("*").eq("customer_team_id", effectiveTeamId).eq("season", season).maybeSingle();
-      // NIL/Other caps are DERIVED per-build from the build's Funding Sources
-      // categories (single source of truth) — override whatever's stored so the
-      // roster + Funding Sources reconcile by construction.
+      // nil_total/other_total are the editable "base" (general, uncategorized)
+      // pool typed in Edit Budget. The full NIL/Other cap is ADDITIVE:
+      // base + SUM(this build's Funding Sources categories) = base + derivedCaps.
       const budget: GmBudget | null = bud
-        ? { rev_share_total: bud.rev_share_total, nil_total: derivedCaps.nil, other_total: derivedCaps.other, scholarship_total: bud.scholarship_total, scholarship_mode: (bud.scholarship_mode as ScholarshipMode) ?? "pct", other_breakdown: (bud.other_breakdown as GmOtherLine[] | null) ?? null, finalized: !!bud.finalized }
+        ? { rev_share_total: bud.rev_share_total, nil_total: bud.nil_total, other_total: bud.other_total, scholarship_total: bud.scholarship_total, scholarship_mode: (bud.scholarship_mode as ScholarshipMode) ?? "pct", other_breakdown: (bud.other_breakdown as GmOtherLine[] | null) ?? null, finalized: !!bud.finalized }
         : null;
       return { rows, budget, coachTotalBudget, derivedCaps };
     },
@@ -409,7 +409,8 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     mutationFn: async (caps: BudgetCaps) => {
       if (!effectiveTeamId) throw new Error("No team in scope");
       // Scholarship is aid, NOT part of the comp budget — exclude from the total.
-      const total = (caps.rev_share_total ?? 0) + (caps.nil_total ?? 0) + (caps.other_total ?? 0);
+      // NIL/Other = base (caps) + this build's Funding Sources categories.
+      const total = (caps.rev_share_total ?? 0) + (caps.nil_total ?? 0) + derivedCaps.nil + (caps.other_total ?? 0) + derivedCaps.other;
       const { error } = await (supabase as any).from("gm_budget").upsert(
         { customer_team_id: effectiveTeamId, season, ...caps, finalized: true, finalized_at: new Date().toISOString(), updated_by_user_id: user?.id ?? null, updated_at: new Date().toISOString() },
         { onConflict: "customer_team_id,season" },
@@ -496,8 +497,9 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         const { error: e2 } = await (supabase as any).from("team_build_players").update({ nil_value: actualPay }).eq("id", row.build_player_id);
         if (e2) throw e2;
       }
-      // Budget totals → coach.
-      const total = (caps.rev_share_total ?? 0) + (caps.nil_total ?? 0) + (caps.other_total ?? 0);
+      // Budget totals → coach. NIL/Other = base (caps) + this build's Funding
+      // Sources categories (derivedCaps), matching the additive on-screen cap.
+      const total = (caps.rev_share_total ?? 0) + (caps.nil_total ?? 0) + derivedCaps.nil + (caps.other_total ?? 0) + derivedCaps.other;
       const { error: bErr } = await (supabase as any).from("gm_budget").upsert(
         { customer_team_id: effectiveTeamId, season, ...caps, finalized: true, finalized_at: now, updated_by_user_id: user?.id ?? null, updated_at: now },
         { onConflict: "customer_team_id,season" },

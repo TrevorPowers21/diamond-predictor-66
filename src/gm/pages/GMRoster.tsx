@@ -136,29 +136,38 @@ function DollarInput({ value, onChange }: { value: number | null; onChange: (n: 
  *  then Finalize sums them and pushes the total into the coach's Team Builder.
  *  The roster boxes stay read-only whole numbers. */
 type BudgetCaps = { rev_share_total: number | null; nil_total: number | null; scholarship_total: number | null; other_total: number | null; other_breakdown: GmOtherLine[] };
-function BudgetDialog({ open, onOpenChange, budget, coachTotal, derivedCaps, onSave, onFinalize }: { open: boolean; onOpenChange: (o: boolean) => void; budget: GmBudget | null; coachTotal: number | null; derivedCaps: { nil: number; other: number }; onSave: (caps: BudgetCaps) => void; onFinalize: (caps: BudgetCaps) => void }) {
+function BudgetDialog({ open, onOpenChange, budget, coachTotal, derivedCaps, onSave, onFinalize, onSetScholarshipMode }: { open: boolean; onOpenChange: (o: boolean) => void; budget: GmBudget | null; coachTotal: number | null; derivedCaps: { nil: number; other: number }; onSave: (caps: BudgetCaps) => void; onFinalize: (caps: BudgetCaps) => void; onSetScholarshipMode: (m: ScholarshipMode) => void }) {
   const [rev, setRev] = useState<number | null>(null);
+  const [nil, setNil] = useState<number | null>(null);
+  const [other, setOther] = useState<number | null>(null);
   const [sch, setSch] = useState<number | null>(null);
   const [schText, setSchText] = useState(""); // text buffer so "11.7" is typeable
   const schMode = budget?.scholarship_mode ?? "pct";
+  // Seed only on the open→ transition so toggling the scholarship unit (which
+  // saves + refetches budget) doesn't wipe an unsaved edit.
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !wasOpen.current) {
       setRev(budget?.rev_share_total ?? null);
+      setNil(budget?.nil_total ?? null);
+      setOther(budget?.other_total ?? null);
       setSch(budget?.scholarship_total ?? null);
       setSchText(budget?.scholarship_total != null ? String(budget.scholarship_total) : "");
     }
+    wasOpen.current = open;
   }, [open, budget]);
-  // NIL + Other caps are per-build rollups of the Funding Sources categories —
-  // read-only here; the coach sizes them on the Funding Sources page.
-  const nilCap = derivedCaps.nil;
-  const otherCap = derivedCaps.other;
+  // NIL/Other here is the editable BASE (general, uncategorized) pool. The full
+  // cap = base + this build's Funding Sources categories (derivedCaps). Both
+  // add up, so the dialog shows base and the combined total side by side.
+  const nilCombined = (nil ?? 0) + derivedCaps.nil;
+  const otherCombined = (other ?? 0) + derivedCaps.other;
   // Scholarship is aid, NOT part of the comp budget — excluded from the total.
-  const total = (rev ?? 0) + nilCap + otherCap;
+  const total = (rev ?? 0) + nilCombined + otherCombined;
   const caps = (): BudgetCaps => ({
     rev_share_total: rev,
-    nil_total: nilCap,
+    nil_total: nil,
     scholarship_total: sch,
-    other_total: otherCap,
+    other_total: other,
     other_breakdown: [],
   });
   const field = (label: string, val: number | null, set: (n: number | null) => void, hint?: string) => (
@@ -173,25 +182,52 @@ function BudgetDialog({ open, onOpenChange, budget, coachTotal, derivedCaps, onS
         <DialogHeader><DialogTitle style={OSWALD}>Season Budget</DialogTitle></DialogHeader>
         <div className="space-y-3 py-1">
           {field("Revenue Share", rev, setRev)}
-          {/* NIL is a read-only rollup of this build's NIL Funding Sources. */}
-          <label className="flex items-center justify-between gap-4">
-            <HintLabel hint="Sum of this build's NIL categories — managed on Funding Sources" style={OSWALD} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">NIL</HintLabel>
-            <span className="font-mono text-xs font-semibold tabular-nums">{money(nilCap)}</span>
-          </label>
-          {/* Scholarships: a COUNT of equivalencies (11.7) in % mode, or a dollar pool in $ mode. */}
-          <label className="flex items-center justify-between gap-4">
+          {/* NIL base — general/uncategorized. Funding Sources vendors add on top. */}
+          <div>
+            <label className="flex items-center justify-between gap-4">
+              <HintLabel hint="General NIL pool. Funding Sources vendor categories add on top of this." style={OSWALD} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">NIL</HintLabel>
+              <DollarInput value={nil} onChange={setNil} />
+            </label>
+            {derivedCaps.nil > 0 && (
+              <p className="mt-0.5 text-right text-[10px] tabular-nums text-muted-foreground">+ {money(derivedCaps.nil)} vendors = <span className="font-semibold text-[#D4AF37]">{money(nilCombined)}</span></p>
+            )}
+          </div>
+          {/* Scholarships: a COUNT of equivalencies (11.7) in % mode, or a dollar pool in $ mode.
+              The unit toggle lives here so the season budget owns it; the per-player
+              Scholarship column reflects whichever unit is chosen. */}
+          <label className="flex items-center justify-between gap-3">
             <HintLabel hint={schMode === "dollar" ? "Total scholarship dollars available" : "Total scholarships available (equivalencies) — not part of the comp budget"} style={OSWALD} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Scholarships</HintLabel>
-            {schMode === "dollar"
-              ? <DollarInput value={sch} onChange={setSch} />
-              : <Input value={schText} onChange={(e) => { const t = e.target.value.replace(/[^0-9.]/g, ""); setSchText(t); setSch(t === "" ? null : Number(t)); }} inputMode="decimal" placeholder="e.g. 11.7 or 35" className="h-8 w-24 text-right text-xs font-mono tabular-nums" />}
+            <div className="flex items-center gap-2">
+              <div className="flex gap-0.5 rounded-md border border-border/60 bg-muted/30 p-0.5">
+                {(["pct", "dollar"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => onSetScholarshipMode(m)}
+                    className={cn("rounded px-2 py-0.5 text-xs font-semibold transition-colors", schMode === m ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                    title={m === "pct" ? "Percent of one scholarship (equivalencies)" : "Flat dollar amount per player"}
+                  >
+                    {m === "pct" ? "%" : "$"}
+                  </button>
+                ))}
+              </div>
+              {schMode === "dollar"
+                ? <DollarInput value={sch} onChange={setSch} />
+                : <Input value={schText} onChange={(e) => { const t = e.target.value.replace(/[^0-9.]/g, ""); setSchText(t); setSch(t === "" ? null : Number(t)); }} inputMode="decimal" placeholder="e.g. 11.7 or 35" className="h-8 w-24 text-right text-xs font-mono tabular-nums" />}
+            </div>
           </label>
 
-          {/* Other is a read-only rollup of this build's Other Funding Sources. */}
-          <label className="flex items-center justify-between gap-4">
-            <HintLabel hint="Sum of this build's Other categories — managed on Funding Sources" style={OSWALD} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Other</HintLabel>
-            <span className="font-mono text-xs font-semibold tabular-nums">{money(otherCap)}</span>
-          </label>
-          <p className="text-[10px] leading-tight text-muted-foreground">NIL &amp; Other are set on the <span className="font-semibold text-foreground">Funding Sources</span> tab — each is the total of that build's categories.</p>
+          {/* Other base — general/uncategorized. Funding Sources add on top. */}
+          <div>
+            <label className="flex items-center justify-between gap-4">
+              <HintLabel hint="General Other pool. Funding Sources Other categories add on top of this." style={OSWALD} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Other</HintLabel>
+              <DollarInput value={other} onChange={setOther} />
+            </label>
+            {derivedCaps.other > 0 && (
+              <p className="mt-0.5 text-right text-[10px] tabular-nums text-muted-foreground">+ {money(derivedCaps.other)} sources = <span className="font-semibold text-[#D4AF37]">{money(otherCombined)}</span></p>
+            )}
+          </div>
+          <p className="text-[10px] leading-tight text-muted-foreground">NIL &amp; Other are typable here <span className="font-semibold text-foreground">and</span> on the Funding Sources tab — the two add together into each cap.</p>
 
           <div className="flex items-center justify-between border-t pt-3">
             <span className="text-xs font-bold uppercase tracking-wider" style={OSWALD}>Total</span>
@@ -482,7 +518,11 @@ export default function GMRoster() {
   const actualUsed = allRows.reduce((s, r) => s + (rowActual(r) ?? 0), 0);
   // Total budget = the GM's planned allotment (Rev + NIL + Other), which updates
   // on Save like the other boxes. (Scholarships are aid, excluded.)
-  const plannedTotal = ((effCaps.rev_share_total ?? 0) + gm.derivedCaps.nil + gm.derivedCaps.other) || null;
+  // NIL/Other cap = editable base (Edit Budget) + this build's Funding Sources
+  // categories (additive). Both surfaces can raise the pool.
+  const nilCapTotal = (effCaps.nil_total ?? 0) + gm.derivedCaps.nil;
+  const otherCapTotal = (effCaps.other_total ?? 0) + gm.derivedCaps.other;
+  const plannedTotal = ((effCaps.rev_share_total ?? 0) + nilCapTotal + otherCapTotal) || null;
   // Scholarship unit: % of one scholarship (equivalencies) or flat $. The GM
   // picks; scholarship_amount holds the raw number in that unit.
   const schMode: ScholarshipMode = gm.budget?.scholarship_mode ?? "pct";
@@ -575,6 +615,7 @@ export default function GMRoster() {
             budget={popupBudget}
             coachTotal={coachTotalBudget}
             derivedCaps={gm.derivedCaps}
+            onSetScholarshipMode={(m) => gm.saveBudget({ scholarship_mode: m })}
             onSave={(caps) => { setBudgetDraft(caps); gm.saveBudget(caps); }}
             onFinalize={(caps) => setConfirmCaps(caps)}
           />
@@ -593,30 +634,15 @@ export default function GMRoster() {
       </div>
 
       {/* Budget — each bucket in its own box: Scholarship · NIL · Other on top,
-          Revenue Share · Total on the second row. */}
+          Revenue Share · Total on the second row. The scholarship $/% unit lives
+          in the Season Budget dialog. */}
       <div className="space-y-3">
-        <div className="flex items-center justify-end gap-2">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Scholarship Unit</span>
-          <div className="flex gap-0.5 rounded-md border border-border/60 bg-muted/30 p-0.5">
-            {(["pct", "dollar"] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => gm.saveBudget({ scholarship_mode: mode })}
-                disabled={gm.isProjection}
-                className={cn("rounded px-3 py-1 text-xs font-semibold transition-colors", schMode === mode ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
-                title={mode === "pct" ? "Percent of one scholarship (equivalencies)" : "Flat dollar amount per player"}
-              >
-                {mode === "pct" ? "%" : "$"}
-              </button>
-            ))}
-          </div>
-        </div>
         <div className="grid grid-cols-3 gap-3">
           {schMode === "dollar"
             ? box("Scholarships", schUsed, effCaps.scholarship_total, false, "Scholarship dollars used vs. available")
             : box("Scholarships", schUsed / 100, effCaps.scholarship_total, false, "Equivalencies used vs. available — not part of the comp budget", (n) => n.toFixed(1))}
-          {box("NIL", nilUsed, gm.derivedCaps.nil)}
-          {box("Other", otherUsed, gm.derivedCaps.other)}
+          {box("NIL", nilUsed, nilCapTotal)}
+          {box("Other", otherUsed, otherCapTotal)}
         </div>
         <div className="grid grid-cols-2 gap-3">
           {box("Revenue Share", revUsed, effCaps.rev_share_total)}

@@ -30,15 +30,20 @@ function MoneyInput({ value, onSave, placeholder = "—", className }: { value: 
   );
 }
 
-function AddCategoryDialog({ open, onOpenChange, onAdd }: { open: boolean; onOpenChange: (o: boolean) => void; onAdd: (name: string, bucket: AllocationBucket, total: number | null) => void }) {
+function AddCategoryDialog({ open, onOpenChange, onAdd, baseFor }: { open: boolean; onOpenChange: (o: boolean) => void; onAdd: (name: string, bucket: AllocationBucket, total: number | null, reallocate: boolean) => void; baseFor: (bucket: AllocationBucket) => number }) {
   const [name, setName] = useState("");
   const [bucket, setBucket] = useState<AllocationBucket>("nil");
   const [total, setTotal] = useState<number | null>(null);
-  const reset = () => { setName(""); setBucket("nil"); setTotal(null); };
+  // "add" = new money on top of the current total; "reallocate" = move it out of
+  // the general (Edit Budget) base so the overall total stays the same.
+  const [mode, setMode] = useState<"add" | "reallocate">("add");
+  const reset = () => { setName(""); setBucket("nil"); setTotal(null); setMode("add"); };
+  const base = baseFor(bucket);
+  const bucketWord = bucket === "nil" ? "NIL" : "Other";
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o); }}>
       <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle style={OSWALD}>Add Category</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle style={OSWALD}>Add {bucket === "nil" ? "Vendor" : "Source"}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1">
             <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Name</label>
@@ -58,9 +63,30 @@ function AddCategoryDialog({ open, onOpenChange, onAdd }: { open: boolean; onOpe
             <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Total pool</label>
             <MoneyInput value={total} onSave={setTotal} placeholder="$0" className="w-full text-left" />
           </div>
+          {/* New money vs. reallocate from the general base, so the GM doesn't
+              accidentally double-count money already sitting in Edit Budget. */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">This money is</label>
+            <div className="grid gap-1.5">
+              {([
+                { v: "add" as const, t: `New money — adds on top of ${bucketWord}` },
+                { v: "reallocate" as const, t: `From the general ${bucketWord} budget${base > 0 ? ` (${money(base)})` : ""} — keeps the total the same` },
+              ]).map((o) => (
+                <button key={o.v} type="button" onClick={() => setMode(o.v)} disabled={o.v === "reallocate" && base <= 0}
+                  className={cn("flex items-start gap-2 rounded-md border p-2 text-left text-xs transition-colors disabled:opacity-40",
+                    mode === o.v ? "border-[#D4AF37] bg-[#D4AF37]/[0.07]" : "border-border/60 hover:border-border")}>
+                  <span className={cn("mt-0.5 h-3 w-3 shrink-0 rounded-full border", mode === o.v ? "border-[#D4AF37] bg-[#D4AF37]" : "border-muted-foreground/50")} />
+                  <span>{o.t}</span>
+                </button>
+              ))}
+            </div>
+            {mode === "reallocate" && total != null && total > base && (
+              <p className="text-[10px] text-rose-500">Only {money(base)} in the general {bucketWord} budget — it'll drop to $0 and {money(total - base)} will be new money.</p>
+            )}
+          </div>
         </div>
         <DialogFooter>
-          <Button size="sm" disabled={!name.trim()} onClick={() => { onAdd(name.trim(), bucket, total); reset(); onOpenChange(false); }}>Add Category</Button>
+          <Button size="sm" disabled={!name.trim()} onClick={() => { onAdd(name.trim(), bucket, total, mode === "reallocate"); reset(); onOpenChange(false); }}>Add {bucket === "nil" ? "Vendor" : "Source"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -272,9 +298,10 @@ export default function GMAllocations() {
     for (const r of [...gm.hitters, ...gm.pitchers]) { nil += (r.nil_amount ?? 0) + r.nil_vendor; other += (r.other_amount ?? 0) + r.other_vendor; }
     return { nil, other };
   }, [gm.hitters, gm.pitchers]);
+  // NIL/Other cap = editable base (Edit Budget) + this build's categories.
   const revCap = gm.budget?.rev_share_total ?? null;
-  const nilCap = gm.derivedCaps.nil;
-  const otherCap = gm.derivedCaps.other;
+  const nilCap = (gm.budget?.nil_total ?? 0) + gm.derivedCaps.nil;
+  const otherCap = (gm.budget?.other_total ?? 0) + gm.derivedCaps.other;
   const totalUsed = revAllocated + bucketUsed.nil + bucketUsed.other;
   const totalCap = ((revCap ?? 0) + (nilCap ?? 0) + (otherCap ?? 0)) || null;
   const hasRoster = gm.hitters.length + gm.pitchers.length > 0;
@@ -294,10 +321,10 @@ export default function GMAllocations() {
             <SelectTrigger className="h-8 w-[170px] text-xs"><SelectValue placeholder="Select build" /></SelectTrigger>
             <SelectContent>{gm.builds.map((b) => <SelectItem key={b.id} value={b.id} className="text-xs">{b.name}</SelectItem>)}</SelectContent>
           </Select>
-          <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setAddOpen(true)}><Plus className="h-3.5 w-3.5" /> Add Category</Button>
+          <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setAddOpen(true)}><Plus className="h-3.5 w-3.5" /> Add Vendor</Button>
         </div>
       </div>
-      <p className="text-xs text-muted-foreground -mt-1">Name a funding category, drop it in a bucket (NIL vendor or Other), set its total, then allocate to players. Remaining tracks against each category's pool.</p>
+      <p className="text-xs text-muted-foreground -mt-1">Name a vendor, set its pool, then allocate to players. Each vendor adds on top of the general NIL/Other you type in Edit Budget — or reallocate from it to keep the total the same.</p>
 
       {hasRoster && (() => {
         const tile = (label: string, used: number, cap: number | null, accent?: boolean) => (
@@ -381,7 +408,20 @@ export default function GMAllocations() {
         })
       )}
 
-      <AddCategoryDialog open={addOpen} onOpenChange={setAddOpen} onAdd={addSource} />
+      <AddCategoryDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        baseFor={(b) => (b === "nil" ? gm.budget?.nil_total : gm.budget?.other_total) ?? 0}
+        onAdd={(name, bucket, total, reallocate) => {
+          addSource(name, bucket, total);
+          // Reallocate: pull this amount out of the general base so the overall
+          // NIL/Other total is unchanged (the money just gets a name now).
+          if (reallocate && total) {
+            const base = (bucket === "nil" ? gm.budget?.nil_total : gm.budget?.other_total) ?? 0;
+            gm.saveBudget(bucket === "nil" ? { nil_total: Math.max(0, base - total) } : { other_total: Math.max(0, base - total) });
+          }
+        }}
+      />
 
       <AlertDialog open={!!confirmDelete} onOpenChange={(o) => { if (!o) setConfirmDelete(null); }}>
         <AlertDialogContent>
