@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
-import { useGmRoster, DEPARTURE_REASONS, type GmBudget, type GmOtherLine, type GmRow, type LocalProjectionTier, type RowMoney } from "@/gm/hooks/useGmRoster";
+import { useGmRoster, DEPARTURE_REASONS, type GmBudget, type GmOtherLine, type GmRow, type LocalProjectionTier, type RowMoney, type ScholarshipMode } from "@/gm/hooks/useGmRoster";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
@@ -143,6 +143,7 @@ function BudgetDialog({ open, onOpenChange, budget, coachTotal, onSave, onFinali
   const [sch, setSch] = useState<number | null>(null);
   const [schText, setSchText] = useState(""); // text buffer so "11.7" is typeable
   const [other, setOther] = useState<OtherDraft[]>([]);
+  const schMode = budget?.scholarship_mode ?? "pct";
   useEffect(() => {
     if (open) {
       setRev(budget?.rev_share_total ?? null);
@@ -185,10 +186,12 @@ function BudgetDialog({ open, onOpenChange, budget, coachTotal, onSave, onFinali
         <div className="space-y-3 py-1">
           {field("Revenue Share", rev, setRev)}
           {field("NIL", nil, setNil)}
-          {/* Scholarships is a COUNT of equivalencies (e.g. 11.7), not dollars. */}
+          {/* Scholarships: a COUNT of equivalencies (11.7) in % mode, or a dollar pool in $ mode. */}
           <label className="flex items-center justify-between gap-4">
-            <HintLabel hint="Total scholarships available (equivalencies) — not part of the comp budget" style={OSWALD} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Scholarships</HintLabel>
-            <Input value={schText} onChange={(e) => { const t = e.target.value.replace(/[^0-9.]/g, ""); setSchText(t); setSch(t === "" ? null : Number(t)); }} inputMode="decimal" placeholder="e.g. 11.7 or 35" className="h-8 w-24 text-right text-xs font-mono tabular-nums" />
+            <HintLabel hint={schMode === "dollar" ? "Total scholarship dollars available" : "Total scholarships available (equivalencies) — not part of the comp budget"} style={OSWALD} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Scholarships</HintLabel>
+            {schMode === "dollar"
+              ? <DollarInput value={sch} onChange={setSch} />
+              : <Input value={schText} onChange={(e) => { const t = e.target.value.replace(/[^0-9.]/g, ""); setSchText(t); setSch(t === "" ? null : Number(t)); }} inputMode="decimal" placeholder="e.g. 11.7 or 35" className="h-8 w-24 text-right text-xs font-mono tabular-nums" />}
           </label>
 
           {/* Other → named funding lines (camps, vendors, donor …) summing to Other. */}
@@ -401,7 +404,7 @@ export default function GMRoster() {
                       a hypothetical future roster's pay. */}
                   {gm.isProjection ? (
                     <>
-                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{pct(m.scholarship_amount)}</TableCell>
+                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{schMode === "dollar" ? money(m.scholarship_amount) : pct(m.scholarship_amount)}</TableCell>
                       <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.rev_share)}</TableCell>
                       <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(nilTotal(r, m))}</TableCell>
                       <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(otherTotal(r, m))}</TableCell>
@@ -411,7 +414,9 @@ export default function GMRoster() {
                     </>
                   ) : (
                     <>
-                      <TableCell className="py-1.5"><PctCell value={m.scholarship_amount} onSave={(n) => setRowField(r, "scholarship_amount", n)} /></TableCell>
+                      <TableCell className="py-1.5">{schMode === "dollar"
+                        ? <MoneyCell value={m.scholarship_amount} onSave={(n) => setRowField(r, "scholarship_amount", n)} />
+                        : <PctCell value={m.scholarship_amount} onSave={(n) => setRowField(r, "scholarship_amount", n)} />}</TableCell>
                       <TableCell className="py-1.5"><MoneyCell value={m.rev_share} onSave={(n) => setRowField(r, "rev_share", n)} /></TableCell>
                       <TableCell className="py-1.5" title={r.nil_vendor > 0 ? `${money(m.nil_amount ?? 0)} unassigned + ${money(r.nil_vendor)} from vendors` : undefined}>
                         <MoneyCell value={nilTotal(r, m)} onSave={(n) => setRowField(r, "nil_amount", n == null ? null : Math.max(0, n - r.nil_vendor))} />
@@ -454,7 +459,7 @@ export default function GMRoster() {
                   <TableCell className="text-center font-mono text-sm py-2">{num(sum((r) => r.war), 1)}</TableCell>
                   <TableCell />
                   <TableCell className="text-center font-mono text-sm py-2">{money(sum((r) => projectedValue(r) ?? r.market_value))}</TableCell>
-                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{equiv(sum((r) => effMoney(r).scholarship_amount))}</TableCell>
+                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{schMode === "dollar" ? money(sum((r) => effMoney(r).scholarship_amount)) : equiv(sum((r) => effMoney(r).scholarship_amount))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).rev_share))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => (effMoney(r).nil_amount ?? 0) + r.nil_vendor))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => (effMoney(r).other_amount ?? 0) + r.other_vendor))}</TableCell>
@@ -504,7 +509,10 @@ export default function GMRoster() {
   // Total budget = the GM's planned allotment (Rev + NIL + Other), which updates
   // on Save like the other boxes. (Scholarships are aid, excluded.)
   const plannedTotal = ((effCaps.rev_share_total ?? 0) + (effCaps.nil_total ?? 0) + (effCaps.other_total ?? 0)) || null;
-  const popupBudget = { ...effCaps, finalized: !!b?.finalized } as GmBudget;
+  // Scholarship unit: % of one scholarship (equivalencies) or flat $. The GM
+  // picks; scholarship_amount holds the raw number in that unit.
+  const schMode: ScholarshipMode = gm.budget?.scholarship_mode ?? "pct";
+  const popupBudget = { ...effCaps, scholarship_mode: schMode, finalized: !!b?.finalized } as GmBudget;
 
   // One budget box — read-only. Shows used / allotment as whole dollars; caps
   // are edited only in the Manage Budget popup. Over-cap turns the used red.
@@ -612,8 +620,26 @@ export default function GMRoster() {
       {/* Budget — each bucket in its own box: Scholarship · NIL · Other on top,
           Revenue Share · Total on the second row. */}
       <div className="space-y-3">
+        <div className="flex items-center justify-end gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Scholarship Unit</span>
+          <div className="flex gap-0.5 rounded-md border border-border/60 bg-muted/30 p-0.5">
+            {(["pct", "dollar"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => gm.saveBudget({ scholarship_mode: mode })}
+                disabled={gm.isProjection}
+                className={cn("rounded px-3 py-1 text-xs font-semibold transition-colors", schMode === mode ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                title={mode === "pct" ? "Percent of one scholarship (equivalencies)" : "Flat dollar amount per player"}
+              >
+                {mode === "pct" ? "%" : "$"}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="grid grid-cols-3 gap-3">
-          {box("Scholarships", schUsed / 100, effCaps.scholarship_total, false, "Equivalencies used vs. available — not part of the comp budget", (n) => n.toFixed(1))}
+          {schMode === "dollar"
+            ? box("Scholarships", schUsed, effCaps.scholarship_total, false, "Scholarship dollars used vs. available")
+            : box("Scholarships", schUsed / 100, effCaps.scholarship_total, false, "Equivalencies used vs. available — not part of the comp budget", (n) => n.toFixed(1))}
           {box("NIL", nilUsed, effCaps.nil_total)}
           {box("Other", otherUsed, effCaps.other_total)}
         </div>

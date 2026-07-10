@@ -75,11 +75,13 @@ export interface RowMoney {
   other_amount: number | null;
 }
 
+export type ScholarshipMode = "pct" | "dollar";
 export interface GmBudget {
   rev_share_total: number | null;
   nil_total: number | null;
   other_total: number | null;
   scholarship_total: number | null;
+  scholarship_mode: ScholarshipMode;
   other_breakdown: GmOtherLine[] | null;
   finalized: boolean;
 }
@@ -171,7 +173,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       const { data: bud } = await (supabase as any)
         .from("gm_budget").select("*").eq("customer_team_id", effectiveTeamId).eq("season", season).maybeSingle();
       const budget: GmBudget | null = bud
-        ? { rev_share_total: bud.rev_share_total, nil_total: bud.nil_total, other_total: bud.other_total, scholarship_total: bud.scholarship_total, other_breakdown: (bud.other_breakdown as GmOtherLine[] | null) ?? null, finalized: !!bud.finalized }
+        ? { rev_share_total: bud.rev_share_total, nil_total: bud.nil_total, other_total: bud.other_total, scholarship_total: bud.scholarship_total, scholarship_mode: (bud.scholarship_mode as ScholarshipMode) ?? "pct", other_breakdown: (bud.other_breakdown as GmOtherLine[] | null) ?? null, finalized: !!bud.finalized }
         : null;
       return { rows, budget, coachTotalBudget };
     },

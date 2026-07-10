@@ -506,4 +506,14 @@ CREATE INDEX IF NOT EXISTS idx_gm_allocation_source_build
   ON public.gm_allocation_source (team_build_id, bucket);
 
 
+-- ---- 20260710130000_gm_scholarship_mode.sql ----
+-- Scholarship can be tracked as a % of one scholarship (equivalencies) OR as a
+-- flat dollar figure per player — the GM picks per team/season. scholarship_amount
+-- holds the raw number in whichever unit the mode selects; scholarship_total is
+-- the pool in that unit (a count like 11.7 in %, dollars in $).
+ALTER TABLE public.gm_budget
+  ADD COLUMN IF NOT EXISTS scholarship_mode text NOT NULL DEFAULT 'pct'
+  CHECK (scholarship_mode IN ('pct', 'dollar'));
+
+
 NOTIFY pgrst, 'reload schema';
