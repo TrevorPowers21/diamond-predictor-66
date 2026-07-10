@@ -198,24 +198,22 @@ function RevShareCard({ hitters, pitchers, total, allocated, onTotal, onSet }: {
   const remaining = total != null ? total - allocated : null;
   const over = remaining != null && remaining < 0;
   return (
-    <Card className="border-border/60">
-      <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
-        <div className="grid grid-cols-3 gap-2 text-center max-w-md ml-auto">
-          <div>
-            <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Total</div>
-            <MoneyInput value={total} onSave={onTotal} placeholder="$0" className="w-full text-center" />
-          </div>
-          <div>
-            <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Allocated</div>
-            <div className="pt-1.5 font-mono text-sm font-semibold tabular-nums">{money(allocated)}</div>
-          </div>
-          <div>
-            <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Remaining</div>
-            <div className={cn("pt-1.5 font-mono text-sm font-semibold tabular-nums", over ? "text-rose-500" : "text-emerald-400")}>{remaining == null ? "—" : money(Math.abs(remaining))}</div>
-          </div>
+    <Card className="overflow-hidden border-border/60">
+      <div className="grid grid-cols-3 divide-x divide-border/50 border-b border-border/40 bg-muted/20">
+        <div className="flex flex-col items-center gap-1 px-4 py-4">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Total Pool</span>
+          <MoneyInput value={total} onSave={onTotal} placeholder="$0" className="h-9 w-full max-w-[180px] border-transparent bg-transparent text-center text-xl font-bold text-[#D4AF37] shadow-none focus-visible:border-border" />
         </div>
-      </CardHeader>
-      <CardContent className="grid gap-x-8 gap-y-4 p-4 md:grid-cols-2">
+        <div className="flex flex-col items-center gap-1 px-4 py-4">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Allocated</span>
+          <span className="font-mono text-2xl font-bold tabular-nums" style={OSWALD}>{money(allocated)}</span>
+        </div>
+        <div className="flex flex-col items-center gap-1 px-4 py-4">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Remaining</span>
+          <span className={cn("font-mono text-2xl font-bold tabular-nums", over ? "text-rose-500" : "text-emerald-400")} style={OSWALD}>{remaining == null ? "—" : money(Math.abs(remaining))}</span>
+        </div>
+      </div>
+      <CardContent className="grid gap-x-8 gap-y-4 p-5 md:grid-cols-2">
         <RevAllocColumn title="Hitters" rows={hitters} onSet={onSet} />
         <RevAllocColumn title="Pitchers" rows={pitchers} onSet={onSet} />
       </CardContent>
