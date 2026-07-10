@@ -167,11 +167,31 @@ export default function GMAllocations() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Wallet className="h-5 w-5 text-[#D4AF37]" />
-          <h2 className="text-2xl font-bold leading-tight" style={OSWALD}>Allocations</h2>
+          <h2 className="text-2xl font-bold leading-tight" style={OSWALD}>Funding Sources</h2>
         </div>
         <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setAddOpen(true)}><Plus className="h-3.5 w-3.5" /> Add Category</Button>
       </div>
       <p className="text-xs text-muted-foreground -mt-1">Name a funding category, drop it in a bucket (NIL vendor or Other), set its total, then allocate to players. Remaining tracks against each category's pool.</p>
+
+      {sources.length > 0 && (() => {
+        const pool = sources.reduce((s, x) => s + (x.total ?? 0), 0);
+        const alloc = sources.reduce((s, x) => s + allocatedTotal(x.id), 0);
+        const remaining = pool - alloc;
+        const tile = (label: string, val: string, accent?: string) => (
+          <div className="px-4 py-3 flex flex-col gap-0.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+            <span className={cn("text-xl font-bold tabular-nums", accent)} style={OSWALD}>{val}</span>
+          </div>
+        );
+        return (
+          <div className="grid grid-cols-2 sm:grid-cols-4 rounded-lg border border-border/60 bg-muted/20 divide-x divide-border/50">
+            {tile("Total Pool", money(pool), "text-[#D4AF37]")}
+            {tile("Allocated", money(alloc))}
+            {tile("Remaining", money(Math.abs(remaining)), remaining < 0 ? "text-rose-500" : "text-emerald-400")}
+            {tile("Categories", String(sources.length))}
+          </div>
+        );
+      })()}
 
       {isLoading ? (
         <Card className="border-border/60"><CardContent className="py-16 text-center text-sm text-muted-foreground">Loading…</CardContent></Card>
