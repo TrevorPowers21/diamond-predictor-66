@@ -28,8 +28,10 @@ export interface GmRow {
   // gm_player_finance
   scholarship_amount: number | null;
   rev_share: number | null;
-  nil_amount: number | null;
-  other_amount: number | null;
+  nil_amount: number | null;   // "Unassigned" NIL — the direct/flex portion (funding vendors add on top)
+  other_amount: number | null; // "Unassigned" Other
+  nil_vendor: number;          // Σ of this player's NIL funding-vendor allocations (this build), read-only
+  other_vendor: number;        // Σ of this player's Other funding-vendor allocations (this build)
   actual_pay: number | null;
   finalized: boolean;
   eligibility_class: string | null; // GM/head-coach display (override ?? class_year)
@@ -236,6 +238,8 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         rev_share: null,
         nil_amount: null,
         other_amount: null,
+        nil_vendor: 0,
+        other_vendor: 0,
         actual_pay: null,
         finalized: false,
         eligibility_class: cls,
@@ -338,7 +342,8 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
 
   const totals = useMemo(() => {
     const sum = (f: (r: GmRow) => number | null) => rows.reduce((s, r) => s + (f(r) ?? 0), 0);
-    return { revUsed: sum((r) => r.rev_share), nilUsed: sum((r) => r.nil_amount), otherUsed: sum((r) => r.other_amount), schUsed: sum((r) => r.scholarship_amount), actualUsed: sum((r) => r.actual_pay) };
+    // NIL/Other "used" = Unassigned (nil_amount) + funding-vendor allocations.
+    return { revUsed: sum((r) => r.rev_share), nilUsed: sum((r) => (r.nil_amount ?? 0) + r.nil_vendor), otherUsed: sum((r) => (r.other_amount ?? 0) + r.other_vendor), schUsed: sum((r) => r.scholarship_amount), actualUsed: sum((r) => r.actual_pay) };
   }, [rows]);
 
   // The per-player checkmark is the ONLY write for a row: it persists the row's
@@ -350,7 +355,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       if (!effectiveTeamId) throw new Error("No team in scope");
       const nextFinalized = finalize;
       const rev = money.rev_share, nilA = money.nil_amount, other = money.other_amount;
-      const actualPay = rev == null && nilA == null && other == null ? null : Number(rev ?? 0) + Number(nilA ?? 0) + Number(other ?? 0);
+      const actualPay = rev == null && nilA == null && other == null && row.nil_vendor === 0 && row.other_vendor === 0 ? null : Number(rev ?? 0) + Number(nilA ?? 0) + Number(other ?? 0) + row.nil_vendor + row.other_vendor;
       // Keyed per-build (build_player_id) — works for local/added players too.
       const { error } = await (supabase as any).from("gm_player_finance").upsert(
         {
@@ -428,7 +433,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       for (const { row, money } of rowsWithMoney) {
         if (row.is_recruit || row.is_added_target) continue;
         const rev = money.rev_share, nilA = money.nil_amount, other = money.other_amount;
-        const actualPay = rev == null && nilA == null && other == null ? null : Number(rev ?? 0) + Number(nilA ?? 0) + Number(other ?? 0);
+        const actualPay = rev == null && nilA == null && other == null && row.nil_vendor === 0 && row.other_vendor === 0 ? null : Number(rev ?? 0) + Number(nilA ?? 0) + Number(other ?? 0) + row.nil_vendor + row.other_vendor;
         const { error } = await (supabase as any).from("gm_player_finance").upsert(
           {
             build_player_id: row.build_player_id, customer_team_id: effectiveTeamId, player_id: row.player_id, season,
@@ -454,7 +459,7 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
       for (const { row, money } of rowsWithMoney) {
         if (row.is_recruit || row.is_added_target) continue; // injected/hypothetical rows have no finance line
         const rev = money.rev_share, nilA = money.nil_amount, other = money.other_amount;
-        const actualPay = rev == null && nilA == null && other == null ? null : Number(rev ?? 0) + Number(nilA ?? 0) + Number(other ?? 0);
+        const actualPay = rev == null && nilA == null && other == null && row.nil_vendor === 0 && row.other_vendor === 0 ? null : Number(rev ?? 0) + Number(nilA ?? 0) + Number(other ?? 0) + row.nil_vendor + row.other_vendor;
         const { error } = await (supabase as any).from("gm_player_finance").upsert(
           {
             build_player_id: row.build_player_id, customer_team_id: effectiveTeamId, player_id: row.player_id, season,

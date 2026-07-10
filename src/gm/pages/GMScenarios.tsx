@@ -48,6 +48,8 @@ function targetToRow(t: GmTarget): GmRow {
     rev_share: null,
     nil_amount: null,
     other_amount: null,
+    nil_vendor: 0,
+    other_vendor: 0,
     actual_pay: null,
     finalized: false,
     eligibility_class: null,

@@ -18,6 +18,7 @@ export function deriveGmRows(
   pById: Map<string, any>,
   finByBp: Map<string, any>,
   eq: ReturnType<typeof readPitchingWeights>,
+  vendorByPlayer: Map<string, { nil: number; other: number }> = new Map(),
 ): GmRow[] {
   return rowsRaw.map((r: any) => {
     const meta = parseBuildPlayerMeta(r.production_notes) as any;
@@ -27,6 +28,7 @@ export function deriveGmRows(
     const snap = r.player_snapshot || {};
     const pitcher = isPitcherPos(r.position_slot) || isPitcherPos(p?.position) || isPitcherPos(local?.position);
     const f = finByBp.get(r.id) || {};
+    const vend = (r.player_id ? vendorByPlayer.get(String(r.player_id)) : null) ?? { nil: 0, other: 0 };
     const mv = snap.market_value ?? snap.twp_hitter_market_value ?? snap.twp_pitcher_market_value ?? null;
     const storedWar = pitcher ? (snap.p_war ?? null) : (snap.o_war ?? null);
 
@@ -60,10 +62,12 @@ export function deriveGmRows(
       rev_share: f.rev_share ?? null,
       nil_amount: f.nil_amount ?? null,
       other_amount: f.other_amount ?? null,
+      nil_vendor: vend.nil,
+      other_vendor: vend.other,
       actual_pay:
-        f.rev_share == null && f.nil_amount == null && f.other_amount == null
+        f.rev_share == null && f.nil_amount == null && f.other_amount == null && vend.nil === 0 && vend.other === 0
           ? null
-          : Number(f.rev_share ?? 0) + Number(f.nil_amount ?? 0) + Number(f.other_amount ?? 0),
+          : Number(f.rev_share ?? 0) + Number(f.nil_amount ?? 0) + Number(f.other_amount ?? 0) + vend.nil + vend.other,
       finalized: !!f.finalized,
       eligibility_class:
         f.eligibility_class ?? (isLocal ? "FR" : projectedEligibilityClass(p?.class_year, meta?.classTransition ?? null)),
@@ -109,6 +113,30 @@ export async function loadGmBuildRoster(
     .from("team_builds").select("total_budget").eq("id", buildId).maybeSingle();
   const coachTotalBudget = buildRow?.total_budget != null ? Number(buildRow.total_budget) : null;
 
-  const rows = deriveGmRows(rowsRaw, pById, finByBp, readPitchingWeights());
+  // Funding-vendor allocations for THIS build, summed per player_id per bucket.
+  // Player NIL/Other = Unassigned (gm_player_finance) + these vendor sums.
+  const { data: srcRows2 } = await (supabase as any)
+    .from("gm_allocation_source").select("id, bucket").eq("team_build_id", buildId);
+  const bucketBySource = new Map<string, "nil" | "other">((srcRows2 || []).map((s: any) => [s.id, s.bucket]));
+  const vendorByPlayer = new Map<string, { nil: number; other: number }>();
+  const srcIds = (srcRows2 || []).map((s: any) => s.id);
+  if (srcIds.length) {
+    const allocs: any[] = [];
+    for (let i = 0; i < srcIds.length; i += 200) {
+      const { data: al } = await (supabase as any).from("gm_allocation").select("source_id, player_id, amount").in("source_id", srcIds.slice(i, i + 200));
+      allocs.push(...(al || []));
+    }
+    for (const a of allocs) {
+      if (a.player_id == null || a.amount == null) continue;
+      const bucket = bucketBySource.get(a.source_id);
+      if (!bucket) continue;
+      const pid = String(a.player_id);
+      const cur = vendorByPlayer.get(pid) ?? { nil: 0, other: 0 };
+      cur[bucket] += Number(a.amount);
+      vendorByPlayer.set(pid, cur);
+    }
+  }
+
+  const rows = deriveGmRows(rowsRaw, pById, finByBp, readPitchingWeights(), vendorByPlayer);
   return { rows, coachTotalBudget };
 }

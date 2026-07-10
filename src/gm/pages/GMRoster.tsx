@@ -308,11 +308,16 @@ export default function GMRoster() {
   // Actual Pay defaults to the coach's Team-Builder number (nil_value). Once any
   // pay bucket (Rev / NIL / Other) is entered it becomes their live sum; clear
   // them all and it falls back to the coach number again.
+  // NIL/Other totals = Unassigned (nil_amount/other_amount) + funding-vendor
+  // allocations (nil_vendor/other_vendor, read-only). Actual Pay sums them all.
   const rowActual = (r: GmRow): number | null => {
     const m = effMoney(r);
-    const hasBuckets = m.rev_share != null || m.nil_amount != null || m.other_amount != null;
-    return hasBuckets ? (m.rev_share ?? 0) + (m.nil_amount ?? 0) + (m.other_amount ?? 0) : (r.nil_value ?? null);
+    const hasBuckets = m.rev_share != null || m.nil_amount != null || m.other_amount != null || r.nil_vendor > 0 || r.other_vendor > 0;
+    return hasBuckets ? (m.rev_share ?? 0) + (m.nil_amount ?? 0) + r.nil_vendor + (m.other_amount ?? 0) + r.other_vendor : (r.nil_value ?? null);
   };
+  // Displayed NIL/Other = Unassigned + vendor (null only when both empty).
+  const nilTotal = (r: GmRow, m: RowMoney) => (m.nil_amount == null && r.nil_vendor === 0 ? null : (m.nil_amount ?? 0) + r.nil_vendor);
+  const otherTotal = (r: GmRow, m: RowMoney) => (m.other_amount == null && r.other_vendor === 0 ? null : (m.other_amount ?? 0) + r.other_vendor);
 
   const section = (title: string, rows: GmRow[]) => {
     const sum = (f: (r: GmRow) => number | null) => rows.reduce((s, r) => s + (f(r) ?? 0), 0);
@@ -398,8 +403,8 @@ export default function GMRoster() {
                     <>
                       <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{pct(m.scholarship_amount)}</TableCell>
                       <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.rev_share)}</TableCell>
-                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.nil_amount)}</TableCell>
-                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(m.other_amount)}</TableCell>
+                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(nilTotal(r, m))}</TableCell>
+                      <TableCell className="py-1.5 pr-3 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(otherTotal(r, m))}</TableCell>
                       <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums text-foreground">{money(rowActual(r))}</TableCell>
                       <TableCell />
                       <TableCell />
@@ -408,8 +413,12 @@ export default function GMRoster() {
                     <>
                       <TableCell className="py-1.5"><PctCell value={m.scholarship_amount} onSave={(n) => setRowField(r, "scholarship_amount", n)} /></TableCell>
                       <TableCell className="py-1.5"><MoneyCell value={m.rev_share} onSave={(n) => setRowField(r, "rev_share", n)} /></TableCell>
-                      <TableCell className="py-1.5"><MoneyCell value={m.nil_amount} onSave={(n) => setRowField(r, "nil_amount", n)} /></TableCell>
-                      <TableCell className="py-1.5"><MoneyCell value={m.other_amount} onSave={(n) => setRowField(r, "other_amount", n)} /></TableCell>
+                      <TableCell className="py-1.5" title={r.nil_vendor > 0 ? `${money(m.nil_amount ?? 0)} unassigned + ${money(r.nil_vendor)} from vendors` : undefined}>
+                        <MoneyCell value={nilTotal(r, m)} onSave={(n) => setRowField(r, "nil_amount", n == null ? null : Math.max(0, n - r.nil_vendor))} />
+                      </TableCell>
+                      <TableCell className="py-1.5" title={r.other_vendor > 0 ? `${money(m.other_amount ?? 0)} unassigned + ${money(r.other_vendor)} from vendors` : undefined}>
+                        <MoneyCell value={otherTotal(r, m)} onSave={(n) => setRowField(r, "other_amount", n == null ? null : Math.max(0, n - r.other_vendor))} />
+                      </TableCell>
                       {/* Actual Pay is the coach's agreed number; it ONLY changes when the
                           GM finalizes (checkmark writes the bucket sum back here + to the
                           coach). So it reads the authoritative nil_value, not the live buckets. */}
@@ -447,8 +456,8 @@ export default function GMRoster() {
                   <TableCell className="text-center font-mono text-sm py-2">{money(sum((r) => projectedValue(r) ?? r.market_value))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{equiv(sum((r) => effMoney(r).scholarship_amount))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).rev_share))}</TableCell>
-                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).nil_amount))}</TableCell>
-                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => effMoney(r).other_amount))}</TableCell>
+                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => (effMoney(r).nil_amount ?? 0) + r.nil_vendor))}</TableCell>
+                  <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => (effMoney(r).other_amount ?? 0) + r.other_vendor))}</TableCell>
                   <TableCell className="text-right font-mono text-sm py-2 pr-3">{money(sum((r) => rowActual(r)))}</TableCell>
                   <TableCell />
                   <TableCell />
@@ -486,8 +495,9 @@ export default function GMRoster() {
   };
   const usedSum = (f: (m: RowMoney) => number | null) => allRows.reduce((s, r) => s + (f(effMoney(r)) ?? 0), 0);
   const revUsed = usedSum((m) => m.rev_share);
-  const nilUsed = usedSum((m) => m.nil_amount);
-  const otherUsed = usedSum((m) => m.other_amount);
+  // NIL/Other used = Unassigned draft + funding-vendor allocations (this build).
+  const nilUsed = allRows.reduce((s, r) => s + (effMoney(r).nil_amount ?? 0) + r.nil_vendor, 0);
+  const otherUsed = allRows.reduce((s, r) => s + (effMoney(r).other_amount ?? 0) + r.other_vendor, 0);
   const schUsed = usedSum((m) => m.scholarship_amount);
   // Actual Pay = the authoritative coach number (nil_value); only finalize changes it.
   const actualUsed = allRows.reduce((s, r) => s + (rowActual(r) ?? 0), 0);
