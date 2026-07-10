@@ -501,6 +501,9 @@ export default function GMRoster() {
   const schUsed = usedSum((m) => m.scholarship_amount);
   // Actual Pay = the authoritative coach number (nil_value); only finalize changes it.
   const actualUsed = allRows.reduce((s, r) => s + (rowActual(r) ?? 0), 0);
+  // Total budget = the GM's planned allotment (Rev + NIL + Other), which updates
+  // on Save like the other boxes. (Scholarships are aid, excluded.)
+  const plannedTotal = ((effCaps.rev_share_total ?? 0) + (effCaps.nil_total ?? 0) + (effCaps.other_total ?? 0)) || null;
   const popupBudget = { ...effCaps, finalized: !!b?.finalized } as GmBudget;
 
   // One budget box — read-only. Shows used / allotment as whole dollars; caps
@@ -616,7 +619,7 @@ export default function GMRoster() {
         </div>
         <div className="grid grid-cols-2 gap-3">
           {box("Revenue Share", revUsed, effCaps.rev_share_total)}
-          {box("Total", actualUsed, coachTotalBudget, true)}
+          {box("Total", actualUsed, plannedTotal, true)}
         </div>
       </div>
 
