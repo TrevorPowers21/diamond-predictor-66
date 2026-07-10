@@ -86,34 +86,30 @@ function SourceCard({ source, players, alloc, allocated, onRename, onTotal, onDe
   const over = remaining != null && remaining < 0;
 
   return (
-    <Card className="border-border/60">
-      <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40 space-y-2">
-        <div className="flex items-center gap-2">
-          <Input
-            value={nameDraft}
-            onChange={(e) => setNameDraft(e.target.value)}
-            onBlur={() => { const n = nameDraft.trim(); if (n && n !== source.name) onRename(n); else setNameDraft(source.name); }}
-            className="h-7 flex-1 border-transparent bg-transparent px-1 text-sm font-semibold hover:border-border focus:border-border"
-          />
-          <button onClick={onDelete} className="text-muted-foreground/50 hover:text-rose-400 transition" title="Delete category"><Trash2 className="h-3.5 w-3.5" /></button>
+    <Card className="overflow-hidden border-border/60">
+      <div className="flex items-center gap-2 px-4 pb-2 pt-3">
+        <Input
+          value={nameDraft}
+          onChange={(e) => setNameDraft(e.target.value)}
+          onBlur={() => { const n = nameDraft.trim(); if (n && n !== source.name) onRename(n); else setNameDraft(source.name); }}
+          className="h-7 flex-1 border-transparent bg-transparent px-1 text-sm font-semibold hover:border-border focus:border-border"
+        />
+        <button onClick={onDelete} className="text-muted-foreground/50 hover:text-rose-400 transition" title="Delete category"><Trash2 className="h-3.5 w-3.5" /></button>
+      </div>
+      <div className="grid grid-cols-3 divide-x divide-border/50 border-y border-border/40 bg-muted/20">
+        <div className="flex flex-col items-center gap-1 px-3 py-3">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Total</span>
+          <MoneyInput value={source.total} onSave={onTotal} placeholder="$0" className="h-9 w-full max-w-[150px] border-transparent bg-transparent text-center text-xl font-bold font-[Oswald] text-[#D4AF37] shadow-none focus-visible:border-border" />
         </div>
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div>
-            <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Total</div>
-            <MoneyInput value={source.total} onSave={onTotal} placeholder="$0" className="w-full text-center" />
-          </div>
-          <div>
-            <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Allocated</div>
-            <div className="pt-1.5 font-mono text-sm font-semibold tabular-nums">{money(allocated)}</div>
-          </div>
-          <div>
-            <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Remaining</div>
-            <div className={cn("pt-1.5 font-mono text-sm font-semibold tabular-nums", over ? "text-rose-500" : "text-emerald-400")}>
-              {remaining == null ? "—" : money(Math.abs(remaining))}
-            </div>
-          </div>
+        <div className="flex flex-col items-center gap-1 px-3 py-3">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Allocated</span>
+          <span className="font-mono text-xl font-bold tabular-nums" style={OSWALD}>{money(allocated)}</span>
         </div>
-      </CardHeader>
+        <div className="flex flex-col items-center gap-1 px-3 py-3">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Remaining</span>
+          <span className={cn("font-mono text-xl font-bold tabular-nums", over ? "text-rose-500" : "text-emerald-400")} style={OSWALD}>{remaining == null ? "—" : money(Math.abs(remaining))}</span>
+        </div>
+      </div>
       <CardContent className="p-0">
         {allocatedPlayers.length === 0 ? (
           <p className="px-4 py-3 text-center text-xs text-muted-foreground">No allocations yet.</p>
@@ -202,7 +198,7 @@ function RevShareCard({ hitters, pitchers, total, allocated, onTotal, onSet }: {
       <div className="grid grid-cols-3 divide-x divide-border/50 border-b border-border/40 bg-muted/20">
         <div className="flex flex-col items-center gap-1 px-4 py-4">
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Total Pool</span>
-          <MoneyInput value={total} onSave={onTotal} placeholder="$0" className="h-9 w-full max-w-[180px] border-transparent bg-transparent text-center text-xl font-bold text-[#D4AF37] shadow-none focus-visible:border-border" />
+          <MoneyInput value={total} onSave={onTotal} placeholder="$0" className="h-10 w-full max-w-[180px] border-transparent bg-transparent text-center text-2xl font-bold font-[Oswald] text-[#D4AF37] shadow-none focus-visible:border-border" />
         </div>
         <div className="flex flex-col items-center gap-1 px-4 py-4">
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Allocated</span>
