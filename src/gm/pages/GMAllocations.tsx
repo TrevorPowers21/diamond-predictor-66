@@ -150,7 +150,7 @@ function SourceCard({ source, players, alloc, allocated, bucketName, onRename, o
             </Select>
           ) : (
             <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-foreground hover:underline">
-              <Plus className="h-3.5 w-3.5" /> Allocate to player
+              <Plus className="h-3.5 w-3.5" /> Add player
             </button>
           )}
         </div>
