@@ -99,7 +99,7 @@ function SourceCard({ source, players, alloc, allocated, onRename, onTotal, onDe
       <div className="grid grid-cols-3 divide-x divide-border/50 border-y border-border/40 bg-muted/20">
         <div className="flex flex-col items-center gap-1 px-3 py-3">
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Total</span>
-          <MoneyInput value={source.total} onSave={onTotal} placeholder="$0" className="h-9 w-full max-w-[150px] border-transparent bg-transparent text-center text-xl font-bold font-[Oswald] text-[#D4AF37] shadow-none focus-visible:border-border" />
+          <MoneyInput value={source.total} onSave={onTotal} placeholder="$0" className="h-9 w-full max-w-[150px] border-transparent bg-transparent text-center text-xl md:text-xl font-bold font-[Oswald] text-[#D4AF37] shadow-none focus-visible:border-border" />
         </div>
         <div className="flex flex-col items-center gap-1 px-3 py-3">
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Allocated</span>
@@ -198,7 +198,7 @@ function RevShareCard({ hitters, pitchers, total, allocated, onTotal, onSet }: {
       <div className="grid grid-cols-3 divide-x divide-border/50 border-b border-border/40 bg-muted/20">
         <div className="flex flex-col items-center gap-1 px-4 py-4">
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Total Pool</span>
-          <MoneyInput value={total} onSave={onTotal} placeholder="$0" className="h-10 w-full max-w-[180px] border-transparent bg-transparent text-center text-2xl font-bold font-[Oswald] text-[#D4AF37] shadow-none focus-visible:border-border" />
+          <MoneyInput value={total} onSave={onTotal} placeholder="$0" className="h-10 w-full max-w-[180px] border-transparent bg-transparent text-center text-2xl md:text-2xl font-bold font-[Oswald] text-[#D4AF37] shadow-none focus-visible:border-border" />
         </div>
         <div className="flex flex-col items-center gap-1 px-4 py-4">
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Allocated</span>
