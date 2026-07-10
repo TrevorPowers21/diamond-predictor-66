@@ -149,7 +149,7 @@ function SourceCard({ source, players, alloc, allocated, bucketName, onRename, o
               </SelectContent>
             </Select>
           ) : (
-            <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+            <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-foreground hover:underline">
               <Plus className="h-3.5 w-3.5" /> Allocate to player
             </button>
           )}
@@ -193,7 +193,7 @@ function RevAllocColumn({ title, rows, onSet }: { title: string; rows: RevRow[];
             </SelectContent>
           </Select>
         ) : (
-          <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"><Plus className="h-3.5 w-3.5" /> Add player</button>
+          <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-foreground hover:underline"><Plus className="h-3.5 w-3.5" /> Add player</button>
         )}
       </div>
     </div>
