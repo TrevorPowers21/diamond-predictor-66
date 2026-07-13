@@ -150,12 +150,13 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
 
   // The LIVE build — the authoritative one that drives player profiles, WAR /
   // market value, program membership, and pay. It's the build a coach flagged
-  // active (GM Settings → Change Active Roster); when none is flagged yet, fall
-  // back to the working build (first non-default), then the default.
+  // active (GM Settings → Change Active Roster). When none is flagged yet, start
+  // on the DEFAULT roster (everyone-returns baseline) — a saved build only takes
+  // over once one is created (which auto-activates) or explicitly assigned.
   const liveBuildId = useMemo(
     () => builds.find((b) => b.is_active)?.id
-      ?? builds.find((b) => !b.is_default)?.id
       ?? builds.find((b) => b.is_default)?.id
+      ?? builds.find((b) => !b.is_default)?.id
       ?? builds[0]?.id ?? null,
     [builds],
   );
@@ -607,8 +608,16 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
   };
 
   const createBuild = useMutation({
-    mutationFn: async ({ sourceBuildId }: { name?: string; sourceBuildId: string }) => cloneBuildInto(nextBuildName(), sourceBuildId),
-    onSuccess: (newBuildId) => { qc.invalidateQueries({ queryKey: ["gm-builds"] }); setPickedBuildId(newBuildId); toast.success("Build created"); },
+    mutationFn: async ({ sourceBuildId }: { name?: string; sourceBuildId: string }) => {
+      const newId = await cloneBuildInto(nextBuildName(), sourceBuildId);
+      // The FIRST saved build becomes live automatically (the program moves off
+      // the default). Once something is already live, new copies stay inactive.
+      if (!builds.some((b) => b.is_active)) {
+        await (supabase as any).from("team_builds").update({ is_active: true }).eq("id", newId);
+      }
+      return newId;
+    },
+    onSuccess: (newBuildId) => { qc.invalidateQueries({ queryKey: ["gm-builds"] }); qc.invalidateQueries({ queryKey: ["gm-roster"] }); setPickedBuildId(newBuildId); toast.success("Build created"); },
     onError: (e: any) => toast.error(`Create build failed: ${e.message}`),
   });
 
