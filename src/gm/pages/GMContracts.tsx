@@ -163,7 +163,7 @@ function Field({ label, children, full }: { label: string; children: React.React
   );
 }
 
-function ContractCard({ c, playerName }: { c: GmContract; playerName: string }) {
+export function ContractCard({ c, playerName }: { c: GmContract; playerName: string }) {
   const { viewPdf, removeContract, toggleObligation } = useGmContracts();
   const dates = [fmtDate(c.start_date), fmtDate(c.end_date)].filter(Boolean).join(" – ");
   return (
