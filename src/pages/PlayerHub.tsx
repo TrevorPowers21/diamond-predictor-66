@@ -7,6 +7,8 @@ import { useGmContracts } from "@/gm/hooks/useGmContracts";
 import PlayerFinancials, { playerComp } from "@/gm/components/PlayerFinancials";
 import { isPitcherProfile } from "@/lib/profileRoutes";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ArrowLeft, LineChart, BarChart3, DollarSign, Activity, Bone, LayoutDashboard } from "lucide-react";
 
@@ -154,17 +156,22 @@ export default function PlayerHub() {
 
   return (
     <div className="space-y-4">
-      <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Back</button>
-
-      {/* Header / home — one consistent header, hidden where the embedded page has its own */}
+      {/* Header — mirrors the scouting profile's style (name + badges, one back
+          button). Hidden on Projections/Season Stats, which carry their own full
+          scouting header with all its wired buttons. */}
       {!embedsOwnHeader && (
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#D4AF37]/15 text-xl font-bold text-[#D4AF37]" style={OSWALD}>{(name[0] || "?").toUpperCase()}</div>
-          <div className="min-w-0">
-            <h1 className="text-2xl font-bold leading-tight" style={OSWALD}>{name}</h1>
-            <div className="text-xs text-muted-foreground">
-              {[showPosition ? position : null, classYr, isPitcher ? "Pitcher" : "Position player"].filter(Boolean).join(" · ")}
-              {row && <span className={cn("ml-1.5 font-medium", row.finalized ? "text-emerald-400" : "text-amber-400")}>· {row.finalized ? "Finalized" : "Draft"}</span>}
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-2xl font-bold tracking-tight">{name}</h2>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              {showPosition && position && <Badge variant="secondary">{position}</Badge>}
+              {classYr && <Badge variant="outline">{classYr}</Badge>}
+              <Badge variant="outline" className="text-muted-foreground">{isPitcher ? "Pitcher" : "Position player"}</Badge>
+              {row && <Badge variant="outline" className={cn("font-semibold", row.finalized ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-500" : "border-amber-500/40 bg-amber-500/10 text-amber-500")}>{row.finalized ? "Finalized" : "Draft"}</Badge>}
+              {c && c.total > 0 && <Badge variant="outline" className="border-[#D4AF37]/40 bg-[#D4AF37]/10 font-semibold text-[#D4AF37]">{money(c.total)}</Badge>}
             </div>
           </div>
         </div>
