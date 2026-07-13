@@ -13,6 +13,7 @@ export interface GmBuildOption {
   id: string;
   name: string;
   is_default: boolean;
+  is_active: boolean; // the one "live" build that drives profiles/WAR/market/pay
 }
 
 export interface GmRow {
@@ -137,23 +138,30 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     queryFn: async (): Promise<GmBuildOption[]> => {
       const { data } = await (supabase as any)
         .from("team_builds")
-        .select("id, name, is_default, academic_year, updated_at, archived")
+        .select("id, name, is_default, is_active, academic_year, updated_at, archived")
         .eq("customer_team_id", effectiveTeamId)
         .order("is_default", { ascending: false })
         .order("updated_at", { ascending: false });
       return (data || [])
         .filter((b: any) => !b.archived && (b.academic_year === season || b.academic_year == null))
-        .map((b: any) => ({ id: b.id, name: b.is_default ? "Default Roster" : b.name, is_default: !!b.is_default }));
+        .map((b: any) => ({ id: b.id, name: b.is_default ? "Default Roster" : b.name, is_default: !!b.is_default, is_active: !!b.is_active }));
     },
   });
 
-  // Fallback build when nothing is picked: the most-recent SAVED (non-default)
-  // build — that's the working roster, not the pristine "everyone returns"
-  // default. Falls back to the default only when no working builds exist.
-  const defaultBuildId = useMemo(
-    () => builds.find((b) => !b.is_default)?.id ?? builds.find((b) => b.is_default)?.id ?? builds[0]?.id ?? null,
+  // The LIVE build — the authoritative one that drives player profiles, WAR /
+  // market value, program membership, and pay. It's the build a coach flagged
+  // active (GM Settings → Change Active Roster); when none is flagged yet, fall
+  // back to the working build (first non-default), then the default.
+  const liveBuildId = useMemo(
+    () => builds.find((b) => b.is_active)?.id
+      ?? builds.find((b) => !b.is_default)?.id
+      ?? builds.find((b) => b.is_default)?.id
+      ?? builds[0]?.id ?? null,
     [builds],
   );
+  // Selection (which build you're VIEWING in Roster Management) defaults to the
+  // live build; a coach can select a scenario copy to edit it without going live.
+  const defaultBuildId = liveBuildId;
   // Guard: the picked build must belong to the CURRENT team's builds. Otherwise a
   // build selected for one team would leak its roster when impersonating another
   // (pickedBuildId is component state and doesn't reset on team switch).
@@ -589,10 +597,37 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     return newBuildId;
   };
 
+  // Auto-name new builds: the first copy off the default is "{year} Roster Build"
+  // (no number); each further copy is "…Build 2", "…Build 3". Copies are created
+  // inactive — they only go live via setLiveBuild (GM Settings → Change Active Roster).
+  const nextBuildName = () => {
+    const year = season + 1;
+    const n = builds.filter((b) => !b.is_default).length;
+    return n === 0 ? `${year} Roster Build` : `${year} Roster Build ${n + 1}`;
+  };
+
   const createBuild = useMutation({
-    mutationFn: async ({ name, sourceBuildId }: { name: string; sourceBuildId: string }) => cloneBuildInto(name, sourceBuildId),
+    mutationFn: async ({ sourceBuildId }: { name?: string; sourceBuildId: string }) => cloneBuildInto(nextBuildName(), sourceBuildId),
     onSuccess: (newBuildId) => { qc.invalidateQueries({ queryKey: ["gm-builds"] }); setPickedBuildId(newBuildId); toast.success("Build created"); },
     onError: (e: any) => toast.error(`Create build failed: ${e.message}`),
+  });
+
+  // Flip which build is LIVE. Exactly one active per team: clear all, set one.
+  const setLiveBuild = useMutation({
+    mutationFn: async (buildId: string) => {
+      if (!effectiveTeamId) throw new Error("No team in scope");
+      const { error: e1 } = await (supabase as any).from("team_builds").update({ is_active: false }).eq("customer_team_id", effectiveTeamId);
+      if (e1) throw e1;
+      const { error: e2 } = await (supabase as any).from("team_builds").update({ is_active: true }).eq("id", buildId);
+      if (e2) throw e2;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["gm-builds"] });
+      qc.invalidateQueries({ queryKey: ["gm-roster"] });
+      qc.invalidateQueries({ queryKey: ["player-program-membership"] });
+      toast.success("Active roster changed");
+    },
+    onError: (e: any) => toast.error(`Change failed: ${e.message}`),
   });
 
   const renameBuild = useMutation({
@@ -812,8 +847,11 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
     isLoading,
     builds,
     selectedBuildId: activeBuildId,
+    liveBuildId,
     activeBuildIsDefault,
     setSelectedBuildId: setPickedBuildId,
+    setLiveBuild: (buildId: string) => setLiveBuild.mutate(buildId),
+    isChangingLiveBuild: setLiveBuild.isPending,
     hitters,
     pitchers,
     budget,

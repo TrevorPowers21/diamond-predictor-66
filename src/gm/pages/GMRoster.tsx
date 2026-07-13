@@ -275,6 +275,8 @@ export default function GMRoster() {
   const [reasonModalOpen, setReasonModalOpen] = useState(false);
   const [departuresOpen, setDeparturesOpen] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
+  const [activeRosterOpen, setActiveRosterOpen] = useState(false);
+  const [pendingLiveBuild, setPendingLiveBuild] = useState<string>("");
   // Per-player notes — authored + dated log (multiple per player).
   const [noteRow, setNoteRow] = useState<GmRow | null>(null);
   const openNote = (r: GmRow) => { setNoteRow(r); };
@@ -597,6 +599,7 @@ export default function GMRoster() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
               <DropdownMenuItem onClick={() => setBudgetOpen(true)}>Edit Budget</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { setPendingLiveBuild(gm.liveBuildId ?? ""); setActiveRosterOpen(true); }}>Change Active Roster</DropdownMenuItem>
               <DropdownMenuItem onClick={() => setDeparturesOpen(true)}>
                 Departures
                 {gm.pendingReasonCount > 0 && (
@@ -618,6 +621,34 @@ export default function GMRoster() {
             onSave={(caps) => { setBudgetDraft(caps); gm.saveBudget(caps); }}
             onFinalize={(caps) => setConfirmCaps(caps)}
           />
+          {/* Change Active Roster — pick which build is LIVE (drives every
+              player's profile, projected value, and pay). Tucked in GM Settings. */}
+          <Dialog open={activeRosterOpen} onOpenChange={setActiveRosterOpen}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader><DialogTitle style={OSWALD}>Change Active Roster</DialogTitle></DialogHeader>
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">The <span className="font-semibold text-foreground">active roster</span> is the one build that drives every player's profile, projected WAR / market value, and pay across the whole app. Changing it updates what everyone sees.</p>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Live build</label>
+                  <Select value={pendingLiveBuild} onValueChange={setPendingLiveBuild}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select build" /></SelectTrigger>
+                    <SelectContent>
+                      {gm.builds.map((b) => (
+                        <SelectItem key={b.id} value={b.id} className="text-sm">{b.name}{b.id === gm.liveBuildId ? " · current" : ""}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" size="sm" onClick={() => setActiveRosterOpen(false)}>Cancel</Button>
+                <Button size="sm" disabled={!pendingLiveBuild || pendingLiveBuild === gm.liveBuildId || gm.isChangingLiveBuild}
+                  onClick={() => { gm.setLiveBuild(pendingLiveBuild); setActiveRosterOpen(false); }}>
+                  {gm.isChangingLiveBuild ? "Changing…" : "Change & apply"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           {/* Per-player notes — authored + dated log, team-shared with the coach's
               Team Builder (same gm_player_notes rows keyed by build_player_id). */}
           <PlayerNotesDialog
