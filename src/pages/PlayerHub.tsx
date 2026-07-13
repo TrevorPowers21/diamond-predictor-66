@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useGmRoster } from "@/gm/hooks/useGmRoster";
 import { useGmContracts } from "@/gm/hooks/useGmContracts";
 import PlayerFinancials, { playerComp } from "@/gm/components/PlayerFinancials";
-import { profileRouteFor, isPitcherProfile } from "@/lib/profileRoutes";
+import { scoutingRouteFor, isPitcherProfile } from "@/lib/profileRoutes";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -75,7 +75,7 @@ export default function PlayerHub() {
   const isPitcher = isPitcherProfile(position, row?.is_pitcher ? "rhp" : null);
   const c = row ? playerComp(row) : null;
 
-  const scoutingRoute = profileRouteFor(playerId, position, row?.is_pitcher ? "rhp" : null);
+  const scoutingRoute = scoutingRouteFor(playerId, position, row?.is_pitcher ? "rhp" : null);
   const statsRoute = `${scoutingRoute}/stats`;
 
   const headline = (label: string, value: string, accent?: boolean) => (

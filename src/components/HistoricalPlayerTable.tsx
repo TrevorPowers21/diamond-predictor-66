@@ -593,7 +593,7 @@ export function HistoricalPitcherTable({ season, onPlayerClick }: { season: numb
                       <TableRow key={`${id}-${i}`} className="cursor-pointer hover:bg-muted/50 transition-colors">
                         <TableCell className="font-medium whitespace-nowrap sticky left-0 z-10 bg-background">
                           <Link
-                            to={`/dashboard/pitcher/${encodeURIComponent(id)}`}
+                            to={`/player/${encodeURIComponent(id)}`}
                             onClick={onPlayerClick}
                             className="hover:text-primary hover:underline transition-colors"
                           >

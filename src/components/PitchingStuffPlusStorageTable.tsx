@@ -373,7 +373,7 @@ export default function PitchingStuffPlusStorageTable({ season }: { season: "202
                     <TableRow key={row.id}>
                       <TableCell className="sticky left-0 z-10 bg-background font-medium min-w-[220px]">
                         {playerId ? (
-                          <Link to={`/dashboard/pitcher/${playerId}`} className="text-primary underline-offset-4 hover:underline">
+                          <Link to={`/player/${playerId}`} className="text-primary underline-offset-4 hover:underline">
                             {row.playerName}
                           </Link>
                         ) : (
