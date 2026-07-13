@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -25,8 +25,7 @@ const TABS = [
   { key: "projections", label: "Projections", icon: LineChart },
   { key: "stats", label: "Season Stats", icon: BarChart3 },
   { key: "financials", label: "Financials", icon: DollarSign },
-  { key: "newtforce", label: "NewtForce", icon: Activity },
-  { key: "biomechanics", label: "Biomechanics", icon: Bone },
+  { key: "development", label: "Player Development", icon: Activity },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
@@ -38,6 +37,32 @@ function Placeholder({ title, note }: { title: string; note: string }) {
         <p className="max-w-md text-sm text-muted-foreground">{note}</p>
       </CardContent>
     </Card>
+  );
+}
+
+// Player Development groups the movement/force data sources under one tab with a
+// toggle — NewtForce and Biomechanics today, room for more dev detail later.
+const DEV_SOURCES = [
+  { key: "newtforce", label: "NewtForce", icon: Activity, note: "Force-plate & mound metrics (Accel Impulse Score, Z Transfer, and more) will appear here once NewtForce data is wired into the program database." },
+  { key: "biomechanics", label: "Biomechanics", icon: Bone, note: "Motion-capture and biomechanics analysis will live here once that data source is connected." },
+] as const;
+
+function PlayerDevelopment() {
+  const [src, setSrc] = useState<(typeof DEV_SOURCES)[number]["key"]>("newtforce");
+  const active = DEV_SOURCES.find((s) => s.key === src)!;
+  return (
+    <div className="space-y-3">
+      <div className="flex w-fit gap-0.5 rounded-md border border-border/60 bg-muted/30 p-0.5">
+        {DEV_SOURCES.map((s) => (
+          <button key={s.key} onClick={() => setSrc(s.key)}
+            className={cn("flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-semibold transition-colors",
+              src === s.key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+            <s.icon className="h-3.5 w-3.5" /> {s.label}
+          </button>
+        ))}
+      </div>
+      <Placeholder title={active.label} note={active.note} />
+    </div>
   );
 }
 
@@ -200,12 +225,7 @@ export default function PlayerHub() {
 
         {tab === "financials" && <PlayerFinancials playerName={name} playerId={playerId} />}
 
-        {tab === "newtforce" && (
-          <Placeholder title="NewtForce" note="Force-plate & mound metrics (Accel Impulse Score, Z Transfer, and more) will appear here once NewtForce data is wired into the program database." />
-        )}
-        {tab === "biomechanics" && (
-          <Placeholder title="Biomechanics" note="Motion-capture and biomechanics analysis will live here once that data source is connected." />
-        )}
+        {tab === "development" && <PlayerDevelopment />}
       </div>
   );
 }
