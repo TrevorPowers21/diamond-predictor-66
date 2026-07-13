@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { useParams } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import PlayerPageTabs from "@/components/PlayerPageTabs";
@@ -17,12 +18,14 @@ const SEASON = 2026;
  * Export Report PDF lives on Profile — the View Full Report button
  * routes there.
  */
-export default function PlayerStatsPage() {
-  const { id } = useParams<{ id: string }>();
+export default function PlayerStatsPage({ embedded = false, idOverride }: { embedded?: boolean; idOverride?: string }) {
+  const { id: paramId } = useParams<{ id: string }>();
+  const id = idOverride ?? paramId;
   const { data: player, isLoading } = usePlayerSourceId(id);
+  const Shell = embedded ? Fragment : DashboardLayout;
 
   return (
-    <DashboardLayout>
+    <Shell>
       <div className="space-y-5 p-4 md:p-6">
         {id && <PlayerPageTabs playerId={id} kind="player" />}
 
@@ -50,6 +53,6 @@ export default function PlayerStatsPage() {
           <HitterPitchLog batterId={player.sourcePlayerId} season={SEASON} />
         )}
       </div>
-    </DashboardLayout>
+    </Shell>
   );
 }

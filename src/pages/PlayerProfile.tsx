@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -223,8 +223,12 @@ function StatRow({ label, from, predicted }: { label: string; from: number | nul
   );
 }
 
-export default function PlayerProfile() {
-  const { id } = useParams<{ id: string }>();
+export default function PlayerProfile({ embedded = false, idOverride }: { embedded?: boolean; idOverride?: string }) {
+  const { id: paramId } = useParams<{ id: string }>();
+  const id = idOverride ?? paramId;
+  // Inside the player hub the outer dashboard chrome is already present, so
+  // render the profile content bare (no second DashboardLayout).
+  const Shell = embedded ? Fragment : DashboardLayout;
   const navigate = useNavigate();
   const location = useLocation();
   const returnTo = (location.state as any)?.returnTo as string | undefined;
@@ -718,7 +722,7 @@ export default function PlayerProfile() {
   if (!player) {
     if (isLoading) {
       return (
-        <DashboardLayout>
+        <Shell>
           <div className="px-4 py-6 max-w-7xl mx-auto">
             <Button variant="ghost" onClick={() => navigate(-1)} className="mb-4 cursor-pointer">
               <ArrowLeft className="mr-2 h-4 w-4" /> Back
@@ -742,18 +746,18 @@ export default function PlayerProfile() {
               </div>
             </div>
           </div>
-        </DashboardLayout>
+        </Shell>
       );
     }
     return (
-      <DashboardLayout>
+      <Shell>
         <div className="flex flex-col items-center justify-center py-20 gap-4">
           <p className="text-muted-foreground">Player not found</p>
           <Button variant="outline" onClick={() => navigate(-1)}>
             <ArrowLeft className="mr-2 h-4 w-4" />Go Back
           </Button>
         </div>
-      </DashboardLayout>
+      </Shell>
     );
   }
 
@@ -990,7 +994,7 @@ export default function PlayerProfile() {
   const hasZeroAb = activeMasterRow != null && (activeAb == null || Number(activeAb) === 0);
   if (hasZeroAb) {
     return (
-      <DashboardLayout>
+      <Shell>
         <div className="space-y-4 max-w-[1400px] mx-auto">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" onClick={() => returnTo ? navigate(returnTo) : navigate(-1)}>
@@ -1021,12 +1025,12 @@ export default function PlayerProfile() {
             </CardContent>
           </Card>
         </div>
-      </DashboardLayout>
+      </Shell>
     );
   }
 
   return (
-    <DashboardLayout>
+    <Shell>
       <div className="space-y-4 max-w-[1400px] mx-auto">
         {id && <PlayerPageTabs playerId={id} kind="player" />}
         {/* Back + Header */}
@@ -1967,7 +1971,7 @@ export default function PlayerProfile() {
         </div>}
 
       </div>
-    </DashboardLayout>
+    </Shell>
   );
 }
 

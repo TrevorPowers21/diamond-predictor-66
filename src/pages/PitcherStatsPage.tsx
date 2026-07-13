@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { useParams } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import PlayerPageTabs from "@/components/PlayerPageTabs";
@@ -13,12 +14,14 @@ const SEASON = 2026;
  * Mirrors PitcherProfile's identity strip. Export Report PDF lives on
  * Profile — View Full Report routes there.
  */
-export default function PitcherStatsPage() {
-  const { id } = useParams<{ id: string }>();
+export default function PitcherStatsPage({ embedded = false, idOverride }: { embedded?: boolean; idOverride?: string }) {
+  const { id: paramId } = useParams<{ id: string }>();
+  const id = idOverride ?? paramId;
   const { data: player, isLoading } = usePlayerSourceId(id);
+  const Shell = embedded ? Fragment : DashboardLayout;
 
   return (
-    <DashboardLayout>
+    <Shell>
       <div className="space-y-5 p-4 md:p-6">
         {id && <PlayerPageTabs playerId={id} kind="pitcher" />}
 
@@ -44,6 +47,6 @@ export default function PitcherStatsPage() {
           <PitcherPitchLog pitcherId={player.sourcePlayerId} season={SEASON} />
         )}
       </div>
-    </DashboardLayout>
+    </Shell>
   );
 }

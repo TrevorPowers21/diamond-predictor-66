@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Download, Target, TrendingUp, Star } from "lucide-react";
@@ -356,8 +356,10 @@ function ScoutGrade({ value, fullLabel, rawStat, unit }: {
 }
 
 
-export default function PitcherProfile() {
-  const { id } = useParams<{ id: string }>();
+export default function PitcherProfile({ embedded = false, idOverride }: { embedded?: boolean; idOverride?: string }) {
+  const { id: paramId } = useParams<{ id: string }>();
+  const id = idOverride ?? paramId;
+  const Shell = embedded ? Fragment : DashboardLayout;
   const navigate = useNavigate();
   const location = useLocation();
   const { hasRole, effectiveTeamId } = useAuth();
@@ -1583,9 +1585,9 @@ export default function PitcherProfile() {
 
   if (isLoading) {
     return (
-      <DashboardLayout>
+      <Shell>
         <div className="p-6 text-muted-foreground">Loading pitcher profile…</div>
-      </DashboardLayout>
+      </Shell>
     );
   }
 
@@ -1593,7 +1595,7 @@ export default function PitcherProfile() {
   const currentIp = (currentPitcherRow as any)?.IP;
   if (currentPitcherRow != null && (currentIp == null || Number(currentIp) === 0)) {
     return (
-      <DashboardLayout>
+      <Shell>
         <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
@@ -1609,12 +1611,12 @@ export default function PitcherProfile() {
             </CardContent>
           </Card>
         </div>
-      </DashboardLayout>
+      </Shell>
     );
   }
 
   return (
-    <DashboardLayout>
+    <Shell>
       <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
         {id && <PlayerPageTabs playerId={id} kind="pitcher" />}
         <div className="flex items-center gap-3">
@@ -2470,7 +2472,7 @@ export default function PitcherProfile() {
         </div>
 
       </div>
-    </DashboardLayout>
+    </Shell>
   );
 }
 
