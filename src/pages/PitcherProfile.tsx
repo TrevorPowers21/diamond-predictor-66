@@ -356,7 +356,7 @@ function ScoutGrade({ value, fullLabel, rawStat, unit }: {
 }
 
 
-export default function PitcherProfile({ embedded = false, idOverride }: { embedded?: boolean; idOverride?: string }) {
+export default function PitcherProfile({ embedded = false, idOverride, hideTabs = false }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean }) {
   const { id: paramId } = useParams<{ id: string }>();
   const id = idOverride ?? paramId;
   const Shell = embedded ? Fragment : DashboardLayout;
@@ -1618,7 +1618,7 @@ export default function PitcherProfile({ embedded = false, idOverride }: { embed
   return (
     <Shell>
       <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
-        {id && !embedded && <PlayerPageTabs playerId={id} kind="pitcher" />}
+        {id && !hideTabs && <PlayerPageTabs playerId={id} kind="pitcher" />}
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"

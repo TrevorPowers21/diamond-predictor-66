@@ -14,7 +14,7 @@ const SEASON = 2026;
  * Mirrors PitcherProfile's identity strip. Export Report PDF lives on
  * Profile — View Full Report routes there.
  */
-export default function PitcherStatsPage({ embedded = false, idOverride }: { embedded?: boolean; idOverride?: string }) {
+export default function PitcherStatsPage({ embedded = false, idOverride, hideTabs = false }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean }) {
   const { id: paramId } = useParams<{ id: string }>();
   const id = idOverride ?? paramId;
   const { data: player, isLoading } = usePlayerSourceId(id);
@@ -23,7 +23,7 @@ export default function PitcherStatsPage({ embedded = false, idOverride }: { emb
   return (
     <Shell>
       <div className="space-y-5 p-4 md:p-6">
-        {id && !embedded && <PlayerPageTabs playerId={id} kind="pitcher" />}
+        {id && !hideTabs && <PlayerPageTabs playerId={id} kind="pitcher" />}
 
         {player && id && (
           <PlayerStatsHeader

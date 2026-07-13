@@ -71,6 +71,27 @@ export default function PlayerHub() {
     },
   });
 
+  // Program membership: a player belongs to the program if they're rostered on
+  // ANY of the team's builds (add to any build → program profile; removed from
+  // all → reverts to the outside scouting design). We know instantly if they're
+  // on the selected build (`row`); otherwise check across the team's builds.
+  const onSelectedBuild = !!row;
+  const buildIds = useMemo(() => gm.builds.map((b) => b.id), [gm.builds]);
+  const { data: onAnyBuild, isLoading: membershipLoading } = useQuery({
+    queryKey: ["player-program-membership", playerId, buildIds.join(",")],
+    enabled: !!playerId && !onSelectedBuild && buildIds.length > 0,
+    queryFn: async () => {
+      const { data } = await (supabase as any)
+        .from("team_build_players").select("id")
+        .in("team_build_id", buildIds).eq("player_id", playerId).eq("included_in_roster", true).limit(1);
+      return (data?.length ?? 0) > 0;
+    },
+  });
+  const isProgramPlayer = onSelectedBuild || onAnyBuild === true;
+  const resolving = gm.isLoading
+    || (!onSelectedBuild && gm.hasTeam && buildIds.length === 0)
+    || (!onSelectedBuild && buildIds.length > 0 && membershipLoading);
+
   const dbName = dbPlayer ? [dbPlayer.first_name, dbPlayer.last_name].filter(Boolean).join(" ") : "";
   const name = (row?.name ?? dbName) || "Player";
   const position = row?.position ?? dbPlayer?.position ?? null;
@@ -90,6 +111,21 @@ export default function PlayerHub() {
   // details it shows are trimmed to what's relevant, e.g. no position on money).
   const embedsOwnHeader = tab === "projections" || tab === "stats";
   const showPosition = tab !== "financials";
+
+  // Outside the program → the Player-Evaluation (scouting) design, with its own
+  // Overview/Season Stats tabs. Only rostered players get the program hub.
+  if (resolving) {
+    return <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>;
+  }
+  if (!isProgramPlayer) {
+    return (
+      <Suspense fallback={<div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>}>
+        {isPitcher
+          ? <PitcherProfile embedded idOverride={playerId} />
+          : <PlayerProfile embedded idOverride={playerId} />}
+      </Suspense>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -149,16 +185,16 @@ export default function PlayerHub() {
         {tab === "projections" && (
           <Suspense fallback={<div className="py-16 text-center text-sm text-muted-foreground">Loading projections…</div>}>
             {isPitcher
-              ? <PitcherProfile embedded idOverride={playerId} />
-              : <PlayerProfile embedded idOverride={playerId} />}
+              ? <PitcherProfile embedded hideTabs idOverride={playerId} />
+              : <PlayerProfile embedded hideTabs idOverride={playerId} />}
           </Suspense>
         )}
 
         {tab === "stats" && (
           <Suspense fallback={<div className="py-16 text-center text-sm text-muted-foreground">Loading stats…</div>}>
             {isPitcher
-              ? <PitcherStatsPage embedded idOverride={playerId} />
-              : <PlayerStatsPage embedded idOverride={playerId} />}
+              ? <PitcherStatsPage embedded hideTabs idOverride={playerId} />
+              : <PlayerStatsPage embedded hideTabs idOverride={playerId} />}
           </Suspense>
         )}
 

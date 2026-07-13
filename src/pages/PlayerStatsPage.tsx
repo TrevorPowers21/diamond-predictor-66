@@ -18,7 +18,7 @@ const SEASON = 2026;
  * Export Report PDF lives on Profile — the View Full Report button
  * routes there.
  */
-export default function PlayerStatsPage({ embedded = false, idOverride }: { embedded?: boolean; idOverride?: string }) {
+export default function PlayerStatsPage({ embedded = false, idOverride, hideTabs = false }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean }) {
   const { id: paramId } = useParams<{ id: string }>();
   const id = idOverride ?? paramId;
   const { data: player, isLoading } = usePlayerSourceId(id);
@@ -27,7 +27,7 @@ export default function PlayerStatsPage({ embedded = false, idOverride }: { embe
   return (
     <Shell>
       <div className="space-y-5 p-4 md:p-6">
-        {id && !embedded && <PlayerPageTabs playerId={id} kind="player" />}
+        {id && !hideTabs && <PlayerPageTabs playerId={id} kind="player" />}
 
         {player && id && (
           <PlayerStatsHeader

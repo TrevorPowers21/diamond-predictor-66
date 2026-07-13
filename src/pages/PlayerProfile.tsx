@@ -223,7 +223,7 @@ function StatRow({ label, from, predicted }: { label: string; from: number | nul
   );
 }
 
-export default function PlayerProfile({ embedded = false, idOverride }: { embedded?: boolean; idOverride?: string }) {
+export default function PlayerProfile({ embedded = false, idOverride, hideTabs = false }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean }) {
   const { id: paramId } = useParams<{ id: string }>();
   const id = idOverride ?? paramId;
   // Inside the player hub the outer dashboard chrome is already present, so
@@ -1032,7 +1032,7 @@ export default function PlayerProfile({ embedded = false, idOverride }: { embedd
   return (
     <Shell>
       <div className="space-y-4 max-w-[1400px] mx-auto">
-        {id && !embedded && <PlayerPageTabs playerId={id} kind="player" />}
+        {id && !hideTabs && <PlayerPageTabs playerId={id} kind="player" />}
         {/* Back + Header */}
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => returnTo ? navigate(returnTo) : navigate(-1)}>
