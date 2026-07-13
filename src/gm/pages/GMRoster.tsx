@@ -371,7 +371,7 @@ export default function GMRoster() {
                   <TableCell className="sticky left-0 z-10 bg-background py-1.5">
                     <span className="inline-flex items-center gap-1.5">
                       {r.player_id ? (
-                        <Link to={`/player/${r.player_id}`} state={{ returnTo }} className="text-sm font-medium hover:text-primary hover:underline">
+                        <Link to={`/gm/player/${r.player_id}`} state={{ returnTo }} className="text-sm font-medium hover:text-primary hover:underline">
                           {r.name}
                         </Link>
                       ) : (

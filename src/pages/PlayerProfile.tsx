@@ -1032,7 +1032,7 @@ export default function PlayerProfile({ embedded = false, idOverride }: { embedd
   return (
     <Shell>
       <div className="space-y-4 max-w-[1400px] mx-auto">
-        {id && <PlayerPageTabs playerId={id} kind="player" />}
+        {id && !embedded && <PlayerPageTabs playerId={id} kind="player" />}
         {/* Back + Header */}
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => returnTo ? navigate(returnTo) : navigate(-1)}>

@@ -23,7 +23,7 @@ export default function PitcherStatsPage({ embedded = false, idOverride }: { emb
   return (
     <Shell>
       <div className="space-y-5 p-4 md:p-6">
-        {id && <PlayerPageTabs playerId={id} kind="pitcher" />}
+        {id && !embedded && <PlayerPageTabs playerId={id} kind="pitcher" />}
 
         {player && id && (
           <PlayerStatsHeader

@@ -2,7 +2,6 @@ import { lazy, Suspense, useMemo } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import DashboardLayout from "@/components/DashboardLayout";
 import { useGmRoster } from "@/gm/hooks/useGmRoster";
 import { useGmContracts } from "@/gm/hooks/useGmContracts";
 import PlayerFinancials, { playerComp } from "@/gm/components/PlayerFinancials";
@@ -86,22 +85,29 @@ export default function PlayerHub() {
     </div>
   );
 
-  return (
-    <DashboardLayout>
-      <div className="space-y-4">
-        <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Back</button>
+  // Projections/Season Stats embed the scouting pages, which carry their own
+  // identity header — so the hub header only shows on the other tabs (and the
+  // details it shows are trimmed to what's relevant, e.g. no position on money).
+  const embedsOwnHeader = tab === "projections" || tab === "stats";
+  const showPosition = tab !== "financials";
 
-        {/* Header / home */}
+  return (
+    <div className="space-y-4">
+      <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Back</button>
+
+      {/* Header / home — one consistent header, hidden where the embedded page has its own */}
+      {!embedsOwnHeader && (
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#D4AF37]/15 text-xl font-bold text-[#D4AF37]" style={OSWALD}>{(name[0] || "?").toUpperCase()}</div>
           <div className="min-w-0">
             <h1 className="text-2xl font-bold leading-tight" style={OSWALD}>{name}</h1>
             <div className="text-xs text-muted-foreground">
-              {[position, classYr, isPitcher ? "Pitcher" : "Position player"].filter(Boolean).join(" · ")}
+              {[showPosition ? position : null, classYr, isPitcher ? "Pitcher" : "Position player"].filter(Boolean).join(" · ")}
               {row && <span className={cn("ml-1.5 font-medium", row.finalized ? "text-emerald-400" : "text-amber-400")}>· {row.finalized ? "Finalized" : "Draft"}</span>}
             </div>
           </div>
         </div>
+      )}
 
         {/* Tab bar */}
         <div className="flex gap-1 overflow-x-auto border-b border-border/60">
@@ -165,6 +171,5 @@ export default function PlayerHub() {
           <Placeholder title="Biomechanics" note="Motion-capture and biomechanics analysis will live here once that data source is connected." />
         )}
       </div>
-    </DashboardLayout>
   );
 }

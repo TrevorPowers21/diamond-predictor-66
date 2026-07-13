@@ -1618,7 +1618,7 @@ export default function PitcherProfile({ embedded = false, idOverride }: { embed
   return (
     <Shell>
       <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
-        {id && <PlayerPageTabs playerId={id} kind="pitcher" />}
+        {id && !embedded && <PlayerPageTabs playerId={id} kind="pitcher" />}
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"

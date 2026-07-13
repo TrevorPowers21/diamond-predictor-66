@@ -13,7 +13,6 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import PlayerNotesDialog from "@/components/PlayerNotesDialog";
 import { ArrowUpDown, Check, ChevronDown, ChevronRight, GripVertical, Plus, Search, StickyNote, Target as TargetIcon, Trash2 } from "lucide-react";
 import { portalStatusMeta } from "@/components/PortalStatus";
-import { profileRouteFor } from "@/lib/profileRoutes";
 import { cn } from "@/lib/utils";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -196,7 +195,7 @@ export default function GMTargets() {
                           <span className="inline-flex items-center justify-center min-w-[26px] h-6 px-1.5 rounded-md text-[12px] font-bold tabular-nums text-[#D4AF37] bg-[#D4AF37]/10 ring-1 ring-[#D4AF37]/20">{i + 1}</span>
                         </TableCell>
                         <TableCell className="min-w-[200px] py-1.5">
-                          <Link to={profileRouteFor(t.player_id, t.position)} className="font-medium text-sm hover:text-primary hover:underline">{t.name}</Link>
+                          <Link to={`/gm/player/${t.player_id}`} className="font-medium text-sm hover:text-primary hover:underline">{t.name}</Link>
                           <div className="text-[11px] text-muted-foreground">{[t.position, t.team, t.class_year].filter(Boolean).join(" · ") || "—"}</div>
                         </TableCell>
                         <TableCell className="py-1.5">{statBadge(t)}</TableCell>

@@ -27,7 +27,7 @@ export default function PlayerStatsPage({ embedded = false, idOverride }: { embe
   return (
     <Shell>
       <div className="space-y-5 p-4 md:p-6">
-        {id && <PlayerPageTabs playerId={id} kind="player" />}
+        {id && !embedded && <PlayerPageTabs playerId={id} kind="player" />}
 
         {player && id && (
           <PlayerStatsHeader

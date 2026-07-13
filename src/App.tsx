@@ -43,6 +43,7 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import NotFound from "./pages/NotFound";
 import DevWeights from "./pages/DevWeights";
 import PlayerComparison from "./pages/PlayerComparison";
+import DashboardLayout from "@/components/DashboardLayout";
 import PlayerProfile from "./pages/PlayerProfile";
 import PitcherProfile from "./pages/PitcherProfile";
 import PlayerStatsPage from "./pages/PlayerStatsPage";
@@ -112,7 +113,7 @@ const router = createBrowserRouter([
       { path: "/dashboard/dev-weights", element: <ProtectedRoute><DevWeights /></ProtectedRoute> },
       // { path: "/dashboard/nil", element: <ProtectedRoute><NilValuations /></ProtectedRoute> },
       { path: "/dashboard/compare", element: <ProtectedRoute><PlayerComparison /></ProtectedRoute> },
-      { path: "/player/:playerId", element: <ProtectedRoute><Suspense fallback={null}><PlayerHub /></Suspense></ProtectedRoute> },
+      { path: "/player/:playerId", element: <ProtectedRoute><DashboardLayout><Suspense fallback={null}><PlayerHub /></Suspense></DashboardLayout></ProtectedRoute> },
       { path: "/dashboard/player/:id", element: <ProtectedRoute><PlayerProfile /></ProtectedRoute> },
       { path: "/dashboard/player/:id/stats", element: <ProtectedRoute><PlayerStatsPage /></ProtectedRoute> },
       { path: "/dashboard/pitcher/:id", element: <ProtectedRoute><PitcherProfile /></ProtectedRoute> },
@@ -177,6 +178,7 @@ const router = createBrowserRouter([
           { path: "targets", element: <Suspense fallback={null}><GMTargets /></Suspense> },
           { path: "allocations", element: <Suspense fallback={null}><GMAllocations /></Suspense> },
           { path: "contracts", element: <Suspense fallback={null}><GMContracts /></Suspense> },
+          { path: "player/:playerId", element: <Suspense fallback={null}><PlayerHub /></Suspense> },
           { path: "analytics", element: <Suspense fallback={null}><GMAnalytics /></Suspense> },
           { path: "recruiting", element: <Suspense fallback={null}><GMRecruits /></Suspense> },
         ],
