@@ -32,6 +32,7 @@ const GMRecruits = lazy(() => import("@/gm/pages/GMRecruits"));
 const GMScenarios = lazy(() => import("@/gm/pages/GMScenarios"));
 const GMTargets = lazy(() => import("@/gm/pages/GMTargets"));
 const GMAllocations = lazy(() => import("@/gm/pages/GMAllocations"));
+const GMContracts = lazy(() => import("@/gm/pages/GMContracts"));
 import TransferPortal from "./pages/TransferPortal";
 import ReturningPlayers from "./pages/ReturningPlayers";
 import WarRoom from "./pages/WarRoom";
@@ -173,6 +174,7 @@ const router = createBrowserRouter([
           { path: "scenarios", element: <Suspense fallback={null}><GMScenarios /></Suspense> },
           { path: "targets", element: <Suspense fallback={null}><GMTargets /></Suspense> },
           { path: "allocations", element: <Suspense fallback={null}><GMAllocations /></Suspense> },
+          { path: "contracts", element: <Suspense fallback={null}><GMContracts /></Suspense> },
           { path: "analytics", element: <Suspense fallback={null}><GMAnalytics /></Suspense> },
           { path: "recruiting", element: <Suspense fallback={null}><GMRecruits /></Suspense> },
         ],
