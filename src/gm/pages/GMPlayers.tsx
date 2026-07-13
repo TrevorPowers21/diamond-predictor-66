@@ -52,7 +52,7 @@ export default function GMPlayers() {
         <Card className="border-border/60">
           <CardContent className="p-0">
             {players.map((r) => (
-              <Link key={r.player_id} to={`/gm/players/${r.player_id}`}
+              <Link key={r.player_id} to={`/player/${r.player_id}`}
                 className="flex items-center gap-3 border-b border-border/40 px-4 py-2.5 transition-colors last:border-0 hover:bg-muted/40">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#D4AF37]/15 text-[11px] font-bold text-[#D4AF37]">{r.name[0]}</div>
                 <div className="min-w-0 flex-1">

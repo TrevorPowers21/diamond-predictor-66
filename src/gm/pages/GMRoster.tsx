@@ -14,7 +14,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Check, Pencil, Plus, Save, SlidersHorizontal, StickyNote, Trash2 } from "lucide-react";
 import PlayerNotesDialog from "@/components/PlayerNotesDialog";
-import { profileRouteFor } from "@/lib/profileRoutes";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { cn } from "@/lib/utils";
 
@@ -372,7 +371,7 @@ export default function GMRoster() {
                   <TableCell className="sticky left-0 z-10 bg-background py-1.5">
                     <span className="inline-flex items-center gap-1.5">
                       {r.player_id ? (
-                        <Link to={profileRouteFor(r.player_id, r.position)} state={{ returnTo }} className="text-sm font-medium hover:text-primary hover:underline">
+                        <Link to={`/player/${r.player_id}`} state={{ returnTo }} className="text-sm font-medium hover:text-primary hover:underline">
                           {r.name}
                         </Link>
                       ) : (

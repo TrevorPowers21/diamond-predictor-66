@@ -34,7 +34,7 @@ const GMTargets = lazy(() => import("@/gm/pages/GMTargets"));
 const GMAllocations = lazy(() => import("@/gm/pages/GMAllocations"));
 const GMContracts = lazy(() => import("@/gm/pages/GMContracts"));
 const GMPlayers = lazy(() => import("@/gm/pages/GMPlayers"));
-const GMPlayerProfile = lazy(() => import("@/gm/pages/GMPlayerProfile"));
+const PlayerHub = lazy(() => import("@/pages/PlayerHub"));
 import TransferPortal from "./pages/TransferPortal";
 import ReturningPlayers from "./pages/ReturningPlayers";
 import WarRoom from "./pages/WarRoom";
@@ -113,6 +113,7 @@ const router = createBrowserRouter([
       { path: "/dashboard/dev-weights", element: <ProtectedRoute><DevWeights /></ProtectedRoute> },
       // { path: "/dashboard/nil", element: <ProtectedRoute><NilValuations /></ProtectedRoute> },
       { path: "/dashboard/compare", element: <ProtectedRoute><PlayerComparison /></ProtectedRoute> },
+      { path: "/player/:playerId", element: <ProtectedRoute><Suspense fallback={null}><PlayerHub /></Suspense></ProtectedRoute> },
       { path: "/dashboard/player/:id", element: <ProtectedRoute><PlayerProfile /></ProtectedRoute> },
       { path: "/dashboard/player/:id/stats", element: <ProtectedRoute><PlayerStatsPage /></ProtectedRoute> },
       { path: "/dashboard/pitcher/:id", element: <ProtectedRoute><PitcherProfile /></ProtectedRoute> },
@@ -178,7 +179,6 @@ const router = createBrowserRouter([
           { path: "allocations", element: <Suspense fallback={null}><GMAllocations /></Suspense> },
           { path: "contracts", element: <Suspense fallback={null}><GMContracts /></Suspense> },
           { path: "players", element: <Suspense fallback={null}><GMPlayers /></Suspense> },
-          { path: "players/:playerId", element: <Suspense fallback={null}><GMPlayerProfile /></Suspense> },
           { path: "analytics", element: <Suspense fallback={null}><GMAnalytics /></Suspense> },
           { path: "recruiting", element: <Suspense fallback={null}><GMRecruits /></Suspense> },
         ],
