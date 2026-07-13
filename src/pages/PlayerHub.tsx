@@ -67,9 +67,8 @@ export default function PlayerHub() {
     },
   });
 
-  const name = row?.name
-    ?? (dbPlayer ? [dbPlayer.first_name, dbPlayer.last_name].filter(Boolean).join(" ") : "")
-    || "Player";
+  const dbName = dbPlayer ? [dbPlayer.first_name, dbPlayer.last_name].filter(Boolean).join(" ") : "";
+  const name = (row?.name ?? dbName) || "Player";
   const position = row?.position ?? dbPlayer?.position ?? null;
   const classYr = row?.eligibility_class ?? row?.class_year ?? dbPlayer?.class_year ?? null;
   const isPitcher = isPitcherProfile(position, row?.is_pitcher ? "rhp" : null);
