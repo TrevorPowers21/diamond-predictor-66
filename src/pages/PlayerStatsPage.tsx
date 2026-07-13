@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import PlayerPageTabs from "@/components/PlayerPageTabs";
@@ -18,7 +18,7 @@ const SEASON = 2026;
  * Export Report PDF lives on Profile — the View Full Report button
  * routes there.
  */
-export default function PlayerStatsPage({ embedded = false, idOverride, hideTabs = false }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean }) {
+export default function PlayerStatsPage({ embedded = false, idOverride, hideTabs = false, tabSlot }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean; tabSlot?: ReactNode }) {
   const { id: paramId } = useParams<{ id: string }>();
   const id = idOverride ?? paramId;
   const { data: player, isLoading } = usePlayerSourceId(id);
@@ -36,6 +36,8 @@ export default function PlayerStatsPage({ embedded = false, idOverride, hideTabs
             playerName={`${player.firstName ?? ""} ${player.lastName ?? ""}`.trim()}
           />
         )}
+
+        {tabSlot}
 
         {isLoading && (
           <div className="py-10 text-sm text-white/50">Loading player…</div>

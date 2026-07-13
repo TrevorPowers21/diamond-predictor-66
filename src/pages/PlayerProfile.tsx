@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -223,7 +223,7 @@ function StatRow({ label, from, predicted }: { label: string; from: number | nul
   );
 }
 
-export default function PlayerProfile({ embedded = false, idOverride, hideTabs = false }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean }) {
+export default function PlayerProfile({ embedded = false, idOverride, hideTabs = false, tabSlot }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean; tabSlot?: ReactNode }) {
   const { id: paramId } = useParams<{ id: string }>();
   const id = idOverride ?? paramId;
   // Inside the player hub the outer dashboard chrome is already present, so
@@ -1384,6 +1384,8 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
             </>
           }
         </div>
+
+        {tabSlot}
 
         {(isLoading || isPredictionsLoading) && (
           <div className="grid gap-4 lg:grid-cols-3">

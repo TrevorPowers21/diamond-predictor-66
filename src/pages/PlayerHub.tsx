@@ -154,6 +154,22 @@ export default function PlayerHub() {
     );
   }
 
+  // The tab bar sits under whichever header the tab uses: the hub's mirror
+  // header on Overview/Financials/Player Development, or the scouting page's own
+  // header on Projections/Season Stats (passed in as tabSlot so it renders right
+  // beneath that header).
+  const tabBar = (
+    <div className="flex gap-1 overflow-x-auto border-b border-border/60">
+      {TABS.map((t) => (
+        <button key={t.key} onClick={() => setTab(t.key)}
+          className={cn("flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+            tab === t.key ? "border-[#D4AF37] text-[#D4AF37]" : "border-transparent text-muted-foreground hover:text-foreground")}>
+          <t.icon className="h-4 w-4" /> {t.label}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       {/* Header — mirrors the scouting profile's style (name + badges, one back
@@ -177,16 +193,9 @@ export default function PlayerHub() {
         </div>
       )}
 
-        {/* Tab bar */}
-        <div className="flex gap-1 overflow-x-auto border-b border-border/60">
-          {TABS.map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)}
-              className={cn("flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-                tab === t.key ? "border-[#D4AF37] text-[#D4AF37]" : "border-transparent text-muted-foreground hover:text-foreground")}>
-              <t.icon className="h-4 w-4" /> {t.label}
-            </button>
-          ))}
-        </div>
+        {/* Tab bar — standalone under the mirror header; on Projections/Season
+            Stats it's slotted under the scouting header instead (see below). */}
+        {!embedsOwnHeader && tabBar}
 
         {/* Tab content */}
         {tab === "overview" && (
@@ -217,16 +226,16 @@ export default function PlayerHub() {
         {tab === "projections" && (
           <Suspense fallback={<div className="py-16 text-center text-sm text-muted-foreground">Loading projections…</div>}>
             {isPitcher
-              ? <PitcherProfile embedded hideTabs idOverride={playerId} />
-              : <PlayerProfile embedded hideTabs idOverride={playerId} />}
+              ? <PitcherProfile embedded hideTabs tabSlot={tabBar} idOverride={playerId} />
+              : <PlayerProfile embedded hideTabs tabSlot={tabBar} idOverride={playerId} />}
           </Suspense>
         )}
 
         {tab === "stats" && (
           <Suspense fallback={<div className="py-16 text-center text-sm text-muted-foreground">Loading stats…</div>}>
             {isPitcher
-              ? <PitcherStatsPage embedded hideTabs idOverride={playerId} />
-              : <PlayerStatsPage embedded hideTabs idOverride={playerId} />}
+              ? <PitcherStatsPage embedded hideTabs tabSlot={tabBar} idOverride={playerId} />
+              : <PlayerStatsPage embedded hideTabs tabSlot={tabBar} idOverride={playerId} />}
           </Suspense>
         )}
 
