@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import PlayerPageTabs from "@/components/PlayerPageTabs";
 import { PlayerStatsHeader } from "@/components/PlayerStatsHeader";
@@ -19,6 +19,12 @@ export default function PitcherStatsPage({ embedded = false, idOverride, hideTab
   const id = idOverride ?? paramId;
   const { data: player, isLoading } = usePlayerSourceId(id);
   const Shell = embedded ? Fragment : DashboardLayout;
+  const navigate = useNavigate();
+  const location = useLocation();
+  const onBack = () => {
+    const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+    navigate(returnTo ?? -1);
+  };
 
   return (
     <Shell>
@@ -30,6 +36,7 @@ export default function PitcherStatsPage({ embedded = false, idOverride, hideTab
             player={player}
             kind="pitcher"
             playerName={`${player.firstName ?? ""} ${player.lastName ?? ""}`.trim()}
+            onBack={onBack}
           />
         )}
 

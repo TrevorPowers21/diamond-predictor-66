@@ -1,4 +1,4 @@
-import { Target, Star } from "lucide-react";
+import { Target, Star, ArrowLeft } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PortalStatusBadge, PortalContactButton } from "@/components/PortalStatus";
@@ -26,10 +26,12 @@ export function PlayerStatsHeader({
   player,
   kind,
   playerName,
+  onBack,
 }: {
   player: PlayerSourceIdResult;
   kind: "hitter" | "pitcher";
   playerName: string;
+  onBack?: () => void;
 }) {
   const { isOnBoard, addPlayer: addToBoard, removePlayer: removeFromBoard } = useTargetBoard();
   const { isOnList: isOnHighFollow, addPlayer: addToHighFollow, removePlayer: removeFromHighFollow } =
@@ -85,6 +87,11 @@ export function PlayerStatsHeader({
 
   return (
     <div className="flex items-start gap-3">
+      {onBack && (
+        <Button variant="ghost" size="icon" onClick={onBack}>
+          <ArrowLeft className="h-5 w-5" />
+        </Button>
+      )}
       <div className="flex-1">
         <h2 className="text-2xl font-bold tracking-tight">{playerName}</h2>
         <div className="flex items-center gap-2 mt-1 flex-wrap">
