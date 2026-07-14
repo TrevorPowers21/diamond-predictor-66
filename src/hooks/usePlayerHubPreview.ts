@@ -18,8 +18,16 @@ export interface HubSeason {
   hits: number | null; home_runs: number | null; rbi: number | null;
   era: number | null; innings_pitched: number | null; pitch_strikeouts: number | null; pitch_walks: number | null; whip: number | null;
 }
+// Advanced hitter line (Hitter Master + inferred bat speed) — batted-ball &
+// plate discipline. Keyed by players.source_player_id (numeric TrackMan id), NOT
+// the UUID. Blended values used when the master row is a combined sample.
+export interface HubHitterAdvanced { barrel: number | null; avg_exit_velo: number | null; contact: number | null; chase: number | null; }
+export interface HubBatSpeed { bat_speed_floor: number | null; bat_speed_ceiling: number | null; squared_up_rate: number | null; }
 
-export function usePlayerHubPreview(playerId: string | null | undefined): { projection: HubProjection | null; season: HubSeason | null } {
+export function usePlayerHubPreview(
+  playerId: string | null | undefined,
+  sourcePlayerId: string | null | undefined,
+): { projection: HubProjection | null; season: HubSeason | null; hitterAdvanced: HubHitterAdvanced | null; batSpeed: HubBatSpeed | null } {
   const { effectiveTeamId } = useAuth();
 
   const { data: projection = null } = useQuery({
@@ -44,5 +52,37 @@ export function usePlayerHubPreview(playerId: string | null | undefined): { proj
     },
   });
 
-  return { projection, season };
+  // Barrel% / Exit Velo / Contact% / Chase% from Hitter Master (blended-aware).
+  const { data: hitterAdvanced = null } = useQuery({
+    queryKey: ["hub-hitter-adv", sourcePlayerId ?? null],
+    enabled: !!sourcePlayerId,
+    queryFn: async (): Promise<HubHitterAdvanced | null> => {
+      const { data } = await (supabase as any).from("Hitter Master")
+        .select("barrel, avg_exit_velo, contact, chase, blended_barrel, blended_avg_exit_velo, blended_contact, blended_chase, combined_used")
+        .eq("source_player_id", sourcePlayerId).eq("Season", CURRENT_SEASON).limit(1);
+      const r = data?.[0];
+      if (!r) return null;
+      const cu = !!r.combined_used;
+      return {
+        barrel: cu ? (r.blended_barrel ?? r.barrel) : r.barrel,
+        avg_exit_velo: cu ? (r.blended_avg_exit_velo ?? r.avg_exit_velo) : r.avg_exit_velo,
+        contact: cu ? (r.blended_contact ?? r.contact) : r.contact,
+        chase: cu ? (r.blended_chase ?? r.chase) : r.chase,
+      };
+    },
+  });
+
+  // Inferred bat speed (floor–ceiling) + squared-up%. Keyed by batter_id = source id.
+  const { data: batSpeed = null } = useQuery({
+    queryKey: ["hub-bat-speed", sourcePlayerId ?? null],
+    enabled: !!sourcePlayerId,
+    queryFn: async (): Promise<HubBatSpeed | null> => {
+      const { data } = await (supabase as any).from("hitter_bat_speed_season")
+        .select("bat_speed_floor, bat_speed_ceiling, squared_up_rate")
+        .eq("batter_id", sourcePlayerId).eq("season", CURRENT_SEASON).limit(1);
+      return (data?.[0] ?? null) as HubBatSpeed | null;
+    },
+  });
+
+  return { projection, season, hitterAdvanced, batSpeed };
 }

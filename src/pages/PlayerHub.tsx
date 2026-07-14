@@ -239,7 +239,13 @@ export default function PlayerHub() {
   // Marketability: one 0–100 composite (program + social + connection + draft).
   // Overview shows the score; the Financials tab carries the full scorecard.
   const marketBreakdown = useMarketability(playerId).breakdown;
-  const { projection, season } = usePlayerHubPreview(playerId);
+  const { projection, season, hitterAdvanced, batSpeed } = usePlayerHubPreview(playerId, dbPlayer?.source_player_id ?? null);
+  // Batted-ball/discipline formatting: exact-0 % reads as missing (—).
+  const advPct = (n: number | null | undefined) => (n == null || n === 0 ? "—" : Number.isInteger(n) ? `${n}%` : `${n.toFixed(1)}%`);
+  const advNum = (n: number | null | undefined) => (n == null || n === 0 ? "—" : n.toFixed(1));
+  const batSpeedRange = batSpeed?.bat_speed_floor && batSpeed?.bat_speed_ceiling
+    ? `${Math.round(batSpeed.bat_speed_floor)}–${Math.round(batSpeed.bat_speed_ceiling)}`
+    : "—";
   // Baseball-style rate: ".312" not "0.312".
   const rate = (n: number | null | undefined) => (n == null ? "—" : n.toFixed(3).replace(/^0(?=\.)/, ""));
   // Scale the stored projection from the dev-agg it was computed with to the
@@ -461,28 +467,27 @@ export default function PlayerHub() {
                 )
               ))}
               {tabCard("stats", `${CURRENT_SEASON} Season Stats`, (
-                season ? (
-                  <div className="space-y-1.5">
-                    {isPitcher ? (
-                      <>
-                        {kv("ERA", num(season.era, 2))}
-                        {kv("IP", num(season.innings_pitched))}
-                        {kv("K", num(season.pitch_strikeouts, 0))}
-                        {kv("BB", num(season.pitch_walks, 0))}
-                        {kv("WHIP", num(season.whip, 2))}
-                      </>
-                    ) : (
-                      <>
-                        {kv("AVG", rate(season.batting_avg))}
-                        {kv("OBP", rate(season.on_base_pct))}
-                        {kv("SLG", rate(season.slugging_pct))}
-                        {kv("HR", num(season.home_runs, 0))}
-                        {kv("RBI", num(season.rbi, 0))}
-                      </>
-                    )}
-                  </div>
+                isPitcher ? (
+                  season ? (
+                    <div className="space-y-1.5">
+                      {kv("ERA", num(season.era, 2))}
+                      {kv("IP", num(season.innings_pitched))}
+                      {kv("K", num(season.pitch_strikeouts, 0))}
+                      {kv("BB", num(season.pitch_walks, 0))}
+                      {kv("WHIP", num(season.whip, 2))}
+                    </div>
+                  ) : <p className="text-xs text-muted-foreground">No {CURRENT_SEASON} stats on file yet.</p>
                 ) : (
-                  <p className="text-xs text-muted-foreground">No {CURRENT_SEASON} stats on file yet.</p>
+                  (hitterAdvanced || batSpeed) ? (
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {projBox("Barrel%", advPct(hitterAdvanced?.barrel))}
+                      {projBox("Exit Velo", advNum(hitterAdvanced?.avg_exit_velo))}
+                      {projBox("Contact%", advPct(hitterAdvanced?.contact))}
+                      {projBox("Chase%", advPct(hitterAdvanced?.chase))}
+                      {projBox("Bat Speed", batSpeedRange)}
+                      {projBox("Squared-Up%", advPct(batSpeed?.squared_up_rate))}
+                    </div>
+                  ) : <p className="text-xs text-muted-foreground">No {CURRENT_SEASON} batted-ball data yet.</p>
                 )
               ))}
             </div>
