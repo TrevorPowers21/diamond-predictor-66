@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { projectedEligibilityClass } from "@/pages/team-builder/helpers";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { PortalTeamCards } from "@/components/PortalTeamCards";
@@ -1526,9 +1527,15 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
                     ["Team", displayTeamCurrent || "—"],
                     ["Conference", resolvedConference || "—"],
                     ["Position", effectivePosition || "—"],
-                    // Class fallback chain: players.class_year → Hitter Master row's class_year
-                    // (Presto upload writes to master tables; players row may not be synced).
-                    ["Class", player.class_year || (activeSeasonRow as any)?.class_year || "—"],
+                    // Class = the PROJECTION-season class (one year forward), so it
+                    // matches the projected stats on this page. Falls back to the
+                    // Hitter Master row's class_year when players isn't synced.
+                    ["Class", (() => {
+                      const cy = player.class_year || (activeSeasonRow as any)?.class_year;
+                      if (!cy && !regularPred?.class_transition) return "—";
+                      const p = projectedEligibilityClass(cy, regularPred?.class_transition);
+                      return p.charAt(0) + p.slice(1).toLowerCase();
+                    })()],
                     ["Bats", (player as any).bats_hand === "R" ? "Right" : (player as any).bats_hand === "L" ? "Left" : (player as any).bats_hand === "S" ? "Switch" : (player as any).bats_hand || "—"],
                     ["Throws", (player as any).throws_hand === "R" ? "Right" : (player as any).throws_hand === "L" ? "Left" : (player as any).throws_hand || "—"],
                   ].map(([label, val]) => (

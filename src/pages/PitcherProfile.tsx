@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
 import { PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { projectedEligibilityClass } from "@/pages/team-builder/helpers";
 import { pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
@@ -1318,6 +1319,16 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     const raw = String(activePrediction?.class_transition || playerOverride?.class_transition || storageProjectionOverride?.class_transition || "SJ").toUpperCase();
     return raw === "FS" || raw === "SJ" || raw === "JS" || raw === "GR" ? (raw as "FS" | "SJ" | "JS" | "GR") : "SJ";
   })();
+  // Display-only: the PROJECTION-season class (one year forward) so the shown
+  // class matches the projected stats. Pass the RAW transition (nullable) so a
+  // missing one advances class_year instead of defaulting everyone to "JR".
+  const displayClassProjected: string | null = displayClass
+    ? (() => {
+        const raw = activePrediction?.class_transition || playerOverride?.class_transition || storageProjectionOverride?.class_transition || null;
+        const p = projectedEligibilityClass(displayClass, raw);
+        return p.charAt(0) + p.slice(1).toLowerCase();
+      })()
+    : null;
   const initialProjectedDevAggressiveness = Number.isFinite(Number(activePrediction?.dev_aggressiveness))
     ? Number(activePrediction?.dev_aggressiveness)
     : (Number.isFinite(Number(playerOverride?.dev_aggressiveness ?? storageProjectionOverride?.dev_aggressiveness))
@@ -2015,7 +2026,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
                 {[
                   ["Team", displayTeam],
                   ["Conference", displayConference],
-                  ["Class", displayClass || "—"],
+                  ["Class", displayClassProjected || "—"],
                   ["Role", effectiveRoleDisplay || "—"],
                   ["Throws", player?.throws_hand || displayHandedness || "—"],
                 ].map(([label, val]) => (
