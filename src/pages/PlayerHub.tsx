@@ -258,7 +258,7 @@ export default function PlayerHub() {
                 <CoverBrand teamName={fullTeamName} logoUrl={logoUrl} />
               </div>
               <div className="flex flex-wrap items-end gap-x-5 gap-y-3 px-5 pb-5 pt-1">
-                <div className="-mt-10 flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#D4AF37]/15 ring-4 ring-background">
+                <div className="-mt-10 flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#0d1a30] ring-4 ring-background">
                   {headshotUrl ? <img src={headshotUrl} alt={name} className="h-full w-full object-cover" /> : <span className="text-2xl font-bold text-[#D4AF37]" style={OSWALD}>{(name[0] || "?").toUpperCase()}</span>}
                 </div>
                 <div className="min-w-0 flex-1 pt-2">
