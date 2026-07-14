@@ -91,10 +91,10 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
               <button onClick={() => setCompOpen(true)} className="text-[11px] text-muted-foreground hover:text-foreground">Edit →</button>
             </div>
             <div className="grid grid-cols-2 divide-x divide-y divide-border/50 sm:grid-cols-5 sm:divide-y-0">
+              {stat("Scholarship", schDisplay)}
               {stat("Revenue Share", money(c.rev))}
               {stat("NIL", money(c.nil))}
               {stat("Other", money(c.other))}
-              {stat("Scholarship", schDisplay)}
               {stat("Total Pay", money(c.total), true)}
             </div>
           </CardContent>
