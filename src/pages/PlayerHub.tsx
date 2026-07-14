@@ -182,6 +182,7 @@ export default function PlayerHub() {
     return denom > 0 ? Math.max(0, (posWeightedWar(row) / denom) * budget) : null;
   })();
   const displayValue = projValue ?? row?.market_value ?? null;
+  const liveBuildName = gm.builds.find((b) => b.id === gm.liveBuildId)?.name ?? null;
 
   const kv = (label: string, value: string, accent?: boolean) => (
     <div className="flex items-center justify-between">
@@ -317,7 +318,7 @@ export default function PlayerHub() {
                 <CardContent className="space-y-2 p-4">
                   <div className="flex items-center justify-between">
                     <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Roster Assignment</h3>
-                    <span className="text-[10px] italic text-muted-foreground">from live build</span>
+                    <span className="text-[10px] italic text-muted-foreground">{liveBuildName ?? "live build"}</span>
                   </div>
                   <div className="space-y-1.5">
                     {kv("Position", position ?? "—")}
