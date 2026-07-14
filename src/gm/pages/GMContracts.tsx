@@ -218,16 +218,17 @@ export function ContractCard({ c, playerName }: { c: GmContract; playerName: str
   );
 }
 
-// Compact team-wide row: player name headline + vendor · date subtitle, bucket
-// on the right. Click to expand the amount, obligations, and notes.
+// Compact contract tile (laid out in a multi-column grid): player name headline
+// + vendor · date subtitle, bucket chip on the right. Click to expand the
+// amount, obligations, and notes.
 function ContractRow({ c, playerName }: { c: GmContract; playerName: string }) {
   const { viewPdf, removeContract, toggleObligation } = useGmContracts();
   const [open, setOpen] = useState(false);
   const dates = [fmtDate(c.start_date), fmtDate(c.end_date)].filter(Boolean).join(" – ");
   const sub = [c.vendor_name, c.start_date ? fmtDate(c.start_date) : null].filter(Boolean).join(" · ");
   return (
-    <div className="border-b border-border/40 last:border-0">
-      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/20">
+    <div className="overflow-hidden rounded-lg border border-border/60">
+      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/20">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold" style={OSWALD}>{playerName}</div>
           <div className="truncate text-xs text-muted-foreground">{sub || "—"}</div>
@@ -235,7 +236,7 @@ function ContractRow({ c, playerName }: { c: GmContract; playerName: string }) {
         <span className={cn("shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider", BUCKET_COLOR[c.bucket])}>{BUCKET_LABEL[c.bucket]}</span>
       </button>
       {open && (
-        <div className="space-y-2.5 px-4 pb-3">
+        <div className="space-y-2.5 border-t border-border/50 px-3 pb-3 pt-2.5">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-3">
               <span className="font-mono text-sm font-bold tabular-nums text-[#D4AF37]">{money(c.total_value)}</span>
@@ -304,11 +305,9 @@ export default function GMContracts() {
       ) : contracts.length === 0 ? (
         <Card className="border-border/60"><CardContent className="py-16 text-center text-sm text-muted-foreground">No contracts yet. Add one to start tracking signed deals.</CardContent></Card>
       ) : (
-        <Card className="border-border/60">
-          <CardContent className="p-0">
-            {sortedContracts.map((c) => <ContractRow key={c.id} c={c} playerName={nameById.get(c.player_id) ?? "Unknown player"} />)}
-          </CardContent>
-        </Card>
+        <div className="grid items-start gap-3 lg:grid-cols-2">
+          {sortedContracts.map((c) => <ContractRow key={c.id} c={c} playerName={nameById.get(c.player_id) ?? "Unknown player"} />)}
+        </div>
       )}
 
       <AddContractDialog open={addOpen} onOpenChange={setAddOpen} players={players} />
