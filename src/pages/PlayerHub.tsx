@@ -192,6 +192,8 @@ export default function PlayerHub() {
   const classYr = row?.eligibility_class ?? row?.class_year ?? dbPlayer?.class_year ?? null;
   const isPitcher = isPitcherProfile(position, row?.is_pitcher ? "rhp" : null);
   const c = row ? playerComp(row) : null;
+  const schMode = gm.budget?.scholarship_mode ?? "pct";
+  const schDisplay = row?.scholarship_amount == null ? "—" : (schMode === "dollar" ? money(row.scholarship_amount) : `${Math.round(row.scholarship_amount)}%`);
   // Projected Value = the roster's budget-share (position-weighted WAR / roster
   // total × budget), falling back to stored market value when there's no budget.
   const posWeightedWar = (r: GmRow) => Number(r.war ?? 0) * getPositionValueMultiplier(r.position);
@@ -236,6 +238,15 @@ export default function PlayerHub() {
   // Marketability: one 0–100 composite (program + social + connection + draft).
   // Overview shows the score; the Financials tab carries the full scorecard.
   const marketBreakdown = useMarketability(playerId).breakdown;
+
+  // One box per tab on the Overview — a preview of that surface. Projections
+  // shows the value signals; the rest describe (enrich with real previews later).
+  const tabBoxes: { t: TabKey; label: string; icon: typeof LineChart; stats: { l: string; v: string }[]; note: string | null }[] = [
+    { t: "projections", label: "Projections", icon: LineChart, stats: [{ l: "WAR", v: num(row?.war) }, { l: "Proj. Value", v: money(displayValue) }], note: null },
+    { t: "stats", label: "Season Stats", icon: BarChart3, stats: [], note: "This season's line, splits & game log" },
+    { t: "financials", label: "Financials", icon: DollarSign, stats: [], note: "Compensation, contracts & obligations" },
+    { t: "development", label: "Player Development", icon: ClipboardList, stats: [], note: "NewtForce metrics & biomechanics" },
+  ];
 
   const kv = (label: string, value: string, accent?: boolean) => (
     <div className="flex items-center justify-between">
@@ -343,11 +354,11 @@ export default function PlayerHub() {
                     </DropdownMenu>
                   </div>
                 </div>
+                {/* Public stat strip — non-sensitive analytics only. Pay lives in
+                    the Compensation card / Financials tab (gated later by role). */}
                 <div className="flex flex-wrap items-stretch divide-x divide-border/50 rounded-lg border border-border/50">
                   {statBox("WAR", num(row?.war))}
                   {statBox("Projected Value", money(displayValue))}
-                  {statBox("Total Pay", money(c?.total ?? null), true)}
-                  {statBox("Value vs Pay", c && c.total > 0 && displayValue != null ? `${(displayValue / c.total).toFixed(2)}×` : "—")}
                   {statBox("Marketability", marketBreakdown.tier, false, marketabilityTierColor(marketBreakdown.tier))}
                 </div>
               </div>
@@ -372,6 +383,7 @@ export default function PlayerHub() {
                   </div>
                   {c ? (
                     <div className="space-y-1.5">
+                      {kv("Scholarship", schDisplay)}
                       {kv("Revenue Share", money(c.rev))}
                       {kv("NIL", money(c.nil))}
                       {kv("Other", money(c.other))}
@@ -401,17 +413,30 @@ export default function PlayerHub() {
               </Card>
             </div>
 
-            {/* Quick jump to the deeper tabs */}
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {[
-                { t: "projections" as TabKey, label: "Projections", desc: "Projected line & value", icon: LineChart },
-                { t: "stats" as TabKey, label: "Season Stats", desc: "This season's numbers", icon: BarChart3 },
-                { t: "financials" as TabKey, label: "Financials", desc: "Comp, contracts & obligations", icon: DollarSign },
-                { t: "development" as TabKey, label: "Player Development", desc: "NewtForce & biomechanics", icon: ClipboardList },
-              ].map((q) => (
-                <button key={q.t} onClick={() => setTab(q.t)} className="flex items-center gap-3 rounded-lg border border-border/60 p-3 text-left transition-colors hover:border-[#D4AF37]/50 hover:bg-muted/30">
-                  <q.icon className="h-5 w-5 shrink-0 text-[#D4AF37]" />
-                  <div className="min-w-0"><div className="truncate text-sm font-semibold">{q.label}</div><div className="truncate text-[11px] text-muted-foreground">{q.desc}</div></div>
+            {/* One box per tab — preview + hover highlight + click to navigate. */}
+            <div className="grid gap-3 sm:grid-cols-2">
+              {tabBoxes.map((b) => (
+                <button
+                  key={b.t}
+                  onClick={() => setTab(b.t)}
+                  className="rounded-lg border border-border/60 p-4 text-left transition-colors hover:border-[#D4AF37]/60 hover:bg-muted/20"
+                >
+                  <div className="flex items-center gap-2">
+                    <b.icon className="h-4 w-4 shrink-0 text-[#D4AF37]" />
+                    <span className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>{b.label}</span>
+                  </div>
+                  {b.stats.length > 0 ? (
+                    <div className="mt-2.5 flex flex-wrap gap-x-6 gap-y-2">
+                      {b.stats.map((s) => (
+                        <div key={s.l} className="flex flex-col">
+                          <span className="font-mono text-base font-bold leading-none text-foreground" style={OSWALD}>{s.v}</span>
+                          <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">{s.l}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-[11px] text-muted-foreground">{b.note}</p>
+                  )}
                 </button>
               ))}
             </div>
