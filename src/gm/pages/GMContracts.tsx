@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { FileText, Plus, Upload, X, ExternalLink, Trash2, Check } from "lucide-react";
+import { FileText, Plus, Upload, X, ExternalLink, Trash2, Check, Search } from "lucide-react";
 
 const OSWALD = { fontFamily: "Oswald, sans-serif" } as const;
 const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
@@ -272,6 +272,7 @@ export default function GMContracts() {
   const gm = useGmRoster();
   const { contracts, isLoading } = useGmContracts();
   const [addOpen, setAddOpen] = useState(false);
+  const [query, setQuery] = useState("");
 
   const players = useMemo(() => {
     const rows = [...gm.hitters, ...gm.pitchers].filter((r) => r.player_id);
@@ -283,11 +284,19 @@ export default function GMContracts() {
   const nameById = useMemo(() => new Map(players.map((p) => [p.id, p.name])), [players]);
 
   const totalValue = contracts.reduce((s, c) => s + (c.total_value ?? 0), 0);
-  // Group same-player contracts together (name headline), newest first within.
+  // Alphabetical by player name (same-player deals grouped, newest first within).
   const sortedContracts = useMemo(() =>
     [...contracts].sort((a, b) =>
       (nameById.get(a.player_id) ?? "").localeCompare(nameById.get(b.player_id) ?? "") || (a.created_at < b.created_at ? 1 : -1),
     ), [contracts, nameById]);
+  // Search filters on player name OR vendor.
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sortedContracts;
+    return sortedContracts.filter((c) =>
+      (nameById.get(c.player_id) ?? "").toLowerCase().includes(q) || (c.vendor_name ?? "").toLowerCase().includes(q),
+    );
+  }, [sortedContracts, query, nameById]);
 
   return (
     <div className="space-y-4">
@@ -300,13 +309,22 @@ export default function GMContracts() {
       </div>
       <p className="-mt-1 text-xs text-muted-foreground">Upload a signed contract PDF — value and dates auto-fill for you to review — and track its bucket, vendor, value, and obligations. {contracts.length > 0 && <span className="font-medium text-foreground/80">{contracts.length} on file · {money(totalValue)} total.</span>}</p>
 
+      {contracts.length > 0 && (
+        <div className="relative max-w-xs">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search player or vendor…" className="h-8 pl-8 text-sm" />
+        </div>
+      )}
+
       {isLoading ? (
         <Card className="border-border/60"><CardContent className="py-16 text-center text-sm text-muted-foreground">Loading…</CardContent></Card>
       ) : contracts.length === 0 ? (
         <Card className="border-border/60"><CardContent className="py-16 text-center text-sm text-muted-foreground">No contracts yet. Add one to start tracking signed deals.</CardContent></Card>
+      ) : filtered.length === 0 ? (
+        <Card className="border-border/60"><CardContent className="py-16 text-center text-sm text-muted-foreground">No contracts match "{query}".</CardContent></Card>
       ) : (
         <div className="grid items-start gap-3 lg:grid-cols-2">
-          {sortedContracts.map((c) => <ContractRow key={c.id} c={c} playerName={nameById.get(c.player_id) ?? "Unknown player"} />)}
+          {filtered.map((c) => <ContractRow key={c.id} c={c} playerName={nameById.get(c.player_id) ?? "Unknown player"} />)}
         </div>
       )}
 
