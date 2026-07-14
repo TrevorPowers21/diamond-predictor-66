@@ -285,7 +285,7 @@ export default function PlayerHub() {
     </Card>
   );
   const projBox = (label: string, value: string, accent?: boolean) => (
-    <div className="flex flex-col items-center justify-center rounded-md border border-border/50 bg-muted/10 px-1 py-2 text-center">
+    <div className="flex min-h-[3.5rem] flex-col items-center justify-center rounded-md border border-border/50 bg-muted/10 px-1 py-2 text-center">
       <span className={cn("font-mono text-sm font-bold leading-none tabular-nums", accent ? "text-[#D4AF37]" : "text-foreground")} style={OSWALD}>{value}</span>
       <span className="mt-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
     </div>
@@ -474,11 +474,11 @@ export default function PlayerHub() {
                   ) : <p className="text-xs text-muted-foreground">No {CURRENT_SEASON} stats on file yet.</p>
                 ) : (
                   hitterAdvanced ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      <ScoutGrade label="Brl" fullLabel="Barrel%" value={hitterAdvanced.barrel_score} rawStat={hitterAdvanced.barrel} unit="%" />
-                      <ScoutGrade label="EV" fullLabel="Exit Velo" value={hitterAdvanced.avg_ev_score} rawStat={hitterAdvanced.avg_exit_velo} unit="mph" />
-                      <ScoutGrade label="Con" fullLabel="Contact%" value={hitterAdvanced.contact_score} rawStat={hitterAdvanced.contact} unit="%" />
-                      <ScoutGrade label="Chs" fullLabel="Chase%" value={hitterAdvanced.chase_score} rawStat={hitterAdvanced.chase} unit="%" />
+                    <div className="grid grid-cols-4 gap-1.5">
+                      <ScoutGrade compact label="Brl" fullLabel="Barrel%" value={hitterAdvanced.barrel_score} rawStat={hitterAdvanced.barrel} unit="%" />
+                      <ScoutGrade compact label="EV" fullLabel="Exit Velo" value={hitterAdvanced.avg_ev_score} rawStat={hitterAdvanced.avg_exit_velo} unit="mph" />
+                      <ScoutGrade compact label="Con" fullLabel="Contact%" value={hitterAdvanced.contact_score} rawStat={hitterAdvanced.contact} unit="%" />
+                      <ScoutGrade compact label="Chs" fullLabel="Chase%" value={hitterAdvanced.chase_score} rawStat={hitterAdvanced.chase} unit="%" />
                     </div>
                   ) : <p className="text-xs text-muted-foreground">No {CURRENT_SEASON} batted-ball data yet.</p>
                 )

@@ -26,18 +26,28 @@ function ordinalSuffixOnly(n: number): string {
   }
 }
 
-export function ScoutGrade({ label, value, fullLabel, rawStat, unit }: {
+export function ScoutGrade({ label, value, fullLabel, rawStat, unit, compact }: {
   label: string;
   value: number | null;
   fullLabel: string;
   rawStat?: number | null;
   unit?: string;
+  compact?: boolean; // small tile (matches the projection stat boxes)
 }) {
   // Treat 0 as missing — percentile scores are 0-100, and a literal 0 is almost
   // always a missing-data sentinel (e.g., JUCO arms whose pipeline computed
   // ev_score from an exit_vel that defaulted to 0). Showing "0 / Poor" for
   // someone we have no data on is more misleading than just rendering N/A.
   if (value == null || value === 0) {
+    if (compact) {
+      return (
+        <div className="flex min-h-[3.5rem] flex-col items-center justify-center rounded-md border border-border/50 bg-muted/10 px-1 py-2 text-center">
+          <span className="font-mono text-sm font-bold leading-none text-muted-foreground" style={{ fontFamily: "Oswald, sans-serif" }}>—</span>
+          <span className="mt-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{fullLabel}</span>
+          <span className="text-[9px] font-medium text-muted-foreground/60">N/A</span>
+        </div>
+      );
+    }
     return (
       <div className="rounded-lg border border-[#162241] bg-[#0d1a30] p-3">
         <div className="text-xs font-medium text-[#8a94a6]">{fullLabel}</div>
@@ -59,6 +69,17 @@ export function ScoutGrade({ label, value, fullLabel, rawStat, unit }: {
     value >= 60 ? "Plus" :
     value >= 45 ? "Average" :
     value >= 35 ? "Below Avg" : "Poor";
+  if (compact) {
+    return (
+      <div className={`flex min-h-[3.5rem] flex-col items-center justify-center rounded-md border px-1 py-2 text-center ${tier}`}>
+        <span className="font-mono text-sm font-bold leading-none" style={{ fontFamily: "Oswald, sans-serif" }}>
+          {rawStat != null ? `${rawStat.toFixed(1)}${unit ?? "%"}` : Math.round(value)}
+        </span>
+        <span className="mt-1 text-[9px] font-semibold uppercase tracking-wider opacity-80">{fullLabel}</span>
+        <span className="text-[9px] font-medium opacity-70">{ordinalSuffix(value)}</span>
+      </div>
+    );
+  }
   return (
     <div className={`rounded-lg border p-3 ${tier}`}>
       <div className="text-xs font-medium opacity-80">{fullLabel}</div>
