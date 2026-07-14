@@ -9,6 +9,10 @@ import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { defaultDraftYear, defaultEligibilityRemaining } from "@/gm/lib/playerEligibility";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
 import { useMarketability } from "@/gm/hooks/useMarketability";
+import { useGmProgramMarketability } from "@/gm/hooks/useGmProgramMarketability";
+import { marketabilityTierColor } from "@/gm/lib/marketability";
+import MarketabilityDialog from "@/gm/components/MarketabilityDialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import PlayerInfoDialog from "@/gm/components/PlayerInfoDialog";
 import PlayerFinancials, { playerComp } from "@/gm/components/PlayerFinancials";
 import { isPitcherProfile } from "@/lib/profileRoutes";
@@ -204,7 +208,21 @@ export default function PlayerHub() {
 
   // Program-owned player info (layers over the scraped record) + derived defaults.
   const { info: playerInfo, save: savePlayerInfo, isSaving: savingInfo } = useGmPlayerInfo(playerId);
+  const { tier: programTier, save: saveProgramTier } = useGmProgramMarketability();
   const [infoOpen, setInfoOpen] = useState(false);
+  const [marketOpen, setMarketOpen] = useState(false);
+  const [savingMarket, setSavingMarket] = useState(false);
+  // Marketability questionnaire saves two stores at once: per-player social +
+  // connection (gm_player_info) and the program-wide community tier.
+  const saveMarketability = async (playerPatch: Parameters<typeof savePlayerInfo>[0], tier: number | null, onDone?: () => void) => {
+    setSavingMarket(true);
+    try {
+      await saveProgramTier(tier);
+      savePlayerInfo(playerPatch, onDone);
+    } finally {
+      setSavingMarket(false);
+    }
+  };
   // classYr above is the PROJECTED (next-season) class shown in "Class". Draft
   // eligibility is a real-world fact tied to the player's CURRENT class + season
   // (a sophomore now → junior year 2027 → draft 2027; earlier only via age/DOB).
@@ -225,9 +243,12 @@ export default function PlayerHub() {
       <span className={cn("text-xs font-semibold", accent ? "font-mono text-[#D4AF37]" : "text-foreground")}>{value}</span>
     </div>
   );
-  const statBox = (label: string, value: string, accent?: boolean) => (
+  const statBox = (label: string, value: string, accent?: boolean, color?: string) => (
     <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-1.5 text-center">
-      <span className={cn("font-mono text-base font-bold leading-none tabular-nums", accent ? "text-[#D4AF37]" : "text-foreground")} style={OSWALD}>{value}</span>
+      <span
+        className={cn("font-mono text-base font-bold leading-none tabular-nums", !color && (accent ? "text-[#D4AF37]" : "text-foreground"))}
+        style={color ? { ...OSWALD, color } : OSWALD}
+      >{value}</span>
       <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
     </div>
   );
@@ -309,9 +330,17 @@ export default function PlayerHub() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <h1 className="text-2xl font-bold leading-none tracking-tight">{name}</h1>
-                    <button onClick={() => setInfoOpen(true)} title="Edit player info" className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button title="Edit" className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-52">
+                        <DropdownMenuItem onClick={() => setInfoOpen(true)}>Edit Player Information</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setMarketOpen(true)}>Edit Marketability</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
                 <div className="flex flex-wrap items-stretch divide-x divide-border/50 rounded-lg border border-border/50">
@@ -319,7 +348,7 @@ export default function PlayerHub() {
                   {statBox("Projected Value", money(displayValue))}
                   {statBox("Total Pay", money(c?.total ?? null), true)}
                   {statBox("Value vs Pay", c && c.total > 0 && displayValue != null ? `${(displayValue / c.total).toFixed(2)}×` : "—")}
-                  {statBox("Marketability", String(marketBreakdown.score))}
+                  {statBox("Marketability", marketBreakdown.tier, false, marketabilityTierColor(marketBreakdown.tier))}
                 </div>
               </div>
             </Card>
@@ -405,7 +434,7 @@ export default function PlayerHub() {
           </Suspense>
         )}
 
-        {tab === "financials" && <PlayerFinancials playerName={name} playerId={playerId} onEditInfo={() => setInfoOpen(true)} />}
+        {tab === "financials" && <PlayerFinancials playerName={name} playerId={playerId} onEditMarketability={() => setMarketOpen(true)} />}
 
         {tab === "development" && <PlayerDevelopment />}
 
@@ -428,6 +457,16 @@ export default function PlayerHub() {
           eligRemainingDefault={defaultEligibilityRemaining(classYr)}
           onSave={savePlayerInfo}
           isSaving={savingInfo}
+        />
+
+        <MarketabilityDialog
+          open={marketOpen}
+          onOpenChange={setMarketOpen}
+          playerName={name}
+          info={playerInfo}
+          programTier={programTier}
+          onSave={saveMarketability}
+          isSaving={savingMarket || savingInfo}
         />
       </div>
   );

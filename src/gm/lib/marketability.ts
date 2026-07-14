@@ -78,3 +78,14 @@ export function marketabilityTier(score: number | null | undefined): string {
   if (score >= 40) return "Moderate";
   return "Emerging";
 }
+
+// Tier → display color (hex), tuned for the dark UI. Elite = brand gold.
+export function marketabilityTierColor(tier: string): string {
+  switch (tier) {
+    case "Elite": return "#D4AF37";
+    case "High": return "#34d399";
+    case "Moderate": return "#fbbf24";
+    case "Emerging": return "#94a3b8";
+    default: return "#94a3b8";
+  }
+}

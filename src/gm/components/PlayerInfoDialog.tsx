@@ -53,14 +53,6 @@ export default function PlayerInfoDialog({
       high_school: s(info?.high_school ?? scraped.high_school),
       contact_phone: s(info?.contact_phone ?? scraped.contact_phone),
       contact_email: s(info?.contact_email ?? scraped.contact_email),
-      instagram_followers: s(info?.instagram_followers),
-      twitter_followers: s(info?.twitter_followers),
-      tiktok_followers: s(info?.tiktok_followers),
-      instagram_handle: s(info?.instagram_handle),
-      twitter_handle: s(info?.twitter_handle),
-      tiktok_handle: s(info?.tiktok_handle),
-      university_connection_tier: s(info?.university_connection_tier),
-      university_connection_note: s(info?.university_connection_note),
     });
   }, [open, info, scraped]);
 
@@ -80,14 +72,6 @@ export default function PlayerInfoDialog({
       high_school: strOrNull(f.high_school),
       contact_phone: strOrNull(f.contact_phone),
       contact_email: strOrNull(f.contact_email),
-      instagram_followers: numOrNull(f.instagram_followers),
-      twitter_followers: numOrNull(f.twitter_followers),
-      tiktok_followers: numOrNull(f.tiktok_followers),
-      instagram_handle: strOrNull(f.instagram_handle),
-      twitter_handle: strOrNull(f.twitter_handle),
-      tiktok_handle: strOrNull(f.tiktok_handle),
-      university_connection_tier: f.university_connection_tier && f.university_connection_tier !== "none" ? f.university_connection_tier : null,
-      university_connection_note: strOrNull(f.university_connection_note),
     }, () => onOpenChange(false));
   };
 
@@ -126,27 +110,6 @@ export default function PlayerInfoDialog({
           <div className="col-span-2">{field("High School", text("high_school"))}</div>
           {field("Phone", text("contact_phone"))}
           {field("Email", text("contact_email"))}
-          <div className="col-span-2 mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Social Following</div>
-          {field("Instagram followers", text("instagram_followers", "followers"))}
-          {field("Instagram handle", text("instagram_handle", "@handle"))}
-          {field("X / Twitter followers", text("twitter_followers", "followers"))}
-          {field("X / Twitter handle", text("twitter_handle", "@handle"))}
-          {field("TikTok followers", text("tiktok_followers", "followers"))}
-          {field("TikTok handle", text("tiktok_handle", "@handle"))}
-
-          <div className="col-span-2 mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">University Connection</div>
-          <div className="col-span-2">{field("Tie to the school", (
-            <Select value={f.university_connection_tier || "none"} onValueChange={(v) => set("university_connection_tier", v)}>
-              <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none" className="text-sm">None</SelectItem>
-                <SelectItem value="local" className="text-sm">In-state / local hometown</SelectItem>
-                <SelectItem value="family_alum" className="text-sm">Immediate family alum</SelectItem>
-                <SelectItem value="family_notable" className="text-sm">Family notable athlete / figure (school or in-state)</SelectItem>
-              </SelectContent>
-            </Select>
-          ))}</div>
-          <div className="col-span-2">{field("Detail", text("university_connection_note", "e.g. aunt = UGA basketball star"))}</div>
         </div>
         <p className="text-[10px] text-muted-foreground">Draft eligibility auto-fills from class/birthday when blank; type a year to override. GPA &amp; academics coming later.</p>
         <DialogFooter>

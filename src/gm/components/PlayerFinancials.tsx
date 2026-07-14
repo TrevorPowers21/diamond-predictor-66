@@ -3,6 +3,7 @@ import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
 import { useGmContracts } from "@/gm/hooks/useGmContracts";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { useMarketability } from "@/gm/hooks/useMarketability";
+import { marketabilityTierColor } from "@/gm/lib/marketability";
 import { ContractCard } from "@/gm/pages/GMContracts";
 import PlayerNotesDialog from "@/components/PlayerNotesDialog";
 import { Button } from "@/components/ui/button";
@@ -29,7 +30,7 @@ export function playerComp(r: GmRow) {
 const PROGRAM_TIER_LABEL: Record<number, string> = { 5: "Elite", 4: "Strong", 3: "Solid", 2: "Modest", 1: "Minimal" };
 const CONN_LABEL: Record<string, string> = { family_notable: "Family notable athlete / figure", family_alum: "Immediate family alum", local: "In-state / local hometown" };
 
-export default function PlayerFinancials({ playerName, playerId, onEditInfo }: { playerName: string; playerId: string; onEditInfo?: () => void }) {
+export default function PlayerFinancials({ playerName, playerId, onEditMarketability }: { playerName: string; playerId: string; onEditMarketability?: () => void }) {
   const gm = useGmRoster();
   const { contracts } = useGmContracts(playerId);
   const [notesOpen, setNotesOpen] = useState(false);
@@ -90,11 +91,11 @@ export default function PlayerFinancials({ playerName, playerId, onEditInfo }: {
       <Card className="border-border/60">
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Marketability</h3>
-            <div className="flex items-baseline gap-2">
-              <span className="font-mono text-2xl font-bold leading-none text-[#D4AF37]" style={OSWALD}>{breakdown.score}</span>
-              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{breakdown.tier}</span>
+            <div className="flex items-center gap-2">
+              <h3 className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Marketability</h3>
+              <button onClick={onEditMarketability} disabled={!onEditMarketability} className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50">Edit →</button>
             </div>
+            <span className="text-xl font-bold uppercase tracking-wide" style={{ ...OSWALD, color: marketabilityTierColor(breakdown.tier) }}>{breakdown.tier}</span>
           </div>
 
           <div className="mt-3 space-y-2.5">
@@ -130,7 +131,7 @@ export default function PlayerFinancials({ playerName, playerId, onEditInfo }: {
               {connTier ? (
                 <span className="shrink-0 font-mono text-sm font-semibold tabular-nums text-[#D4AF37]">+{breakdown.connection}<span className="text-[10px] text-muted-foreground">/20</span></span>
               ) : (
-                <button onClick={onEditInfo} disabled={!onEditInfo} className="shrink-0 text-[11px] font-semibold text-[#D4AF37] hover:underline disabled:opacity-50">Add →</button>
+                <button onClick={onEditMarketability} disabled={!onEditMarketability} className="shrink-0 text-[11px] font-semibold text-[#D4AF37] hover:underline disabled:opacity-50">Add →</button>
               )}
             </div>
 
