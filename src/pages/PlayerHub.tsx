@@ -242,6 +242,19 @@ export default function PlayerHub() {
   const { projection, season } = usePlayerHubPreview(playerId);
   // Baseball-style rate: ".312" not "0.312".
   const rate = (n: number | null | undefined) => (n == null ? "—" : n.toFixed(3).replace(/^0(?=\.)/, ""));
+  // Scale the stored projection from the dev-agg it was computed with to the
+  // live build's dev-agg (production_notes) — mirrors PlayerProfile's applyDevScale
+  // so the card matches the Projections tab.
+  const devAggScale = (() => {
+    if (!projection) return 1;
+    const ct = String(projection.class_transition || "SJ").toUpperCase();
+    const classAdj = ct === "FS" ? 0.03 : ct === "JS" ? 0.015 : ct === "GR" ? 0.01 : 0.02;
+    const stored = Number.isFinite(Number(projection.dev_aggressiveness)) ? Number(projection.dev_aggressiveness) : 0;
+    const build = row?.dev_aggressiveness ?? 0;
+    const storedMult = 1 + classAdj + stored * 0.06;
+    return storedMult > 0 ? (1 + classAdj + build * 0.06) / storedMult : 1;
+  })();
+  const sc = (v: number | null | undefined) => (v == null ? null : v * devAggScale);
 
   const kv = (label: string, value: string, accent?: boolean) => (
     <div className="flex items-center justify-between">
@@ -269,6 +282,12 @@ export default function PlayerHub() {
         {body}
       </CardContent>
     </Card>
+  );
+  const projBox = (label: string, value: string, accent?: boolean) => (
+    <div className="flex flex-col items-center justify-center rounded-md border border-border/50 bg-muted/10 px-1 py-2 text-center">
+      <span className={cn("font-mono text-sm font-bold leading-none tabular-nums", accent ? "text-[#D4AF37]" : "text-foreground")} style={OSWALD}>{value}</span>
+      <span className="mt-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+    </div>
   );
 
   // Projections/Season Stats embed the scouting pages, which carry their own
@@ -423,24 +442,22 @@ export default function PlayerHub() {
             {/* A detail card per tab — same styling, clickable through to the tab. */}
             <div className="grid gap-4 md:grid-cols-2">
               {tabCard("projections", `${PROJECTION_SEASON} Projection`, (
-                <div className="space-y-1.5">
-                  {kv("Projected WAR", num(row?.war))}
-                  {isPitcher ? (
-                    <>
-                      {kv("ERA", num(projection?.p_era, 2))}
-                      {kv("FIP", num(projection?.p_fip, 2))}
-                      {kv("K/9", num(projection?.p_k9))}
-                      {kv("BB/9", num(projection?.p_bb9))}
-                    </>
-                  ) : (
-                    <>
-                      {kv("AVG", rate(projection?.p_avg))}
-                      {kv("OBP", rate(projection?.p_obp))}
-                      {kv("SLG", rate(projection?.p_slg))}
-                      {kv("wRC+", projection?.p_wrc_plus != null ? String(Math.round(projection.p_wrc_plus)) : "—", true)}
-                    </>
-                  )}
-                </div>
+                isPitcher ? (
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {projBox("ERA", num(projection?.p_era, 2))}
+                    {projBox("FIP", num(projection?.p_fip, 2))}
+                    {projBox("K/9", num(projection?.p_k9))}
+                    {projBox("BB/9", num(projection?.p_bb9))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {projBox("AVG", rate(sc(projection?.p_avg)))}
+                    {projBox("OBP", rate(sc(projection?.p_obp)))}
+                    {projBox("SLG", rate(sc(projection?.p_slg)))}
+                    {projBox("OPS", rate(sc(projection?.p_ops)))}
+                    {projBox("wRC+", projection?.p_wrc_plus != null ? String(Math.round(sc(projection.p_wrc_plus)!)) : "—", true)}
+                  </div>
+                )
               ))}
               {tabCard("stats", `${CURRENT_SEASON} Season Stats`, (
                 season ? (

@@ -8,8 +8,10 @@ import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 // (player_predictions, team-scoped preference) and the current-season line
 // (season_stats). Both keyed by players.id.
 export interface HubProjection {
-  p_avg: number | null; p_obp: number | null; p_slg: number | null; p_wrc_plus: number | null;
+  p_avg: number | null; p_obp: number | null; p_slg: number | null; p_ops: number | null; p_wrc_plus: number | null;
   p_era: number | null; p_fip: number | null; p_k9: number | null; p_bb9: number | null;
+  dev_aggressiveness: number | null; // dev-agg the row was computed with (scale from this to the build's)
+  class_transition: string | null;   // drives the dev-agg class adjustment
 }
 export interface HubSeason {
   batting_avg: number | null; on_base_pct: number | null; slugging_pct: number | null;
@@ -25,7 +27,7 @@ export function usePlayerHubPreview(playerId: string | null | undefined): { proj
     enabled: !!playerId,
     queryFn: async (): Promise<HubProjection | null> => {
       const { data } = await (supabase as any).from("player_predictions")
-        .select("p_avg, p_obp, p_slg, p_wrc_plus, p_era, p_fip, p_k9, p_bb9, variant, customer_team_id, pitcher_role")
+        .select("p_avg, p_obp, p_slg, p_ops, p_wrc_plus, p_era, p_fip, p_k9, p_bb9, dev_aggressiveness, class_transition, variant, customer_team_id, pitcher_role")
         .eq("player_id", playerId).eq("season", PROJECTION_SEASON).eq("status", "active");
       return (pickPreferredPrediction((data ?? []) as any[], effectiveTeamId ?? null) ?? null) as HubProjection | null;
     },
