@@ -210,17 +210,12 @@ export default function PlayerHub() {
         </div>
       )}
 
-        {/* Tab bar — standalone under the mirror header; on Projections/Season
-            Stats it's slotted under the scouting header instead (see below). */}
-        {!embedsOwnHeader && tabBar}
-
-        {/* Tab content */}
+        {/* Overview has its OWN cover-photo hero above the tabs (name-only — the
+            details live in the Roster Assignment card below). Every other tab uses
+            the mirror header. */}
         {tab === "overview" && (
-          <div className="space-y-4">
+          <>
             <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Back</button>
-
-            {/* Cover-photo hero: slim team-branded cover + overlapping headshot,
-                name + badges, and a stats strip on the right (Turo web profile style). */}
             <Card className="overflow-hidden border-border/60">
               <div className="flex h-20 items-center justify-center bg-[#070e1f] px-5">
                 {logoUrl ? <img src={logoUrl} alt="" className="h-10 w-auto opacity-90" /> : <span className="text-sm font-semibold tracking-widest text-[#D4AF37]/70" style={OSWALD}>RSTR IQ</span>}
@@ -229,16 +224,10 @@ export default function PlayerHub() {
                 <div className="-mt-10 flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#D4AF37]/15 ring-4 ring-background">
                   {headshotUrl ? <img src={headshotUrl} alt={name} className="h-full w-full object-cover" /> : <span className="text-2xl font-bold text-[#D4AF37]" style={OSWALD}>{(name[0] || "?").toUpperCase()}</span>}
                 </div>
-                <div className="min-w-0 flex-1 pt-1">
+                <div className="min-w-0 flex-1 pt-2">
                   <h1 className="text-2xl font-bold tracking-tight">{name}</h1>
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    {position && <Badge variant="secondary">{position}</Badge>}
-                    {classYr && <Badge variant="outline">{classYr}</Badge>}
-                    <Badge variant="outline" className="text-muted-foreground">{isPitcher ? "Pitcher" : "Position player"}</Badge>
-                    {row && <Badge variant="outline" className={cn("font-semibold", row.finalized ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-500" : "border-amber-500/40 bg-amber-500/10 text-amber-500")}>{row.finalized ? "Finalized" : "Draft"}</Badge>}
-                  </div>
                 </div>
-                <div className="flex flex-wrap items-stretch divide-x divide-border/50 rounded-lg border border-border/50 pt-0">
+                <div className="flex flex-wrap items-stretch divide-x divide-border/50 rounded-lg border border-border/50">
                   {statBox("WAR", num(row?.war))}
                   {statBox("Market Value", money(row?.market_value))}
                   {statBox("Total Pay", money(c?.total ?? null), true)}
@@ -246,7 +235,16 @@ export default function PlayerHub() {
                 </div>
               </div>
             </Card>
+          </>
+        )}
 
+        {/* Tab bar — under the mirror header (other tabs) or the Overview hero;
+            on Projections/Season Stats it's slotted under the scouting header. */}
+        {!embedsOwnHeader && tabBar}
+
+        {/* Tab content */}
+        {tab === "overview" && (
+          <div className="space-y-4">
             {/* Compensation + Roster assignment */}
             <div className="grid gap-4 md:grid-cols-2">
               <Card className="border-border/60">
