@@ -4,12 +4,12 @@ import { useGmContracts } from "@/gm/hooks/useGmContracts";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { useMarketability } from "@/gm/hooks/useMarketability";
 import { marketabilityTierColor } from "@/gm/lib/marketability";
-import { ContractCard } from "@/gm/pages/GMContracts";
+import { AddContractDialog, BUCKET_LABEL } from "@/gm/pages/GMContracts";
 import PlayerNotesDialog from "@/components/PlayerNotesDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { StickyNote, ListChecks } from "lucide-react";
+import { StickyNote, ListChecks, Plus } from "lucide-react";
 
 const OSWALD = { fontFamily: "Oswald, sans-serif" } as const;
 const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
@@ -28,12 +28,15 @@ export function playerComp(r: GmRow) {
  * roster row when the player is on it.
  */
 const PROGRAM_TIER_LABEL: Record<number, string> = { 5: "Elite", 4: "Strong", 3: "Solid", 2: "Modest", 1: "Minimal" };
+const PROGRAM_TIER_COLOR: Record<number, string> = { 5: "#D4AF37", 4: "#34d399", 3: "#fbbf24", 2: "#94a3b8", 1: "#94a3b8" };
 const CONN_LABEL: Record<string, string> = { family_notable: "Legacy athlete", family_alum: "Immediate family alum", local: "In-state / local hometown" };
+const CONN_COLOR: Record<string, string> = { family_notable: "#D4AF37", family_alum: "#34d399", local: "#fbbf24" };
 
 export default function PlayerFinancials({ playerName, playerId, onEditMarketability }: { playerName: string; playerId: string; onEditMarketability?: () => void }) {
   const gm = useGmRoster();
   const { contracts } = useGmContracts(playerId);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   const row = useMemo(
     () => [...gm.hitters, ...gm.pitchers].find((r) => r.player_id === playerId) ?? null,
@@ -41,27 +44,21 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
   );
   const c = row ? playerComp(row) : null;
 
-  // Marketability scorecard: the components that roll up into the Overview score.
+  // Marketability buckets — each a clickable half-card showing a tier (not raw
+  // points). Empty buckets ("Add") open the questionnaire to fill them.
   const { info: pInfo } = useGmPlayerInfo(playerId);
   const { breakdown, programTier, draftRank } = useMarketability(playerId);
-  const platforms = [
-    { key: "Instagram", n: pInfo?.instagram_followers ?? null, handle: pInfo?.instagram_handle ?? null },
-    { key: "X / Twitter", n: pInfo?.twitter_followers ?? null, handle: pInfo?.twitter_handle ?? null },
-    { key: "TikTok", n: pInfo?.tiktok_followers ?? null, handle: pInfo?.tiktok_handle ?? null },
-    { key: "YouTube", n: pInfo?.youtube_followers ?? null, handle: pInfo?.youtube_handle ?? null },
-  ];
-  const socialTotal = platforms.reduce((a, p) => a + (p.n ?? 0), 0);
+  const socialTotal = (pInfo?.instagram_followers ?? 0) + (pInfo?.twitter_followers ?? 0) + (pInfo?.tiktok_followers ?? 0) + (pInfo?.youtube_followers ?? 0);
   const connTier = pInfo?.university_connection_tier ?? null;
   const compactNum = (n: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n);
-  const scoreRow = (label: string, detail: string, pts: number, max: number, muted?: boolean) => (
-    <div className="flex items-center justify-between gap-3">
-      <div className="min-w-0">
-        <div className="text-sm font-medium text-foreground">{label}</div>
-        <div className="truncate text-[11px] text-muted-foreground">{detail}</div>
-      </div>
-      <span className={cn("shrink-0 font-mono text-sm font-semibold tabular-nums", muted ? "text-muted-foreground" : "text-[#D4AF37]")}>+{pts}<span className="text-[10px] text-muted-foreground">/{max}</span></span>
-    </div>
-  );
+  const socialLabel = socialTotal >= 150000 ? "Massive" : socialTotal >= 50000 ? "Large" : socialTotal >= 10000 ? "Established" : socialTotal >= 2500 ? "Growing" : socialTotal >= 1000 ? "Small" : "Minimal";
+  const socialColor = socialTotal >= 50000 ? "#D4AF37" : socialTotal >= 10000 ? "#34d399" : socialTotal >= 2500 ? "#fbbf24" : "#94a3b8";
+  const buckets = [
+    { title: "Program & Community", isEmpty: !programTier, tier: programTier ? PROGRAM_TIER_LABEL[programTier] : "", color: programTier ? (PROGRAM_TIER_COLOR[programTier] ?? "#94a3b8") : "", detail: programTier ? "Fanbase & community pull" : "Set your program tier" },
+    { title: "Social Following", isEmpty: socialTotal === 0, tier: socialLabel, color: socialColor, detail: socialTotal === 0 ? "Add follower counts" : `${compactNum(socialTotal)} across platforms` },
+    { title: "University Connection", isEmpty: !connTier, tier: connTier ? (CONN_LABEL[connTier] ?? connTier) : "", color: connTier ? (CONN_COLOR[connTier] ?? "#94a3b8") : "", detail: connTier ? (pInfo?.university_connection_note || "Legacy / family ties") : "Legacy or family ties add value" },
+    { title: "Draft Context", isEmpty: false, tier: draftRank == null ? "Unranked" : draftRank <= 100 ? "Top-100" : "Ranked", color: draftRank == null ? "#94a3b8" : draftRank <= 100 ? "#D4AF37" : "#34d399", detail: draftRank == null ? "Not on the draft board" : `#${draftRank} on the draft board` },
+  ];
 
   const openObligations = contracts.flatMap((ct) => ct.obligations).filter((o) => !o.fulfilled).length;
   const totalObligations = contracts.reduce((s, ct) => s + ct.obligations.length, 0);
@@ -76,6 +73,56 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
 
   return (
     <div className="space-y-4">
+      {/* Top of the page: two half-tables — Marketability | Contracts */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card
+          onClick={onEditMarketability}
+          className={cn("border-border/60", onEditMarketability && "cursor-pointer transition-colors hover:border-[#D4AF37]/50")}
+        >
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Marketability</h3>
+              <span className="text-base font-bold uppercase tracking-wide" style={{ ...OSWALD, color: marketabilityTierColor(breakdown.tier) }}>{breakdown.tier}</span>
+            </div>
+            <div className="mt-2.5 space-y-2">
+              {buckets.map((b) => (
+                <div key={b.title} className="flex items-center justify-between gap-3 border-b border-border/40 pb-2 last:border-0 last:pb-0">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-foreground">{b.title}</div>
+                    <div className="truncate text-[11px] text-muted-foreground">{b.detail}</div>
+                  </div>
+                  <span className="shrink-0 text-sm font-bold uppercase tracking-wide" style={{ ...OSWALD, color: b.isEmpty ? "#D4AF37" : b.color }}>{b.isEmpty ? "Add" : b.tier}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/60">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Contracts</h3>
+              <Button size="sm" className="h-7 gap-1 text-xs" onClick={() => setAddOpen(true)}><Plus className="h-3.5 w-3.5" /> Add Contract</Button>
+            </div>
+            {contracts.length === 0 ? (
+              <p className="mt-3 text-xs text-muted-foreground">No contracts yet. Adding one flows to the Contracts tab and funding sources.</p>
+            ) : (
+              <div className="mt-2.5 space-y-2">
+                {contracts.map((ct) => (
+                  <div key={ct.id} className="flex items-center justify-between gap-3 border-b border-border/40 pb-2 last:border-0 last:pb-0">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-foreground">{ct.title || ct.vendor_name || BUCKET_LABEL[ct.bucket]}</div>
+                      <div className="truncate text-[11px] text-muted-foreground">{BUCKET_LABEL[ct.bucket]}{ct.vendor_name ? ` · ${ct.vendor_name}` : ""}</div>
+                    </div>
+                    <span className="shrink-0 font-mono text-sm font-semibold text-[#D4AF37]">{money(ct.total_value)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
       {c ? (
         <Card className="border-border/60">
           <CardContent className="grid grid-cols-2 divide-x divide-y divide-border/50 p-0 sm:grid-cols-4 sm:divide-y-0">
@@ -86,84 +133,16 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
           </CardContent>
         </Card>
       ) : (
-        <p className="text-xs text-muted-foreground">No compensation record on the current build — contracts below are still tracked.</p>
+        <p className="text-xs text-muted-foreground">No compensation record on the current build — contracts are still tracked above.</p>
       )}
-
-      <Card className="border-border/60">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h3 className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Marketability</h3>
-              <button onClick={onEditMarketability} disabled={!onEditMarketability} className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50">Edit →</button>
-            </div>
-            <span className="text-xl font-bold uppercase tracking-wide" style={{ ...OSWALD, color: marketabilityTierColor(breakdown.tier) }}>{breakdown.tier}</span>
-          </div>
-
-          <div className="mt-3 space-y-2.5">
-            {scoreRow(
-              "Program & Community",
-              programTier ? `${PROGRAM_TIER_LABEL[programTier]} program` : "Program tier not set — using neutral",
-              breakdown.program, 45, breakdown.programWasDefaulted,
-            )}
-
-            {scoreRow(
-              "Social Following",
-              socialTotal > 0 ? `${compactNum(socialTotal)} total across platforms` : "Add follower counts in Player Info",
-              breakdown.social, 45, socialTotal === 0,
-            )}
-            {socialTotal > 0 && (
-              <div className="flex flex-wrap gap-x-5 gap-y-1 pl-0.5">
-                {platforms.filter((p) => p.n != null).map((p) => (
-                  <span key={p.key} className="text-[11px] text-muted-foreground">
-                    <span className="font-mono font-semibold text-foreground">{compactNum(p.n as number)}</span> {p.key}{p.handle ? ` · ${p.handle.startsWith("@") ? p.handle : "@" + p.handle}` : ""}
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {/* University Connection — the nudge: when unscored, prompt to add. */}
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-medium text-foreground">University Connection</div>
-                <div className="truncate text-[11px] text-muted-foreground">
-                  {connTier ? `${CONN_LABEL[connTier] ?? connTier}${pInfo?.university_connection_note ? ` · ${pInfo.university_connection_note}` : ""}` : "Not scored — legacy or family ties add value"}
-                </div>
-              </div>
-              {connTier ? (
-                <span className="shrink-0 font-mono text-sm font-semibold tabular-nums text-[#D4AF37]">+{breakdown.connection}<span className="text-[10px] text-muted-foreground">/20</span></span>
-              ) : (
-                <button onClick={onEditMarketability} disabled={!onEditMarketability} className="shrink-0 text-[11px] font-semibold text-[#D4AF37] hover:underline disabled:opacity-50">Add →</button>
-              )}
-            </div>
-
-            {scoreRow(
-              "Draft Context",
-              draftRank != null ? `#${draftRank} on the draft board` : "Not on the draft board",
-              breakdown.draft, 15, draftRank == null,
-            )}
-          </div>
-        </CardContent>
-      </Card>
 
       {totalObligations > 0 && (
         <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-4 py-2.5 text-sm">
           <ListChecks className="h-4 w-4 text-[#D4AF37]" />
           <span className="font-medium">{openObligations}</span>
-          <span className="text-muted-foreground">open obligation{openObligations === 1 ? "" : "s"} of {totalObligations} across {contracts.length} contract{contracts.length === 1 ? "" : "s"} — check them off below.</span>
+          <span className="text-muted-foreground">open obligation{openObligations === 1 ? "" : "s"} of {totalObligations} across {contracts.length} contract{contracts.length === 1 ? "" : "s"} — manage them on the Contracts tab.</span>
         </div>
       )}
-
-      <div className="space-y-2">
-        <div className="flex items-baseline gap-2">
-          <h3 className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Contracts</h3>
-          <span className="text-[11px] text-muted-foreground">add contracts on the Contracts tab</span>
-        </div>
-        {contracts.length === 0 ? (
-          <Card className="border-border/60"><CardContent className="py-10 text-center text-sm text-muted-foreground">No contracts on file for this player.</CardContent></Card>
-        ) : (
-          <div className="grid gap-3 lg:grid-cols-2">{contracts.map((ct) => <ContractCard key={ct.id} c={ct} playerName={playerName} />)}</div>
-        )}
-      </div>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
@@ -198,6 +177,8 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
           subtitle="Scouting or negotiation context. Each note is stamped with the date and who wrote it. Shared with your staff and the coach's Team Builder."
         />
       )}
+
+      <AddContractDialog open={addOpen} onOpenChange={setAddOpen} players={[{ id: playerId, name: playerName }]} defaultPlayerId={playerId} />
     </div>
   );
 }

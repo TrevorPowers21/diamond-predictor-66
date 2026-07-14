@@ -14,7 +14,7 @@ const OSWALD = { fontFamily: "Oswald, sans-serif" } as const;
 const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
 const fmtDate = (d: string | null) => (d ? new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null);
 
-const BUCKET_LABEL: Record<ContractBucket, string> = { rev: "Rev Share", nil: "NIL", other: "Other" };
+export const BUCKET_LABEL: Record<ContractBucket, string> = { rev: "Rev Share", nil: "NIL", other: "Other" };
 const BUCKET_COLOR: Record<ContractBucket, string> = {
   rev: "bg-sky-500/12 text-sky-400 border-sky-500/30",
   nil: "bg-[#D4AF37]/12 text-[#D4AF37] border-[#D4AF37]/30",
@@ -26,12 +26,12 @@ const STATUS_COLOR: Record<ContractStatus, string> = {
 
 type ObDraft = { description: string; due_date: string | null };
 
-function AddContractDialog({ open, onOpenChange, players }: {
-  open: boolean; onOpenChange: (o: boolean) => void; players: { id: string; name: string }[];
+export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId }: {
+  open: boolean; onOpenChange: (o: boolean) => void; players: { id: string; name: string }[]; defaultPlayerId?: string;
 }) {
   const { addContract, isSaving } = useGmContracts();
   const [file, setFile] = useState<File | null>(null);
-  const [playerId, setPlayerId] = useState<string>("");
+  const [playerId, setPlayerId] = useState<string>(defaultPlayerId ?? "");
   const [title, setTitle] = useState("");
   const [bucket, setBucket] = useState<ContractBucket>("nil");
   const [vendor, setVendor] = useState("");
@@ -48,7 +48,7 @@ function AddContractDialog({ open, onOpenChange, players }: {
   const [reviewed, setReviewed] = useState(false);
 
   const reset = () => {
-    setFile(null); setPlayerId(""); setTitle(""); setBucket("nil"); setVendor(""); setValue(null);
+    setFile(null); setPlayerId(defaultPlayerId ?? ""); setTitle(""); setBucket("nil"); setVendor(""); setValue(null);
     setStart(""); setEnd(""); setStatus("active"); setSummary(""); setNotes(""); setObs([]); setParsedRaw(null);
     setExtracting(false); setAutoFilled(false); setReviewed(false);
   };
@@ -101,12 +101,14 @@ function AddContractDialog({ open, onOpenChange, players }: {
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Player" full>
-              <Select value={playerId} onValueChange={setPlayerId}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select player" /></SelectTrigger>
-                <SelectContent className="max-h-64">{players.map((p) => <SelectItem key={p.id} value={p.id} className="text-sm">{p.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </Field>
+            {!defaultPlayerId && (
+              <Field label="Player" full>
+                <Select value={playerId} onValueChange={setPlayerId}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select player" /></SelectTrigger>
+                  <SelectContent className="max-h-64">{players.map((p) => <SelectItem key={p.id} value={p.id} className="text-sm">{p.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </Field>
+            )}
             <Field label="Title" full><Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Opendorse NIL Agreement" className="h-9 text-sm" /></Field>
             <Field label="Bucket">
               <Select value={bucket} onValueChange={(v) => setBucket(v as ContractBucket)}>
