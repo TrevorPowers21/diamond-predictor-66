@@ -986,6 +986,10 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
   // Builder. `undefined` = standalone scouting route → use the computed value.
   const displayOWar = warOverride !== undefined ? warOverride : computedOWar;
   const displayNilValuation = marketOverride !== undefined ? marketOverride : computedNilValuation;
+  // Build-pinned = rendered inside the program hub (WAR/market come from the live
+  // build). There the depth-role / dev-agg controls are read-only labels — they
+  // define how the player IS set up in the build, not a preview to fiddle with.
+  const buildPinned = warOverride !== undefined;
   const predFromAvg = seedStatRow?.avg ?? regularPred?.from_avg ?? null;
   const predFromObp = seedStatRow?.obp ?? regularPred?.from_obp ?? null;
   const predFromSlg = seedStatRow?.slg ?? regularPred?.from_slg ?? null;
@@ -1734,6 +1738,13 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
                     <CardHeader className="pb-2 pt-3 px-4">
                       <div className="flex items-center gap-3 flex-wrap">
                         <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2027 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
+                        {buildPinned ? (
+                          // Program hub: read-only — shows how the player is set up in the live build.
+                          <div className="flex items-center gap-1.5">
+                            <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Depth role — from the active roster build">{({ cornerstone: "Cornerstone", everyday_starter: "Everyday Starter", platoon_starter: "Platoon Starter", utility: "Utility", bench: "Bench" } as Record<string, string>)[depthRole] ?? depthRole}</span>
+                            <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Dev aggressiveness — from the active roster build">Dev {sessionDevAgg}</span>
+                          </div>
+                        ) : (
                         <div className="flex items-center gap-1.5">
                           <Select value={depthRole} onValueChange={(v) => setDepthRole(v as HitterDepthRole)}>
                             <SelectTrigger className="h-7 w-[150px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200" title="Depth role — session-only display overlay; not saved"><SelectValue /></SelectTrigger>
@@ -1757,6 +1768,7 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
                             </SelectContent>
                           </Select>
                         </div>
+                        )}
                       </div>
                     </CardHeader>
                     <CardContent className="px-4 pb-4">

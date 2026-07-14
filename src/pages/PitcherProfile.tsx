@@ -1492,6 +1492,9 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
   // matches the roster + Team Builder. `undefined` = standalone scouting route.
   const displayPWar = warOverride !== undefined ? warOverride : projectedPitching.pWar;
   const displayMarket = marketOverride !== undefined ? marketOverride : (projectedPitching.marketValue ?? nilValuation?.projected_value ?? null);
+  // Program hub: dev-agg / role controls become read-only labels (they define how
+  // the pitcher is set up in the live build, not a preview to fiddle with).
+  const buildPinned = warOverride !== undefined;
 
   const pitching2025 = useMemo(() => {
     const eq = readPitchingWeights();
@@ -2202,6 +2205,14 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
                   <CardHeader className="pb-2 pt-3 px-4">
                     <div className="flex items-center gap-3 flex-wrap">
                       <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2027 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
+                      {buildPinned ? (
+                        // Program hub: read-only — shows how the pitcher is set up in the live build.
+                        <div className="flex items-center gap-1.5">
+                          <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Role — from the active roster build">{projectedRole === "SM" ? "SP" : projectedRole}</span>
+                          <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Depth role — from the active roster build">{({ weekend_starter: "Weekend Starter", weekday_starter: "Weekday Starter", swing_starter: "Swing Starter", workhorse_reliever: "Workhorse Reliever", high_leverage_reliever: "High-Leverage Reliever", mid_leverage_reliever: "Mid-Leverage Reliever", low_impact_reliever: "Low-Impact Reliever", specialist_reliever: "Specialist Reliever" } as Record<string, string>)[depthRole] ?? depthRole}</span>
+                          <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Dev aggressiveness — from the active roster build">Dev {projectedDevAggressiveness}</span>
+                        </div>
+                      ) : (
                       <div className="flex items-center gap-1.5">
                         <Select value={projectedRole === "SM" ? "SP" : projectedRole} onValueChange={(v) => {
                           const newRole = v as "SP" | "RP";
@@ -2250,6 +2261,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
                           </SelectContent>
                         </Select>
                       </div>
+                      )}
                     </div>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
