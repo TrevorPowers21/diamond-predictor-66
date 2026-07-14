@@ -4,7 +4,6 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useGmRoster } from "@/gm/hooks/useGmRoster";
-import { useGmContracts } from "@/gm/hooks/useGmContracts";
 import PlayerFinancials, { playerComp } from "@/gm/components/PlayerFinancials";
 import { isPitcherProfile } from "@/lib/profileRoutes";
 import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
@@ -12,7 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, LineChart, BarChart3, DollarSign, Activity, Bone, LayoutDashboard, FileText, ClipboardList } from "lucide-react";
+import { ArrowLeft, LineChart, BarChart3, DollarSign, Activity, Bone, LayoutDashboard, ClipboardList } from "lucide-react";
 
 // Depth/pitcher role → display label (both hitter and pitcher roles).
 const ROLE_LABEL: Record<string, string> = {
@@ -122,7 +121,6 @@ export default function PlayerHub() {
   const setTab = (t: TabKey) => setParams((p) => { p.set("tab", t); return p; }, { replace: true });
 
   const gm = useGmRoster();
-  const { contracts } = useGmContracts(playerId);
 
   const row = useMemo(
     () => [...gm.hitters, ...gm.pitchers].find((r) => r.player_id === playerId) ?? null,
@@ -184,8 +182,6 @@ export default function PlayerHub() {
       <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
     </div>
   );
-  const contractTotal = contracts.reduce((s, ct) => s + (ct.total_value ?? 0), 0);
-  const openObligations = contracts.flatMap((ct) => ct.obligations).filter((o) => !o.fulfilled).length;
 
   // Projections/Season Stats embed the scouting pages, which carry their own
   // identity header — so the hub header only shows on the other tabs (and the
@@ -257,11 +253,11 @@ export default function PlayerHub() {
               <div className={cn("flex h-16 items-center justify-center px-5", !branding && "bg-[#070e1f]")} style={coverStyle}>
                 <CoverBrand teamName={fullTeamName} logoUrl={logoUrl} />
               </div>
-              <div className="flex flex-wrap items-end gap-x-5 gap-y-3 px-5 pb-5 pt-5">
-                <div className="-mt-14 flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#0d1a30] ring-4 ring-background">
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-3 px-5 pb-5 pt-5">
+                <div className="-mt-14 flex h-20 w-20 shrink-0 self-start items-center justify-center overflow-hidden rounded-full bg-[#0d1a30] ring-4 ring-background">
                   {headshotUrl ? <img src={headshotUrl} alt={name} className="h-full w-full object-cover" /> : <span className="text-2xl font-bold text-[#D4AF37]" style={OSWALD}>{(name[0] || "?").toUpperCase()}</span>}
                 </div>
-                <div className="min-w-0 flex-1 pt-2">
+                <div className="min-w-0 flex-1">
                   <h1 className="text-2xl font-bold tracking-tight">{name}</h1>
                 </div>
                 <div className="flex flex-wrap items-stretch divide-x divide-border/50 rounded-lg border border-border/50">
@@ -320,17 +316,6 @@ export default function PlayerHub() {
                 </CardContent>
               </Card>
             </div>
-
-            {/* Contracts & obligations summary */}
-            <button onClick={() => setTab("financials")} className="flex w-full items-center gap-3 rounded-lg border border-border/60 p-3 text-left transition-colors hover:border-[#D4AF37]/50 hover:bg-muted/30">
-              <FileText className="h-5 w-5 shrink-0 text-[#D4AF37]" />
-              <div className="min-w-0 flex-1 text-sm">
-                {contracts.length > 0 ? (
-                  <><span className="font-semibold">{contracts.length} contract{contracts.length > 1 ? "s" : ""}</span> on file · {money(contractTotal)} total{openObligations > 0 && <> · <span className="text-amber-400">{openObligations} open obligation{openObligations > 1 ? "s" : ""}</span></>}</>
-                ) : <span className="text-muted-foreground">No contracts on file — add one on Financials.</span>}
-              </div>
-              <span className="shrink-0 text-[11px] text-muted-foreground">Financials →</span>
-            </button>
 
             {/* Quick jump to the deeper tabs */}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
