@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
 import { useGmContracts } from "@/gm/hooks/useGmContracts";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
-import { marketabilityScore, marketabilityTier } from "@/gm/lib/marketability";
+import { useMarketability } from "@/gm/hooks/useMarketability";
 import { ContractCard } from "@/gm/pages/GMContracts";
 import PlayerNotesDialog from "@/components/PlayerNotesDialog";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,10 @@ export function playerComp(r: GmRow) {
  * team-level (shown for any player); comp + notes come from the current build's
  * roster row when the player is on it.
  */
-export default function PlayerFinancials({ playerName, playerId }: { playerName: string; playerId: string }) {
+const PROGRAM_TIER_LABEL: Record<number, string> = { 5: "Elite", 4: "Strong", 3: "Solid", 2: "Modest", 1: "Minimal" };
+const CONN_LABEL: Record<string, string> = { family_notable: "Family notable athlete / figure", family_alum: "Immediate family alum", local: "In-state / local hometown" };
+
+export default function PlayerFinancials({ playerName, playerId, onEditInfo }: { playerName: string; playerId: string; onEditInfo?: () => void }) {
   const gm = useGmRoster();
   const { contracts } = useGmContracts(playerId);
   const [notesOpen, setNotesOpen] = useState(false);
@@ -37,17 +40,26 @@ export default function PlayerFinancials({ playerName, playerId }: { playerName:
   );
   const c = row ? playerComp(row) : null;
 
-  // Marketability detail: the per-platform following that rolls up into the
-  // Overview's single marketability score.
+  // Marketability scorecard: the components that roll up into the Overview score.
   const { info: pInfo } = useGmPlayerInfo(playerId);
+  const { breakdown, programTier, draftRank } = useMarketability(playerId);
   const platforms = [
-    { key: "Instagram", n: pInfo?.instagram_followers ?? null },
-    { key: "X / Twitter", n: pInfo?.twitter_followers ?? null },
-    { key: "TikTok", n: pInfo?.tiktok_followers ?? null },
+    { key: "Instagram", n: pInfo?.instagram_followers ?? null, handle: pInfo?.instagram_handle ?? null },
+    { key: "X / Twitter", n: pInfo?.twitter_followers ?? null, handle: pInfo?.twitter_handle ?? null },
+    { key: "TikTok", n: pInfo?.tiktok_followers ?? null, handle: pInfo?.tiktok_handle ?? null },
   ];
   const socialTotal = platforms.reduce((a, p) => a + (p.n ?? 0), 0);
-  const marketScore = marketabilityScore(socialTotal > 0 ? socialTotal : null);
+  const connTier = pInfo?.university_connection_tier ?? null;
   const compactNum = (n: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+  const scoreRow = (label: string, detail: string, pts: number, max: number, muted?: boolean) => (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-foreground">{label}</div>
+        <div className="truncate text-[11px] text-muted-foreground">{detail}</div>
+      </div>
+      <span className={cn("shrink-0 font-mono text-sm font-semibold tabular-nums", muted ? "text-muted-foreground" : "text-[#D4AF37]")}>+{pts}<span className="text-[10px] text-muted-foreground">/{max}</span></span>
+    </div>
+  );
 
   const openObligations = contracts.flatMap((ct) => ct.obligations).filter((o) => !o.fulfilled).length;
   const totalObligations = contracts.reduce((s, ct) => s + ct.obligations.length, 0);
@@ -79,28 +91,55 @@ export default function PlayerFinancials({ playerName, playerId }: { playerName:
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
             <h3 className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Marketability</h3>
-            <span className="text-[11px] text-muted-foreground">from social following</span>
-          </div>
-          {socialTotal > 0 ? (
-            <div className="mt-3 flex flex-wrap items-center gap-x-8 gap-y-3">
-              <div className="flex flex-col">
-                <span className="font-mono text-3xl font-bold leading-none text-[#D4AF37]" style={OSWALD}>{marketScore}</span>
-                <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">Score · {marketabilityTier(marketScore)}</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="font-mono text-lg font-semibold leading-none text-foreground">{compactNum(socialTotal)}</span>
-                <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">Total Followers</span>
-              </div>
-              {platforms.filter((p) => p.n != null).map((p) => (
-                <div key={p.key} className="flex flex-col">
-                  <span className="font-mono text-lg font-semibold leading-none text-foreground">{compactNum(p.n as number)}</span>
-                  <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">{p.key}</span>
-                </div>
-              ))}
+            <div className="flex items-baseline gap-2">
+              <span className="font-mono text-2xl font-bold leading-none text-[#D4AF37]" style={OSWALD}>{breakdown.score}</span>
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{breakdown.tier}</span>
             </div>
-          ) : (
-            <p className="mt-2 text-xs text-muted-foreground">No social following entered yet — add Instagram, X, or TikTok in the ⋯ Player Info panel to generate a marketability score.</p>
-          )}
+          </div>
+
+          <div className="mt-3 space-y-2.5">
+            {scoreRow(
+              "Program & Community",
+              programTier ? `${PROGRAM_TIER_LABEL[programTier]} program` : "Program tier not set — using neutral",
+              breakdown.program, 45, breakdown.programWasDefaulted,
+            )}
+
+            {scoreRow(
+              "Social Following",
+              socialTotal > 0 ? `${compactNum(socialTotal)} total across platforms` : "Add follower counts in Player Info",
+              breakdown.social, 45, socialTotal === 0,
+            )}
+            {socialTotal > 0 && (
+              <div className="flex flex-wrap gap-x-5 gap-y-1 pl-0.5">
+                {platforms.filter((p) => p.n != null).map((p) => (
+                  <span key={p.key} className="text-[11px] text-muted-foreground">
+                    <span className="font-mono font-semibold text-foreground">{compactNum(p.n as number)}</span> {p.key}{p.handle ? ` · ${p.handle.startsWith("@") ? p.handle : "@" + p.handle}` : ""}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* University Connection — the nudge: when unscored, prompt to add. */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-foreground">University Connection</div>
+                <div className="truncate text-[11px] text-muted-foreground">
+                  {connTier ? `${CONN_LABEL[connTier] ?? connTier}${pInfo?.university_connection_note ? ` · ${pInfo.university_connection_note}` : ""}` : "Not scored — legacy or family ties add value"}
+                </div>
+              </div>
+              {connTier ? (
+                <span className="shrink-0 font-mono text-sm font-semibold tabular-nums text-[#D4AF37]">+{breakdown.connection}<span className="text-[10px] text-muted-foreground">/20</span></span>
+              ) : (
+                <button onClick={onEditInfo} disabled={!onEditInfo} className="shrink-0 text-[11px] font-semibold text-[#D4AF37] hover:underline disabled:opacity-50">Add →</button>
+              )}
+            </div>
+
+            {scoreRow(
+              "Draft Context",
+              draftRank != null ? `#${draftRank} on the draft board` : "Not on the draft board",
+              breakdown.draft, 15, draftRank == null,
+            )}
+          </div>
         </CardContent>
       </Card>
 

@@ -8,7 +8,7 @@ import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { defaultDraftYear, defaultEligibilityRemaining } from "@/gm/lib/playerEligibility";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
-import { marketabilityScore } from "@/gm/lib/marketability";
+import { useMarketability } from "@/gm/hooks/useMarketability";
 import PlayerInfoDialog from "@/gm/components/PlayerInfoDialog";
 import PlayerFinancials, { playerComp } from "@/gm/components/PlayerFinancials";
 import { isPitcherProfile } from "@/lib/profileRoutes";
@@ -215,11 +215,9 @@ export default function PlayerHub() {
   const onDraftBoard = slotDraftYear != null;
   const eligRemaining = playerInfo?.eligibility_remaining ?? defaultEligibilityRemaining(classYr);
 
-  // Marketability: one 0–100 score aggregated from total social following. The
-  // per-platform breakdown lives on the Financials tab; the Overview shows only
-  // the score. null when no following is entered.
-  const socialTotal = (playerInfo?.instagram_followers ?? 0) + (playerInfo?.twitter_followers ?? 0) + (playerInfo?.tiktok_followers ?? 0);
-  const market = marketabilityScore(socialTotal > 0 ? socialTotal : null);
+  // Marketability: one 0–100 composite (program + social + connection + draft).
+  // Overview shows the score; the Financials tab carries the full scorecard.
+  const marketBreakdown = useMarketability(playerId).breakdown;
 
   const kv = (label: string, value: string, accent?: boolean) => (
     <div className="flex items-center justify-between">
@@ -321,7 +319,7 @@ export default function PlayerHub() {
                   {statBox("Projected Value", money(displayValue))}
                   {statBox("Total Pay", money(c?.total ?? null), true)}
                   {statBox("Value vs Pay", c && c.total > 0 && displayValue != null ? `${(displayValue / c.total).toFixed(2)}×` : "—")}
-                  {statBox("Marketability", market != null ? String(market) : "—")}
+                  {statBox("Marketability", String(marketBreakdown.score))}
                 </div>
               </div>
             </Card>
@@ -407,7 +405,7 @@ export default function PlayerHub() {
           </Suspense>
         )}
 
-        {tab === "financials" && <PlayerFinancials playerName={name} playerId={playerId} />}
+        {tab === "financials" && <PlayerFinancials playerName={name} playerId={playerId} onEditInfo={() => setInfoOpen(true)} />}
 
         {tab === "development" && <PlayerDevelopment />}
 

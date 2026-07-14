@@ -20,6 +20,11 @@ export interface GmPlayerInfo {
   instagram_followers: number | null;
   twitter_followers: number | null;
   tiktok_followers: number | null;
+  instagram_handle: string | null;
+  twitter_handle: string | null;
+  tiktok_handle: string | null;
+  university_connection_tier: string | null; // family_notable | family_alum | local | null
+  university_connection_note: string | null;
   gpa: number | null;
   academic_note: string | null;
 }
