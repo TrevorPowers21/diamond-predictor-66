@@ -1743,6 +1743,7 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
                           <div className="flex items-center gap-1.5">
                             <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Depth role — from the active roster build">{({ cornerstone: "Cornerstone", everyday_starter: "Everyday Starter", platoon_starter: "Platoon Starter", utility: "Utility", bench: "Bench" } as Record<string, string>)[depthRole] ?? depthRole}</span>
                             <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Dev aggressiveness — from the active roster build">Dev {sessionDevAgg}</span>
+                            <span className="text-[10px] italic text-[#8a94a6]">*assigned from team build</span>
                           </div>
                         ) : (
                         <div className="flex items-center gap-1.5">

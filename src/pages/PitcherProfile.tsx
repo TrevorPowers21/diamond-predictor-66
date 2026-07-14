@@ -2211,6 +2211,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
                           <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Role — from the active roster build">{projectedRole === "SM" ? "SP" : projectedRole}</span>
                           <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Depth role — from the active roster build">{({ weekend_starter: "Weekend Starter", weekday_starter: "Weekday Starter", swing_starter: "Swing Starter", workhorse_reliever: "Workhorse Reliever", high_leverage_reliever: "High-Leverage Reliever", mid_leverage_reliever: "Mid-Leverage Reliever", low_impact_reliever: "Low-Impact Reliever", specialist_reliever: "Specialist Reliever" } as Record<string, string>)[depthRole] ?? depthRole}</span>
                           <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Dev aggressiveness — from the active roster build">Dev {projectedDevAggressiveness}</span>
+                          <span className="text-[10px] italic text-[#8a94a6]">*assigned from team build</span>
                         </div>
                       ) : (
                       <div className="flex items-center gap-1.5">
