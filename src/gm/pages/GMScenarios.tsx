@@ -43,6 +43,8 @@ function targetToRow(t: GmTarget): GmRow {
     is_pitcher: t.is_pitcher,
     war: t.war,
     market_value: t.market_value,
+    dev_aggressiveness: 0,
+    depth_role: null,
     nil_value: 0,
     scholarship_amount: null,
     rev_share: null,

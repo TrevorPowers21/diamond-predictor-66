@@ -25,6 +25,8 @@ export interface GmRow {
   is_pitcher: boolean;
   war: number | null;
   market_value: number | null;
+  dev_aggressiveness: number;     // build's dev-agg setting (production_notes) — feeds the profile toggle
+  depth_role: string | null;      // build's depth/pitcher role (production_notes) — feeds the profile toggle
   nil_value: number | null; // coach's Team Builder actual pay
   // gm_player_finance
   scholarship_amount: number | null;
@@ -248,6 +250,8 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
         is_pitcher: pitcher,
         war: null,
         market_value: null,
+        dev_aggressiveness: 0,
+        depth_role: null,
         // Expected pay for a projected commit = what we're willing to pay (else the ask).
         nil_value: c.target_offer ?? c.asking_price ?? null,
         scholarship_amount: null,

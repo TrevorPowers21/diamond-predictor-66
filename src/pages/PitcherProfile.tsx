@@ -356,7 +356,7 @@ function ScoutGrade({ value, fullLabel, rawStat, unit }: {
 }
 
 
-export default function PitcherProfile({ embedded = false, idOverride, hideTabs = false, tabSlot, warOverride, marketOverride }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean; tabSlot?: ReactNode; warOverride?: number | null; marketOverride?: number | null }) {
+export default function PitcherProfile({ embedded = false, idOverride, hideTabs = false, tabSlot, warOverride, marketOverride, devAggOverride, roleOverride }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean; tabSlot?: ReactNode; warOverride?: number | null; marketOverride?: number | null; devAggOverride?: number | null; roleOverride?: string | null }) {
   const { id: paramId } = useParams<{ id: string }>();
   const id = idOverride ?? paramId;
   const Shell = embedded ? Fragment : DashboardLayout;
@@ -1344,10 +1344,17 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
   })();
   const [depthRole, setDepthRole] = useState<PitcherDepthRole>(initialDepthRole);
   useEffect(() => {
+    // Program hub: seed dev-agg + depth role from the LIVE build so the profile
+    // reflects the build; otherwise use the prediction's stored values.
     setProjectedRole(initialProjectedRole as "SP" | "RP" | "SM");
-    setProjectedDevAggressiveness(initialProjectedDevAggressiveness);
-    setDepthRole(initialDepthRole);
-  }, [initialProjectedRole, initialProjectedDevAggressiveness, initialDepthRole]);
+    setProjectedDevAggressiveness(devAggOverride != null ? devAggOverride : initialProjectedDevAggressiveness);
+    const validDepths: PitcherDepthRole[] = [
+      "weekend_starter", "weekday_starter", "swing_starter",
+      "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever",
+      "low_impact_reliever", "specialist_reliever",
+    ];
+    setDepthRole(roleOverride && validDepths.includes(roleOverride as PitcherDepthRole) ? (roleOverride as PitcherDepthRole) : initialDepthRole);
+  }, [initialProjectedRole, initialProjectedDevAggressiveness, initialDepthRole, devAggOverride, roleOverride]);
   // Session-only display overlay. Profile dropdowns (depth role, dev agg,
   // pitcher role) are NEVER persisted — the coach can preview "what if this
   // pitcher started weekends and was developed aggressively" without

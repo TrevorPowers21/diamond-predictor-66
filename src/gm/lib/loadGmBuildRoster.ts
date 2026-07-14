@@ -57,6 +57,8 @@ export function deriveGmRows(
       is_pitcher: pitcher,
       war: effWar ?? storedWar,
       market_value: effMarket ?? mv,
+      dev_aggressiveness: devAgg,
+      depth_role: sessionDepthRole ?? null,
       nil_value: r.nil_value ?? null,
       scholarship_amount: f.scholarship_amount ?? null,
       rev_share: f.rev_share ?? null,

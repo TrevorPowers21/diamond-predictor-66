@@ -223,7 +223,7 @@ function StatRow({ label, from, predicted }: { label: string; from: number | nul
   );
 }
 
-export default function PlayerProfile({ embedded = false, idOverride, hideTabs = false, tabSlot, warOverride, marketOverride }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean; tabSlot?: ReactNode; warOverride?: number | null; marketOverride?: number | null }) {
+export default function PlayerProfile({ embedded = false, idOverride, hideTabs = false, tabSlot, warOverride, marketOverride, devAggOverride, roleOverride }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean; tabSlot?: ReactNode; warOverride?: number | null; marketOverride?: number | null; devAggOverride?: number | null; roleOverride?: string | null }) {
   const { id: paramId } = useParams<{ id: string }>();
   const id = idOverride ?? paramId;
   // Inside the player hub the outer dashboard chrome is already present, so
@@ -630,20 +630,23 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
   // prediction changes (player nav, impersonation switch, etc.). Default to
   // 0 when no stored value exists.
   useEffect(() => {
-    const stored = regularPred?.dev_aggressiveness;
+    // In the program hub, seed the dev-agg toggle from the LIVE build's setting
+    // so the profile reflects the build; otherwise use the prediction's value.
+    const stored = devAggOverride != null ? devAggOverride : regularPred?.dev_aggressiveness;
     setSessionDevAgg(Number.isFinite(Number(stored)) ? String(Number(stored)) : "0");
-  }, [regularPred?.id, regularPred?.dev_aggressiveness]);
+  }, [regularPred?.id, regularPred?.dev_aggressiveness, devAggOverride]);
   // Sync session depth role to the stored hitter_depth_role; fall back to
   // auto-assignment from raw PA when no stored value (e.g. older rows pre-
   // schema-migration, or sub-threshold players).
   useEffect(() => {
-    const stored = (regularPred as any)?.hitter_depth_role as HitterDepthRole | null | undefined;
+    // Program hub: seed depth role from the LIVE build's setting; else the stored one.
+    const stored = (roleOverride ?? (regularPred as any)?.hitter_depth_role) as HitterDepthRole | null | undefined;
     if (stored === "cornerstone" || stored === "everyday_starter" || stored === "platoon_starter" || stored === "utility" || stored === "bench") {
       setDepthRole(stored);
     } else {
       setDepthRole(defaultHitterDepthRoleFromActualPa((player as any)?.pa ?? null));
     }
-  }, [regularPred?.id, (regularPred as any)?.hitter_depth_role, (player as any)?.pa]);
+  }, [regularPred?.id, (regularPred as any)?.hitter_depth_role, (player as any)?.pa, roleOverride]);
   const { getOverride } = usePlayerOverrides();
   const playerOverride = id ? getOverride(id) : null;
   const effectivePosition = playerOverride?.position ?? player?.position ?? null;
