@@ -3,7 +3,8 @@ import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useGmRoster } from "@/gm/hooks/useGmRoster";
+import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
+import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import PlayerFinancials, { playerComp } from "@/gm/components/PlayerFinancials";
 import { isPitcherProfile } from "@/lib/profileRoutes";
 import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
@@ -169,6 +170,18 @@ export default function PlayerHub() {
   const classYr = row?.eligibility_class ?? row?.class_year ?? dbPlayer?.class_year ?? null;
   const isPitcher = isPitcherProfile(position, row?.is_pitcher ? "rhp" : null);
   const c = row ? playerComp(row) : null;
+  // Projected Value = the roster's budget-share (position-weighted WAR / roster
+  // total × budget), falling back to stored market value when there's no budget.
+  const posWeightedWar = (r: GmRow) => Number(r.war ?? 0) * getPositionValueMultiplier(r.position);
+  const rosterScore = [...gm.hitters, ...gm.pitchers].reduce((s, r) => s + posWeightedWar(r), 0);
+  const projValue = (() => {
+    if (!row) return null;
+    const budget = gm.coachTotalBudget ?? 0;
+    if (budget <= 0) return null;
+    const denom = Math.max(rosterScore, 33);
+    return denom > 0 ? Math.max(0, (posWeightedWar(row) / denom) * budget) : null;
+  })();
+  const displayValue = projValue ?? row?.market_value ?? null;
 
   const kv = (label: string, value: string, accent?: boolean) => (
     <div className="flex items-center justify-between">
@@ -250,11 +263,11 @@ export default function PlayerHub() {
           <>
             <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Back</button>
             <Card className="overflow-hidden border-border/60">
-              <div className={cn("flex h-16 items-center justify-center px-5", !branding && "bg-[#070e1f]")} style={coverStyle}>
+              <div className={cn("flex h-20 items-center justify-center px-5", !branding && "bg-[#070e1f]")} style={coverStyle}>
                 <CoverBrand teamName={fullTeamName} logoUrl={logoUrl} />
               </div>
-              <div className="flex flex-wrap items-center gap-x-5 gap-y-3 px-5 pb-5 pt-5">
-                <div className="-mt-14 flex h-20 w-20 shrink-0 self-start items-center justify-center overflow-hidden rounded-full bg-[#0d1a30] ring-4 ring-background">
+              <div className="flex min-h-[80px] flex-wrap items-center gap-x-5 gap-y-3 px-5">
+                <div className="-mt-10 flex h-20 w-20 shrink-0 self-start items-center justify-center overflow-hidden rounded-full bg-[#0d1a30] ring-4 ring-background">
                   {headshotUrl ? <img src={headshotUrl} alt={name} className="h-full w-full object-cover" /> : <span className="text-2xl font-bold text-[#D4AF37]" style={OSWALD}>{(name[0] || "?").toUpperCase()}</span>}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -262,9 +275,9 @@ export default function PlayerHub() {
                 </div>
                 <div className="flex flex-wrap items-stretch divide-x divide-border/50 rounded-lg border border-border/50">
                   {statBox("WAR", num(row?.war))}
-                  {statBox("Market Value", money(row?.market_value))}
+                  {statBox("Projected Value", money(displayValue))}
                   {statBox("Total Pay", money(c?.total ?? null), true)}
-                  {statBox("Value vs Pay", c && c.total > 0 && row?.market_value != null ? `${(row.market_value / c.total).toFixed(2)}×` : "—")}
+                  {statBox("Value vs Pay", c && c.total > 0 && displayValue != null ? `${(displayValue / c.total).toFixed(2)}×` : "—")}
                 </div>
               </div>
             </Card>
