@@ -7,7 +7,7 @@ import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { defaultDraftYear, defaultEligibilityRemaining } from "@/gm/lib/playerEligibility";
-import { CURRENT_SEASON } from "@/lib/seasonConstants";
+import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { useMarketability } from "@/gm/hooks/useMarketability";
 import { usePlayerHubPreview } from "@/hooks/usePlayerHubPreview";
 import { useGmProgramMarketability } from "@/gm/hooks/useGmProgramMarketability";
