@@ -6,6 +6,7 @@ import { useGmRoster } from "@/gm/hooks/useGmRoster";
 import { useGmContracts } from "@/gm/hooks/useGmContracts";
 import PlayerFinancials, { playerComp } from "@/gm/components/PlayerFinancials";
 import { isPitcherProfile } from "@/lib/profileRoutes";
+import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -97,14 +98,18 @@ export default function PlayerHub() {
     [gm.hitters, gm.pitchers, playerId],
   );
 
+  // Always fetch the player record — for the headshot (players.headshot_url,
+  // auto-populated from the roster source) and identity fallback.
   const { data: dbPlayer } = useQuery({
     queryKey: ["player-identity", playerId],
-    enabled: !!playerId && !row,
+    enabled: !!playerId,
     queryFn: async () => {
       const { data } = await (supabase as any).from("players").select("*").eq("id", playerId).maybeSingle();
       return data as any;
     },
   });
+  const { logoUrl } = useEffectiveSchool();
+  const headshotUrl: string | null = dbPlayer?.headshot_url ?? null;
 
   // Program membership: a player belongs to the program if they're on the LIVE
   // (active) build — the same build that drives their numbers, so membership and
@@ -130,16 +135,16 @@ export default function PlayerHub() {
   const isPitcher = isPitcherProfile(position, row?.is_pitcher ? "rhp" : null);
   const c = row ? playerComp(row) : null;
 
-  const headline = (label: string, value: string, accent?: boolean) => (
-    <div className="flex flex-col gap-0.5 px-4 py-3">
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
-      <span className={cn("font-mono text-lg font-bold tabular-nums", accent ? "text-[#D4AF37]" : "text-foreground")} style={OSWALD}>{value}</span>
-    </div>
-  );
   const kv = (label: string, value: string, accent?: boolean) => (
     <div className="flex items-center justify-between">
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className={cn("text-xs font-semibold", accent ? "font-mono text-[#D4AF37]" : "text-foreground")}>{value}</span>
+    </div>
+  );
+  const statBox = (label: string, value: string, accent?: boolean) => (
+    <div className="flex flex-col items-center justify-center gap-0.5 px-4 py-1.5 text-center">
+      <span className={cn("font-mono text-base font-bold leading-none tabular-nums", accent ? "text-[#D4AF37]" : "text-foreground")} style={OSWALD}>{value}</span>
+      <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
     </div>
   );
   const contractTotal = contracts.reduce((s, ct) => s + (ct.total_value ?? 0), 0);
@@ -185,9 +190,9 @@ export default function PlayerHub() {
   return (
     <div className="space-y-4">
       {/* Header — mirrors the scouting profile's style (name + badges, one back
-          button). Hidden on Projections/Season Stats, which carry their own full
-          scouting header with all its wired buttons. */}
-      {!embedsOwnHeader && (
+          button). Hidden on Projections/Season Stats (own scouting header) and on
+          Overview (its cover-photo hero carries the name). */}
+      {!embedsOwnHeader && tab !== "overview" && (
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
             <ArrowLeft className="h-5 w-5" />
@@ -212,14 +217,34 @@ export default function PlayerHub() {
         {/* Tab content */}
         {tab === "overview" && (
           <div className="space-y-4">
-            {/* Headline numbers */}
-            <Card className="border-border/60">
-              <CardContent className="grid grid-cols-2 divide-x divide-y divide-border/50 p-0 sm:grid-cols-4 sm:divide-y-0">
-                {headline("Projected WAR", num(row?.war))}
-                {headline("Market Value", money(row?.market_value))}
-                {headline("Total Pay", money(c?.total ?? null), true)}
-                {headline("Value vs Pay", c && c.total > 0 && row?.market_value != null ? `${(row.market_value / c.total).toFixed(2)}×` : "—")}
-              </CardContent>
+            <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Back</button>
+
+            {/* Cover-photo hero: slim team-branded cover + overlapping headshot,
+                name + badges, and a stats strip on the right (Turo web profile style). */}
+            <Card className="overflow-hidden border-border/60">
+              <div className="flex h-20 items-center bg-[#070e1f] px-5">
+                {logoUrl ? <img src={logoUrl} alt="" className="h-10 w-auto opacity-90" /> : <span className="text-sm font-semibold tracking-widest text-[#D4AF37]/70" style={OSWALD}>RSTR IQ</span>}
+              </div>
+              <div className="flex flex-wrap items-end gap-x-5 gap-y-3 px-5 pb-4">
+                <div className="-mt-10 flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#D4AF37]/15 ring-4 ring-background">
+                  {headshotUrl ? <img src={headshotUrl} alt={name} className="h-full w-full object-cover" /> : <span className="text-2xl font-bold text-[#D4AF37]" style={OSWALD}>{(name[0] || "?").toUpperCase()}</span>}
+                </div>
+                <div className="min-w-0 flex-1 pt-1">
+                  <h1 className="text-2xl font-bold tracking-tight">{name}</h1>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    {position && <Badge variant="secondary">{position}</Badge>}
+                    {classYr && <Badge variant="outline">{classYr}</Badge>}
+                    <Badge variant="outline" className="text-muted-foreground">{isPitcher ? "Pitcher" : "Position player"}</Badge>
+                    {row && <Badge variant="outline" className={cn("font-semibold", row.finalized ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-500" : "border-amber-500/40 bg-amber-500/10 text-amber-500")}>{row.finalized ? "Finalized" : "Draft"}</Badge>}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-stretch divide-x divide-border/50 rounded-lg border border-border/50 pt-0">
+                  {statBox("WAR", num(row?.war))}
+                  {statBox("Market Value", money(row?.market_value))}
+                  {statBox("Total Pay", money(c?.total ?? null), true)}
+                  {statBox("Value vs Pay", c && c.total > 0 && row?.market_value != null ? `${(row.market_value / c.total).toFixed(2)}×` : "—")}
+                </div>
+              </div>
             </Card>
 
             {/* Compensation + Roster assignment */}
