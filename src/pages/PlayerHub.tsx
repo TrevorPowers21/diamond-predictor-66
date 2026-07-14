@@ -5,6 +5,9 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
+import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
+import { defaultDraftYear, defaultEligibilityRemaining } from "@/gm/lib/playerEligibility";
+import PlayerInfoDialog from "@/gm/components/PlayerInfoDialog";
 import PlayerFinancials, { playerComp } from "@/gm/components/PlayerFinancials";
 import { isPitcherProfile } from "@/lib/profileRoutes";
 import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
@@ -12,7 +15,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, LineChart, BarChart3, DollarSign, Activity, Bone, LayoutDashboard, ClipboardList } from "lucide-react";
+import { ArrowLeft, LineChart, BarChart3, DollarSign, Activity, Bone, LayoutDashboard, ClipboardList, MoreHorizontal } from "lucide-react";
 
 // Depth/pitcher role → display label (both hitter and pitcher roles).
 const ROLE_LABEL: Record<string, string> = {
@@ -184,6 +187,13 @@ export default function PlayerHub() {
   const displayValue = projValue ?? row?.market_value ?? null;
   const liveBuildName = gm.builds.find((b) => b.id === gm.liveBuildId)?.name ?? null;
 
+  // Program-owned player info (layers over the scraped record) + derived defaults.
+  const { info: playerInfo, save: savePlayerInfo, isSaving: savingInfo } = useGmPlayerInfo(playerId);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const draftYear = playerInfo?.draft_eligible_year ?? defaultDraftYear(classYr, playerInfo?.dob, gm.season);
+  const eligRemaining = playerInfo?.eligibility_remaining ?? defaultEligibilityRemaining(classYr);
+  const jersey = playerInfo?.jersey_number ?? null;
+
   const kv = (label: string, value: string, accent?: boolean) => (
     <div className="flex items-center justify-between">
       <span className="text-xs text-muted-foreground">{label}</span>
@@ -272,7 +282,12 @@ export default function PlayerHub() {
                   {headshotUrl ? <img src={headshotUrl} alt={name} className="h-full w-full object-cover" /> : <span className="text-3xl font-bold text-[#D4AF37]" style={OSWALD}>{(name[0] || "?").toUpperCase()}</span>}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h1 className="text-2xl font-bold tracking-tight">{name}</h1>
+                  <div className="flex items-center gap-1.5">
+                    <h1 className="text-2xl font-bold tracking-tight">{name}</h1>
+                    <button onClick={() => setInfoOpen(true)} title="Edit player info" className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
                 <div className="flex flex-wrap items-stretch divide-x divide-border/50 rounded-lg border border-border/50">
                   {statBox("WAR", num(row?.war))}
@@ -323,9 +338,10 @@ export default function PlayerHub() {
                   <div className="space-y-1.5">
                     {kv("Position", position ?? "—")}
                     {kv("Class", classYr ?? "—")}
+                    {kv("Jersey #", jersey ? `#${jersey}` : "—")}
                     {kv("Role", (row?.depth_role && ROLE_LABEL[row.depth_role]) ?? "—")}
-                    {kv("Dev Aggressiveness", row ? String(row.dev_aggressiveness) : "—")}
-                    {kv("Status", row?.finalized ? "Finalized" : "Draft", true)}
+                    {kv("Eligibility Remaining", eligRemaining != null ? `${eligRemaining} yr${eligRemaining === 1 ? "" : "s"}` : "—")}
+                    {kv("Draft Eligibility", draftYear != null ? String(draftYear) : "—", true)}
                   </div>
                 </CardContent>
               </Card>
@@ -367,6 +383,27 @@ export default function PlayerHub() {
         {tab === "financials" && <PlayerFinancials playerName={name} playerId={playerId} />}
 
         {tab === "development" && <PlayerDevelopment />}
+
+        <PlayerInfoDialog
+          open={infoOpen}
+          onOpenChange={setInfoOpen}
+          playerName={name}
+          info={playerInfo}
+          scraped={{
+            bats: dbPlayer?.bats_hand ?? null,
+            throws: dbPlayer?.throws_hand ?? null,
+            height_inches: dbPlayer?.height_inches ?? null,
+            weight_lbs: dbPlayer?.weight ?? null,
+            hometown: dbPlayer?.hometown ?? dbPlayer?.home_state ?? null,
+            high_school: dbPlayer?.high_school ?? null,
+            contact_phone: dbPlayer?.contact_cell ?? null,
+            contact_email: dbPlayer?.contact_email ?? null,
+          }}
+          draftYearDefault={defaultDraftYear(classYr, playerInfo?.dob, gm.season)}
+          eligRemainingDefault={defaultEligibilityRemaining(classYr)}
+          onSave={savePlayerInfo}
+          isSaving={savingInfo}
+        />
       </div>
   );
 }
