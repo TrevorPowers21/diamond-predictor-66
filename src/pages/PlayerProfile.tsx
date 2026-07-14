@@ -223,7 +223,7 @@ function StatRow({ label, from, predicted }: { label: string; from: number | nul
   );
 }
 
-export default function PlayerProfile({ embedded = false, idOverride, hideTabs = false, tabSlot }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean; tabSlot?: ReactNode }) {
+export default function PlayerProfile({ embedded = false, idOverride, hideTabs = false, tabSlot, warOverride, marketOverride }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean; tabSlot?: ReactNode; warOverride?: number | null; marketOverride?: number | null }) {
   const { id: paramId } = useParams<{ id: string }>();
   const id = idOverride ?? paramId;
   // Inside the player hub the outer dashboard chrome is already present, so
@@ -976,8 +976,13 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
   const depthScale = storedPa > 0 ? sessionPa / storedPa : 1;
   const overlayScale = depthScale * (devAggScale ?? 1);
   const projectedOWar = storedOWar != null ? storedOWar * overlayScale : null;
-  const displayOWar = projectedOWar ?? (historicalOWar != null ? historicalOWar * overlayScale : null);
-  const displayNilValuation = storedMarketValue != null ? storedMarketValue * overlayScale : null;
+  const computedOWar = projectedOWar ?? (historicalOWar != null ? historicalOWar * overlayScale : null);
+  const computedNilValuation = storedMarketValue != null ? storedMarketValue * overlayScale : null;
+  // In the program hub, WAR + market come from the LIVE build (effectiveProjection
+  // on its snapshot + production_notes) so Projections matches the roster and Team
+  // Builder. `undefined` = standalone scouting route → use the computed value.
+  const displayOWar = warOverride !== undefined ? warOverride : computedOWar;
+  const displayNilValuation = marketOverride !== undefined ? marketOverride : computedNilValuation;
   const predFromAvg = seedStatRow?.avg ?? regularPred?.from_avg ?? null;
   const predFromObp = seedStatRow?.obp ?? regularPred?.from_obp ?? null;
   const predFromSlg = seedStatRow?.slg ?? regularPred?.from_slg ?? null;

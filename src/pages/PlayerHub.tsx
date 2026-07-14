@@ -222,8 +222,8 @@ export default function PlayerHub() {
         {tab === "projections" && (
           <Suspense fallback={<div className="py-16 text-center text-sm text-muted-foreground">Loading projections…</div>}>
             {isPitcher
-              ? <PitcherProfile embedded hideTabs tabSlot={tabBar} idOverride={playerId} />
-              : <PlayerProfile embedded hideTabs tabSlot={tabBar} idOverride={playerId} />}
+              ? <PitcherProfile embedded hideTabs tabSlot={tabBar} idOverride={playerId} warOverride={row ? row.war : undefined} marketOverride={row ? row.market_value : undefined} />
+              : <PlayerProfile embedded hideTabs tabSlot={tabBar} idOverride={playerId} warOverride={row ? row.war : undefined} marketOverride={row ? row.market_value : undefined} />}
           </Suspense>
         )}
 

@@ -356,7 +356,7 @@ function ScoutGrade({ value, fullLabel, rawStat, unit }: {
 }
 
 
-export default function PitcherProfile({ embedded = false, idOverride, hideTabs = false, tabSlot }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean; tabSlot?: ReactNode }) {
+export default function PitcherProfile({ embedded = false, idOverride, hideTabs = false, tabSlot, warOverride, marketOverride }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean; tabSlot?: ReactNode; warOverride?: number | null; marketOverride?: number | null }) {
   const { id: paramId } = useParams<{ id: string }>();
   const id = idOverride ?? paramId;
   const Shell = embedded ? Fragment : DashboardLayout;
@@ -1481,6 +1481,11 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     displayTeam,
   ]);
 
+  // In the program hub, WAR + market come from the LIVE build so Projections
+  // matches the roster + Team Builder. `undefined` = standalone scouting route.
+  const displayPWar = warOverride !== undefined ? warOverride : projectedPitching.pWar;
+  const displayMarket = marketOverride !== undefined ? marketOverride : (projectedPitching.marketValue ?? nilValuation?.projected_value ?? null);
+
   const pitching2025 = useMemo(() => {
     const eq = readPitchingWeights();
     const era2025 = latestStats?.era ?? storageEra;
@@ -1706,10 +1711,10 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
                       p_era: projectedPitching.pEra, p_fip: projectedPitching.pFip,
                       p_whip: projectedPitching.pWhip, p_k9: projectedPitching.pK9,
                       p_bb9: projectedPitching.pBb9, p_hr9: projectedPitching.pHr9,
-                      p_war: projectedPitching.pWar,
+                      p_war: displayPWar,
                       p_rv_plus: projectedPitching.pRvPlus,
-                      market_value: projectedPitching.marketValue,
-                      nil_value: projectedPitching.marketValue,
+                      market_value: displayMarket,
+                      nil_value: displayMarket,
                       overall_pr_plus: internalPowerRatings?.overallPlus,
                       stuff_plus: pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus,
                       whiff_pct: pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct,
@@ -1813,7 +1818,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
                       p_era: projectedPitching.pEra, p_fip: projectedPitching.pFip,
                       p_whip: projectedPitching.pWhip, p_k9: projectedPitching.pK9,
                       p_bb9: projectedPitching.pBb9, p_hr9: projectedPitching.pHr9,
-                      p_war: projectedPitching.pWar,
+                      p_war: displayPWar,
                       p_rv_plus: projectedPitching.pRvPlus,
                       overall_pr_plus: internalPowerRatings?.overallPlus,
                       coach_notes: notes,
@@ -1883,11 +1888,11 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
                     p_era: projectedPitching.pEra, p_fip: projectedPitching.pFip,
                     p_whip: projectedPitching.pWhip, p_k9: projectedPitching.pK9,
                     p_bb9: projectedPitching.pBb9, p_hr9: projectedPitching.pHr9,
-                    p_war: projectedPitching.pWar,
+                    p_war: displayPWar,
                     p_rv_plus: projectedPitching.pRvPlus,
                     // Valuation
-                    market_value: projectedPitching.marketValue,
-                    nil_value: projectedPitching.marketValue,
+                    market_value: displayMarket,
+                    nil_value: displayMarket,
                     overall_pr_plus: internalPowerRatings?.overallPlus,
                     // Scouting scores
                     stuff_plus: pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus,
@@ -2167,11 +2172,11 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
             <div className="grid gap-3 grid-cols-3">
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">pWAR</div>
-                <div className="text-3xl font-bold tracking-tight mt-1 text-white">{fmt(projectedPitching.pWar, 2)}</div>
+                <div className="text-3xl font-bold tracking-tight mt-1 text-white">{fmt(displayPWar, 2)}</div>
               </div>
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Market Value</div>
-                <div className="text-2xl font-bold tracking-tight mt-1 text-[#D4AF37]">{nilFormat(projectedPitching.marketValue ?? nilValuation?.projected_value ?? null)}</div>
+                <div className="text-2xl font-bold tracking-tight mt-1 text-[#D4AF37]">{nilFormat(displayMarket)}</div>
               </div>
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Power Rating</div>
