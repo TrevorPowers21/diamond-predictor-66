@@ -218,6 +218,55 @@ export function ContractCard({ c, playerName }: { c: GmContract; playerName: str
   );
 }
 
+// Compact team-wide row: player name headline + vendor · date subtitle, bucket
+// on the right. Click to expand the amount, obligations, and notes.
+function ContractRow({ c, playerName }: { c: GmContract; playerName: string }) {
+  const { viewPdf, removeContract, toggleObligation } = useGmContracts();
+  const [open, setOpen] = useState(false);
+  const dates = [fmtDate(c.start_date), fmtDate(c.end_date)].filter(Boolean).join(" – ");
+  const sub = [c.vendor_name, c.start_date ? fmtDate(c.start_date) : null].filter(Boolean).join(" · ");
+  return (
+    <div className="border-b border-border/40 last:border-0">
+      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/20">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold" style={OSWALD}>{playerName}</div>
+          <div className="truncate text-xs text-muted-foreground">{sub || "—"}</div>
+        </div>
+        <span className={cn("shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider", BUCKET_COLOR[c.bucket])}>{BUCKET_LABEL[c.bucket]}</span>
+      </button>
+      {open && (
+        <div className="space-y-2.5 px-4 pb-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-sm font-bold tabular-nums text-[#D4AF37]">{money(c.total_value)}</span>
+              {dates && <span className="text-xs text-muted-foreground">{dates}</span>}
+              <span className={cn("text-xs capitalize", STATUS_COLOR[c.status])}>{c.status}</span>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              {c.pdf_path && <Button size="icon" variant="ghost" className="h-7 w-7" title="Open PDF" onClick={() => viewPdf(c.pdf_path!)}><ExternalLink className="h-3.5 w-3.5" /></Button>}
+              <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-rose-400" title="Remove" onClick={() => removeContract(c)}><Trash2 className="h-3.5 w-3.5" /></Button>
+            </div>
+          </div>
+          {c.summary && <p className="text-xs text-muted-foreground">{c.summary}</p>}
+          {c.obligations.length > 0 && (
+            <div className="space-y-1 border-t border-border/50 pt-2">
+              {c.obligations.map((o) => (
+                <button key={o.id} onClick={() => toggleObligation(o.id, !o.fulfilled)}
+                  className="flex w-full items-center gap-2 text-left text-xs transition-colors hover:text-foreground">
+                  <span className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded border", o.fulfilled ? "border-emerald-500 bg-emerald-500/20 text-emerald-400" : "border-muted-foreground/40 text-transparent")}><Check className="h-3 w-3" /></span>
+                  <span className={cn("flex-1", o.fulfilled && "text-muted-foreground line-through")}>{o.description}</span>
+                  {o.due_date && <span className="shrink-0 text-[10px] text-muted-foreground">{fmtDate(o.due_date)}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+          {c.notes && <div className="border-t border-border/50 pt-2 text-xs text-muted-foreground"><span className="font-semibold text-foreground/70">Notes: </span>{c.notes}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function GMContracts() {
   const gm = useGmRoster();
   const { contracts, isLoading } = useGmContracts();
@@ -233,6 +282,11 @@ export default function GMContracts() {
   const nameById = useMemo(() => new Map(players.map((p) => [p.id, p.name])), [players]);
 
   const totalValue = contracts.reduce((s, c) => s + (c.total_value ?? 0), 0);
+  // Group same-player contracts together (name headline), newest first within.
+  const sortedContracts = useMemo(() =>
+    [...contracts].sort((a, b) =>
+      (nameById.get(a.player_id) ?? "").localeCompare(nameById.get(b.player_id) ?? "") || (a.created_at < b.created_at ? 1 : -1),
+    ), [contracts, nameById]);
 
   return (
     <div className="space-y-4">
@@ -250,9 +304,11 @@ export default function GMContracts() {
       ) : contracts.length === 0 ? (
         <Card className="border-border/60"><CardContent className="py-16 text-center text-sm text-muted-foreground">No contracts yet. Add one to start tracking signed deals.</CardContent></Card>
       ) : (
-        <div className="grid gap-3 lg:grid-cols-2">
-          {contracts.map((c) => <ContractCard key={c.id} c={c} playerName={nameById.get(c.player_id) ?? "Unknown player"} />)}
-        </div>
+        <Card className="border-border/60">
+          <CardContent className="p-0">
+            {sortedContracts.map((c) => <ContractRow key={c.id} c={c} playerName={nameById.get(c.player_id) ?? "Unknown player"} />)}
+          </CardContent>
+        </Card>
       )}
 
       <AddContractDialog open={addOpen} onOpenChange={setAddOpen} players={players} />
