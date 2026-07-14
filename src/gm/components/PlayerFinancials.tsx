@@ -10,7 +10,7 @@ import PlayerNotesDialog from "@/components/PlayerNotesDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { StickyNote, ListChecks, Plus } from "lucide-react";
+import { StickyNote, ListChecks, Plus, Check } from "lucide-react";
 
 const OSWALD = { fontFamily: "Oswald, sans-serif" } as const;
 const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
@@ -35,7 +35,12 @@ const CONN_COLOR: Record<string, string> = { family_notable: "#D4AF37", family_a
 
 export default function PlayerFinancials({ playerName, playerId, onEditMarketability }: { playerName: string; playerId: string; onEditMarketability?: () => void }) {
   const gm = useGmRoster();
-  const { contracts } = useGmContracts(playerId);
+  const { contracts, toggleObligation } = useGmContracts(playerId);
+  const fmtDate = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  // How a contract reads in the table / tracker: Rev Share shows "Revenue Share";
+  // NIL & Other show the vendor category they fall under.
+  const contractLabel = (ct: { bucket: string; vendor_name: string | null }) =>
+    ct.bucket === "rev" ? "Revenue Share" : (ct.vendor_name || BUCKET_LABEL[ct.bucket as keyof typeof BUCKET_LABEL]);
   const [notesOpen, setNotesOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [compOpen, setCompOpen] = useState(false);
@@ -141,8 +146,8 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
                 {contracts.map((ct) => (
                   <div key={ct.id} className="flex items-center justify-between gap-3 border-b border-border/40 pb-2 last:border-0 last:pb-0">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-foreground">{ct.title || ct.vendor_name || BUCKET_LABEL[ct.bucket]}</div>
-                      <div className="truncate text-[11px] text-muted-foreground">{BUCKET_LABEL[ct.bucket]}{ct.vendor_name ? ` · ${ct.vendor_name}` : ""}</div>
+                      <div className="truncate text-sm font-medium text-foreground">{contractLabel(ct)}</div>
+                      {ct.bucket !== "rev" && <div className="truncate text-[11px] text-muted-foreground">{BUCKET_LABEL[ct.bucket]}</div>}
                     </div>
                     <span className="shrink-0 font-mono text-sm font-semibold text-[#D4AF37]">{money(ct.total_value)}</span>
                   </div>
@@ -154,10 +159,26 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
       </div>
 
       {totalObligations > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-4 py-2.5 text-sm">
-          <ListChecks className="h-4 w-4 text-[#D4AF37]" />
-          <span className="font-medium">{openObligations}</span>
-          <span className="text-muted-foreground">open obligation{openObligations === 1 ? "" : "s"} of {totalObligations} across {contracts.length} contract{contracts.length === 1 ? "" : "s"} — manage them on the Contracts tab.</span>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-1.5 text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}><ListChecks className="h-4 w-4" /> Obligation Tracker</h3>
+            <span className="text-[11px] text-muted-foreground">{totalObligations - openObligations}/{totalObligations} complete</span>
+          </div>
+          <Card className="border-border/60">
+            <CardContent className="space-y-0.5 p-2">
+              {contracts.flatMap((ct) => ct.obligations.map((o) => ({ o, ct }))).map(({ o, ct }) => (
+                <button
+                  key={o.id}
+                  onClick={() => toggleObligation(o.id, !o.fulfilled)}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/30"
+                >
+                  <span className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded border", o.fulfilled ? "border-emerald-500 bg-emerald-500/20 text-emerald-400" : "border-muted-foreground/40 text-transparent")}><Check className="h-3 w-3" /></span>
+                  <span className={cn("min-w-0 flex-1 truncate", o.fulfilled && "text-muted-foreground line-through")}>{o.description}</span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">{contractLabel(ct)}{o.due_date ? ` · ${fmtDate(o.due_date)}` : ""}</span>
+                </button>
+              ))}
+            </CardContent>
+          </Card>
         </div>
       )}
 
