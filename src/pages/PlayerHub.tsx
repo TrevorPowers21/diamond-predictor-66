@@ -239,15 +239,6 @@ export default function PlayerHub() {
   // Overview shows the score; the Financials tab carries the full scorecard.
   const marketBreakdown = useMarketability(playerId).breakdown;
 
-  // One box per tab on the Overview — a preview of that surface. Projections
-  // shows the value signals; the rest describe (enrich with real previews later).
-  const tabBoxes: { t: TabKey; label: string; icon: typeof LineChart; stats: { l: string; v: string }[]; note: string | null }[] = [
-    { t: "projections", label: "Projections", icon: LineChart, stats: [{ l: "WAR", v: num(row?.war) }, { l: "Proj. Value", v: money(displayValue) }], note: null },
-    { t: "stats", label: "Season Stats", icon: BarChart3, stats: [], note: "This season's line, splits & game log" },
-    { t: "financials", label: "Financials", icon: DollarSign, stats: [], note: "Compensation, contracts & obligations" },
-    { t: "development", label: "Player Development", icon: ClipboardList, stats: [], note: "NewtForce metrics & biomechanics" },
-  ];
-
   const kv = (label: string, value: string, accent?: boolean) => (
     <div className="flex items-center justify-between">
       <span className="text-xs text-muted-foreground">{label}</span>
@@ -262,6 +253,18 @@ export default function PlayerHub() {
       >{value}</span>
       <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
     </div>
+  );
+  // A detail card (Compensation/Roster-Assignment styling) that routes to a tab.
+  const tabCard = (t: TabKey, title: string, body: React.ReactNode) => (
+    <Card onClick={() => setTab(t)} className="cursor-pointer border-border/60 transition-colors hover:border-[#D4AF37]/60 hover:bg-muted/10">
+      <CardContent className="space-y-2 p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>{title}</h3>
+          <span className="text-[11px] text-muted-foreground">Open →</span>
+        </div>
+        {body}
+      </CardContent>
+    </Card>
   );
 
   // Projections/Season Stats embed the scouting pages, which carry their own
@@ -375,11 +378,11 @@ export default function PlayerHub() {
           <div className="space-y-4">
             {/* Compensation + Roster assignment */}
             <div className="grid gap-4 md:grid-cols-2">
-              <Card className="border-border/60">
+              <Card onClick={() => setTab("financials")} className="cursor-pointer border-border/60 transition-colors hover:border-[#D4AF37]/60 hover:bg-muted/10">
                 <CardContent className="space-y-2 p-4">
                   <div className="flex items-center justify-between">
                     <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Compensation</h3>
-                    <button onClick={() => setTab("financials")} className="text-[11px] text-muted-foreground hover:text-foreground">Financials →</button>
+                    <span className="text-[11px] text-muted-foreground">Open →</span>
                   </div>
                   {c ? (
                     <div className="space-y-1.5">
@@ -413,33 +416,24 @@ export default function PlayerHub() {
               </Card>
             </div>
 
-            {/* One box per tab — preview + hover highlight + click to navigate. */}
-            <div className="grid gap-3 sm:grid-cols-2">
-              {tabBoxes.map((b) => (
-                <button
-                  key={b.t}
-                  onClick={() => setTab(b.t)}
-                  className="rounded-lg border border-border/60 p-4 text-left transition-colors hover:border-[#D4AF37]/60 hover:bg-muted/20"
-                >
-                  <div className="flex items-center gap-2">
-                    <b.icon className="h-4 w-4 shrink-0 text-[#D4AF37]" />
-                    <span className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>{b.label}</span>
-                  </div>
-                  {b.stats.length > 0 ? (
-                    <div className="mt-2.5 flex flex-wrap gap-x-6 gap-y-2">
-                      {b.stats.map((s) => (
-                        <div key={s.l} className="flex flex-col">
-                          <span className="font-mono text-base font-bold leading-none text-foreground" style={OSWALD}>{s.v}</span>
-                          <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">{s.l}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-[11px] text-muted-foreground">{b.note}</p>
-                  )}
-                </button>
+            {/* A detail card per tab — same styling, clickable through to the tab. */}
+            <div className="grid gap-4 md:grid-cols-2">
+              {tabCard("projections", "Projections", (
+                <div className="space-y-1.5">
+                  {kv("Projected WAR", num(row?.war))}
+                  {kv("Projected Value", money(displayValue))}
+                  {kv("Market Value", money(row?.market_value ?? null))}
+                  {kv("Role", (row?.depth_role && ROLE_LABEL[row.depth_role]) ?? "—")}
+                </div>
+              ))}
+              {tabCard("stats", "Season Stats", (
+                <p className="text-xs text-muted-foreground">This season's line, splits &amp; game log.</p>
               ))}
             </div>
+
+            {tabCard("development", "Player Development", (
+              <p className="text-xs text-muted-foreground">NewtForce metrics &amp; biomechanics.</p>
+            ))}
           </div>
         )}
 
