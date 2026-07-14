@@ -73,7 +73,20 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
 
   return (
     <div className="space-y-4">
-      {/* Top of the page: two half-tables — Marketability | Contracts */}
+      {c ? (
+        <Card className="border-border/60">
+          <CardContent className="grid grid-cols-2 divide-x divide-y divide-border/50 p-0 sm:grid-cols-4 sm:divide-y-0">
+            {stat("Revenue Share", money(c.rev))}
+            {stat("NIL", money(c.nil))}
+            {stat("Other", money(c.other))}
+            {stat("Total Pay", money(c.total), true)}
+          </CardContent>
+        </Card>
+      ) : (
+        <p className="text-xs text-muted-foreground">No compensation record on the current build — contracts are still tracked below.</p>
+      )}
+
+      {/* Marketability | Contracts half-tables */}
       <div className="grid gap-4 md:grid-cols-2">
         <Card
           onClick={onEditMarketability}
@@ -122,19 +135,6 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
           </CardContent>
         </Card>
       </div>
-
-      {c ? (
-        <Card className="border-border/60">
-          <CardContent className="grid grid-cols-2 divide-x divide-y divide-border/50 p-0 sm:grid-cols-4 sm:divide-y-0">
-            {stat("Revenue Share", money(c.rev))}
-            {stat("NIL", money(c.nil))}
-            {stat("Other", money(c.other))}
-            {stat("Total Pay", money(c.total), true)}
-          </CardContent>
-        </Card>
-      ) : (
-        <p className="text-xs text-muted-foreground">No compensation record on the current build — contracts are still tracked above.</p>
-      )}
 
       {totalObligations > 0 && (
         <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-4 py-2.5 text-sm">
