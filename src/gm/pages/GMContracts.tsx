@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { FileText, Plus, Sparkles, Upload, X, ExternalLink, Trash2, Check } from "lucide-react";
+import { FileText, Plus, Upload, X, ExternalLink, Trash2, Check } from "lucide-react";
 
 const OSWALD = { fontFamily: "Oswald, sans-serif" } as const;
 const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
@@ -29,7 +29,7 @@ type ObDraft = { description: string; due_date: string | null };
 function AddContractDialog({ open, onOpenChange, players }: {
   open: boolean; onOpenChange: (o: boolean) => void; players: { id: string; name: string }[];
 }) {
-  const { parse, isParsing, addContract, isSaving } = useGmContracts();
+  const { addContract, isSaving } = useGmContracts();
   const [file, setFile] = useState<File | null>(null);
   const [playerId, setPlayerId] = useState<string>("");
   const [title, setTitle] = useState("");
@@ -43,21 +43,20 @@ function AddContractDialog({ open, onOpenChange, players }: {
   const [notes, setNotes] = useState("");
   const [obs, setObs] = useState<ObDraft[]>([]);
   const [parsedRaw, setParsedRaw] = useState<ParsedContract | null>(null);
-  const [aiDone, setAiDone] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [autoFilled, setAutoFilled] = useState(false); // a PDF pre-filled fields → review required
   const [reviewed, setReviewed] = useState(false);
 
   const reset = () => {
     setFile(null); setPlayerId(""); setTitle(""); setBucket("nil"); setVendor(""); setValue(null);
-    setStart(""); setEnd(""); setStatus("active"); setSummary(""); setNotes(""); setObs([]); setParsedRaw(null); setAiDone(false);
+    setStart(""); setEnd(""); setStatus("active"); setSummary(""); setNotes(""); setObs([]); setParsedRaw(null);
     setExtracting(false); setAutoFilled(false); setReviewed(false);
   };
 
   // Read the PDF entirely in the browser (no AI/key) and pre-fill the reliable
   // bits: dollar value + start/end dates. The coach must review before saving.
   const onFile = async (f: File | null) => {
-    setFile(f); setAiDone(false); setAutoFilled(false); setReviewed(false);
+    setFile(f); setAutoFilled(false); setReviewed(false);
     if (!f) return;
     setExtracting(true);
     try {
@@ -70,21 +69,6 @@ function AddContractDialog({ open, onOpenChange, players }: {
       setAutoFilled(true);
     } catch { /* best-effort — leave fields for manual entry on failure */ }
     finally { setExtracting(false); }
-  };
-
-  const runParse = async () => {
-    if (!file) return;
-    const p = await parse(file);
-    setParsedRaw(p);
-    if (p.title) setTitle(p.title);
-    if (p.bucket) setBucket(p.bucket);
-    if (p.vendor_name) setVendor(p.vendor_name);
-    if (p.total_value != null) setValue(p.total_value);
-    if (p.start_date) setStart(p.start_date);
-    if (p.end_date) setEnd(p.end_date);
-    if (p.summary) setSummary(p.summary);
-    if (p.obligations?.length) setObs(p.obligations.map((o) => ({ description: o.description, due_date: o.due_date || null })));
-    setAiDone(true); setAutoFilled(true); setReviewed(false);
   };
 
   const save = () => {
@@ -111,11 +95,6 @@ function AddContractDialog({ open, onOpenChange, players }: {
                 <input type="file" accept="application/pdf" className="hidden"
                   onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
               </label>
-              {file && (
-                <Button size="sm" variant="secondary" className="h-8 gap-1.5" disabled={isParsing} onClick={runParse}>
-                  <Sparkles className="h-3.5 w-3.5" /> {isParsing ? "Reading…" : aiDone ? "Re-read" : "Read with AI"}
-                </Button>
-              )}
             </div>
             {extracting && <p className="mt-2 text-[11px] text-muted-foreground">Reading the PDF…</p>}
             {autoFilled && !extracting && <p className="mt-2 text-[11px] text-emerald-400">Value + dates pre-filled from the PDF. Review every field below before saving — auto-fill can be wrong.</p>}
@@ -262,7 +241,7 @@ export default function GMContracts() {
         </div>
         <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setAddOpen(true)}><Plus className="h-3.5 w-3.5" /> Add Contract</Button>
       </div>
-      <p className="-mt-1 text-xs text-muted-foreground">Upload a signed contract PDF, read it with AI, and track its bucket, vendor, value, and obligations. {contracts.length > 0 && <span className="font-medium text-foreground/80">{contracts.length} on file · {money(totalValue)} total.</span>}</p>
+      <p className="-mt-1 text-xs text-muted-foreground">Upload a signed contract PDF — value and dates auto-fill for you to review — and track its bucket, vendor, value, and obligations. {contracts.length > 0 && <span className="font-medium text-foreground/80">{contracts.length} on file · {money(totalValue)} total.</span>}</p>
 
       {isLoading ? (
         <Card className="border-border/60"><CardContent className="py-16 text-center text-sm text-muted-foreground">Loading…</CardContent></Card>
