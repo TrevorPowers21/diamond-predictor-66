@@ -142,6 +142,19 @@ export default function PlayerHub() {
       return data as any;
     },
   });
+  // Draft board: if the player is on the industry draft board we import
+  // (player_slot_values), its draft_year overrides the class/age-computed
+  // eligibility. Most recent cycle wins. Null when the player isn't ranked.
+  const { data: slotDraftYear } = useQuery({
+    queryKey: ["player-hub-slot-draft-year", playerId],
+    enabled: !!playerId,
+    queryFn: async () => {
+      const { data } = await (supabase as any).from("player_slot_values")
+        .select("draft_year").eq("player_id", playerId)
+        .order("draft_year", { ascending: false }).limit(1).maybeSingle();
+      return (data?.draft_year ?? null) as number | null;
+    },
+  });
   const { logoUrl, schoolName, branding } = useEffectiveSchool();
   const headshotUrl: string | null = dbPlayer?.headshot_url ?? null;
   // Team-colored cover (full "Arkansas Razorbacks" name + team palette). Branding
@@ -195,7 +208,10 @@ export default function PlayerHub() {
   // eligibility is a real-world fact tied to the player's CURRENT class + season
   // (a sophomore now → junior year 2027 → draft 2027; earlier only via age/DOB).
   const currentClass = row?.class_year ?? dbPlayer?.class_year ?? classYr;
-  const draftYear = playerInfo?.draft_eligible_year ?? defaultDraftYear(currentClass, playerInfo?.dob, CURRENT_SEASON);
+  // Precedence: a coach's manual year wins; else the draft board (player_slot_values);
+  // else the class/age default.
+  const draftYear = playerInfo?.draft_eligible_year ?? slotDraftYear ?? defaultDraftYear(currentClass, playerInfo?.dob, CURRENT_SEASON);
+  const onDraftBoard = slotDraftYear != null;
   const eligRemaining = playerInfo?.eligibility_remaining ?? defaultEligibilityRemaining(classYr);
 
   const kv = (label: string, value: string, accent?: boolean) => (
@@ -344,7 +360,7 @@ export default function PlayerHub() {
                     {kv("Class", classYr ?? "—")}
                     {kv("Role", (row?.depth_role && ROLE_LABEL[row.depth_role]) ?? "—")}
                     {kv("Eligibility Remaining", eligRemaining != null ? `${eligRemaining} yr${eligRemaining === 1 ? "" : "s"}` : "—")}
-                    {kv("Draft Eligibility", draftYear != null ? String(draftYear) : "—", true)}
+                    {kv(onDraftBoard && playerInfo?.draft_eligible_year == null ? "Draft Eligibility · Board" : "Draft Eligibility", draftYear != null ? String(draftYear) : "—", true)}
                   </div>
                 </CardContent>
               </Card>
@@ -402,7 +418,7 @@ export default function PlayerHub() {
             contact_phone: dbPlayer?.contact_cell ?? null,
             contact_email: dbPlayer?.contact_email ?? null,
           }}
-          draftYearDefault={defaultDraftYear(currentClass, playerInfo?.dob, CURRENT_SEASON)}
+          draftYearDefault={slotDraftYear ?? defaultDraftYear(currentClass, playerInfo?.dob, CURRENT_SEASON)}
           eligRemainingDefault={defaultEligibilityRemaining(classYr)}
           onSave={savePlayerInfo}
           isSaving={savingInfo}
