@@ -8,6 +8,7 @@ import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { defaultDraftYear, defaultEligibilityRemaining } from "@/gm/lib/playerEligibility";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
+import { marketabilityScore } from "@/gm/lib/marketability";
 import PlayerInfoDialog from "@/gm/components/PlayerInfoDialog";
 import PlayerFinancials, { playerComp } from "@/gm/components/PlayerFinancials";
 import { isPitcherProfile } from "@/lib/profileRoutes";
@@ -214,15 +215,11 @@ export default function PlayerHub() {
   const onDraftBoard = slotDraftYear != null;
   const eligRemaining = playerInfo?.eligibility_remaining ?? defaultEligibilityRemaining(classYr);
 
-  // Social following (program-entered per platform; total is derived).
-  const social = [
-    { key: "Instagram", n: playerInfo?.instagram_followers ?? null },
-    { key: "X / Twitter", n: playerInfo?.twitter_followers ?? null },
-    { key: "TikTok", n: playerInfo?.tiktok_followers ?? null },
-  ];
-  const hasSocial = social.some((s) => s.n != null);
-  const socialTotal = social.reduce((a, s) => a + (s.n ?? 0), 0);
-  const compactNum = (n: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+  // Marketability: one 0–100 score aggregated from total social following. The
+  // per-platform breakdown lives on the Financials tab; the Overview shows only
+  // the score. null when no following is entered.
+  const socialTotal = (playerInfo?.instagram_followers ?? 0) + (playerInfo?.twitter_followers ?? 0) + (playerInfo?.tiktok_followers ?? 0);
+  const market = marketabilityScore(socialTotal > 0 ? socialTotal : null);
 
   const kv = (label: string, value: string, accent?: boolean) => (
     <div className="flex items-center justify-between">
@@ -324,6 +321,7 @@ export default function PlayerHub() {
                   {statBox("Projected Value", money(displayValue))}
                   {statBox("Total Pay", money(c?.total ?? null), true)}
                   {statBox("Value vs Pay", c && c.total > 0 && displayValue != null ? `${(displayValue / c.total).toFixed(2)}×` : "—")}
+                  {statBox("Marketability", market != null ? String(market) : "—")}
                 </div>
               </div>
             </Card>
@@ -370,37 +368,11 @@ export default function PlayerHub() {
                     {kv("Class", classYr ?? "—")}
                     {kv("Role", (row?.depth_role && ROLE_LABEL[row.depth_role]) ?? "—")}
                     {kv("Eligibility Remaining", eligRemaining != null ? `${eligRemaining} yr${eligRemaining === 1 ? "" : "s"}` : "—")}
-                    {kv(onDraftBoard && playerInfo?.draft_eligible_year == null ? "Draft Eligibility · Board" : "Draft Eligibility", draftYear != null ? String(draftYear) : "—", true)}
+                    {kv("Draft Eligibility", draftYear != null ? String(draftYear) : "—", true)}
                   </div>
                 </CardContent>
               </Card>
             </div>
-
-            {/* Social following */}
-            <Card className="border-border/60">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Social Following</h3>
-                  <button onClick={() => setInfoOpen(true)} className="text-[11px] text-muted-foreground hover:text-foreground">Edit →</button>
-                </div>
-                {hasSocial ? (
-                  <div className="mt-3 flex flex-wrap items-center gap-x-8 gap-y-3">
-                    <div className="flex flex-col">
-                      <span className="font-mono text-2xl font-bold leading-none text-[#D4AF37]" style={OSWALD}>{compactNum(socialTotal)}</span>
-                      <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">Total Followers</span>
-                    </div>
-                    {social.filter((s) => s.n != null).map((s) => (
-                      <div key={s.key} className="flex flex-col">
-                        <span className="font-mono text-base font-semibold leading-none text-foreground">{compactNum(s.n as number)}</span>
-                        <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">{s.key}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-xs text-muted-foreground">No social following entered. Add Instagram, X, or TikTok via the ⋯ next to the name.</p>
-                )}
-              </CardContent>
-            </Card>
 
             {/* Quick jump to the deeper tabs */}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

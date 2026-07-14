@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
 import { useGmContracts } from "@/gm/hooks/useGmContracts";
+import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
+import { marketabilityScore, marketabilityTier } from "@/gm/lib/marketability";
 import { ContractCard } from "@/gm/pages/GMContracts";
 import PlayerNotesDialog from "@/components/PlayerNotesDialog";
 import { Button } from "@/components/ui/button";
@@ -34,6 +36,19 @@ export default function PlayerFinancials({ playerName, playerId }: { playerName:
     [gm.hitters, gm.pitchers, playerId],
   );
   const c = row ? playerComp(row) : null;
+
+  // Marketability detail: the per-platform following that rolls up into the
+  // Overview's single marketability score.
+  const { info: pInfo } = useGmPlayerInfo(playerId);
+  const platforms = [
+    { key: "Instagram", n: pInfo?.instagram_followers ?? null },
+    { key: "X / Twitter", n: pInfo?.twitter_followers ?? null },
+    { key: "TikTok", n: pInfo?.tiktok_followers ?? null },
+  ];
+  const socialTotal = platforms.reduce((a, p) => a + (p.n ?? 0), 0);
+  const marketScore = marketabilityScore(socialTotal > 0 ? socialTotal : null);
+  const compactNum = (n: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+
   const openObligations = contracts.flatMap((ct) => ct.obligations).filter((o) => !o.fulfilled).length;
   const totalObligations = contracts.reduce((s, ct) => s + ct.obligations.length, 0);
   const notes = row ? gm.notesByBuildPlayer.get(row.build_player_id) ?? [] : [];
@@ -59,6 +74,35 @@ export default function PlayerFinancials({ playerName, playerId }: { playerName:
       ) : (
         <p className="text-xs text-muted-foreground">No compensation record on the current build — contracts below are still tracked.</p>
       )}
+
+      <Card className="border-border/60">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Marketability</h3>
+            <span className="text-[11px] text-muted-foreground">from social following</span>
+          </div>
+          {socialTotal > 0 ? (
+            <div className="mt-3 flex flex-wrap items-center gap-x-8 gap-y-3">
+              <div className="flex flex-col">
+                <span className="font-mono text-3xl font-bold leading-none text-[#D4AF37]" style={OSWALD}>{marketScore}</span>
+                <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">Score · {marketabilityTier(marketScore)}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="font-mono text-lg font-semibold leading-none text-foreground">{compactNum(socialTotal)}</span>
+                <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">Total Followers</span>
+              </div>
+              {platforms.filter((p) => p.n != null).map((p) => (
+                <div key={p.key} className="flex flex-col">
+                  <span className="font-mono text-lg font-semibold leading-none text-foreground">{compactNum(p.n as number)}</span>
+                  <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">{p.key}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-muted-foreground">No social following entered yet — add Instagram, X, or TikTok in the ⋯ Player Info panel to generate a marketability score.</p>
+          )}
+        </CardContent>
+      </Card>
 
       {totalObligations > 0 && (
         <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-4 py-2.5 text-sm">
