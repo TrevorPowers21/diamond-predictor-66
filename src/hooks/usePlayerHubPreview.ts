@@ -22,12 +22,11 @@ export interface HubSeason {
 // plate discipline. Keyed by players.source_player_id (numeric TrackMan id), NOT
 // the UUID. Blended values used when the master row is a combined sample.
 export interface HubHitterAdvanced { barrel: number | null; avg_exit_velo: number | null; contact: number | null; chase: number | null; }
-export interface HubBatSpeed { bat_speed_floor: number | null; bat_speed_ceiling: number | null; squared_up_rate: number | null; }
 
 export function usePlayerHubPreview(
   playerId: string | null | undefined,
   sourcePlayerId: string | null | undefined,
-): { projection: HubProjection | null; season: HubSeason | null; hitterAdvanced: HubHitterAdvanced | null; batSpeed: HubBatSpeed | null } {
+): { projection: HubProjection | null; season: HubSeason | null; hitterAdvanced: HubHitterAdvanced | null } {
   const { effectiveTeamId } = useAuth();
 
   const { data: projection = null } = useQuery({
@@ -72,17 +71,5 @@ export function usePlayerHubPreview(
     },
   });
 
-  // Inferred bat speed (floor–ceiling) + squared-up%. Keyed by batter_id = source id.
-  const { data: batSpeed = null } = useQuery({
-    queryKey: ["hub-bat-speed", sourcePlayerId ?? null],
-    enabled: !!sourcePlayerId,
-    queryFn: async (): Promise<HubBatSpeed | null> => {
-      const { data } = await (supabase as any).from("hitter_bat_speed_season")
-        .select("bat_speed_floor, bat_speed_ceiling, squared_up_rate")
-        .eq("batter_id", sourcePlayerId).eq("season", CURRENT_SEASON).limit(1);
-      return (data?.[0] ?? null) as HubBatSpeed | null;
-    },
-  });
-
-  return { projection, season, hitterAdvanced, batSpeed };
+  return { projection, season, hitterAdvanced };
 }

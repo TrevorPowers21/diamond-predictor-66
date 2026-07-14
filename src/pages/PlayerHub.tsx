@@ -239,13 +239,10 @@ export default function PlayerHub() {
   // Marketability: one 0–100 composite (program + social + connection + draft).
   // Overview shows the score; the Financials tab carries the full scorecard.
   const marketBreakdown = useMarketability(playerId).breakdown;
-  const { projection, season, hitterAdvanced, batSpeed } = usePlayerHubPreview(playerId, dbPlayer?.source_player_id ?? null);
+  const { projection, season, hitterAdvanced } = usePlayerHubPreview(playerId, dbPlayer?.source_player_id ?? null);
   // Batted-ball/discipline formatting: exact-0 % reads as missing (—).
   const advPct = (n: number | null | undefined) => (n == null || n === 0 ? "—" : Number.isInteger(n) ? `${n}%` : `${n.toFixed(1)}%`);
   const advNum = (n: number | null | undefined) => (n == null || n === 0 ? "—" : n.toFixed(1));
-  const batSpeedRange = batSpeed?.bat_speed_floor && batSpeed?.bat_speed_ceiling
-    ? `${Math.round(batSpeed.bat_speed_floor)}–${Math.round(batSpeed.bat_speed_ceiling)}`
-    : "—";
   // Baseball-style rate: ".312" not "0.312".
   const rate = (n: number | null | undefined) => (n == null ? "—" : n.toFixed(3).replace(/^0(?=\.)/, ""));
   // Scale the stored projection from the dev-agg it was computed with to the
@@ -478,14 +475,12 @@ export default function PlayerHub() {
                     </div>
                   ) : <p className="text-xs text-muted-foreground">No {CURRENT_SEASON} stats on file yet.</p>
                 ) : (
-                  (hitterAdvanced || batSpeed) ? (
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {projBox("Barrel%", advPct(hitterAdvanced?.barrel))}
-                      {projBox("Exit Velo", advNum(hitterAdvanced?.avg_exit_velo))}
-                      {projBox("Contact%", advPct(hitterAdvanced?.contact))}
-                      {projBox("Chase%", advPct(hitterAdvanced?.chase))}
-                      {projBox("Bat Speed", batSpeedRange)}
-                      {projBox("Squared-Up%", advPct(batSpeed?.squared_up_rate))}
+                  hitterAdvanced ? (
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {projBox("Barrel%", advPct(hitterAdvanced.barrel))}
+                      {projBox("Exit Velo", advNum(hitterAdvanced.avg_exit_velo))}
+                      {projBox("Contact%", advPct(hitterAdvanced.contact))}
+                      {projBox("Chase%", advPct(hitterAdvanced.chase))}
                     </div>
                   ) : <p className="text-xs text-muted-foreground">No {CURRENT_SEASON} batted-ball data yet.</p>
                 )
