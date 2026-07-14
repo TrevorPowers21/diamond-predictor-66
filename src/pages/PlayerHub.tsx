@@ -108,7 +108,7 @@ export default function PlayerHub() {
     queryFn: async () => {
       const { data } = await (supabase as any)
         .from("team_build_players").select("id")
-        .eq("team_build_id", liveBuildId).eq("player_id", playerId).eq("included_in_roster", true).limit(1);
+        .eq("build_id", liveBuildId).eq("player_id", playerId).eq("included_in_roster", true).limit(1);
       return (data?.length ?? 0) > 0;
     },
   });
