@@ -151,14 +151,14 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
   });
 
   // The LIVE build — the authoritative one that drives player profiles, WAR /
-  // market value, program membership, and pay. It's the build a coach flagged
-  // active (GM Settings → Change Active Roster). When none is flagged yet, start
-  // on the DEFAULT roster (everyone-returns baseline) — a saved build only takes
-  // over once one is created (which auto-activates) or explicitly assigned.
+  // market value, program membership, and pay. Priority: the build a coach
+  // flagged active (GM Settings → Change Active Roster); else the working (saved,
+  // non-default) build if one exists — "once a saved build is created, use it";
+  // else the DEFAULT roster (everyone-returns baseline, when nothing else is done).
   const liveBuildId = useMemo(
     () => builds.find((b) => b.is_active)?.id
-      ?? builds.find((b) => b.is_default)?.id
       ?? builds.find((b) => !b.is_default)?.id
+      ?? builds.find((b) => b.is_default)?.id
       ?? builds[0]?.id ?? null,
     [builds],
   );
@@ -613,10 +613,13 @@ export function useGmRoster(projectionSeason: number = PROJECTION_SEASON) {
 
   const createBuild = useMutation({
     mutationFn: async ({ sourceBuildId }: { name?: string; sourceBuildId: string }) => {
+      // The FIRST saved build (created off the default) becomes live automatically
+      // — the program moves off the default. Any later copy is an inactive
+      // scenario. Keyed on "is this the first non-default build" (not is_active),
+      // so existing working builds without the flag don't get displaced by a copy.
+      const isFirstSaved = builds.filter((b) => !b.is_default).length === 0;
       const newId = await cloneBuildInto(nextBuildName(), sourceBuildId);
-      // The FIRST saved build becomes live automatically (the program moves off
-      // the default). Once something is already live, new copies stay inactive.
-      if (!builds.some((b) => b.is_active)) {
+      if (isFirstSaved) {
         await (supabase as any).from("team_builds").update({ is_active: true }).eq("id", newId);
       }
       return newId;
