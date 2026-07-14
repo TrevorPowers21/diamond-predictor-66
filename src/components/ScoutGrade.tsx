@@ -41,10 +41,9 @@ export function ScoutGrade({ label, value, fullLabel, rawStat, unit, compact }: 
   if (value == null || value === 0) {
     if (compact) {
       return (
-        <div className="flex min-h-[3.5rem] flex-col items-center justify-between rounded-md border border-border/50 bg-muted/10 px-1 py-1.5 text-center">
+        <div className="flex min-h-[3.5rem] flex-col items-center justify-center gap-1 rounded-md border border-border/50 bg-muted/10 px-1 py-2 text-center">
           <span className="font-mono text-base font-bold leading-none text-muted-foreground" style={{ fontFamily: "Oswald, sans-serif" }}>—</span>
-          <span className="text-[11px] font-bold leading-none text-muted-foreground/70">N/A</span>
-          <span className="text-[8px] font-semibold uppercase tracking-wide leading-none text-muted-foreground">{fullLabel}</span>
+          <span className="text-[9px] font-semibold uppercase tracking-wide leading-none text-muted-foreground">{fullLabel}</span>
         </div>
       );
     }
@@ -71,12 +70,11 @@ export function ScoutGrade({ label, value, fullLabel, rawStat, unit, compact }: 
     value >= 35 ? "Below Avg" : "Poor";
   if (compact) {
     return (
-      <div className={`flex min-h-[3.5rem] flex-col items-center justify-between rounded-md border px-1 py-1.5 text-center ${tier}`}>
+      <div className={`flex min-h-[3.5rem] flex-col items-center justify-center gap-1 rounded-md border px-1 py-2 text-center ${tier}`}>
         <span className="font-mono text-base font-bold leading-none" style={{ fontFamily: "Oswald, sans-serif" }}>
           {rawStat != null ? `${rawStat.toFixed(1)}${unit ?? "%"}` : Math.round(value)}
         </span>
-        <span className="text-[11px] font-bold leading-none">{ordinalSuffix(value)}</span>
-        <span className="text-[8px] font-semibold uppercase tracking-wide opacity-75 leading-none">{fullLabel}</span>
+        <span className="text-[9px] font-semibold uppercase tracking-wide opacity-80 leading-none">{fullLabel}</span>
       </div>
     );
   }
