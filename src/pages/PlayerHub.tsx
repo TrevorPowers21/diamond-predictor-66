@@ -222,7 +222,7 @@ export default function PlayerHub() {
             {/* Cover-photo hero: slim team-branded cover + overlapping headshot,
                 name + badges, and a stats strip on the right (Turo web profile style). */}
             <Card className="overflow-hidden border-border/60">
-              <div className="flex h-20 items-center bg-[#070e1f] px-5">
+              <div className="flex h-20 items-center justify-center bg-[#070e1f] px-5">
                 {logoUrl ? <img src={logoUrl} alt="" className="h-10 w-auto opacity-90" /> : <span className="text-sm font-semibold tracking-widest text-[#D4AF37]/70" style={OSWALD}>RSTR IQ</span>}
               </div>
               <div className="flex flex-wrap items-end gap-x-5 gap-y-3 px-5 pb-4">
