@@ -9,6 +9,7 @@ import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { defaultDraftYear, defaultEligibilityRemaining } from "@/gm/lib/playerEligibility";
 import { CURRENT_SEASON } from "@/lib/seasonConstants";
 import { useMarketability } from "@/gm/hooks/useMarketability";
+import { usePlayerHubPreview } from "@/hooks/usePlayerHubPreview";
 import { useGmProgramMarketability } from "@/gm/hooks/useGmProgramMarketability";
 import { marketabilityTierColor } from "@/gm/lib/marketability";
 import MarketabilityDialog from "@/gm/components/MarketabilityDialog";
@@ -238,6 +239,9 @@ export default function PlayerHub() {
   // Marketability: one 0–100 composite (program + social + connection + draft).
   // Overview shows the score; the Financials tab carries the full scorecard.
   const marketBreakdown = useMarketability(playerId).breakdown;
+  const { projection, season } = usePlayerHubPreview(playerId);
+  // Baseball-style rate: ".312" not "0.312".
+  const rate = (n: number | null | undefined) => (n == null ? "—" : n.toFixed(3).replace(/^0(?=\.)/, ""));
 
   const kv = (label: string, value: string, accent?: boolean) => (
     <div className="flex items-center justify-between">
@@ -418,16 +422,50 @@ export default function PlayerHub() {
 
             {/* A detail card per tab — same styling, clickable through to the tab. */}
             <div className="grid gap-4 md:grid-cols-2">
-              {tabCard("projections", "Projections", (
+              {tabCard("projections", `${PROJECTION_SEASON} Projection`, (
                 <div className="space-y-1.5">
                   {kv("Projected WAR", num(row?.war))}
-                  {kv("Projected Value", money(displayValue))}
-                  {kv("Market Value", money(row?.market_value ?? null))}
-                  {kv("Role", (row?.depth_role && ROLE_LABEL[row.depth_role]) ?? "—")}
+                  {isPitcher ? (
+                    <>
+                      {kv("ERA", num(projection?.p_era, 2))}
+                      {kv("FIP", num(projection?.p_fip, 2))}
+                      {kv("K/9", num(projection?.p_k9))}
+                      {kv("BB/9", num(projection?.p_bb9))}
+                    </>
+                  ) : (
+                    <>
+                      {kv("AVG", rate(projection?.p_avg))}
+                      {kv("OBP", rate(projection?.p_obp))}
+                      {kv("SLG", rate(projection?.p_slg))}
+                      {kv("wRC+", projection?.p_wrc_plus != null ? String(Math.round(projection.p_wrc_plus)) : "—", true)}
+                    </>
+                  )}
                 </div>
               ))}
-              {tabCard("stats", "Season Stats", (
-                <p className="text-xs text-muted-foreground">This season's line, splits &amp; game log.</p>
+              {tabCard("stats", `${CURRENT_SEASON} Season Stats`, (
+                season ? (
+                  <div className="space-y-1.5">
+                    {isPitcher ? (
+                      <>
+                        {kv("ERA", num(season.era, 2))}
+                        {kv("IP", num(season.innings_pitched))}
+                        {kv("K", num(season.pitch_strikeouts, 0))}
+                        {kv("BB", num(season.pitch_walks, 0))}
+                        {kv("WHIP", num(season.whip, 2))}
+                      </>
+                    ) : (
+                      <>
+                        {kv("AVG", rate(season.batting_avg))}
+                        {kv("OBP", rate(season.on_base_pct))}
+                        {kv("SLG", rate(season.slugging_pct))}
+                        {kv("HR", num(season.home_runs, 0))}
+                        {kv("RBI", num(season.rbi, 0))}
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No {CURRENT_SEASON} stats on file yet.</p>
+                )
               ))}
             </div>
 
