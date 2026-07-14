@@ -7,6 +7,7 @@ import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { defaultDraftYear, defaultEligibilityRemaining } from "@/gm/lib/playerEligibility";
+import { CURRENT_SEASON } from "@/lib/seasonConstants";
 import PlayerInfoDialog from "@/gm/components/PlayerInfoDialog";
 import PlayerFinancials, { playerComp } from "@/gm/components/PlayerFinancials";
 import { isPitcherProfile } from "@/lib/profileRoutes";
@@ -190,9 +191,10 @@ export default function PlayerHub() {
   // Program-owned player info (layers over the scraped record) + derived defaults.
   const { info: playerInfo, save: savePlayerInfo, isSaving: savingInfo } = useGmPlayerInfo(playerId);
   const [infoOpen, setInfoOpen] = useState(false);
-  const draftYear = playerInfo?.draft_eligible_year ?? defaultDraftYear(classYr, playerInfo?.dob, gm.season);
+  // Draft eligibility keys off the CURRENT season (a junior this year is eligible
+  // for this year's draft) — not the forward projection season.
+  const draftYear = playerInfo?.draft_eligible_year ?? defaultDraftYear(classYr, playerInfo?.dob, CURRENT_SEASON);
   const eligRemaining = playerInfo?.eligibility_remaining ?? defaultEligibilityRemaining(classYr);
-  const jersey = playerInfo?.jersey_number ?? null;
 
   const kv = (label: string, value: string, accent?: boolean) => (
     <div className="flex items-center justify-between">
@@ -283,8 +285,8 @@ export default function PlayerHub() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <h1 className="text-2xl font-bold tracking-tight">{name}</h1>
-                    <button onClick={() => setInfoOpen(true)} title="Edit player info" className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                    <h1 className="text-2xl font-bold leading-none tracking-tight">{name}</h1>
+                    <button onClick={() => setInfoOpen(true)} title="Edit player info" className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                       <MoreHorizontal className="h-4 w-4" />
                     </button>
                   </div>
@@ -338,7 +340,6 @@ export default function PlayerHub() {
                   <div className="space-y-1.5">
                     {kv("Position", position ?? "—")}
                     {kv("Class", classYr ?? "—")}
-                    {kv("Jersey #", jersey ? `#${jersey}` : "—")}
                     {kv("Role", (row?.depth_role && ROLE_LABEL[row.depth_role]) ?? "—")}
                     {kv("Eligibility Remaining", eligRemaining != null ? `${eligRemaining} yr${eligRemaining === 1 ? "" : "s"}` : "—")}
                     {kv("Draft Eligibility", draftYear != null ? String(draftYear) : "—", true)}
@@ -399,7 +400,7 @@ export default function PlayerHub() {
             contact_phone: dbPlayer?.contact_cell ?? null,
             contact_email: dbPlayer?.contact_email ?? null,
           }}
-          draftYearDefault={defaultDraftYear(classYr, playerInfo?.dob, gm.season)}
+          draftYearDefault={defaultDraftYear(classYr, playerInfo?.dob, CURRENT_SEASON)}
           eligRemainingDefault={defaultEligibilityRemaining(classYr)}
           onSave={savePlayerInfo}
           isSaving={savingInfo}
