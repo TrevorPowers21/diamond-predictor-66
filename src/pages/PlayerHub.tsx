@@ -1,4 +1,5 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -77,6 +78,36 @@ function PlayerDevelopment() {
   );
 }
 
+// Cover branding — crossfades the team logo ↔ team name every ~7s. Falls back to
+// a static logo/name when reduced-motion is on or one of the two is missing.
+function CoverBrand({ teamName, logoUrl }: { teamName: string | null; logoUrl: string | null }) {
+  const reduce = useReducedMotion();
+  const [showLogo, setShowLogo] = useState(true);
+  const canRotate = !!teamName && !!logoUrl && !reduce;
+  useEffect(() => {
+    if (!canRotate) return;
+    const id = setInterval(() => setShowLogo((s) => !s), 7000);
+    return () => clearInterval(id);
+  }, [canRotate]);
+  const showingLogo = !teamName || (showLogo && !!logoUrl);
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={showingLogo ? "logo" : "name"}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -6 }}
+        transition={{ duration: 0.45, ease: "easeInOut" }}
+        className="flex items-center justify-center"
+      >
+        {showingLogo && logoUrl
+          ? <img src={logoUrl} alt="" className="h-10 w-auto" />
+          : <span className="text-lg font-bold uppercase tracking-[0.14em] text-white" style={OSWALD}>{teamName ?? "RSTR IQ"}</span>}
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 /**
  * Universal player hub — the program-wide home for one player. Every internal
  * player click routes here. A header + tab bar; Projections and Season Stats
@@ -108,7 +139,7 @@ export default function PlayerHub() {
       return data as any;
     },
   });
-  const { logoUrl } = useEffectiveSchool();
+  const { logoUrl, schoolName } = useEffectiveSchool();
   const headshotUrl: string | null = dbPlayer?.headshot_url ?? null;
 
   // Program membership: a player belongs to the program if they're on the LIVE
@@ -218,7 +249,7 @@ export default function PlayerHub() {
             <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Back</button>
             <Card className="overflow-hidden border-border/60">
               <div className="flex h-20 items-center justify-center bg-[#070e1f] px-5">
-                {logoUrl ? <img src={logoUrl} alt="" className="h-10 w-auto opacity-90" /> : <span className="text-sm font-semibold tracking-widest text-[#D4AF37]/70" style={OSWALD}>RSTR IQ</span>}
+                <CoverBrand teamName={schoolName} logoUrl={logoUrl} />
               </div>
               <div className="flex flex-wrap items-end gap-x-5 gap-y-3 px-5 pb-4">
                 <div className="-mt-10 flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#D4AF37]/15 ring-4 ring-background">
