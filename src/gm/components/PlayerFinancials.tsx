@@ -29,9 +29,9 @@ export function playerComp(r: GmRow) {
  * roster row when the player is on it.
  */
 const PROGRAM_TIER_LABEL: Record<number, string> = { 5: "Elite", 4: "Strong", 3: "Solid", 2: "Modest", 1: "Minimal" };
-const PROGRAM_TIER_COLOR: Record<number, string> = { 5: "#D4AF37", 4: "#34d399", 3: "#fbbf24", 2: "#94a3b8", 1: "#94a3b8" };
+const PROGRAM_TIER_COLOR: Record<number, string> = { 5: "#22d3ee", 4: "#34d399", 3: "#fbbf24", 2: "#94a3b8", 1: "#94a3b8" };
 const CONN_LABEL: Record<string, string> = { family_notable: "Legacy athlete", family_alum: "Immediate family alum", local: "In-state / local hometown" };
-const CONN_COLOR: Record<string, string> = { family_notable: "#D4AF37", family_alum: "#34d399", local: "#fbbf24" };
+const CONN_COLOR: Record<string, string> = { family_notable: "#22d3ee", family_alum: "#34d399", local: "#fbbf24" };
 
 export default function PlayerFinancials({ playerName, playerId, onEditMarketability }: { playerName: string; playerId: string; onEditMarketability?: () => void }) {
   const gm = useGmRoster();
@@ -67,12 +67,12 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
   const connTier = pInfo?.university_connection_tier ?? null;
   const compactNum = (n: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n);
   const socialLabel = socialTotal >= 150000 ? "Massive" : socialTotal >= 50000 ? "Large" : socialTotal >= 10000 ? "Established" : socialTotal >= 2500 ? "Growing" : socialTotal >= 1000 ? "Small" : "Minimal";
-  const socialColor = socialTotal >= 50000 ? "#D4AF37" : socialTotal >= 10000 ? "#34d399" : socialTotal >= 2500 ? "#fbbf24" : "#94a3b8";
+  const socialColor = socialTotal >= 50000 ? "#22d3ee" : socialTotal >= 10000 ? "#34d399" : socialTotal >= 2500 ? "#fbbf24" : "#94a3b8";
   const buckets = [
     { title: "Program & Community", isEmpty: !programTier, tier: programTier ? PROGRAM_TIER_LABEL[programTier] : "", color: programTier ? (PROGRAM_TIER_COLOR[programTier] ?? "#94a3b8") : "", detail: programTier ? "Fanbase & community pull" : "Set your program tier" },
     { title: "Social Following", isEmpty: socialTotal === 0, tier: socialLabel, color: socialColor, detail: socialTotal === 0 ? "Add follower counts" : `${compactNum(socialTotal)} across platforms` },
     { title: "University Connection", isEmpty: !connTier, tier: connTier ? (CONN_LABEL[connTier] ?? connTier) : "", color: connTier ? (CONN_COLOR[connTier] ?? "#94a3b8") : "", detail: connTier ? (pInfo?.university_connection_note || "Legacy / family ties") : "Legacy or family ties add value" },
-    { title: "Draft Context", isEmpty: false, tier: draftRank == null ? "Unranked" : draftRank <= 100 ? "Top-100" : "Ranked", color: draftRank == null ? "#94a3b8" : draftRank <= 100 ? "#D4AF37" : "#34d399", detail: draftRank == null ? "Not on the draft board" : `#${draftRank} on the draft board` },
+    { title: "Draft Context", isEmpty: false, tier: draftRank == null ? "Unranked" : draftRank <= 100 ? "Top-100" : "Ranked", color: draftRank == null ? "#94a3b8" : draftRank <= 100 ? "#22d3ee" : "#34d399", detail: draftRank == null ? "Not on the draft board" : `#${draftRank} on the draft board` },
   ];
 
   const openObligations = contracts.flatMap((ct) => ct.obligations).filter((o) => !o.fulfilled).length;
@@ -126,7 +126,7 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
                     <div className="text-sm font-medium text-foreground">{b.title}</div>
                     <div className="truncate text-[11px] text-muted-foreground">{b.detail}</div>
                   </div>
-                  <span className="shrink-0 text-sm font-bold uppercase tracking-wide" style={{ ...OSWALD, color: b.isEmpty ? "#D4AF37" : b.color }}>{b.isEmpty ? "Add" : b.tier}</span>
+                  <span className={cn("shrink-0 text-sm font-bold uppercase tracking-wide", b.isEmpty && "text-foreground")} style={b.isEmpty ? OSWALD : { ...OSWALD, color: b.color }}>{b.isEmpty ? "Add" : b.tier}</span>
                 </div>
               ))}
             </div>
@@ -137,7 +137,7 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Contracts</h3>
-              <Button size="sm" className="h-7 gap-1 text-xs" onClick={() => setAddOpen(true)}><Plus className="h-3.5 w-3.5" /> Add Contract</Button>
+              <Button size="sm" className="h-6 gap-1 px-2 text-[11px]" onClick={() => setAddOpen(true)}><Plus className="h-3 w-3" /> Add Contract</Button>
             </div>
             {contracts.length === 0 ? (
               <p className="mt-3 text-xs text-muted-foreground">No contracts yet. Adding one flows to the Contracts tab and funding sources.</p>
