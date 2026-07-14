@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
-import { PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { projectedEligibilityClass } from "@/pages/team-builder/helpers";
 import { pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
@@ -2024,9 +2024,9 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
               </CardHeader>
               <CardContent className="space-y-2.5 text-sm px-4 pb-4">
                 {[
-                  ["Team", displayTeam],
-                  ["Conference", displayConference],
-                  ["Class", displayClassProjected || "—"],
+                  [`${CURRENT_SEASON} Team`, displayTeam],
+                  [`${CURRENT_SEASON} Conference`, displayConference],
+                  [`${PROJECTION_SEASON} Class`, displayClassProjected || "—"],
                   ["Role", effectiveRoleDisplay || "—"],
                   ["Throws", player?.throws_hand || displayHandedness || "—"],
                 ].map(([label, val]) => (

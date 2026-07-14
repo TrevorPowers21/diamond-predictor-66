@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { projectedEligibilityClass } from "@/pages/team-builder/helpers";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -1524,13 +1524,13 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
                 ) : (
                   <div className="space-y-2.5 text-sm">
                   {[
-                    ["Team", displayTeamCurrent || "—"],
-                    ["Conference", resolvedConference || "—"],
+                    [`${CURRENT_SEASON} Team`, displayTeamCurrent || "—"],
+                    [`${CURRENT_SEASON} Conference`, resolvedConference || "—"],
                     ["Position", effectivePosition || "—"],
                     // Class = the PROJECTION-season class (one year forward), so it
                     // matches the projected stats on this page. Falls back to the
                     // Hitter Master row's class_year when players isn't synced.
-                    ["Class", (() => {
+                    [`${PROJECTION_SEASON} Class`, (() => {
                       const cy = player.class_year || (activeSeasonRow as any)?.class_year;
                       if (!cy && !regularPred?.class_transition) return "—";
                       const p = projectedEligibilityClass(cy, regularPred?.class_transition);
