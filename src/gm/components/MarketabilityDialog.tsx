@@ -33,9 +33,11 @@ export default function MarketabilityDialog({
       instagram_followers: s(info?.instagram_followers),
       twitter_followers: s(info?.twitter_followers),
       tiktok_followers: s(info?.tiktok_followers),
+      youtube_followers: s(info?.youtube_followers),
       instagram_handle: s(info?.instagram_handle),
       twitter_handle: s(info?.twitter_handle),
       tiktok_handle: s(info?.tiktok_handle),
+      youtube_handle: s(info?.youtube_handle),
       university_connection_tier: s(info?.university_connection_tier) || "none",
       university_connection_note: s(info?.university_connection_note),
     });
@@ -49,9 +51,11 @@ export default function MarketabilityDialog({
         instagram_followers: numOrNull(f.instagram_followers),
         twitter_followers: numOrNull(f.twitter_followers),
         tiktok_followers: numOrNull(f.tiktok_followers),
+        youtube_followers: numOrNull(f.youtube_followers),
         instagram_handle: strOrNull(f.instagram_handle),
         twitter_handle: strOrNull(f.twitter_handle),
         tiktok_handle: strOrNull(f.tiktok_handle),
+        youtube_handle: strOrNull(f.youtube_handle),
         university_connection_tier: f.university_connection_tier && f.university_connection_tier !== "none" ? f.university_connection_tier : null,
         university_connection_note: strOrNull(f.university_connection_note),
       },
@@ -95,6 +99,8 @@ export default function MarketabilityDialog({
           {field("X / Twitter handle", text("twitter_handle", "@handle"))}
           {field("TikTok followers", text("tiktok_followers", "followers"))}
           {field("TikTok handle", text("tiktok_handle", "@handle"))}
+          {field("YouTube subscribers", text("youtube_followers", "subscribers"))}
+          {field("YouTube handle", text("youtube_handle", "@handle"))}
         </div>
 
         <div className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">University Connection</div>
@@ -105,11 +111,11 @@ export default function MarketabilityDialog({
               <SelectItem value="none" className="text-sm">None</SelectItem>
               <SelectItem value="local" className="text-sm">In-state / local hometown</SelectItem>
               <SelectItem value="family_alum" className="text-sm">Immediate family alum</SelectItem>
-              <SelectItem value="family_notable" className="text-sm">Family notable athlete / figure (school or in-state)</SelectItem>
+              <SelectItem value="family_notable" className="text-sm">Legacy athlete</SelectItem>
             </SelectContent>
           </Select>
         ))}
-        {field("Detail", text("university_connection_note", "e.g. aunt = UGA basketball star"))}
+        {field("Detail", text("university_connection_note", "e.g. dad = baseball player, or famous alumni"))}
 
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>

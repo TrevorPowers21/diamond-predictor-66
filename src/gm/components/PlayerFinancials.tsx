@@ -28,7 +28,7 @@ export function playerComp(r: GmRow) {
  * roster row when the player is on it.
  */
 const PROGRAM_TIER_LABEL: Record<number, string> = { 5: "Elite", 4: "Strong", 3: "Solid", 2: "Modest", 1: "Minimal" };
-const CONN_LABEL: Record<string, string> = { family_notable: "Family notable athlete / figure", family_alum: "Immediate family alum", local: "In-state / local hometown" };
+const CONN_LABEL: Record<string, string> = { family_notable: "Legacy athlete", family_alum: "Immediate family alum", local: "In-state / local hometown" };
 
 export default function PlayerFinancials({ playerName, playerId, onEditMarketability }: { playerName: string; playerId: string; onEditMarketability?: () => void }) {
   const gm = useGmRoster();
@@ -48,6 +48,7 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
     { key: "Instagram", n: pInfo?.instagram_followers ?? null, handle: pInfo?.instagram_handle ?? null },
     { key: "X / Twitter", n: pInfo?.twitter_followers ?? null, handle: pInfo?.twitter_handle ?? null },
     { key: "TikTok", n: pInfo?.tiktok_followers ?? null, handle: pInfo?.tiktok_handle ?? null },
+    { key: "YouTube", n: pInfo?.youtube_followers ?? null, handle: pInfo?.youtube_handle ?? null },
   ];
   const socialTotal = platforms.reduce((a, p) => a + (p.n ?? 0), 0);
   const connTier = pInfo?.university_connection_tier ?? null;

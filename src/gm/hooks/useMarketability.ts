@@ -31,7 +31,7 @@ export function useMarketability(playerId: string | null | undefined): {
     },
   });
 
-  const totalFollowers = (info?.instagram_followers ?? 0) + (info?.twitter_followers ?? 0) + (info?.tiktok_followers ?? 0);
+  const totalFollowers = (info?.instagram_followers ?? 0) + (info?.twitter_followers ?? 0) + (info?.tiktok_followers ?? 0) + (info?.youtube_followers ?? 0);
   const breakdown = computeMarketability({
     totalFollowers,
     programTier,
