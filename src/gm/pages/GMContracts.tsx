@@ -44,10 +44,32 @@ function AddContractDialog({ open, onOpenChange, players }: {
   const [obs, setObs] = useState<ObDraft[]>([]);
   const [parsedRaw, setParsedRaw] = useState<ParsedContract | null>(null);
   const [aiDone, setAiDone] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [autoFilled, setAutoFilled] = useState(false); // a PDF pre-filled fields → review required
+  const [reviewed, setReviewed] = useState(false);
 
   const reset = () => {
     setFile(null); setPlayerId(""); setTitle(""); setBucket("nil"); setVendor(""); setValue(null);
     setStart(""); setEnd(""); setStatus("active"); setSummary(""); setNotes(""); setObs([]); setParsedRaw(null); setAiDone(false);
+    setExtracting(false); setAutoFilled(false); setReviewed(false);
+  };
+
+  // Read the PDF entirely in the browser (no AI/key) and pre-fill the reliable
+  // bits: dollar value + start/end dates. The coach must review before saving.
+  const onFile = async (f: File | null) => {
+    setFile(f); setAiDone(false); setAutoFilled(false); setReviewed(false);
+    if (!f) return;
+    setExtracting(true);
+    try {
+      const { extractContractPdf } = await import("@/gm/lib/extractContractPdf");
+      const x = await extractContractPdf(f);
+      if (x.total_value != null) setValue(x.total_value);
+      if (x.start_date) setStart(x.start_date);
+      if (x.end_date) setEnd(x.end_date);
+      setTitle((t) => t.trim() || f.name.replace(/\.pdf$/i, ""));
+      setAutoFilled(true);
+    } catch { /* best-effort — leave fields for manual entry on failure */ }
+    finally { setExtracting(false); }
   };
 
   const runParse = async () => {
@@ -62,11 +84,11 @@ function AddContractDialog({ open, onOpenChange, players }: {
     if (p.end_date) setEnd(p.end_date);
     if (p.summary) setSummary(p.summary);
     if (p.obligations?.length) setObs(p.obligations.map((o) => ({ description: o.description, due_date: o.due_date || null })));
-    setAiDone(true);
+    setAiDone(true); setAutoFilled(true); setReviewed(false);
   };
 
   const save = () => {
-    if (!playerId) return;
+    if (!playerId || (autoFilled && !reviewed)) return;
     addContract({
       player_id: playerId, title: title.trim() || null, bucket, vendor_name: vendor.trim() || null,
       total_value: value, start_date: start || null, end_date: end || null, status,
@@ -87,7 +109,7 @@ function AddContractDialog({ open, onOpenChange, players }: {
                 <Upload className="h-4 w-4 text-muted-foreground" />
                 <span className="truncate">{file ? file.name : "Choose contract PDF…"}</span>
                 <input type="file" accept="application/pdf" className="hidden"
-                  onChange={(e) => { setFile(e.target.files?.[0] ?? null); setAiDone(false); }} />
+                  onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
               </label>
               {file && (
                 <Button size="sm" variant="secondary" className="h-8 gap-1.5" disabled={isParsing} onClick={runParse}>
@@ -95,7 +117,8 @@ function AddContractDialog({ open, onOpenChange, players }: {
                 </Button>
               )}
             </div>
-            {aiDone && <p className="mt-2 text-[11px] text-emerald-400">Fields pre-filled from the PDF — review and correct below.</p>}
+            {extracting && <p className="mt-2 text-[11px] text-muted-foreground">Reading the PDF…</p>}
+            {autoFilled && !extracting && <p className="mt-2 text-[11px] text-emerald-400">Value + dates pre-filled from the PDF. Review every field below before saving — auto-fill can be wrong.</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -145,9 +168,17 @@ function AddContractDialog({ open, onOpenChange, players }: {
           </div>
 
           <Field label="Internal notes" full><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" className="min-h-[60px] text-sm" /></Field>
+
+          {/* When a PDF pre-filled fields, the coach must confirm they've reviewed them. */}
+          {autoFilled && (
+            <label className="flex items-start gap-2 rounded-md border border-[#D4AF37]/40 bg-[#D4AF37]/[0.06] p-2.5 text-xs">
+              <input type="checkbox" checked={reviewed} onChange={(e) => setReviewed(e.target.checked)} className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[#D4AF37]" />
+              <span>I've read through every field above and confirmed it matches the contract PDF.</span>
+            </label>
+          )}
         </div>
         <DialogFooter>
-          <Button size="sm" disabled={!playerId || isSaving} onClick={save}>{isSaving ? "Saving…" : "Save Contract"}</Button>
+          <Button size="sm" disabled={!playerId || isSaving || (autoFilled && !reviewed)} onClick={save}>{isSaving ? "Saving…" : "Save Contract"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
