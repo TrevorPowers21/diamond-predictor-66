@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { useGmRoster, type GmRow } from "@/gm/hooks/useGmRoster";
+import { useGmRoster, type GmRow, type RowMoney } from "@/gm/hooks/useGmRoster";
 import { useGmContracts } from "@/gm/hooks/useGmContracts";
+import PlayerCompensationDialog from "@/gm/components/PlayerCompensationDialog";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { useMarketability } from "@/gm/hooks/useMarketability";
 import { marketabilityTierColor } from "@/gm/lib/marketability";
@@ -37,12 +38,21 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
   const { contracts } = useGmContracts(playerId);
   const [notesOpen, setNotesOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [compOpen, setCompOpen] = useState(false);
+  const [savingComp, setSavingComp] = useState(false);
 
   const row = useMemo(
     () => [...gm.hitters, ...gm.pitchers].find((r) => r.player_id === playerId) ?? null,
     [gm.hitters, gm.pitchers, playerId],
   );
   const c = row ? playerComp(row) : null;
+  const schMode = gm.budget?.scholarship_mode ?? "pct";
+  const schDisplay = row?.scholarship_amount == null ? "—" : (schMode === "dollar" ? money(row.scholarship_amount) : `${Math.round(row.scholarship_amount)}%`);
+  const submitComp = (mny: RowMoney, finalize: boolean, onDone: () => void) => {
+    if (!row) return;
+    setSavingComp(true);
+    gm.finalizePlayer(row, mny, finalize, () => { setSavingComp(false); onDone(); });
+  };
 
   // Marketability buckets — each a clickable half-card showing a tier (not raw
   // points). Empty buckets ("Add") open the questionnaire to fill them.
@@ -73,13 +83,20 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
 
   return (
     <div className="space-y-4">
-      {c ? (
+      {c && row ? (
         <Card className="border-border/60">
-          <CardContent className="grid grid-cols-2 divide-x divide-y divide-border/50 p-0 sm:grid-cols-4 sm:divide-y-0">
-            {stat("Revenue Share", money(c.rev))}
-            {stat("NIL", money(c.nil))}
-            {stat("Other", money(c.other))}
-            {stat("Total Pay", money(c.total), true)}
+          <CardContent className="p-0">
+            <div className="flex items-center justify-between px-4 pb-1 pt-3">
+              <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Compensation{row.finalized && <span className="ml-2 text-[10px] font-semibold text-[#D4AF37]">FINALIZED</span>}</h3>
+              <button onClick={() => setCompOpen(true)} className="text-[11px] text-muted-foreground hover:text-foreground">Edit →</button>
+            </div>
+            <div className="grid grid-cols-2 divide-x divide-y divide-border/50 sm:grid-cols-5 sm:divide-y-0">
+              {stat("Revenue Share", money(c.rev))}
+              {stat("NIL", money(c.nil))}
+              {stat("Other", money(c.other))}
+              {stat("Scholarship", schDisplay)}
+              {stat("Total Pay", money(c.total), true)}
+            </div>
           </CardContent>
         </Card>
       ) : (
@@ -179,6 +196,18 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
       )}
 
       <AddContractDialog open={addOpen} onOpenChange={setAddOpen} players={[{ id: playerId, name: playerName }]} defaultPlayerId={playerId} />
+
+      {row && (
+        <PlayerCompensationDialog
+          open={compOpen}
+          onOpenChange={setCompOpen}
+          row={row}
+          schMode={schMode}
+          finalized={!!row.finalized}
+          onSubmit={submitComp}
+          isSaving={savingComp}
+        />
+      )}
     </div>
   );
 }
