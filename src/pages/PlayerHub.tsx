@@ -101,8 +101,8 @@ function CoverBrand({ teamName, logoUrl }: { teamName: string | null; logoUrl: s
         className="flex items-center justify-center"
       >
         {showingLogo && logoUrl
-          ? <img src={logoUrl} alt="" className="h-10 w-auto" />
-          : <span className="text-lg font-bold uppercase tracking-[0.14em] text-white" style={OSWALD}>{teamName ?? "RSTR IQ"}</span>}
+          ? <img src={logoUrl} alt="" className="h-10 w-auto drop-shadow-[0_1px_3px_rgba(0,0,0,0.4)]" />
+          : <span className="text-lg font-bold uppercase tracking-[0.14em] text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.5)]" style={OSWALD}>{teamName ?? "RSTR IQ"}</span>}
       </motion.div>
     </AnimatePresence>
   );
@@ -139,8 +139,14 @@ export default function PlayerHub() {
       return data as any;
     },
   });
-  const { logoUrl, schoolName } = useEffectiveSchool();
+  const { logoUrl, schoolName, branding } = useEffectiveSchool();
   const headshotUrl: string | null = dbPlayer?.headshot_url ?? null;
+  // Team-colored cover (full "Arkansas Razorbacks" name + team palette). Branding
+  // is sparse on staging → falls back to the brand navy. Richer on prod.
+  const fullTeamName = branding ? `${branding.displayName} ${branding.mascot}` : schoolName;
+  const coverStyle = branding
+    ? { background: `linear-gradient(135deg, ${branding.primaryColor} 0%, ${branding.secondaryColor} 100%)` }
+    : undefined;
 
   // Program membership: a player belongs to the program if they're on the LIVE
   // (active) build — the same build that drives their numbers, so membership and
@@ -248,8 +254,8 @@ export default function PlayerHub() {
           <>
             <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Back</button>
             <Card className="overflow-hidden border-border/60">
-              <div className="flex h-20 items-center justify-center bg-[#070e1f] px-5">
-                <CoverBrand teamName={schoolName} logoUrl={logoUrl} />
+              <div className={cn("flex h-20 items-center justify-center px-5", !branding && "bg-[#070e1f]")} style={coverStyle}>
+                <CoverBrand teamName={fullTeamName} logoUrl={logoUrl} />
               </div>
               <div className="flex flex-wrap items-end gap-x-5 gap-y-3 px-5 pb-4">
                 <div className="-mt-10 flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#D4AF37]/15 ring-4 ring-background">
