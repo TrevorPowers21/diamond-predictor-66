@@ -21,7 +21,10 @@ export interface HubSeason {
 // Advanced hitter line (Hitter Master + inferred bat speed) — batted-ball &
 // plate discipline. Keyed by players.source_player_id (numeric TrackMan id), NOT
 // the UUID. Blended values used when the master row is a combined sample.
-export interface HubHitterAdvanced { barrel: number | null; avg_exit_velo: number | null; contact: number | null; chase: number | null; }
+export interface HubHitterAdvanced {
+  barrel: number | null; avg_exit_velo: number | null; contact: number | null; chase: number | null;
+  barrel_score: number | null; avg_ev_score: number | null; contact_score: number | null; chase_score: number | null;
+}
 
 export function usePlayerHubPreview(
   playerId: string | null | undefined,
@@ -57,7 +60,7 @@ export function usePlayerHubPreview(
     enabled: !!sourcePlayerId,
     queryFn: async (): Promise<HubHitterAdvanced | null> => {
       const { data } = await (supabase as any).from("Hitter Master")
-        .select("barrel, avg_exit_velo, contact, chase, blended_barrel, blended_avg_exit_velo, blended_contact, blended_chase, combined_used")
+        .select("barrel, avg_exit_velo, contact, chase, barrel_score, avg_ev_score, contact_score, chase_score, blended_barrel, blended_avg_exit_velo, blended_contact, blended_chase, combined_used")
         .eq("source_player_id", sourcePlayerId).eq("Season", CURRENT_SEASON).limit(1);
       const r = data?.[0];
       if (!r) return null;
@@ -67,6 +70,10 @@ export function usePlayerHubPreview(
         avg_exit_velo: cu ? (r.blended_avg_exit_velo ?? r.avg_exit_velo) : r.avg_exit_velo,
         contact: cu ? (r.blended_contact ?? r.contact) : r.contact,
         chase: cu ? (r.blended_chase ?? r.chase) : r.chase,
+        barrel_score: r.barrel_score ?? null,
+        avg_ev_score: r.avg_ev_score ?? null,
+        contact_score: r.contact_score ?? null,
+        chase_score: r.chase_score ?? null,
       };
     },
   });

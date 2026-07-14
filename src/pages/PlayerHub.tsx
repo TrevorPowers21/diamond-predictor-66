@@ -10,6 +10,7 @@ import { defaultDraftYear, defaultEligibilityRemaining } from "@/gm/lib/playerEl
 import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { useMarketability } from "@/gm/hooks/useMarketability";
 import { usePlayerHubPreview } from "@/hooks/usePlayerHubPreview";
+import { ScoutGrade } from "@/components/ScoutGrade";
 import { useGmProgramMarketability } from "@/gm/hooks/useGmProgramMarketability";
 import { marketabilityTierColor } from "@/gm/lib/marketability";
 import MarketabilityDialog from "@/gm/components/MarketabilityDialog";
@@ -240,9 +241,6 @@ export default function PlayerHub() {
   // Overview shows the score; the Financials tab carries the full scorecard.
   const marketBreakdown = useMarketability(playerId).breakdown;
   const { projection, season, hitterAdvanced } = usePlayerHubPreview(playerId, dbPlayer?.source_player_id ?? null);
-  // Batted-ball/discipline formatting: exact-0 % reads as missing (—).
-  const advPct = (n: number | null | undefined) => (n == null || n === 0 ? "—" : Number.isInteger(n) ? `${n}%` : `${n.toFixed(1)}%`);
-  const advNum = (n: number | null | undefined) => (n == null || n === 0 ? "—" : n.toFixed(1));
   // Baseball-style rate: ".312" not "0.312".
   const rate = (n: number | null | undefined) => (n == null ? "—" : n.toFixed(3).replace(/^0(?=\.)/, ""));
   // Scale the stored projection from the dev-agg it was computed with to the
@@ -463,7 +461,7 @@ export default function PlayerHub() {
                   </div>
                 )
               ))}
-              {tabCard("stats", `${CURRENT_SEASON} Season Stats`, (
+              {tabCard("stats", `${CURRENT_SEASON} Statistical Profile`, (
                 isPitcher ? (
                   season ? (
                     <div className="space-y-1.5">
@@ -476,11 +474,11 @@ export default function PlayerHub() {
                   ) : <p className="text-xs text-muted-foreground">No {CURRENT_SEASON} stats on file yet.</p>
                 ) : (
                   hitterAdvanced ? (
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {projBox("Barrel%", advPct(hitterAdvanced.barrel))}
-                      {projBox("Exit Velo", advNum(hitterAdvanced.avg_exit_velo))}
-                      {projBox("Contact%", advPct(hitterAdvanced.contact))}
-                      {projBox("Chase%", advPct(hitterAdvanced.chase))}
+                    <div className="grid grid-cols-2 gap-2">
+                      <ScoutGrade label="Brl" fullLabel="Barrel%" value={hitterAdvanced.barrel_score} rawStat={hitterAdvanced.barrel} unit="%" />
+                      <ScoutGrade label="EV" fullLabel="Exit Velo" value={hitterAdvanced.avg_ev_score} rawStat={hitterAdvanced.avg_exit_velo} unit="mph" />
+                      <ScoutGrade label="Con" fullLabel="Contact%" value={hitterAdvanced.contact_score} rawStat={hitterAdvanced.contact} unit="%" />
+                      <ScoutGrade label="Chs" fullLabel="Chase%" value={hitterAdvanced.chase_score} rawStat={hitterAdvanced.chase} unit="%" />
                     </div>
                   ) : <p className="text-xs text-muted-foreground">No {CURRENT_SEASON} batted-ball data yet.</p>
                 )
