@@ -266,9 +266,9 @@ export default function PlayerHub() {
               <div className={cn("flex h-20 items-center justify-center px-5", !branding && "bg-[#070e1f]")} style={coverStyle}>
                 <CoverBrand teamName={fullTeamName} logoUrl={logoUrl} />
               </div>
-              <div className="flex min-h-[80px] flex-wrap items-center gap-x-5 gap-y-3 px-5">
-                <div className="-mt-10 flex h-20 w-20 shrink-0 self-start items-center justify-center overflow-hidden rounded-full bg-[#0d1a30] ring-4 ring-background">
-                  {headshotUrl ? <img src={headshotUrl} alt={name} className="h-full w-full object-cover" /> : <span className="text-2xl font-bold text-[#D4AF37]" style={OSWALD}>{(name[0] || "?").toUpperCase()}</span>}
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-3 px-5 py-4">
+                <div className="-mt-12 flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#0d1a30] ring-4 ring-background">
+                  {headshotUrl ? <img src={headshotUrl} alt={name} className="h-full w-full object-cover" /> : <span className="text-3xl font-bold text-[#D4AF37]" style={OSWALD}>{(name[0] || "?").toUpperCase()}</span>}
                 </div>
                 <div className="min-w-0 flex-1">
                   <h1 className="text-2xl font-bold tracking-tight">{name}</h1>
