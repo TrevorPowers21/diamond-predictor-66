@@ -98,26 +98,22 @@ export default function PlayerHub() {
     },
   });
 
-  // Program membership: a player belongs to the program if they're rostered on
-  // ANY of the team's builds (add to any build → program profile; removed from
-  // all → reverts to the outside scouting design). We know instantly if they're
-  // on the selected build (`row`); otherwise check across the team's builds.
-  const onSelectedBuild = !!row;
-  const buildIds = useMemo(() => gm.builds.map((b) => b.id), [gm.builds]);
-  const { data: onAnyBuild, isLoading: membershipLoading } = useQuery({
-    queryKey: ["player-program-membership", playerId, buildIds.join(",")],
-    enabled: !!playerId && !onSelectedBuild && buildIds.length > 0,
+  // Program membership: a player belongs to the program if they're on the LIVE
+  // (active) build — the same build that drives their numbers, so membership and
+  // display always agree. Not on the live build → the outside scouting design.
+  const liveBuildId = gm.liveBuildId;
+  const { data: onLiveBuild, isLoading: membershipLoading } = useQuery({
+    queryKey: ["player-program-membership", playerId, liveBuildId],
+    enabled: !!playerId && !!liveBuildId,
     queryFn: async () => {
       const { data } = await (supabase as any)
         .from("team_build_players").select("id")
-        .in("team_build_id", buildIds).eq("player_id", playerId).eq("included_in_roster", true).limit(1);
+        .eq("team_build_id", liveBuildId).eq("player_id", playerId).eq("included_in_roster", true).limit(1);
       return (data?.length ?? 0) > 0;
     },
   });
-  const isProgramPlayer = onSelectedBuild || onAnyBuild === true;
-  const resolving = gm.isLoading
-    || (!onSelectedBuild && gm.hasTeam && buildIds.length === 0)
-    || (!onSelectedBuild && buildIds.length > 0 && membershipLoading);
+  const isProgramPlayer = onLiveBuild === true;
+  const resolving = gm.isLoading || (!!liveBuildId && membershipLoading);
 
   const dbName = dbPlayer ? [dbPlayer.first_name, dbPlayer.last_name].filter(Boolean).join(" ") : "";
   const name = (row?.name ?? dbName) || "Player";
