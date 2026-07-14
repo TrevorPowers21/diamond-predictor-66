@@ -431,9 +431,13 @@ export default function PlayerHub() {
               ))}
             </div>
 
-            {tabCard("development", "Player Development", (
-              <p className="text-xs text-muted-foreground">NewtForce metrics &amp; biomechanics.</p>
-            ))}
+            {/* Player Development — greyed out until NewtForce/biomechanics is wired. */}
+            <Card className="border-border/60 opacity-60">
+              <CardContent className="flex items-center justify-between p-4">
+                <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Player Development</h3>
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Coming soon</span>
+              </CardContent>
+            </Card>
           </div>
         )}
 
