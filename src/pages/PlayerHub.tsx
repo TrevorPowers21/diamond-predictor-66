@@ -191,9 +191,11 @@ export default function PlayerHub() {
   // Program-owned player info (layers over the scraped record) + derived defaults.
   const { info: playerInfo, save: savePlayerInfo, isSaving: savingInfo } = useGmPlayerInfo(playerId);
   const [infoOpen, setInfoOpen] = useState(false);
-  // Draft eligibility keys off the CURRENT season (a junior this year is eligible
-  // for this year's draft) — not the forward projection season.
-  const draftYear = playerInfo?.draft_eligible_year ?? defaultDraftYear(classYr, playerInfo?.dob, CURRENT_SEASON);
+  // classYr above is the PROJECTED (next-season) class shown in "Class". Draft
+  // eligibility is a real-world fact tied to the player's CURRENT class + season
+  // (a sophomore now → junior year 2027 → draft 2027; earlier only via age/DOB).
+  const currentClass = row?.class_year ?? dbPlayer?.class_year ?? classYr;
+  const draftYear = playerInfo?.draft_eligible_year ?? defaultDraftYear(currentClass, playerInfo?.dob, CURRENT_SEASON);
   const eligRemaining = playerInfo?.eligibility_remaining ?? defaultEligibilityRemaining(classYr);
 
   const kv = (label: string, value: string, accent?: boolean) => (
@@ -400,7 +402,7 @@ export default function PlayerHub() {
             contact_phone: dbPlayer?.contact_cell ?? null,
             contact_email: dbPlayer?.contact_email ?? null,
           }}
-          draftYearDefault={defaultDraftYear(classYr, playerInfo?.dob, CURRENT_SEASON)}
+          draftYearDefault={defaultDraftYear(currentClass, playerInfo?.dob, CURRENT_SEASON)}
           eligRemainingDefault={defaultEligibilityRemaining(classYr)}
           onSave={savePlayerInfo}
           isSaving={savingInfo}

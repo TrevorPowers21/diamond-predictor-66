@@ -1,5 +1,6 @@
-// NCAA class → baseline years of eligibility remaining (redshirts adjusted by hand).
-const CLASS_YEARS_LEFT: Record<string, number> = { FR: 4, SO: 3, JR: 2, SR: 1, GR: 0 };
+// NCAA class → baseline years of eligibility remaining, INCLUSIVE of the current
+// year (5-year model: a JR has JR + SR + 5th = 3 left). Redshirts adjusted by hand.
+const CLASS_YEARS_LEFT: Record<string, number> = { FR: 5, SO: 4, JR: 3, SR: 2, GR: 1 };
 
 export function classCode(classYr: string | null | undefined): "FR" | "SO" | "JR" | "SR" | "GR" | null {
   if (!classYr) return null;
