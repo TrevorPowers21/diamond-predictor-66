@@ -10,7 +10,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, LineChart, BarChart3, DollarSign, Activity, Bone, LayoutDashboard } from "lucide-react";
+import { ArrowLeft, LineChart, BarChart3, DollarSign, Activity, Bone, LayoutDashboard, FileText, ClipboardList } from "lucide-react";
+
+// Depth/pitcher role → display label (both hitter and pitcher roles).
+const ROLE_LABEL: Record<string, string> = {
+  cornerstone: "Cornerstone", everyday_starter: "Everyday Starter", platoon_starter: "Platoon Starter", utility: "Utility", bench: "Bench",
+  weekend_starter: "Weekend Starter", weekday_starter: "Weekday Starter", swing_starter: "Swing Starter",
+  workhorse_reliever: "Workhorse Reliever", high_leverage_reliever: "High-Leverage Reliever", mid_leverage_reliever: "Mid-Leverage Reliever",
+  low_impact_reliever: "Low-Impact Reliever", specialist_reliever: "Specialist Reliever",
+};
 
 // Reuse the existing scouting pages verbatim as tab content (embedded = no chrome).
 const PlayerProfile = lazy(() => import("@/pages/PlayerProfile"));
@@ -128,6 +136,14 @@ export default function PlayerHub() {
       <span className={cn("font-mono text-lg font-bold tabular-nums", accent ? "text-[#D4AF37]" : "text-foreground")} style={OSWALD}>{value}</span>
     </div>
   );
+  const kv = (label: string, value: string, accent?: boolean) => (
+    <div className="flex items-center justify-between">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={cn("text-xs font-semibold", accent ? "font-mono text-[#D4AF37]" : "text-foreground")}>{value}</span>
+    </div>
+  );
+  const contractTotal = contracts.reduce((s, ct) => s + (ct.total_value ?? 0), 0);
+  const openObligations = contracts.flatMap((ct) => ct.obligations).filter((o) => !o.fulfilled).length;
 
   // Projections/Season Stats embed the scouting pages, which carry their own
   // identity header — so the hub header only shows on the other tabs (and the
@@ -196,23 +212,77 @@ export default function PlayerHub() {
         {/* Tab content */}
         {tab === "overview" && (
           <div className="space-y-4">
+            {/* Headline numbers */}
             <Card className="border-border/60">
               <CardContent className="grid grid-cols-2 divide-x divide-y divide-border/50 p-0 sm:grid-cols-4 sm:divide-y-0">
                 {headline("Projected WAR", num(row?.war))}
                 {headline("Market Value", money(row?.market_value))}
                 {headline("Total Pay", money(c?.total ?? null), true)}
-                {headline("Contracts", String(contracts.length))}
+                {headline("Value vs Pay", c && c.total > 0 && row?.market_value != null ? `${(row.market_value / c.total).toFixed(2)}×` : "—")}
               </CardContent>
             </Card>
-            <div className="grid gap-3 sm:grid-cols-3">
+
+            {/* Compensation + Roster assignment */}
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card className="border-border/60">
+                <CardContent className="space-y-2 p-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Compensation</h3>
+                    <button onClick={() => setTab("financials")} className="text-[11px] text-muted-foreground hover:text-foreground">Financials →</button>
+                  </div>
+                  {c ? (
+                    <div className="space-y-1.5">
+                      {kv("Revenue Share", money(c.rev))}
+                      {kv("NIL", money(c.nil))}
+                      {kv("Other", money(c.other))}
+                      <div className="flex items-center justify-between border-t border-border/50 pt-1.5">
+                        <span className="text-xs font-semibold">Total Pay</span>
+                        <span className="font-mono text-sm font-bold text-[#D4AF37]">{money(c.total)}</span>
+                      </div>
+                    </div>
+                  ) : <p className="text-xs text-muted-foreground">No compensation set on the live roster build.</p>}
+                </CardContent>
+              </Card>
+
+              <Card className="border-border/60">
+                <CardContent className="space-y-2 p-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Roster Assignment</h3>
+                    <span className="text-[10px] italic text-muted-foreground">from live build</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {kv("Position", position ?? "—")}
+                    {kv("Class", classYr ?? "—")}
+                    {kv("Role", (row?.depth_role && ROLE_LABEL[row.depth_role]) ?? "—")}
+                    {kv("Dev Aggressiveness", row ? String(row.dev_aggressiveness) : "—")}
+                    {kv("Status", row?.finalized ? "Finalized" : "Draft", true)}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Contracts & obligations summary */}
+            <button onClick={() => setTab("financials")} className="flex w-full items-center gap-3 rounded-lg border border-border/60 p-3 text-left transition-colors hover:border-[#D4AF37]/50 hover:bg-muted/30">
+              <FileText className="h-5 w-5 shrink-0 text-[#D4AF37]" />
+              <div className="min-w-0 flex-1 text-sm">
+                {contracts.length > 0 ? (
+                  <><span className="font-semibold">{contracts.length} contract{contracts.length > 1 ? "s" : ""}</span> on file · {money(contractTotal)} total{openObligations > 0 && <> · <span className="text-amber-400">{openObligations} open obligation{openObligations > 1 ? "s" : ""}</span></>}</>
+                ) : <span className="text-muted-foreground">No contracts on file — add one on Financials.</span>}
+              </div>
+              <span className="shrink-0 text-[11px] text-muted-foreground">Financials →</span>
+            </button>
+
+            {/* Quick jump to the deeper tabs */}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {[
                 { t: "projections" as TabKey, label: "Projections", desc: "Projected line & value", icon: LineChart },
                 { t: "stats" as TabKey, label: "Season Stats", desc: "This season's numbers", icon: BarChart3 },
                 { t: "financials" as TabKey, label: "Financials", desc: "Comp, contracts & obligations", icon: DollarSign },
+                { t: "development" as TabKey, label: "Player Development", desc: "NewtForce & biomechanics", icon: ClipboardList },
               ].map((q) => (
                 <button key={q.t} onClick={() => setTab(q.t)} className="flex items-center gap-3 rounded-lg border border-border/60 p-3 text-left transition-colors hover:border-[#D4AF37]/50 hover:bg-muted/30">
-                  <q.icon className="h-5 w-5 text-[#D4AF37]" />
-                  <div><div className="text-sm font-semibold">{q.label}</div><div className="text-[11px] text-muted-foreground">{q.desc}</div></div>
+                  <q.icon className="h-5 w-5 shrink-0 text-[#D4AF37]" />
+                  <div className="min-w-0"><div className="truncate text-sm font-semibold">{q.label}</div><div className="truncate text-[11px] text-muted-foreground">{q.desc}</div></div>
                 </button>
               ))}
             </div>
