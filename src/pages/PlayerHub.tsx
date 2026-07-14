@@ -443,9 +443,10 @@ export default function PlayerHub() {
             <div className="grid gap-4 md:grid-cols-2">
               {tabCard("projections", `${PROJECTION_SEASON} Projection`, (
                 isPitcher ? (
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-5 gap-1.5">
                     {projBox("ERA", num(projection?.p_era, 2))}
                     {projBox("FIP", num(projection?.p_fip, 2))}
+                    {projBox("WHIP", num(projection?.p_whip, 2))}
                     {projBox("K/9", num(projection?.p_k9))}
                     {projBox("BB/9", num(projection?.p_bb9))}
                   </div>
