@@ -53,6 +53,9 @@ export default function PlayerInfoDialog({
       high_school: s(info?.high_school ?? scraped.high_school),
       contact_phone: s(info?.contact_phone ?? scraped.contact_phone),
       contact_email: s(info?.contact_email ?? scraped.contact_email),
+      instagram_followers: s(info?.instagram_followers),
+      twitter_followers: s(info?.twitter_followers),
+      tiktok_followers: s(info?.tiktok_followers),
     });
   }, [open, info, scraped]);
 
@@ -72,6 +75,9 @@ export default function PlayerInfoDialog({
       high_school: strOrNull(f.high_school),
       contact_phone: strOrNull(f.contact_phone),
       contact_email: strOrNull(f.contact_email),
+      instagram_followers: numOrNull(f.instagram_followers),
+      twitter_followers: numOrNull(f.twitter_followers),
+      tiktok_followers: numOrNull(f.tiktok_followers),
     }, () => onOpenChange(false));
   };
 
@@ -110,6 +116,10 @@ export default function PlayerInfoDialog({
           <div className="col-span-2">{field("High School", text("high_school"))}</div>
           {field("Phone", text("contact_phone"))}
           {field("Email", text("contact_email"))}
+          <div className="col-span-2 mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Social Following</div>
+          {field("Instagram", text("instagram_followers", "followers"))}
+          {field("X / Twitter", text("twitter_followers", "followers"))}
+          {field("TikTok", text("tiktok_followers", "followers"))}
         </div>
         <p className="text-[10px] text-muted-foreground">Draft eligibility auto-fills from class/birthday when blank; type a year to override. GPA &amp; academics coming later.</p>
         <DialogFooter>

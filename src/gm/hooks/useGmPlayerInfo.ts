@@ -17,6 +17,9 @@ export interface GmPlayerInfo {
   contact_email: string | null;
   eligibility_remaining: number | null;
   draft_eligible_year: number | null;
+  instagram_followers: number | null;
+  twitter_followers: number | null;
+  tiktok_followers: number | null;
   gpa: number | null;
   academic_note: string | null;
 }

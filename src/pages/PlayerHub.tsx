@@ -214,6 +214,16 @@ export default function PlayerHub() {
   const onDraftBoard = slotDraftYear != null;
   const eligRemaining = playerInfo?.eligibility_remaining ?? defaultEligibilityRemaining(classYr);
 
+  // Social following (program-entered per platform; total is derived).
+  const social = [
+    { key: "Instagram", n: playerInfo?.instagram_followers ?? null },
+    { key: "X / Twitter", n: playerInfo?.twitter_followers ?? null },
+    { key: "TikTok", n: playerInfo?.tiktok_followers ?? null },
+  ];
+  const hasSocial = social.some((s) => s.n != null);
+  const socialTotal = social.reduce((a, s) => a + (s.n ?? 0), 0);
+  const compactNum = (n: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+
   const kv = (label: string, value: string, accent?: boolean) => (
     <div className="flex items-center justify-between">
       <span className="text-xs text-muted-foreground">{label}</span>
@@ -365,6 +375,32 @@ export default function PlayerHub() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* Social following */}
+            <Card className="border-border/60">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Social Following</h3>
+                  <button onClick={() => setInfoOpen(true)} className="text-[11px] text-muted-foreground hover:text-foreground">Edit →</button>
+                </div>
+                {hasSocial ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-x-8 gap-y-3">
+                    <div className="flex flex-col">
+                      <span className="font-mono text-2xl font-bold leading-none text-[#D4AF37]" style={OSWALD}>{compactNum(socialTotal)}</span>
+                      <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">Total Followers</span>
+                    </div>
+                    {social.filter((s) => s.n != null).map((s) => (
+                      <div key={s.key} className="flex flex-col">
+                        <span className="font-mono text-base font-semibold leading-none text-foreground">{compactNum(s.n as number)}</span>
+                        <span className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">{s.key}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-muted-foreground">No social following entered. Add Instagram, X, or TikTok via the ⋯ next to the name.</p>
+                )}
+              </CardContent>
+            </Card>
 
             {/* Quick jump to the deeper tabs */}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
