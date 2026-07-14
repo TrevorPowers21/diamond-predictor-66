@@ -285,9 +285,9 @@ export default function PlayerHub() {
     </Card>
   );
   const projBox = (label: string, value: string, accent?: boolean) => (
-    <div className="flex min-h-[3.5rem] flex-col items-center justify-center rounded-md border border-border/50 bg-muted/10 px-1 py-2 text-center">
-      <span className={cn("font-mono text-sm font-bold leading-none tabular-nums", accent ? "text-[#D4AF37]" : "text-foreground")} style={OSWALD}>{value}</span>
-      <span className="mt-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+    <div className="flex min-h-[3.5rem] flex-col items-center justify-center gap-1 rounded-md border border-border/50 bg-muted/10 px-1 py-1.5 text-center">
+      <span className={cn("font-mono text-base font-bold leading-none tabular-nums", accent ? "text-[#D4AF37]" : "text-foreground")} style={OSWALD}>{value}</span>
+      <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
     </div>
   );
 
@@ -400,47 +400,7 @@ export default function PlayerHub() {
         {/* Tab content */}
         {tab === "overview" && (
           <div className="space-y-4">
-            {/* Compensation + Roster assignment */}
-            <div className="grid gap-4 md:grid-cols-2">
-              <Card onClick={() => setTab("financials")} className="cursor-pointer border-border/60 transition-colors hover:border-[#D4AF37]/60 hover:bg-muted/10">
-                <CardContent className="space-y-2 p-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Compensation</h3>
-                    <span className="text-[11px] text-muted-foreground">Open →</span>
-                  </div>
-                  {c ? (
-                    <div className="space-y-1.5">
-                      {kv("Scholarship", schDisplay)}
-                      {kv("Revenue Share", money(c.rev))}
-                      {kv("NIL", money(c.nil))}
-                      {kv("Other", money(c.other))}
-                      <div className="flex items-center justify-between border-t border-border/50 pt-1.5">
-                        <span className="text-xs font-semibold">Total Pay</span>
-                        <span className="font-mono text-sm font-bold text-[#D4AF37]">{money(c.total)}</span>
-                      </div>
-                    </div>
-                  ) : <p className="text-xs text-muted-foreground">No compensation set on the live roster build.</p>}
-                </CardContent>
-              </Card>
-
-              <Card className="border-border/60">
-                <CardContent className="space-y-2 p-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Roster Assignment</h3>
-                    <span className="text-[10px] italic text-muted-foreground">{liveBuildName ?? "live build"}</span>
-                  </div>
-                  <div className="space-y-1.5">
-                    {kv("Position", position ?? "—")}
-                    {kv("Class", classYr ?? "—")}
-                    {kv("Role", (row?.depth_role && ROLE_LABEL[row.depth_role]) ?? "—")}
-                    {kv("Eligibility Remaining", eligRemaining != null ? `${eligRemaining} yr${eligRemaining === 1 ? "" : "s"}` : "—")}
-                    {kv("Draft Eligibility", draftYear != null ? String(draftYear) : "—", true)}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* A detail card per tab — same styling, clickable through to the tab. */}
+            {/* Statistical cards up top — Projection + Statistical Profile, each clickable to its tab. */}
             <div className="grid gap-4 md:grid-cols-2">
               {tabCard("projections", `${PROJECTION_SEASON} Projection`, (
                 isPitcher ? (
@@ -483,6 +443,46 @@ export default function PlayerHub() {
                   ) : <p className="text-xs text-muted-foreground">No {CURRENT_SEASON} batted-ball data yet.</p>
                 )
               ))}
+            </div>
+
+            {/* Compensation + Roster assignment */}
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card onClick={() => setTab("financials")} className="cursor-pointer border-border/60 transition-colors hover:border-[#D4AF37]/60 hover:bg-muted/10">
+                <CardContent className="space-y-2 p-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Compensation</h3>
+                    <span className="text-[11px] text-muted-foreground">Open →</span>
+                  </div>
+                  {c ? (
+                    <div className="space-y-1.5">
+                      {kv("Scholarship", schDisplay)}
+                      {kv("Revenue Share", money(c.rev))}
+                      {kv("NIL", money(c.nil))}
+                      {kv("Other", money(c.other))}
+                      <div className="flex items-center justify-between border-t border-border/50 pt-1.5">
+                        <span className="text-xs font-semibold">Total Pay</span>
+                        <span className="font-mono text-sm font-bold text-[#D4AF37]">{money(c.total)}</span>
+                      </div>
+                    </div>
+                  ) : <p className="text-xs text-muted-foreground">No compensation set on the live roster build.</p>}
+                </CardContent>
+              </Card>
+
+              <Card className="border-border/60">
+                <CardContent className="space-y-2 p-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Roster Assignment</h3>
+                    <span className="text-[10px] italic text-muted-foreground">{liveBuildName ?? "live build"}</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {kv("Position", position ?? "—")}
+                    {kv("Class", classYr ?? "—")}
+                    {kv("Role", (row?.depth_role && ROLE_LABEL[row.depth_role]) ?? "—")}
+                    {kv("Eligibility Remaining", eligRemaining != null ? `${eligRemaining} yr${eligRemaining === 1 ? "" : "s"}` : "—")}
+                    {kv("Draft Eligibility", draftYear != null ? String(draftYear) : "—", true)}
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
             {/* Player Development — greyed out until NewtForce/biomechanics is wired. */}
