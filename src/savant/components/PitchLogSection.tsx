@@ -1275,7 +1275,6 @@ function PageShell({
           {picker}
           <div className="text-[11px] uppercase tracking-wider text-white/55">
             {sampleCount.toLocaleString()} {sampleLabel}
-            <span className="ml-2 text-white/40">· *includes postseason</span>
           </div>
         </div>
       </div>
