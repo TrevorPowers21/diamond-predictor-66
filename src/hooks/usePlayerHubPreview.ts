@@ -13,10 +13,13 @@ export interface HubProjection {
   dev_aggressiveness: number | null; // dev-agg the row was computed with (scale from this to the build's)
   class_transition: string | null;   // drives the dev-agg class adjustment
 }
-export interface HubSeason {
-  batting_avg: number | null; on_base_pct: number | null; slugging_pct: number | null;
-  hits: number | null; home_runs: number | null; rbi: number | null;
-  era: number | null; innings_pitched: number | null; pitch_strikeouts: number | null; pitch_walks: number | null; whip: number | null;
+// Advanced pitcher grades from "Pitching Master" (parallels the hitter card):
+// Stuff+ / Whiff% / BB% / Barrel%, each with its 0–100 percentile score.
+export interface HubPitcherAdvanced {
+  stuff_plus: number | null; stuff_score: number | null;
+  whiff: number | null; whiff_score: number | null;
+  bb_pct: number | null; bb_score: number | null;
+  barrel_pct: number | null; barrel_score: number | null;
 }
 // Advanced hitter line (Hitter Master + inferred bat speed) — batted-ball &
 // plate discipline. Keyed by players.source_player_id (numeric TrackMan id), NOT
@@ -29,7 +32,7 @@ export interface HubHitterAdvanced {
 export function usePlayerHubPreview(
   playerId: string | null | undefined,
   sourcePlayerId: string | null | undefined,
-): { projection: HubProjection | null; season: HubSeason | null; hitterAdvanced: HubHitterAdvanced | null } {
+): { projection: HubProjection | null; hitterAdvanced: HubHitterAdvanced | null; pitcherAdvanced: HubPitcherAdvanced | null } {
   const { effectiveTeamId } = useAuth();
 
   const { data: projection = null } = useQuery({
@@ -43,14 +46,22 @@ export function usePlayerHubPreview(
     },
   });
 
-  const { data: season = null } = useQuery({
-    queryKey: ["hub-season", playerId],
-    enabled: !!playerId,
-    queryFn: async (): Promise<HubSeason | null> => {
-      const { data } = await (supabase as any).from("season_stats")
-        .select("batting_avg, on_base_pct, slugging_pct, hits, home_runs, rbi, era, innings_pitched, pitch_strikeouts, pitch_walks, whip")
-        .eq("player_id", playerId).eq("season", CURRENT_SEASON).maybeSingle();
-      return (data ?? null) as HubSeason | null;
+  // Stuff+ / Whiff% / BB% / Barrel% from "Pitching Master" (source_player_id).
+  const { data: pitcherAdvanced = null } = useQuery({
+    queryKey: ["hub-pitcher-adv", sourcePlayerId ?? null],
+    enabled: !!sourcePlayerId,
+    queryFn: async (): Promise<HubPitcherAdvanced | null> => {
+      const { data } = await (supabase as any).from("Pitching Master")
+        .select("stuff_plus, stuff_score, in_zone_whiff_pct, iz_whiff_score, bb_pct, bb_score, barrel_pct, barrel_score")
+        .eq("source_player_id", sourcePlayerId).eq("Season", CURRENT_SEASON).limit(1);
+      const r = data?.[0];
+      if (!r) return null;
+      return {
+        stuff_plus: r.stuff_plus ?? null, stuff_score: r.stuff_score ?? null,
+        whiff: r.in_zone_whiff_pct ?? null, whiff_score: r.iz_whiff_score ?? null,
+        bb_pct: r.bb_pct ?? null, bb_score: r.bb_score ?? null,
+        barrel_pct: r.barrel_pct ?? null, barrel_score: r.barrel_score ?? null,
+      };
     },
   });
 
@@ -78,5 +89,5 @@ export function usePlayerHubPreview(
     },
   });
 
-  return { projection, season, hitterAdvanced };
+  return { projection, hitterAdvanced, pitcherAdvanced };
 }

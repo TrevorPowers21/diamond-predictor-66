@@ -257,7 +257,7 @@ export default function PlayerHub() {
   // Marketability: one 0–100 composite (program + social + connection + draft).
   // Overview shows the score; the Financials tab carries the full scorecard.
   const marketBreakdown = useMarketability(playerId).breakdown;
-  const { projection, season, hitterAdvanced } = usePlayerHubPreview(playerId, dbPlayer?.source_player_id ?? null);
+  const { projection, hitterAdvanced, pitcherAdvanced } = usePlayerHubPreview(playerId, dbPlayer?.source_player_id ?? null);
   // Baseball-style rate: ".312" not "0.312".
   const rate = (n: number | null | undefined) => (n == null ? "—" : n.toFixed(3).replace(/^0(?=\.)/, ""));
   // Scale the stored projection from the dev-agg it was computed with to the
@@ -442,15 +442,14 @@ export default function PlayerHub() {
               ))}
               {tabCard("stats", `${CURRENT_SEASON} Statistical Profile`, (
                 isPitcher ? (
-                  season ? (
-                    <div className="space-y-1.5">
-                      {kv("ERA", num(season.era, 2))}
-                      {kv("IP", num(season.innings_pitched))}
-                      {kv("K", num(season.pitch_strikeouts, 0))}
-                      {kv("BB", num(season.pitch_walks, 0))}
-                      {kv("WHIP", num(season.whip, 2))}
+                  pitcherAdvanced ? (
+                    <div className="grid grid-cols-4 gap-1.5">
+                      <ScoutGrade compact label="Stf" fullLabel="Stuff+" value={pitcherAdvanced.stuff_score} rawStat={pitcherAdvanced.stuff_plus} unit="" />
+                      <ScoutGrade compact label="Whf" fullLabel="Whiff%" value={pitcherAdvanced.whiff_score} rawStat={pitcherAdvanced.whiff} unit="%" />
+                      <ScoutGrade compact label="BB" fullLabel="BB%" value={pitcherAdvanced.bb_score} rawStat={pitcherAdvanced.bb_pct} unit="%" />
+                      <ScoutGrade compact label="Brl" fullLabel="Barrel%" value={pitcherAdvanced.barrel_score} rawStat={pitcherAdvanced.barrel_pct} unit="%" />
                     </div>
-                  ) : <p className="text-xs text-muted-foreground">No {CURRENT_SEASON} stats on file yet.</p>
+                  ) : <p className="text-xs text-muted-foreground">No {CURRENT_SEASON} metrics yet.</p>
                 ) : (
                   hitterAdvanced ? (
                     <div className="grid grid-cols-4 gap-1.5">
