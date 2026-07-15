@@ -32,6 +32,23 @@ const ROLE_LABEL: Record<string, string> = {
   workhorse_reliever: "Workhorse Reliever", high_leverage_reliever: "High-Leverage Reliever", mid_leverage_reliever: "Mid-Leverage Reliever",
   low_impact_reliever: "Low-Impact Reliever", specialist_reliever: "Specialist Reliever",
 };
+// Role badge color by value tier: cornerstone (gold) → anchor/high-leverage
+// (emerald) → rotation/mid (sky) → depth (slate).
+const ROLE_COLOR: Record<string, string> = {
+  cornerstone: "border-[#D4AF37]/40 bg-[#D4AF37]/10 text-[#D4AF37]",
+  everyday_starter: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
+  weekend_starter: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
+  workhorse_reliever: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
+  high_leverage_reliever: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
+  platoon_starter: "border-sky-500/40 bg-sky-500/10 text-sky-400",
+  utility: "border-sky-500/40 bg-sky-500/10 text-sky-400",
+  weekday_starter: "border-sky-500/40 bg-sky-500/10 text-sky-400",
+  swing_starter: "border-sky-500/40 bg-sky-500/10 text-sky-400",
+  mid_leverage_reliever: "border-sky-500/40 bg-sky-500/10 text-sky-400",
+  bench: "border-slate-500/40 bg-slate-500/10 text-slate-400",
+  low_impact_reliever: "border-slate-500/40 bg-slate-500/10 text-slate-400",
+  specialist_reliever: "border-slate-500/40 bg-slate-500/10 text-slate-400",
+};
 
 // Reuse the existing scouting pages verbatim as tab content (embedded = no chrome).
 const PlayerProfile = lazy(() => import("@/pages/PlayerProfile"));
@@ -342,7 +359,7 @@ export default function PlayerHub() {
             <div className="mt-1 flex flex-wrap items-center gap-2">
               {classYr && <Badge variant="outline">{classYr}</Badge>}
               {position && <Badge variant="secondary">{position}</Badge>}
-              {row?.depth_role && ROLE_LABEL[row.depth_role] && <Badge variant="outline" className="text-muted-foreground">{ROLE_LABEL[row.depth_role]}</Badge>}
+              {row?.depth_role && ROLE_LABEL[row.depth_role] && <Badge variant="outline" className={cn("font-semibold", ROLE_COLOR[row.depth_role] ?? "text-muted-foreground")}>{ROLE_LABEL[row.depth_role]}</Badge>}
             </div>
           </div>
         </div>
