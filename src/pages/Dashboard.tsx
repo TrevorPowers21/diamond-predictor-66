@@ -551,12 +551,15 @@ export default function Dashboard() {
           <Card className="border-border/60">
             <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
               <div className="flex items-center justify-between gap-3">
-                <CardTitle
-                  className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#D4AF37] shrink-0"
-                  style={{ fontFamily: "Oswald, sans-serif" }}
-                >
-                  Top 5 Hitters
-                </CardTitle>
+                <Link to="/dashboard/returning?tab=hitting" className="group inline-flex shrink-0 items-center gap-1">
+                  <CardTitle
+                    className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]"
+                    style={{ fontFamily: "Oswald, sans-serif" }}
+                  >
+                    Top 5 Hitters
+                  </CardTitle>
+                  <ArrowRight className="h-3 w-3 text-muted-foreground transition-colors group-hover:text-[#D4AF37]" />
+                </Link>
                 <span className="hidden sm:block text-[10px] uppercase tracking-wider text-muted-foreground font-mono whitespace-nowrap">
                   pAVG / pOBP / pSLG · pWRC+
                 </span>
@@ -612,12 +615,15 @@ export default function Dashboard() {
           <Card className="border-border/60">
             <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
               <div className="flex items-center justify-between gap-3">
-                <CardTitle
-                  className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#D4AF37] shrink-0"
-                  style={{ fontFamily: "Oswald, sans-serif" }}
-                >
-                  Top 5 Pitchers
-                </CardTitle>
+                <Link to="/dashboard/returning?tab=pitching" className="group inline-flex shrink-0 items-center gap-1">
+                  <CardTitle
+                    className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]"
+                    style={{ fontFamily: "Oswald, sans-serif" }}
+                  >
+                    Top 5 Pitchers
+                  </CardTitle>
+                  <ArrowRight className="h-3 w-3 text-muted-foreground transition-colors group-hover:text-[#D4AF37]" />
+                </Link>
                 <span className="hidden sm:block text-[10px] uppercase tracking-wider text-muted-foreground font-mono whitespace-nowrap">
                   pERA / pFIP / pK/9 · pRV+
                 </span>
@@ -674,12 +680,15 @@ export default function Dashboard() {
         {/* Target Board */}
         <Card className="border-border/60">
           <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40 flex flex-row items-center justify-between">
-            <CardTitle
-              className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]"
-              style={{ fontFamily: "Oswald, sans-serif" }}
-            >
-              Target Board
-            </CardTitle>
+            <Link to="/dashboard/targets" className="group inline-flex items-center gap-1">
+              <CardTitle
+                className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]"
+                style={{ fontFamily: "Oswald, sans-serif" }}
+              >
+                Target Board
+              </CardTitle>
+              <ArrowRight className="h-3 w-3 text-muted-foreground transition-colors group-hover:text-[#D4AF37]" />
+            </Link>
             <span className="text-[10px] text-muted-foreground/70 font-mono">{targetBoard.length} {targetBoard.length === 1 ? "player" : "players"}</span>
           </CardHeader>
           <CardContent className="p-0">
