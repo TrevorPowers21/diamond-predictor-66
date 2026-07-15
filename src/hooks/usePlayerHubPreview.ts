@@ -2,19 +2,11 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
+import { usePitchLog2026PitcherRates } from "@/hooks/usePitchLog2026PitcherRates";
+import { usePitchLog2026PitcherPop } from "@/hooks/usePitchLog2026PitcherPop";
+import { percentileRank } from "@/savant/lib/percentile";
 import { pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
-
-// Standard-normal CDF (erf approximation) — same one the scouting pages use to
-// turn a metric z-score into a 0-100 percentile.
-const normalCdf = (x: number) => {
-  const sign = x < 0 ? -1 : 1;
-  const ax = Math.abs(x) / Math.sqrt(2);
-  const t = 1 / (1 + 0.3275911 * ax);
-  const erf = sign * (1 - (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t) * Math.exp(-ax * ax));
-  return 0.5 * (1 + erf);
-};
 
 // Slim previews for the player-hub Overview cards: the projected line
 // (player_predictions, team-scoped preference) and the current-season line
@@ -58,45 +50,22 @@ export function usePlayerHubPreview(
     },
   });
 
-  // Stuff+ / Whiff% / BB% / Barrel% from the STORED pitch-log rollup
-  // (pitch_log_pitcher_totals) — the same source the pitcher profile uses. Stuff+
-  // = stuff_plus_sum/data_pitches (arsenal-weighted); Whiff = whiffs/swings (not
-  // in-zone). Scores are z-scores off the pitching-equation NCAA avg/SD, so the
-  // tiles match the profile page — NOT the Pitching-Master columns.
-  const pitchingEq = usePitchingEquationWeights();
-  const { data: plTotals = null } = useQuery({
-    queryKey: ["hub-pitcher-plog", sourcePlayerId ?? null],
-    enabled: !!sourcePlayerId,
-    queryFn: async () => {
-      const { data } = await (supabase as any).from("pitch_log_pitcher_totals")
-        .select("total_swings, total_whiffs, total_pa, total_bb, stuff_plus_sum, stuff_plus_data_pitches, batted_barrels_allowed, batted_balls_allowed_with_ev")
-        .eq("pitcher_id", sourcePlayerId).eq("season", CURRENT_SEASON).eq("dimension_key", "all").maybeSingle();
-      return (data ?? null) as any;
-    },
-  });
+  // Stuff+ / Whiff% / BB% / Barrel% — EXACTLY as the pitcher profile does it:
+  // the pitch-log rates + an empirical percentile rank vs the pitcher population
+  // (same hooks + percentileRank), so both the values AND the tile colors match.
+  const plRates = usePitchLog2026PitcherRates(sourcePlayerId ?? null).data;
+  const plPop = usePitchLog2026PitcherPop().data ?? [];
   const pitcherAdvanced: HubPitcherAdvanced | null = useMemo(() => {
-    const r = plTotals;
-    if (!r) return null;
-    const div = (n: number | null, d: number | null) => (d != null && d > 0 ? (n ?? 0) / d : null);
-    const pct = (n: number | null, d: number | null) => { const v = div(n, d); return v == null ? null : v * 100; };
-    const score = (v: number | null, avg: number, sd: number, lower = false) => {
-      if (v == null || !Number.isFinite(sd) || sd <= 0) return null;
-      const p = normalCdf((v - avg) / sd) * 100;
-      return lower ? 100 - p : p;
-    };
-    const stuff = div(r.stuff_plus_sum, r.stuff_plus_data_pitches);
-    const whiff = pct(r.total_whiffs, r.total_swings);
-    const bb = pct(r.total_bb, r.total_pa);
-    const barrel = pct(r.batted_barrels_allowed, r.batted_balls_allowed_with_ev);
-    const stuffAvg = Number.isFinite(pitchingEq.p_ncaa_avg_stuff_plus) ? pitchingEq.p_ncaa_avg_stuff_plus : 100;
-    const stuffSd = Number.isFinite(pitchingEq.p_sd_stuff_plus) && pitchingEq.p_sd_stuff_plus > 0 ? pitchingEq.p_sd_stuff_plus : 3.97;
+    if (!plRates?.hasData) return null;
+    const rank = (v: number | null, key: "stuffPlus" | "whiff" | "bb" | "barrel", invert?: boolean) =>
+      plPop.length > 0 ? percentileRank(v, plPop.map((p) => (p as any)[key] as number | null), invert ? { invert: true } : undefined) : null;
     return {
-      stuff_plus: stuff, stuff_score: score(stuff, stuffAvg, stuffSd),
-      whiff, whiff_score: score(whiff, pitchingEq.p_ncaa_avg_whiff_pct, pitchingEq.p_sd_whiff_pct),
-      bb_pct: bb, bb_score: score(bb, pitchingEq.p_ncaa_avg_bb_pct, pitchingEq.p_sd_bb_pct, true),
-      barrel_pct: barrel, barrel_score: score(barrel, pitchingEq.p_ncaa_avg_barrel_pct, pitchingEq.p_sd_barrel_pct, true),
+      stuff_plus: plRates.stuffPlus, stuff_score: rank(plRates.stuffPlus, "stuffPlus"),
+      whiff: plRates.whiff, whiff_score: rank(plRates.whiff, "whiff"),
+      bb_pct: plRates.bb, bb_score: rank(plRates.bb, "bb", true),
+      barrel_pct: plRates.barrel, barrel_score: rank(plRates.barrel, "barrel", true),
     };
-  }, [plTotals, pitchingEq]);
+  }, [plRates, plPop]);
 
   // Barrel% / Exit Velo / Contact% / Chase% from Hitter Master (blended-aware).
   const { data: hitterAdvanced = null } = useQuery({
