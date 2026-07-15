@@ -177,7 +177,13 @@ export function useGmContracts(playerId?: string | null) {
       const { error } = await (supabase as any).from("gm_contract").delete().eq("id", c.id);
       if (error) throw error;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); toast.success("Contract removed"); },
+    onSuccess: (_data, c) => {
+      // Drop it from the cache immediately so the list updates without waiting on
+      // the refetch (which can lag a just-committed delete).
+      qc.setQueryData<GmContract[]>(key, (old) => (old ?? []).filter((x) => x.id !== c.id));
+      qc.invalidateQueries({ queryKey: key });
+      toast.success("Contract removed");
+    },
     onError: (e: any) => toast.error(`Delete failed: ${e.message}`),
   });
 
