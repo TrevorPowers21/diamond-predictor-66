@@ -295,7 +295,6 @@ export default function PlayerHub() {
   // identity header — so the hub header only shows on the other tabs (and the
   // details it shows are trimmed to what's relevant, e.g. no position on money).
   const embedsOwnHeader = tab === "projections" || tab === "stats";
-  const showPosition = tab !== "financials";
 
   // Outside the program → the Player-Evaluation (scouting) design, with its own
   // Overview/Season Stats tabs. Only rostered players get the program hub.
@@ -341,11 +340,9 @@ export default function PlayerHub() {
           <div className="min-w-0 flex-1">
             <h2 className="text-2xl font-bold tracking-tight">{name}</h2>
             <div className="mt-1 flex flex-wrap items-center gap-2">
-              {showPosition && position && <Badge variant="secondary">{position}</Badge>}
               {classYr && <Badge variant="outline">{classYr}</Badge>}
-              <Badge variant="outline" className="text-muted-foreground">{isPitcher ? "Pitcher" : "Position player"}</Badge>
-              {row && <Badge variant="outline" className={cn("font-semibold", row.finalized ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-500" : "border-amber-500/40 bg-amber-500/10 text-amber-500")}>{row.finalized ? "Finalized" : "Draft"}</Badge>}
-              {c && c.total > 0 && <Badge variant="outline" className="border-[#D4AF37]/40 bg-[#D4AF37]/10 font-semibold text-[#D4AF37]">{money(c.total)}</Badge>}
+              {position && <Badge variant="secondary">{position}</Badge>}
+              {row?.depth_role && ROLE_LABEL[row.depth_role] && <Badge variant="outline" className="text-muted-foreground">{ROLE_LABEL[row.depth_role]}</Badge>}
             </div>
           </div>
         </div>
