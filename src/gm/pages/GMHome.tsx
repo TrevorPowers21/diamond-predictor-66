@@ -119,26 +119,30 @@ export default function GMHome() {
 
       {/* Two-column card grid */}
       <div className="grid lg:grid-cols-2 gap-4 items-start">
-        {/* Budget breakdown */}
-        <Card className="border-border/60">
-          <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
-            <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Budget Breakdown</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0 divide-y divide-border/40">
-            <BudgetLine label="Revenue Share" used={gm.totals.revUsed} total={b?.rev_share_total ?? null} />
-            <BudgetLine label="NIL" used={gm.totals.nilUsed} total={b?.nil_total ?? null} />
-            <BudgetLine label="Other" used={gm.totals.otherUsed} total={b?.other_total ?? null} />
-            <BudgetLine label="Scholarships" used={gm.totals.schUsed / 100} total={b?.scholarship_total ?? null} fmt={(n) => n.toFixed(1)} />
-          </CardContent>
-        </Card>
+        {/* Budget breakdown → Funding Sources */}
+        <Link to="/gm/allocations" className="group block">
+          <Card className="border-border/60 transition-colors group-hover:border-[#D4AF37]/60 group-hover:bg-muted/[0.06]">
+            <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40 flex flex-row items-center justify-between">
+              <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Budget Breakdown</CardTitle>
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground group-hover:text-primary">Funding Sources <ArrowRight className="h-3 w-3" /></span>
+            </CardHeader>
+            <CardContent className="p-0 divide-y divide-border/40">
+              <BudgetLine label="Revenue Share" used={gm.totals.revUsed} total={b?.rev_share_total ?? null} />
+              <BudgetLine label="NIL" used={gm.totals.nilUsed} total={b?.nil_total ?? null} />
+              <BudgetLine label="Other" used={gm.totals.otherUsed} total={b?.other_total ?? null} />
+              <BudgetLine label="Scholarships" used={gm.totals.schUsed / 100} total={b?.scholarship_total ?? null} fmt={(n) => n.toFixed(1)} />
+            </CardContent>
+          </Card>
+        </Link>
 
-        {/* Roster snapshot */}
-        <Card className="border-border/60">
+        {/* Roster snapshot → Roster Management */}
+        <Link to="/gm/roster" className="group block">
+          <Card className="border-border/60 transition-colors group-hover:border-[#D4AF37]/60 group-hover:bg-muted/[0.06]">
           <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40 flex flex-row items-center justify-between">
             <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Roster</CardTitle>
-            <Link to="/gm/roster" className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-primary">
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground group-hover:text-primary">
               Manage <ArrowRight className="h-3 w-3" />
-            </Link>
+            </span>
           </CardHeader>
           <CardContent className="p-0 divide-y divide-border/40">
             <div className="flex items-center justify-between px-4 py-2.5">
@@ -157,7 +161,8 @@ export default function GMHome() {
               </span>
             </div>
           </CardContent>
-        </Card>
+          </Card>
+        </Link>
       </div>
     </div>
   );
