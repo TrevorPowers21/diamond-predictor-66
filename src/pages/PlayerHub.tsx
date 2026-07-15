@@ -334,13 +334,18 @@ export default function PlayerHub() {
   // beneath that header).
   const tabBar = (
     <div className="flex gap-1 overflow-x-auto border-b border-border/60">
-      {TABS.map((t) => (
-        <button key={t.key} onClick={() => setTab(t.key)}
-          className={cn("flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-            tab === t.key ? "border-[#D4AF37] text-[#D4AF37]" : "border-transparent text-muted-foreground hover:text-foreground")}>
-          <t.icon className="h-4 w-4" /> {t.label}
-        </button>
-      ))}
+      {TABS.map((t) => {
+        const disabled = t.key === "development"; // greyed until NewtForce/biomech is wired
+        return (
+          <button key={t.key} onClick={disabled ? undefined : () => setTab(t.key)} disabled={disabled}
+            title={disabled ? "Coming soon" : undefined}
+            className={cn("flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+              disabled ? "cursor-not-allowed border-transparent text-muted-foreground/40"
+                : tab === t.key ? "border-[#D4AF37] text-[#D4AF37]" : "border-transparent text-muted-foreground hover:text-foreground")}>
+            <t.icon className="h-4 w-4" /> {t.label}
+          </button>
+        );
+      })}
     </div>
   );
 
