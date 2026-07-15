@@ -8,6 +8,9 @@ import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { defaultDraftYear, defaultEligibilityRemaining } from "@/gm/lib/playerEligibility";
 import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { applyRoleTransitionAdjustment } from "@/lib/transferPitcherProjection";
+import { pitcherRoleFromDepthRole } from "@/lib/depthRoles";
 import { useMarketability } from "@/gm/hooks/useMarketability";
 import { usePlayerHubPreview } from "@/hooks/usePlayerHubPreview";
 import { ScoutGrade } from "@/components/ScoutGrade";
@@ -273,6 +276,34 @@ export default function PlayerHub() {
     return storedMult > 0 ? (1 + classAdj + build * 0.06) / storedMult : 1;
   })();
   const sc = (v: number | null | undefined) => (v == null ? null : v * devAggScale);
+  // Pitcher line: apply the build's role-transition + dev-agg overlay to the
+  // stored prediction — mirrors PitcherProfile.projectedPitching (production_notes).
+  const pitcherProj = (() => {
+    if (!isPitcher || !projection) return null;
+    const eq = readPitchingWeights();
+    const roleCurve = {
+      tier1Max: eq.rp_to_sp_low_better_tier1_max, tier2Max: eq.rp_to_sp_low_better_tier2_max, tier3Max: eq.rp_to_sp_low_better_tier3_max,
+      tier1Mult: eq.rp_to_sp_low_better_tier1_mult, tier2Mult: eq.rp_to_sp_low_better_tier2_mult, tier3Mult: eq.rp_to_sp_low_better_tier3_mult,
+    };
+    const storedDevAgg = Number.isFinite(Number(projection.dev_aggressiveness)) ? Number(projection.dev_aggressiveness) : 0;
+    const sessionDevAgg = row?.dev_aggressiveness ?? 0;
+    const delta = (sessionDevAgg - storedDevAgg) * 0.06;
+    const unchanged = sessionDevAgg === storedDevAgg;
+    const validRole = (r: unknown): "SP" | "RP" | "SM" | null => (r === "SP" || r === "RP" || r === "SM" ? r : null);
+    const storedRole = validRole(projection.pitcher_role);
+    const sessionRole = row?.depth_role ? pitcherRoleFromDepthRole(row.depth_role as never) : null;
+    const roleChanged = storedRole != null && sessionRole != null && storedRole !== sessionRole;
+    const rt = (v: number | null, pct: number, lower: boolean) => (roleChanged ? applyRoleTransitionAdjustment(v, pct, storedRole, sessionRole, lower, roleCurve) : v);
+    const low = (v: number | null) => (v == null ? null : unchanged ? v : v * (1 - delta));
+    const high = (v: number | null) => (v == null ? null : unchanged ? v : v * (1 + delta));
+    return {
+      era: low(rt(projection.p_era, eq.sp_to_rp_reg_era_pct, true)),
+      fip: low(rt(projection.p_fip, eq.sp_to_rp_reg_fip_pct, true)),
+      whip: low(rt(projection.p_whip, eq.sp_to_rp_reg_whip_pct, true)),
+      k9: high(rt(projection.p_k9, eq.sp_to_rp_reg_k9_pct, false)),
+      bb9: low(rt(projection.p_bb9, eq.sp_to_rp_reg_bb9_pct, true)),
+    };
+  })();
 
   const kv = (label: string, value: string, accent?: boolean) => (
     <div className="flex items-center justify-between">
@@ -424,11 +455,11 @@ export default function PlayerHub() {
               {tabCard("projections", `${PROJECTION_SEASON} Projection`, (
                 isPitcher ? (
                   <div className="grid grid-cols-5 gap-1.5">
-                    {projBox("ERA", num(projection?.p_era, 2))}
-                    {projBox("FIP", num(projection?.p_fip, 2))}
-                    {projBox("WHIP", num(projection?.p_whip, 2))}
-                    {projBox("K/9", num(projection?.p_k9))}
-                    {projBox("BB/9", num(projection?.p_bb9))}
+                    {projBox("ERA", num(pitcherProj?.era, 2))}
+                    {projBox("FIP", num(pitcherProj?.fip, 2))}
+                    {projBox("WHIP", num(pitcherProj?.whip, 2))}
+                    {projBox("K/9", num(pitcherProj?.k9))}
+                    {projBox("BB/9", num(pitcherProj?.bb9))}
                   </div>
                 ) : (
                   <div className="grid grid-cols-5 gap-1.5">

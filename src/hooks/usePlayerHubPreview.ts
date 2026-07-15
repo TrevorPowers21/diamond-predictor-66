@@ -15,7 +15,8 @@ export interface HubProjection {
   p_avg: number | null; p_obp: number | null; p_slg: number | null; p_ops: number | null; p_wrc_plus: number | null;
   p_era: number | null; p_fip: number | null; p_whip: number | null; p_k9: number | null; p_bb9: number | null;
   dev_aggressiveness: number | null; // dev-agg the row was computed with (scale from this to the build's)
-  class_transition: string | null;   // drives the dev-agg class adjustment
+  class_transition: string | null;   // drives the dev-agg class adjustment (hitters)
+  pitcher_role: string | null;       // stored role, for the role-transition overlay
 }
 // Advanced pitcher grades from "Pitching Master" (parallels the hitter card):
 // Stuff+ / Whiff% / BB% / Barrel%, each with its 0–100 percentile score.
