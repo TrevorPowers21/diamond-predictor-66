@@ -1357,14 +1357,18 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
   useEffect(() => {
     // Program hub: seed dev-agg + depth role from the LIVE build so the profile
     // reflects the build; otherwise use the prediction's stored values.
-    setProjectedRole(initialProjectedRole as "SP" | "RP" | "SM");
     setProjectedDevAggressiveness(devAggOverride != null ? devAggOverride : initialProjectedDevAggressiveness);
     const validDepths: PitcherDepthRole[] = [
       "weekend_starter", "weekday_starter", "swing_starter",
       "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever",
       "low_impact_reliever", "specialist_reliever",
     ];
-    setDepthRole(roleOverride && validDepths.includes(roleOverride as PitcherDepthRole) ? (roleOverride as PitcherDepthRole) : initialDepthRole);
+    const effDepthRole = roleOverride && validDepths.includes(roleOverride as PitcherDepthRole) ? (roleOverride as PitcherDepthRole) : initialDepthRole;
+    setDepthRole(effDepthRole);
+    // Program hub / build view: derive the SP/RP/SM role from the build's depth
+    // role, so a weekday_starter projects as SP and the role transition fires.
+    // Standalone scouting keeps the prediction's stored pitcher_role.
+    setProjectedRole(roleOverride ? pitcherRoleFromDepthRole(effDepthRole) : (initialProjectedRole as "SP" | "RP" | "SM"));
   }, [initialProjectedRole, initialProjectedDevAggressiveness, initialDepthRole, devAggOverride, roleOverride]);
   // Session-only display overlay. Profile dropdowns (depth role, dev agg,
   // pitcher role) are NEVER persisted — the coach can preview "what if this
