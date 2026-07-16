@@ -413,7 +413,7 @@ export default function PlayerHub() {
               </div>
               <div className="flex flex-wrap items-center gap-x-5 gap-y-3 px-5 py-4">
                 <div className="-mt-12 flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#0d1a30] ring-4 ring-background">
-                  {headshotUrl ? <img src={headshotUrl} alt={name} className="h-full w-full object-cover" /> : <span className="text-3xl font-bold text-[#D4AF37]" style={OSWALD}>{(name[0] || "?").toUpperCase()}</span>}
+                  {headshotUrl ? <img src={headshotUrl} alt={name} className="h-full w-full object-cover object-top" /> : <span className="text-3xl font-bold text-[#D4AF37]" style={OSWALD}>{(name[0] || "?").toUpperCase()}</span>}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
