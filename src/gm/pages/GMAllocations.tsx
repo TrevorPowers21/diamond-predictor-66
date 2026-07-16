@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { useGmAllocations, type AllocationBucket, type GmAllocationSource } from "@/gm/hooks/useGmAllocations";
 import { useGmRoster } from "@/gm/hooks/useGmRoster";
+import { useGmContracts } from "@/gm/hooks/useGmContracts";
+import { PlayerLink } from "@/gm/components/PlayerLink";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -155,7 +157,7 @@ function SourceCard({ source, players, alloc, allocated, bucketName, onRename, o
             <div className="divide-y divide-border/40">
               {allocatedPlayers.map((p) => (
                 <div key={p.player_id} className="flex items-center gap-2 px-4 py-1.5">
-                  <span className="flex-1 truncate text-sm">{p.name}</span>
+                  <PlayerLink playerId={p.player_id} name={p.name} className="flex-1 truncate text-sm" />
                   <MoneyInput value={alloc?.get(p.player_id) ?? null} onSave={(n) => onSet(p.player_id, n)} className="w-24" />
                   {/* Whole-bucket total — additive by default, edit down to absorb into Unassigned. */}
                   <MoneyInput value={totalFor(p.player_id)} onSave={(n) => onSetTotal(p.player_id, n)} placeholder="—" className="w-24 font-semibold text-[#D4AF37]" />
@@ -202,7 +204,7 @@ function RevAllocColumn({ title, rows, onSet }: { title: string; rows: RevRow[];
         <div className="divide-y divide-border/40">
           {allocated.map((r) => (
             <div key={r.bpid} className="flex items-center gap-2 py-1.5">
-              <span className="flex-1 truncate text-sm">{r.name}</span>
+              <PlayerLink playerId={r.pid} name={r.name} className="flex-1 truncate text-sm" />
               <MoneyInput value={r.rev} onSave={(n) => onSet(r.bpid, r.pid, n)} className="w-24" />
               <button onClick={() => onSet(r.bpid, r.pid, null)} className="text-muted-foreground/40 hover:text-destructive transition" title="Remove"><X className="h-3.5 w-3.5" /></button>
             </div>
@@ -258,9 +260,38 @@ function RevShareCard({ hitters, pitchers, total, allocated, onTotal, onSet }: {
   );
 }
 
+// A vendor whose money comes from CONTRACTS (no manually-created funding source
+// in this build). Read-only here — edit the deals on the Contracts / Financials
+// pages. Budget-cap integration (new-money vs carve) lands in slice 4.
+function ContractVendorCard({ vendorName, rows }: { vendorName: string; rows: { player_id: string; name: string; amount: number }[] }) {
+  const total = rows.reduce((s, r) => s + r.amount, 0);
+  return (
+    <Card className="border-border/60">
+      <CardContent className="space-y-2 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-semibold" style={OSWALD}>{vendorName}</span>
+            <span className="shrink-0 rounded border border-border/50 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">Contracts</span>
+          </div>
+          <span className="shrink-0 font-mono text-sm font-semibold text-[#D4AF37]">{money(total)}</span>
+        </div>
+        <div className="divide-y divide-border/40">
+          {rows.map((r) => (
+            <div key={r.player_id} className="flex items-center justify-between gap-2 py-1.5">
+              <PlayerLink playerId={r.player_id} name={r.name} className="flex-1 truncate text-sm" />
+              <span className="shrink-0 font-mono text-sm tabular-nums text-muted-foreground">{money(r.amount)}</span>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function GMAllocations() {
   const gm = useGmRoster();
   const { sources, isLoading, allocBySource, allocatedTotal, addSource, updateSource, removeSource, setAllocation } = useGmAllocations(gm.selectedBuildId);
+  const { contracts } = useGmContracts();
   const [addOpen, setAddOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<GmAllocationSource | null>(null);
 
@@ -269,6 +300,25 @@ export default function GMAllocations() {
     () => [...gm.hitters, ...gm.pitchers].filter((r) => r.player_id).map((r) => ({ player_id: r.player_id as string, name: r.name })),
     [gm.hitters, gm.pitchers],
   );
+  const nameById = useMemo(() => new Map(players.map((p) => [p.player_id, p.name])), [players]);
+
+  // Contracts grouped by vendor → the money that trickles onto this page. Keyed
+  // by vendor_id (falls back to the vendor name for any pre-link contract), and
+  // amounts summed per player (a player may have several deals with one vendor).
+  const contractVendorsByBucket = useMemo(() => {
+    const byBucket = new Map<"nil" | "other", Map<string, { name: string; vendorId: string | null; rows: Map<string, number> }>>();
+    for (const c of contracts) {
+      if (c.bucket !== "nil" && c.bucket !== "other") continue;
+      if (!c.vendor_id && !c.vendor_name?.trim()) continue;
+      const key = c.vendor_id ?? `n:${(c.vendor_name ?? "").trim().toLowerCase()}`;
+      if (!byBucket.has(c.bucket)) byBucket.set(c.bucket, new Map());
+      const m = byBucket.get(c.bucket)!;
+      if (!m.has(key)) m.set(key, { name: c.vendor_name?.trim() || "Vendor", vendorId: c.vendor_id, rows: new Map() });
+      const g = m.get(key)!;
+      g.rows.set(c.player_id, (g.rows.get(c.player_id) ?? 0) + (c.total_value ?? 0));
+    }
+    return byBucket;
+  }, [contracts]);
   // Rev Share is flat (no categories): a per-player amount stored on the roster
   // (gm_player_finance.rev_share). Edited here, it syncs to Roster Management.
   // Split hitters / pitchers into two columns of one full-width card.
@@ -372,16 +422,25 @@ export default function GMAllocations() {
       ) : (
         buckets.map((bucket) => {
           const list = sources.filter((s) => s.bucket === bucket);
-          if (list.length === 0) return null;
+          // Vendors whose money comes only from contracts (no manual source here).
+          const sourceVendorIds = new Set(list.map((s) => s.vendor_id).filter(Boolean) as string[]);
+          const cVendors = [...(contractVendorsByBucket.get(bucket)?.values() ?? [])]
+            .filter((g) => !(g.vendorId && sourceVendorIds.has(g.vendorId)))
+            .map((g) => ({ name: g.name, rows: [...g.rows].map(([pid, amt]) => ({ player_id: pid, name: nameById.get(pid) ?? "Player", amount: amt })) }))
+            .filter((g) => g.rows.length > 0)
+            .sort((a, b) => a.name.localeCompare(b.name));
+          if (list.length === 0 && cVendors.length === 0) return null;
           const poolTotal = list.reduce((s, x) => s + (x.total ?? 0), 0);
           const poolAllocated = list.reduce((s, x) => s + allocatedTotal(x.id), 0);
+          const catCount = list.length + cVendors.length;
           return (
             <div key={bucket} className="space-y-2">
               <div className="flex items-baseline gap-2">
                 <h3 className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>{BUCKET_LABEL[bucket]}</h3>
-                <span className="text-[11px] text-muted-foreground">{money(poolAllocated)} allocated{poolTotal > 0 && ` of ${money(poolTotal)}`} · {list.length} categor{list.length === 1 ? "y" : "ies"}</span>
+                <span className="text-[11px] text-muted-foreground">{money(poolAllocated)} allocated{poolTotal > 0 && ` of ${money(poolTotal)}`} · {catCount} categor{catCount === 1 ? "y" : "ies"}</span>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
+                {cVendors.map((g) => <ContractVendorCard key={`c:${g.name}`} vendorName={g.name} rows={g.rows} />)}
                 {list.map((s) => (
                   <SourceCard
                     key={s.id}
@@ -413,26 +472,57 @@ export default function GMAllocations() {
         onOpenChange={setAddOpen}
         baseFor={(b) => (b === "nil" ? gm.budget?.nil_total : gm.budget?.other_total) ?? 0}
         onAdd={(name, bucket, total, reallocate) => {
-          addSource(name, bucket, total);
-          // Reallocate: pull this amount out of the general base so the overall
-          // NIL/Other total is unchanged (the money just gets a name now).
-          if (reallocate && total) {
-            const base = (bucket === "nil" ? gm.budget?.nil_total : gm.budget?.other_total) ?? 0;
-            gm.saveBudget(bucket === "nil" ? { nil_total: Math.max(0, base - total) } : { other_total: Math.max(0, base - total) });
-          }
+          // Carve = pull this amount out of the general base so the overall total
+          // stays the same. base_offset records the exact dollars pulled, so delete
+          // can offer to return them. (If the pool exceeds the base, only the base
+          // portion is carved — the rest is new money.)
+          const base = (bucket === "nil" ? gm.budget?.nil_total : gm.budget?.other_total) ?? 0;
+          const offset = reallocate && total ? Math.min(total, base) : 0;
+          addSource(name, bucket, total, offset > 0 ? "from_base" : "new_money", offset);
+          if (offset > 0) gm.saveBudget(bucket === "nil" ? { nil_total: base - offset } : { other_total: base - offset });
         }}
       />
 
       <AlertDialog open={!!confirmDelete} onOpenChange={(o) => { if (!o) setConfirmDelete(null); }}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete "{confirmDelete?.name}"?</AlertDialogTitle>
-            <AlertDialogDescription>This removes the category and all of its player allocations. This can't be undone.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-rose-600 hover:bg-rose-700" onClick={() => { if (confirmDelete) removeSource(confirmDelete.id); setConfirmDelete(null); }}>Delete</AlertDialogAction>
-          </AlertDialogFooter>
+          {(() => {
+            const del = confirmDelete;
+            const offset = del?.base_offset ?? 0;
+            const bWord = del?.bucket === "nil" ? "NIL" : "Other";
+            const removeIt = () => { if (del) removeSource(del.id); setConfirmDelete(null); };
+            const returnToBase = () => {
+              if (!del) return;
+              const base = (del.bucket === "nil" ? gm.budget?.nil_total : gm.budget?.other_total) ?? 0;
+              gm.saveBudget(del.bucket === "nil" ? { nil_total: base + offset } : { other_total: base + offset });
+              removeIt();
+            };
+            // Carved-from-base vendor → ask whether the carve returns to the base or
+            // leaves the budget. New-money vendor → plain delete (its pool just drops).
+            return offset > 0 ? (
+              <>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete "{del?.name}"?</AlertDialogTitle>
+                  <AlertDialogDescription>{money(offset)} of this vendor was taken from the general {bWord} budget. Deleting removes the vendor and its allocations — should that {money(offset)} go back to the general {bWord} budget, or leave the budget entirely?</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={returnToBase}>Return {money(offset)} to {bWord}</AlertDialogAction>
+                  <AlertDialogAction className="bg-rose-600 hover:bg-rose-700" onClick={removeIt}>Remove entirely</AlertDialogAction>
+                </AlertDialogFooter>
+              </>
+            ) : (
+              <>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete "{del?.name}"?</AlertDialogTitle>
+                  <AlertDialogDescription>This removes the vendor and all of its player allocations, and subtracts its pool from the {bWord} total. This can't be undone.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction className="bg-rose-600 hover:bg-rose-700" onClick={removeIt}>Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </>
+            );
+          })()}
         </AlertDialogContent>
       </AlertDialog>
     </div>

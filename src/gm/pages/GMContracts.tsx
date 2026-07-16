@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useGmRoster } from "@/gm/hooks/useGmRoster";
-import { useGmContracts, type ContractBucket, type ContractStatus, type GmContract, type ParsedContract } from "@/gm/hooks/useGmContracts";
+import { useGmContracts, type ContractBucket, type ContractStatus, type FundingMode, type GmContract, type ParsedContract } from "@/gm/hooks/useGmContracts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { FileText, Plus, Upload, X, ExternalLink, Trash2, Check, Search } from "lucide-react";
+import { PlayerLink } from "@/gm/components/PlayerLink";
+import { useGmVendors } from "@/gm/hooks/useGmVendors";
+import { FileText, Plus, Upload, X, ExternalLink, Trash2, Check, Search, Pencil } from "lucide-react";
 
 const OSWALD = { fontFamily: "Oswald, sans-serif" } as const;
 const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
@@ -24,12 +26,13 @@ const STATUS_COLOR: Record<ContractStatus, string> = {
   active: "text-emerald-400", pending: "text-amber-400", expired: "text-muted-foreground", terminated: "text-rose-400",
 };
 
-type ObDraft = { description: string; due_date: string | null };
+type ObDraft = { id?: string; description: string; due_date: string | null };
 
-export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId }: {
-  open: boolean; onOpenChange: (o: boolean) => void; players: { id: string; name: string }[]; defaultPlayerId?: string;
+export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId, editing }: {
+  open: boolean; onOpenChange: (o: boolean) => void; players: { id: string; name: string }[]; defaultPlayerId?: string; editing?: GmContract | null;
 }) {
-  const { addContract, isSaving } = useGmContracts();
+  const { addContract, isSaving, updateContract, isUpdating } = useGmContracts();
+  const { vendors, ensureVendor } = useGmVendors();
   const [file, setFile] = useState<File | null>(null);
   const [playerId, setPlayerId] = useState<string>(defaultPlayerId ?? "");
   const [title, setTitle] = useState("");
@@ -39,6 +42,7 @@ export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [status, setStatus] = useState<ContractStatus>("active");
+  const [fundingMode, setFundingMode] = useState<FundingMode>("new_money");
   const [summary, setSummary] = useState("");
   const [notes, setNotes] = useState("");
   const [obs, setObs] = useState<ObDraft[]>([]);
@@ -49,9 +53,23 @@ export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId
 
   const reset = () => {
     setFile(null); setPlayerId(defaultPlayerId ?? ""); setTitle(""); setBucket("nil"); setVendor(""); setValue(null);
-    setStart(""); setEnd(""); setStatus("active"); setSummary(""); setNotes(""); setObs([]); setParsedRaw(null);
+    setStart(""); setEnd(""); setStatus("active"); setFundingMode("new_money"); setSummary(""); setNotes(""); setObs([]); setParsedRaw(null);
     setExtracting(false); setAutoFilled(false); setReviewed(false);
   };
+
+  // Editing: hydrate the form from the existing contract when the dialog opens.
+  // Obligations keep their id so their fulfilled state survives the save.
+  useEffect(() => {
+    if (!open || !editing) return;
+    setPlayerId(editing.player_id); setTitle(editing.title ?? ""); setBucket(editing.bucket);
+    setVendor(editing.vendor_name ?? ""); setValue(editing.total_value);
+    setStart(editing.start_date ?? ""); setEnd(editing.end_date ?? ""); setStatus(editing.status);
+    setFundingMode(editing.funding_mode ?? "new_money");
+    setSummary(editing.summary ?? ""); setNotes(editing.notes ?? "");
+    setObs(editing.obligations.map((o) => ({ id: o.id, description: o.description, due_date: o.due_date })));
+    setFile(null); setParsedRaw(editing.parsed ?? null); setAutoFilled(false); setReviewed(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing?.id]);
 
   // Read the PDF entirely in the browser (no AI/key) and pre-fill the reliable
   // bits: dollar value + start/end dates. The coach must review before saving.
@@ -71,27 +89,35 @@ export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId
     finally { setExtracting(false); }
   };
 
-  const save = () => {
+  const save = async () => {
     if (!playerId || (autoFilled && !reviewed)) return;
-    addContract({
-      player_id: playerId, title: title.trim() || null, bucket, vendor_name: vendor.trim() || null,
+    // Recognize/create the vendor in the program directory and capture its id
+    // (NIL/Other only; Rev "Source" is the school, not a vendor).
+    const vendor_id = bucket !== "rev" && vendor.trim() ? await ensureVendor(vendor.trim(), bucket) : null;
+    const payload = {
+      player_id: playerId, title: title.trim() || null, bucket, vendor_name: vendor.trim() || null, vendor_id,
+      funding_mode: (bucket !== "rev" ? fundingMode : "new_money") as FundingMode,
       total_value: value, start_date: start || null, end_date: end || null, status,
       summary: summary.trim() || null, notes: notes.trim() || null, parsed: parsedRaw,
       obligations: obs, file,
-    }, () => { reset(); onOpenChange(false); });
+    };
+    const done = () => { reset(); onOpenChange(false); };
+    if (editing) updateContract({ id: editing.id, existing: editing, ...payload }, done);
+    else addContract(payload, done);
   };
+  const busy = isSaving || isUpdating;
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o); }}>
       <DialogContent className="max-w-lg max-h-[88vh] overflow-y-auto">
-        <DialogHeader><DialogTitle style={OSWALD}>Add Contract</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle style={OSWALD}>{editing ? "Edit Contract" : "Add Contract"}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           {/* PDF + AI read */}
           <div className="rounded-lg border border-dashed border-border/70 p-3">
             <div className="flex items-center gap-2">
               <label className="flex flex-1 cursor-pointer items-center gap-2 text-sm">
                 <Upload className="h-4 w-4 text-muted-foreground" />
-                <span className="truncate">{file ? file.name : "Choose contract PDF…"}</span>
+                <span className="truncate">{file ? file.name : editing?.pdf_name ? `${editing.pdf_name} — choose to replace` : "Choose contract PDF…"}</span>
                 <input type="file" accept="application/pdf" className="hidden"
                   onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
               </label>
@@ -116,8 +142,15 @@ export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId
                 <SelectContent>{(["rev", "nil", "other"] as ContractBucket[]).map((b) => <SelectItem key={b} value={b} className="text-sm">{BUCKET_LABEL[b]}</SelectItem>)}</SelectContent>
               </Select>
             </Field>
-            <Field label={bucket === "rev" ? "Source" : "Vendor"}><Input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder={bucket === "rev" ? "School" : "e.g. Opendorse"} className="h-9 text-sm" /></Field>
-            <Field label="Total value"><Input value={value ?? ""} onChange={(e) => { const t = e.target.value.replace(/[^0-9.]/g, ""); setValue(t === "" ? null : Number(t)); }} inputMode="decimal" placeholder="$0" className="h-9 text-sm" /></Field>
+            <Field label={bucket === "rev" ? "Source" : "Vendor"}>
+              <Input list={bucket === "rev" ? undefined : "gm-vendor-options"} value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder={bucket === "rev" ? "School" : "Type or pick a vendor"} className="h-9 text-sm" />
+              {bucket !== "rev" && (
+                <datalist id="gm-vendor-options">
+                  {vendors.filter((v) => v.bucket === bucket).map((v) => <option key={v.id} value={v.name} />)}
+                </datalist>
+              )}
+            </Field>
+            <Field label="Total value"><Input value={value == null ? "" : "$" + value.toLocaleString("en-US")} onChange={(e) => { const t = e.target.value.replace(/[^0-9]/g, ""); setValue(t === "" ? null : Number(t)); }} inputMode="numeric" placeholder="$0" className="h-9 text-sm" /></Field>
             <Field label="Status">
               <Select value={status} onValueChange={(v) => setStatus(v as ContractStatus)}>
                 <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
@@ -129,6 +162,27 @@ export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId
           </div>
 
           <Field label="Summary" full><Input value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="One-line description" className="h-9 text-sm" /></Field>
+
+          {/* Funding: new money on top of the bucket, or carved from the player's
+              existing budget (keeps their total the same). NIL/Other only. */}
+          {bucket !== "rev" && (
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">This money is</label>
+              <div className="grid gap-1.5">
+                {([
+                  { v: "new_money" as const, t: `New money — adds to ${bucket === "nil" ? "NIL" : "Other"}` },
+                  { v: "from_base" as const, t: `From the player's ${bucket === "nil" ? "NIL" : "Other"} budget — details money they already have` },
+                ]).map((o) => (
+                  <button key={o.v} type="button" onClick={() => setFundingMode(o.v)}
+                    className={cn("flex items-start gap-2 rounded-md border p-2 text-left text-xs transition-colors",
+                      fundingMode === o.v ? "border-[#D4AF37] bg-[#D4AF37]/[0.07]" : "border-border/60 hover:border-border")}>
+                    <span className={cn("mt-0.5 h-3 w-3 shrink-0 rounded-full border", fundingMode === o.v ? "border-[#D4AF37] bg-[#D4AF37]" : "border-muted-foreground/50")} />
+                    <span>{o.t}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Obligations */}
           <div className="space-y-2 rounded-lg border border-border/60 p-2.5">
@@ -159,7 +213,7 @@ export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId
           )}
         </div>
         <DialogFooter>
-          <Button size="sm" disabled={!playerId || isSaving || (autoFilled && !reviewed)} onClick={save}>{isSaving ? "Saving…" : "Save Contract"}</Button>
+          <Button size="sm" disabled={!playerId || busy || (autoFilled && !reviewed)} onClick={save}>{busy ? "Saving…" : editing ? "Save Changes" : "Save Contract"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -224,17 +278,19 @@ export function ContractCard({ c, playerName }: { c: GmContract; playerName: str
 function ContractRow({ c, playerName }: { c: GmContract; playerName: string }) {
   const { viewPdf, removeContract, toggleObligation } = useGmContracts();
   const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const dates = [fmtDate(c.start_date), fmtDate(c.end_date)].filter(Boolean).join(" – ");
   const sub = [c.vendor_name, c.start_date ? fmtDate(c.start_date) : null].filter(Boolean).join(" · ");
   return (
+    <>
     <div className="overflow-hidden rounded-lg border border-border/60">
-      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/20">
+      <div onClick={() => setOpen((o) => !o)} className="flex w-full cursor-pointer items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/20">
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold" style={OSWALD}>{playerName}</div>
+          <PlayerLink playerId={c.player_id} name={playerName} className="block truncate text-sm font-semibold" style={OSWALD} />
           <div className="truncate text-xs text-muted-foreground">{sub || "—"}</div>
         </div>
         <span className={cn("shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider", BUCKET_COLOR[c.bucket])}>{BUCKET_LABEL[c.bucket]}</span>
-      </button>
+      </div>
       {open && (
         <div className="space-y-2.5 border-t border-border/50 px-3 pb-3 pt-2.5">
           <div className="flex items-center justify-between gap-2">
@@ -245,6 +301,7 @@ function ContractRow({ c, playerName }: { c: GmContract; playerName: string }) {
             </div>
             <div className="flex shrink-0 items-center gap-1">
               {c.pdf_path && <Button size="icon" variant="ghost" className="h-7 w-7" title="Open PDF" onClick={() => viewPdf(c.pdf_path!)}><ExternalLink className="h-3.5 w-3.5" /></Button>}
+              <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Edit" onClick={() => setEditOpen(true)}><Pencil className="h-3.5 w-3.5" /></Button>
               <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-rose-400" title="Remove" onClick={() => removeContract(c)}><Trash2 className="h-3.5 w-3.5" /></Button>
             </div>
           </div>
@@ -265,6 +322,8 @@ function ContractRow({ c, playerName }: { c: GmContract; playerName: string }) {
         </div>
       )}
     </div>
+    <AddContractDialog open={editOpen} onOpenChange={setEditOpen} players={[{ id: c.player_id, name: playerName }]} defaultPlayerId={c.player_id} editing={c} />
+    </>
   );
 }
 

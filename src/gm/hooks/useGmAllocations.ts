@@ -12,6 +12,9 @@ export interface GmAllocationSource {
   bucket: AllocationBucket;
   total: number | null;
   sort_order: number;
+  vendor_id: string | null; // → gm_vendor (links this source to the program vendor)
+  funding_mode: "new_money" | "from_base"; // new money on top of the bucket, or carved from the base
+  base_offset: number; // dollars pulled from the general base at creation (0 for new money)
 }
 export interface GmAllocation {
   id: string;
@@ -38,7 +41,7 @@ export function useGmAllocations(buildId: string | null | undefined) {
     queryFn: async (): Promise<GmAllocationSource[]> => {
       const { data, error } = await (supabase as any)
         .from("gm_allocation_source")
-        .select("id, name, bucket, total, sort_order")
+        .select("id, name, bucket, total, sort_order, vendor_id, funding_mode, base_offset")
         .eq("customer_team_id", effectiveTeamId)
         .eq("team_build_id", buildId)
         .order("sort_order", { ascending: true })
@@ -78,12 +81,12 @@ export function useGmAllocations(buildId: string | null | undefined) {
   };
 
   const addSource = useMutation({
-    mutationFn: async ({ name, bucket, total }: { name: string; bucket: AllocationBucket; total: number | null }) => {
+    mutationFn: async ({ name, bucket, total, funding_mode, base_offset }: { name: string; bucket: AllocationBucket; total: number | null; funding_mode: "new_money" | "from_base"; base_offset: number }) => {
       if (!effectiveTeamId || !buildId) throw new Error("No team/build in scope");
       const nextOrder = sources.length ? Math.max(...sources.map((s) => s.sort_order)) + 1 : 0;
       const { error } = await (supabase as any).from("gm_allocation_source").insert({
         customer_team_id: effectiveTeamId, team_build_id: buildId, name: name.trim(), bucket, total, sort_order: nextOrder,
-        created_by_user_id: user?.id ?? null,
+        funding_mode, base_offset, created_by_user_id: user?.id ?? null,
       });
       if (error) throw error;
     },
@@ -137,7 +140,7 @@ export function useGmAllocations(buildId: string | null | undefined) {
     isLoading: srcLoading || allocLoading,
     allocBySource,
     allocatedTotal,
-    addSource: (name: string, bucket: AllocationBucket, total: number | null) => addSource.mutate({ name, bucket, total }),
+    addSource: (name: string, bucket: AllocationBucket, total: number | null, funding_mode: "new_money" | "from_base", base_offset: number) => addSource.mutate({ name, bucket, total, funding_mode, base_offset }),
     updateSource: (id: string, patch: Partial<Pick<GmAllocationSource, "name" | "total">>) => updateSource.mutate({ id, patch }),
     removeSource: (id: string) => removeSource.mutate(id),
     setAllocation: (sourceId: string, playerId: string, amount: number | null) => setAllocation.mutate({ sourceId, playerId, amount }),

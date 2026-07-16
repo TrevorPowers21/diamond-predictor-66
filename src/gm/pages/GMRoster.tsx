@@ -439,12 +439,22 @@ export default function GMRoster() {
                           GM finalizes (checkmark writes the bucket sum back here + to the
                           coach). So it reads the authoritative nil_value, not the live buckets. */}
                       <TableCell className="py-1.5 pr-3 text-right font-mono text-sm font-semibold tabular-nums text-foreground">{money(rowActual(r))}</TableCell>
-                      {/* Read-only finalized indicator. Saving is the global Save
-                          button; pushing to the coach is Finalize Roster Pay. */}
+                      {/* Per-row finalize: the ONLY per-player push to the coach's
+                          Team Builder. Click writes this row's Actual Pay to
+                          team_build_players.nil_value (finalizePlayer, finalize=true);
+                          everything else stays in the GM layer until this is clicked. */}
                       <TableCell className="py-1.5 text-center">
-                        {shownFinalized ? <Check className="mx-auto h-4 w-4 text-emerald-500" aria-label="Pushed to coach" />
-                          : dirty ? <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-500" title="Unsaved">•</span>
-                          : null}
+                        <button
+                          onClick={() => gm.finalizePlayer(r, effMoney(r), true, () => setRowDrafts((d) => { const n = { ...d }; delete n[r.build_player_id]; return n; }))}
+                          disabled={gm.isProjection}
+                          title={shownFinalized ? "Finalized — Actual Pay pushed to the coach. Click to re-push the current numbers." : "Finalize & push this player's Actual Pay to the coach's Team Builder"}
+                          className={cn("mx-auto inline-flex h-6 w-6 items-center justify-center rounded transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40",
+                            shownFinalized ? "text-emerald-500 hover:bg-emerald-500/10"
+                              : dirty ? "text-amber-500 hover:bg-emerald-500/10 hover:text-emerald-500"
+                              : "text-muted-foreground/40 hover:bg-emerald-500/10 hover:text-emerald-500")}
+                        >
+                          <Check className="h-4 w-4" />
+                        </button>
                       </TableCell>
                       <TableCell className="py-1.5 text-center">
                         <button

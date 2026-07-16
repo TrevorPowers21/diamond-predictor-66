@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useGmRoster, type GmRow, type RowMoney } from "@/gm/hooks/useGmRoster";
-import { useGmContracts } from "@/gm/hooks/useGmContracts";
+import { useGmContracts, type GmContract } from "@/gm/hooks/useGmContracts";
 import PlayerCompensationDialog from "@/gm/components/PlayerCompensationDialog";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { useMarketability } from "@/gm/hooks/useMarketability";
@@ -10,7 +10,7 @@ import PlayerNotesDialog from "@/components/PlayerNotesDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { StickyNote, ListChecks, Plus, Check } from "lucide-react";
+import { StickyNote, ListChecks, Plus, Check, Pencil, Trash2, ExternalLink } from "lucide-react";
 
 const OSWALD = { fontFamily: "Oswald, sans-serif" } as const;
 const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
@@ -35,7 +35,7 @@ const CONN_COLOR: Record<string, string> = { family_notable: "#22d3ee", family_a
 
 export default function PlayerFinancials({ playerName, playerId, onEditMarketability }: { playerName: string; playerId: string; onEditMarketability?: () => void }) {
   const gm = useGmRoster();
-  const { contracts, toggleObligation } = useGmContracts(playerId);
+  const { contracts, toggleObligation, removeContract, viewPdf } = useGmContracts(playerId);
   const fmtDate = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
   // How a contract reads in the table / tracker: Rev Share shows "Revenue Share";
   // NIL & Other show the vendor category they fall under.
@@ -43,6 +43,7 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
     ct.bucket === "rev" ? "Revenue Share" : (ct.vendor_name || BUCKET_LABEL[ct.bucket as keyof typeof BUCKET_LABEL]);
   const [notesOpen, setNotesOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [editing, setEditing] = useState<GmContract | null>(null);
   const [compOpen, setCompOpen] = useState(false);
   const [savingComp, setSavingComp] = useState(false);
 
@@ -149,7 +150,12 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
                       <div className="truncate text-sm font-medium text-foreground">{contractLabel(ct)}</div>
                       {ct.bucket !== "rev" && <div className="truncate text-[11px] text-muted-foreground">{BUCKET_LABEL[ct.bucket]}</div>}
                     </div>
-                    <span className="shrink-0 font-mono text-sm font-semibold text-[#D4AF37]">{money(ct.total_value)}</span>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <span className="mr-1 font-mono text-sm font-semibold text-[#D4AF37]">{money(ct.total_value)}</span>
+                      {ct.pdf_path && <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Open PDF" onClick={() => viewPdf(ct.pdf_path!)}><ExternalLink className="h-3.5 w-3.5" /></Button>}
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Edit" onClick={() => setEditing(ct)}><Pencil className="h-3.5 w-3.5" /></Button>
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-rose-400" title="Remove" onClick={() => removeContract(ct)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -217,6 +223,7 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
       )}
 
       <AddContractDialog open={addOpen} onOpenChange={setAddOpen} players={[{ id: playerId, name: playerName }]} defaultPlayerId={playerId} />
+      <AddContractDialog open={!!editing} onOpenChange={(o) => { if (!o) setEditing(null); }} players={[{ id: playerId, name: playerName }]} defaultPlayerId={playerId} editing={editing} />
 
       {row && (
         <PlayerCompensationDialog
