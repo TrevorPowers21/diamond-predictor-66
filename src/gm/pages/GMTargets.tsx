@@ -14,6 +14,7 @@ import PlayerNotesDialog from "@/components/PlayerNotesDialog";
 import { ArrowUpDown, Check, ChevronDown, ChevronRight, GripVertical, Plus, Search, StickyNote, Target as TargetIcon, Trash2 } from "lucide-react";
 import { portalStatusMeta } from "@/components/PortalStatus";
 import { cn } from "@/lib/utils";
+import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -124,6 +125,20 @@ export default function GMTargets() {
   }, [allHitters]);
   const hitterCount = allHitters.length, pitcherCount = allPitchers.length;
 
+  // Projected Value = the target's roster budget-share (position-weighted WAR /
+  // roster total × budget) — mirrors the player hub. Falls back to the stored
+  // market value for targets not on the roster or when there's no budget set.
+  const posWeightedWar = (war: number | null, position: string | null) => Number(war ?? 0) * getPositionValueMultiplier(position);
+  const rosterById = useMemo(() => new Map([...gm.hitters, ...gm.pitchers].filter((r) => r.player_id).map((r) => [r.player_id as string, r])), [gm.hitters, gm.pitchers]);
+  const rosterScore = useMemo(() => [...gm.hitters, ...gm.pitchers].reduce((s, r) => s + posWeightedWar(r.war, r.position), 0), [gm.hitters, gm.pitchers]);
+  const gmBudget = gm.coachTotalBudget ?? 0;
+  const projectedValue = (t: GmTarget): number | null => {
+    const row = rosterById.get(t.player_id);
+    if (!row || gmBudget <= 0) return null;
+    return Math.max(0, (posWeightedWar(row.war, row.position) / Math.max(rosterScore, 33)) * gmBudget);
+  };
+  const displayValue = (t: GmTarget): number | null => projectedValue(t) ?? t.market_value ?? null;
+
   const toggleSort = (sk: SortKey) => {
     if (sortKey === sk) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortKey(sk); setSortDir(sk === "name" ? "asc" : "desc"); }
@@ -133,8 +148,8 @@ export default function GMTargets() {
     const mul = sortDir === "asc" ? 1 : -1;
     return [...rows].sort((a, b) => {
       if (sortKey === "name") return `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`) * mul;
-      const va = Number((a as any)[sortKey] ?? -Infinity), vb = Number((b as any)[sortKey] ?? -Infinity);
-      return (va - vb) * mul;
+      const val = (r: GmTarget) => (sortKey === "market_value" ? displayValue(r) : Number((r as any)[sortKey])) ?? -Infinity;
+      return (val(a) - val(b)) * mul;
     });
   };
 
@@ -155,7 +170,7 @@ export default function GMTargets() {
     () => setConfirmAdd(null),
   );
 
-  const statBadge = (t: GmTarget) => { const c = portalStatusMeta(t.portal_status); return <Badge variant="outline" className={`text-[10px] ${c.bg} ${c.text} border-current/30`}>{c.label}</Badge>; };
+  const statBadge = (t: GmTarget) => { const c = portalStatusMeta(t.portal_status); return <Badge variant="outline" className={`whitespace-nowrap text-[10px] ${c.bg} ${c.text} border-current/30`}>{c.label}</Badge>; };
 
   const renderTable = (rows: GmTarget[], scope: ScopeKey) => {
     const sorted = sortRows(rows, scope);
@@ -171,7 +186,7 @@ export default function GMTargets() {
                 <TableHead className="min-w-[200px]"><SortBtn label="Player" sk="name" active={sortKey === "name"} dir={sortDir} onClick={toggleSort} /></TableHead>
                 <TableHead className="text-[11px]">Status</TableHead>
                 <TableHead className="text-right"><SortBtn label={warLabel} sk="war" active={sortKey === "war"} dir={sortDir} onClick={toggleSort} align="right" /></TableHead>
-                <TableHead className="text-right"><SortBtn label="Market Value" sk="market_value" active={sortKey === "market_value"} dir={sortDir} onClick={toggleSort} align="right" /></TableHead>
+                <TableHead className="text-right"><SortBtn label="Projected Value" sk="market_value" active={sortKey === "market_value"} dir={sortDir} onClick={toggleSort} align="right" /></TableHead>
                 <TableHead className="text-right"><SortBtn label="Asking" sk="asking" active={sortKey === "asking"} dir={sortDir} onClick={toggleSort} align="right" /></TableHead>
                 <TableHead className="text-right"><SortBtn label="Willing to Pay" sk="offer" active={sortKey === "offer"} dir={sortDir} onClick={toggleSort} align="right" /></TableHead>
                 <TableHead className="text-center text-[11px]">Notes</TableHead>
@@ -200,7 +215,7 @@ export default function GMTargets() {
                         </TableCell>
                         <TableCell className="py-1.5">{statBadge(t)}</TableCell>
                         <TableCell className="py-1.5 text-right font-mono text-sm tabular-nums">{num(t.war, 2)}</TableCell>
-                        <TableCell className="py-1.5 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(t.market_value)}</TableCell>
+                        <TableCell className="py-1.5 text-right font-mono text-sm tabular-nums text-muted-foreground">{money(displayValue(t))}</TableCell>
                         <TableCell className="py-1.5 text-right"><MoneyInput value={t.asking} onSave={(n) => saveAsking(t.player_id, n)} /></TableCell>
                         <TableCell className="py-1.5 text-right"><MoneyInput value={t.offer} onSave={(n) => saveOffer(t.player_id, n)} /></TableCell>
                         <TableCell className="py-1.5 text-center">
