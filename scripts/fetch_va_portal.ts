@@ -55,34 +55,44 @@ async function ensureLoggedIn(ctx: BrowserContext): Promise<"ok" | "needs_login"
 }
 
 async function downloadCsv(ctx: BrowserContext): Promise<string> {
-  const page = await ctx.newPage();
-  await page.goto(VA_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
-  await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
+  // The download event intermittently never fires (VA export flakiness / the
+  // click landing before the table's data + handler are ready). Retry a few
+  // times with a fresh page, a data-loaded wait, and a generous timeout.
+  const ATTEMPTS = 3;
+  let lastErr: Error | null = null;
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    const page = await ctx.newPage();
+    try {
+      await page.goto(VA_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
+      // Wait until the transfers table has actually rendered rows — so Export
+      // isn't clicked before the data (and its export handler) exist.
+      await page.locator(".ant-table-row, table tbody tr").first()
+        .waitFor({ state: "visible", timeout: 30000 }).catch(() => {});
+      await page.waitForTimeout(2000);
 
-  // Give the SPA's button a moment to mount after data loads.
-  await page.waitForTimeout(2000);
+      // VA renders an Ant Design <button> with text "Export".
+      const exportBtn = page.locator('button:has-text("Export")').first();
+      await exportBtn.waitFor({ state: "visible", timeout: 30000 });
 
-  // VA renders an Ant Design <button> with text "Export". Direct text
-  // selector is more reliable than getByRole here.
-  const exportBtn = page.locator('button:has-text("Export")').first();
-  try {
-    await exportBtn.waitFor({ state: "visible", timeout: 30000 });
-  } catch {
-    await page.close();
-    throw new Error("Could not find Export button on /transfers — VA UI may have changed");
+      const downloadPromise = page.waitForEvent("download", { timeout: 120000 });
+      await exportBtn.click();
+      const download = await downloadPromise;
+
+      const destPath = join(INBOX_DIR, `transfers_${todayStamp()}.csv`);
+      mkdirSync(INBOX_DIR, { recursive: true });
+      await download.saveAs(destPath);
+      await page.close();
+      if (attempt > 1) console.log(`Export succeeded on attempt ${attempt}.`);
+      return destPath;
+    } catch (e) {
+      lastErr = e as Error;
+      await page.close().catch(() => {});
+      console.log(`Export attempt ${attempt}/${ATTEMPTS} failed: ${lastErr.message}`);
+      if (attempt < ATTEMPTS) await new Promise((r) => setTimeout(r, 8000));
+    }
   }
-
-  const downloadPromise = page.waitForEvent("download", { timeout: 60000 });
-  await exportBtn.click();
-
-  const download = await downloadPromise;
-  const stamp = todayStamp();
-  const filename = `transfers_${stamp}.csv`;
-  const destPath = join(INBOX_DIR, filename);
-  mkdirSync(INBOX_DIR, { recursive: true });
-  await download.saveAs(destPath);
-  await page.close();
-  return destPath;
+  throw lastErr ?? new Error("Could not export CSV from /transfers — VA UI may have changed");
 }
 
 async function main() {
