@@ -233,6 +233,7 @@ export default function GMRoster() {
   const [budgetDraft, setBudgetDraft] = useState<BudgetCaps | null>(null);
   // Remove-player flow + build management dialogs.
   const [removeRow, setRemoveRow] = useState<GmRow | null>(null);
+  const [confirmFinalizeRow, setConfirmFinalizeRow] = useState<GmRow | null>(null);
   const [removeBuildName, setRemoveBuildName] = useState("");
   const [buildDialog, setBuildDialog] = useState<null | "new" | "rename">(null);
   const [buildName, setBuildName] = useState("");
@@ -411,7 +412,7 @@ export default function GMRoster() {
                           everything else stays in the GM layer until this is clicked. */}
                       <TableCell className="py-1.5 text-center">
                         <button
-                          onClick={() => gm.finalizePlayer(r, effMoney(r), true, () => setRowDrafts((d) => { const n = { ...d }; delete n[r.build_player_id]; return n; }))}
+                          onClick={() => setConfirmFinalizeRow(r)}
                           disabled={gm.isProjection}
                           title={shownFinalized ? "Finalized — Actual Pay pushed to the coach. Click to re-push the current numbers." : "Finalize & push this player's Actual Pay to the coach's Team Builder"}
                           className={cn("mx-auto inline-flex h-6 w-6 items-center justify-center rounded transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40",
@@ -701,8 +702,8 @@ export default function GMRoster() {
             <AlertDialogTitle style={OSWALD}>Remove {removeRow?.name} from roster?</AlertDialogTitle>
             <AlertDialogDescription>
               {gm.activeBuildIsDefault
-                ? "You're on the default roster — this starts a new working build off the default (name it below) and marks the player leaving. You'll set the departure reason later."
-                : "The player is marked leaving on this build. You'll set the departure reason later."}
+                ? "You're on the default roster — this starts a new working build off the default (name it below) and marks the player leaving. You can mark departure reason under GM Settings."
+                : "It will remove this player from the saved build on team builder. You can mark departure reason under GM Settings."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {gm.activeBuildIsDefault && (
@@ -715,6 +716,29 @@ export default function GMRoster() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => { if (removeRow) gm.removePlayer(removeRow, removeBuildName); setRemoveRow(null); }}
             >Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Finalize confirm — the per-row checkmark is the only per-player push
+          to the coach's Team Builder, so confirm before overriding it. */}
+      <AlertDialog open={!!confirmFinalizeRow} onOpenChange={(o) => { if (!o) setConfirmFinalizeRow(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle style={OSWALD}>Finalize {confirmFinalizeRow?.name}'s Actual Pay?</AlertDialogTitle>
+            <AlertDialogDescription>
+              It will override what is listed on the Team Builder page.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const r = confirmFinalizeRow;
+                if (r) gm.finalizePlayer(r, effMoney(r), true, () => setRowDrafts((d) => { const n = { ...d }; delete n[r.build_player_id]; return n; }));
+                setConfirmFinalizeRow(null);
+              }}
+            >Finalize</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
