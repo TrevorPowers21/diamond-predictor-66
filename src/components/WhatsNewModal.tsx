@@ -46,19 +46,18 @@ const RELEASES: Release[] = [
         ],
       },
       {
-        title: "Contracts, Read On Your Own Device",
+        title: "Contracts",
         tagline:
           "Keep every signed deal with the player it belongs to, with value, dates, and obligations tracked for you.",
         details: [
-          "Upload a contract PDF and the value and dates are read right in your browser. The file never leaves your computer and is never sent to any outside service.",
+          "Store your contracts in the database, filed under the player they belong to.",
           "Type a vendor and it links to one you already have or stores a new one, so contracts and funding sources stay in sync.",
           "Track obligations like posts and appearances, and edit or remove any contract at any time.",
         ],
       },
     ],
     whatElse: [
-      "Player names are clickable across the Front Office, taking you straight to that player's page.",
-      "The Target Board now shows Projected Value, falling back to market value when a target is not yet on your roster.",
+      "Team Builder and the Front Office work in two directions: the roster and money changes coaches save in Team Builder carry into the Front Office, and Front Office updates carry back, all in one process.",
     ],
   },
   {
