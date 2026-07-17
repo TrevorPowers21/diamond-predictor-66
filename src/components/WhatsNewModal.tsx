@@ -16,9 +16,51 @@ type Release = {
   headline: string;   // One-line summary used in the history view
   features: Feature[];
   whatElse: string[];
+  landingRoute?: string; // where dismissing this release sends the coach (full nav)
 };
 
 const RELEASES: Release[] = [
+  {
+    date: "2026-07-17",
+    headline: "Introducing the Front Office",
+    landingRoute: "/gm",
+    features: [
+      {
+        title: "Your Program's Front Office",
+        tagline:
+          "A dedicated home for the money side of roster building, kept separate from evaluation. Manage your budget, pay, funding, and contracts in one place, then push finalized numbers to your Team Builder when you are ready.",
+        details: [
+          "Roster Management lists every player with their scholarship, revenue share, NIL, and other pay, alongside what you have used against your budget.",
+          "Set your program budget once and it shows everywhere, from the dashboard briefing to the roster totals.",
+          "Finalize a player one row at a time with the checkmark. Only the players you finalize get pushed to your Team Builder, so nothing is committed until you say so.",
+        ],
+      },
+      {
+        title: "Funding Sources and Vendors",
+        tagline:
+          "Track the collectives, sponsors, and revenue that fund your roster, and split each one across your players.",
+        details: [
+          "Add a vendor, set its pool, and allocate it to players. Each vendor either adds new money on top of your budget or comes out of your general NIL or Other budget, your call.",
+          "Vendors are stored under your program, so once you add one it is there to reuse and it recognizes it the next time you type it.",
+          "Every allocation trickles into your totals, so your budget always reflects what is actually committed.",
+        ],
+      },
+      {
+        title: "Contracts, Read On Your Own Device",
+        tagline:
+          "Keep every signed deal with the player it belongs to, with value, dates, and obligations tracked for you.",
+        details: [
+          "Upload a contract PDF and the value and dates are read right in your browser. The file never leaves your computer and is never sent to any outside service.",
+          "Type a vendor and it links to one you already have or stores a new one, so contracts and funding sources stay in sync.",
+          "Track obligations like posts and appearances, and edit or remove any contract at any time.",
+        ],
+      },
+    ],
+    whatElse: [
+      "Player names are clickable across the Front Office, taking you straight to that player's page.",
+      "The Target Board now shows Projected Value, falling back to market value when a target is not yet on your roster.",
+    ],
+  },
   {
     date: "2026-07-04",
     headline: "An improved roster building experience",
@@ -506,8 +548,13 @@ export function WhatsNewModal() {
     // Go") so anyone who's had the app open across a deploy picks up the latest
     // build + data instead of working off a stale cache. Runs once per release
     // (the seen flag above stops the modal, and this reload, from repeating).
+    // A release that introduces a new area (Front Office) sends the coach straight
+    // there on dismiss; otherwise a plain reload picks up the fresh build. Either
+    // way it is a full navigation, so the new build + data load cleanly.
     try {
-      window.location.reload();
+      const target = RELEASES[0].landingRoute;
+      if (target) window.location.assign(target);
+      else window.location.reload();
     } catch {
       // ignore (SSR / unavailable)
     }
