@@ -1649,7 +1649,21 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     if (pitcherEligible(p)) v += effectiveNilForPlayer(p, "pitcher");
     return sum + v;
   }, 0);
-  const budgetRemaining = totalBudget - totalEffectiveNil;
+  // Budget Used / Remaining reflect ONLY the actual pay the coach has entered
+  // (overridden rows) — not the projected budget shares that fill each
+  // untouched player's row. Type a number on a player and it lands here;
+  // rows you haven't touched contribute $0 to the summary even though their
+  // row still shows a projected share. (Per-player projections + the
+  // Analytics distributions keep using totalEffectiveNil above.)
+  const totalActualNil = rosterPlayers.reduce((sum, p) => {
+    if (!countsTowardRoster(p)) return sum;
+    if (!p.nil_value_overridden) return sum;
+    let v = 0;
+    if (hitterEligible(p)) v += effectiveNilForPlayer(p, "hitter");
+    if (pitcherEligible(p)) v += effectiveNilForPlayer(p, "pitcher");
+    return sum + v;
+  }, 0);
+  const budgetRemaining = totalBudget - totalActualNil;
 
   // ── Block R: calcTotals, table total useMemos, projectedBudgetValue ──────────
   const calcTotals = useCallback((rows: BuildPlayer[], forSide?: "hitter" | "pitcher") => {
@@ -1829,6 +1843,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     targetPositionPlayers,
     targetPitchers,
     totalEffectiveNil,
+    totalActualNil,
     totalRosterPlayerScore,
     budgetRemaining,
     pitchingTierMultipliers,

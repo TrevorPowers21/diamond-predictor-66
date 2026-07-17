@@ -1379,7 +1379,7 @@ export default function TeamBuilder() {
     targetPositionTableTotals, targetPitcherTableTotals,
     hitterEligible, pitcherEligible,
     positionPlayers, pitchers, targetPositionPlayers, targetPitchers,
-    totalEffectiveNil, totalRosterPlayerScore, budgetRemaining,
+    totalEffectiveNil, totalActualNil, totalRosterPlayerScore, budgetRemaining,
     pitchingTierMultipliers, pitchingPvfForRole,
   } = useTeamBuilderSimulation({
     teams, teamsByName, pitchingMasterRows, pitchingPowerEq, newConfStats,
@@ -3690,7 +3690,7 @@ export default function TeamBuilder() {
           </div>
           <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4 text-center">
             <div className="text-muted-foreground text-xs uppercase tracking-wide">Budget Used</div>
-            <div className="text-2xl font-bold tracking-tight mt-1">${Math.round(totalEffectiveNil).toLocaleString()}</div>
+            <div className="text-2xl font-bold tracking-tight mt-1">${Math.round(totalActualNil).toLocaleString()}</div>
           </div>
           <div className={`rounded-lg border-2 p-4 text-center ${budgetRemaining < 0 ? "border-destructive/30 bg-destructive/5" : "border-primary/20 bg-primary/5"}`}>
             <div className="text-muted-foreground text-xs uppercase tracking-wide">Remaining</div>
