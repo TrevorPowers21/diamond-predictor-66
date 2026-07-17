@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, GripVertical, ExternalLink, X, FileText, Phone, CalendarClock, DollarSign, Settings } from "lucide-react";
+import { Plus, GripVertical, ExternalLink, X, FileText, Phone, CalendarClock, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OSWALD = { fontFamily: "'Oswald', sans-serif" } as const;
@@ -45,11 +45,12 @@ const SECTIONS: { type: RecruitType; title: string }[] = [
 /** Position-board grouping — how a coach organizes prospects by role on the field. */
 const POSITION_GROUPS: { key: string; title: string; positions: string[] }[] = [
   { key: "catcher", title: "Catcher", positions: ["C"] },
-  { key: "middle_if", title: "Middle Infield", positions: ["2B", "SS"] },
   { key: "corner_if", title: "Corner Infield", positions: ["1B", "3B", "DH"] },
-  { key: "outfield", title: "Outfield", positions: ["LF", "CF", "RF", "OF"] },
-  { key: "pitcher", title: "Pitcher", positions: ["RHP", "LHP", "SP", "RP", "P"] },
-  { key: "two_way", title: "Two-Way", positions: ["TWP"] },
+  { key: "middle_if", title: "Middle Infield", positions: ["2B", "SS"] },
+  { key: "outfield", title: "Outfielder", positions: ["LF", "CF", "RF", "OF"] },
+  { key: "two_way", title: "TWP", positions: ["TWP"] },
+  { key: "rhp", title: "RHP", positions: ["RHP", "SP", "RP", "P"] },
+  { key: "lhp", title: "LHP", positions: ["LHP"] },
 ];
 
 function toneClass(tone: string): string {
@@ -100,8 +101,6 @@ function SortableRecruitCard({ recruit, index, onEdit, onRemove, onStageChange, 
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.55 : 1, zIndex: isDragging ? 10 : "auto", position: "relative" };
   const name = `${recruit.first_name ?? ""} ${recruit.last_name ?? ""}`.trim() || "Unnamed";
   const locale = recruit.high_school ? `${recruit.high_school}${recruit.state ? ` (${recruit.state})` : ""}` : (recruit.state ?? "");
-  // Once a recruit commits/signs, "Willing to Pay" becomes the agreed number.
-  const payLabel = recruit.stage === "committed" || recruit.stage === "signed" ? "Agreed" : "Willing";
   return (
     <div ref={setNodeRef} style={style} onClick={onEdit} title="Edit recruit" className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 bg-card/40 p-2.5 transition-colors hover:border-[#D4AF37]/40">
       <button {...attributes} {...listeners} onClick={(e) => e.stopPropagation()} className="mt-0.5 cursor-grab text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing" title="Drag to reorder">
@@ -110,35 +109,23 @@ function SortableRecruitCard({ recruit, index, onEdit, onRemove, onStageChange, 
       <span className="mt-0.5 inline-flex h-6 min-w-[26px] shrink-0 items-center justify-center rounded-md bg-[#D4AF37]/10 px-1.5 text-[12px] font-bold tabular-nums text-[#D4AF37] ring-1 ring-[#D4AF37]/20">{index}</span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-semibold">{name}</span>
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold">{name}</span>
           {recruit.position && <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">{recruit.position}</span>}
-          {recruit.level !== "hs" && (
-            <span className="shrink-0 rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-400" title="Junior college">
-              {recruit.level === "juco_fr" ? "FR JUCO" : "SO JUCO"}
-            </span>
-          )}
+          <span onClick={(e) => e.stopPropagation()} className="shrink-0"><StageSelect value={recruit.stage} onChange={onStageChange} /></span>
         </div>
-        {(locale || recruit.travel_org) && (
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">{locale}{locale && recruit.travel_org ? " · " : ""}{recruit.travel_org}</div>
+        {(recruit.projection_tier || recruit.level !== "hs") && (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <TierBadge value={recruit.projection_tier} />
+            {recruit.level !== "hs" && (
+              <span className="shrink-0 rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-400" title="Junior college">
+                {recruit.level === "juco_fr" ? "FR JUCO" : "SO JUCO"}
+              </span>
+            )}
+          </div>
         )}
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          <TierBadge value={recruit.projection_tier} />
-          <span onClick={(e) => e.stopPropagation()}><StageSelect value={recruit.stage} onChange={onStageChange} /></span>
-        </div>
-        {/* Deal — asking price + what we're willing to pay. Click to edit. */}
-        <button onClick={(e) => { e.stopPropagation(); onDeal(); }} className="mt-1.5 flex items-center gap-2 text-xs hover:opacity-80" title="Edit deal">
-          <DollarSign className="h-3 w-3 text-[#D4AF37]" />
-          {recruit.asking_price == null && recruit.target_offer == null && recruit.scholarship_pct == null ? (
-            <span className="text-muted-foreground/70">Add deal</span>
-          ) : (
-            <span className="tabular-nums">
-              <span className="text-muted-foreground">Ask</span> <span className="font-semibold text-foreground">{money(recruit.asking_price)}</span>
-              <span className="mx-1.5 text-muted-foreground/40">·</span>
-              <span className="text-muted-foreground">{payLabel}</span> <span className="font-semibold text-[#D4AF37]">{money(recruit.target_offer)}</span>
-              {recruit.scholarship_pct != null && <><span className="mx-1.5 text-muted-foreground/40">·</span><span className="text-muted-foreground">Schol</span> <span className="font-semibold text-foreground">{recruit.scholarship_pct}%</span></>}
-            </span>
-          )}
-        </button>
+        {(locale || recruit.travel_org) && (
+          <div className="mt-1 truncate text-xs text-muted-foreground">{locale}{locale && recruit.travel_org ? " · " : ""}{recruit.travel_org}</div>
+        )}
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
           {recruit.link && (
             <a href={recruit.link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
