@@ -1808,13 +1808,16 @@ export default function TeamBuilder() {
       newBuild();
       return;
     }
-    // Prefer most-recent coach build for the current season; fall back to any
-    // prior-year coach build, then to the most-recent default build.
-    // Builds are sorted updated_at DESC by the query, so [0] is always the latest.
+    // Prefer the build flagged active (the live roster the Front Office uses),
+    // so both sides open to the same roster. Fall back to most-recent coach
+    // build for the current season, then any prior-year coach build, then the
+    // most-recent default build. Builds are sorted updated_at DESC by the
+    // query, so [0] is always the latest.
     const coachBuilds = builds.filter((b: any) => !b.is_default);
     const defaultBuilds = builds.filter((b: any) => b.is_default);
+    const activeBuild = builds.find((b: any) => b.is_active && !b.is_default);
     const currentYearCoachBuilds = coachBuilds.filter((b: any) => b.academic_year === PROJECTION_SEASON);
-    const toLoad = (currentYearCoachBuilds[0] ?? coachBuilds[0] ?? defaultBuilds[0]) as { id: string; is_default?: boolean } | undefined;
+    const toLoad = (activeBuild ?? currentYearCoachBuilds[0] ?? coachBuilds[0] ?? defaultBuilds[0]) as { id: string; is_default?: boolean } | undefined;
     if (!toLoad) return;
     setHasSavedOnce(!toLoad.is_default);
     loadBuild(toLoad.id);
