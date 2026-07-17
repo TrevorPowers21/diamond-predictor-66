@@ -1379,7 +1379,7 @@ export default function TeamBuilder() {
     targetPositionTableTotals, targetPitcherTableTotals,
     hitterEligible, pitcherEligible,
     positionPlayers, pitchers, targetPositionPlayers, targetPitchers,
-    totalEffectiveNil, totalActualNil, totalRosterPlayerScore, budgetRemaining,
+    totalEffectiveNil, totalActualNil, totalRosterPlayerScore, budgetRemaining, projectedBudgetRemaining,
     pitchingTierMultipliers, pitchingPvfForRole,
   } = useTeamBuilderSimulation({
     teams, teamsByName, pitchingMasterRows, pitchingPowerEq, newConfStats,
@@ -3698,6 +3698,9 @@ export default function TeamBuilder() {
           <div className={`rounded-lg border-2 p-4 text-center ${budgetRemaining < 0 ? "border-destructive/30 bg-destructive/5" : "border-primary/20 bg-primary/5"}`}>
             <div className="text-muted-foreground text-xs uppercase tracking-wide">Remaining</div>
             <div className={`text-2xl font-bold tracking-tight mt-1 ${budgetRemaining < 0 ? "text-destructive" : ""}`}>${Math.round(budgetRemaining).toLocaleString()}</div>
+            {totalBudget > 0 && (
+              <div className={`text-[11px] mt-0.5 ${projectedBudgetRemaining < 0 ? "text-destructive/80" : "text-muted-foreground"}`}>· ${Math.round(projectedBudgetRemaining).toLocaleString()} if projected</div>
+            )}
           </div>
         </div>
 

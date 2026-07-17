@@ -1551,24 +1551,24 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const v = Number(p.nil_value);
       return Number.isFinite(v) ? Math.max(0, v) : 0;
     }
+    // STABLE share: price every player against the FULL budget and the FULL
+    // roster score (overridden players included in the denominator), so a
+    // player's projected value does NOT move when a coach enters actual pay
+    // on someone else. Entering a value overrides that one player's row only
+    // (handled above). The live "redistribute the remaining budget as pay is
+    // assigned" behavior is deferred to the Situation Room, not Team Builder.
     // Denominator includes returners + on-roster targets + the target being
-    // computed (so off-roster targets each see their own "what if I were
-    // the next add" share). Other off-roster targets are skipped so they
-    // don't dilute each other's marginal value — each one is independently
-    // priced as the lone next addition.
-    let overriddenTotal = 0;
-    let nonOverriddenScore = 0;
+    // computed (so off-roster targets each see their own "what if I were the
+    // next add" share). Other off-roster targets are skipped so they don't
+    // dilute each other's marginal value — each priced as the lone next add.
+    let totalScore = 0;
     for (const rp of rosterPlayers) {
       if (!isProjectedStatus(rp)) continue;
       if (!countsTowardRoster(rp) && rp !== p) continue;
-      if (rp.nil_value_overridden) {
-        overriddenTotal += Math.max(0, Number(rp.nil_value) || 0);
-      } else {
-        nonOverriddenScore += projectedPlayerScore(rp);
-      }
+      totalScore += projectedPlayerScore(rp);
     }
-    const remainingBudget = Math.max(0, totalBudget - overriddenTotal);
-    if (nonOverriddenScore <= 0) return 0;
+    const remainingBudget = totalBudget;
+    if (totalScore <= 0) return 0;
     const score = projectedPlayerScore(p);
     // League-wide denominator floor — fixes "shrinking roster inflates
     // per-player share" bug exposed by the off-roster target toggle.
@@ -1611,7 +1611,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // → smaller individual shares, exactly the prior behavior.
     const RAW_WAR_BENCHMARK = 33;
     const adjustedBenchmark = RAW_WAR_BENCHMARK * programTierMultiplier;
-    const denominator = Math.max(nonOverriddenScore, adjustedBenchmark);
+    const denominator = Math.max(totalScore, adjustedBenchmark);
     return (score / denominator) * remainingBudget;
   }, [projectedPlayerScore, totalBudget, rosterPlayers, programTierMultiplier]);
 
@@ -1664,6 +1664,10 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     return sum + v;
   }, 0);
   const budgetRemaining = totalBudget - totalActualNil;
+  // Projected-aware remaining: budget minus (actual entered + each still-blank
+  // player's stable projected share). Lets a coach see headroom assuming the
+  // untouched players land at projection, alongside the actual-cash Remaining.
+  const projectedBudgetRemaining = totalBudget - totalEffectiveNil;
 
   // ── Block R: calcTotals, table total useMemos, projectedBudgetValue ──────────
   const calcTotals = useCallback((rows: BuildPlayer[], forSide?: "hitter" | "pitcher") => {
@@ -1846,6 +1850,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     totalActualNil,
     totalRosterPlayerScore,
     budgetRemaining,
+    projectedBudgetRemaining,
     pitchingTierMultipliers,
     pitchingPvfForRole,
   };
