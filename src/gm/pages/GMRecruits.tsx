@@ -95,7 +95,7 @@ function TierBadge({ value }: { value: RecruitTier | null }) {
   return <span className={cn("inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", toneClass(info.tone))} style={OSWALD}>{info.label}</span>;
 }
 
-function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onTimeline, reports, onReports, onContact, onDeal }: { recruit: GmRecruit; onRemove: () => void; onStageChange: (s: RecruitStage) => void; eventCount: number; onTimeline: () => void; reports: GmRecruitReport[]; onReports: () => void; onContact: () => void; onDeal: () => void }) {
+function SortableRecruitCard({ recruit, index, onEdit, onRemove, onStageChange, eventCount, onTimeline, reports, onReports, onContact, onDeal }: { recruit: GmRecruit; index: number; onEdit: () => void; onRemove: () => void; onStageChange: (s: RecruitStage) => void; eventCount: number; onTimeline: () => void; reports: GmRecruitReport[]; onReports: () => void; onContact: () => void; onDeal: () => void }) {
   const { setNodeRef, listeners, attributes, transform, transition, isDragging } = useSortable({ id: recruit.id });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.55 : 1, zIndex: isDragging ? 10 : "auto", position: "relative" };
   const name = `${recruit.first_name ?? ""} ${recruit.last_name ?? ""}`.trim() || "Unnamed";
@@ -105,9 +105,10 @@ function SortableRecruitCard({ recruit, onRemove, onStageChange, eventCount, onT
       <button {...attributes} {...listeners} className="mt-0.5 cursor-grab text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing" title="Drag to reorder">
         <GripVertical className="h-4 w-4" />
       </button>
+      <span className="mt-0.5 w-4 shrink-0 text-center text-[11px] font-bold tabular-nums text-[#D4AF37]/70">{index}</span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-semibold">{name}</span>
+          <button onClick={onEdit} className="truncate text-left text-sm font-semibold hover:text-[#D4AF37] hover:underline" title="Edit recruit">{name}</button>
           {recruit.position && <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">{recruit.position}</span>}
           {recruit.level !== "hs" && (
             <span className="shrink-0 rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-400" title="Junior college">
@@ -170,6 +171,7 @@ export default function GMRecruits() {
   const [view, setView] = useState<"type" | "position">("type");
   const [levelFilter, setLevelFilter] = useState<"all" | "hs" | "juco">("all");
   const [addOpen, setAddOpen] = useState(false);
+  const [editingRecruit, setEditingRecruit] = useState<GmRecruit | null>(null);
   const BLANK_FORM = { first_name: "", last_name: "", position: "", high_school: "", state: "", travel_org: "", notes: "", link: "", class_year: YEARS[0], stage: "evaluating" as RecruitStage, projection_tier: "" as RecruitTier | "", phone: "", email: "", guardian_name: "", guardian_phone: "", coach_name: "", coach_phone: "", asking_price: "", target_offer: "", scholarship_pct: "", level: "hs" as RecruitLevel, extra_contacts: [] as ExtraContact[] };
   const [form, setForm] = useState(BLANK_FORM);
   const addFormNumber = () => setForm((f) => ({ ...f, extra_contacts: [...f.extra_contacts, { label: "", value: "" }] }));
@@ -209,12 +211,15 @@ export default function GMRecruits() {
   const listFor = (t: RecruitType) => gm.recruits.filter((r) => r.class_year === year && r.player_type === t && matchLevel(r)).sort((a, b) => a.sort_order - b.sort_order);
   const listForPositions = (positions: string[]) => gm.recruits.filter((r) => r.class_year === year && positions.includes((r.position ?? "").toUpperCase()) && matchLevel(r)).sort((a, b) => a.sort_order - b.sort_order);
   const groupedPositions = POSITION_GROUPS.flatMap((g) => g.positions);
-  const sections = view === "type"
-    ? SECTIONS.map((s) => ({ key: s.type, title: s.title, list: listFor(s.type) }))
+  // Position to auto-fill when adding from a section: the section's own
+  // position (first valid one for a group), or TWP for the two-way section.
+  const validPos = (positions: string[]) => positions.find((p) => (POSITIONS as readonly string[]).includes(p));
+  const sections: { key: string; title: string; list: GmRecruit[]; addPos?: string }[] = view === "type"
+    ? SECTIONS.map((s) => ({ key: s.type, title: s.title, list: listFor(s.type), addPos: s.type === "twp" ? "TWP" : undefined }))
     : (() => {
-        const groups = POSITION_GROUPS.map((g) => ({ key: g.key, title: g.title, list: listForPositions(g.positions) }));
+        const groups = POSITION_GROUPS.map((g) => ({ key: g.key, title: g.title, list: listForPositions(g.positions), addPos: validPos(g.positions) }));
         const unassigned = gm.recruits.filter((r) => r.class_year === year && matchLevel(r) && !groupedPositions.includes((r.position ?? "").toUpperCase())).sort((a, b) => a.sort_order - b.sort_order);
-        return unassigned.length ? [...groups, { key: "unassigned", title: "Unassigned", list: unassigned }] : groups;
+        return unassigned.length ? [...groups, { key: "unassigned", title: "Unassigned", list: unassigned, addPos: undefined }] : groups;
       })();
 
   // Forward class budget — the SET budget stays constant. Committed money +
@@ -246,10 +251,26 @@ export default function GMRecruits() {
     gm.reorder(arrayMove(list, oldI, newI).map((r) => r.id));
   };
 
-  const openAdd = () => { setForm({ ...BLANK_FORM, class_year: year }); setAddOpen(true); };
+  const openAdd = (position?: string) => { setEditingRecruit(null); setForm({ ...BLANK_FORM, class_year: year, position: position ?? "" }); setAddOpen(true); };
+  const openEdit = (r: GmRecruit) => {
+    setEditingRecruit(r);
+    setForm({
+      first_name: r.first_name ?? "", last_name: r.last_name ?? "", position: r.position ?? "",
+      high_school: r.high_school ?? "", state: r.state ?? "", travel_org: r.travel_org ?? "",
+      notes: "", link: r.link ?? "", class_year: r.class_year, stage: r.stage,
+      projection_tier: (r.projection_tier ?? "") as RecruitTier | "",
+      phone: r.phone ?? "", email: r.email ?? "", guardian_name: r.guardian_name ?? "", guardian_phone: r.guardian_phone ?? "",
+      coach_name: r.coach_name ?? "", coach_phone: r.coach_phone ?? "",
+      asking_price: r.asking_price != null ? String(r.asking_price) : "",
+      target_offer: r.target_offer != null ? String(r.target_offer) : "",
+      scholarship_pct: r.scholarship_pct != null ? String(r.scholarship_pct) : "",
+      level: r.level, extra_contacts: r.extra_contacts ?? [],
+    });
+    setAddOpen(true);
+  };
   const submit = () => {
     const tier = form.projection_tier || null;
-    gm.addRecruit({
+    const core = {
       class_year: form.class_year,
       player_type: recruitTypeForPosition(form.position),
       stage: form.stage,
@@ -264,8 +285,6 @@ export default function GMRecruits() {
       state: form.state.trim() || null,
       travel_org: form.travel_org.trim() || null,
       position: form.position || null,
-      notes: null,
-      scouting_report_date: null,
       link: form.link.trim() || null,
       phone: form.phone.trim() || null,
       email: form.email.trim() || null,
@@ -274,8 +293,14 @@ export default function GMRecruits() {
       coach_name: form.coach_name.trim() || null,
       coach_phone: form.coach_phone.trim() || null,
       extra_contacts: form.extra_contacts.filter((c) => c.value.trim()).map((c) => ({ label: c.label.trim(), value: c.value.trim() })),
-    }, (form.notes.trim() || tier) ? { report_date: today(), body: form.notes.trim(), tier } : undefined);
-    setAddOpen(false);
+    };
+    if (editingRecruit) {
+      gm.updateRecruit(editingRecruit.id, core);
+      if (form.notes.trim()) gm.addReport(editingRecruit.id, today(), form.notes.trim(), tier);
+    } else {
+      gm.addRecruit({ ...core, notes: null, scouting_report_date: null }, (form.notes.trim() || tier) ? { report_date: today(), body: form.notes.trim(), tier } : undefined);
+    }
+    setAddOpen(false); setEditingRecruit(null);
   };
 
   return (
@@ -287,7 +312,7 @@ export default function GMRecruits() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={openBudget}><Settings className="h-3.5 w-3.5" /> Edit Budget</Button>
-          <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={openAdd}><Plus className="h-3.5 w-3.5" /> Add Player</Button>
+          <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => openAdd()}><Plus className="h-3.5 w-3.5" /> Add Player</Button>
         </div>
       </div>
 
@@ -376,10 +401,13 @@ export default function GMRecruits() {
 
       {/* Sortable sections — grouped by type or by position */}
       <div className="grid gap-4 lg:grid-cols-3">
-        {sections.map(({ key, title, list }) => (
+        {sections.map(({ key, title, list, addPos }) => (
           <Card key={key} className="border-border/60">
             <CardHeader className="pb-2 pt-3 px-4 border-b border-border/40">
-              <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>{title} ({list.length})</CardTitle>
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-[13px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>{title} ({list.length})</CardTitle>
+                <button onClick={() => openAdd(addPos)} title="Add recruit to this group" className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:text-[#D4AF37]"><Plus className="h-3.5 w-3.5" /> Add</button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-2 p-3">
               {list.length === 0 ? (
@@ -388,7 +416,7 @@ export default function GMRecruits() {
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd(list)}>
                   <SortableContext items={list.map((r) => r.id)} strategy={verticalListSortingStrategy}>
                     <div className="space-y-2">
-                      {list.map((r) => <SortableRecruitCard key={r.id} recruit={r} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} reports={gm.reportsByRecruit.get(r.id) ?? []} onReports={() => openReports(r)} onContact={() => openContact(r)} onDeal={() => openDeal(r)} />)}
+                      {list.map((r, i) => <SortableRecruitCard key={r.id} recruit={r} index={i + 1} onEdit={() => openEdit(r)} onRemove={() => gm.removeRecruit(r.id)} onStageChange={(s) => gm.updateRecruit(r.id, { stage: s })} eventCount={gm.eventsByRecruit.get(r.id)?.length ?? 0} onTimeline={() => { setEventNote(""); setEventDate(today()); setTimelineRecruit(r); }} reports={gm.reportsByRecruit.get(r.id) ?? []} onReports={() => openReports(r)} onContact={() => openContact(r)} onDeal={() => openDeal(r)} />)}
                     </div>
                   </SortableContext>
                 </DndContext>
@@ -399,9 +427,9 @@ export default function GMRecruits() {
       </div>
 
       {/* Add recruit — two columns so it isn't a tall single stack */}
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+      <Dialog open={addOpen} onOpenChange={(o) => { setAddOpen(o); if (!o) setEditingRecruit(null); }}>
         <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto">
-          <DialogHeader><DialogTitle style={OSWALD}>Add Recruit</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle style={OSWALD}>{editingRecruit ? "Edit Recruit" : "Add Recruit"}</DialogTitle></DialogHeader>
           <div className="grid gap-x-6 gap-y-3 py-1 md:grid-cols-2">
             {/* Left column — identity, location, deal */}
             <div className="space-y-3">
@@ -529,7 +557,7 @@ export default function GMRecruits() {
             </div>
           </div>
           <DialogFooter>
-            <Button size="sm" disabled={!form.first_name.trim() && !form.last_name.trim()} onClick={submit}>Add To Board</Button>
+            <Button size="sm" disabled={!form.first_name.trim() && !form.last_name.trim()} onClick={submit}>{editingRecruit ? "Save Changes" : "Add To Board"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
