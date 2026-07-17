@@ -39,7 +39,8 @@ export interface GmContract {
   obligations: ContractObligation[];
 }
 
-// Shape returned by the parse-contract edge function (all optional — a review step follows).
+// Optional parsed-contract fields stored on the row (all optional). PDF reading
+// is done locally in the browser (extractContractPdf) — no AI, no network.
 export interface ParsedContract {
   title?: string;
   bucket?: ContractBucket;
@@ -78,17 +79,6 @@ export interface UpdateContractInput extends NewContractInput {
   existing: GmContract;
 }
 
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const res = reader.result as string;
-      resolve(res.includes(",") ? res.split(",")[1] : res); // strip data: prefix
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 
 /**
  * GM contract storage: the signed-contract records + their PDFs + obligations,
@@ -129,20 +119,6 @@ export function useGmContracts(playerId?: string | null) {
   });
 
   const forPlayer = playerId ? contracts.filter((c) => c.player_id === playerId) : contracts;
-
-  // Read a PDF with Claude — returns suggested fields for the review form.
-  const parse = useMutation({
-    mutationFn: async (file: File): Promise<ParsedContract> => {
-      const fileBase64 = await fileToBase64(file);
-      const { data, error } = await supabase.functions.invoke("parse-contract", {
-        body: { fileBase64, mimeType: file.type || "application/pdf", fileName: file.name },
-      });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-      return (data?.contract ?? {}) as ParsedContract;
-    },
-    onError: (e: any) => toast.error(`Couldn't read contract: ${e.message}`),
-  });
 
   const addContract = useMutation({
     mutationFn: async (input: NewContractInput) => {
@@ -290,8 +266,6 @@ export function useGmContracts(playerId?: string | null) {
     contracts: forPlayer,
     allContracts: contracts,
     isLoading,
-    parse: (file: File) => parse.mutateAsync(file),
-    isParsing: parse.isPending,
     addContract: (input: NewContractInput, onDone?: () => void) =>
       addContract.mutate(input, onDone ? { onSuccess: () => onDone() } : undefined),
     isSaving: addContract.isPending,
