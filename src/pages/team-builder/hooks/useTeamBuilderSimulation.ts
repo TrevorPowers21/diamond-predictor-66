@@ -1664,10 +1664,6 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     return sum + v;
   }, 0);
   const budgetRemaining = totalBudget - totalActualNil;
-  // Projected-aware remaining: budget minus (actual entered + each still-blank
-  // player's stable projected share). Lets a coach see headroom assuming the
-  // untouched players land at projection, alongside the actual-cash Remaining.
-  const projectedBudgetRemaining = totalBudget - totalEffectiveNil;
 
   // ── Block R: calcTotals, table total useMemos, projectedBudgetValue ──────────
   const calcTotals = useCallback((rows: BuildPlayer[], forSide?: "hitter" | "pitcher") => {
@@ -1850,7 +1846,6 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     totalActualNil,
     totalRosterPlayerScore,
     budgetRemaining,
-    projectedBudgetRemaining,
     pitchingTierMultipliers,
     pitchingPvfForRole,
   };
