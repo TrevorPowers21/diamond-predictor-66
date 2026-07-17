@@ -101,14 +101,14 @@ function SortableRecruitCard({ recruit, index, onEdit, onRemove, onStageChange, 
   const name = `${recruit.first_name ?? ""} ${recruit.last_name ?? ""}`.trim() || "Unnamed";
   const locale = recruit.high_school ? `${recruit.high_school}${recruit.state ? ` (${recruit.state})` : ""}` : (recruit.state ?? "");
   return (
-    <div ref={setNodeRef} style={style} className="flex items-start gap-2 rounded-md border border-border/60 bg-card/40 p-2.5">
-      <button {...attributes} {...listeners} className="mt-0.5 cursor-grab text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing" title="Drag to reorder">
+    <div ref={setNodeRef} style={style} onClick={onEdit} title="Edit recruit" className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 bg-card/40 p-2.5 transition-colors hover:border-[#D4AF37]/40">
+      <button {...attributes} {...listeners} onClick={(e) => e.stopPropagation()} className="mt-0.5 cursor-grab text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing" title="Drag to reorder">
         <GripVertical className="h-4 w-4" />
       </button>
-      <span className="mt-0.5 w-4 shrink-0 text-center text-[11px] font-bold tabular-nums text-[#D4AF37]/70">{index}</span>
+      <span className="mt-0.5 inline-flex h-6 min-w-[26px] shrink-0 items-center justify-center rounded-md bg-[#D4AF37]/10 px-1.5 text-[12px] font-bold tabular-nums text-[#D4AF37] ring-1 ring-[#D4AF37]/20">{index}</span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <button onClick={onEdit} className="truncate text-left text-sm font-semibold hover:text-[#D4AF37] hover:underline" title="Edit recruit">{name}</button>
+          <span className="truncate text-sm font-semibold">{name}</span>
           {recruit.position && <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">{recruit.position}</span>}
           {recruit.level !== "hs" && (
             <span className="shrink-0 rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-400" title="Junior college">
@@ -121,10 +121,10 @@ function SortableRecruitCard({ recruit, index, onEdit, onRemove, onStageChange, 
         )}
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <TierBadge value={recruit.projection_tier} />
-          <StageSelect value={recruit.stage} onChange={onStageChange} />
+          <span onClick={(e) => e.stopPropagation()}><StageSelect value={recruit.stage} onChange={onStageChange} /></span>
         </div>
         {/* Deal — asking price + what we're willing to pay. Click to edit. */}
-        <button onClick={onDeal} className="mt-1.5 flex items-center gap-2 text-xs hover:opacity-80" title="Edit deal">
+        <button onClick={(e) => { e.stopPropagation(); onDeal(); }} className="mt-1.5 flex items-center gap-2 text-xs hover:opacity-80" title="Edit deal">
           <DollarSign className="h-3 w-3 text-[#D4AF37]" />
           {recruit.asking_price == null && recruit.target_offer == null && recruit.scholarship_pct == null ? (
             <span className="text-muted-foreground/70">Add deal</span>
@@ -139,18 +139,18 @@ function SortableRecruitCard({ recruit, index, onEdit, onRemove, onStageChange, 
         </button>
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
           {recruit.link && (
-            <a href={recruit.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+            <a href={recruit.link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
               <ExternalLink className="h-3 w-3" /> Profile
             </a>
           )}
-          <button onClick={onContact} className="inline-flex items-center gap-1 text-xs text-primary hover:underline" title="Contact information">
+          <button onClick={(e) => { e.stopPropagation(); onContact(); }} className="inline-flex items-center gap-1 text-xs text-primary hover:underline" title="Contact information">
             <Phone className="h-3 w-3" /> Contact
           </button>
-          <button onClick={onReports} className="inline-flex items-center gap-1 text-xs text-primary hover:underline" title="Scouting reports">
+          <button onClick={(e) => { e.stopPropagation(); onReports(); }} className="inline-flex items-center gap-1 text-xs text-primary hover:underline" title="Scouting reports">
             <FileText className="h-3 w-3" /> Reports{reports.length > 0 && <span className="tabular-nums">({reports.length})</span>}
           </button>
           <DropdownMenu>
-            <DropdownMenuTrigger className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" title="Add">
+            <DropdownMenuTrigger onClick={(e) => e.stopPropagation()} className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" title="Add">
               <Plus className="h-3.5 w-3.5" />{eventCount > 0 && <span className="tabular-nums">{eventCount}</span>}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
@@ -160,7 +160,7 @@ function SortableRecruitCard({ recruit, index, onEdit, onRemove, onStageChange, 
           </DropdownMenu>
         </div>
       </div>
-      <button onClick={onRemove} title="Remove" className="text-muted-foreground/40 hover:text-destructive"><X className="h-3.5 w-3.5" /></button>
+      <button onClick={(e) => { e.stopPropagation(); onRemove(); }} title="Remove" className="text-muted-foreground/40 hover:text-destructive"><X className="h-3.5 w-3.5" /></button>
     </div>
   );
 }
