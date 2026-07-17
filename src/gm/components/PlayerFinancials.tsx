@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useGmRoster, type GmRow, type RowMoney } from "@/gm/hooks/useGmRoster";
 import { useGmContracts, type GmContract } from "@/gm/hooks/useGmContracts";
+import { useGmAllocations, type GmAllocationSource } from "@/gm/hooks/useGmAllocations";
 import PlayerCompensationDialog from "@/gm/components/PlayerCompensationDialog";
 import { useGmPlayerInfo } from "@/gm/hooks/useGmPlayerInfo";
 import { useMarketability } from "@/gm/hooks/useMarketability";
@@ -10,7 +11,7 @@ import PlayerNotesDialog from "@/components/PlayerNotesDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { StickyNote, ListChecks, Plus, Check, Pencil, Trash2, ExternalLink } from "lucide-react";
+import { StickyNote, ListChecks, Plus, Check, Pencil, Trash2, ExternalLink, AlertTriangle } from "lucide-react";
 
 const OSWALD = { fontFamily: "Oswald, sans-serif" } as const;
 const money = (n: number | null | undefined) => (n == null ? "—" : "$" + Math.round(n).toLocaleString("en-US"));
@@ -36,7 +37,20 @@ const CONN_COLOR: Record<string, string> = { family_notable: "#22d3ee", family_a
 export default function PlayerFinancials({ playerName, playerId, onEditMarketability }: { playerName: string; playerId: string; onEditMarketability?: () => void }) {
   const gm = useGmRoster();
   const { contracts, toggleObligation, removeContract, viewPdf } = useGmContracts(playerId);
+  const { sources, allocBySource } = useGmAllocations(gm.selectedBuildId);
   const fmtDate = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  // Draft contracts: money allocated to this player from a vendor on the Funding
+  // Sources page that has no contract yet. Shown as an unfinalized entry until
+  // the coach edits it and saves the contract details (money is unchanged —
+  // syncContractFunding reconciles onto the same allocation).
+  const drafts = useMemo(() => {
+    const withContract = new Set(contracts.map((c) => c.vendor_id).filter(Boolean) as string[]);
+    return sources
+      .filter((s) => s.vendor_id && !withContract.has(s.vendor_id))
+      .map((s) => ({ source: s, amount: allocBySource.get(s.id)?.get(playerId) ?? 0 }))
+      .filter((d) => d.amount > 0);
+  }, [sources, allocBySource, contracts, playerId]);
+  const [finalizeDraft, setFinalizeDraft] = useState<{ source: GmAllocationSource; amount: number } | null>(null);
   // How a contract reads in the table / tracker: Rev Share shows "Revenue Share";
   // NIL & Other show the vendor category they fall under.
   const contractLabel = (ct: { bucket: string; vendor_name: string | null }) =>
@@ -140,10 +154,24 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
               <h3 className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#D4AF37]" style={OSWALD}>Contracts</h3>
               <Button size="sm" className="h-6 gap-1 px-2 text-[11px]" onClick={() => setAddOpen(true)}><Plus className="h-3 w-3" /> Add Contract</Button>
             </div>
-            {contracts.length === 0 ? (
+            {contracts.length === 0 && drafts.length === 0 ? (
               <p className="mt-3 text-xs text-muted-foreground">No contracts yet. Adding one flows to the Contracts tab and funding sources.</p>
             ) : (
               <div className="mt-2.5 space-y-2">
+                {drafts.map((d) => (
+                  <div key={`draft-${d.source.id}`} className="flex items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/[0.06] px-2.5 py-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-foreground">{d.source.name}</div>
+                      <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-amber-500">
+                        <AlertTriangle className="h-3 w-3 shrink-0" /> Not finalized — add contract details
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <span className="mr-1 font-mono text-sm font-semibold text-amber-500">{money(d.amount)}</span>
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Finalize contract" onClick={() => setFinalizeDraft(d)}><Pencil className="h-3.5 w-3.5" /></Button>
+                    </div>
+                  </div>
+                ))}
                 {contracts.map((ct) => (
                   <div key={ct.id} className="flex items-center justify-between gap-3 border-b border-border/40 pb-2 last:border-0 last:pb-0">
                     <div className="min-w-0">
@@ -224,6 +252,13 @@ export default function PlayerFinancials({ playerName, playerId, onEditMarketabi
 
       <AddContractDialog open={addOpen} onOpenChange={setAddOpen} players={[{ id: playerId, name: playerName }]} defaultPlayerId={playerId} />
       <AddContractDialog open={!!editing} onOpenChange={(o) => { if (!o) setEditing(null); }} players={[{ id: playerId, name: playerName }]} defaultPlayerId={playerId} editing={editing} />
+      <AddContractDialog
+        open={!!finalizeDraft}
+        onOpenChange={(o) => { if (!o) setFinalizeDraft(null); }}
+        players={[{ id: playerId, name: playerName }]}
+        defaultPlayerId={playerId}
+        prefill={finalizeDraft ? { bucket: finalizeDraft.source.bucket, vendor: finalizeDraft.source.name, value: finalizeDraft.amount } : undefined}
+      />
 
       {row && (
         <PlayerCompensationDialog

@@ -30,8 +30,9 @@ const STATUS_COLOR: Record<ContractStatus, string> = {
 
 type ObDraft = { id?: string; description: string; due_date: string | null };
 
-export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId, editing }: {
+export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId, editing, prefill }: {
   open: boolean; onOpenChange: (o: boolean) => void; players: { id: string; name: string }[]; defaultPlayerId?: string; editing?: GmContract | null;
+  prefill?: { bucket?: ContractBucket; vendor?: string; value?: number | null };
 }) {
   const { addContract, isSaving, updateContract, isUpdating } = useGmContracts();
   const { vendors, ensureVendor } = useGmVendors();
@@ -72,6 +73,17 @@ export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId
     setFile(null); setParsedRaw(editing.parsed ?? null); setAutoFilled(false); setReviewed(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing?.id]);
+
+  // Finalizing a draft (a vendor allocation with no contract yet): seed the
+  // vendor + amount so the coach only fills in the remaining details. Money is
+  // unchanged — syncContractFunding reconciles onto the existing allocation.
+  useEffect(() => {
+    if (!open || editing || !prefill) return;
+    if (prefill.bucket) setBucket(prefill.bucket);
+    if (prefill.vendor != null) setVendor(prefill.vendor);
+    if (prefill.value !== undefined) setValue(prefill.value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing, prefill?.bucket, prefill?.vendor, prefill?.value]);
 
   // Read the PDF entirely in the browser (no AI/key) and pre-fill the reliable
   // bits: dollar value + start/end dates. The coach must review before saving.
