@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
+import { CurrencyInput } from "@/components/CurrencyInput";
 import PlayerTableRow, { type PlayerTableRowSharedProps } from "../PlayerTableRow";
 import type { BuildPlayer } from "../types";
 
@@ -142,11 +142,9 @@ export default function RosterTab({
             </div>
             <div>
               <Label className="text-xs mb-1 block">Initial Value ($)</Label>
-              <Input
-                type="text"
-                inputMode="numeric"
-                value={formatWithCommas(incomingNil)}
-                onChange={(e) => setIncomingNil(parseCommaNumber(e.target.value))}
+              <CurrencyInput
+                value={incomingNil || null}
+                onChange={(n) => setIncomingNil(n ?? 0)}
               />
             </div>
             <div>

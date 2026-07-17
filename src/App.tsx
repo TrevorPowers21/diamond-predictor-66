@@ -20,6 +20,20 @@ const SavantTeamsList = lazy(() => import("@/savant/pages/TeamsListPage"));
 const SavantTeamProfile = lazy(() => import("@/savant/pages/TeamProfilePage"));
 const SavantHitterPage = lazy(() => import("@/savant/pages/HitterPage"));
 const SavantPitcherPage = lazy(() => import("@/savant/pages/PitcherPage"));
+
+// GM (front office) — gated + lazy-loaded so Player Evaluation users never
+// download it. Do not link to /gm/* from Player Evaluation nav except the toggle.
+const GMRoute = lazy(() => import("@/gm/components/GMRoute"));
+const GMLayout = lazy(() => import("@/gm/components/GMLayout"));
+const GMRoster = lazy(() => import("@/gm/pages/GMRoster"));
+const GMHome = lazy(() => import("@/gm/pages/GMHome"));
+const GMAnalytics = lazy(() => import("@/gm/pages/GMAnalytics"));
+const GMRecruits = lazy(() => import("@/gm/pages/GMRecruits"));
+const GMScenarios = lazy(() => import("@/gm/pages/GMScenarios"));
+const GMTargets = lazy(() => import("@/gm/pages/GMTargets"));
+const GMAllocations = lazy(() => import("@/gm/pages/GMAllocations"));
+const GMContracts = lazy(() => import("@/gm/pages/GMContracts"));
+const PlayerHub = lazy(() => import("@/pages/PlayerHub"));
 import TransferPortal from "./pages/TransferPortal";
 import ReturningPlayers from "./pages/ReturningPlayers";
 import WarRoom from "./pages/WarRoom";
@@ -29,6 +43,7 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import NotFound from "./pages/NotFound";
 import DevWeights from "./pages/DevWeights";
 import PlayerComparison from "./pages/PlayerComparison";
+import DashboardLayout from "@/components/DashboardLayout";
 import PlayerProfile from "./pages/PlayerProfile";
 import PitcherProfile from "./pages/PitcherProfile";
 import PlayerStatsPage from "./pages/PlayerStatsPage";
@@ -98,6 +113,7 @@ const router = createBrowserRouter([
       { path: "/dashboard/dev-weights", element: <ProtectedRoute><DevWeights /></ProtectedRoute> },
       // { path: "/dashboard/nil", element: <ProtectedRoute><NilValuations /></ProtectedRoute> },
       { path: "/dashboard/compare", element: <ProtectedRoute><PlayerComparison /></ProtectedRoute> },
+      { path: "/player/:playerId", element: <ProtectedRoute><DashboardLayout><Suspense fallback={null}><PlayerHub /></Suspense></DashboardLayout></ProtectedRoute> },
       { path: "/dashboard/player/:id", element: <ProtectedRoute><PlayerProfile /></ProtectedRoute> },
       { path: "/dashboard/player/:id/stats", element: <ProtectedRoute><PlayerStatsPage /></ProtectedRoute> },
       { path: "/dashboard/pitcher/:id", element: <ProtectedRoute><PitcherProfile /></ProtectedRoute> },
@@ -143,6 +159,28 @@ const router = createBrowserRouter([
           { path: "team/:id", element: <Suspense fallback={null}><SavantTeamProfile /></Suspense> },
           { path: "hitter/:id", element: <Suspense fallback={null}><SavantHitterPage /></Suspense> },
           { path: "pitcher/:id", element: <Suspense fallback={null}><SavantPitcherPage /></Suspense> },
+        ],
+      },
+      // GM (front office) — gated by GMRoute (auth + superadmin/team_admin).
+      {
+        path: "/gm",
+        element: (
+          <ProtectedRoute>
+            <Suspense fallback={null}>
+              <GMRoute><GMLayout /></GMRoute>
+            </Suspense>
+          </ProtectedRoute>
+        ),
+        children: [
+          { index: true, element: <Suspense fallback={null}><GMHome /></Suspense> },
+          { path: "roster", element: <Suspense fallback={null}><GMRoster /></Suspense> },
+          { path: "scenarios", element: <Suspense fallback={null}><GMScenarios /></Suspense> },
+          { path: "targets", element: <Suspense fallback={null}><GMTargets /></Suspense> },
+          { path: "allocations", element: <Suspense fallback={null}><GMAllocations /></Suspense> },
+          { path: "contracts", element: <Suspense fallback={null}><GMContracts /></Suspense> },
+          { path: "player/:playerId", element: <Suspense fallback={null}><PlayerHub /></Suspense> },
+          { path: "analytics", element: <Suspense fallback={null}><GMAnalytics /></Suspense> },
+          { path: "recruiting", element: <Suspense fallback={null}><GMRecruits /></Suspense> },
         ],
       },
       { path: "*", element: <NotFound /> },

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Download, Target, TrendingUp, Star } from "lucide-react";
@@ -11,7 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
-import { PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { projectedEligibilityClass } from "@/pages/team-builder/helpers";
 import { pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { usePlayerOverrides } from "@/hooks/usePlayerOverrides";
@@ -356,8 +357,10 @@ function ScoutGrade({ value, fullLabel, rawStat, unit }: {
 }
 
 
-export default function PitcherProfile() {
-  const { id } = useParams<{ id: string }>();
+export default function PitcherProfile({ embedded = false, idOverride, hideTabs = false, tabSlot, warOverride, marketOverride, devAggOverride, roleOverride }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean; tabSlot?: ReactNode; warOverride?: number | null; marketOverride?: number | null; devAggOverride?: number | null; roleOverride?: string | null }) {
+  const { id: paramId } = useParams<{ id: string }>();
+  const id = idOverride ?? paramId;
+  const Shell = embedded ? Fragment : DashboardLayout;
   const navigate = useNavigate();
   const location = useLocation();
   const { hasRole, effectiveTeamId } = useAuth();
@@ -1316,6 +1319,16 @@ export default function PitcherProfile() {
     const raw = String(activePrediction?.class_transition || playerOverride?.class_transition || storageProjectionOverride?.class_transition || "SJ").toUpperCase();
     return raw === "FS" || raw === "SJ" || raw === "JS" || raw === "GR" ? (raw as "FS" | "SJ" | "JS" | "GR") : "SJ";
   })();
+  // Display-only: the PROJECTION-season class (one year forward) so the shown
+  // class matches the projected stats. Pass the RAW transition (nullable) so a
+  // missing one advances class_year instead of defaulting everyone to "JR".
+  const displayClassProjected: string | null = displayClass
+    ? (() => {
+        const raw = activePrediction?.class_transition || playerOverride?.class_transition || storageProjectionOverride?.class_transition || null;
+        const p = projectedEligibilityClass(displayClass, raw);
+        return p.charAt(0) + p.slice(1).toLowerCase();
+      })()
+    : null;
   const initialProjectedDevAggressiveness = Number.isFinite(Number(activePrediction?.dev_aggressiveness))
     ? Number(activePrediction?.dev_aggressiveness)
     : (Number.isFinite(Number(playerOverride?.dev_aggressiveness ?? storageProjectionOverride?.dev_aggressiveness))
@@ -1342,10 +1355,21 @@ export default function PitcherProfile() {
   })();
   const [depthRole, setDepthRole] = useState<PitcherDepthRole>(initialDepthRole);
   useEffect(() => {
-    setProjectedRole(initialProjectedRole as "SP" | "RP" | "SM");
-    setProjectedDevAggressiveness(initialProjectedDevAggressiveness);
-    setDepthRole(initialDepthRole);
-  }, [initialProjectedRole, initialProjectedDevAggressiveness, initialDepthRole]);
+    // Program hub: seed dev-agg + depth role from the LIVE build so the profile
+    // reflects the build; otherwise use the prediction's stored values.
+    setProjectedDevAggressiveness(devAggOverride != null ? devAggOverride : initialProjectedDevAggressiveness);
+    const validDepths: PitcherDepthRole[] = [
+      "weekend_starter", "weekday_starter", "swing_starter",
+      "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever",
+      "low_impact_reliever", "specialist_reliever",
+    ];
+    const effDepthRole = roleOverride && validDepths.includes(roleOverride as PitcherDepthRole) ? (roleOverride as PitcherDepthRole) : initialDepthRole;
+    setDepthRole(effDepthRole);
+    // Program hub / build view: derive the SP/RP/SM role from the build's depth
+    // role, so a weekday_starter projects as SP and the role transition fires.
+    // Standalone scouting keeps the prediction's stored pitcher_role.
+    setProjectedRole(roleOverride ? pitcherRoleFromDepthRole(effDepthRole) : (initialProjectedRole as "SP" | "RP" | "SM"));
+  }, [initialProjectedRole, initialProjectedDevAggressiveness, initialDepthRole, devAggOverride, roleOverride]);
   // Session-only display overlay. Profile dropdowns (depth role, dev agg,
   // pitcher role) are NEVER persisted — the coach can preview "what if this
   // pitcher started weekends and was developed aggressively" without
@@ -1479,6 +1503,14 @@ export default function PitcherProfile() {
     displayTeam,
   ]);
 
+  // In the program hub, WAR + market come from the LIVE build so Projections
+  // matches the roster + Team Builder. `undefined` = standalone scouting route.
+  const displayPWar = warOverride !== undefined ? warOverride : projectedPitching.pWar;
+  const displayMarket = marketOverride !== undefined ? marketOverride : (projectedPitching.marketValue ?? nilValuation?.projected_value ?? null);
+  // Program hub: dev-agg / role controls become read-only labels (they define how
+  // the pitcher is set up in the live build, not a preview to fiddle with).
+  const buildPinned = warOverride !== undefined;
+
   const pitching2025 = useMemo(() => {
     const eq = readPitchingWeights();
     const era2025 = latestStats?.era ?? storageEra;
@@ -1583,9 +1615,9 @@ export default function PitcherProfile() {
 
   if (isLoading) {
     return (
-      <DashboardLayout>
+      <Shell>
         <div className="p-6 text-muted-foreground">Loading pitcher profile…</div>
-      </DashboardLayout>
+      </Shell>
     );
   }
 
@@ -1593,7 +1625,7 @@ export default function PitcherProfile() {
   const currentIp = (currentPitcherRow as any)?.IP;
   if (currentPitcherRow != null && (currentIp == null || Number(currentIp) === 0)) {
     return (
-      <DashboardLayout>
+      <Shell>
         <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
@@ -1609,14 +1641,14 @@ export default function PitcherProfile() {
             </CardContent>
           </Card>
         </div>
-      </DashboardLayout>
+      </Shell>
     );
   }
 
   return (
-    <DashboardLayout>
+    <Shell>
       <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
-        {id && <PlayerPageTabs playerId={id} kind="pitcher" />}
+        {id && !hideTabs && <PlayerPageTabs playerId={id} kind="pitcher" />}
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
@@ -1704,10 +1736,10 @@ export default function PitcherProfile() {
                       p_era: projectedPitching.pEra, p_fip: projectedPitching.pFip,
                       p_whip: projectedPitching.pWhip, p_k9: projectedPitching.pK9,
                       p_bb9: projectedPitching.pBb9, p_hr9: projectedPitching.pHr9,
-                      p_war: projectedPitching.pWar,
+                      p_war: displayPWar,
                       p_rv_plus: projectedPitching.pRvPlus,
-                      market_value: projectedPitching.marketValue,
-                      nil_value: projectedPitching.marketValue,
+                      market_value: displayMarket,
+                      nil_value: displayMarket,
                       overall_pr_plus: internalPowerRatings?.overallPlus,
                       stuff_plus: pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus,
                       whiff_pct: pitchArsenal.overallWhiffPct ?? (masterRow as any)?.miss_pct,
@@ -1811,7 +1843,7 @@ export default function PitcherProfile() {
                       p_era: projectedPitching.pEra, p_fip: projectedPitching.pFip,
                       p_whip: projectedPitching.pWhip, p_k9: projectedPitching.pK9,
                       p_bb9: projectedPitching.pBb9, p_hr9: projectedPitching.pHr9,
-                      p_war: projectedPitching.pWar,
+                      p_war: displayPWar,
                       p_rv_plus: projectedPitching.pRvPlus,
                       overall_pr_plus: internalPowerRatings?.overallPlus,
                       coach_notes: notes,
@@ -1881,11 +1913,11 @@ export default function PitcherProfile() {
                     p_era: projectedPitching.pEra, p_fip: projectedPitching.pFip,
                     p_whip: projectedPitching.pWhip, p_k9: projectedPitching.pK9,
                     p_bb9: projectedPitching.pBb9, p_hr9: projectedPitching.pHr9,
-                    p_war: projectedPitching.pWar,
+                    p_war: displayPWar,
                     p_rv_plus: projectedPitching.pRvPlus,
                     // Valuation
-                    market_value: projectedPitching.marketValue,
-                    nil_value: projectedPitching.marketValue,
+                    market_value: displayMarket,
+                    nil_value: displayMarket,
                     overall_pr_plus: internalPowerRatings?.overallPlus,
                     // Scouting scores
                     stuff_plus: pitchArsenal.overallStuffPlus ?? (masterRow as any)?.stuffPlus,
@@ -1986,6 +2018,8 @@ export default function PitcherProfile() {
           )}
         </div>
 
+        {tabSlot}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-1 space-y-4">
             <Card className="border-[#162241] bg-[#0a1428]">
@@ -1994,9 +2028,9 @@ export default function PitcherProfile() {
               </CardHeader>
               <CardContent className="space-y-2.5 text-sm px-4 pb-4">
                 {[
-                  ["Team", displayTeam],
-                  ["Conference", displayConference],
-                  ["Class", displayClass || "—"],
+                  [`${CURRENT_SEASON} Team`, displayTeam],
+                  [`${CURRENT_SEASON} Conference`, displayConference],
+                  [`${PROJECTION_SEASON} Class`, displayClassProjected || "—"],
                   ["Role", effectiveRoleDisplay || "—"],
                   ["Throws", player?.throws_hand || displayHandedness || "—"],
                 ].map(([label, val]) => (
@@ -2163,11 +2197,11 @@ export default function PitcherProfile() {
             <div className="grid gap-3 grid-cols-3">
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">pWAR</div>
-                <div className="text-3xl font-bold tracking-tight mt-1 text-white">{fmt(projectedPitching.pWar, 2)}</div>
+                <div className="text-3xl font-bold tracking-tight mt-1 text-white">{fmt(displayPWar, 2)}</div>
               </div>
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Market Value</div>
-                <div className="text-2xl font-bold tracking-tight mt-1 text-[#D4AF37]">{nilFormat(projectedPitching.marketValue ?? nilValuation?.projected_value ?? null)}</div>
+                <div className="text-2xl font-bold tracking-tight mt-1 text-[#D4AF37]">{nilFormat(displayMarket)}</div>
               </div>
               <div className="rounded-lg border border-[#162241] bg-[#0a1428] p-4 text-center">
                 <div className="text-[11px] uppercase tracking-wider font-semibold text-[#8a94a6]">Power Rating</div>
@@ -2186,6 +2220,15 @@ export default function PitcherProfile() {
                   <CardHeader className="pb-2 pt-3 px-4">
                     <div className="flex items-center gap-3 flex-wrap">
                       <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2027 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
+                      {buildPinned ? (
+                        // Program hub: read-only — shows how the pitcher is set up in the live build.
+                        <div className="flex items-center gap-1.5">
+                          <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Role — from the active roster build">{projectedRole === "SM" ? "SP" : projectedRole}</span>
+                          <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Depth role — from the active roster build">{({ weekend_starter: "Weekend Starter", weekday_starter: "Weekday Starter", swing_starter: "Swing Starter", workhorse_reliever: "Workhorse Reliever", high_leverage_reliever: "High-Leverage Reliever", mid_leverage_reliever: "Mid-Leverage Reliever", low_impact_reliever: "Low-Impact Reliever", specialist_reliever: "Specialist Reliever" } as Record<string, string>)[depthRole] ?? depthRole}</span>
+                          <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Dev aggressiveness — from the active roster build">Dev {projectedDevAggressiveness}</span>
+                          <span className="text-[10px] italic text-[#8a94a6]">*assigned from team build</span>
+                        </div>
+                      ) : (
                       <div className="flex items-center gap-1.5">
                         <Select value={projectedRole === "SM" ? "SP" : projectedRole} onValueChange={(v) => {
                           const newRole = v as "SP" | "RP";
@@ -2234,6 +2277,7 @@ export default function PitcherProfile() {
                           </SelectContent>
                         </Select>
                       </div>
+                      )}
                     </div>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
@@ -2470,7 +2514,7 @@ export default function PitcherProfile() {
         </div>
 
       </div>
-    </DashboardLayout>
+    </Shell>
   );
 }
 

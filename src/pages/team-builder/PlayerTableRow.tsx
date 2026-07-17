@@ -4,7 +4,7 @@ import { TableRow, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Trash2, Plus, Check } from "lucide-react";
+import { Trash2, Plus, Check, StickyNote } from "lucide-react";
 import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { assessHitterRisk, assessPitcherRisk } from "@/lib/playerRisk";
@@ -95,6 +95,9 @@ export interface PlayerTableRowSharedProps {
   markPlayerLeaving: (idx: number, name: string) => void;
   updatePlayerOverrideFn: (playerId: string, overrides: { position?: string | null }) => void;
   setSupabaseRole: (playerId: string, role: "SP" | "RP" | null) => void;
+  // Open the shared, dated per-player notes log (same log the GM sees on Roster
+  // Management). Keyed by build_player_id; only offered for persisted rows.
+  onOpenNotes?: (buildPlayerId: string, playerName: string) => void;
 }
 
 interface Props extends PlayerTableRowSharedProps {
@@ -139,6 +142,7 @@ function PlayerTableRow({
   markPlayerLeaving,
   updatePlayerOverrideFn,
   setSupabaseRole,
+  onOpenNotes,
 }: Props) {
   const side: "hitter" | "pitcher" = pool ?? (isPitcher(p) ? "pitcher" : "hitter");
   const projection = playerProjection(p, side);
@@ -719,14 +723,28 @@ function PlayerTableRow({
       </TableCell>
 
       <TableCell>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => removePlayer(globalIdx)}
-        >
-          <Trash2 className="h-4 w-4 text-destructive" />
-        </Button>
+        <div className="flex items-center">
+          {onOpenNotes && p.id && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Notes"
+              aria-label="Player notes"
+              onClick={() => onOpenNotes(p.id!, getPlayerName(p))}
+            >
+              <StickyNote className="h-4 w-4 text-muted-foreground" />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => removePlayer(globalIdx)}
+          >
+            <Trash2 className="h-4 w-4 text-destructive" />
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   );

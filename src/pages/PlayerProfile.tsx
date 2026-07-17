@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
+import { projectedEligibilityClass } from "@/pages/team-builder/helpers";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { PortalTeamCards } from "@/components/PortalTeamCards";
@@ -223,8 +224,12 @@ function StatRow({ label, from, predicted }: { label: string; from: number | nul
   );
 }
 
-export default function PlayerProfile() {
-  const { id } = useParams<{ id: string }>();
+export default function PlayerProfile({ embedded = false, idOverride, hideTabs = false, tabSlot, warOverride, marketOverride, devAggOverride, roleOverride }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean; tabSlot?: ReactNode; warOverride?: number | null; marketOverride?: number | null; devAggOverride?: number | null; roleOverride?: string | null }) {
+  const { id: paramId } = useParams<{ id: string }>();
+  const id = idOverride ?? paramId;
+  // Inside the player hub the outer dashboard chrome is already present, so
+  // render the profile content bare (no second DashboardLayout).
+  const Shell = embedded ? Fragment : DashboardLayout;
   const navigate = useNavigate();
   const location = useLocation();
   const returnTo = (location.state as any)?.returnTo as string | undefined;
@@ -626,20 +631,23 @@ export default function PlayerProfile() {
   // prediction changes (player nav, impersonation switch, etc.). Default to
   // 0 when no stored value exists.
   useEffect(() => {
-    const stored = regularPred?.dev_aggressiveness;
+    // In the program hub, seed the dev-agg toggle from the LIVE build's setting
+    // so the profile reflects the build; otherwise use the prediction's value.
+    const stored = devAggOverride != null ? devAggOverride : regularPred?.dev_aggressiveness;
     setSessionDevAgg(Number.isFinite(Number(stored)) ? String(Number(stored)) : "0");
-  }, [regularPred?.id, regularPred?.dev_aggressiveness]);
+  }, [regularPred?.id, regularPred?.dev_aggressiveness, devAggOverride]);
   // Sync session depth role to the stored hitter_depth_role; fall back to
   // auto-assignment from raw PA when no stored value (e.g. older rows pre-
   // schema-migration, or sub-threshold players).
   useEffect(() => {
-    const stored = (regularPred as any)?.hitter_depth_role as HitterDepthRole | null | undefined;
+    // Program hub: seed depth role from the LIVE build's setting; else the stored one.
+    const stored = (roleOverride ?? (regularPred as any)?.hitter_depth_role) as HitterDepthRole | null | undefined;
     if (stored === "cornerstone" || stored === "everyday_starter" || stored === "platoon_starter" || stored === "utility" || stored === "bench") {
       setDepthRole(stored);
     } else {
       setDepthRole(defaultHitterDepthRoleFromActualPa((player as any)?.pa ?? null));
     }
-  }, [regularPred?.id, (regularPred as any)?.hitter_depth_role, (player as any)?.pa]);
+  }, [regularPred?.id, (regularPred as any)?.hitter_depth_role, (player as any)?.pa, roleOverride]);
   const { getOverride } = usePlayerOverrides();
   const playerOverride = id ? getOverride(id) : null;
   const effectivePosition = playerOverride?.position ?? player?.position ?? null;
@@ -718,7 +726,7 @@ export default function PlayerProfile() {
   if (!player) {
     if (isLoading) {
       return (
-        <DashboardLayout>
+        <Shell>
           <div className="px-4 py-6 max-w-7xl mx-auto">
             <Button variant="ghost" onClick={() => navigate(-1)} className="mb-4 cursor-pointer">
               <ArrowLeft className="mr-2 h-4 w-4" /> Back
@@ -742,18 +750,18 @@ export default function PlayerProfile() {
               </div>
             </div>
           </div>
-        </DashboardLayout>
+        </Shell>
       );
     }
     return (
-      <DashboardLayout>
+      <Shell>
         <div className="flex flex-col items-center justify-center py-20 gap-4">
           <p className="text-muted-foreground">Player not found</p>
           <Button variant="outline" onClick={() => navigate(-1)}>
             <ArrowLeft className="mr-2 h-4 w-4" />Go Back
           </Button>
         </div>
-      </DashboardLayout>
+      </Shell>
     );
   }
 
@@ -972,8 +980,17 @@ export default function PlayerProfile() {
   const depthScale = storedPa > 0 ? sessionPa / storedPa : 1;
   const overlayScale = depthScale * (devAggScale ?? 1);
   const projectedOWar = storedOWar != null ? storedOWar * overlayScale : null;
-  const displayOWar = projectedOWar ?? (historicalOWar != null ? historicalOWar * overlayScale : null);
-  const displayNilValuation = storedMarketValue != null ? storedMarketValue * overlayScale : null;
+  const computedOWar = projectedOWar ?? (historicalOWar != null ? historicalOWar * overlayScale : null);
+  const computedNilValuation = storedMarketValue != null ? storedMarketValue * overlayScale : null;
+  // In the program hub, WAR + market come from the LIVE build (effectiveProjection
+  // on its snapshot + production_notes) so Projections matches the roster and Team
+  // Builder. `undefined` = standalone scouting route → use the computed value.
+  const displayOWar = warOverride !== undefined ? warOverride : computedOWar;
+  const displayNilValuation = marketOverride !== undefined ? marketOverride : computedNilValuation;
+  // Build-pinned = rendered inside the program hub (WAR/market come from the live
+  // build). There the depth-role / dev-agg controls are read-only labels — they
+  // define how the player IS set up in the build, not a preview to fiddle with.
+  const buildPinned = warOverride !== undefined;
   const predFromAvg = seedStatRow?.avg ?? regularPred?.from_avg ?? null;
   const predFromObp = seedStatRow?.obp ?? regularPred?.from_obp ?? null;
   const predFromSlg = seedStatRow?.slg ?? regularPred?.from_slg ?? null;
@@ -990,7 +1007,7 @@ export default function PlayerProfile() {
   const hasZeroAb = activeMasterRow != null && (activeAb == null || Number(activeAb) === 0);
   if (hasZeroAb) {
     return (
-      <DashboardLayout>
+      <Shell>
         <div className="space-y-4 max-w-[1400px] mx-auto">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" onClick={() => returnTo ? navigate(returnTo) : navigate(-1)}>
@@ -1021,14 +1038,14 @@ export default function PlayerProfile() {
             </CardContent>
           </Card>
         </div>
-      </DashboardLayout>
+      </Shell>
     );
   }
 
   return (
-    <DashboardLayout>
+    <Shell>
       <div className="space-y-4 max-w-[1400px] mx-auto">
-        {id && <PlayerPageTabs playerId={id} kind="player" />}
+        {id && !hideTabs && <PlayerPageTabs playerId={id} kind="player" />}
         {/* Back + Header */}
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => returnTo ? navigate(returnTo) : navigate(-1)}>
@@ -1381,6 +1398,8 @@ export default function PlayerProfile() {
           }
         </div>
 
+        {tabSlot}
+
         {(isLoading || isPredictionsLoading) && (
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="lg:col-span-1 space-y-4">
@@ -1505,12 +1524,18 @@ export default function PlayerProfile() {
                 ) : (
                   <div className="space-y-2.5 text-sm">
                   {[
-                    ["Team", displayTeamCurrent || "—"],
-                    ["Conference", resolvedConference || "—"],
+                    [`${CURRENT_SEASON} Team`, displayTeamCurrent || "—"],
+                    [`${CURRENT_SEASON} Conference`, resolvedConference || "—"],
                     ["Position", effectivePosition || "—"],
-                    // Class fallback chain: players.class_year → Hitter Master row's class_year
-                    // (Presto upload writes to master tables; players row may not be synced).
-                    ["Class", player.class_year || (activeSeasonRow as any)?.class_year || "—"],
+                    // Class = the PROJECTION-season class (one year forward), so it
+                    // matches the projected stats on this page. Falls back to the
+                    // Hitter Master row's class_year when players isn't synced.
+                    [`${PROJECTION_SEASON} Class`, (() => {
+                      const cy = player.class_year || (activeSeasonRow as any)?.class_year;
+                      if (!cy && !regularPred?.class_transition) return "—";
+                      const p = projectedEligibilityClass(cy, regularPred?.class_transition);
+                      return p.charAt(0) + p.slice(1).toLowerCase();
+                    })()],
                     ["Bats", (player as any).bats_hand === "R" ? "Right" : (player as any).bats_hand === "L" ? "Left" : (player as any).bats_hand === "S" ? "Switch" : (player as any).bats_hand || "—"],
                     ["Throws", (player as any).throws_hand === "R" ? "Right" : (player as any).throws_hand === "L" ? "Left" : (player as any).throws_hand || "—"],
                   ].map(([label, val]) => (
@@ -1720,6 +1745,14 @@ export default function PlayerProfile() {
                     <CardHeader className="pb-2 pt-3 px-4">
                       <div className="flex items-center gap-3 flex-wrap">
                         <CardTitle className="text-sm font-semibold tracking-wide uppercase text-[#D4AF37] flex items-center gap-2" style={{ fontFamily: "Oswald, sans-serif" }}><TrendingUp className="h-4 w-4" />2027 Projected Stats{isThinSample ? "*" : ""}</CardTitle>
+                        {buildPinned ? (
+                          // Program hub: read-only — shows how the player is set up in the live build.
+                          <div className="flex items-center gap-1.5">
+                            <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Depth role — from the active roster build">{({ cornerstone: "Cornerstone", everyday_starter: "Everyday Starter", platoon_starter: "Platoon Starter", utility: "Utility", bench: "Bench" } as Record<string, string>)[depthRole] ?? depthRole}</span>
+                            <span className="rounded border border-[#162241] bg-[#0d1a30] px-2 py-1 text-xs text-slate-200" title="Dev aggressiveness — from the active roster build">Dev {sessionDevAgg}</span>
+                            <span className="text-[10px] italic text-[#8a94a6]">*assigned from team build</span>
+                          </div>
+                        ) : (
                         <div className="flex items-center gap-1.5">
                           <Select value={depthRole} onValueChange={(v) => setDepthRole(v as HitterDepthRole)}>
                             <SelectTrigger className="h-7 w-[150px] text-xs border-[#162241] bg-[#0d1a30] text-slate-200" title="Depth role — session-only display overlay; not saved"><SelectValue /></SelectTrigger>
@@ -1743,6 +1776,7 @@ export default function PlayerProfile() {
                             </SelectContent>
                           </Select>
                         </div>
+                        )}
                       </div>
                     </CardHeader>
                     <CardContent className="px-4 pb-4">
@@ -1967,7 +2001,7 @@ export default function PlayerProfile() {
         </div>}
 
       </div>
-    </DashboardLayout>
+    </Shell>
   );
 }
 

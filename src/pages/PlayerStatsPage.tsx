@@ -1,4 +1,5 @@
-import { useParams } from "react-router-dom";
+import { Fragment, type ReactNode } from "react";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import PlayerPageTabs from "@/components/PlayerPageTabs";
 import { PlayerStatsHeader } from "@/components/PlayerStatsHeader";
@@ -17,22 +18,33 @@ const SEASON = 2026;
  * Export Report PDF lives on Profile — the View Full Report button
  * routes there.
  */
-export default function PlayerStatsPage() {
-  const { id } = useParams<{ id: string }>();
+export default function PlayerStatsPage({ embedded = false, idOverride, hideTabs = false, tabSlot }: { embedded?: boolean; idOverride?: string; hideTabs?: boolean; tabSlot?: ReactNode }) {
+  const { id: paramId } = useParams<{ id: string }>();
+  const id = idOverride ?? paramId;
   const { data: player, isLoading } = usePlayerSourceId(id);
+  const Shell = embedded ? Fragment : DashboardLayout;
+  const navigate = useNavigate();
+  const location = useLocation();
+  const onBack = () => {
+    const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+    navigate(returnTo ?? -1);
+  };
 
   return (
-    <DashboardLayout>
+    <Shell>
       <div className="space-y-5 p-4 md:p-6">
-        {id && <PlayerPageTabs playerId={id} kind="player" />}
+        {id && !hideTabs && <PlayerPageTabs playerId={id} kind="player" />}
 
         {player && id && (
           <PlayerStatsHeader
             player={player}
             kind="hitter"
             playerName={`${player.firstName ?? ""} ${player.lastName ?? ""}`.trim()}
+            onBack={onBack}
           />
         )}
+
+        {tabSlot}
 
         {isLoading && (
           <div className="py-10 text-sm text-white/50">Loading player…</div>
@@ -50,6 +62,6 @@ export default function PlayerStatsPage() {
           <HitterPitchLog batterId={player.sourcePlayerId} season={SEASON} />
         )}
       </div>
-    </DashboardLayout>
+    </Shell>
   );
 }
