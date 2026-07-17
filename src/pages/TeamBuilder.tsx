@@ -4,7 +4,7 @@ import RosterTab from "./team-builder/tabs/RosterTab";
 import TargetBoardTab from "./team-builder/tabs/TargetBoardTab";
 import DepthTab from "./team-builder/tabs/DepthTab";
 import CompareTab from "./team-builder/tabs/CompareTab";
-import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
+import { CurrencyInput } from "@/components/CurrencyInput";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,8 @@ import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { resolveMetricParkFactor, batsHandToHandedness } from "@/lib/parkFactors";
 import { useEffectiveSchool } from "@/hooks/useEffectiveSchool";
+import PlayerNotesDialog from "@/components/PlayerNotesDialog";
+import { usePlayerNotes } from "@/hooks/usePlayerNotes";
 // TeamWarSnapshot moved to AnalyticsTab
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { computePitcherProjection } from "@/lib/pitcherProjection";
@@ -719,6 +721,23 @@ function readLocalNum(key: string, fallback: number, remoteValues?: Record<strin
   return fallback;
 }
 
+/** Wrapper so usePlayerNotes runs only while the dialog is mounted. */
+function TeamBuilderNotesDialog({ buildPlayerId, playerName, onClose }: { buildPlayerId: string; playerName: string; onClose: () => void }) {
+  const { notes, addNote, removeNote, busy } = usePlayerNotes(buildPlayerId);
+  return (
+    <PlayerNotesDialog
+      open
+      onOpenChange={(o) => { if (!o) onClose(); }}
+      playerName={playerName}
+      notes={notes}
+      onAdd={addNote}
+      onRemove={removeNote}
+      busy={busy}
+      subtitle="Scouting or negotiation context. Each note is stamped with the date and who wrote it. Shared with the front office's Roster Management."
+    />
+  );
+}
+
 export default function TeamBuilder() {
   const { user, hasRole, effectiveTeamId } = useAuth();
   const { toast } = useToast();
@@ -1360,7 +1379,7 @@ export default function TeamBuilder() {
     targetPositionTableTotals, targetPitcherTableTotals,
     hitterEligible, pitcherEligible,
     positionPlayers, pitchers, targetPositionPlayers, targetPitchers,
-    totalEffectiveNil, totalRosterPlayerScore, budgetRemaining,
+    totalEffectiveNil, totalActualNil, totalRosterPlayerScore, budgetRemaining,
     pitchingTierMultipliers, pitchingPvfForRole,
   } = useTeamBuilderSimulation({
     teams, teamsByName, pitchingMasterRows, pitchingPowerEq, newConfStats,
@@ -1789,13 +1808,16 @@ export default function TeamBuilder() {
       newBuild();
       return;
     }
-    // Prefer most-recent coach build for the current season; fall back to any
-    // prior-year coach build, then to the most-recent default build.
-    // Builds are sorted updated_at DESC by the query, so [0] is always the latest.
+    // Prefer the build flagged active (the live roster the Front Office uses),
+    // so both sides open to the same roster. Fall back to most-recent coach
+    // build for the current season, then any prior-year coach build, then the
+    // most-recent default build. Builds are sorted updated_at DESC by the
+    // query, so [0] is always the latest.
     const coachBuilds = builds.filter((b: any) => !b.is_default);
     const defaultBuilds = builds.filter((b: any) => b.is_default);
+    const activeBuild = builds.find((b: any) => b.is_active && !b.is_default);
     const currentYearCoachBuilds = coachBuilds.filter((b: any) => b.academic_year === PROJECTION_SEASON);
-    const toLoad = (currentYearCoachBuilds[0] ?? coachBuilds[0] ?? defaultBuilds[0]) as { id: string; is_default?: boolean } | undefined;
+    const toLoad = (activeBuild ?? currentYearCoachBuilds[0] ?? coachBuilds[0] ?? defaultBuilds[0]) as { id: string; is_default?: boolean } | undefined;
     if (!toLoad) return;
     setHasSavedOnce(!toLoad.is_default);
     loadBuild(toLoad.id);
@@ -3249,6 +3271,10 @@ export default function TeamBuilder() {
     autoSeededTeamRef.current = normalizeName(selectedTeam);
   };
 
+  // Shared per-player dated notes (same log the GM sees on Roster Management).
+  const [notesTarget, setNotesTarget] = useState<{ buildPlayerId: string; name: string } | null>(null);
+  const openPlayerNotes = useCallback((buildPlayerId: string, name: string) => setNotesTarget({ buildPlayerId, name }), []);
+
   const playerRowProps = useMemo(() => ({
     allPlayersById,
     pitchingSourceMap: pitchingStatsByNameTeam.bySourceId,
@@ -3273,6 +3299,7 @@ export default function TeamBuilder() {
     markPlayerLeaving,
     updatePlayerOverrideFn,
     setSupabaseRole,
+    onOpenNotes: openPlayerNotes,
   }), [
     allPlayersById,
     pitchingStatsByNameTeam,
@@ -3297,6 +3324,7 @@ export default function TeamBuilder() {
     markPlayerLeaving,
     updatePlayerOverrideFn,
     setSupabaseRole,
+    openPlayerNotes,
   ]);
 
   return (
@@ -3631,7 +3659,7 @@ export default function TeamBuilder() {
           </div>
           <div>
             <Label className="text-xs mb-1 block">Total Budget ($)</Label>
-            <Input type="text" inputMode="numeric" value={formatWithCommas(totalBudget)} onChange={(e) => { setTotalBudget(parseCommaNumber(e.target.value)); setDirty(true); }} />
+            <CurrencyInput value={totalBudget || null} onChange={(n) => { setTotalBudget(n ?? 0); setDirty(true); }} />
           </div>
           <div>
             <Label className="text-xs mb-1 block">Program Tier Conference (PTM)</Label>
@@ -3665,7 +3693,7 @@ export default function TeamBuilder() {
           </div>
           <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4 text-center">
             <div className="text-muted-foreground text-xs uppercase tracking-wide">Budget Used</div>
-            <div className="text-2xl font-bold tracking-tight mt-1">${Math.round(totalEffectiveNil).toLocaleString()}</div>
+            <div className="text-2xl font-bold tracking-tight mt-1">${Math.round(totalActualNil).toLocaleString()}</div>
           </div>
           <div className={`rounded-lg border-2 p-4 text-center ${budgetRemaining < 0 ? "border-destructive/30 bg-destructive/5" : "border-primary/20 bg-primary/5"}`}>
             <div className="text-muted-foreground text-xs uppercase tracking-wide">Remaining</div>
@@ -3790,6 +3818,15 @@ export default function TeamBuilder() {
               <Trash2 className="h-4 w-4 mr-1" /> Delete Build
             </Button>
           </div>
+        )}
+
+        {/* Shared per-player dated notes — same log the GM sees on Roster Management. */}
+        {notesTarget && (
+          <TeamBuilderNotesDialog
+            buildPlayerId={notesTarget.buildPlayerId}
+            playerName={notesTarget.name}
+            onClose={() => setNotesTarget(null)}
+          />
         )}
       </div>
     </DashboardLayout>

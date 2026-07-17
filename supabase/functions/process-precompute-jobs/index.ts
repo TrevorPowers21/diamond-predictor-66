@@ -1667,7 +1667,7 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
         class_transition: "same", dev_aggressiveness: 0,
         class_transition_overridden: false, dev_aggressiveness_overridden: false,
         depth_role: hDepth,
-        player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, market_value: hPred.twp_hitter_market_value ?? hPred.market_value, hitter_depth_role: hPred.hitter_depth_role, class_transition: hPred.class_transition ?? null, dev_aggressiveness: hPred.dev_aggressiveness ?? null } : null,
+        player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, market_value: hPred.twp_hitter_market_value ?? hPred.market_value, hitter_depth_role: hPred.hitter_depth_role } : null,
       });
       playerRows.push({
         player_id: p.id, source: "returner", custom_name: customName,
@@ -1676,7 +1676,7 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
         class_transition: "same", dev_aggressiveness: 0,
         class_transition_overridden: false, dev_aggressiveness_overridden: false,
         depth_role: pDepth,
-        player_snapshot: pPred ? { p_era: pPred.p_era, p_fip: pPred.p_fip, p_whip: pPred.p_whip, p_k9: pPred.p_k9, p_bb9: pPred.p_bb9, p_hr9: pPred.p_hr9, p_rv_plus: pPred.p_rv_plus, p_war: pPred.p_war, pitcher_role: pPred.pitcher_role, market_value: pPred.twp_pitcher_market_value ?? pPred.market_value, class_transition: pPred.class_transition ?? null, dev_aggressiveness: pPred.dev_aggressiveness ?? null } : null,
+        player_snapshot: pPred ? { p_era: pPred.p_era, p_fip: pPred.p_fip, p_whip: pPred.p_whip, p_k9: pPred.p_k9, p_bb9: pPred.p_bb9, p_hr9: pPred.p_hr9, p_rv_plus: pPred.p_rv_plus, p_war: pPred.p_war, pitcher_role: pPred.pitcher_role, market_value: pPred.twp_pitcher_market_value ?? pPred.market_value } : null,
       });
     } else if (isPitcher) {
       const pRole: "SP" | "RP" = pPred?.pitcher_role === "SP" ? "SP" : "RP";
@@ -1687,7 +1687,7 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
         class_transition: "same", dev_aggressiveness: 0,
         class_transition_overridden: false, dev_aggressiveness_overridden: false,
         depth_role: pDepth,
-        player_snapshot: pPred ? { p_era: pPred.p_era, p_fip: pPred.p_fip, p_whip: pPred.p_whip, p_k9: pPred.p_k9, p_bb9: pPred.p_bb9, p_hr9: pPred.p_hr9, p_rv_plus: pPred.p_rv_plus, p_war: pPred.p_war, pitcher_role: pPred.pitcher_role, pitcher_depth_role: pPred.pitcher_depth_role, market_value: pPred.market_value, class_transition: pPred.class_transition ?? null, dev_aggressiveness: pPred.dev_aggressiveness ?? null } : null,
+        player_snapshot: pPred ? { p_era: pPred.p_era, p_fip: pPred.p_fip, p_whip: pPred.p_whip, p_k9: pPred.p_k9, p_bb9: pPred.p_bb9, p_hr9: pPred.p_hr9, p_rv_plus: pPred.p_rv_plus, p_war: pPred.p_war, pitcher_role: pPred.pitcher_role, pitcher_depth_role: pPred.pitcher_depth_role, market_value: pPred.market_value } : null,
       });
     } else {
       const hDepth = validHitterDepths.includes(hPred?.hitter_depth_role) ? hPred.hitter_depth_role : hitterDepthFromPa(p.pa ?? null);
@@ -1697,7 +1697,7 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
         class_transition: "same", dev_aggressiveness: 0,
         class_transition_overridden: false, dev_aggressiveness_overridden: false,
         depth_role: hDepth,
-        player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, market_value: hPred.market_value, hitter_depth_role: hPred.hitter_depth_role, class_transition: hPred.class_transition ?? null, dev_aggressiveness: hPred.dev_aggressiveness ?? null } : null,
+        player_snapshot: hPred ? { p_avg: hPred.p_avg, p_obp: hPred.p_obp, p_slg: hPred.p_slg, p_wrc_plus: hPred.p_wrc_plus, o_war: hPred.o_war, market_value: hPred.market_value, hitter_depth_role: hPred.hitter_depth_role } : null,
       });
     }
   }
@@ -1746,6 +1746,29 @@ async function createOrRefreshDefaultBuild(supabase: any, customerTeamId: string
   }
 
   return { buildId, rows: rows.length };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// GM (Front Office) init — idempotent. Runs after the default build so a new
+// team's front office is explicitly ready: a baseline budget row for the
+// projection season + a welcome activity entry. All other GM tables
+// (recruits, notes, per-player finance) self-populate on first write, so
+// nothing else needs seeding. Wrapped by the caller in try/catch — if the GM
+// tables don't exist yet in this environment it's a no-op.
+// ─────────────────────────────────────────────────────────────────────────
+async function ensureGmSetup(supabase: any, customerTeamId: string): Promise<{ seeded: boolean }> {
+  const season = PROJECTION_SEASON_FOR_DEFAULT;
+  const { data: existing } = await supabase
+    .from("gm_budget").select("id").eq("customer_team_id", customerTeamId).eq("season", season).maybeSingle();
+  if (existing) return { seeded: false }; // already initialized (runs after every job)
+
+  await supabase.from("gm_budget").insert({ customer_team_id: customerTeamId, season });
+  await supabase.from("gm_activity").insert({
+    customer_team_id: customerTeamId,
+    actor: null,
+    action: "Front office initialized — roster imported and ready",
+  });
+  return { seeded: true };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1824,7 +1847,15 @@ Deno.serve(async (req: Request) => {
       console.error("default build refresh failed (non-fatal):", dbErr);
     }
 
-    return new Response(JSON.stringify({ ok: true, jobId: job.id, ...result, defaultBuild: defaultBuildResult }), {
+    // Initialize the team's GM / front office (idempotent, non-fatal).
+    let gmSetupResult: { seeded: boolean } | null = null;
+    try {
+      gmSetupResult = await ensureGmSetup(supabase, job.customer_team_id);
+    } catch (gmErr: any) {
+      console.error("GM setup failed (non-fatal):", gmErr);
+    }
+
+    return new Response(JSON.stringify({ ok: true, jobId: job.id, ...result, defaultBuild: defaultBuildResult, gmSetup: gmSetupResult }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e: any) {
