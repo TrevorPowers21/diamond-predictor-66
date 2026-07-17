@@ -107,10 +107,23 @@ export function useGmAllocations(buildId: string | null | undefined) {
 
   const removeSource = useMutation({
     mutationFn: async (id: string) => {
+      const vendorId = sources.find((s) => s.id === id)?.vendor_id ?? null;
       const { error } = await (supabase as any).from("gm_allocation_source").delete().eq("id", id);
       if (error) throw error;
+      // Drop the vendor from the program directory (so it leaves the picker)
+      // once it's no longer referenced by any OTHER source or any contract —
+      // a vendor still backing a contract stays.
+      if (vendorId) {
+        const [{ count: srcRefs }, { count: conRefs }] = await Promise.all([
+          (supabase as any).from("gm_allocation_source").select("id", { count: "exact", head: true }).eq("vendor_id", vendorId),
+          (supabase as any).from("gm_contract").select("id", { count: "exact", head: true }).eq("vendor_id", vendorId),
+        ]);
+        if ((srcRefs ?? 0) === 0 && (conRefs ?? 0) === 0) {
+          await (supabase as any).from("gm_vendor").delete().eq("id", vendorId);
+        }
+      }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: srcKey }); qc.invalidateQueries({ queryKey: allocKey }); qc.invalidateQueries({ queryKey: ["gm-roster"] }); toast.success("Category removed"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: srcKey }); qc.invalidateQueries({ queryKey: allocKey }); qc.invalidateQueries({ queryKey: ["gm-roster"] }); qc.invalidateQueries({ queryKey: ["gm-vendors"] }); toast.success("Category removed"); },
     onError: (e: any) => toast.error(`Delete failed: ${e.message}`),
   });
 
