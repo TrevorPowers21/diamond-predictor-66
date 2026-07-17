@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 
 /**
@@ -19,6 +19,8 @@ export function CurrencyInput({ value, onSave, onChange, placeholder = "$0", cla
   const ref = useRef<HTMLInputElement>(null);
   const [local, setLocal] = useState<string | null>(null);
   const caret = useRef<number | null>(null);
+  // Number committed on blur, held until the parent's value prop catches up.
+  const pending = useRef<number | null | undefined>(undefined);
   const display = local != null ? local : value == null ? "" : "$" + Math.round(value).toLocaleString("en-US");
 
   // Restore the caret after React repaints the reformatted value.
@@ -28,6 +30,16 @@ export function CurrencyInput({ value, onSave, onChange, placeholder = "$0", cla
       caret.current = null;
     }
   });
+
+  // Once the parent's value prop reflects what we just committed, drop the
+  // local edit copy. Holding it until then stops the field from flashing the
+  // old number for a beat while the save/refetch is in flight.
+  useEffect(() => {
+    if (pending.current !== undefined && (value == null ? null : Math.round(value)) === pending.current) {
+      pending.current = undefined;
+      setLocal(null);
+    }
+  }, [value]);
 
   return (
     <Input
@@ -55,7 +67,14 @@ export function CurrencyInput({ value, onSave, onChange, placeholder = "$0", cla
         onChange?.(digits === "" ? null : Number(digits));
       }}
       onBlur={() => {
-        if (local != null) { const d = local.replace(/[^0-9]/g, ""); onSave?.(d === "" ? null : Number(d)); setLocal(null); }
+        if (local == null) return;
+        const d = local.replace(/[^0-9]/g, "");
+        const n = d === "" ? null : Number(d);
+        onSave?.(n);
+        // If the prop already matches, drop local now; otherwise hold it until
+        // the value prop lands (see the effect above) so it doesn't flicker.
+        if ((value == null ? null : Math.round(value)) === n) setLocal(null);
+        else pending.current = n;
       }}
     />
   );
