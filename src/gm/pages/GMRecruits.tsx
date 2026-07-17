@@ -217,11 +217,14 @@ export default function GMRecruits() {
         return unassigned.length ? [...groups, { key: "unassigned", title: "Unassigned", list: unassigned }] : groups;
       })();
 
-  // Forward class budget — what we've budgeted (willing to pay) for the class.
+  // Forward class budget — the SET budget stays constant. Committed money +
+  // scholarships only accrue from recruits who have COMMITTED or SIGNED; a
+  // player who's merely added/evaluating consumes nothing until they lock in
+  // (and drops back off the totals if their stage moves off committed/signed).
   const classRecruits = gm.recruits.filter((r) => r.class_year === year);
-  const classWilling = classRecruits.reduce((s, r) => s + (r.target_offer ?? 0), 0);
-  const committedWilling = classRecruits.filter((r) => r.stage === "committed" || r.stage === "signed").reduce((s, r) => s + (r.target_offer ?? 0), 0);
-  const classSchol = classRecruits.reduce((s, r) => s + (r.scholarship_pct ?? 0), 0) / 100; // equivalencies committed
+  const isLockedIn = (r: GmRecruit) => r.stage === "committed" || r.stage === "signed";
+  const committedWilling = classRecruits.filter(isLockedIn).reduce((s, r) => s + (r.target_offer ?? 0), 0);
+  const classSchol = classRecruits.filter(isLockedIn).reduce((s, r) => s + (r.scholarship_pct ?? 0), 0) / 100; // committed/signed only
   const cfg = gm.configByYear.get(year);
 
   // Edit Budget (per class year) dialog state.
@@ -362,10 +365,10 @@ export default function GMRecruits() {
       </div>
 
       {/* Class budget — what we've budgeted (willing to pay) vs the target + scholarships */}
-      {(classWilling > 0 || classSchol > 0 || cfg?.budget != null || cfg?.scholarships != null) && (
+      {(committedWilling > 0 || classSchol > 0 || cfg?.budget != null || cfg?.scholarships != null) && (
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border border-[#D4AF37]/40 bg-[#D4AF37]/[0.05] px-4 py-2.5">
           <span className="text-[11px] font-bold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>{year} Class Budget</span>
-          <DealStat label="Budgeted" value={`${money(classWilling)}${cfg?.budget != null ? ` / ${money(cfg.budget)}` : ""}`} accent />
+          <DealStat label="Budgeted" value={cfg?.budget != null ? money(cfg.budget) : "—"} accent />
           <DealStat label="Committed" value={money(committedWilling)} />
           <DealStat label="Scholarships" value={`${classSchol.toFixed(1)}${cfg?.scholarships != null ? ` / ${cfg.scholarships}` : ""}`} />
         </div>
