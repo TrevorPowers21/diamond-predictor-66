@@ -81,12 +81,12 @@ export function useGmAllocations(buildId: string | null | undefined) {
   };
 
   const addSource = useMutation({
-    mutationFn: async ({ name, bucket, total, funding_mode, base_offset }: { name: string; bucket: AllocationBucket; total: number | null; funding_mode: "new_money" | "from_base"; base_offset: number }) => {
+    mutationFn: async ({ name, bucket, total, funding_mode, base_offset, vendor_id }: { name: string; bucket: AllocationBucket; total: number | null; funding_mode: "new_money" | "from_base"; base_offset: number; vendor_id?: string | null }) => {
       if (!effectiveTeamId || !buildId) throw new Error("No team/build in scope");
       const nextOrder = sources.length ? Math.max(...sources.map((s) => s.sort_order)) + 1 : 0;
       const { error } = await (supabase as any).from("gm_allocation_source").insert({
         customer_team_id: effectiveTeamId, team_build_id: buildId, name: name.trim(), bucket, total, sort_order: nextOrder,
-        funding_mode, base_offset, created_by_user_id: user?.id ?? null,
+        funding_mode, base_offset, vendor_id: vendor_id ?? null, created_by_user_id: user?.id ?? null,
       });
       if (error) throw error;
     },
@@ -140,7 +140,7 @@ export function useGmAllocations(buildId: string | null | undefined) {
     isLoading: srcLoading || allocLoading,
     allocBySource,
     allocatedTotal,
-    addSource: (name: string, bucket: AllocationBucket, total: number | null, funding_mode: "new_money" | "from_base", base_offset: number) => addSource.mutate({ name, bucket, total, funding_mode, base_offset }),
+    addSource: (name: string, bucket: AllocationBucket, total: number | null, funding_mode: "new_money" | "from_base", base_offset: number, vendor_id?: string | null) => addSource.mutate({ name, bucket, total, funding_mode, base_offset, vendor_id }),
     updateSource: (id: string, patch: Partial<Pick<GmAllocationSource, "name" | "total">>) => updateSource.mutate({ id, patch }),
     removeSource: (id: string) => removeSource.mutate(id),
     setAllocation: (sourceId: string, playerId: string, amount: number | null) => setAllocation.mutate({ sourceId, playerId, amount }),

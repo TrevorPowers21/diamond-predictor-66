@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { cn } from "@/lib/utils";
 import { PlayerLink } from "@/gm/components/PlayerLink";
 import { useGmVendors } from "@/gm/hooks/useGmVendors";
+import { VendorPicker } from "@/gm/components/VendorPicker";
 import { CurrencyInput } from "@/components/CurrencyInput";
 import { FileText, Plus, Upload, X, ExternalLink, Trash2, Check, Search, Pencil } from "lucide-react";
 
@@ -144,12 +145,9 @@ export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId
               </Select>
             </Field>
             <Field label={bucket === "rev" ? "Source" : "Vendor"}>
-              <Input list={bucket === "rev" ? undefined : "gm-vendor-options"} value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder={bucket === "rev" ? "School" : "Type or pick a vendor"} className="h-9 text-sm" />
-              {bucket !== "rev" && (
-                <datalist id="gm-vendor-options">
-                  {vendors.filter((v) => v.bucket === bucket).map((v) => <option key={v.id} value={v.name} />)}
-                </datalist>
-              )}
+              {bucket === "rev"
+                ? <Input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="School" className="h-9 text-sm" />
+                : <VendorPicker key={bucket} vendors={vendors} bucket={bucket} value={vendor} onChange={setVendor} />}
             </Field>
             <Field label="Total value"><CurrencyInput value={value} onChange={setValue} placeholder="$0" className="h-9 text-sm" /></Field>
             <Field label="Status">

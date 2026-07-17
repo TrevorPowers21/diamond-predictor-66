@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { useGmAllocations, type AllocationBucket, type GmAllocationSource } from "@/gm/hooks/useGmAllocations";
 import { useGmRoster } from "@/gm/hooks/useGmRoster";
 import { useGmContracts } from "@/gm/hooks/useGmContracts";
+import { useGmVendors, type GmVendor } from "@/gm/hooks/useGmVendors";
+import { VendorPicker } from "@/gm/components/VendorPicker";
 import { PlayerLink } from "@/gm/components/PlayerLink";
 import { CurrencyInput } from "@/components/CurrencyInput";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +24,7 @@ function MoneyInput({ value, onSave, placeholder = "—", className }: { value: 
   return <CurrencyInput value={value} onSave={onSave} placeholder={placeholder} className={cn("h-8 text-right text-xs font-mono tabular-nums", className)} />;
 }
 
-function AddCategoryDialog({ open, onOpenChange, onAdd, baseFor }: { open: boolean; onOpenChange: (o: boolean) => void; onAdd: (name: string, bucket: AllocationBucket, total: number | null, reallocate: boolean) => void; baseFor: (bucket: AllocationBucket) => number }) {
+function AddCategoryDialog({ open, onOpenChange, onAdd, baseFor, vendors }: { open: boolean; onOpenChange: (o: boolean) => void; onAdd: (name: string, bucket: AllocationBucket, total: number | null, reallocate: boolean) => void; baseFor: (bucket: AllocationBucket) => number; vendors: GmVendor[] }) {
   const [name, setName] = useState("");
   const [bucket, setBucket] = useState<AllocationBucket>("nil");
   const [total, setTotal] = useState<number | null>(null);
@@ -38,8 +40,8 @@ function AddCategoryDialog({ open, onOpenChange, onAdd, baseFor }: { open: boole
         <DialogHeader><DialogTitle style={OSWALD}>Add {bucket === "nil" ? "Vendor" : "Source"}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1">
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Name</label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Opendorse, Summer Camp" className="h-9 text-sm" />
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{bucket === "nil" ? "Vendor" : "Source"}</label>
+            <VendorPicker key={bucket} vendors={vendors} bucket={bucket} value={name} onChange={setName} label={bucket === "nil" ? "vendor" : "source"} />
           </div>
           <div className="space-y-1">
             <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Bucket</label>
@@ -282,6 +284,7 @@ export default function GMAllocations() {
   const gm = useGmRoster();
   const { sources, isLoading, allocBySource, allocatedTotal, addSource, updateSource, removeSource, setAllocation } = useGmAllocations(gm.selectedBuildId);
   const { contracts } = useGmContracts();
+  const { vendors, ensureVendor } = useGmVendors();
   const [addOpen, setAddOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<GmAllocationSource | null>(null);
 
@@ -460,15 +463,19 @@ export default function GMAllocations() {
       <AddCategoryDialog
         open={addOpen}
         onOpenChange={setAddOpen}
+        vendors={vendors}
         baseFor={(b) => (b === "nil" ? gm.budget?.nil_total : gm.budget?.other_total) ?? 0}
-        onAdd={(name, bucket, total, reallocate) => {
+        onAdd={async (name, bucket, total, reallocate) => {
           // Carve = pull this amount out of the general base so the overall total
           // stays the same. base_offset records the exact dollars pulled, so delete
           // can offer to return them. (If the pool exceeds the base, only the base
           // portion is carved — the rest is new money.)
           const base = (bucket === "nil" ? gm.budget?.nil_total : gm.budget?.other_total) ?? 0;
           const offset = reallocate && total ? Math.min(total, base) : 0;
-          addSource(name, bucket, total, offset > 0 ? "from_base" : "new_money", offset);
+          // Recognize/create the vendor in the program directory and link it,
+          // so the same vendor is reused everywhere (no duplicates).
+          const vendor_id = name.trim() ? await ensureVendor(name.trim(), bucket) : null;
+          addSource(name, bucket, total, offset > 0 ? "from_base" : "new_money", offset, vendor_id);
           if (offset > 0) gm.saveBudget(bucket === "nil" ? { nil_total: base - offset } : { other_total: base - offset });
         }}
       />
