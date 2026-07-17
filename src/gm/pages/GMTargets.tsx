@@ -15,6 +15,7 @@ import { ArrowUpDown, Check, ChevronDown, ChevronRight, GripVertical, Plus, Sear
 import { portalStatusMeta } from "@/components/PortalStatus";
 import { cn } from "@/lib/utils";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
+import { CurrencyInput } from "@/gm/components/CurrencyInput";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -58,18 +59,7 @@ const applyOrder = (rows: GmTarget[], order: string[]): GmTarget[] => {
 
 /** Live-formatting currency input; saves the raw number on blur. */
 function MoneyInput({ value, onSave }: { value: number | null; onSave: (n: number | null) => void }) {
-  const [local, setLocal] = useState<string | null>(null);
-  const display = local != null ? local : value == null ? "" : "$" + Math.round(value).toLocaleString("en-US");
-  return (
-    <Input
-      value={display}
-      inputMode="numeric"
-      placeholder="—"
-      className="h-8 w-24 text-right text-xs font-mono tabular-nums ml-auto"
-      onChange={(e) => { const d = e.target.value.replace(/[^0-9]/g, ""); setLocal(d === "" ? "" : "$" + Number(d).toLocaleString("en-US")); }}
-      onBlur={() => { if (local != null) { const d = local.replace(/[^0-9]/g, ""); onSave(d === "" ? null : Number(d)); setLocal(null); } }}
-    />
-  );
+  return <CurrencyInput value={value} onSave={onSave} placeholder="—" className="h-8 w-24 text-right text-xs font-mono tabular-nums ml-auto" />;
 }
 
 function SortBtn({ label, sk, active, dir, onClick, align = "left" }: { label: string; sk: SortKey; active: boolean; dir: SortDir; onClick: (sk: SortKey) => void; align?: "left" | "right" }) {

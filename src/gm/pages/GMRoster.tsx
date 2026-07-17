@@ -13,6 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Check, Pencil, Plus, Save, SlidersHorizontal, StickyNote, Trash2 } from "lucide-react";
+import { CurrencyInput } from "@/gm/components/CurrencyInput";
 import PlayerNotesDialog from "@/components/PlayerNotesDialog";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { cn } from "@/lib/utils";
@@ -59,27 +60,7 @@ function ReasonSelect({ value, onChange }: { value: string | null; onChange: (r:
 
 /** Currency input: type 8000 → $8,000, no negatives, saves on blur. */
 function MoneyCell({ value, onSave }: { value: number | null; onSave: (n: number | null) => void }) {
-  const [local, setLocal] = useState<string | null>(null);
-  const display = local != null ? local : value == null ? "" : "$" + Math.round(value).toLocaleString("en-US");
-  return (
-    <Input
-      value={display}
-      inputMode="numeric"
-      placeholder="—"
-      className="h-8 w-24 text-right text-xs font-mono tabular-nums ml-auto"
-      onChange={(e) => {
-        const d = e.target.value.replace(/[^0-9]/g, "");
-        setLocal(d === "" ? "" : "$" + Number(d).toLocaleString("en-US"));
-      }}
-      onBlur={() => {
-        if (local != null) {
-          const d = local.replace(/[^0-9]/g, "");
-          onSave(d === "" ? null : Number(d));
-          setLocal(null);
-        }
-      }}
-    />
-  );
+  return <CurrencyInput value={value} onSave={onSave} placeholder="—" className="h-8 w-24 text-right text-xs font-mono tabular-nums ml-auto" />;
 }
 
 // Scholarship is an equivalency: a % of one scholarship (0–100). The % sign is
@@ -113,22 +94,7 @@ const equiv = (usedPct: number) => (usedPct / 100).toFixed(1); // sum of % → s
 
 /** Controlled dollar input for the budget popup — formats as $ while typing. */
 function DollarInput({ value, onChange }: { value: number | null; onChange: (n: number | null) => void }) {
-  const [text, setText] = useState<string | null>(null);
-  const display = text != null ? text : value == null ? "" : "$" + Math.round(value).toLocaleString("en-US");
-  return (
-    <Input
-      value={display}
-      inputMode="numeric"
-      placeholder="$0"
-      className="h-8 w-36 text-right text-sm font-mono tabular-nums"
-      onChange={(e) => {
-        const d = e.target.value.replace(/[^0-9]/g, "");
-        setText(d === "" ? "" : "$" + Number(d).toLocaleString("en-US"));
-        onChange(d === "" ? null : Number(d));
-      }}
-      onBlur={() => setText(null)}
-    />
-  );
+  return <CurrencyInput value={value} onChange={onChange} placeholder="$0" className="h-8 w-36 text-right text-sm font-mono tabular-nums" />;
 }
 
 /** Budget-setup popup: the GM edits the four allotments here (nowhere else),
@@ -686,7 +652,10 @@ export default function GMRoster() {
         </div>
         <div className="grid grid-cols-2 gap-3">
           {box("Revenue Share", revUsed, effCaps.rev_share_total)}
-          {box("Total", actualUsed, plannedTotal, true)}
+          {/* Total allotment = the GM's planned caps (Edit Budget + Funding Sources);
+              falls back to the coach's Team-Builder total_budget when the GM hasn't
+              set caps yet, so a budget typed on either surface always shows here. */}
+          {box("Total", actualUsed, plannedTotal ?? coachTotalBudget, true)}
         </div>
       </div>
 

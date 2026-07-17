@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { cn } from "@/lib/utils";
 import { PlayerLink } from "@/gm/components/PlayerLink";
 import { useGmVendors } from "@/gm/hooks/useGmVendors";
+import { CurrencyInput } from "@/gm/components/CurrencyInput";
 import { FileText, Plus, Upload, X, ExternalLink, Trash2, Check, Search, Pencil } from "lucide-react";
 
 const OSWALD = { fontFamily: "Oswald, sans-serif" } as const;
@@ -150,7 +151,7 @@ export function AddContractDialog({ open, onOpenChange, players, defaultPlayerId
                 </datalist>
               )}
             </Field>
-            <Field label="Total value"><Input value={value == null ? "" : "$" + value.toLocaleString("en-US")} onChange={(e) => { const t = e.target.value.replace(/[^0-9]/g, ""); setValue(t === "" ? null : Number(t)); }} inputMode="numeric" placeholder="$0" className="h-9 text-sm" /></Field>
+            <Field label="Total value"><CurrencyInput value={value} onChange={setValue} placeholder="$0" className="h-9 text-sm" /></Field>
             <Field label="Status">
               <Select value={status} onValueChange={(v) => setStatus(v as ContractStatus)}>
                 <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>

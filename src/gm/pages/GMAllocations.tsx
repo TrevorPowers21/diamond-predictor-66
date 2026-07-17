@@ -3,6 +3,7 @@ import { useGmAllocations, type AllocationBucket, type GmAllocationSource } from
 import { useGmRoster } from "@/gm/hooks/useGmRoster";
 import { useGmContracts } from "@/gm/hooks/useGmContracts";
 import { PlayerLink } from "@/gm/components/PlayerLink";
+import { CurrencyInput } from "@/gm/components/CurrencyInput";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -18,18 +19,7 @@ const BUCKET_LABEL: Record<AllocationBucket, string> = { nil: "NIL Vendors", oth
 
 /** Live-formatting currency input, saves the raw number on blur. */
 function MoneyInput({ value, onSave, placeholder = "—", className }: { value: number | null; onSave: (n: number | null) => void; placeholder?: string; className?: string }) {
-  const [local, setLocal] = useState<string | null>(null);
-  const display = local != null ? local : value == null ? "" : "$" + Math.round(value).toLocaleString("en-US");
-  return (
-    <Input
-      value={display}
-      inputMode="numeric"
-      placeholder={placeholder}
-      className={cn("h-8 text-right text-xs font-mono tabular-nums", className)}
-      onChange={(e) => { const d = e.target.value.replace(/[^0-9]/g, ""); setLocal(d === "" ? "" : "$" + Number(d).toLocaleString("en-US")); }}
-      onBlur={() => { if (local != null) { const d = local.replace(/[^0-9]/g, ""); onSave(d === "" ? null : Number(d)); setLocal(null); } }}
-    />
-  );
+  return <CurrencyInput value={value} onSave={onSave} placeholder={placeholder} className={cn("h-8 text-right text-xs font-mono tabular-nums", className)} />;
 }
 
 function AddCategoryDialog({ open, onOpenChange, onAdd, baseFor }: { open: boolean; onOpenChange: (o: boolean) => void; onAdd: (name: string, bucket: AllocationBucket, total: number | null, reallocate: boolean) => void; baseFor: (bucket: AllocationBucket) => number }) {
