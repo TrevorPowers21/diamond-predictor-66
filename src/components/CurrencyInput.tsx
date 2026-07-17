@@ -40,7 +40,13 @@ export function CurrencyInput({ value, onSave, onChange, placeholder = "$0", cla
         const el = e.currentTarget;
         const digitsBefore = el.value.slice(0, el.selectionStart ?? el.value.length).replace(/[^0-9]/g, "").length;
         const digits = el.value.replace(/[^0-9]/g, "");
-        const formatted = digits === "" ? "" : "$" + Number(digits).toLocaleString("en-US");
+        // Group the raw digit string (commas every 3) rather than collapsing
+        // through Number() — so deleting the leading digit of e.g. 200,000
+        // leaves "00,000" (which you can retype into 300,000) instead of
+        // snapping to $0 / empty and wiping the value. onChange/onBlur below
+        // still report the clean numeric value, and blur normalizes display.
+        const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        const formatted = digits === "" ? "" : "$" + grouped;
         // Caret goes after the same number of digits in the reformatted string.
         let pos = 0, seen = 0;
         while (pos < formatted.length && seen < digitsBefore) { if (/[0-9]/.test(formatted[pos]!)) seen++; pos++; }

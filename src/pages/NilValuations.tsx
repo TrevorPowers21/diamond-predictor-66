@@ -1,6 +1,6 @@
 // TODO: Route is commented out in App.tsx — page is unreachable. Reconnect or remove.
 import { useState, useMemo } from "react";
-import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
+import { CurrencyInput } from "@/components/CurrencyInput";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -260,11 +260,9 @@ export default function NilValuations() {
             </div>
             <div>
               <Label className="text-xs mb-1 block">Team-Specific Total NIL Budget ($)</Label>
-              <Input
-                type="text"
-                inputMode="numeric"
-                value={formatWithCommas(consultationNilBudget)}
-                onChange={(e) => setConsultationNilBudget(parseCommaNumber(e.target.value))}
+              <CurrencyInput
+                value={consultationNilBudget || null}
+                onChange={(n) => setConsultationNilBudget(n ?? 0)}
               />
             </div>
             <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">

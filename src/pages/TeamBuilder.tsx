@@ -4,7 +4,7 @@ import RosterTab from "./team-builder/tabs/RosterTab";
 import TargetBoardTab from "./team-builder/tabs/TargetBoardTab";
 import DepthTab from "./team-builder/tabs/DepthTab";
 import CompareTab from "./team-builder/tabs/CompareTab";
-import { formatWithCommas, parseCommaNumber } from "@/lib/utils";
+import { CurrencyInput } from "@/components/CurrencyInput";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -3659,7 +3659,7 @@ export default function TeamBuilder() {
           </div>
           <div>
             <Label className="text-xs mb-1 block">Total Budget ($)</Label>
-            <Input type="text" inputMode="numeric" value={formatWithCommas(totalBudget)} onChange={(e) => { setTotalBudget(parseCommaNumber(e.target.value)); setDirty(true); }} />
+            <CurrencyInput value={totalBudget || null} onChange={(n) => { setTotalBudget(n ?? 0); setDirty(true); }} />
           </div>
           <div>
             <Label className="text-xs mb-1 block">Program Tier Conference (PTM)</Label>

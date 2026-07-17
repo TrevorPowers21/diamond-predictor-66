@@ -13,7 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Check, Pencil, Plus, Save, SlidersHorizontal, StickyNote, Trash2 } from "lucide-react";
-import { CurrencyInput } from "@/gm/components/CurrencyInput";
+import { CurrencyInput } from "@/components/CurrencyInput";
 import PlayerNotesDialog from "@/components/PlayerNotesDialog";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
 import { cn } from "@/lib/utils";

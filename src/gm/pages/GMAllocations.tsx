@@ -3,7 +3,7 @@ import { useGmAllocations, type AllocationBucket, type GmAllocationSource } from
 import { useGmRoster } from "@/gm/hooks/useGmRoster";
 import { useGmContracts } from "@/gm/hooks/useGmContracts";
 import { PlayerLink } from "@/gm/components/PlayerLink";
-import { CurrencyInput } from "@/gm/components/CurrencyInput";
+import { CurrencyInput } from "@/components/CurrencyInput";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";

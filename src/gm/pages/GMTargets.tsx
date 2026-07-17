@@ -15,7 +15,7 @@ import { ArrowUpDown, Check, ChevronDown, ChevronRight, GripVertical, Plus, Sear
 import { portalStatusMeta } from "@/components/PortalStatus";
 import { cn } from "@/lib/utils";
 import { getPositionValueMultiplier } from "@/lib/nilProgramSpecific";
-import { CurrencyInput } from "@/gm/components/CurrencyInput";
+import { CurrencyInput } from "@/components/CurrencyInput";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";

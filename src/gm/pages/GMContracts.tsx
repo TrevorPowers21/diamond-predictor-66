@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { cn } from "@/lib/utils";
 import { PlayerLink } from "@/gm/components/PlayerLink";
 import { useGmVendors } from "@/gm/hooks/useGmVendors";
-import { CurrencyInput } from "@/gm/components/CurrencyInput";
+import { CurrencyInput } from "@/components/CurrencyInput";
 import { FileText, Plus, Upload, X, ExternalLink, Trash2, Check, Search, Pencil } from "lucide-react";
 
 const OSWALD = { fontFamily: "Oswald, sans-serif" } as const;
