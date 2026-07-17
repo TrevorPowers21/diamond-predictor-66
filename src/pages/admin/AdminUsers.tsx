@@ -79,12 +79,17 @@ export default function AdminUsers() {
   const removeMember = useMutation({
     mutationFn: async (userId: string) => {
       if (!scopedTeamId) throw new Error("No team selected");
-      const { error } = await supabase
+      // .select() returns the rows actually deleted — if RLS filters the delete
+      // (e.g. no permission), it returns 0 rows with NO error, which would
+      // otherwise read as a false success. Treat an empty result as a failure.
+      const { data, error } = await supabase
         .from("user_team_access")
         .delete()
         .eq("user_id", userId)
-        .eq("customer_team_id", scopedTeamId);
+        .eq("customer_team_id", scopedTeamId)
+        .select("user_id");
       if (error) throw error;
+      if (!data || data.length === 0) throw new Error("Nothing was removed — you may not have permission, or they were already removed.");
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-team-members", scopedTeamId] });
