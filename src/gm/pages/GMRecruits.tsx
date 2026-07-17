@@ -100,6 +100,8 @@ function SortableRecruitCard({ recruit, index, onEdit, onRemove, onStageChange, 
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.55 : 1, zIndex: isDragging ? 10 : "auto", position: "relative" };
   const name = `${recruit.first_name ?? ""} ${recruit.last_name ?? ""}`.trim() || "Unnamed";
   const locale = recruit.high_school ? `${recruit.high_school}${recruit.state ? ` (${recruit.state})` : ""}` : (recruit.state ?? "");
+  // Once a recruit commits/signs, "Willing to Pay" becomes the agreed number.
+  const payLabel = recruit.stage === "committed" || recruit.stage === "signed" ? "Agreed" : "Willing";
   return (
     <div ref={setNodeRef} style={style} onClick={onEdit} title="Edit recruit" className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 bg-card/40 p-2.5 transition-colors hover:border-[#D4AF37]/40">
       <button {...attributes} {...listeners} onClick={(e) => e.stopPropagation()} className="mt-0.5 cursor-grab text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing" title="Drag to reorder">
@@ -132,7 +134,7 @@ function SortableRecruitCard({ recruit, index, onEdit, onRemove, onStageChange, 
             <span className="tabular-nums">
               <span className="text-muted-foreground">Ask</span> <span className="font-semibold text-foreground">{money(recruit.asking_price)}</span>
               <span className="mx-1.5 text-muted-foreground/40">·</span>
-              <span className="text-muted-foreground">Willing</span> <span className="font-semibold text-[#D4AF37]">{money(recruit.target_offer)}</span>
+              <span className="text-muted-foreground">{payLabel}</span> <span className="font-semibold text-[#D4AF37]">{money(recruit.target_offer)}</span>
               {recruit.scholarship_pct != null && <><span className="mx-1.5 text-muted-foreground/40">·</span><span className="text-muted-foreground">Schol</span> <span className="font-semibold text-foreground">{recruit.scholarship_pct}%</span></>}
             </span>
           )}
@@ -391,7 +393,7 @@ export default function GMRecruits() {
 
       {/* Class budget — what we've budgeted (willing to pay) vs the target + scholarships */}
       {(committedWilling > 0 || classSchol > 0 || cfg?.budget != null || cfg?.scholarships != null) && (
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border border-[#D4AF37]/40 bg-[#D4AF37]/[0.05] px-4 py-2.5">
+        <div className="flex flex-wrap items-center gap-x-10 gap-y-3 rounded-md border border-[#D4AF37]/40 bg-[#D4AF37]/[0.05] px-5 py-3">
           <span className="text-[11px] font-bold uppercase tracking-wider text-[#D4AF37]" style={OSWALD}>{year} Class Budget</span>
           <DealStat label="Budgeted" value={cfg?.budget != null ? money(cfg.budget) : "—"} accent />
           <DealStat label="Committed" value={money(committedWilling)} />
@@ -528,7 +530,7 @@ export default function GMRecruits() {
                     <MoneyInput value={form.asking_price} onChange={(v) => setForm((f) => ({ ...f, asking_price: v }))} placeholder="$300,000" className="h-9 text-sm" />
                   </div>
                   <div>
-                    <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Willing to Pay</span>
+                    <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>{form.stage === "committed" || form.stage === "signed" ? "Agreed to Pay" : "Willing to Pay"}</span>
                     <MoneyInput value={form.target_offer} onChange={(v) => setForm((f) => ({ ...f, target_offer: v }))} placeholder="$250,000" className="h-9 text-sm" />
                   </div>
                   <div>
@@ -721,7 +723,7 @@ export default function GMRecruits() {
               <MoneyInput value={deal.asking_price} onChange={(v) => setDeal((d) => ({ ...d, asking_price: v }))} placeholder="$300,000" className="h-9 text-sm" />
             </div>
             <div>
-              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>Willing to Pay</span>
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground" style={OSWALD}>{dealRecruit && (dealRecruit.stage === "committed" || dealRecruit.stage === "signed") ? "Agreed to Pay" : "Willing to Pay"}</span>
               <MoneyInput value={deal.target_offer} onChange={(v) => setDeal((d) => ({ ...d, target_offer: v }))} placeholder="$250,000" className="h-9 text-sm" />
             </div>
             <div>
