@@ -34,7 +34,47 @@ Not just "does this table exist," but:
 
 The floor is verifiable facts; this layer is judgment against the full context.
 
-## 4. The mechanical floor — deterministic checks
+## 4. The oversight protocol — what a change must clear
+
+The agent interrogates whoever's making a change (including Trevor) and only "signs off" once the change holds up. Ordered by severity.
+
+**Hard stops (block the change):**
+- **Data consistency — the #1 rule.** Every user-facing number must read from the **proper precompute / returner line**. The agent pushes work to **never calculate live**; when live is unavoidable, the value **must be identical across every place it appears for the user — including under dev-aggressiveness, depth role, and SP/RP toggle.** The same stat showing two different values anywhere invalidates the whole app. This is the thing it guards hardest.
+  - **Enforcement = map-level (chosen).** The agent maintains a living **map of each stat → every surface it renders on**, and verifies they resolve to the *identical* value, running the dev-agg / depth-role / SP-RP toggle permutations to confirm the number doesn't move. Not just "flag live calc at the source" — the full stat-by-stat map is the goal. (Builds on the stored-vs-live audit + `storedVsLive.test.ts`.)
+- **DB safety.**
+  - **Verify which database** before any change — confirm the target (staging vs prod) so changes never land on the wrong one.
+  - **Staging first, always.** Additive changes promoted to prod are low-worry; **destructive changes or function changes are meticulous** and get extra scrutiny.
+  - **RLS is part of everything** — all data, especially anything big. Maintain a **saved, living analysis of how RLS works** (per table + actor: what each policy allows) so correctness is provable, not assumed.
+  - **Migration ritual:** dry-run apply first → run for real → **verify the objects/effects after (catalog, not `exec_sql OK`)** → **brief and question the operator** through it. Explicitly guards the "many migrations run, none re-checked, usage never tested before push" failure (the gm_contract silent rollback).
+
+**Questions it always asks (warn / push back, may block on a weak answer):**
+- **Intent** — what are you changing, and why?
+- **Process match** — does this follow how we've made and executed prior decisions?
+- **Prior decisions** — does it contradict anything in the decision records? (agent names the conflict)
+- **Proof** — data verified, and did the code actually reach the end / complete?
+
+**Soft / adaptive (guidance, not gates):**
+- **Terminology** — adapt to each operator's own words (not everyone prompts as precisely as Trevor); keep *user-facing* app terms consistent.
+- **Reuse** — prefer our existing patterns/utils, but don't hold anyone to the fire on it. (The *calc*-logic side of reuse is covered by the data-consistency hard stop — forking a formula is what creates divergent numbers.)
+
+**Enforcement — tiered, and hard blocks are a discussion, not a wall.**
+- **Soft items** are advisory: flag, suggest, move on.
+- **Hard stops don't slam a gate shut.** When the agent senses a non-negotiable is at risk, it *opens a conversation* — surfaces the concern, asks the editor for the *why* behind the action, and they work through it together until it's resolved in a **protected** way: nothing breaks, the progress is sound, and the reasoning is on record. An editor can work through *any* issue; what's required is the deliberate working-through, not silent approval. If they proceed past a hard stop, the resolution/override is **recorded and attributed**. The goal is protected collaboration, not "computer says no."
+
+## 5. How the knowledge gets captured — the loop
+
+You never author rules from a blank page. Capture is a **react-and-correct loop**:
+
+**The agent reads → proposes the rule it infers → you react → your correction becomes the record.**
+
+- **From the code:** the agent reads the codebase + git history and drafts the *observable* rules (money flow, precompute/returner reads, terminology).
+- **From talking:** it shows you that draft; you correct it ("the real reason is Y"); the correction is what's saved. Wrong guesses are the fastest way to pull the real reasoning out of your head — which is exactly how this whole plan was captured.
+
+**Two phases:** a **bootstrap** pass (agent mines the whole codebase + git history + existing session memory, presents everything it believes the rules are, you confirm/correct over a few sessions → the starting knowledge base), then **ongoing** capture on every change via the same loop, plus occasional deliberate philosophy drop-ins.
+
+**Record shape:** what / why / scope / supersedes / origin — and especially **what it was protecting against** (the failure mode), because that's what lets the agent extrapolate *the way you would* to situations you never explicitly ruled on. The agent mines these from the discussion; nobody fills a template.
+
+## 6. The mechanical floor — deterministic checks
 
 Every check traces to a real bug from the GM launch. This is the provable base the voice stands on.
 
@@ -54,25 +94,29 @@ Every check traces to a real bug from the GM launch. This is the provable base t
 - **Data invariants** — allocations ↔ contracts (no double-count, no orphan vendors); budget = base + Σ derived; recruiting committed money/scholarship only from committed/signed; exactly one `is_active` build per team.
 - **Code ↔ data** — columns the app selects exist in the target's PostgREST cache; stored-vs-live parity hooks (ties to `src/lib/storedVsLive.test.ts`).
 
-## 5. Where it lives / how it's invoked
+## 7. Where it lives / how it's invoked
 
 - A `scripts/agent/` folder + a thin CLI: `npm run rstr-check -- <command>`.
 - Reuses the existing `scripts/_run_sql_file.ts` / service-client pattern and both `.env.local` (staging) + `.env.production.local` (prod), read-only for catalog checks.
 - **Voice layer** = a Claude Code **custom subagent** (`agentType: rstr-check`) whose system prompt encodes the decision history + the hard-won rules (below), with the deterministic scripts as its toolkit. It reads the git diff, runs the relevant checks, and writes a plain-English report.
 
-## 6. Output
+**Architecture: Option A — build ON a coding-agent harness, don't rebuild one.** The harness (agent loop, tools, code editing, git, context management) is inherited; we pour effort into the RSTR-IQ-specific layer (knowledge base, oversight protocol, consistency map, DB rituals). **Claude Code is the primary / blessed harness.** But the brain is kept **portable, not Claude-Code-locked** — the knowledge lives as repo docs (markdown) and the checks as plain scripts/CLI, so a different harness can load the same rules + run the same tools. The Claude-Code-specific config (instructions, sub-agents, skills) is the blessed default; the underlying knowledge + tools are harness-agnostic.
+
+## 8. Output
 
 - Human report (terminal + optional markdown file): the consistency read up top, then ✅/❌ per mechanical check with the failing object and a suggested fix.
 - Non-zero exit on hard failures so it can gate a pre-push hook or CI later.
 - Flags: `--target staging|prod`, `--scope migrations|rls|drift|data|voice|all`, `--branch <name>`.
 
-## 7. Phasing
+## 9. Build posture
 
-- **Phase 1 (MVP):** the mechanical floor — migration integrity + staging⇄prod drift + RLS coverage. Highest ROI; these are the ones that bit us. Deterministic scripts only.
-- **Phase 2:** data invariants + the **voice layer** (diff-aware review against decision history, terminology, duplication, cross-surface impact).
-- **Phase 3:** wire into the workflow — pre-push on migration-touching branches, a pre-prod-migrate gate, post-deploy smoke.
+**We build it right, not quick.** No throwaway MVP — the agent is a real system built to do the job properly from the start (Trevor: "if we are building an agent we should be doing it right"). Phasing below is *build order*, not "cheap version first" — each piece is done properly before it's relied on.
 
-## 8. Open questions
+- **Foundation:** the knowledge base (repo decision records + your judgment) and the capture/refresh loop — nothing else is trustworthy without it.
+- **The guarantees:** the stat → surface map (with toggle permutations) and the DB-safety / RLS analysis — the two things that most protect the app.
+- **The gate + voice:** the oversight protocol wired into the real workflow (pushes, migrations), asking the right questions of whoever's at the keyboard.
+
+## 10. Open questions
 
 1. **Invocation:** manual CLI, or auto-gated (pre-push git hook / CI on the PR)? Recommend starting manual.
 2. **Prod access:** it needs the prod service key for read-only catalog checks (same `.env.production.local` used today). Keep it read-only-by-convention, or mint a separate read-only key?
