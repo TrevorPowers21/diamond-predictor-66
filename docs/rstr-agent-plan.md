@@ -1,7 +1,7 @@
 # RSTR IQ Dev Agent — Plan
 
-> Status: **planned, not built.** Design doc for a dev-side tool. We'll build it on this branch (`docs/rstr-agent-plan`).
-> Authored 2026-07-17; reframed 2026-07-18 around "a consistent voice across every change."
+> Status: **design complete, not built.** We'll build it on this branch (`docs/rstr-agent-plan`), starting with the bootstrap knowledge pass. No rush.
+> Authored 2026-07-17; design worked through with Trevor 2026-07-18 around "a consistent voice across every change."
 
 ## 1. What it is
 
@@ -108,20 +108,24 @@ Every check traces to a real bug from the GM launch. This is the provable base t
 - Non-zero exit on hard failures so it can gate a pre-push hook or CI later.
 - Flags: `--target staging|prod`, `--scope migrations|rls|drift|data|voice|all`, `--branch <name>`.
 
-## 9. Build posture
+## 9. Scope & attribution
 
-**We build it right, not quick.** No throwaway MVP — the agent is a real system built to do the job properly from the start (Trevor: "if we are building an agent we should be doing it right"). Phasing below is *build order*, not "cheap version first" — each piece is done properly before it's relied on.
+- **Scope = all activity.** Not just code changes — **every operation gets checks-and-balances at minimum**: code, migrations, CSV imports, precompute runs, scraping, portal pulls, hand SQL fixes. The data-ops are where silent damage happens (this session was half data-ops), so they're in scope, not an afterthought.
+- **Attribution.** The agent should **know who made each change**, however we implement it (git author + a recorded sign-off is likely enough). Lightweight for now; matters more the moment there's a second person at the keyboard.
 
-- **Foundation:** the knowledge base (repo decision records + your judgment) and the capture/refresh loop — nothing else is trustworthy without it.
-- **The guarantees:** the stat → surface map (with toggle permutations) and the DB-safety / RLS analysis — the two things that most protect the app.
-- **The gate + voice:** the oversight protocol wired into the real workflow (pushes, migrations), asking the right questions of whoever's at the keyboard.
+## 10. Build posture & starting point
 
-## 10. Open questions
+**We build it right, not quick.** No throwaway MVP — the agent is a real system built to do the job properly from the start (Trevor: "if we are building an agent we should be doing it right"). The order below is *build sequence*, not "cheap version first" — each piece is done properly before it's relied on. **No rush.**
 
-1. **Invocation:** manual CLI, or auto-gated (pre-push git hook / CI on the PR)? Recommend starting manual.
-2. **Prod access:** it needs the prod service key for read-only catalog checks (same `.env.production.local` used today). Keep it read-only-by-convention, or mint a separate read-only key?
-3. **Where does the "decision history" live** so the voice layer can load it? Options: this repo's memory/docs, a structured decisions file, or a sync from the assistant's memory. This is the crux of "all the information possible" — the voice is only as good as the history it can read.
-4. **Report destination:** terminal only, or also a dated report file / posted to the PR?
+1. **Start here — the bootstrap knowledge pass.** The agent reads the whole codebase + git history + this session's memory and drafts the rules/decisions for Trevor to correct (the react-and-correct loop). Nothing else is trustworthy until the knowledge base exists.
+2. **The guarantees:** the stat → surface map (with toggle permutations) and the DB-safety / RLS living analysis — the two things that most protect the app.
+3. **The gate + voice:** the oversight protocol wired into the real workflow (all activity — pushes, migrations, data-ops), asking the right questions of whoever's at the keyboard, with attribution.
+
+## 11. Still to decide (not blocking the start)
+
+- **Prod access:** it needs the prod service key for read-only catalog checks (same `.env.production.local` used today). Keep it read-only-by-convention, or mint a separate read-only key?
+- **Report / sign-off destination:** terminal only, or also a dated record file / posted to the PR?
+- **Attribution mechanism:** git author is the free version; do we want an explicit per-change sign-off record too?
 
 ## Guardrails the agent must encode (lessons from the GM launch)
 
