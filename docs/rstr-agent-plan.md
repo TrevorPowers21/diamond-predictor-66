@@ -1,80 +1,87 @@
 # RSTR IQ Dev Agent — Plan
 
-> Status: **planned, not built.** A design doc for an upcoming dev-side tool.
-> Authored 2026-07-17 out of the failure modes hit during the GM / Front Office launch.
+> Status: **planned, not built.** Design doc for a dev-side tool. We'll build it on this branch (`docs/rstr-agent-plan`).
+> Authored 2026-07-17; reframed 2026-07-18 around "a consistent voice across every change."
 
 ## 1. What it is
 
-A **command-line agent that cross-checks code + Supabase state before and after we make changes.** It's the automated version of the ad-hoc verification we run by hand — migration audits, schema-cache probes, data-consistency checks, RLS audits. Invoke it around risky operations (before a push, before a prod migration, after a deploy) and it reports what's *actually* true vs. what the tooling *claims*.
+**A single, fully-informed voice that reviews every change we make against everything RSTR IQ knows about itself — so the system stays coherent as it grows.**
 
-Two layers:
+It's the thing that holds the whole picture in its head at once — the code, both databases, the domain rules, and the *why* behind past decisions — so no individual change quietly contradicts another. We invoke it around any meaningful change (before a push, before a prod migration, after a deploy) and it gives one grounded read: is this consistent with who we've decided RSTR IQ is?
 
-- **Deterministic check library** — scripts that query the DB catalog + code and return pass/fail facts.
-- **Agent layer** — a Claude Code subagent that runs the relevant checks for a given change, interprets results, and writes a plain-English report (e.g. "gm_contract never actually created on prod; here's the fix").
+The DB/schema verification is the **mechanical floor** — the hard, provable base it always checks. The higher value is that it speaks with *one voice, every time, with the full history loaded*, instead of us re-deriving context each session.
 
-## 2. Why — every check traces to a real bug
+## 2. "All the information possible" — what it draws on
 
-| Failure we hit | What the agent catches |
+Every change is checked against the full body of knowledge:
+
+- **The codebase** — conventions, shared utilities, the refactoring policy (don't fork math that lives in `src/lib`), naming, component patterns (`CurrencyInput`, etc.).
+- **The schema + live data** — staging *and* prod, plus migration history.
+- **The domain rules** — WAR / wRC+ / Stuff+ formulas, the budget model, projection math, the scouting framework, RBAC.
+- **The decision history (the *why*)** — e.g. notes filed as reports not a column; vendors are canonical; Actual Pay only moves on finalize; committed totals count only committed/signed; "Willing" → "Agreed" on commit; team_admin manages their own team. Captured today only as ad-hoc memory.
+- **The terminology** — the app says "Actual Pay," "Agreed," "Front Office," consistently.
+
+## 3. "Consistent voice" — what it actually catches
+
+Not just "does this table exist," but:
+
+- **Contradiction** — "this change makes budget behave differently than the rule we set weeks ago."
+- **Drift** — "this new money input doesn't use `CurrencyInput`, so it'll have the caret bug we already fixed."
+- **Duplication** — "this projection math already exists in `useTeamBuilderSimulation`; you're forking it."
+- **Terminology** — "this reads 'Willing' but for committed recruits the rest of the app says 'Agreed.'"
+- **Invariants** — the money / allocation / active-build / RLS checks (the mechanical floor below).
+- **Cross-surface impact** — "changing this formula breaks the stored-vs-live precompute parity."
+
+The floor is verifiable facts; this layer is judgment against the full context.
+
+## 4. The mechanical floor — deterministic checks
+
+Every check traces to a real bug from the GM launch. This is the provable base the voice stands on.
+
+| Failure we hit | What it catches |
 |---|---|
-| `gm_contracts.sql` reported `exec_sql OK` but silently rolled back (storage step) — the table never existed on prod | Verify objects exist via the **catalog** (`to_regclass`, DDL probe), never trust `exec_sql OK` or PostgREST reads |
-| PostgREST returned "✓ table ok" for a table that didn't exist (stale schema cache) | Authoritative catalog checks, not `.from().select()` |
-| Remove-access silently deleted 0 rows (RLS blocked it, no error) | **RLS coverage audit** — every table has policies for its intended write actors |
-| Vendor allocations could double-count against contracts | **Money / consistency invariants** (allocations ↔ contracts, budget = Σ parts) |
-| Migrations applied on staging but not prod; column-shape drift | **staging ⇄ prod drift** diff |
-| Willing/committed totals counting non-committed players | **Business-rule assertions** on derived numbers |
+| `gm_contracts.sql` reported `exec_sql OK` but silently rolled back — table never existed on prod | Verify objects exist via the **catalog** (`to_regclass`, DDL probe), never trust `exec_sql OK` or PostgREST reads |
+| PostgREST returned "✓ table ok" for a table that didn't exist (stale cache) | Authoritative catalog checks, not `.from().select()` |
+| Remove-access silently deleted 0 rows (RLS blocked it, no error) | **RLS write-path coverage** — every table has policies for its intended actors |
+| Vendor allocations could double-count against contracts | **Money / consistency invariants** |
+| Migrations applied on staging but not prod; column drift | **staging ⇄ prod drift** diff |
+| Committed totals counting non-committed recruits | **Business-rule assertions** on derived numbers |
 
-## 3. Where it lives / how it's invoked
+**Check groups:**
+- **Migration integrity** — every `CREATE TABLE`/`ADD COLUMN` in the branch exists on the target (catalog, per-object); flag owner-restricted ops (`storage.*`, `GRANT`, `ALTER OWNER`) that roll back the whole file through `exec_sql`; additivity gate before prod (no `DROP`/`ALTER COLUMN`/`DELETE`/`SET NOT NULL`).
+- **Schema / RLS** — RLS enabled + a policy per table; write-path coverage per actor (superadmin / team_admin / member); self-referencing policies without a `SECURITY DEFINER` helper.
+- **staging ⇄ prod drift** — diff tables/columns/policies/indexes; list what's on staging but not prod and vice-versa.
+- **Data invariants** — allocations ↔ contracts (no double-count, no orphan vendors); budget = base + Σ derived; recruiting committed money/scholarship only from committed/signed; exactly one `is_active` build per team.
+- **Code ↔ data** — columns the app selects exist in the target's PostgREST cache; stored-vs-live parity hooks (ties to `src/lib/storedVsLive.test.ts`).
 
-- A `scripts/agent/` folder in the repo + a thin CLI: `npm run rstr-check -- <command>`.
-- Reuses the existing `scripts/_run_sql_file.ts` / service-client pattern and both `.env.local` (staging) + `.env.production.local` (prod).
-- Agent mode = a Claude Code **custom subagent** (`agentType: rstr-check`) whose system prompt encodes the hard-won rules ("never trust `exec_sql OK`; verify via catalog; a PostgREST read is not proof a table exists"), with these scripts as its toolkit.
+## 5. Where it lives / how it's invoked
 
-## 4. Check catalog
+- A `scripts/agent/` folder + a thin CLI: `npm run rstr-check -- <command>`.
+- Reuses the existing `scripts/_run_sql_file.ts` / service-client pattern and both `.env.local` (staging) + `.env.production.local` (prod), read-only for catalog checks.
+- **Voice layer** = a Claude Code **custom subagent** (`agentType: rstr-check`) whose system prompt encodes the decision history + the hard-won rules (below), with the deterministic scripts as its toolkit. It reads the git diff, runs the relevant checks, and writes a plain-English report.
 
-### A. Migration integrity
-- Every `CREATE TABLE` / `ADD COLUMN` in the branch's migrations exists on the target DB (catalog, per-object) — the audit that caught gm_contract.
-- Flag migrations containing owner-restricted ops (`storage.*`, `GRANT`, `ALTER ... OWNER`, `CREATE EXTENSION`) that will roll back the whole file through `exec_sql` → "run this part in the dashboard."
-- Additivity check before prod: no `DROP TABLE/COLUMN`, `ALTER COLUMN`, `DELETE FROM`, `SET NOT NULL`.
+## 6. Output
 
-### B. Schema / RLS
-- RLS enabled + at least one policy on every app table.
-- **Write-path coverage:** for each table + intended actor (superadmin / team_admin / member), is there an `INSERT/UPDATE/DELETE` policy? (Would have flagged the remove-access bug before it shipped.)
-- Recursion check: policies that self-reference their table without a `SECURITY DEFINER` helper.
+- Human report (terminal + optional markdown file): the consistency read up top, then ✅/❌ per mechanical check with the failing object and a suggested fix.
+- Non-zero exit on hard failures so it can gate a pre-push hook or CI later.
+- Flags: `--target staging|prod`, `--scope migrations|rls|drift|data|voice|all`, `--branch <name>`.
 
-### C. staging ⇄ prod drift
-- Diff tables / columns / policies / indexes between the two DBs; list what's on staging but not prod (migration backlog) and vice-versa.
+## 7. Phasing
 
-### D. Data consistency (business invariants)
-- Vendor allocations vs contracts (no double-count; orphan vendors; sources with no `vendor_id`).
-- Budget math: `gm_budget` caps = base + Σ derived; recruiting committed money/scholarship only from committed/signed recruits.
-- Active-build integrity: exactly one `is_active` per customer team.
+- **Phase 1 (MVP):** the mechanical floor — migration integrity + staging⇄prod drift + RLS coverage. Highest ROI; these are the ones that bit us. Deterministic scripts only.
+- **Phase 2:** data invariants + the **voice layer** (diff-aware review against decision history, terminology, duplication, cross-surface impact).
+- **Phase 3:** wire into the workflow — pre-push on migration-touching branches, a pre-prod-migrate gate, post-deploy smoke.
 
-### E. Code ↔ data
-- Columns the app selects actually exist in the target DB's PostgREST cache (catches the "page read errors on a missing column" class — the funding-page failure).
-- Stored-vs-live parity hooks (ties to the existing `src/lib/storedVsLive.test.ts`).
+## 8. Open questions
 
-## 5. Output
+1. **Invocation:** manual CLI, or auto-gated (pre-push git hook / CI on the PR)? Recommend starting manual.
+2. **Prod access:** it needs the prod service key for read-only catalog checks (same `.env.production.local` used today). Keep it read-only-by-convention, or mint a separate read-only key?
+3. **Where does the "decision history" live** so the voice layer can load it? Options: this repo's memory/docs, a structured decisions file, or a sync from the assistant's memory. This is the crux of "all the information possible" — the voice is only as good as the history it can read.
+4. **Report destination:** terminal only, or also a dated report file / posted to the PR?
 
-- Human report (terminal + optional markdown file): ✅/❌ per check, with the failing object and a suggested fix.
-- Non-zero exit on failures so it can gate a pre-push hook or CI later.
-- Flags: `--target staging|prod`, `--scope migrations|rls|drift|data|all`, `--branch <name>`.
+## Guardrails the agent must encode (lessons from the GM launch)
 
-## 6. Phasing
-
-- **Phase 1 (MVP):** Migration integrity + staging⇄prod drift + RLS coverage. Highest ROI — these are the ones that bit us. Deterministic scripts only.
-- **Phase 2:** Data-consistency invariants (money, active build, recruiting) + the agent / report layer.
-- **Phase 3:** Wire into the workflow — pre-push check on migration-touching branches, a "pre-prod-migrate" gate, post-deploy smoke.
-
-## 7. Open questions
-
-1. **Invocation:** a plain CLI run manually, or auto-gated (pre-push git hook / CI on the PR)? Recommend starting manual.
-2. **Prod access:** the agent needs the prod service key for read-only catalog checks (same `.env.production.local` used today). Keep it read-only-by-convention, or mint a separate read-only key?
-3. **Scope of "cross-check changes":** schema + DB-state only (recommended for Phase 1), or also *diff-aware* (read the git diff and reason "this migration adds X; is X consistent with the code that reads it")?
-4. **Report destination:** terminal only, or also drop a dated report file / post to the PR?
-
-## Guardrails the agent must encode (lessons from this session)
-
-- `exec_sql` runs each migration file as **one transaction** — any failed statement rolls back the whole file (incl. its `CREATE TABLE`). Success of the runner is **not** proof the objects exist.
-- A PostgREST/`.from().select()` read can be a **stale-cache false positive** — use `to_regclass` / a DDL probe (`COMMENT ON TABLE …` errors if absent) for authoritative existence.
+- `exec_sql` runs each migration file as **one transaction** — any failed statement rolls back the whole file (incl. its `CREATE TABLE`). Runner success is **not** proof the objects exist.
+- A PostgREST / `.from().select()` read can be a **stale-cache false positive** — use `to_regclass` / a DDL probe (`COMMENT ON TABLE …` errors if absent) for authoritative existence.
 - A Supabase write filtered by RLS returns **success with 0 rows affected**, no error — always `.select()` the affected rows when correctness matters.
 - Storage (`storage.objects` / `storage.buckets`) and other owner-restricted DDL can't run via the service-role runner — those go through the dashboard.
