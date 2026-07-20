@@ -12,13 +12,13 @@
 - **Origin:** Design conversation 2026-07-18.
 - **Status:** draft
 
-### staging-first: Staging before prod, always
-- **Rule:** All changes land on staging first, are verified there, then promoted to prod. Never straight to prod.
-- **Why / protecting against:** Untested changes hitting live customer data. Staging is the proving ground.
-- **Scope:** Code and data both.
-- **Supersedes:** —
-- **Origin:** Standing rule (memory: staging-before-main).
-- **Status:** draft
+### branch-flow: main → staging → feature, and back up through two PRs
+- **Rule:** Every change starts from a clean lineage — branch `main → staging → feature`. Work on the feature branch, then open a **feature→staging PR** (the test step), merge to staging, then a **staging→main PR** (usually clean by then) to ship code to prod.
+- **Why / protecting against:** Drift and untested changes. The two-PR path means nothing reaches prod without passing through staging and a review point, and the lineage keeps everything clean.
+- **Scope:** All app changes (code, migrations, RLS). Everyone follows it. Lead-discretion exception → see `lead-discretion`.
+- **Supersedes:** the old "always open a PR, even for staging" phrasing.
+- **Origin:** Standing rules + process walkthrough 2026-07-20.
+- **Status:** confirmed
 
 ### prod-confirmation: Explicit "prod, now?" before prod writes
 - **Rule:** Never write to prod on an ambiguous go-ahead. Get an explicit confirmation ("prod, now?") first. Approval in one context doesn't carry to the next.
@@ -28,13 +28,21 @@
 - **Origin:** Standing rule (memory: explicit-prod-confirmation).
 - **Status:** draft
 
-### pr-for-everything: Always open a PR, even for staging
-- **Rule:** Push changes via a PR, including to staging. Never push a feature branch straight to main. staging→main via `gh pr create`.
-- **Why / protecting against:** Unreviewed direct pushes; keeping history/review consistent. (Note: doc-only commits Trevor has waved straight onto staging — confirm whether that's a real exception.)
-- **Scope:** Code branches.
+### pr-preview-is-prod-db: The feature→staging PR preview runs on the PROD database
+- **Rule:** The Vercel PR preview is wired to the **prod** database (local dev uses staging). So the feature→staging PR *is* the real test environment — it shows actual user impact on real data. Test thoroughly there before merging.
+- **Why / protecting against:** It's the only place a change is seen against real users before it ships — and it's what forces the migration timing below.
+- **Scope:** Every feature→staging PR.
 - **Supersedes:** —
-- **Origin:** Standing rule (memory: pr-for-main-promotion, "always open a pr even for staging").
-- **Status:** draft
+- **Origin:** Process walkthrough 2026-07-20 (memory: preview-verification-loop).
+- **Status:** confirmed
+
+### lead-discretion: The process binds everyone; the lead can make organizational exceptions
+- **Rule:** The full branch+PR flow applies to everyone. Trevor, as project lead, can make deliberate exceptions for organizational reasons (e.g. committing a planning doc straight to staging so an idea isn't lost, rather than spinning up a feature branch that gets lost). Others shouldn't make a habit of it.
+- **Why / protecting against:** Keeps the process clean for the team while letting the lead move pragmatically. A lead's exception is a decision, not a loophole for everyone.
+- **Scope:** Process exceptions. The agent holds non-leads to the full process and flags when an exception is being taken.
+- **Supersedes:** —
+- **Origin:** 2026-07-20 (Trevor committing the URL-migration doc straight to staging).
+- **Status:** confirmed
 
 ### trevor-drives-prod-merge: Trevor clicks the final prod merge
 - **Rule:** The agent preps the staging→main PR up to mergeable/green, then hands it to Trevor to click merge. Don't merge a `--base main` PR unless Trevor says merge it now. Merging feature→staging is fine for the agent to do.
@@ -78,12 +86,15 @@
 - **Origin:** Design conversation 2026-07-18 + the remove-access bug.
 - **Status:** draft
 
-### additive-to-prod: Additive is low-risk; destructive/function changes are meticulous
-- **Rule:** Additive changes (`CREATE`/`ADD COLUMN IF NOT EXISTS`, guarded backfills) promoted to prod are low-worry. **Destructive changes (DROP/ALTER COLUMN/DELETE/SET NOT NULL) or function changes get meticulous, extra scrutiny** — and are the ones to slow down on.
-- **Why / protecting against:** Additive can't break existing reads; destructive can. Match caution to blast radius.
-- **Scope:** Prod migrations.
-- **Origin:** Design conversation 2026-07-18.
-- **Status:** draft
+### migration-timing: Migrations hit prod BEFORE the PR — additive freely, destructive with urgency
+- **Rule:** Because the PR preview reads the prod DB, migrations must be applied to **prod before the PR/testing**.
+  - **Additive** (`CREATE`/`ADD COLUMN IF NOT EXISTS`, guarded backfills): run before the PR, low worry — invisible to current users until the code ships.
+  - **Destructive** (DROP/ALTER COLUMN/DELETE/SET NOT NULL) or **function changes**: **test as much as possible locally on the feature branch (against staging DB) first, then migrate and move quickly.** Real urgency — prod sits in a changed state ahead of the code that catches up to it, so minimize that window. Still before the PRs, but with a stopwatch running.
+- **Why / protecting against:** Additive can't break current prod reads; destructive can break prod *right now*, before anything's merged. The danger is the gap between a destructive prod change and the code catching up.
+- **Scope:** All prod migrations.
+- **Supersedes:** old "additive-to-prod" record.
+- **Origin:** Process walkthrough 2026-07-20.
+- **Status:** confirmed
 
 ### storage-ddl-dashboard: Owner-restricted DDL goes through the dashboard
 - **Rule:** `storage.objects` / `storage.buckets` policies and other owner-restricted DDL can't run via the service-role runner (`must be owner of table objects`). Split those out and run them in the Supabase dashboard SQL editor; run the table/RLS DDL via the runner.
