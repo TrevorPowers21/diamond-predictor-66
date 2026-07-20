@@ -8,11 +8,11 @@ The one sentence: **the same stat must show the same value everywhere it appears
 
 ## The rules (judgment — Trevor confirms)
 
-### same-number-everywhere: A stat is identical across every surface, including toggles
-- **Rule:** A given player's stat (WAR, market value, projection rates, wRC+…) must resolve to the **exact same value** on every surface it appears — Dashboard, Player Profile, Team Builder, Target Board — for the **same toggle state** (dev-aggressiveness, depth role, SP/RP). Two surfaces showing two values = a hard stop.
-- **Why / protecting against:** Nothing invalidates the app faster than the same number reading differently in two places — it destroys trust in every number. This is *the* existential product rule.
-- **Scope:** Every user-facing number.
-- **Origin:** Trevor, standing + design conversation 2026-07-18.
+### same-value-everywhere: The same data point is identical across every surface, including toggles
+- **Rule:** A given player's data point — a **computed stat** (WAR, market value, rates, wRC+) *or* an **attribute** (class/grad year, position, status) — must resolve to the **exact same value** on every surface (Dashboard, Player Profile, Team Builder, Target Board, recruiting), for the **same toggle state** (dev-aggressiveness, depth role, SP/RP). Two surfaces showing two values = a hard stop.
+- **Why / protecting against:** Nothing invalidates the app faster than the same value reading differently in two places — it destroys trust in *every* value. Not just numbers: a grad/class year showing "2026" one place and "Senior" or "2027" another does the same damage as a divergent WAR. This is *the* existential product rule.
+- **Scope:** Every user-facing value — computed stats AND attributes like grad/class year.
+- **Origin:** Trevor, standing + design conversation 2026-07-18; broadened to attributes (grad year) 2026-07-20.
 - **Status:** confirmed
 
 ### stored-first: Read precomputed/stored values; don't calculate live
@@ -84,4 +84,14 @@ The stored-first pattern is ~90% enforced. Remaining live-calc spots (divergence
 - **MEDIUM — transfer oWAR inline copy.** `transferProjection.ts:120-126` re-implements the oWAR formula instead of importing it. Only safe because the parity test back-calculates it. Violates `one-canonical-formula`.
 - **MEDIUM — Phase 4d incomplete.** Team Builder + Transfer Portal simulator aren't fully stored-first (the `.skip`ped Rossow ERA test). CLAUDE.md tracks this.
 
-**Decision for Trevor:** is closing these (esp. the HIGH pitcher-rate one) a **priority the agent should push on**, or a known-acceptable state we consciously carry for now? Either way the agent should *flag* any new code that adds a fresh live-calc of a stored number.
+**Decision (2026-07-20): fix them — priority.** Trevor: these need closing, not carrying. Order to tackle:
+1. **Pitcher rates stored-first** in Team Builder + ReturningPlayers (HIGH — the biggest divergence gap).
+2. **transferProjection.ts imports the canonical oWAR** instead of its inline copy.
+3. **Phase 4d** — finish stored-first on the TB + Transfer Portal simulator, then un-`.skip` the Rossow ERA test.
+
+And the agent flags any *new* code that adds a fresh live-calc of a stored number.
+
+### Known inconsistency to fix: grad / class year displays
+- **Issue (Trevor 2026-07-20):** grad/class year is **displayed inconsistently** across the app — the same player's year doesn't read the same everywhere. This is a `same-value-everywhere` violation on an *attribute*, not a stat.
+- **Needs investigation** (verify, don't assume): find every place class/grad year is derived or displayed — candidates: `playerCurrentClass` / class-advancement logic in `src/pages/team-builder/helpers.ts`, the `players` table `class_year`/grad fields, and any "Senior/Junior" ↔ "2026/2027" ↔ grad-year conversions. Pin down which surfaces compute it which way, converge on one source.
+- **Status:** open — to investigate + fix.
