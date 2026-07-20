@@ -15,6 +15,11 @@ The **react-and-correct loop** (never authored from a blank page):
 
 **Only Trevor confirms a new record or a supersede** (for now). Drafts are marked `status: draft` until he does.
 
+## Two kinds of knowledge — captured differently
+
+- **Judgment / decisions** — Trevor is the source of truth ("vendors are canonical," "Actual Pay only on finalize"). The agent records his word.
+- **Factual / technical state** — RLS coverage, what a policy actually allows, whether a column exists, how a number is computed. The agent must **verify this against the code + database and record what's *true* — never word-of-mouth.** Trevor's recollection is a hypothesis to go check, not a fact to store. Records of this kind note *how* they were verified. (This is the lesson from PostgREST claiming a table existed when it didn't — trust the catalog, not the recollection or the cache.)
+
 ## Record format
 
 Each rule is one record. Keep them tight.

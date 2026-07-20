@@ -79,12 +79,13 @@
 - **Origin:** 2026-07-17 (team-admin remove-access fix).
 - **Status:** draft
 
-### rls-everywhere: RLS is part of everything
-- **Rule:** All data tables have RLS enabled with policies covering the intended actors (superadmin / team_admin / member) for the writes they need. Maintain a living analysis of what each policy allows. Anything big is RLS.
-- **Why / protecting against:** Silent access failures and tenancy leaks. RLS gaps are invisible until someone can't do their job (or can do too much).
-- **Scope:** All app tables.
-- **Origin:** Design conversation 2026-07-18 + the remove-access bug.
-- **Status:** draft
+### tenant-isolation: Every program's data is walled off from every other program
+- **Rule:** Every table holding program data has RLS enabled, with **write** policies scoped tight to the right actors (superadmin / team_admin / member) and **read** policies tenant-scoped so a program can only ever see its *own* data. Reference/lookup tables (D1 teams, conference stats, park factors, scouting constants) still have RLS *on* — typically read-open-to-authenticated, no writes. The agent maintains a **living, verified analysis** of read/write access per table per actor.
+- **Why / protecting against:** **13 users = 13 separate college programs**, each holding highly sensitive competitive data — contracts, financial planning, target boards, team builds, and soon program-local player development + program-specific recomputes. One program seeing another's contracts or targets is **existential**: competitive damage and a broken trust promise, not a minor bug. Also guards the silent-access-failure class (remove-access bug).
+- **Scope:** All app tables. Program data = tenant-locked; reference data = read-open, RLS still on.
+- **Supersedes:** old "rls-everywhere" record.
+- **Origin:** Design conversation 2026-07-18 + remove-access bug; stakes framed by Trevor 2026-07-20.
+- **Status:** **draft — coverage NOT yet verified.** The actual per-table RLS state must be *audited*, not taken on memory (see the two-kinds-of-knowledge rule). That audit is a first concrete agent task; this record holds the *intent*, the audit produces the *verified map*.
 
 ### migration-timing: Migrations hit prod BEFORE the PR — additive freely, destructive with urgency
 - **Rule:** Because the PR preview reads the prod DB, migrations must be applied to **prod before the PR/testing**.
