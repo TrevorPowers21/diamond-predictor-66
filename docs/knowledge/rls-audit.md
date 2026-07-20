@@ -22,9 +22,10 @@ Query the catalog for: (1) tables with RLS off, (2) tables with RLS on but zero 
 | `precompute_jobs` | `[ALL]` admin/staff only, no public SELECT | ✅ Safe — staff-only, not readable by program users. |
 | `target_board_bak_20260704`, `target_board_bak_pre_surgical_20260704`, `team_build_players_bak_20260704`, `team_builds_bak_20260704` | RLS on, **zero policies** (locked to service role only) | 🧹 Dead July-4 backup tables. Not a leak (locked), but should be **dropped** as cleanup. |
 
-### Open decision
+### Decision (2026-07-20)
 
-- **`player_predictions` read is `USING: true`.** For the shared/global predictions that's fine, but the table also holds **team-specific precomputes** (project-everyone-at-customer-team). Question for Trevor: are team-scoped prediction rows program-private (→ lock reads to the owning program), or is prediction data intentionally shared across programs? *Status: awaiting decision.*
+- **`player_predictions`: tenant-scope each row's read — LOW priority (cleanup).** Trevor: not worrisome shared information (won't break anything), but each line should be protected — it tidies how it's stored. Global/model rows stay readable; team-scoped rows should lock to the owning program. Do it when convenient; not urgent.
+- **Related forward rule:** `program-owns-uploaded-data` (db-safety-and-process.md) — program-uploaded player data (player dev, NewtForce) is program-owned and must NOT follow a transferring player. Bake into RLS from day one of the player-development build.
 
 ## Heuristic lessons (fold into the audit tool)
 

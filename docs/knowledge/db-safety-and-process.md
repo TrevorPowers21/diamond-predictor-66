@@ -85,7 +85,15 @@
 - **Scope:** All app tables. Program data = tenant-locked; reference data = read-open, RLS still on.
 - **Supersedes:** old "rls-everywhere" record.
 - **Origin:** Design conversation 2026-07-18 + remove-access bug; stakes framed by Trevor 2026-07-20.
-- **Status:** **draft — coverage NOT yet verified.** The actual per-table RLS state must be *audited*, not taken on memory (see the two-kinds-of-knowledge rule). That audit is a first concrete agent task; this record holds the *intent*, the audit produces the *verified map*.
+- **Status:** confirmed. Coverage **audited 2026-07-20** → `rls-audit.md` (RLS on all 75 tables; one open-read finding on `player_predictions`). Re-audit on schema changes.
+
+### program-owns-uploaded-data: Uploaded program data belongs to the program and does NOT follow a transferring player
+- **Rule:** Anything a program uploads or creates about a player — **player development, NewtForce assessments, program-local evaluations, program-specific recomputes** — is **owned by that program** and tenant-locked to it. It does **not** travel with the player. If a player transfers Arkansas → Georgia, Georgia's staff cannot see Arkansas's uploaded data on that player; Arkansas keeps it.
+- **Why / protecting against:** A program's proprietary development work leaking to a competitor via player transfer. Arkansas invests in developing a player; Georgia must never inherit that work. Player-transfer is the exact leak vector, and it's non-obvious because we instinctively think of it as "the player's data."
+- **Scope:** All program-uploaded / program-created player data (player dev, NewtForce, program-local evals + recomputes). NOT shared reference/model data. **Forward-looking — bake into the RLS from day one of the player-development build.**
+- **Supersedes:** —
+- **Origin:** Trevor 2026-07-20 (note for the player-development build).
+- **Status:** confirmed (forward rule)
 
 ### migration-timing: Migrations hit prod BEFORE the PR — additive freely, destructive with urgency
 - **Rule:** Because the PR preview reads the prod DB, migrations must be applied to **prod before the PR/testing**.
