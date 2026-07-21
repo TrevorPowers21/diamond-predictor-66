@@ -13,6 +13,8 @@ export type TransferSnapshot = {
   p_war?: number | null;
   owar: number | null;
   nil_valuation: number | null;
+  twp_hitter_market_value?: number | null;
+  twp_pitcher_market_value?: number | null;
   from_team: string | null;
   from_conference: string | null;
 };

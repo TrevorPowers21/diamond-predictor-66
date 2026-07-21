@@ -76,6 +76,8 @@ type TransferSnapshot = {
   p_war?: number | null;
   owar: number | null;
   nil_valuation: number | null;
+  twp_hitter_market_value?: number | null;
+  twp_pitcher_market_value?: number | null;
   from_team: string | null;
   from_conference: string | null;
 };
@@ -2745,6 +2747,10 @@ export default function TeamBuilder() {
           p_wrc_plus: stored?.p_wrc_plus ?? null,
           owar: stored?.o_war ?? null,
           nil_valuation: isTwp ? (stored?.twp_hitter_market_value ?? null) : (stored?.market_value ?? null),
+          // Carry BOTH side market values so pickHitter/PitcherMarketValue can
+          // resolve a TWP's per-side market from either row's snapshot.
+          twp_hitter_market_value: stored?.twp_hitter_market_value ?? null,
+          twp_pitcher_market_value: stored?.twp_pitcher_market_value ?? null,
           from_team: fromTeamName,
           from_conference: fromConference,
         },
@@ -2775,6 +2781,10 @@ export default function TeamBuilder() {
           p_war: stored?.p_war ?? null,
           owar: stored?.p_war ?? null,
           nil_valuation: isTwp ? (stored?.twp_pitcher_market_value ?? null) : (stored?.market_value ?? null),
+          // Carry BOTH side market values so pickHitter/PitcherMarketValue can
+          // resolve a TWP's per-side market from either row's snapshot.
+          twp_hitter_market_value: stored?.twp_hitter_market_value ?? null,
+          twp_pitcher_market_value: stored?.twp_pitcher_market_value ?? null,
           from_team: fromTeamName,
           from_conference: fromConference,
         },

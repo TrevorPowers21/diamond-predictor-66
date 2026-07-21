@@ -304,6 +304,13 @@ async function main() {
       snapshot.pitcher_depth_role = pred.pitcher_depth_role ?? null;
       snapshot.pitcher_role = pred.pitcher_role ?? null;
     }
+    // TWPs: carry BOTH side market values so the display's pickHitter/
+    // pickPitcherMarketValue can resolve each side (raw market_value alone is
+    // one side and NULL on the wrong side → $0 on the pitcher/hitter row).
+    if (isTwp) {
+      snapshot.twp_hitter_market_value = pred.twp_hitter_market_value ?? null;
+      snapshot.twp_pitcher_market_value = pred.twp_pitcher_market_value ?? null;
+    }
     // NOTE: do NOT store class_transition / dev_aggressiveness on the snapshot.
     // The stored line is the NEUTRAL baseline; the simulation applies the coach's
     // dev-agg as a session overlay reading storedDevAgg from the snapshot. Storing
