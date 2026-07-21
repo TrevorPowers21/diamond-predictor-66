@@ -35,7 +35,6 @@ import {
   getPositionValueMultiplier,
 } from "@/lib/nilProgramSpecific";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
-import { projectPitchingRate } from "@/lib/pitcherProjection";
 import { usePitchingEquationWeights } from "@/hooks/usePitchingEquationWeights";
 import { profileRouteFor } from "@/lib/profileRoutes";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
@@ -601,34 +600,10 @@ const toNum = (v: string | null | undefined) => {
   return Number.isFinite(n) ? n : null;
 };
 
-const DEFAULT_PITCHING_CLASS_TRANSITION: "FS" | "SJ" | "JS" | "GR" = "SJ";
 const DEFAULT_PITCHING_DEV_AGGRESSIVENESS = 0;
-const getPitchingPvfForRole = (
-  role: "SP" | "RP" | "SM",
-  eq: ReturnType<typeof readPitchingWeights>,
-) => (role === "RP" ? eq.market_pvf_reliever : role === "SM" ? eq.market_pvf_weekday_sp : eq.market_pvf_weekend_sp);
-const canShowPitchingMarketValue = (team: string | null | undefined, conference: string | null | undefined) => {
-  const conf = String(conference || "").trim().toLowerCase();
-  const tm = String(team || "").trim().toLowerCase();
-  if (!conf) return false;
-  const isIndependent = conf === "independent" || conf.includes("independent");
-  if (!isIndependent) return true;
-  return tm === "oregon state" || tm.includes("oregon state");
-};
 const parkToIndex = (v: number | null | undefined) => {
   if (v == null || !Number.isFinite(v)) return 100;
   return Math.abs(v) <= 3 ? v * 100 : v;
-};
-
-const toPitchingClassAdj = (
-  classTransition: "FS" | "SJ" | "JS" | "GR",
-  fs: number,
-  sj: number,
-  js: number,
-  gr: number,
-) => {
-  const pct = classTransition === "FS" ? fs : classTransition === "SJ" ? sj : classTransition === "JS" ? js : gr;
-  return Number.isFinite(pct) ? pct / 100 : 0;
 };
 
 const calcPitchingPlus = (
@@ -2527,7 +2502,6 @@ export default function ReturningPlayers() {
           const baseRole = toPitchingRole(r.role) || (games != null && games > 0 && starts != null ? ((starts / games) < 0.5 ? "RP" : "SP") : null);
           const roleKey = `${normalizeName(playerName)}|${normalize(normalizedTeam)}`;
           const projectedRole = roleOverrides[roleKey] || baseRole || "SM";
-          const projectedIp = projectedRole === "SP" ? eq.pwar_ip_sp : projectedRole === "RP" ? eq.pwar_ip_rp : eq.pwar_ip_sm;
 
           // Compute power-rating scores from Pitching Master raw metrics
           const scoreObj = {
@@ -2564,49 +2538,18 @@ export default function ReturningPlayers() {
           scoreObj.hr9PrPlus = r.hr9_pr_plus ?? recomputed.hr9PrPlus ?? null;
           scoreObj.bb9PrPlus = r.bb9_pr_plus ?? recomputed.bb9PrPlus ?? null;
 
-          const classTransition = DEFAULT_PITCHING_CLASS_TRANSITION;
+          // Pitching projections (p_era…p_hr9, pRV+, pWAR, market value) are read
+          // STORED from player_predictions below (dbPred) — NEVER live-computed
+          // here. We only store 2026 actuals + the finished projections, not the
+          // full projection inputs, so a live fallback can't reproduce the
+          // canonical numbers — it would produce a divergent value. A pitcher with
+          // no stored row shows blank, not a live guess. See
+          // docs/knowledge/data-and-numbers.md → no-live-projection-fallback.
           const devAggressiveness = DEFAULT_PITCHING_DEV_AGGRESSIVENESS;
 
-          const classEraAdj = toPitchingClassAdj(classTransition, eq.class_era_fs, eq.class_era_sj, eq.class_era_js, eq.class_era_gr);
-          const classFipAdj = toPitchingClassAdj(classTransition, eq.class_fip_fs, eq.class_fip_sj, eq.class_fip_js, eq.class_fip_gr);
-          const classWhipAdj = toPitchingClassAdj(classTransition, eq.class_whip_fs, eq.class_whip_sj, eq.class_whip_js, eq.class_whip_gr);
-          const classK9Adj = toPitchingClassAdj(classTransition, eq.class_k9_fs, eq.class_k9_sj, eq.class_k9_js, eq.class_k9_gr);
-          const classBb9Adj = toPitchingClassAdj(classTransition, eq.class_bb9_fs, eq.class_bb9_sj, eq.class_bb9_js, eq.class_bb9_gr);
-          const classHr9Adj = toPitchingClassAdj(classTransition, eq.class_hr9_fs, eq.class_hr9_sj, eq.class_hr9_js, eq.class_hr9_gr);
-
-          const pEra = projectPitchingRate({ lastStat: era, prPlus: scoreObj.eraPrPlus, ncaaAvg: eq.era_plus_ncaa_avg, ncaaSd: eq.era_plus_ncaa_sd, prSd: eq.era_pr_sd, classAdjustment: classEraAdj, devAggressiveness, thresholds: eq.era_damp_thresholds, impacts: eq.era_damp_impacts, lowerIsBetter: true });
-          const pFip = projectPitchingRate({ lastStat: fip, prPlus: scoreObj.fipPrPlus, ncaaAvg: eq.fip_plus_ncaa_avg, ncaaSd: eq.fip_plus_ncaa_sd, prSd: eq.fip_pr_sd, classAdjustment: classFipAdj, devAggressiveness, thresholds: eq.fip_damp_thresholds, impacts: eq.fip_damp_impacts, lowerIsBetter: true });
-          const pWhip = projectPitchingRate({ lastStat: whip, prPlus: scoreObj.whipPrPlus, ncaaAvg: eq.whip_plus_ncaa_avg, ncaaSd: eq.whip_plus_ncaa_sd, prSd: eq.whip_pr_sd, classAdjustment: classWhipAdj, devAggressiveness, thresholds: eq.whip_damp_thresholds, impacts: eq.whip_damp_impacts, lowerIsBetter: true });
-          const pK9 = projectPitchingRate({ lastStat: k9, prPlus: scoreObj.k9PrPlus, ncaaAvg: eq.k9_plus_ncaa_avg, ncaaSd: eq.k9_plus_ncaa_sd, prSd: eq.k9_pr_sd, classAdjustment: classK9Adj, devAggressiveness, thresholds: eq.k9_damp_thresholds, impacts: eq.k9_damp_impacts, lowerIsBetter: false });
-          const pBb9 = projectPitchingRate({ lastStat: bb9, prPlus: scoreObj.bb9PrPlus, ncaaAvg: eq.bb9_plus_ncaa_avg, ncaaSd: eq.bb9_plus_ncaa_sd, prSd: eq.bb9_pr_sd, classAdjustment: classBb9Adj, devAggressiveness, thresholds: eq.bb9_damp_thresholds, impacts: eq.bb9_damp_impacts, lowerIsBetter: true });
-          const pHr9 = projectPitchingRate({ lastStat: hr9, prPlus: scoreObj.hr9PrPlus, ncaaAvg: eq.hr9_plus_ncaa_avg, ncaaSd: eq.hr9_plus_ncaa_sd, prSd: eq.hr9_pr_sd, classAdjustment: classHr9Adj, devAggressiveness, thresholds: eq.hr9_damp_thresholds, impacts: eq.hr9_damp_impacts, lowerIsBetter: true });
-
-          // Park factor intentionally NOT applied to returner projections —
-          // the pitcher's lastStat already reflects their home park. Mirrors
-          // the lib edit in pitcherProjection.ts and PitcherProfile.
-          const parkAdjustedEra = pEra;
-          const parkAdjustedWhip = pWhip;
-          const parkAdjustedHr9 = pHr9;
-          void teamParkComponents;
-
-          // Prefer Pitching Master.p_rv_plus (canonical composite of the 6
-          // component PR+ values, computed by the pipeline). Live fallback was
-          // using eraPrPlus as a proxy — wrong, that's just one component.
-          const pRvPlus = (r as any).p_rv_plus ?? scoreObj.eraPrPlus;
-          const pitcherValue = pRvPlus == null ? null : ((pRvPlus - 100) / 100);
-          const pWar = pitcherValue == null || eq.pwar_runs_per_win === 0 ? null : ((((pitcherValue * (projectedIp / 9) * eq.pwar_r_per_9) + ((projectedIp / 9) * eq.pwar_replacement_runs_per_9)) / eq.pwar_runs_per_win));
-
-          const pitchingTierMultipliers = { sec: eq.market_tier_sec, p4: eq.market_tier_acc_big12, bigTen: eq.market_tier_big_ten, strongMid: eq.market_tier_strong_mid, lowMajor: eq.market_tier_low_major };
-          const conferenceForMarket = teamMatch?.conference ?? r.conference ?? null;
-          const ptm = getProgramTierMultiplierByConference(conferenceForMarket, pitchingTierMultipliers);
-          const pvm = getPitchingPvfForRole(projectedRole, eq);
-          const marketEligible = canShowPitchingMarketValue(normalizedTeam, conferenceForMarket);
-          const marketValue = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
-
-          // DB-stored projections are the source of truth. Read p_war +
-          // market_value directly from player_predictions (pitcher precompute
-          // writes them). Only fall back to the live `pWar`/`marketValue`
-          // when no stored row exists for this pitcher (unflagged TWPs etc.).
+          // DB-stored projections are the ONLY source. Read p_war + market_value
+          // directly from player_predictions (the pitcher precompute writes them).
+          // No live fallback — a pitcher with no stored row shows blank.
           const dbPred = r.source_player_id ? pitcherPredBySourceId?.get(r.source_player_id) : null;
           const dbPRvPlus = dbPred?.p_rv_plus ?? null;
           const dbRole = (dbPred?.pitcher_role as "SP" | "RP" | "SM" | null) ?? null;
