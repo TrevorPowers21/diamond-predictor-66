@@ -181,10 +181,17 @@ export const projectedEligibilityClass = (
   classYear: string | null | undefined,
   classTransition: string | null | undefined,
 ): string => {
-  const ct = String(classTransition || "").toUpperCase();
-  if (TRANSITION_TO_CLASS[ct]) return TRANSITION_TO_CLASS[ct];
+  // class_year is the SOURCE OF TRUTH — advance it one season for the
+  // projection-season class. class_transition is only a fallback for players
+  // with no class_year (e.g. some JUCO). Previously the transition was checked
+  // FIRST, so a stale default ("SJ") overrode a correct class_year — the
+  // grad-year inconsistency (Cole Johnson: roster JR vs projections SO, 2026-07).
+  // Explicit coach overrides are applied upstream (GM `eligibility_class`);
+  // a future per-player eligibility override belongs there too, not here.
   const cy = String(classYear || "").toUpperCase().replace(/^R-/, "");
   if (CLASS_ADVANCE[cy]) return CLASS_ADVANCE[cy];
+  const ct = String(classTransition || "").toUpperCase();
+  if (TRANSITION_TO_CLASS[ct]) return TRANSITION_TO_CLASS[ct];
   return "FR";
 };
 
