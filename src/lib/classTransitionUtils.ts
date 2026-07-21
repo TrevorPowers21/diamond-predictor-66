@@ -55,3 +55,21 @@ export function classTransitionFromYearOrDefault(
 ): ClassTransition {
   return classTransitionFromYear(classYear) ?? fallback;
 }
+
+/**
+ * Resolve the class_transition to STORE on a prediction at (re)compute time,
+ * class_year-authoritative:
+ *   explicit coach override (class_transition_overridden) → class_year-derived
+ *   → the existing stored value → null.
+ * Use this instead of passing through `pred.class_transition` so the pervasive
+ * stale "SJ" default self-corrects on the next precompute. Returns null when
+ * nothing resolves (the caller/engine may apply its own last-resort default).
+ * See docs/knowledge/eligibility-and-class.md.
+ */
+export function resolveClassTransition(
+  classYear: string | null | undefined,
+  pred?: { class_transition?: string | null; class_transition_overridden?: boolean | null } | null,
+): string | null {
+  if (pred?.class_transition_overridden && pred.class_transition) return pred.class_transition;
+  return classTransitionFromYear(classYear) ?? pred?.class_transition ?? null;
+}

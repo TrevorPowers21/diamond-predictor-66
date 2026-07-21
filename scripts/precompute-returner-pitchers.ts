@@ -29,6 +29,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { fetchParkFactorsMap, resolveMetricParkFactor } from "@/lib/parkFactors";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { resolveClassTransition } from "@/lib/classTransitionUtils";
 import {
   computePitcherProjection,
   type PitcherProjectionInput,
@@ -160,7 +161,7 @@ async function main() {
   const allPlayers = await loadAllPaged<any>(() =>
     supabase
       .from("players")
-      .select("id, first_name, last_name, position, team, from_team, team_id, conference, division, source_player_id, source_team_id, is_twp"),
+      .select("id, first_name, last_name, position, team, from_team, team_id, conference, division, source_player_id, source_team_id, is_twp, class_year"),
   );
   console.log(`  ${allPlayers.length} total players`);
   const pitcherTest = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP|SM)/i.test(String(pos || ""));
@@ -224,7 +225,7 @@ async function main() {
     const chunk = await loadAllPaged<any>(() =>
       supabase
         .from("player_predictions")
-        .select("id, player_id, model_type, variant, status, class_transition, dev_aggressiveness, pitcher_role")
+        .select("id, player_id, model_type, variant, status, class_transition, class_transition_overridden, dev_aggressiveness, pitcher_role")
         .in("player_id", idsChunk)
         .eq("model_type", "returner")
         .eq("variant", "regular")
@@ -433,7 +434,7 @@ async function main() {
       hr9: pmRow.hr9_pr_plus ?? null,
     };
 
-    const classTransition = (pred?.class_transition as "FS" | "SJ" | "JS" | "GR" | undefined) ?? "SJ";
+    const classTransition = (resolveClassTransition((p as any).class_year, pred) ?? "SJ") as "FS" | "SJ" | "JS" | "GR";
     const devAggressiveness = Number.isFinite(Number(pred?.dev_aggressiveness)) ? Number(pred?.dev_aggressiveness) : 0;
 
     const result = computePitcherProjection(input, {

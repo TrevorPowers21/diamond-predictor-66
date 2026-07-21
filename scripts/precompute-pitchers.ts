@@ -23,6 +23,7 @@ import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { fetchParkFactorsMap, resolveMetricParkFactor } from "@/lib/parkFactors";
 import { fetchConferenceStats } from "@/lib/supabaseQueries";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
+import { resolveClassTransition } from "@/lib/classTransitionUtils";
 import { getConferenceAliases } from "@/lib/conferenceMapping";
 import { JUCO_DISTRICT_CONFERENCE_ID, jucoDistrictNameFromConference } from "@/lib/transferWeightDefaults";
 import {
@@ -254,7 +255,7 @@ async function main() {
   const allPlayers = await loadAllPaged<any>(() =>
     supabase
       .from("players")
-      .select("id, first_name, last_name, position, team, from_team, team_id, conference, division, source_player_id, source_team_id, portal_status, is_twp, ip"),
+      .select("id, first_name, last_name, position, team, from_team, team_id, conference, division, source_player_id, source_team_id, portal_status, is_twp, ip, class_year"),
   );
   console.log(`  ${allPlayers.length} total players`);
   const isPitcher = (pos: string | null | undefined) => {
@@ -363,7 +364,7 @@ async function main() {
     const chunk = await loadAllPaged<any>(() =>
       supabase
         .from("player_predictions")
-        .select("id, player_id, model_type, variant, status, updated_at, class_transition, dev_aggressiveness")
+        .select("id, player_id, model_type, variant, status, updated_at, class_transition, class_transition_overridden, dev_aggressiveness")
         .in("player_id", idsChunk)
         .in("model_type", ["returner", "transfer"])
         .is("customer_team_id", null)
@@ -413,6 +414,10 @@ async function main() {
 
   for (const p of pitchers) {
     const pred = bestPredByPlayer.get(p.id);
+    // class_year is the source of truth for class_transition (dev factor + display);
+    // a coach override wins. Derived here so the next precompute self-corrects the
+    // pervasive stale "SJ" default. See docs/knowledge/eligibility-and-class.md.
+    const resolvedCt = resolveClassTransition((p as any).class_year, pred);
     const pmRow = findPm(p);
 
     // Resolve from team: prefer PM TeamID → players.team_id → name lookup
@@ -444,7 +449,7 @@ async function main() {
         team: p.team,
         team_id: p.team_id,
         source_player_id: p.source_player_id,
-        class_transition: pred?.class_transition ?? null,
+        class_transition: resolvedCt,
         dev_aggressiveness: Number.isFinite(Number(pred?.dev_aggressiveness)) ? Number(pred?.dev_aggressiveness) : null,
       },
       fromTeam: fromTeamRow,
@@ -481,7 +486,7 @@ async function main() {
     }
 
     const final = applyTransferPitcherPostprocess(projected, {
-      classTransition: pred?.class_transition ?? null,
+      classTransition: resolvedCt,
       devAggressiveness: pred?.dev_aggressiveness ?? null,
       isJucoSource: result.isJucoSource,
       pitchingEq,
@@ -507,7 +512,7 @@ async function main() {
       variant: "precomputed",
       season,
       status: "active",
-      class_transition: pred?.class_transition ?? null,
+      class_transition: resolvedCt,
       dev_aggressiveness: pred?.dev_aggressiveness ?? null,
       p_era: final.p_era,
       p_fip: final.p_fip,

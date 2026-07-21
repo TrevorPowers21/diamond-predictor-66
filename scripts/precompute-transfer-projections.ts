@@ -22,6 +22,7 @@ import { CURRENT_SEASON, PROJECTION_SEASON } from "@/lib/seasonConstants";
 import { fetchParkFactorsMap, resolveMetricParkFactor } from "@/lib/parkFactors";
 import { fetchConferenceStats } from "@/lib/supabaseQueries";
 import { computeTransferProjection } from "@/lib/transferProjection";
+import { resolveClassTransition } from "@/lib/classTransitionUtils";
 import {
   buildHitterTransferInputs,
   applyTransferPostprocess,
@@ -210,7 +211,7 @@ async function main() {
   const allPlayers = await loadAllPaged<any>(() =>
     supabase
       .from("players")
-      .select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, portal_status, is_twp, pa"),
+      .select("id, first_name, last_name, position, team, from_team, conference, division, bats_hand, source_team_id, portal_status, is_twp, pa, class_year"),
   );
   console.log(`  ${allPlayers.length} total players`);
   const isPitcher = (pos: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(pos || ""));
@@ -248,7 +249,7 @@ async function main() {
     const chunk = await loadAllPaged<any>(() =>
       supabase
         .from("player_predictions")
-        .select("id, player_id, model_type, variant, status, updated_at, from_avg, from_obp, from_slg, class_transition, dev_aggressiveness")
+        .select("id, player_id, model_type, variant, status, updated_at, from_avg, from_obp, from_slg, class_transition, class_transition_overridden, dev_aggressiveness")
         .in("player_id", idsChunk)
         .in("model_type", ["returner", "transfer"])
         .is("customer_team_id", null)
@@ -316,6 +317,7 @@ async function main() {
 
   for (const p of hitters) {
     const pred = bestPredByPlayer.get(p.id);
+    const resolvedCt = resolveClassTransition((p as any).class_year, pred); // class_year-authoritative (see eligibility-and-class.md)
     const internals = pred ? internalsByPredId.get(pred.id) : null;
 
     const fromTeamName = (p.from_team || p.team || "") as string;
@@ -330,7 +332,7 @@ async function main() {
         position: p.position,
         bats_hand: p.bats_hand,
         division: p.division,
-        class_transition: pred?.class_transition ?? null,
+        class_transition: resolvedCt,
         dev_aggressiveness: Number.isFinite(Number(pred?.dev_aggressiveness)) ? Number(pred?.dev_aggressiveness) : null,
         from_avg: pred?.from_avg ?? null,
         from_obp: pred?.from_obp ?? null,
@@ -390,7 +392,7 @@ async function main() {
       from_avg: pred?.from_avg ?? null,
       from_obp: pred?.from_obp ?? null,
       from_slg: pred?.from_slg ?? null,
-      class_transition: pred?.class_transition ?? null,
+      class_transition: resolvedCt,
       dev_aggressiveness: pred?.dev_aggressiveness ?? null,
       p_avg: final.pAvg,
       p_obp: final.pObp,
