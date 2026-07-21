@@ -5,8 +5,10 @@
  *   (model_type='returner', variant='regular', customer_team_id=NULL, season)
  *
  * Writes p_era, p_fip, p_whip, p_k9, p_bb9, p_hr9, p_rv_plus, p_war,
- * market_value, projected_ip, pitcher_role. Does NOT touch class_transition or
- * dev_aggressiveness (those are coach-owned).
+ * market_value, projected_ip, pitcher_role, and class_transition (D1 path:
+ * class_year-authoritative + override-safe via resolveClassTransition — a coach
+ * override or existing value is preserved). Does NOT touch dev_aggressiveness
+ * (coach-owned). JUCO path leaves class_transition null (class adj is zeroed).
  *
  * Math goes through `computePitcherProjection` in src/lib/pitcherProjection.ts
  * — same engine PitcherProfile / the live recalc path use. Equation weights
@@ -434,7 +436,11 @@ async function main() {
       hr9: pmRow.hr9_pr_plus ?? null,
     };
 
-    const classTransition = (resolveClassTransition((p as any).class_year, pred) ?? "SJ") as "FS" | "SJ" | "JS" | "GR";
+    // class_year-authoritative, override-safe (see eligibility-and-class.md).
+    // resolvedCt preserves a coach override / existing value and is null only
+    // when there is genuinely nothing to store — so writing it back can't erase.
+    const resolvedCt = resolveClassTransition((p as any).class_year, pred);
+    const classTransition = (resolvedCt ?? "SJ") as "FS" | "SJ" | "JS" | "GR";
     const devAggressiveness = Number.isFinite(Number(pred?.dev_aggressiveness)) ? Number(pred?.dev_aggressiveness) : 0;
 
     const result = computePitcherProjection(input, {
@@ -480,6 +486,7 @@ async function main() {
       market_value: result.market_value,
       projected_ip: projectedIp,
       pitcher_role: result.projected_role,
+      class_transition: resolvedCt,
       // Unlock so future runs can refresh; trigger reverts rates when locked=true.
       locked: false,
       updated_at: new Date().toISOString(),
