@@ -126,3 +126,10 @@
 - **Scope:** Any hand-written SQL.
 - **Origin:** Standing rule + the build_id mixup 2026-07-17.
 - **Status:** confirmed
+
+### verify-gate-blind-to-reference-errors: `tsc --noEmit` is a NO-OP; the build gate can't see component crashes
+- **Rule:** The standing verify command `./node_modules/.bin/tsc --noEmit` type-checks **ZERO files** and always "passes." Root `tsconfig.json` has `files:[]` + project references, and plain `tsc --noEmit` does not traverse references (that needs `tsc -b`). `vite build` uses esbuild (transpile-only, no type errors) and `npm test` runs only unit tests. So **none of the three catch an undefined identifier / bad type in a page or component** — that class of bug only surfaces by loading the page in the browser. The real type check is `./node_modules/.bin/tsc -p tsconfig.app.json --noEmit`, but the app carries ~198 pre-existing errors, so you can't gate on "zero." To check a file you edited: run that and `grep '<File>.tsx'`, confirming no NEW error line vs the base branch.
+- **Why / protecting against:** This exact gap shipped a runtime crash. Deleting a `const classTransition` in ReturningPlayers left one live reference (`class_transition: classTransition` in the row object); tsc/vite/tests all passed green, but the pitcher dashboard threw "classTransition is not defined" on load. The `tsc -p tsconfig.app.json` check *did* flag it (TS2552) — it was just never run. The lesson: **green build ≠ it runs.** For any page/component change, load it locally (or exercise the exact affected view) before calling it verified. Mirrors the DB rule "`exec_sql` OK ≠ objects exist, verify the real thing."
+- **Scope:** Every code change to a page/component/hook. Especially dead-code deletion (check ALL references of a removed symbol) and anything not covered by a unit test.
+- **Origin:** 2026-07-21, the live-pERA cleanup — I introduced and then caught a reference-error crash the build gate missed. CLAUDE.md verify guidance corrected in the same pass.
+- **Status:** confirmed
