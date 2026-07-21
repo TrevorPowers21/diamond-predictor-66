@@ -684,12 +684,18 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const storedMult = 1 + devAggClassAdj + storedDevAgg * 0.06;
       const sessionMult = 1 + devAggClassAdj + sessionDevAgg * 0.06;
       const devAggScale = storedMult > 0 ? sessionMult / storedMult : 1;
-      const overlayScale = depthScale * devAggScale;
-
-      const owar = storedOwar != null ? storedOwar * overlayScale : null;
-      // market_value may be absent from p.prediction (saved build data). Fall back
-      // to transfer_snapshot.nil_valuation which IS populated from the load-build query.
-      const nil_valuation = storedMarket != null ? storedMarket * overlayScale : (p.transfer_snapshot?.nil_valuation ?? null);
+      void depthScale; // depth now flows through session PA in computeOWar below
+      // oWAR REBUILT from the dev-adjusted wRC+ over the session depth PA
+      // (computeOWar) — NOT scaled from stored oWAR. oWAR is affine in wRC+, so
+      // scaling double-scaled the replacement constant and inverted ordering
+      // (Souza/Traeger). Same fix as the returner path + PlayerProfile + precompute.
+      const adjWrc = lp.p_wrc_plus != null ? Math.round(Number(lp.p_wrc_plus) * devAggScale) : null;
+      const owar = adjWrc != null ? computeOWarFromWrcPlus(adjWrc, sessionPa) : null;
+      // Market tracks the CORRECTED oWAR via the WAR ratio (keeps $/WAR + tier +
+      // position baked into the stored market). Falls back to stored/snapshot.
+      const nil_valuation = (storedMarket != null && storedOwar != null && storedOwar !== 0 && owar != null)
+        ? Number(storedMarket) * (owar / storedOwar)
+        : ((storedMarket as number | null) ?? p.transfer_snapshot?.nil_valuation ?? null);
       return {
         p_avg: lp.p_avg ?? null,
         p_obp: lp.p_obp ?? null,

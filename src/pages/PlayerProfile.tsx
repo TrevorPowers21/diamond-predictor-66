@@ -990,7 +990,12 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
     ? Math.round(Number(seedDerived.wrcPlus) * (devAggScale ?? 1)) : null;
   const computedOWar = projectedOWar ?? (_histAdjWrc != null ? computeOWarFromWrcPlus(_histAdjWrc, sessionPa) : null);
   void historicalOWar;
-  const computedNilValuation = storedMarketValue != null ? storedMarketValue * overlayScale : null;
+  // Market tracks the CORRECTED oWAR via the WAR ratio (stored market already
+  // carries $/WAR × conference tier × position, so scale it by the oWAR change).
+  const computedNilValuation = (storedMarketValue != null && storedOWar != null && Number(storedOWar) !== 0 && computedOWar != null)
+    ? Number(storedMarketValue) * (computedOWar / Number(storedOWar))
+    : (storedMarketValue != null ? Number(storedMarketValue) : null);
+  void overlayScale;
   // In the program hub, WAR + market come from the LIVE build (effectiveProjection
   // on its snapshot + production_notes) so Projections matches the roster and Team
   // Builder. `undefined` = standalone scouting route → use the computed value.
