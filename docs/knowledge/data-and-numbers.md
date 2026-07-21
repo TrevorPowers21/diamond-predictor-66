@@ -43,6 +43,13 @@ The one sentence: **the same stat must show the same value everywhere it appears
 - **Origin:** Trevor, 2026-07-21 (from the eligibility `class_transition` fix + the "shouldn't we build it in one run?" question).
 - **Status:** confirmed
 
+### no-live-projection-fallback: When a stored projection is missing, show blank — never live-compute a fallback
+- **Rule:** Projected/derived values (pitcher rates `p_era…p_hr9`, `pRV+`, `pWAR`, market value; hitter equivalents) are read **only** from the stored precompute row. If no stored row exists for a player, the surface shows **blank (`—`)** — it must **not** fall back to a live client-side computation.
+- **Why / protecting against:** We store **2026 actuals + the finished projections**, not the full set of projection inputs (the PR+ component scores in a faithful form, park/role context, dev/class machinery). So a client-side "live fallback" can't reproduce the canonical pipeline number — it produces a **different, wrong** value that then diverges from every stored surface. A blank is honest; a divergent guess silently corrupts trust (`same-value-everywhere`). This is distinct from `stored-first` (which allows a parity-guaranteed live path): for *projections specifically*, the inputs to even attempt parity aren't present, so there is no acceptable live path at all.
+- **Scope:** All projected/derived player values whose inputs aren't fully stored client-side. NOT scouting PR+ recomputed from stored component scores (those inputs *are* present) — that narrow recompute-from-stored-scores fallback is allowed.
+- **Origin:** Trevor, 2026-07-21 — deciding the ReturningPlayers live-pERA cleanup ("we don't even store the necessary information to compute it live; we only store 2026 actuals and then compute projections"). The dead live block was removed; display was already stored, so this was a rule-compliance cleanup surfaced by the audit, not a user-visible bug.
+- **Status:** confirmed
+
 ### change-a-weight-reprecompute: Changing an equation weight means re-precompute + update every copy
 - **Rule:** If you change any equation weight/constant (wRC+ weights, pRV+ composite, projection blend, $/WAR, tier/position multipliers), you must (1) update the canonical formula, (2) re-run the precompute so stored values refresh, and (3) confirm the parity test still passes. Stored values silently go **stale** the moment a weight changes without a re-precompute.
 - **Why / protecting against:** Stored numbers computed under old weights, shown next to live numbers under new weights — the exact divergence the whole system exists to prevent.
