@@ -1461,13 +1461,20 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     const pvfStored = getPitchingPvfForRole(storedRoleBucket, eq);
     const pvfNew = getPitchingPvfForRole(newRoleBucket, eq);
     const pvfRatio = pvfStored > 0 ? pvfNew / pvfStored : 1;
-    const devAggScale = devAggUnchanged ? 1 : (1 + devAggDelta);
-    const overlayScale = ipScale * pvfRatio * devAggScale;
-    const overlayPWar = stored?.p_war != null ? Number(stored.p_war) * overlayScale : null;
+    // pWAR is REBUILT from the dev + role-adjusted pRV+ at the depth-role IP
+    // (computePitcherWar) — NOT scaled from stored p_war, and with NO PVF. PVF
+    // is a market/positional factor; folding it into WAR let a converted
+    // reliever outrank a real starter. Matches Team Builder + GM + the precompute.
+    void ipScale; // depth flows through overlayIp in computePitcherWar
+    const overlayPWar = computePitcherWar(overlayPRvPlus, overlayIp, eq);
     // TWP-aware: for is_twp=true rows, stored.market_value is NULL by design;
     // pull from twp_pitcher_market_value via the helper. Non-TWPs unchanged.
     const storedPitcherMv = pickPitcherMarketValue(stored as any, !!(player as any)?.is_twp);
-    const overlayMarketValue = storedPitcherMv != null ? storedPitcherMv * overlayScale : null;
+    // Market tracks the recomputed pWAR (WAR ratio) AND applies the role's PVF
+    // change (pvfRatio) — PVF stays market-only. Keeps $/WAR + tier baked in.
+    const overlayMarketValue = (storedPitcherMv != null && stored?.p_war != null && Number(stored.p_war) !== 0 && overlayPWar != null)
+      ? storedPitcherMv * (overlayPWar / Number(stored.p_war)) * pvfRatio
+      : (storedPitcherMv != null ? storedPitcherMv : null);
     const scaleLow = (v: number | null | undefined) =>
       v == null ? null : devAggUnchanged ? v : v * (1 - devAggDelta);
     const scaleHigh = (v: number | null | undefined) =>
