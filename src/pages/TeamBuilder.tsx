@@ -2168,7 +2168,27 @@ export default function TeamBuilder() {
   }, [rosterPlayers, removeFromSupabaseBoard]);
 
   const updatePlayer = useCallback((idx: number, updates: Partial<BuildPlayer>) => {
-    setRosterPlayers((prev) => prev.map((p, i) => (i === idx ? { ...p, ...updates } : p)));
+    setRosterPlayers((prev) => {
+      const target = prev[idx];
+      // Two-way players occupy BOTH sides (one hitter row + one pitcher row,
+      // same player_id). Add-to-roster / remove-from-roster is a whole-player
+      // decision, so toggling `included_in_roster` on one side toggles the
+      // other too — clicking "+" on the pitcher side brings the hitter in as
+      // well (and vice versa), so a TWP always appears on the roster as both.
+      // Everything else (depth role, dev agg, position slot) stays per-side.
+      if (target && "included_in_roster" in updates && (target.player as any)?.is_twp && target.player_id) {
+        const pid = target.player_id;
+        const included = (updates as any).included_in_roster;
+        return prev.map((p, i) => {
+          if (i === idx) return { ...p, ...updates };
+          if (p.player_id === pid && (p.roster_status || "returner") === "target") {
+            return { ...p, included_in_roster: included };
+          }
+          return p;
+        });
+      }
+      return prev.map((p, i) => (i === idx ? { ...p, ...updates } : p));
+    });
     setDirty(true);
   }, []);
 
