@@ -22,6 +22,7 @@
 import { paForHitterDepthRole } from "@/lib/depthRoles";
 import type { PitchingEquationWeights } from "@/lib/pitchingEquations";
 import { applyRoleTransitionAdjustment, calcPitchingPlus } from "@/lib/transferPitcherProjection";
+import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
 
 const STARTER_DEPTH_ROLES = new Set(["weekend_starter", "weekday_starter", "swing_starter"]);
 
@@ -140,19 +141,32 @@ export function effectivePitcherWar(
   return (((adjRv - 100) / 100) * (ip / 9) * eq.pwar_r_per_9 + (ip / 9) * eq.pwar_replacement_runs_per_9) / eq.pwar_runs_per_win;
 }
 
-/** Effective hitter oWAR = storedOwar × depthScale × devAggScale. */
+/**
+ * Effective hitter oWAR — REBUILT from the toggle-adjusted wRC+ over the session
+ * depth role's PA, via the same computeOWar the precompute uses. NOT scaled from
+ * stored oWAR.
+ *
+ * Why: oWAR is affine in wRC+ (it has a constant replacement term), so
+ * multiplying stored oWAR by the dev ratio double-scaled that constant and broke
+ * ordering — a higher-wRC+ hitter could show a LOWER oWAR than a lower-wRC+ one
+ * (the Souza/Traeger inversion). Depth (PA) was already exact because oWAR IS
+ * linear in PA; this preserves that (session PA) and fixes dev (wRC+ × devScale).
+ *
+ * NOTE: param 1 is now the stored **wRC+**, not stored oWAR. Snapshots are the
+ * neutral baseline (stored dev = 0), so devScale is taken from session vs 0.
+ */
 export function effectiveHitterWar(
-  storedOwar: number | null | undefined,
-  storedHitterDepthRole: string | null | undefined,
+  storedWrcPlus: number | null | undefined,
+  _storedHitterDepthRole: string | null | undefined, // unused (signature kept stable)
   sessionDepthRole: string | null | undefined,
   sessionDevAgg: number,
   classTransition: string | null | undefined,
 ): number | null {
-  if (storedOwar == null || !Number.isFinite(Number(storedOwar))) return null;
-  const storedPa = paForHitterDepthRole((storedHitterDepthRole as any) ?? "everyday_starter");
+  if (storedWrcPlus == null || !Number.isFinite(Number(storedWrcPlus))) return null;
+  const dev = devAggScale(sessionDevAgg, 0, classAdjHitter(classTransition));
+  const adjWrc = Math.round(Number(storedWrcPlus) * dev);
   const sessionPa = paForHitterDepthRole((sessionDepthRole as any) ?? "everyday_starter");
-  const depthScale = storedPa > 0 ? sessionPa / storedPa : 1;
-  return Number(storedOwar) * depthScale * devAggScale(sessionDevAgg, 0, classAdjHitter(classTransition));
+  return computeOWarFromWrcPlus(adjWrc, sessionPa);
 }
 
 /** Effective market = stored market scaled by the WAR change. The stored value

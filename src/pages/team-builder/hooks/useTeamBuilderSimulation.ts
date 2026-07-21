@@ -1449,7 +1449,12 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     const sessionMult = 1 + devAggClassAdj + sessionDevAgg * 0.06;
     const devAggScale = storedMult > 0 ? sessionMult / storedMult : 1;
 
-    const owar = storedOwar != null ? storedOwar * depthScale * devAggScale : null;
+    // oWAR is REBUILT from the toggle-adjusted wRC+ over the session depth PA
+    // (computeOWar), not scaled from stored oWAR — oWAR is affine in wRC+, so
+    // scaling broke ordering. Matches PlayerProfile + the precompute exactly.
+    void storedOwar; void depthScale;
+    const adjWrcForOwar = shownWrc != null ? Math.round(shownWrc * devAggScale) : null;
+    const owar = adjWrcForOwar != null ? computeOWarFromWrcPlus(adjWrcForOwar, sessionPa) : null;
 
     // Apply devAgg scale to slash stats — mirrors PlayerProfile.applyDevScale.
     // Depth role only affects PA → oWAR, not the rate stats themselves.

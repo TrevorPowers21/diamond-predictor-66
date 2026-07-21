@@ -979,8 +979,17 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
   const storedPa = paForHitterDepthRole(storedHitterDepthRole);
   const depthScale = storedPa > 0 ? sessionPa / storedPa : 1;
   const overlayScale = depthScale * (devAggScale ?? 1);
-  const projectedOWar = storedOWar != null ? storedOWar * overlayScale : null;
-  const computedOWar = projectedOWar ?? (historicalOWar != null ? historicalOWar * overlayScale : null);
+  // oWAR is REBUILT from the dev-adjusted wRC+ over the session depth PA
+  // (computeOWar), not scaled from stored oWAR — oWAR is affine in wRC+ so
+  // scaling broke ordering (Souza/Traeger inversion). Matches TB + the precompute.
+  void storedOWar;
+  const _adjWrc = (regularPred as any)?.p_wrc_plus != null
+    ? Math.round(Number((regularPred as any).p_wrc_plus) * (devAggScale ?? 1)) : null;
+  const projectedOWar = _adjWrc != null ? computeOWarFromWrcPlus(_adjWrc, sessionPa) : null;
+  const _histAdjWrc = seedDerived?.wrcPlus != null
+    ? Math.round(Number(seedDerived.wrcPlus) * (devAggScale ?? 1)) : null;
+  const computedOWar = projectedOWar ?? (_histAdjWrc != null ? computeOWarFromWrcPlus(_histAdjWrc, sessionPa) : null);
+  void historicalOWar;
   const computedNilValuation = storedMarketValue != null ? storedMarketValue * overlayScale : null;
   // In the program hub, WAR + market come from the LIVE build (effectiveProjection
   // on its snapshot + production_notes) so Projections matches the roster and Team

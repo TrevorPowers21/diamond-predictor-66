@@ -39,7 +39,7 @@ export function deriveGmRows(
       : (meta?.depthRole ?? snap.hitter_depth_role);
     const effWar = pitcher
       ? effectivePitcherWar(snap, sessionDepthRole, devAgg, classTransition, eq)
-      : effectiveHitterWar(snap.o_war, snap.hitter_depth_role, sessionDepthRole, devAgg, classTransition);
+      : effectiveHitterWar(snap.p_wrc_plus, snap.hitter_depth_role, sessionDepthRole, devAgg, classTransition);
     const effMarket = effectiveMarket(mv, storedWar, effWar);
 
     const displayPosition = isLocal
