@@ -37,6 +37,6 @@ Example: Cole Johnson (Georgia, `class_year="FR"`) — his own predictions are i
 
 - **A. Display fix** — `projectedEligibilityClass` prefers `class_year` (transition = fallback only); route every eligibility display through it. Fixes ~8K D1 displays immediately, no re-precompute.
 - **B. Projection fix** — derive class_transition from class_year in the engine + **re-precompute the ~7,970 D1 players** (moves their numbers via the corrected dev factor).
-- **C. JUCO class-data** — populate `class_year` for ~5.3K JUCO (a separate ingest track).
+- **C. JUCO class-data** — populate `class_year` for ~5.3K JUCO (a separate ingest track). **Verified 2026-07-21: class is DISPLAY-ONLY for JUCO** — the JUCO projection path (`jucoReturnerPitcherProjection.ts` + the JUCO hitter branch in `predictionEngine`) deliberately does NOT use `class_transition` or the developmental factor (guarded by comment). `class_year` is imported for JUCO via `import-juco-class-dob.ts` (into the masters). So the JUCO refresh affects only eligibility display, never JUCO projections — low-stakes, deferred to future. Still needs refreshing eventually.
 - Cleanup: orphan player rows (e.g. the `team=null, class=null` Cole `d9f1e871`).
 - **Status:** scope TBD. Fix on a `feature` branch off staging; combine with the live-pERA stored-first cleanup (same consistency theme).
