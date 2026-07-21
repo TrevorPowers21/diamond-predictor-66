@@ -270,7 +270,7 @@ Both blocks are deeply coupled — need 15-20 params each to extract cleanly:
 
 ### Watch Out For
 - `depthAssignments`/`depthPlaceholders` state stays in TeamBuilder — passed as props to DepthTab, NOT moved there (persisted to Supabase)
-- tsc: use `./node_modules/.bin/tsc --noEmit` (not `npx tsc`)
+- tsc: **`./node_modules/.bin/tsc --noEmit` is a NO-OP** — the root tsconfig.json has `files:[]` + project references, and plain `tsc --noEmit` does not traverse references, so it type-checks ZERO files and always "passes." It will NOT catch a real error (undefined identifier, bad type) in a page/component — those only surface by loading the page. The REAL check is `./node_modules/.bin/tsc -p tsconfig.app.json --noEmit`, but the app currently has ~198 pre-existing errors, so you can't gate on "zero." To check a file you edited: `tsc -p tsconfig.app.json --noEmit 2>&1 | grep '<File>.tsx'` and confirm no NEW error lines vs the base branch. `vite build` uses esbuild (transpile-only, no type errors) and `npm test` only runs unit tests — neither catches component reference errors either. **For any page/component change: load it locally before calling it verified.**
 - Merging staging → refactor always conflicts on TeamBuilder.tsx — cherry-pick individual commits instead
 - New staging commits since our last sync: cherry-pick order was `b2beb17 33f3fb6 ada1fd0 99d2050 c1af893 0cd3a5f`
 
