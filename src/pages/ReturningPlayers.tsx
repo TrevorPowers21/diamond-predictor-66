@@ -57,6 +57,7 @@ import {
 import { useHighFollow } from "@/hooks/useHighFollow";
 import { JucoPlayerDashboardPanel } from "@/components/JucoPlayerDashboardPanel";
 import { pickHitterMarketValue, pickPitcherMarketValue } from "@/lib/twpMarketValue";
+import { classTransitionFromYearOrDefault } from "@/lib/classTransitionUtils";
 
 type SortKey =
   | "name"
@@ -2579,7 +2580,7 @@ export default function ReturningPlayers() {
             role: effectiveRole,
             class_year: pitcherClassYear,
             is_twp: pitcherIsTwp,
-            class_transition: classTransition,
+            class_transition: classTransitionFromYearOrDefault(pitcherClassYear),
             dev_aggressiveness: devAggressiveness,
             // Stuff+ stays on client-computed until next computeAndStoreScores
             // run populates stuff_score. Other 3 read from predictions (1=1).
