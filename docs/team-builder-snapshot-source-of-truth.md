@@ -29,27 +29,62 @@ so "reset toggles" recomputes from there, and we never lose the true line.
 TWPs: two rows (OF hitter + SP pitcher), each with its own snapshot values and
 its own toggle state. Sides are computed independently; NIL is the sum.
 
-## Read path (the simplification)
-Today: `snapshot (neutral) → apply production_notes overlay (LIVE compute) → display`.
-**New:** `snapshot → display`. The overlay compute is **removed** from the read
-path (this is the only read-side change — a deletion, not a new path). Every
-surface — TB `playerProjection`, `effectiveHitterWar`/`effectivePitcherWar`,
-PitcherProfile/PlayerProfile `projectedPitching`/`projectedHitting` — reads the
-snapshot's stored values instead of recomputing.
+## The invariant (the whole design in one line)
+`snapshot === projectEffective(neutral base, production_notes)`
+- **production_notes** = the toggle state (dev-agg, depth, position, SP/RP) — *the recipe*.
+- **neutral base** = default-build snapshot / prediction row — *the ingredients*.
+- **snapshot** = the displayed adjusted values — *the baked result*.
 
-## Write path (compute once, on toggle change)
-When a coach changes a toggle (depth role, dev-agg, position, SP/RP role):
-1. Read the **neutral base** for that player+side (default build snapshot / the
-   picked prediction row) — NOT the current adjusted snapshot, so changes never
-   compound.
-2. Recompute the adjusted values from the neutral base + the **full new toggle
-   state**, using the canonical formulas below.
-3. **Write** those values to this build's `player_snapshot`; update
-   `production_notes` toggle state.
-4. Reset-to-default = recompute with neutral toggles → writes the neutral line back.
+The recipe (production_notes) drives BOTH the knob positions in the UI and the
+guard's recompute — so the knobs and the verification can never read different
+state. On drift, **production_notes wins** (coach intent); the snapshot heals to it.
+
+## Read path (display = pure snapshot read, NO overlay anywhere)
+Today: `snapshot (neutral) → apply production_notes overlay (LIVE compute) → display`.
+**New:** `snapshot → display`. The overlay is **removed** from every read path —
+TB `playerProjection`, `effectiveHitterWar`/`effectivePitcherWar`,
+PitcherProfile/PlayerProfile. This is what makes rendering **idempotent**: reading
+the same snapshot N times shows the same number N times, so nothing can compound.
+Killing the overlay is the single fix that closes both the flicker AND the
+double-dev-agg bug — they were the same overlay.
+
+(Standalone scouting "what-if" preview — a page not tied to a build — stays a
+session-only sandbox that computes from the neutral prediction. Not snapshot+overlay.)
+
+## Write path (compute once, on toggle change — optimistic)
+When a coach changes a toggle:
+1. Read the **neutral base** for that player+side — NOT the current adjusted
+   snapshot, so changes never compound (idempotent: dev-agg 0.5 always means
+   "0.5 vs neutral," never "0.5 on top of whatever's there").
+2. Recompute the adjusted line from neutral + the **full new toggle state**
+   (canonical fns below). This runs **once, in the click handler** — not on render.
+3. **Immediately** update local snapshot state → instant display (0ms, same feel
+   as today).
+4. **Background** one-way write of snapshot + production_notes to the DB. NO
+   refetch-that-recomputes — state → DB only, so there's no write→recompute loop.
+5. Reset-to-default = recompute with neutral toggles → writes the neutral line back.
 
 "Edit a default roster" first **forks to a new saved build**, so the default
 snapshot never mutates.
+
+## Load path + the self-healing guard
+On open, three reads reconcile:
+| Read | Source | Role |
+|---|---|---|
+| Knob positions | production_notes | what the coach set (already wired via build-player meta) |
+| Displayed numbers | snapshot | the cached result — shown **instantly**, no wait |
+| Guard | `projectEffective(neutral, production_notes)` | proves numbers == knobs; heals to knobs on real drift |
+
+The guard runs in the background and only heals a **genuine** mismatch. Two rules
+keep it from misfiring (which would re-create the flicker):
+- **Wait for complete data** — only compare once all async deps are loaded; never
+  heal off partial-data compute.
+- **Compare at display precision, with tolerance** — pRV+/wRC+ are rounded, so
+  compare the rounded/displayed values; float noise must not trigger a heal.
+
+In steady state the guard always matches → invisible. It only fires after a
+formula change or a half-failed write, and when it does it's a *correction*. This
+is the runtime version of the dev-agent's stored-vs-live consistency guard.
 
 ---
 
