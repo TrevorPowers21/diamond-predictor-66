@@ -1563,9 +1563,15 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     if (!isProjectedStatus(p)) return 0;
     // Phase B: CLEAN row → stored market straight from the snapshot (no async
     // conference-tier recompute → no market flicker). Applies to rostered
-    // transfers too. Dirty rows / snapshots without a stored market fall through.
+    // transfers too. TWP pitcher side stores its value in twp_pitcher_market_value
+    // (raw market_value is the hitter side / mis-sided), so read the right field.
+    // Dirty rows / snapshots without a stored market fall through.
     if (!(p as any)._dirty) {
-      const m = (p.prediction as any)?.market_value;
+      const snap: any = p.prediction;
+      const rap = side === "pitcher" || (side == null && isPitcher(p));
+      const m = (!!(p.player as any)?.is_twp && rap)
+        ? (snap?.twp_pitcher_market_value ?? snap?.market_value)
+        : snap?.market_value;
       if (m != null && Number.isFinite(Number(m))) return Math.max(0, Number(m));
     }
     const renderAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
