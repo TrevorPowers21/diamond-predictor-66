@@ -1212,6 +1212,18 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     // Fall back to player conference, team conference, or any master row
     return player?.conference || masterRow?.conference || (anyPitcherMasterRow as any)?.Conference || conferenceByTeam.get(normalize(displayTeam)) || "—";
   })();
+  // MARKET conference = the DESTINATION (logged-in program = effectiveTeamId), not
+  // the player's own team. A transfer is valued at the program viewing him (SEC $,
+  // not his old Big Ten school). For a returner, effectiveTeam == his team, so this
+  // equals displayConference. Falls back to the player's conference when there's no
+  // program context (standalone scouting).
+  const destinationConference = (() => {
+    if (effectiveTeamId) {
+      const t = (teamDirectory as Array<{ id: string | null; conference: string | null }>).find((tt) => tt.id === effectiveTeamId);
+      if (t?.conference) return t.conference;
+    }
+    return displayConference;
+  })();
   const displayHandedness = player?.handedness || masterRow?.throwHand || (anyPitcherMasterRow as any)?.ThrowHand || storageRow?.[2] || "—";
   const confStatsRow = (() => {
     const confName = displayConference !== "—" ? displayConference : null;
@@ -1413,7 +1425,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     // Market = pWAR × $/WAR × conference tier (NO PVF — role value is already in
     // WAR via IP). `role` is passed for call-site parity but no longer affects it.
     const overlayMarketValue = computePitcherMarketValue(
-      line.pWar, { conference: displayConference, role: sessionRole, team: displayTeam }, eq,
+      line.pWar, { conference: destinationConference, role: sessionRole, team: displayTeam }, eq,
     );
 
     return {
@@ -1440,6 +1452,7 @@ export default function PitcherProfile({ embedded = false, idOverride, hideTabs 
     projectedClassTransition,
     depthRole,
     displayConference,
+    destinationConference,
     derivedRole,
     projectedRole,
     predictions,
