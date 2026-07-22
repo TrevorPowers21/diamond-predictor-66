@@ -88,7 +88,11 @@ export function projectJucoReturner(args: {
 
   const iso = slg - avg;
   const ops = obp + slg;
-  const wrcPlus = wrcPlusFromRates(avg, obp, slg);
+  // wRC+ is a whole number everywhere (mirrors pRV+): round at derivation so the
+  // stored wRC+ and the o_war computed from it below both use the same integer.
+  // The D1 returner path (recalcReturner) already rounds; this brought JUCO
+  // returners in line.
+  const wrcPlus = Math.round(wrcPlusFromRates(avg, obp, slg));
 
   const depthRole = defaultHitterDepthRoleFromActualPa(args.actualPa ?? null);
   const projectedPa = paForHitterDepthRole(depthRole);
