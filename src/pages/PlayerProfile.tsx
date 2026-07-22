@@ -52,6 +52,7 @@ import { useTransferPortalContext } from "@/hooks/useTransferPortalContext";
 import {
   paForHitterDepthRole,
   defaultHitterDepthRoleFromActualPa,
+  computeHitterMarketValue,
   type HitterDepthRole,
 } from "@/lib/depthRoles";
 import { useNilValuation } from "@/hooks/useNilValuation";
@@ -990,11 +991,22 @@ export default function PlayerProfile({ embedded = false, idOverride, hideTabs =
     ? Math.round(Number(seedDerived.wrcPlus) * (devAggScale ?? 1)) : null;
   const computedOWar = projectedOWar ?? (_histAdjWrc != null ? computeOWarFromWrcPlus(_histAdjWrc, sessionPa) : null);
   void historicalOWar;
-  // Market tracks the CORRECTED oWAR via the WAR ratio (stored market already
-  // carries $/WAR × conference tier × position, so scale it by the oWAR change).
-  const computedNilValuation = (storedMarketValue != null && storedOWar != null && Number(storedOWar) !== 0 && computedOWar != null)
-    ? Number(storedMarketValue) * (computedOWar / Number(storedOWar))
-    : (storedMarketValue != null ? Number(storedMarketValue) : null);
+  // Market is COMPUTED (not scaled) from oWAR at the DESTINATION conference (the
+  // logged-in program = effectiveTeamId) + the current position — so a transfer
+  // is valued at the viewing program, never his old school, a position toggle
+  // flows through posMult, and it stays consistent with Team Builder. For a
+  // returner effectiveTeam == his team, so this equals the old value.
+  const destinationConference = (() => {
+    if (effectiveTeamId) {
+      const t = (teamsForConference as Array<{ id: string | null; conference: string | null }>).find((tt) => tt.id === effectiveTeamId);
+      if (t?.conference) return t.conference;
+    }
+    return resolvedConference || (player as any)?.conference || null;
+  })();
+  const computedNilValuation = computeHitterMarketValue(
+    computedOWar,
+    { conference: destinationConference, position: effectivePosition },
+  ) ?? (storedMarketValue != null ? Number(storedMarketValue) : null);
   void overlayScale;
   // In the program hub, WAR + market come from the LIVE build (effectiveProjection
   // on its snapshot + production_notes) so Projections matches the roster and Team
