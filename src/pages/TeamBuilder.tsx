@@ -463,7 +463,7 @@ const pitcherExpectedIp = (
 ): number => {
   switch (depthRole) {
     // Starters
-    case "weekend_starter":     return pitchingEq.pwar_ip_sp;  // ~80 IP — Fri/Sat/Sun rotation
+    case "weekend_starter":     return pitchingEq.pwar_ip_sp;  // ~85 IP — Fri/Sat/Sun rotation
     case "weekday_starter":     return pitchingEq.pwar_ip_sm;  // ~50 IP — midweek SP
     case "swing_starter":       return 30;                     // long relief / spot start
     // Relievers — graduated by leverage + workload

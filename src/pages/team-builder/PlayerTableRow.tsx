@@ -536,7 +536,7 @@ function PlayerTableRow({
             <SelectContent>
               {currentPitcherRole === "SP" ? (
                 <>
-                  <SelectItem value="weekend_starter">Weekend Starter (~80 IP)</SelectItem>
+                  <SelectItem value="weekend_starter">Weekend Starter (~85 IP)</SelectItem>
                   <SelectItem value="weekday_starter">Weekday Starter (~50 IP)</SelectItem>
                   <SelectItem value="swing_starter">Swing / Long Relief (~30 IP)</SelectItem>
                 </>

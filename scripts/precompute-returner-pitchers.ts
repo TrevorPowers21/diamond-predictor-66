@@ -36,7 +36,7 @@ import {
   computePitcherProjection,
   type PitcherProjectionInput,
 } from "@/lib/pitcherProjection";
-import { pitcherExpectedIp } from "@/lib/depthRoles";
+import { derivePitcherStored } from "@/lib/predictionEngine";
 import { PITCHING_EQ_DEFAULTS } from "@/hooks/usePitchingEquationWeights";
 import { projectJucoReturnerPitcher } from "@/lib/jucoReturnerPitcherProjection";
 
@@ -460,11 +460,15 @@ async function main() {
       continue;
     }
 
-    // projected_ip from the engine's projected_role (matches transfer script).
-    const projectedIp = pitcherExpectedIp(
-      result.projected_role === "SP" ? "weekend_starter"
-        : result.projected_role === "SM" ? "weekday_starter"
-          : null, // RP fallback in pitcherExpectedIp returns pwar_ip_rp
+    // Derive projected_ip + p_war + depth role through the SAME canonical path as
+    // the recalc engine: classify the fine depth role from real IP, then use that
+    // role's IP (not the coarse SP/SM/RP default). Keeps stored == live and lets
+    // one writer own (projected_ip, p_war, pitcher_depth_role, market).
+    const actualIp = Number(pmRow.IP) || 0;
+    const derived = derivePitcherStored(
+      result.p_rv_plus,
+      result.projected_role,
+      { conference, team: teamName, is_twp: !!(p as any).is_twp, ip: actualIp },
       pitchingEq,
     );
 
@@ -482,10 +486,12 @@ async function main() {
       p_bb9: result.p_bb9,
       p_hr9: result.p_hr9,
       p_rv_plus: result.p_rv_plus,
-      p_war: result.p_war,
-      market_value: result.market_value,
-      projected_ip: projectedIp,
+      p_war: derived.p_war,
+      market_value: derived.market_value,
+      twp_pitcher_market_value: (derived as any).twp_pitcher_market_value ?? null,
+      projected_ip: derived.projected_ip,
       pitcher_role: result.projected_role,
+      pitcher_depth_role: derived.pitcher_depth_role,
       class_transition: resolvedCt,
       // Unlock so future runs can refresh; trigger reverts rates when locked=true.
       locked: false,

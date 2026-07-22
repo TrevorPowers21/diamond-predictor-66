@@ -340,13 +340,17 @@ export function applyTransferPitcherPostprocess(
   const bb9PlusAdj = calcPitchingPlus(adjBb9, pitchingEq.bb9_plus_ncaa_avg, pitchingEq.bb9_plus_ncaa_sd, pitchingEq.bb9_plus_scale, false);
   const hr9PlusAdj = calcPitchingPlus(adjHr9, pitchingEq.hr9_plus_ncaa_avg, pitchingEq.hr9_plus_ncaa_sd, pitchingEq.hr9_plus_scale, false);
 
+  // pRV+ stored whole (mirrors wRC+). Rounding here keeps the (p_rv_plus, p_war,
+  // market_value) triple below internally consistent off the same integer.
   const pRvPlusAdj = [eraPlusAdj, fipPlusAdj, whipPlusAdj, k9PlusAdj, bb9PlusAdj, hr9PlusAdj].every((v) => v != null)
-    ? (Number(eraPlusAdj) * pitchingEq.era_plus_weight) +
+    ? Math.round(
+      (Number(eraPlusAdj) * pitchingEq.era_plus_weight) +
       (Number(fipPlusAdj) * pitchingEq.fip_plus_weight) +
       (Number(whipPlusAdj) * pitchingEq.whip_plus_weight) +
       (Number(k9PlusAdj) * pitchingEq.k9_plus_weight) +
       (Number(bb9PlusAdj) * pitchingEq.bb9_plus_weight) +
       (Number(hr9PlusAdj) * pitchingEq.hr9_plus_weight)
+    )
     : result.p_rv_plus;
 
   // pRV+ drives pWAR; pWAR drives market value. Re-derive both from the

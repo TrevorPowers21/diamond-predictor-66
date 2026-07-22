@@ -117,14 +117,17 @@ export function projectJucoReturnerPitcher(args: {
 
   // Step 2: weighted pRV+. Same composition as D1 engine, but applied to raw
   // JUCO rates with no role/park/conf transform.
+  // pRV+ stored whole (mirrors wRC+); display and p_war share the integer.
   const pRvPlus =
     [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-      ? (Number(eraPlus) * eq.era_plus_weight) +
+      ? Math.round(
+        (Number(eraPlus) * eq.era_plus_weight) +
         (Number(fipPlus) * eq.fip_plus_weight) +
         (Number(whipPlus) * eq.whip_plus_weight) +
         (Number(k9Plus) * eq.k9_plus_weight) +
         (Number(bb9Plus) * eq.bb9_plus_weight) +
         (Number(hr9Plus) * eq.hr9_plus_weight)
+      )
       : null;
 
   // Step 3: depth role + projected IP.

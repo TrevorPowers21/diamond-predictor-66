@@ -185,11 +185,6 @@ const projectHigher = (
   };
 };
 
-const getPitchingPvfForRole = (
-  role: "SP" | "RP" | "SM",
-  eq: ReturnType<typeof readPitchingWeights>,
-) => (role === "RP" ? eq.market_pvf_reliever : role === "SM" ? eq.market_pvf_weekday_sp : eq.market_pvf_weekend_sp);
-
 const canShowPitchingMarketValue = (team: string | null | undefined, conference: string | null | undefined) => {
   const conf = String(conference || "").trim().toLowerCase();
   const tm = String(team || "").trim().toLowerCase();
@@ -410,8 +405,9 @@ export function computeTransferPitcherProjection(
   const k9Plus = calcPitchingPlus(roleAdjustedK9, eq.k9_plus_ncaa_avg, eq.k9_plus_ncaa_sd, eq.k9_plus_scale, true);
   const bb9Plus = calcPitchingPlus(roleAdjustedBb9, eq.bb9_plus_ncaa_avg, eq.bb9_plus_ncaa_sd, eq.bb9_plus_scale, false);
   const hr9Plus = calcPitchingPlus(roleAdjustedHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale, false);
+  // pRV+ stored whole (mirrors wRC+); display and the p_war below share the integer.
   const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-    ? round3(
+    ? Math.round(
         (eq.era_plus_weight * Number(eraPlus)) +
         (eq.fip_plus_weight * Number(fipPlus)) +
         (eq.whip_plus_weight * Number(whipPlus)) +
@@ -435,10 +431,11 @@ export function computeTransferPitcherProjection(
     juco: 0.35, // mirror DEFAULT_NIL_TIER_MULTIPLIERS.juco; no eq.market_tier_juco yet
   };
   const ptm = getProgramTierMultiplierByConference(input.toConference, pitchingTierMultipliers);
-  const pvm = getPitchingPvfForRole(projectedRole, eq);
   const marketEligible = canShowPitchingMarketValue(input.toTeam, input.toConference);
-  // Market value floors at $0 — negative WAR shouldn't produce a negative dollar projection.
-  const marketValueRaw = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm * pvm;
+  // Market value floors at $0 — negative WAR shouldn't produce a negative dollar
+  // projection. PVF dropped — role value is already in WAR via IP (see
+  // computePitcherMarketValue); market = pWAR × $/WAR × tier.
+  const marketValueRaw = !marketEligible || pWar == null ? null : pWar * eq.market_dollars_per_war * ptm;
   const marketValue = marketValueRaw == null ? null : Math.max(0, marketValueRaw);
 
   const showWork: TransferPitcherShowWork = {

@@ -47,6 +47,11 @@ function derivePitcherDepthRole(ip: number | null | undefined, role: "SP" | "RP"
   if (r === "SP") {
     if (ipNum >= 65) return "weekend_starter";
     if (ipNum >= 35) return "weekday_starter";
+    // Thin-sample SPs (<10 IP) drop to specialist_reliever — without this a
+    // 3-IP arm gets swing_starter's ~30 projected IP (and previously ~85),
+    // scaling pWAR / market way too high. Mirrors defaultPitcherDepthRoleFromIp
+    // (helpers) so both classifiers agree.
+    if (ipNum < 10) return "specialist_reliever";
     return "swing_starter";
   }
   if (ipNum >= 40) return "workhorse_reliever";
@@ -57,7 +62,9 @@ function derivePitcherDepthRole(ip: number | null | undefined, role: "SP" | "RP"
 }
 
 // Compute pitcher derived columns from a freshly-recalculated row.
-function derivePitcherStored(
+// Exported so the precompute scripts derive projected_ip / p_war / depth role
+// through the SAME path as the recalc engine (no coarse-role IP fork).
+export function derivePitcherStored(
   pRvPlus: number | null | undefined,
   role: "SP" | "RP" | "SM",
   meta: { conference: string | null; team: string | null; is_twp?: boolean; ip?: number | null },

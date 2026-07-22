@@ -876,13 +876,16 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const bb9PlusAdj = calcPitchingPlus(adjBb9, pitchingEq.bb9_plus_ncaa_avg, pitchingEq.bb9_plus_ncaa_sd, pitchingEq.bb9_plus_scale, false);
       const hr9PlusAdj = calcPitchingPlus(adjHr9, pitchingEq.hr9_plus_ncaa_avg, pitchingEq.hr9_plus_ncaa_sd, pitchingEq.hr9_plus_scale, false);
 
+      // pRV+ stored/displayed whole (mirrors wRC+) so display and WAR share the integer.
       const pRvPlusAdj = [eraPlusAdj, fipPlusAdj, whipPlusAdj, k9PlusAdj, bb9PlusAdj, hr9PlusAdj].every((v) => v != null)
-        ? (Number(eraPlusAdj) * pitchingEq.era_plus_weight) +
+        ? Math.round(
+          (Number(eraPlusAdj) * pitchingEq.era_plus_weight) +
           (Number(fipPlusAdj) * pitchingEq.fip_plus_weight) +
           (Number(whipPlusAdj) * pitchingEq.whip_plus_weight) +
           (Number(k9PlusAdj) * pitchingEq.k9_plus_weight) +
           (Number(bb9PlusAdj) * pitchingEq.bb9_plus_weight) +
           (Number(hr9PlusAdj) * pitchingEq.hr9_plus_weight)
+        )
         : result.p_rv_plus;
 
       return {
@@ -1147,7 +1150,8 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   // ── Block M: computePitcherPwar ───────────────────────────────────────────────
   const computePitcherPwar = useCallback((p: BuildPlayer, source: any) => {
     const pRvPlusRaw = source?.p_rv_plus ?? source?.p_wrc_plus ?? p.transfer_snapshot?.p_rv_plus ?? p.transfer_snapshot?.p_wrc_plus ?? null;
-    const pRvPlus = Number(pRvPlusRaw);
+    // pRV+ is whole everywhere (mirrors wRC+); round so WAR matches the displayed integer.
+    const pRvPlus = Math.round(Number(pRvPlusRaw));
     if (!Number.isFinite(pRvPlus) || pitchingEq.pwar_runs_per_win === 0) return null;
     const sourceId = (p.player as any)?.source_player_id ?? null;
     const pmRole = sourceId ? pitchingStatsByNameTeam.bySourceId.get(sourceId)?.role : null;
@@ -1334,8 +1338,8 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         p_k9:       sourceBase.p_k9       != null ? Number(sourceBase.p_k9)       * devAggScalePitch    : null,
         p_bb9:      sourceBase.p_bb9      != null ? Number(sourceBase.p_bb9)      * invDevAggScalePitch : null,
         p_hr9:      sourceBase.p_hr9      != null ? Number(sourceBase.p_hr9)      * invDevAggScalePitch : null,
-        p_rv_plus:  sourceBase.p_rv_plus  != null ? Number(sourceBase.p_rv_plus)  * devAggScalePitch    : null,
-        p_wrc_plus: sourceBase.p_rv_plus  != null ? Number(sourceBase.p_rv_plus)  * devAggScalePitch    : (sourceBase.p_wrc_plus ?? null),
+        p_rv_plus:  sourceBase.p_rv_plus  != null ? Math.round(Number(sourceBase.p_rv_plus)  * devAggScalePitch)    : null,
+        p_wrc_plus: sourceBase.p_rv_plus  != null ? Math.round(Number(sourceBase.p_rv_plus)  * devAggScalePitch)    : (sourceBase.p_wrc_plus ?? null),
       } : sourceBase;
       // SP↔RP role-transition adjustment to rates. Mirrors PitcherProfile:
       // when the session role bucket differs from the stored role, scale rates
@@ -1372,9 +1376,11 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
         const bb9P  = calcPitchingPlus(rtBb9,  pitchingEq.bb9_plus_ncaa_avg,  pitchingEq.bb9_plus_ncaa_sd,  pitchingEq.bb9_plus_scale,  false);
         const hr9P  = calcPitchingPlus(rtHr9,  pitchingEq.hr9_plus_ncaa_avg,  pitchingEq.hr9_plus_ncaa_sd,  pitchingEq.hr9_plus_scale,  false);
         const rtPRvPlus = [eraP, fipP, whipP, k9P, bb9P, hr9P].every((v) => v != null)
-          ? (Number(eraP) * pitchingEq.era_plus_weight) + (Number(fipP) * pitchingEq.fip_plus_weight) +
+          ? Math.round(
+            (Number(eraP) * pitchingEq.era_plus_weight) + (Number(fipP) * pitchingEq.fip_plus_weight) +
             (Number(whipP) * pitchingEq.whip_plus_weight) + (Number(k9P) * pitchingEq.k9_plus_weight) +
             (Number(bb9P) * pitchingEq.bb9_plus_weight) + (Number(hr9P) * pitchingEq.hr9_plus_weight)
+          )
           : (devSource.p_rv_plus ?? devSource.p_wrc_plus ?? null);
         return {
           ...devSource,
@@ -1411,12 +1417,16 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
           default:                      return pitchingEq.pwar_ip_rp;
         }
       })();
-      const adjRvForWar = source?.p_rv_plus != null ? Number(source.p_rv_plus) : null;
+      // pRV+ is whole everywhere; round base-path (unadjusted) source too so the
+      // displayed pRV+ and this WAR always share the same integer.
+      const adjRvForWar = source?.p_rv_plus != null ? Math.round(Number(source.p_rv_plus)) : null;
       const pwar = adjRvForWar != null && Number.isFinite(adjRvForWar)
         ? ((((adjRvForWar - 100) / 100) * (sessionIpForRow / 9) * pitchingEq.pwar_r_per_9)
            + ((sessionIpForRow / 9) * pitchingEq.pwar_replacement_runs_per_9)) / pitchingEq.pwar_runs_per_win
         : null;
-      return { sim, shown: source, shownWrc: source?.p_rv_plus ?? source?.p_wrc_plus ?? null, owar: pwar ?? 0, pwar };
+      const shownPRv = source?.p_rv_plus != null ? Math.round(Number(source.p_rv_plus))
+        : source?.p_wrc_plus != null ? Math.round(Number(source.p_wrc_plus)) : null;
+      return { sim, shown: source, shownWrc: shownPRv, owar: pwar ?? 0, pwar };
     }
     const shownWrc = (() => {
       if (shown?.p_wrc_plus != null) return shown.p_wrc_plus;

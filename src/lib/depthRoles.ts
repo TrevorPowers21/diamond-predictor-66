@@ -106,7 +106,7 @@ export function pitcherExpectedIp(
   eq: Pick<PitchingEquationWeights, "pwar_ip_sp" | "pwar_ip_sm" | "pwar_ip_rp">,
 ): number {
   switch (depthRole) {
-    case "weekend_starter":        return eq.pwar_ip_sp;  // ~80 IP — Fri/Sat/Sun
+    case "weekend_starter":        return eq.pwar_ip_sp;  // ~85 IP — Fri/Sat/Sun
     case "weekday_starter":        return eq.pwar_ip_sm;  // ~50 IP — midweek SP
     case "swing_starter":          return 30;             // long relief / spot start
     case "workhorse_reliever":     return 50;             // closer/setup workhorse
@@ -220,8 +220,11 @@ export function computePitcherMarketValue(
     juco: 0.35,
   };
   const ptm = getProgramTierMultiplierByConference(ctx.conference, tiers);
-  const pvm = getPitchingPvfForRole(ctx.role, eq);
-  const raw = pWar * eq.market_dollars_per_war * ptm * pvm;
+  // PVF dropped: a starter's role value is already in WAR through IP (85 vs 35
+  // innings), so a PVF premium on top double-counts. Market = pWAR × $/WAR × tier,
+  // matching the returner path + Team Builder. `ctx.role` kept for call-site parity.
+  void ctx.role;
+  const raw = pWar * eq.market_dollars_per_war * ptm;
   return Math.max(0, raw);
 }
 

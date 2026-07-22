@@ -462,13 +462,18 @@ export function computePitcherProjection(
   const hr9Plus = calcPitchingPlus(roleAdjustedHr9, eq.hr9_plus_ncaa_avg, eq.hr9_plus_ncaa_sd, eq.hr9_plus_scale);
 
   // Step 5: pRvPlus = weighted composite of the six +-stats.
+  // pRV+ is stored as a whole number (mirrors wRC+, which is rounded at
+  // derivation). Rounding here means the displayed pRV+ and the p_war computed
+  // from it below both run off the same integer — hand-checks match exactly.
   const pRvPlus = [eraPlus, fipPlus, whipPlus, k9Plus, bb9Plus, hr9Plus].every((v) => v != null)
-    ? (Number(eraPlus) * eq.era_plus_weight) +
+    ? Math.round(
+      (Number(eraPlus) * eq.era_plus_weight) +
       (Number(fipPlus) * eq.fip_plus_weight) +
       (Number(whipPlus) * eq.whip_plus_weight) +
       (Number(k9Plus) * eq.k9_plus_weight) +
       (Number(bb9Plus) * eq.bb9_plus_weight) +
       (Number(hr9Plus) * eq.hr9_plus_weight)
+    )
     : null;
 
   // Step 6: pWar from pRvPlus + projected IP.
