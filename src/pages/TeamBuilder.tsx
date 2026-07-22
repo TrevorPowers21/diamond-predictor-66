@@ -2000,6 +2000,11 @@ export default function TeamBuilder() {
       setHasSavedOnce(true);
       toast({ title: result?.saveAs ? `Build saved as "${result.targetName}"` : "Build saved" });
       queryClient.invalidateQueries({ queryKey: ["team-builds"] });
+      // Phase B: reload the saved build so every row comes back CLEAN — the
+      // persisted adjusted snapshots load into p.prediction with no _dirty, so the
+      // build returns to pure snapshot reads (zero live compute). The clean-read
+      // is synchronous, so this reload has no flicker.
+      if (result?.buildId) loadBuild(result.buildId);
     },
     onError: (e: any) => toast({ title: "Save failed", description: e.message, variant: "destructive" }),
   });

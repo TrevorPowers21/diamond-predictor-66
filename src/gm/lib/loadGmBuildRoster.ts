@@ -1,7 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { readPitchingWeights } from "@/lib/pitchingEquations";
 import { parseBuildPlayerMeta, projectedEligibilityClass } from "@/pages/team-builder/helpers";
-import { effectivePitcherWar, effectiveHitterWar, effectiveMarket, pitcherSessionRole } from "@/lib/effectiveProjection";
+import { pitcherSessionRole } from "@/lib/effectiveProjection";
 import type { GmRow } from "@/gm/hooks/useGmRoster";
 
 export const isPitcherPos = (s: string | null | undefined) => /^(SP|RP|CL|P|LHP|RHP)/i.test(String(s || ""));
@@ -37,10 +37,10 @@ export function deriveGmRows(
     const sessionDepthRole = pitcher
       ? (meta?.depthRole ?? (snap.pitcher_role === "SP" ? "weekend_starter" : snap.pitcher_role === "SM" ? "weekday_starter" : undefined))
       : (meta?.depthRole ?? snap.hitter_depth_role);
-    const effWar = pitcher
-      ? effectivePitcherWar(snap, sessionDepthRole, devAgg, classTransition, eq)
-      : effectiveHitterWar(snap.p_wrc_plus, snap.hitter_depth_role, sessionDepthRole, devAgg, classTransition);
-    const effMarket = effectiveMarket(mv, storedWar, effWar);
+    // Phase B: GM reads the snapshot ONLY. The snapshot already holds
+    // f(neutral, toggles) — re-applying the production_notes overlay here would
+    // double it. war/market come straight from the stored snapshot values below.
+    void classTransition;
 
     const displayPosition = isLocal
       ? (r.position_slot ?? local?.position ?? null)
@@ -55,8 +55,8 @@ export function deriveGmRows(
       position: displayPosition,
       class_year: p?.class_year ?? null,
       is_pitcher: pitcher,
-      war: effWar ?? storedWar,
-      market_value: effMarket ?? mv,
+      war: storedWar,
+      market_value: mv,
       dev_aggressiveness: devAgg,
       depth_role: sessionDepthRole ?? null,
       nil_value: r.nil_value ?? null,
