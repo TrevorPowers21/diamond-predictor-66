@@ -1301,8 +1301,11 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // snapshot directly — synchronous, no async recompute, so no load flicker.
     // Only a DIRTY row (a toggle moved this session) falls through to recompute,
     // and that recompute uses neutralPrediction (below) so it can't compound.
-    // Targets keep the existing path (their snapshot flow is a separate slice).
-    if (!(p as any)._dirty && p.roster_status !== "target") {
+    // Applies to ROSTERED transfers too (Hanley/Cespedes): they carry a real
+    // adjusted build snapshot in p.prediction just like returners. The field
+    // guards below (p_war / o_war present) protect against a wrong-side row, so
+    // a board target without a real snapshot simply falls through.
+    if (!(p as any)._dirty) {
       const snap: any = p.prediction;
       if (snap) {
         if (treatAsPitcher && snap.p_war != null && snap.p_rv_plus != null) {
@@ -1559,8 +1562,9 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   const projectedNilForPlayer = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
     if (!isProjectedStatus(p)) return 0;
     // Phase B: CLEAN row → stored market straight from the snapshot (no async
-    // conference-tier recompute → no market flicker). Dirty rows fall through.
-    if (!(p as any)._dirty && p.roster_status !== "target") {
+    // conference-tier recompute → no market flicker). Applies to rostered
+    // transfers too. Dirty rows / snapshots without a stored market fall through.
+    if (!(p as any)._dirty) {
       const m = (p.prediction as any)?.market_value;
       if (m != null && Number.isFinite(Number(m))) return Math.max(0, Number(m));
     }
