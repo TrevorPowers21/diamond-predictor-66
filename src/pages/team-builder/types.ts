@@ -111,6 +111,10 @@ export type BuildPlayer = {
   // recomputes from — kept separate from `prediction`, which holds the adjusted
   // snapshot once Slice 1 lands. Loose shape; read like `prediction`.
   neutralPrediction?: Record<string, any> | null;
+  // Phase B (transient, never persisted): true when a toggle moved this session,
+  // so the sim recomputes this row from neutral instead of reading its snapshot.
+  // Cleared on save. Clean rows read the stored adjusted snapshot (no flicker).
+  _dirty?: boolean;
   nilVal?: number | null;
   nil_owar?: number | null;
   team_metrics?: TeamMetricInputs | null;

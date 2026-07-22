@@ -1296,6 +1296,23 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
   // ── Block O: playerProjection ────────────────────────────────────────────────
   const playerProjection = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
     const treatAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
+    // ── Phase B: CLEAN read ──────────────────────────────────────────────────
+    // A CLEAN row (no toggle changed this session) reads its STORED adjusted
+    // snapshot directly — synchronous, no async recompute, so no load flicker.
+    // Only a DIRTY row (a toggle moved this session) falls through to recompute,
+    // and that recompute uses neutralPrediction (below) so it can't compound.
+    // Targets keep the existing path (their snapshot flow is a separate slice).
+    if (!(p as any)._dirty && p.roster_status !== "target") {
+      const snap: any = p.prediction;
+      if (snap) {
+        if (treatAsPitcher && snap.p_war != null && snap.p_rv_plus != null) {
+          return { sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_rv_plus)), owar: Number(snap.p_war), pwar: Number(snap.p_war) };
+        }
+        if (!treatAsPitcher && snap.o_war != null && snap.p_wrc_plus != null) {
+          return { sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_wrc_plus)), owar: Number(snap.o_war), pwar: null };
+        }
+      }
+    }
     const storedPrecomputed = p.roster_status === "target" && p.player_id
       ? liveTargetPredictionByPlayerId.get(p.player_id)
       : null;
@@ -1315,9 +1332,12 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // reads) so TB values match what coaches see elsewhere. Fall back to the
     // live computeReturnerPitchingProjection only when no stored row exists
     // (e.g. a newly-added player whose precompute hasn't run yet).
+    // Returner compute base = neutralPrediction (the immutable dev_agg=0 line), so
+    // a DIRTY row's overlay recomputes from neutral and never stacks on an already-
+    // adjusted snapshot. Targets keep their live-target base.
     const shown = (p.roster_status === "target")
       ? (storedPrecomputed ?? (!treatAsPitcher ? p.prediction : null) ?? null)
-      : (treatAsPitcher ? (p.prediction ?? computeReturnerPitchingProjection(p)) : p.prediction);
+      : (treatAsPitcher ? ((p.neutralPrediction ?? p.prediction) ?? computeReturnerPitchingProjection(p)) : (p.neutralPrediction ?? p.prediction));
     if (treatAsPitcher) {
       const sourceBase: any = shown ?? p.transfer_snapshot ?? null;
       // Mirror hitter dev_agg pattern: one ratio formula, no target-only gate,
@@ -1538,6 +1558,12 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
 
   const projectedNilForPlayer = useCallback((p: BuildPlayer, side?: "hitter" | "pitcher") => {
     if (!isProjectedStatus(p)) return 0;
+    // Phase B: CLEAN row → stored market straight from the snapshot (no async
+    // conference-tier recompute → no market flicker). Dirty rows fall through.
+    if (!(p as any)._dirty && p.roster_status !== "target") {
+      const m = (p.prediction as any)?.market_value;
+      if (m != null && Number.isFinite(Number(m))) return Math.max(0, Number(m));
+    }
     const renderAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
     if (renderAsPitcher) {
       const projection = playerProjection(p, "pitcher");
