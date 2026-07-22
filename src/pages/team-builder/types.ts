@@ -107,6 +107,10 @@ export type BuildPlayer = {
     model_type: "returner" | "transfer" | string | null;
     status: string | null;
   } | null;
+  // Phase B: the NEUTRAL base (dev_agg=0 precompute line) the toggle handler
+  // recomputes from — kept separate from `prediction`, which holds the adjusted
+  // snapshot once Slice 1 lands. Loose shape; read like `prediction`.
+  neutralPrediction?: Record<string, any> | null;
   nilVal?: number | null;
   nil_owar?: number | null;
   team_metrics?: TeamMetricInputs | null;
