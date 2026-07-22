@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { applyTeamScopeFilter, pickPreferredPrediction } from "@/lib/teamScopedPredictions";
 import { computeOWarFromWrcPlus } from "@/lib/playerCalcs";
-import { paForHitterDepthRole, pitcherRoleFromDepthRole, getPitchingPvfForRole } from "@/lib/depthRoles";
+import { paForHitterDepthRole, pitcherRoleFromDepthRole, getPitchingPvfForRole, computeHitterMarketValue } from "@/lib/depthRoles";
 import { applyRoleTransitionAdjustment } from "@/lib/transferPitcherProjection";
 import { computeTransferProjection } from "@/lib/transferProjection";
 import { computeHitterPowerRatings } from "@/lib/powerRatings";
@@ -691,11 +691,16 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       // (Souza/Traeger). Same fix as the returner path + PlayerProfile + precompute.
       const adjWrc = lp.p_wrc_plus != null ? Math.round(Number(lp.p_wrc_plus) * devAggScale) : null;
       const owar = adjWrc != null ? computeOWarFromWrcPlus(adjWrc, sessionPa) : null;
-      // Market tracks the CORRECTED oWAR via the WAR ratio (keeps $/WAR + tier +
-      // position baked into the stored market). Falls back to stored/snapshot.
-      const nil_valuation = (storedMarket != null && storedOwar != null && storedOwar !== 0 && owar != null)
-        ? Number(storedMarket) * (owar / storedOwar)
-        : ((storedMarket as number | null) ?? p.transfer_snapshot?.nil_valuation ?? null);
+      // Market is COMPUTED (not scaled) from oWAR at the DESTINATION conference
+      // (this build's team) + the current position — so same oWAR + same position
+      // + same conference always yields the identical dollar value, a position
+      // toggle flows through posMult, and a transfer is valued at the program
+      // building the roster, never its old school. Falls back to stored/snapshot
+      // only when oWAR is unavailable.
+      const nil_valuation = computeHitterMarketValue(
+        owar,
+        { conference: selectedTeamConference, position: p.position_slot ?? (p.player as any)?.position ?? (livePlayer as any)?.position ?? null },
+      ) ?? ((storedMarket as number | null) ?? p.transfer_snapshot?.nil_valuation ?? null);
       return {
         p_avg: lp.p_avg ?? null,
         p_obp: lp.p_obp ?? null,
@@ -1550,7 +1555,13 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       const eligibleForMv = storedMv != null && Number.isFinite(storedMv);
       const pwarForMv = projection?.pwar;
       if (eligibleForMv && pwarForMv != null && Number.isFinite(Number(pwarForMv))) {
-        const confForMv = (p.player as any)?.conference ?? (source as any)?.conference ?? null;
+        // Tier comes from the DESTINATION (this build's team), not the player's
+        // own conference. A transfer target is valued at the program building the
+        // roster (e.g. a Big Ten arm added to a Georgia/SEC build is worth SEC
+        // dollars). Using player.conference leaked the old school's tier — a
+        // regression. Compute (never scale) so same role + same WAR + same
+        // conference always yields the identical market.
+        const confForMv = selectedTeamConference ?? (source as any)?.conference ?? (p.player as any)?.conference ?? null;
         const tierForMv = getProgramTierMultiplierByConference(confForMv, pitchingTierMultipliers);
         return Math.max(0, Number(pwarForMv) * pitchingEq.market_dollars_per_war * tierForMv);
       }
@@ -1560,7 +1571,7 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       return 0;
     }
     return projectedPlayerScore(p) * nilBasePerOWar;
-  }, [nilBasePerOWar, pitchingEq, pitchingPvfForRole, pitchingTierMultipliers, projectedPlayerScore, playerProjection, selectedTeam, teamByKey, pitchingStatsByNameTeam]);
+  }, [nilBasePerOWar, pitchingEq, pitchingPvfForRole, pitchingTierMultipliers, projectedPlayerScore, playerProjection, selectedTeam, selectedTeamConference, teamByKey, pitchingStatsByNameTeam]);
 
   // Per-player projected budget share (proportional allocation of remaining
   // budget after overrides). Defined here so effectiveNilForPlayer can use it

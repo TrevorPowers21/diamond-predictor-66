@@ -1927,39 +1927,13 @@ export default function TeamBuilder() {
           // Only newly added targets land as false; the "+" toggle on the
           // target board flips this to true.
           included_in_roster: rp.included_in_roster ?? true,
-          // Phase B: the snapshot is the DISPLAYED (toggle-adjusted) line
-          // f(neutral, toggles) — not the raw neutral prediction. The sim's
-          // settled per-row output IS that adjusted line (it overlays the
-          // toggles on the neutral prediction), so we capture it here. Spread
-          // the prediction first to preserve every field, then override only
-          // the toggle-affected values (rates, pRV+/wRC+, WAR, market).
-          player_snapshot: (() => {
-            const proj = playerProjection(rp);
-            if (!proj) return rp.prediction ?? null;
-            const base: any = rp.prediction ? { ...rp.prediction } : {};
-            const shown: any = proj.shown ?? {};
-            if (proj.pwar != null) {
-              base.p_era = shown.p_era ?? base.p_era ?? null;
-              base.p_fip = shown.p_fip ?? base.p_fip ?? null;
-              base.p_whip = shown.p_whip ?? base.p_whip ?? null;
-              base.p_k9 = shown.p_k9 ?? base.p_k9 ?? null;
-              base.p_bb9 = shown.p_bb9 ?? base.p_bb9 ?? null;
-              base.p_hr9 = shown.p_hr9 ?? base.p_hr9 ?? null;
-              base.p_rv_plus = proj.shownWrc ?? shown.p_rv_plus ?? base.p_rv_plus ?? null;
-              base.p_war = proj.pwar ?? null;
-              base.pitcher_depth_role = rp.depth_role ?? base.pitcher_depth_role ?? null;
-            } else {
-              base.p_avg = shown.p_avg ?? base.p_avg ?? null;
-              base.p_obp = shown.p_obp ?? base.p_obp ?? null;
-              base.p_slg = shown.p_slg ?? base.p_slg ?? null;
-              base.p_wrc_plus = proj.shownWrc ?? shown.p_wrc_plus ?? base.p_wrc_plus ?? null;
-              base.o_war = proj.owar ?? null;
-              base.hitter_depth_role = rp.depth_role ?? base.hitter_depth_role ?? null;
-            }
-            const mkt = projectedNilForPlayer(rp);
-            if (mkt != null) base.market_value = mkt;
-            return base;
-          })(),
+          // NOTE: snapshot stays the NEUTRAL prediction for now. The loader feeds
+          // player_snapshot back in as the sim's BASE (useLoadBuild activePred),
+          // and the sim applies the dev-agg/role overlay on top — so an *adjusted*
+          // snapshot would be re-overlaid on every load (double dev-agg). Making
+          // the snapshot hold f(neutral,toggles) MUST land together with the
+          // read-path flip that stops overlaying (Phase B Slice 1+3 combined).
+          player_snapshot: rp.prediction ?? null,
           production_notes: serializeBuildPlayerMeta(
             rp.production_notes,
             rp.team_metrics ?? null,
