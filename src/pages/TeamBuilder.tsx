@@ -3045,6 +3045,43 @@ export default function TeamBuilder() {
       });
     };
 
+    // Build target rows SYNCHRONOUSLY from the board data (transfer_snapshot +
+    // production_notes) — no per-player player_predictions fetch. Replaces the
+    // addPlayerFromTargetSearch await-loop that made targets trickle in one at a
+    // time (the flicker). A TWP spawns two rows (hitter / pitcher), each with a
+    // VALIDATED per-side depth role, so a hitter row can never hold a pitcher role.
+    const VALID_HIT = ["cornerstone", "everyday_starter", "platoon_starter", "utility", "bench"];
+    const VALID_PIT = ["weekend_starter", "weekday_starter", "swing_starter", "workhorse_reliever", "high_leverage_reliever", "mid_leverage_reliever", "low_impact_reliever", "specialist_reliever"];
+    const buildTargetRowsFromBoard = (sbRow: any): BuildPlayer[] => {
+      const ts: any = sbRow.transfer_snapshot ?? {};
+      const meta = parseBuildPlayerMeta(sbRow.production_notes);
+      const isTwp = !!ts.is_twp;
+      const dbPos = sbRow.position ?? null;
+      const isPitPos = /^(SP|RP|CL|P|LHP|RHP)/i.test(String(dbPos || ""));
+      const pitcherRole: "SP" | "RP" = /weekend|weekday|swing|_starter$/.test(String(ts.pitcher_depth_role || "")) ? "SP" : "RP";
+      const hitDepth = VALID_HIT.includes(ts.hitter_depth_role) ? ts.hitter_depth_role : (VALID_HIT.includes(meta?.depthRole as any) ? (meta!.depthRole as any) : "everyday_starter");
+      const pitDepth = VALID_PIT.includes(ts.pitcher_depth_role) ? ts.pitcher_depth_role : (VALID_PIT.includes(meta?.depthRole as any) ? (meta!.depthRole as any) : "high_leverage_reliever");
+      const pMeta = { first_name: sbRow.first_name || "", last_name: sbRow.last_name || "", class_year: sbRow.class_year ?? null, bats_hand: sbRow.bats_hand ?? null, team: sbRow.team ?? null, from_team: sbRow.team ?? null, conference: sbRow.conference ?? null };
+      const base: any = {
+        player_id: sbRow.player_id, source: "portal", custom_name: `${sbRow.first_name || ""} ${sbRow.last_name || ""}`.trim() || null,
+        depth_order: 1, nil_value: 0, production_notes: sbRow.production_notes ?? null,
+        roster_status: "target", included_in_roster: false, prediction: null,
+        class_transition: meta?.classTransition ?? classTransitionFromYearOrDefault(sbRow.class_year),
+        dev_aggressiveness: meta?.devAggressiveness ?? 0,
+        class_transition_overridden: meta?.classTransitionOverridden ?? false,
+        dev_aggressiveness_overridden: meta?.devAggressivenessOverridden ?? false,
+        team_metrics: null, team_power_plus: null, nilVal: null, nil_owar: null,
+        transfer_snapshot: ts,
+      };
+      if (isTwp) {
+        return [
+          { ...base, position_slot: (isPitPos ? null : dbPos), depth_role: hitDepth, player: { ...pMeta, position: (isPitPos ? null : dbPos) } },
+          { ...base, position_slot: pitcherRole, depth_role: pitDepth, player: { ...pMeta, position: pitcherRole } },
+        ];
+      }
+      return [{ ...base, position_slot: isPitPos ? pitcherRole : dbPos, depth_role: isPitPos ? pitDepth : hitDepth, player: { ...pMeta, position: dbPos } }];
+    };
+
     // Push roster targets → Supabase (deduped against in-session push history)
     const rosterTargets = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target" && p.player_id && isUuid(p.player_id));
     for (const p of rosterTargets) {
@@ -3085,30 +3122,39 @@ export default function TeamBuilder() {
       const existingPlayerIds = new Set(rosterPlayers.map((rp) => rp.player_id));
       const newFromSupabase = supabaseTargetBoard.filter((sb) => !existingPlayerIds.has(sb.player_id));
       if (newFromSupabase.length > 0) {
-        (async () => {
-          for (const sb of newFromSupabase) {
-            await addPlayerFromTargetSearch({
-              id: sb.player_id,
-              first_name: sb.first_name,
-              last_name: sb.last_name,
-              position: sb.position,
-              class_year: sb.class_year ?? null,
-              bats_hand: (sb as any).bats_hand ?? null,
-              team: sb.team,
-              from_team: sb.team,
-              conference: sb.conference ?? null,
-              source_player_id: (sb as any).source_player_id ?? null,
-              // __sync flag suppresses the "Added to targets" toast inside
-              // addPlayerFromTargetSearch — the originating surface (Profile /
-              // Dashboard / Portal) already showed its own "Added to Target
-              // Board" toast, so a second one fires for every cross-surface
-              // pull. Cross-surface pulls also shouldn't mark the build dirty.
-              __sync: true,
+        // The whole existing board carries a transfer_snapshot → build ALL of those
+        // rows in ONE synchronous batch (every name/stat/toggle at once, no flicker).
+        // A brand-new add (from a profile/dashboard) has no snapshot yet → fall back
+        // to the async stored-first fetch for just that player (rare, one at a time).
+        const withSnap = newFromSupabase.filter((sb) => (sb as any).transfer_snapshot);
+        const withoutSnap = newFromSupabase.filter((sb) => !(sb as any).transfer_snapshot);
+        const sideKey = (slot: any, pos: any) => `${/^(SP|RP|CL|P|LHP|RHP)/i.test(String(slot || pos || "")) ? "P" : "H"}`;
+        if (withSnap.length > 0) {
+          const rows = withSnap.flatMap((sb) => buildTargetRowsFromBoard(sb));
+          setRosterPlayers((prev) => {
+            const seen = new Set(prev.map((p) => `${p.player_id}|${sideKey(p.position_slot, p.player?.position)}`));
+            const toAdd = rows.filter((r) => {
+              const k = `${r.player_id}|${sideKey(r.position_slot, r.player?.position)}`;
+              if (seen.has(k)) return false;
+              seen.add(k);
+              return true;
             });
-          }
-          // After the fresh adds land, overlay any saved toggle line onto them.
-          overlaySavedTargets();
-        })();
+            return toAdd.length ? [...prev, ...toAdd] : prev;
+          });
+        }
+        if (withoutSnap.length > 0) {
+          (async () => {
+            for (const sb of withoutSnap) {
+              await addPlayerFromTargetSearch({
+                id: sb.player_id, first_name: sb.first_name, last_name: sb.last_name,
+                position: sb.position, class_year: sb.class_year ?? null, bats_hand: (sb as any).bats_hand ?? null,
+                team: sb.team, from_team: sb.team, conference: sb.conference ?? null,
+                source_player_id: (sb as any).source_player_id ?? null, __sync: true,
+              });
+            }
+            overlaySavedTargets();
+          })();
+        }
       }
     }
     // Already-loaded targets (saved-build load, or no new pulls): overlay now too.
