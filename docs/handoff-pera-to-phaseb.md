@@ -177,6 +177,10 @@ everywhere. Current status:
 - [ ] **Prod backfill `target_board.transfer_snapshot`** — `scripts/backfill-target-transfer-snapshots.ts --apply`
       (TWP-aware now: nulls `nil_valuation` for TWPs, stamps `is_twp`, keeps side-aware splits.
       Expect noPrediction=0. If any noPrediction, STOP — that's the pagination-order bug, not a gap.)
+- [ ] **Prod: `scripts/backfill-rostered-target-consistency.ts --apply`** — one-time: for a target
+      also on its program's ACTIVE build roster, copy the build `player_snapshot` INTO
+      `target_board.transfer_snapshot` (field-mapped) so the two lines are 1:1. Run AFTER the
+      transfer_snapshot backfill. Staging: 19 rows reconciled. Lockstep save keeps them 1:1 after.
 - [ ] You drive the staging → main PR + click prod
 
 ### TWP transfer-snapshot fix (Kenny) — staging done, mirror on prod
