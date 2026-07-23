@@ -511,10 +511,10 @@ export default function TargetBoardSubtab() {
                 <TableHead className="w-[56px] text-center p-0 sticky left-[28px] z-10 bg-[#0a1428]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Rank</span>
                 </TableHead>
-                <TableHead className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                <TableHead className="w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                   <HitterSortBtn label="Player" sk="name" />
                 </TableHead>
-                <TableHead className="min-w-[96px]">
+                <TableHead className="w-[96px] sticky left-[304px] z-10 bg-[#0a1428]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6] whitespace-nowrap">Status</span>
                 </TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="AVG" sk="p_avg" /></TableHead>
@@ -556,7 +556,7 @@ export default function TargetBoardSubtab() {
                             {i + 1}
                           </span>
                         </TableCell>
-                        <TableCell className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                        <TableCell className="w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                           <Link
                             to={profileRouteFor(r.player_id, r.position, r.position)}
                             className="font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
@@ -568,7 +568,7 @@ export default function TargetBoardSubtab() {
                             {r.class_year ? ` · ${r.class_year}` : ""}
                           </div>
                         </TableCell>
-                        <TableCell className="min-w-[96px]">{portalBadge(r)}</TableCell>
+                        <TableCell className="w-[96px] sticky left-[304px] z-10 bg-[#0a1428]">{portalBadge(r)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt3(pred?.p_avg)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt3(pred?.p_obp)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt3(pred?.p_slg)}</TableCell>
@@ -630,10 +630,10 @@ export default function TargetBoardSubtab() {
                 <TableHead className="w-[56px] text-center p-0 sticky left-[28px] z-10 bg-[#0a1428]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Rank</span>
                 </TableHead>
-                <TableHead className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                <TableHead className="w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                   <PitcherSortBtn label="Player" sk="name" />
                 </TableHead>
-                <TableHead className="min-w-[96px]">
+                <TableHead className="w-[96px] sticky left-[304px] z-10 bg-[#0a1428]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6] whitespace-nowrap">Status</span>
                 </TableHead>
                 <TableHead className="text-right"><PitcherSortBtn label="ERA" sk="p_era" /></TableHead>
@@ -676,7 +676,7 @@ export default function TargetBoardSubtab() {
                             {i + 1}
                           </span>
                         </TableCell>
-                        <TableCell className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                        <TableCell className="w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                           <Link
                             to={profileRouteFor(r.player_id, r.position, r.position)}
                             className="font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
@@ -688,7 +688,7 @@ export default function TargetBoardSubtab() {
                             {r.class_year ? ` · ${r.class_year}` : ""}
                           </div>
                         </TableCell>
-                        <TableCell className="min-w-[96px]">{portalBadge(r)}</TableCell>
+                        <TableCell className="w-[96px] sticky left-[304px] z-10 bg-[#0a1428]">{portalBadge(r)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt2(pred?.p_era)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt2(pred?.p_fip)}</TableCell>
                         <TableCell className="text-right font-mono text-sm text-slate-200">{fmt2(pred?.p_whip)}</TableCell>
