@@ -1305,7 +1305,12 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // adjusted build snapshot in p.prediction just like returners. The field
     // guards below (p_war / o_war present) protect against a wrong-side row, so
     // a board target without a real snapshot simply falls through.
-    if (!(p as any)._dirty) {
+    // A ROSTERED target reads its build player_snapshot ALWAYS — never live-compute
+    // (its toggles go through the roster save). Without this, a rostered TWP hitter
+    // fell through to the live path and computed off a wrong-team transfer wRC+
+    // (e.g. 113 → 1.42) instead of reading its snapshot (cornerstone → 1.499).
+    const rosteredTarget = p.roster_status === "target" && (p as any).included_in_roster === true;
+    if (!(p as any)._dirty || rosteredTarget) {
       // Build snapshot for rostered rows; transfer_snapshot (captured at add-time)
       // for board targets — so targets read their stored line INSTANTLY instead of
       // waiting on the async liveTargetPredictions query (kills the piecemeal load).
