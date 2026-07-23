@@ -191,6 +191,18 @@ everywhere. Current status:
       also on its program's ACTIVE build roster, copy the build `player_snapshot` INTO
       `target_board.transfer_snapshot` (field-mapped) so the two lines are 1:1. Run AFTER the
       transfer_snapshot backfill. Staging: 19 rows reconciled. Lockstep save keeps them 1:1 after.
+- [ ] **Prod: `scripts/rebake-twp-markets.ts --apply`** — one-time: recompute every TWP
+      `twp_hitter`/`twp_pitcher` market from its stored WAR (`compute*MarketValue`), so market
+      matches WAR. Run LAST (after all snapshots exist). Staging done (Kenny twp_hitter → 61,817).
+
+### ⚠️ REMAINING (TWP WAR-read — do before/with the push): rostered TWP row must read its own-side snapshot
+- Market now follows WAR everywhere (re-bake `5da59f0`), but the WARs still disagree by slot:
+  the roster **live-computes** the TWP hitter (Kenny 1.42) instead of reading its player_snapshot
+  (1.499), and the merged `transfer_snapshot` pulls `p_war` from the hitter slot (2.360) not the
+  pitcher slot (0.832). Fix: a rostered TWP hitter row reads the HITTER-slot player_snapshot and a
+  rostered TWP pitcher row reads the PITCHER-slot player_snapshot (strict own-side), and the
+  transfer_snapshot merge takes each side from its own slot. Same "read the snapshot, don't
+  live-compute" rule the rest of Phase B follows.
 - [ ] You drive the staging → main PR + click prod
 
 ### TWP transfer-snapshot fix (Kenny) — staging done, mirror on prod
