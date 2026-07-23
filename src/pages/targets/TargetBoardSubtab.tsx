@@ -369,7 +369,7 @@ export default function TargetBoardSubtab() {
     const m = new Map<string, any>();
     for (const r of board) {
       const pid = r.player_id;
-      const live = displayByPlayerId.get(pid);
+      const live = predictionByPlayerId.get(pid);
       const roster = rosterSnapByPid.get(pid);
       const ts: any = (r as any).transfer_snapshot;
       const snap = roster
