@@ -1940,6 +1940,7 @@ export default function TeamBuilder() {
             if (!proj) return rp.prediction ?? null;
             const base: any = rp.prediction ? { ...rp.prediction } : (rp.neutralPrediction ? { ...rp.neutralPrediction } : {});
             const shown: any = proj.shown ?? {};
+            const isTwp = !!(rp.player as any)?.is_twp;
             if (proj.pwar != null) {
               base.p_era = shown.p_era ?? base.p_era ?? null;
               base.p_fip = shown.p_fip ?? base.p_fip ?? null;
@@ -1950,6 +1951,8 @@ export default function TeamBuilder() {
               base.p_rv_plus = proj.shownWrc ?? shown.p_rv_plus ?? base.p_rv_plus ?? null;
               base.p_war = proj.pwar ?? null;
               base.pitcher_depth_role = rp.depth_role ?? base.pitcher_depth_role ?? null;
+              // TWP pitcher slot is OWN-SIDE ONLY — never carry the hitter side.
+              if (isTwp) { base.o_war = null; base.p_avg = null; base.p_obp = null; base.p_slg = null; base.p_wrc_plus = null; base.hitter_depth_role = null; base.twp_hitter_market_value = null; }
             } else {
               base.p_avg = shown.p_avg ?? base.p_avg ?? null;
               base.p_obp = shown.p_obp ?? base.p_obp ?? null;
@@ -1957,9 +1960,18 @@ export default function TeamBuilder() {
               base.p_wrc_plus = proj.shownWrc ?? shown.p_wrc_plus ?? base.p_wrc_plus ?? null;
               base.o_war = proj.owar ?? null;
               base.hitter_depth_role = rp.depth_role ?? base.hitter_depth_role ?? null;
+              // TWP hitter slot is OWN-SIDE ONLY — never carry the pitcher side.
+              if (isTwp) { base.p_era = null; base.p_fip = null; base.p_whip = null; base.p_k9 = null; base.p_bb9 = null; base.p_hr9 = null; base.p_rv_plus = null; base.p_war = null; base.pitcher_depth_role = null; base.twp_pitcher_market_value = null; }
             }
             const mkt = projectedNilForPlayer(rp);
-            if (mkt != null) base.market_value = mkt;
+            if (isTwp) {
+              // TWP market lives in the side split; the shared market_value stays null.
+              if (proj.pwar != null) base.twp_pitcher_market_value = mkt ?? null;
+              else base.twp_hitter_market_value = mkt ?? null;
+              base.market_value = null;
+            } else if (mkt != null) {
+              base.market_value = mkt;
+            }
             return base;
           })(),
           production_notes: serializeBuildPlayerMeta(
@@ -2257,6 +2269,12 @@ export default function TeamBuilder() {
       if (isTwp) { t.twp_hitter_market_value = mkt; bp.twp_hitter_market_value = mkt; t.nil_valuation = null; bp.market_value = null; }
       else if (mkt != null) { t.nil_valuation = mkt; bp.market_value = mkt; }
     }
+    // bp (roster mirror) is OWN-SIDE ONLY for a TWP — the lockstep writes it to the
+    // matching slot only, so a slot snapshot never carries the other side's data.
+    if (isTwp) {
+      if (treatAsPitcher) { bp.o_war = null; bp.p_avg = null; bp.p_obp = null; bp.p_slg = null; bp.p_wrc_plus = null; bp.hitter_depth_role = null; bp.twp_hitter_market_value = null; }
+      else { bp.p_era = null; bp.p_fip = null; bp.p_whip = null; bp.p_k9 = null; bp.p_bb9 = null; bp.p_hr9 = null; bp.p_rv_plus = null; bp.p_war = null; bp.pitcher_depth_role = null; bp.twp_pitcher_market_value = null; }
+    }
     const playerMeta = player.player
       ? { first_name: player.player.first_name || "", last_name: player.player.last_name || "", position: player.player.position ?? null, team: player.player.team ?? null, from_team: player.player.from_team ?? null, conference: player.player.conference ?? null }
       : null;
@@ -2275,9 +2293,16 @@ export default function TeamBuilder() {
     // 2) Roster lockstep — if this target is on the loaded build's roster, mirror
     //    the exact same line into team_build_players.
     if ((player as any).included_in_roster && selectedBuildId) {
-      await supabase.from("team_build_players")
+      let q = supabase.from("team_build_players")
         .update({ player_snapshot: bp, production_notes: notes })
         .eq("build_id", selectedBuildId).eq("player_id", pid);
+      // A TWP has two slot rows — write only the matching side's slot so the other
+      // slot keeps its own-side snapshot.
+      if (isTwp) {
+        const pitSlots = "(SP,RP,CL,P,LHP,RHP)";
+        q = treatAsPitcher ? q.in("position_slot", ["SP", "RP", "CL", "P", "LHP", "RHP"]) : q.not("position_slot", "in", pitSlots);
+      }
+      await q;
     }
     // Local: adopt the saved snapshot + clear dirty on every row for this player
     // (a TWP's two rows both settle) → back to a synchronous snapshot read. Force
