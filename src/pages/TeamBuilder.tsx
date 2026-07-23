@@ -2208,6 +2208,78 @@ export default function TeamBuilder() {
     }
   }, [rosterPlayers, removeFromSupabaseBoard]);
 
+  // ── Phase B for TARGETS — auto-save a target toggle to the universal board ──
+  // A board target has no saved build; any toggle on its TB row auto-persists to
+  // target_board (transfer_snapshot + production_notes), mirroring the roster's
+  // Phase B save. If the target is also on THIS build's roster (included_in_roster),
+  // the same toggle also writes the roster's player_snapshot + production_notes so
+  // board and roster stay in lockstep. The row then reads snapshot-only again.
+  // Neutral stays player_predictions (the sim recomputes a dirty target from the
+  // live neutral), so this can't compound.
+  const rosterPlayersRef = useRef<BuildPlayer[]>(rosterPlayers);
+  useEffect(() => { rosterPlayersRef.current = rosterPlayers; }, [rosterPlayers]);
+  const targetSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const saveTargetToggle = useCallback(async (player: BuildPlayer) => {
+    if (!effectiveTeamId || !player.player_id) return;
+    const pid = player.player_id;
+    const isTwp = !!(player.player as any)?.is_twp;
+    const treatAsPitcher = isPitcher(player);
+    const proj = playerProjection(player);
+    if (!proj) return;
+    const shown: any = proj.shown ?? {};
+    // Merge onto the existing snapshot so a TWP's OTHER side (its own rosterPlayers
+    // row, same player_id) is preserved when only this side's toggle moved.
+    const { data: existing } = await supabase
+      .from("target_board").select("transfer_snapshot")
+      .eq("customer_team_id", effectiveTeamId).eq("player_id", pid).maybeSingle();
+    const t: any = { ...(((existing as any)?.transfer_snapshot) ?? player.transfer_snapshot ?? {}) };
+    const bp: any = { ...t }; // roster player_snapshot mirror (o_war / market_value field names)
+    t.is_twp = isTwp; bp.is_twp = isTwp;
+    const mkt = projectedNilForPlayer(player, treatAsPitcher ? "pitcher" : "hitter");
+    if (treatAsPitcher) {
+      const f = { p_era: shown.p_era ?? t.p_era ?? null, p_fip: shown.p_fip ?? t.p_fip ?? null, p_whip: shown.p_whip ?? t.p_whip ?? null, p_k9: shown.p_k9 ?? t.p_k9 ?? null, p_bb9: shown.p_bb9 ?? t.p_bb9 ?? null, p_hr9: shown.p_hr9 ?? t.p_hr9 ?? null, p_rv_plus: proj.shownWrc ?? shown.p_rv_plus ?? t.p_rv_plus ?? null, p_war: proj.pwar ?? null, pitcher_depth_role: player.depth_role ?? t.pitcher_depth_role ?? null };
+      Object.assign(t, f); Object.assign(bp, f);
+      if (isTwp) { t.twp_pitcher_market_value = mkt; bp.twp_pitcher_market_value = mkt; t.nil_valuation = null; bp.market_value = null; }
+      else if (mkt != null) { t.nil_valuation = mkt; bp.market_value = mkt; }
+    } else {
+      const f = { p_avg: shown.p_avg ?? t.p_avg ?? null, p_obp: shown.p_obp ?? t.p_obp ?? null, p_slg: shown.p_slg ?? t.p_slg ?? null, p_wrc_plus: proj.shownWrc ?? shown.p_wrc_plus ?? t.p_wrc_plus ?? null, hitter_depth_role: player.depth_role ?? t.hitter_depth_role ?? null };
+      Object.assign(t, f); Object.assign(bp, f);
+      t.owar = proj.owar ?? null; bp.o_war = proj.owar ?? null;
+      if (isTwp) { t.twp_hitter_market_value = mkt; bp.twp_hitter_market_value = mkt; t.nil_valuation = null; bp.market_value = null; }
+      else if (mkt != null) { t.nil_valuation = mkt; bp.market_value = mkt; }
+    }
+    const playerMeta = player.player
+      ? { first_name: player.player.first_name || "", last_name: player.player.last_name || "", position: player.player.position ?? null, team: player.player.team ?? null, from_team: player.player.from_team ?? null, conference: player.player.conference ?? null }
+      : null;
+    const notes = serializeBuildPlayerMeta(
+      player.production_notes, player.team_metrics ?? null, player.team_power_plus ?? null,
+      player.roster_status ?? null, player.depth_role ?? null, player.class_transition ?? null,
+      player.dev_aggressiveness ?? null, player.class_transition_overridden ?? false,
+      player.dev_aggressiveness_overridden ?? false, t, playerMeta,
+      (player as any).projection_tier ?? null, (player as any).nil_value_overridden ?? false,
+    );
+    // 1) Universal target board — always.
+    const { error: tbErr } = await supabase.from("target_board")
+      .update({ transfer_snapshot: t, production_notes: notes })
+      .eq("customer_team_id", effectiveTeamId).eq("player_id", pid);
+    if (tbErr) { toast({ title: "Target save failed", description: tbErr.message, variant: "destructive" }); return; }
+    // 2) Roster lockstep — if this target is on the loaded build's roster, mirror
+    //    the exact same line into team_build_players.
+    if ((player as any).included_in_roster && selectedBuildId) {
+      await supabase.from("team_build_players")
+        .update({ player_snapshot: bp, production_notes: notes })
+        .eq("build_id", selectedBuildId).eq("player_id", pid);
+    }
+    // Local: adopt the saved snapshot + clear dirty on every row for this player
+    // (a TWP's two rows both settle) → back to a synchronous snapshot read.
+    setRosterPlayers((prev) => prev.map((p) =>
+      p.player_id === pid && (p.roster_status || "returner") === "target"
+        ? { ...p, transfer_snapshot: t, _dirty: false } : p));
+  }, [effectiveTeamId, playerProjection, projectedNilForPlayer, selectedBuildId]);
+  const saveTargetToggleRef = useRef(saveTargetToggle);
+  useEffect(() => { saveTargetToggleRef.current = saveTargetToggle; }, [saveTargetToggle]);
+
   const updatePlayer = useCallback((idx: number, updates: Partial<BuildPlayer>) => {
     // Phase B: a value-affecting toggle marks the row DIRTY so the sim recomputes
     // it from neutral this session (instead of reading the stored snapshot). Save
@@ -2240,6 +2312,19 @@ export default function TeamBuilder() {
       return prev.map((p, i) => (i === idx ? withDirty(p) : p));
     });
     setDirty(true);
+    // Phase B for targets: a toggle on a board target auto-saves (debounced) to
+    // the universal target_board — and to the roster too if it's rostered. Uses
+    // the ref so this []-dep callback always calls the latest saver / sim state.
+    if (markDirty) {
+      const cur = rosterPlayersRef.current[idx];
+      if (cur && (cur.roster_status || "returner") === "target" && cur.player_id) {
+        const updated: BuildPlayer = { ...cur, ...updates, _dirty: true };
+        const pid = cur.player_id;
+        const timers = targetSaveTimers.current;
+        if (timers.has(pid)) clearTimeout(timers.get(pid)!);
+        timers.set(pid, setTimeout(() => { timers.delete(pid); saveTargetToggleRef.current(updated); }, 500));
+      }
+    }
   }, []);
 
   const updatePlayerWithRecalc = useCallback(async (idx: number, updates: Partial<BuildPlayer>) => {
