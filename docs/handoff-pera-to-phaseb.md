@@ -127,6 +127,26 @@ consistency pass:
   `player_predictions` must propagate into (a) target `neutralPrediction`s and (b) default-build
   `player_snapshot`s, so neutrals + default snapshots refresh instead of going stale. Design a
   sync (precompute → neutral predictions + default build snapshots) as part of the finalization ritual.
+### Target Phase B — CROSS-SURFACE CONSISTENCY (verify before main — Trevor)
+Every surface a target appears on must show the SAME line = its `transfer_snapshot`
+(or, if rostered, the build `player_snapshot`), so a saved toggle reads identically
+everywhere. Current status:
+- [x] **TB target board** — reads `transfer_snapshot` via the sim clean-read (`8c46b7d`).
+- [x] **Target player profile** (PlayerHub) — reads `transfer_snapshot`; passes
+  `warOverride`/`marketOverride` so `buildPinned` makes the depth/dev-agg controls
+  **READ-ONLY** on a target's page. ✔ toggles show as read-only.
+- [x] **Added to roster** — reads `player_snapshot`; the toggle lockstep write keeps it
+  identical to the board line.
+- [ ] **Targets-tab board** (`TargetBoardSubtab`) — STILL reads live `player_predictions`
+  (line 316). Must switch to `transfer_snapshot` (roster→`player_snapshot`) so it reflects
+  saved toggles. ← TODO
+- [ ] **GM target board** (`useGmTargetBoard`) — STILL reads live `player_predictions`
+  (line 70). Must switch to `transfer_snapshot` (roster→`player_snapshot`). ← TODO
+- [ ] **Identical-value pass:** pick one toggled target + one toggled rostered target and
+  confirm the WAR / market / projected value match across TB board, Targets tab, profile,
+  GM board, and roster.
+- [ ] **Read-only toggles on player pages:** confirm depth/dev-agg controls are read-only
+  (not editable) on a target's PlayerProfile AND PitcherProfile (`buildPinned`).
 - [ ] TWP on the targets page view — verify pitcher/hitter markets show right
 - [ ] "NOT IN PORTAL" display bug
 
