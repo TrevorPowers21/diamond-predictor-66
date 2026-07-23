@@ -1306,13 +1306,18 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // guards below (p_war / o_war present) protect against a wrong-side row, so
     // a board target without a real snapshot simply falls through.
     if (!(p as any)._dirty) {
-      const snap: any = p.prediction;
+      // Build snapshot for rostered rows; transfer_snapshot (captured at add-time)
+      // for board targets — so targets read their stored line INSTANTLY instead of
+      // waiting on the async liveTargetPredictions query (kills the piecemeal load).
+      const snap: any = p.prediction ?? p.transfer_snapshot;
       if (snap) {
         if (treatAsPitcher && snap.p_war != null && snap.p_rv_plus != null) {
           return { sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_rv_plus)), owar: Number(snap.p_war), pwar: Number(snap.p_war) };
         }
-        if (!treatAsPitcher && snap.o_war != null && snap.p_wrc_plus != null) {
-          return { sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_wrc_plus)), owar: Number(snap.o_war), pwar: null };
+        // transfer_snapshot stores oWAR as `owar`; build snapshot as `o_war`.
+        const hitterWar = snap.o_war ?? snap.owar;
+        if (!treatAsPitcher && hitterWar != null && snap.p_wrc_plus != null) {
+          return { sim: null, shown: snap, shownWrc: Math.round(Number(snap.p_wrc_plus)), owar: Number(hitterWar), pwar: null };
         }
       }
     }
@@ -1567,11 +1572,13 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
     // (raw market_value is the hitter side / mis-sided), so read the right field.
     // Dirty rows / snapshots without a stored market fall through.
     if (!(p as any)._dirty) {
-      const snap: any = p.prediction;
+      // Build snapshot (market_value) or, for board targets, transfer_snapshot
+      // (nil_valuation) — read the stored market instantly, no async recompute.
+      const snap: any = p.prediction ?? p.transfer_snapshot;
       const rap = side === "pitcher" || (side == null && isPitcher(p));
       const m = (!!(p.player as any)?.is_twp && rap)
-        ? (snap?.twp_pitcher_market_value ?? snap?.market_value)
-        : snap?.market_value;
+        ? (snap?.twp_pitcher_market_value ?? snap?.market_value ?? snap?.nil_valuation)
+        : (snap?.market_value ?? snap?.nil_valuation);
       if (m != null && Number.isFinite(Number(m))) return Math.max(0, Number(m));
     }
     const renderAsPitcher = side === "pitcher" || (side == null && isPitcher(p));
