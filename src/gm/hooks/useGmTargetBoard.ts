@@ -58,14 +58,28 @@ export function useGmTargetBoard() {
     enabled: !!user?.id && !!effectiveTeamId && playerIds.length > 0,
     queryFn: async () => {
       const map = new Map<string, any>();
-      for (let i = 0; i < playerIds.length; i += 200) {
-        let q = (supabase as any)
-          .from("player_predictions")
-          .select("player_id, variant, customer_team_id, o_war, p_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, pitcher_role, hitter_depth_role")
-          .in("player_id", playerIds.slice(i, i + 200));
-        q = applyTeamScopeFilter(q, effectiveTeamId);
-        const { data } = await q;
-        for (const p of dedupePreferredPerPlayer(data || [], effectiveTeamId)) map.set(p.player_id, p);
+      // Batch of 100 players × ~16 preds each = ~1,600 rows > the 1,000-row cap,
+      // so paginate WITHIN each batch and order by a stable key — without the
+      // .order(), .range() page 2 overlaps page 1 and silently drops whole players.
+      for (let i = 0; i < playerIds.length; i += 100) {
+        const batch = playerIds.slice(i, i + 100);
+        let all: any[] = [];
+        let from = 0;
+        for (;;) {
+          let q = (supabase as any)
+            .from("player_predictions")
+            .select("id, player_id, variant, customer_team_id, o_war, p_war, market_value, twp_hitter_market_value, twp_pitcher_market_value, pitcher_role, hitter_depth_role")
+            .eq("season", 2027)
+            .in("player_id", batch)
+            .order("id", { ascending: true })
+            .range(from, from + 999);
+          q = applyTeamScopeFilter(q, effectiveTeamId);
+          const { data } = await q;
+          all = all.concat(data || []);
+          if (!data || data.length < 1000) break;
+          from += 1000;
+        }
+        for (const p of dedupePreferredPerPlayer(all, effectiveTeamId)) map.set(p.player_id, p);
       }
       return map;
     },

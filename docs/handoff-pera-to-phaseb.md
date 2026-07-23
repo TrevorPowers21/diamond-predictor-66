@@ -115,11 +115,27 @@ consistency pass:
 - [ ] Prod `target_board` column migration (`player_snapshot`, `production_notes`)
 - [ ] Prod re-bake build snapshots (`scripts/rebake-build-snapshots.ts` — recreate; was a one-off)
 - [ ] **Prod backfill `target_board.transfer_snapshot`** — `scripts/backfill-target-transfer-snapshots.ts --apply`
-      (prod = 178 rows, ALL null; ~155 backfill, ~23 have no 2027 prediction on prod either — un-projectable, leave them)
+      (ALL rows are projectable — expect noPrediction=0. If it reports any noPrediction,
+      STOP: that's the pagination-order bug below, not a real gap.)
 - [ ] You drive the staging → main PR + click prod
 
 ### Staging data ops run so far (mirror on prod)
 - pRV+/wRC+ rounding + p_war/o_war recompute
 - projected_ip = depth-role IP + p_war (4,844 rows)
 - re-bake build snapshots (1,117 rows)
-- backfill target_board.transfer_snapshot (117 rows; 45 no-prediction skipped)
+- backfill target_board.transfer_snapshot — **162/162 rows, 0 no-prediction**
+
+### ⚠️ Pagination-order bug (found + fixed) — applies to ANY multi-row `.in()` read
+The first backfill reported "45 no-prediction" targets (Bell, Grindlinger, etc.) and I
+wrongly called them un-projectable. They all HAVE predictions (16 rows each). Two bugs:
+1. `.in(N players)` with no pagination hits Supabase's **1,000-row cap** (~16 preds/player).
+2. `.range()` with **no `.order()`** returns rows in arbitrary order → page 2 overlaps
+   page 1 → whole players silently dropped. **Both checks AND the backfill had this**,
+   which is why "prod also has 23" was also false — same artifact.
+Fix: paginate within batches of 100 AND `.order("id")`. Then 162/162, noPrediction=0.
+- Same bug fixed in the **live GM target board** hook (`src/gm/hooks/useGmTargetBoard.ts`)
+  — it did `.in(200)` unpaginated/unordered, so on a large board it dropped targets'
+  war/market. Now paginates + orders + filters `season=2027`.
+- Lower-risk sibling left as-is: TB `liveTargetPredictions` (`useTeamBuilderSimulation`
+  ~line 512) — team-scope filter reduces it to ~2 rows/player, under the cap; and it's
+  already slated to be replaced by the `transfer_snapshot` read (§5).

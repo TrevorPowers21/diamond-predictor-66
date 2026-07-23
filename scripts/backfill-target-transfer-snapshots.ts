@@ -7,7 +7,11 @@ async function page(tbl:string,sel:string,flt:(q:any)=>any){let f=0,out:any[]=[]
   const tb=await page("target_board","id,player_id,customer_team_id,transfer_snapshot",q=>q);
   const pids=[...new Set(tb.map((r:any)=>r.player_id).filter(Boolean))];
   // fetch predictions for these players
-  let preds:any[]=[];for(let i=0;i<pids.length;i+=200){const{data}=await sb.from("player_predictions").select(F).eq("season",2027).in("player_id",pids.slice(i,i+200));preds=preds.concat(data||[]);}
+  // Paginate WITHIN each batch — .in() over many players blows past the 1000-row
+  // cap (each player has ~16 predictions). CRITICAL: order by a stable key, else
+  // .range() returns rows in arbitrary order and page 2 overlaps page 1, silently
+  // dropping whole players (that's how Bell/Grindlinger vanished).
+  let preds:any[]=[];for(let i=0;i<pids.length;i+=100){const batch=pids.slice(i,i+100);let f=0;while(true){const{data,error}=await sb.from("player_predictions").select(F).eq("season",2027).in("player_id",batch).order("id",{ascending:true}).range(f,f+999);if(error)throw error;preds=preds.concat(data||[]);if(!data||data.length<1000)break;f+=1000;}}
   const byPlayer=new Map<string,any[]>();for(const p of preds){if(!byPlayer.has(p.player_id))byPlayer.set(p.player_id,[]);byPlayer.get(p.player_id)!.push(p);}
   const pick=(pid:string,ctid:string)=>{const rows=byPlayer.get(pid)||[];
     return rows.find(r=>r.customer_team_id===ctid && r.variant==="precomputed")
