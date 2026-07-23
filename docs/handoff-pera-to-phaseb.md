@@ -149,11 +149,9 @@ everywhere. Current status:
   **READ-ONLY** on a target's page. ✔ toggles show as read-only.
 - [x] **Added to roster** — reads `player_snapshot`; the toggle lockstep write keeps it
   identical to the board line.
-- [ ] **Targets-tab board** (`TargetBoardSubtab`) — STILL reads live `player_predictions`
-  (line 316). Must switch to `transfer_snapshot` (roster→`player_snapshot`) so it reflects
-  saved toggles. ← TODO
-- [ ] **GM target board** (`useGmTargetBoard`) — STILL reads live `player_predictions`
-  (line 70). Must switch to `transfer_snapshot` (roster→`player_snapshot`). ← TODO
+- [x] **Targets-tab board** (`TargetBoardSubtab`) — reads the resolved DISPLAY line
+  (roster→`player_snapshot`, else→`transfer_snapshot`, scouting from live) (`8ed583f`).
+- [x] **GM target board** (`useGmTargetBoard`) — same resolution (`8ed583f`).
 - [ ] **Identical-value pass:** pick one toggled target + one toggled rostered target and
   confirm the WAR / market / projected value match across TB board, Targets tab, profile,
   GM board, and roster.
