@@ -114,8 +114,12 @@ consistency pass:
 - [ ] Prod SQL batch: pRV+/wRC+ rounding + p_war/o_war + depth-IP + market
 - [ ] Prod `target_board` column migration (`player_snapshot`, `production_notes`)
 - [ ] Prod re-bake build snapshots (`scripts/rebake-build-snapshots.ts` — recreate; was a one-off)
-- [ ] **Prod: null returner-TWP `market_value`** (SQL below) — **137 prod rows**. Must run
-      BEFORE the transfer_snapshot backfill so TWP snapshots don't re-inherit the contaminant.
+- [ ] **Prod: `scripts/fix-returner-twp-hitter-market.ts --apply`** — **~137 prod rows**.
+      Recomputes returner-TWP `twp_hitter_market_value` with the current canonical
+      `computeHitterMarketValue` (new equation) AND nulls the shared `market_value`.
+      Must run BEFORE the transfer_snapshot backfill so TWP snapshots pick up the
+      canonical split, not the contaminant. (Supersedes the earlier paste-SQL, which
+      only nulled — this also makes the stored value canonical.)
 - [ ] **Prod backfill `target_board.transfer_snapshot`** — `scripts/backfill-target-transfer-snapshots.ts --apply`
       (TWP-aware now: nulls `nil_valuation` for TWPs, stamps `is_twp`, keeps side-aware splits.
       Expect noPrediction=0. If any noPrediction, STOP — that's the pagination-order bug, not a gap.)
@@ -131,17 +135,11 @@ consistency pass:
   + nulls `market_value` for `is_twp` (commit `4d9d224`). `backfill-target-transfer-snapshots.ts`
   nulls `nil_valuation` for TWPs + stamps `is_twp` (commit `f165c3c`). TB sim clean-read reads
   market via canonical `pickHitter/pickPitcherMarketValue` (`f165c3c`).
-- **Staging SQL run:** null returner-TWP market_value (idempotent):
-  ```sql
-  UPDATE player_predictions pp SET market_value = NULL
-  FROM players p
-  WHERE pp.player_id = p.id AND p.is_twp = true
-    AND pp.model_type = 'returner' AND pp.variant = 'regular'
-    AND pp.season = 2027 AND pp.market_value IS NOT NULL;
-  ```
-- **Calibration note (open):** stored returner `twp_hitter` for Kenny (33,259) is ~10% below what
-  `computeHitterMarketValue` now produces (36,585). Left as-is (matches what the build shows);
-  the value refreshes to canonical whenever the returner precompute re-runs at finalization.
+- **Data (staging done):** `scripts/fix-returner-twp-hitter-market.ts --apply` — recomputes
+  returner-TWP `twp_hitter_market_value` canonically (new equation) + nulls `market_value`.
+  Kenny end-to-end: player_predictions `twp_hitter=36,585, market_value=null`; transfer_snapshot
+  `twpH=36,585, nil_valuation=null`. Both consistent + canonical. (Trevor: stored uses the new
+  equation; the toggle flow recomputes from that neutral with the same canonical fns.)
 
 ### Staging data ops run so far (mirror on prod)
 - pRV+/wRC+ rounding + p_war/o_war recompute
