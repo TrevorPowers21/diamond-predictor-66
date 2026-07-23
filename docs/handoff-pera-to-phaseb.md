@@ -120,6 +120,24 @@ consistency pass:
   - [x] Stage 4 — TWP side-aware in the save (twp_hitter/twp_pitcher via `projectedNilForPlayer`,
     merges onto existing snapshot so the untoggled side survives, nulls shared).
   - [ ] **BROWSER-VERIFY** the toggle→save→reload cycle (see below) — not yet loaded.
+  - [ ] **Stage 5 — KILL THE FLICKER LOAD (Trevor priority).** The board list loads instantly
+    (one query), but the TB sync then calls `addPlayerFromTargetSearch` **per-player in an await
+    loop** (TeamBuilder.tsx ~2952) + the async `liveTargetPredictions` query → "group appears,
+    then players trickle in." Now that the board data carries `transfer_snapshot` +
+    `production_notes` (useTargetBoard selects them), build EVERY target row **synchronously in
+    one batch** from `supabaseTargetBoard` → one `setRosterPlayers` → instant, no waves. TWPs
+    spawn two rows (hitter side / pitcher side) from the one merged snapshot. Drop the per-player
+    async fetch + the `liveTargetPredictions` dependency for display.
+  - [ ] **TWP toggle side-crossing bug** — a hitter toggle on a TWP wrote a PITCHER depth role
+    (`swing_starter`) into `hitter_depth_role` (Kenny showed owar 1.315/swing_starter instead of
+    1.499/cornerstone). `saveTargetToggle` must keep the hitter side (o_war, hitter_depth_role,
+    twp_hitter) and pitcher side (p_war, pitcher_depth_role, twp_pitcher) strictly separate when
+    merging onto the existing snapshot — never let the toggled row's depth_role land on the wrong side.
+  - [ ] **TWP roster-save pollution** — the SP-slot `team_build_players.player_snapshot` carries a
+    stale hitter side (o_war 1.315 / swing_starter). Latent (not displayed if sides read right),
+    but the roster save should not write the other side's stats onto a slot row.
+- **Prod rostered-consistency backfill is TWP-merge aware** (`667ce8e`) — hitter fields from the
+  hitter slot, pitcher fields from the pitcher slot. Re-run on prod after the transfer_snapshot backfill.
   - [ ] Follow-up: load path could also hydrate the row's toggle CONTROLS from saved
     `production_notes` (today the displayed stats are correct via transfer_snapshot, but the
     depth/dev-agg dropdowns show defaults until re-derived). Low priority — display is right.
