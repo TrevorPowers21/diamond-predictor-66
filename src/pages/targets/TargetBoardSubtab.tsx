@@ -511,7 +511,7 @@ export default function TargetBoardSubtab() {
                 <TableHead className="w-[56px] text-center p-0 sticky left-[28px] z-10 bg-[#0a1428]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Rank</span>
                 </TableHead>
-                <TableHead className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                <TableHead className="w-[220px] max-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                   <HitterSortBtn label="Player" sk="name" />
                 </TableHead>
                 <TableHead className="min-w-[96px]">
@@ -556,14 +556,14 @@ export default function TargetBoardSubtab() {
                             {i + 1}
                           </span>
                         </TableCell>
-                        <TableCell className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                        <TableCell className="w-[220px] max-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                           <Link
                             to={profileRouteFor(r.player_id, r.position, r.position)}
-                            className="font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
+                            className="block truncate font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
                           >
                             {r.first_name} {r.last_name}
                           </Link>
-                          <div className="text-[11px] text-[#8a94a6]">
+                          <div className="truncate text-[11px] text-[#8a94a6]">
                             {r.position || "—"} · {r.team || "—"}
                             {r.class_year ? ` · ${r.class_year}` : ""}
                           </div>
@@ -630,7 +630,7 @@ export default function TargetBoardSubtab() {
                 <TableHead className="w-[56px] text-center p-0 sticky left-[28px] z-10 bg-[#0a1428]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Rank</span>
                 </TableHead>
-                <TableHead className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                <TableHead className="w-[220px] max-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                   <PitcherSortBtn label="Player" sk="name" />
                 </TableHead>
                 <TableHead className="min-w-[96px]">
@@ -676,14 +676,14 @@ export default function TargetBoardSubtab() {
                             {i + 1}
                           </span>
                         </TableCell>
-                        <TableCell className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                        <TableCell className="w-[220px] max-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                           <Link
                             to={profileRouteFor(r.player_id, r.position, r.position)}
-                            className="font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
+                            className="block truncate font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
                           >
                             {r.first_name} {r.last_name}
                           </Link>
-                          <div className="text-[11px] text-[#8a94a6]">
+                          <div className="truncate text-[11px] text-[#8a94a6]">
                             {r.position || "—"} · {r.team || "—"}
                             {r.class_year ? ` · ${r.class_year}` : ""}
                           </div>
