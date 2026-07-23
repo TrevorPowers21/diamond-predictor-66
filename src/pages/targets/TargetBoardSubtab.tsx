@@ -557,15 +557,17 @@ export default function TargetBoardSubtab() {
                           </span>
                         </TableCell>
                         <TableCell className="w-[220px] max-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
-                          <Link
-                            to={profileRouteFor(r.player_id, r.position, r.position)}
-                            className="block truncate font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
-                          >
-                            {r.first_name} {r.last_name}
-                          </Link>
-                          <div className="truncate text-[11px] text-[#8a94a6]">
-                            {r.position || "—"} · {r.team || "—"}
-                            {r.class_year ? ` · ${r.class_year}` : ""}
+                          <div className="w-[188px] overflow-hidden">
+                            <Link
+                              to={profileRouteFor(r.player_id, r.position, r.position)}
+                              className="block truncate font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
+                            >
+                              {r.first_name} {r.last_name}
+                            </Link>
+                            <div className="truncate text-[11px] text-[#8a94a6]">
+                              {r.position || "—"} · {r.team || "—"}
+                              {r.class_year ? ` · ${r.class_year}` : ""}
+                            </div>
                           </div>
                         </TableCell>
                         <TableCell className="min-w-[96px]">{portalBadge(r)}</TableCell>
@@ -677,15 +679,17 @@ export default function TargetBoardSubtab() {
                           </span>
                         </TableCell>
                         <TableCell className="w-[220px] max-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
-                          <Link
-                            to={profileRouteFor(r.player_id, r.position, r.position)}
-                            className="block truncate font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
-                          >
-                            {r.first_name} {r.last_name}
-                          </Link>
-                          <div className="truncate text-[11px] text-[#8a94a6]">
-                            {r.position || "—"} · {r.team || "—"}
-                            {r.class_year ? ` · ${r.class_year}` : ""}
+                          <div className="w-[188px] overflow-hidden">
+                            <Link
+                              to={profileRouteFor(r.player_id, r.position, r.position)}
+                              className="block truncate font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
+                            >
+                              {r.first_name} {r.last_name}
+                            </Link>
+                            <div className="truncate text-[11px] text-[#8a94a6]">
+                              {r.position || "—"} · {r.team || "—"}
+                              {r.class_year ? ` · ${r.class_year}` : ""}
+                            </div>
                           </div>
                         </TableCell>
                         <TableCell className="min-w-[96px]">{portalBadge(r)}</TableCell>
