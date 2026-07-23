@@ -112,6 +112,14 @@ consistency pass:
 ## 8. Prod promotion (after staging verified, before main)
 - [ ] Open staging PR (always-PR rule)
 - [ ] Prod SQL batch: pRV+/wRC+ rounding + p_war/o_war + depth-IP + market
-- [ ] Prod `target_board` column migration
-- [ ] Prod re-bake build snapshots
+- [ ] Prod `target_board` column migration (`player_snapshot`, `production_notes`)
+- [ ] Prod re-bake build snapshots (`scripts/rebake-build-snapshots.ts` — recreate; was a one-off)
+- [ ] **Prod backfill `target_board.transfer_snapshot`** — `scripts/backfill-target-transfer-snapshots.ts --apply`
+      (prod = 178 rows, ALL null; ~155 backfill, ~23 have no 2027 prediction on prod either — un-projectable, leave them)
 - [ ] You drive the staging → main PR + click prod
+
+### Staging data ops run so far (mirror on prod)
+- pRV+/wRC+ rounding + p_war/o_war recompute
+- projected_ip = depth-role IP + p_war (4,844 rows)
+- re-bake build snapshots (1,117 rows)
+- backfill target_board.transfer_snapshot (117 rows; 45 no-prediction skipped)
