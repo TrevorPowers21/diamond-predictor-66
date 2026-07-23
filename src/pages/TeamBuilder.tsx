@@ -2227,6 +2227,14 @@ export default function TeamBuilder() {
     const treatAsPitcher = isPitcher(player);
     const proj = playerProjection(player);
     if (!proj) return;
+    // NEVER persist a neutral line. If the recompute didn't yield an adjusted value
+    // (e.g. the live neutral wasn't loaded when the debounce fired), abort — leave
+    // the row dirty (still showing the live-adjusted value) instead of writing/
+    // reverting to neutral. This is what caused "toggle → reverts to neutral".
+    const projValid = treatAsPitcher
+      ? (proj.pwar != null && Number.isFinite(Number(proj.pwar)))
+      : (proj.owar != null && Number.isFinite(Number(proj.owar)));
+    if (!projValid) return;
     const shown: any = proj.shown ?? {};
     // Merge onto the existing snapshot so a TWP's OTHER side (its own rosterPlayers
     // row, same player_id) is preserved when only this side's toggle moved.
@@ -2245,7 +2253,7 @@ export default function TeamBuilder() {
     } else {
       const f = { p_avg: shown.p_avg ?? t.p_avg ?? null, p_obp: shown.p_obp ?? t.p_obp ?? null, p_slg: shown.p_slg ?? t.p_slg ?? null, p_wrc_plus: proj.shownWrc ?? shown.p_wrc_plus ?? t.p_wrc_plus ?? null, hitter_depth_role: player.depth_role ?? t.hitter_depth_role ?? null };
       Object.assign(t, f); Object.assign(bp, f);
-      t.owar = proj.owar ?? null; bp.o_war = proj.owar ?? null;
+      t.owar = proj.owar ?? null; t.o_war = proj.owar ?? null; bp.o_war = proj.owar ?? null;
       if (isTwp) { t.twp_hitter_market_value = mkt; bp.twp_hitter_market_value = mkt; t.nil_valuation = null; bp.market_value = null; }
       else if (mkt != null) { t.nil_valuation = mkt; bp.market_value = mkt; }
     }
@@ -2272,10 +2280,12 @@ export default function TeamBuilder() {
         .eq("build_id", selectedBuildId).eq("player_id", pid);
     }
     // Local: adopt the saved snapshot + clear dirty on every row for this player
-    // (a TWP's two rows both settle) → back to a synchronous snapshot read.
+    // (a TWP's two rows both settle) → back to a synchronous snapshot read. Force
+    // prediction=null so the clean-read (p.prediction ?? p.transfer_snapshot) uses
+    // the just-saved adjusted transfer_snapshot, not a shadowing neutral prediction.
     setRosterPlayers((prev) => prev.map((p) =>
       p.player_id === pid && (p.roster_status || "returner") === "target"
-        ? { ...p, transfer_snapshot: t, _dirty: false } : p));
+        ? { ...p, prediction: null, transfer_snapshot: t, _dirty: false } : p));
   }, [effectiveTeamId, playerProjection, projectedNilForPlayer, selectedBuildId]);
   const saveTargetToggleRef = useRef(saveTargetToggle);
   useEffect(() => { saveTargetToggleRef.current = saveTargetToggle; }, [saveTargetToggle]);
