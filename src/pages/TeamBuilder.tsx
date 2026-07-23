@@ -3017,6 +3017,11 @@ export default function TeamBuilder() {
         let changed = false;
         const next = prev.map((p) => {
           if ((p.roster_status || "returner") !== "target" || !p.player_id || (p as any)._dirty) return p;
+          // RULE: off roster (included_in_roster=false) reads transfer_snapshot; ON
+          // roster (=true) reads its build player_snapshot (loaded into p.prediction
+          // by useLoadBuild) — do NOT overlay the transfer line onto a rostered target
+          // or its WAR/market read the wrong (transfer) line. Save keeps them 1:1.
+          if ((p as any).included_in_roster === true) return p;
           const saved = savedByPid.get(p.player_id);
           const s: any = saved?.transfer_snapshot;
           if (!s) return p;
