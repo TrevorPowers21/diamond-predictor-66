@@ -86,14 +86,24 @@ consistency pass:
 - [ ] ReturningPlayers / pitcher dashboard · Rankings
 
 ## 5. 🔧 OPEN — Target board (Team Builder)
-- [ ] Load-order issue — board display loads piecemeal; make it load instantly like the targets tab
-- [ ] Toggle changes DON'T persist — wire the TB target board to `production_notes` → snapshot (likely never done)
-- [ ] TWP on the targets page view — verify markets
+- **DECISION (Trevor): board = DISPLAY-ONLY.** A board target just shows its stored
+  line; toggles only happen once pulled onto the roster. So NO production_notes
+  persistence on the board — the fix is purely "read the stored line instantly."
+- [ ] Load-order issue — board display waits on the async `liveTargetPredictions`
+  query (`useTeamBuilderSimulation` ~line 512) → targets pop in one-by-one. Make
+  it read the immediate stored line (snapshot / `transfer_snapshot`) like the
+  targets tab, so it loads instantly.
+- [ ] TWP on the targets page view — verify pitcher/hitter markets show right
 - [ ] "NOT IN PORTAL" display bug
-- [ ] DECISION NEEDED: should a board target be toggle-able at all (persist per-program), or display-only until rostered?
 
 ## 6. 🔧 OPEN — Player profiles
-- [ ] Make profiles DISPLAY-ONLY (disable toggles) — not wired to production_notes, can corrupt data. Mirror how rostered players already render read-only.
+- **DECISION (Trevor): display-only for RETURNERS + TARGETS; interactive/local for
+  everyone else** (pure scouting players not on a roster or board).
+- [ ] Extend `buildPinned` (currently `warOverride !== undefined`) so the read-only
+  labels also show when the player is a **target** (on the board). Keep the
+  interactive Selects only for non-returner / non-target players. `buildPinned` is
+  used ONLY for these controls (PitcherProfile 2182, PlayerProfile 1774), so it's
+  contained. Make the "from team build" note conditional (build context only).
 
 ## 7. 🔧 OPEN — deferred refinements
 - [ ] Load-time self-healing guard (verify snapshot == f(neutral, notes), heal drift)
