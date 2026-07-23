@@ -511,7 +511,7 @@ export default function TargetBoardSubtab() {
                 <TableHead className="w-[56px] text-center p-0 sticky left-[28px] z-10 bg-[#0a1428]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Rank</span>
                 </TableHead>
-                <TableHead className="w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                <TableHead className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                   <HitterSortBtn label="Player" sk="name" />
                 </TableHead>
                 <TableHead className="w-[96px] sticky left-[304px] z-10 bg-[#0a1428]">
@@ -556,7 +556,7 @@ export default function TargetBoardSubtab() {
                             {i + 1}
                           </span>
                         </TableCell>
-                        <TableCell className="w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                        <TableCell className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                           <Link
                             to={profileRouteFor(r.player_id, r.position, r.position)}
                             className="font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
@@ -630,7 +630,7 @@ export default function TargetBoardSubtab() {
                 <TableHead className="w-[56px] text-center p-0 sticky left-[28px] z-10 bg-[#0a1428]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Rank</span>
                 </TableHead>
-                <TableHead className="w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                <TableHead className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                   <PitcherSortBtn label="Player" sk="name" />
                 </TableHead>
                 <TableHead className="w-[96px] sticky left-[304px] z-10 bg-[#0a1428]">
@@ -676,7 +676,7 @@ export default function TargetBoardSubtab() {
                             {i + 1}
                           </span>
                         </TableCell>
-                        <TableCell className="w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
+                        <TableCell className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                           <Link
                             to={profileRouteFor(r.player_id, r.position, r.position)}
                             className="font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
