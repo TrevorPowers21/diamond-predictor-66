@@ -507,11 +507,11 @@ export default function TargetBoardSubtab() {
           <Table>
             <TableHeader>
               <TableRow className="border-b border-[#162241] hover:bg-transparent">
-                <TableHead className="w-[28px] p-0"></TableHead>
-                <TableHead className="w-[56px] text-center p-0 sticky left-0 z-10 bg-[#0a1428]">
+                <TableHead className="w-[28px] p-0 sticky left-0 z-10 bg-[#0a1428]"></TableHead>
+                <TableHead className="w-[56px] text-center p-0 sticky left-[28px] z-10 bg-[#0a1428]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Rank</span>
                 </TableHead>
-                <TableHead className="min-w-[220px] sticky left-[56px] z-10 bg-[#0a1428]">
+                <TableHead className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                   <HitterSortBtn label="Player" sk="name" />
                 </TableHead>
                 <TableHead className="min-w-[96px]">
@@ -537,7 +537,7 @@ export default function TargetBoardSubtab() {
                   <SortableRow key={r.player_id} id={r.player_id}>
                     {({ listeners, attributes, isDragging }) => (
                       <>
-                        <TableCell className="w-[28px] p-0 text-center align-middle">
+                        <TableCell className="w-[28px] p-0 text-center align-middle sticky left-0 z-10 bg-[#0a1428]">
                           <button
                             type="button"
                             {...listeners}
@@ -551,12 +551,12 @@ export default function TargetBoardSubtab() {
                             <GripVertical className="h-4 w-4" />
                           </button>
                         </TableCell>
-                        <TableCell className="w-[56px] p-0 text-center align-middle sticky left-0 z-10 bg-[#0a1428]">
+                        <TableCell className="w-[56px] p-0 text-center align-middle sticky left-[28px] z-10 bg-[#0a1428]">
                           <span className="inline-flex items-center justify-center min-w-[28px] h-6 px-2 rounded-md text-[12px] font-bold tabular-nums text-[#D4AF37] bg-[#D4AF37]/10 ring-1 ring-[#D4AF37]/20">
                             {i + 1}
                           </span>
                         </TableCell>
-                        <TableCell className="min-w-[220px] sticky left-[56px] z-10 bg-[#0a1428]">
+                        <TableCell className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                           <Link
                             to={profileRouteFor(r.player_id, r.position, r.position)}
                             className="font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
@@ -626,11 +626,11 @@ export default function TargetBoardSubtab() {
           <Table>
             <TableHeader>
               <TableRow className="border-b border-[#162241] hover:bg-transparent">
-                <TableHead className="w-[28px] p-0"></TableHead>
-                <TableHead className="w-[56px] text-center p-0 sticky left-0 z-10 bg-[#0a1428]">
+                <TableHead className="w-[28px] p-0 sticky left-0 z-10 bg-[#0a1428]"></TableHead>
+                <TableHead className="w-[56px] text-center p-0 sticky left-[28px] z-10 bg-[#0a1428]">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Rank</span>
                 </TableHead>
-                <TableHead className="min-w-[220px] sticky left-[56px] z-10 bg-[#0a1428]">
+                <TableHead className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                   <PitcherSortBtn label="Player" sk="name" />
                 </TableHead>
                 <TableHead className="min-w-[96px]">
@@ -657,7 +657,7 @@ export default function TargetBoardSubtab() {
                   <SortableRow key={r.player_id} id={r.player_id}>
                     {({ listeners, attributes, isDragging }) => (
                       <>
-                        <TableCell className="w-[28px] p-0 text-center align-middle">
+                        <TableCell className="w-[28px] p-0 text-center align-middle sticky left-0 z-10 bg-[#0a1428]">
                           <button
                             type="button"
                             {...listeners}
@@ -671,12 +671,12 @@ export default function TargetBoardSubtab() {
                             <GripVertical className="h-4 w-4" />
                           </button>
                         </TableCell>
-                        <TableCell className="w-[56px] p-0 text-center align-middle sticky left-0 z-10 bg-[#0a1428]">
+                        <TableCell className="w-[56px] p-0 text-center align-middle sticky left-[28px] z-10 bg-[#0a1428]">
                           <span className="inline-flex items-center justify-center min-w-[28px] h-6 px-2 rounded-md text-[12px] font-bold tabular-nums text-[#D4AF37] bg-[#D4AF37]/10 ring-1 ring-[#D4AF37]/20">
                             {i + 1}
                           </span>
                         </TableCell>
-                        <TableCell className="min-w-[220px] sticky left-[56px] z-10 bg-[#0a1428]">
+                        <TableCell className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                           <Link
                             to={profileRouteFor(r.player_id, r.position, r.position)}
                             className="font-medium text-slate-200 hover:text-[#D4AF37] hover:underline transition-colors"
