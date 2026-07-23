@@ -3042,14 +3042,23 @@ export default function TeamBuilder() {
         let changed = false;
         const next = prev.map((p) => {
           if ((p.roster_status || "returner") !== "target" || !p.player_id || (p as any)._dirty) return p;
-          // RULE: off roster (included_in_roster=false) reads transfer_snapshot; ON
-          // roster (=true) reads its build player_snapshot (loaded into p.prediction
-          // by useLoadBuild) — do NOT overlay the transfer line onto a rostered target
-          // or its WAR/market read the wrong (transfer) line. Save keeps them 1:1.
-          if ((p as any).included_in_roster === true) return p;
           const saved = savedByPid.get(p.player_id);
           const s: any = saved?.transfer_snapshot;
           if (!s) return p;
+          // ON roster reads its build player_snapshot (p.prediction); OFF roster reads
+          // transfer_snapshot. transfer_snapshot is kept 1:1 with player_snapshot by the
+          // lockstep + consistency backfill, so a ROSTERED target SELF-HEALS its
+          // (possibly stale) in-memory prediction from the fresh 1:1 transfer_snapshot —
+          // no manual build reload needed. Each TWP row reads its own side from the line.
+          if ((p as any).included_in_roster === true) {
+            const norm: any = { ...s, o_war: s.o_war ?? s.owar, market_value: s.market_value ?? s.nil_valuation };
+            const cur: any = p.prediction;
+            const same = cur && cur.o_war === norm.o_war && cur.p_war === norm.p_war && cur.p_wrc_plus === norm.p_wrc_plus
+              && cur.p_rv_plus === norm.p_rv_plus && cur.twp_hitter_market_value === norm.twp_hitter_market_value && cur.twp_pitcher_market_value === norm.twp_pitcher_market_value;
+            if (same) return p;
+            changed = true;
+            return { ...p, prediction: norm, _dirty: false };
+          }
           const cur: any = p.transfer_snapshot;
           const same = cur && cur.owar === s.owar && cur.p_war === s.p_war && cur.p_wrc_plus === s.p_wrc_plus
             && cur.p_rv_plus === s.p_rv_plus && cur.nil_valuation === s.nil_valuation
