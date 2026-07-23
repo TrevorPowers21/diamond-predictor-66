@@ -198,6 +198,17 @@ everywhere. Current status:
       `rebake-twp-markets.ts`. Staging done (Kenny: hitter 1.499/cornerstone/61,817, pitcher
       0.832/swing_starter/31,193, cleanly separated).
 
+### ✅ Removed the last stray live-compute for targets (`37ec75d`)
+`PlayerTableRow` ran `simulateTransferProjection` (a live transfer-to-team compute) for EVERY
+target and displayed its oWAR/market, overriding the snapshot read. It coincidentally matched
+for real transfers but was wrong for a returner-on-the-board (Kenny: off a wrong-team transfer
+wRC+ 113 → 1.42, while wRC+ correctly read 115 from the snapshot). Now targets read
+`projection.owar` + `projectedNilForPlayer` (the snapshot: rostered→player_snapshot,
+else→transfer_snapshot). No call sites of `simulateTransferProjection` remain.
+**RULE (Trevor): the ONLY live compute allowed is the split-second a toggle moves (dirty row
+recomputes from neutral, then auto-saves → snapshot read). Every other row — returner, rostered,
+target — reads its stored snapshot. Nothing else should ever live-compute.**
+
 ### ✅ TWP strict own-side — FIXED (`3316078`)
 Root cause: each TWP slot snapshot carried a polluted off-side (RF slot bad p_war 2.360, SP slot
 bad o_war 1.315), and the merged transfer_snapshot pulled the wrong side, so market/WAR crossed.
