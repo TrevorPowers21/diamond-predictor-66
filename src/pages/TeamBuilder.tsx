@@ -3004,6 +3004,42 @@ export default function TeamBuilder() {
     if (targetBoardLoading) return;
     const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 
+    // Phase B for targets — overlay each loaded target's SAVED transfer_snapshot +
+    // toggle state (target_board.transfer_snapshot / production_notes) onto its row,
+    // so a persisted toggle survives refresh instead of the rebuilt-neutral line the
+    // add path produces. Idempotent (skips rows already equal); never touches a DIRTY
+    // row (an in-session edge mid-save).
+    const overlaySavedTargets = () => {
+      const savedByPid = new Map<string, any>();
+      for (const sbRow of supabaseTargetBoard) if ((sbRow as any).transfer_snapshot) savedByPid.set(sbRow.player_id, sbRow);
+      if (savedByPid.size === 0) return;
+      setRosterPlayers((prev) => {
+        let changed = false;
+        const next = prev.map((p) => {
+          if ((p.roster_status || "returner") !== "target" || !p.player_id || (p as any)._dirty) return p;
+          const saved = savedByPid.get(p.player_id);
+          const s: any = saved?.transfer_snapshot;
+          if (!s) return p;
+          const cur: any = p.transfer_snapshot;
+          const same = cur && cur.owar === s.owar && cur.p_war === s.p_war && cur.p_wrc_plus === s.p_wrc_plus
+            && cur.p_rv_plus === s.p_rv_plus && cur.nil_valuation === s.nil_valuation
+            && cur.twp_hitter_market_value === s.twp_hitter_market_value && cur.twp_pitcher_market_value === s.twp_pitcher_market_value;
+          if (same) return p;
+          changed = true;
+          const meta = parseBuildPlayerMeta(saved.production_notes);
+          return {
+            ...p, transfer_snapshot: s, prediction: null, _dirty: false,
+            depth_role: meta?.depthRole ?? p.depth_role,
+            dev_aggressiveness: meta?.devAggressiveness ?? p.dev_aggressiveness,
+            class_transition: meta?.classTransition ?? p.class_transition,
+            dev_aggressiveness_overridden: meta?.devAggressivenessOverridden ?? p.dev_aggressiveness_overridden,
+            class_transition_overridden: meta?.classTransitionOverridden ?? p.class_transition_overridden,
+          };
+        });
+        return changed ? next : prev;
+      });
+    };
+
     // Push roster targets → Supabase (deduped against in-session push history)
     const rosterTargets = rosterPlayers.filter((p) => (p.roster_status || "returner") === "target" && p.player_id && isUuid(p.player_id));
     for (const p of rosterTargets) {
@@ -3065,9 +3101,13 @@ export default function TeamBuilder() {
               __sync: true,
             });
           }
+          // After the fresh adds land, overlay any saved toggle line onto them.
+          overlaySavedTargets();
         })();
       }
     }
+    // Already-loaded targets (saved-build load, or no new pulls): overlay now too.
+    overlaySavedTargets();
 
     // Reverse-direction sync: when target_board entries get deleted on
     // another surface (Targets page trash icon, Player Profile remove, etc.),

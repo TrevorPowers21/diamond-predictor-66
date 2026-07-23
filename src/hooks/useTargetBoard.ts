@@ -26,6 +26,10 @@ export interface TargetBoardRow {
   portal_status: PortalStatus;
   bats_hand: string | null;
   division: string | null;
+  // Phase B for targets — the saved DISPLAYED line + toggle state, so a persisted
+  // toggle survives refresh instead of being rebuilt to neutral.
+  transfer_snapshot: Record<string, any> | null;
+  production_notes: string | null;
 }
 
 /**
@@ -67,7 +71,7 @@ export function useTargetBoard() {
       // is what guarantees a superadmin sees one team at a time, never a blend.
       if (!effectiveTeamId) return [];
       const { data, error } = await tb()
-        .select("id, player_id, notes, added_at, players!inner(first_name, last_name, team, conference, position, class_year, portal_status, bats_hand, division, source_player_id)")
+        .select("id, player_id, notes, added_at, transfer_snapshot, production_notes, players!inner(first_name, last_name, team, conference, position, class_year, portal_status, bats_hand, division, source_player_id)")
         // Team-scoped only — every coach on the team sees the same board.
         .eq("customer_team_id", effectiveTeamId!)
         .order("added_at", { ascending: false });
@@ -89,6 +93,8 @@ export function useTargetBoard() {
         portal_status: row.players.portal_status || "NOT IN PORTAL",
         bats_hand: row.players.bats_hand ?? null,
         division: row.players.division ?? null,
+        transfer_snapshot: row.transfer_snapshot ?? null,
+        production_notes: row.production_notes ?? null,
       })) as TargetBoardRow[];
     },
     // Refetch when the user re-focuses TB / Targets / any surface using the
