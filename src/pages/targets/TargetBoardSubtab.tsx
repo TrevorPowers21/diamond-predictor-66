@@ -528,6 +528,7 @@ export default function TargetBoardSubtab() {
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Scouting</span>
                 </TableHead>
                 <TableHead className="w-[36px] p-0"></TableHead>
+                <TableHead className="w-full p-0"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -608,6 +609,7 @@ export default function TargetBoardSubtab() {
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </TableCell>
+                        <TableCell className="w-full p-0"></TableCell>
                       </>
                     )}
                   </SortableRow>
@@ -650,6 +652,7 @@ export default function TargetBoardSubtab() {
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Scouting</span>
                 </TableHead>
                 <TableHead className="w-[36px] p-0"></TableHead>
+                <TableHead className="w-full p-0"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -731,6 +734,7 @@ export default function TargetBoardSubtab() {
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </TableCell>
+                        <TableCell className="w-full p-0"></TableCell>
                       </>
                     )}
                   </SortableRow>
