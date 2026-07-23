@@ -39,7 +39,7 @@ import {
   pitcherRoleFromSlot,
 } from "../helpers";
 import type { BuildPlayer, TeamRow } from "../types";
-import { pickPitcherMarketValue } from "@/lib/twpMarketValue";
+import { pickHitterMarketValue, pickPitcherMarketValue } from "@/lib/twpMarketValue";
 
 // ── Module-level pure helpers ────────────────────────────────────────────────
 
@@ -1576,9 +1576,18 @@ export function useTeamBuilderSimulation(params: UseTeamBuilderSimulationParams)
       // (nil_valuation) — read the stored market instantly, no async recompute.
       const snap: any = p.prediction ?? p.transfer_snapshot;
       const rap = side === "pitcher" || (side == null && isPitcher(p));
-      const m = (!!(p.player as any)?.is_twp && rap)
-        ? (snap?.twp_pitcher_market_value ?? snap?.market_value ?? snap?.nil_valuation)
-        : (snap?.market_value ?? snap?.nil_valuation);
+      const isTwpP = !!(p.player as any)?.is_twp;
+      // Side-aware via the canonical helper: a TWP reads its hitter/pitcher split,
+      // never the shared field (which is NULL for TWPs). Normalize the field-name
+      // gap first — transfer_snapshot uses nil_valuation, build snapshot market_value.
+      const normalized = {
+        market_value: snap?.market_value ?? snap?.nil_valuation ?? null,
+        twp_hitter_market_value: snap?.twp_hitter_market_value,
+        twp_pitcher_market_value: snap?.twp_pitcher_market_value,
+      };
+      const m = rap
+        ? pickPitcherMarketValue(normalized, isTwpP)
+        : pickHitterMarketValue(normalized, isTwpP);
       if (m != null && Number.isFinite(Number(m))) return Math.max(0, Number(m));
     }
     const renderAsPitcher = side === "pitcher" || (side == null && isPitcher(p));

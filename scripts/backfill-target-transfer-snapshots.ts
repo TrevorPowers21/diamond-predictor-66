@@ -6,6 +6,13 @@ async function page(tbl:string,sel:string,flt:(q:any)=>any){let f=0,out:any[]=[]
 (async()=>{
   const tb=await page("target_board","id,player_id,customer_team_id,transfer_snapshot",q=>q);
   const pids=[...new Set(tb.map((r:any)=>r.player_id).filter(Boolean))];
+  // TWP flag per player — a TWP's shared market_value is meaningless (the real
+  // values live in twp_hitter/twp_pitcher_market_value). Some source rows (a
+  // returner fallback) wrongly populate market_value alongside the splits, so we
+  // must NULL nil_valuation for TWPs and rely on the side-aware splits, exactly
+  // like player_predictions/player_snapshot do.
+  const twp=new Set<string>();
+  for(let i=0;i<pids.length;i+=200){const{data}=await sb.from("players").select("id,is_twp").in("id",pids.slice(i,i+200));for(const p of (data||[])) if((p as any).is_twp) twp.add((p as any).id);}
   // fetch predictions for these players
   // Paginate WITHIN each batch — .in() over many players blows past the 1000-row
   // cap (each player has ~16 predictions). CRITICAL: order by a stable key, else
@@ -21,7 +28,8 @@ async function page(tbl:string,sel:string,flt:(q:any)=>any){let f=0,out:any[]=[]
   for(const r of tb){
     const p=pick(r.player_id,r.customer_team_id);
     if(!p){noPred++;continue;}
-    const snap={p_avg:p.p_avg,p_obp:p.p_obp,p_slg:p.p_slg,p_wrc_plus:p.p_wrc_plus,p_era:p.p_era,p_fip:p.p_fip,p_whip:p.p_whip,p_k9:p.p_k9,p_bb9:p.p_bb9,p_hr9:p.p_hr9,p_rv_plus:p.p_rv_plus,p_war:p.p_war,owar:p.o_war,nil_valuation:p.market_value,twp_hitter_market_value:p.twp_hitter_market_value,twp_pitcher_market_value:p.twp_pitcher_market_value};
+    const isTwp=twp.has(r.player_id);
+    const snap={p_avg:p.p_avg,p_obp:p.p_obp,p_slg:p.p_slg,p_wrc_plus:p.p_wrc_plus,p_era:p.p_era,p_fip:p.p_fip,p_whip:p.p_whip,p_k9:p.p_k9,p_bb9:p.p_bb9,p_hr9:p.p_hr9,p_rv_plus:p.p_rv_plus,p_war:p.p_war,owar:p.o_war,nil_valuation:isTwp?null:p.market_value,twp_hitter_market_value:p.twp_hitter_market_value,twp_pitcher_market_value:p.twp_pitcher_market_value,is_twp:isTwp};
     updates.push({id:r.id,transfer_snapshot:snap}); ok++;
     if(samples.length<6) samples.push(`  ${r.player_id.slice(0,8)} ctid=${r.customer_team_id.slice(0,8)}: ${p.o_war!=null?`oWAR=${Number(p.o_war).toFixed(3)}`:`pWAR=${p.p_war?.toFixed?.(3)}`} wRC+=${p.p_wrc_plus} rv=${p.p_rv_plus} mkt=${p.market_value==null?"-":Math.round(p.market_value)} twpH=${p.twp_hitter_market_value==null?"-":Math.round(p.twp_hitter_market_value)} twpP=${p.twp_pitcher_market_value==null?"-":Math.round(p.twp_pitcher_market_value)}`);
   }
