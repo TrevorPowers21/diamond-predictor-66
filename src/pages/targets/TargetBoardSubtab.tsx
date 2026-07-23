@@ -487,7 +487,7 @@ export default function TargetBoardSubtab() {
     // collapsing every non-portal player to "Watching".
     const c = portalStatusMeta(r.portal_status);
     return (
-      <Badge variant="outline" className={`text-[10px] ${c.bg} ${c.text} border-current/30`}>
+      <Badge variant="outline" className={`text-[10px] whitespace-nowrap ${c.bg} ${c.text} border-current/30`}>
         {c.label}
       </Badge>
     );
@@ -511,8 +511,8 @@ export default function TargetBoardSubtab() {
                 <TableHead className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                   <HitterSortBtn label="Player" sk="name" />
                 </TableHead>
-                <TableHead>
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Status</span>
+                <TableHead className="min-w-[96px]">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6] whitespace-nowrap">Status</span>
                 </TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="AVG" sk="p_avg" /></TableHead>
                 <TableHead className="text-right"><HitterSortBtn label="OBP" sk="p_obp" /></TableHead>
@@ -630,8 +630,8 @@ export default function TargetBoardSubtab() {
                 <TableHead className="min-w-[220px] sticky left-[84px] z-10 bg-[#0a1428]">
                   <PitcherSortBtn label="Player" sk="name" />
                 </TableHead>
-                <TableHead>
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6]">Status</span>
+                <TableHead className="min-w-[96px]">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8a94a6] whitespace-nowrap">Status</span>
                 </TableHead>
                 <TableHead className="text-right"><PitcherSortBtn label="ERA" sk="p_era" /></TableHead>
                 <TableHead className="text-right"><PitcherSortBtn label="FIP" sk="p_fip" /></TableHead>
