@@ -3122,15 +3122,13 @@ export default function TeamBuilder() {
       const existingPlayerIds = new Set(rosterPlayers.map((rp) => rp.player_id));
       const newFromSupabase = supabaseTargetBoard.filter((sb) => !existingPlayerIds.has(sb.player_id));
       if (newFromSupabase.length > 0) {
-        // The whole existing board carries a transfer_snapshot → build ALL of those
-        // rows in ONE synchronous batch (every name/stat/toggle at once, no flicker).
-        // A brand-new add (from a profile/dashboard) has no snapshot yet → fall back
-        // to the async stored-first fetch for just that player (rare, one at a time).
-        const withSnap = newFromSupabase.filter((sb) => (sb as any).transfer_snapshot);
-        const withoutSnap = newFromSupabase.filter((sb) => !(sb as any).transfer_snapshot);
+        // Every board row carries a transfer_snapshot (created at add-time) → build
+        // ALL rows in ONE synchronous batch: every name/stat/toggle at once, no async,
+        // no trickle-in flicker. (A row missing a snapshot — legacy — is skipped here
+        // and picked up by overlaySavedTargets / the next add.)
         const sideKey = (slot: any, pos: any) => `${/^(SP|RP|CL|P|LHP|RHP)/i.test(String(slot || pos || "")) ? "P" : "H"}`;
-        if (withSnap.length > 0) {
-          const rows = withSnap.flatMap((sb) => buildTargetRowsFromBoard(sb));
+        const rows = newFromSupabase.filter((sb) => (sb as any).transfer_snapshot).flatMap((sb) => buildTargetRowsFromBoard(sb));
+        if (rows.length > 0) {
           setRosterPlayers((prev) => {
             const seen = new Set(prev.map((p) => `${p.player_id}|${sideKey(p.position_slot, p.player?.position)}`));
             const toAdd = rows.filter((r) => {
@@ -3141,19 +3139,6 @@ export default function TeamBuilder() {
             });
             return toAdd.length ? [...prev, ...toAdd] : prev;
           });
-        }
-        if (withoutSnap.length > 0) {
-          (async () => {
-            for (const sb of withoutSnap) {
-              await addPlayerFromTargetSearch({
-                id: sb.player_id, first_name: sb.first_name, last_name: sb.last_name,
-                position: sb.position, class_year: sb.class_year ?? null, bats_hand: (sb as any).bats_hand ?? null,
-                team: sb.team, from_team: sb.team, conference: sb.conference ?? null,
-                source_player_id: (sb as any).source_player_id ?? null, __sync: true,
-              });
-            }
-            overlaySavedTargets();
-          })();
         }
       }
     }
