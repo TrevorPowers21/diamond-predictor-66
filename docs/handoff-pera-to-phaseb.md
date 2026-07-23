@@ -85,14 +85,43 @@ consistency pass:
 - [ ] PlayerProfile + PitcherProfile (match TB, read-only)
 - [ ] ReturningPlayers / pitcher dashboard · Rankings
 
-## 5. 🔧 OPEN — Target board (Team Builder)
-- **DECISION (Trevor): board = DISPLAY-ONLY.** A board target just shows its stored
-  line; toggles only happen once pulled onto the roster. So NO production_notes
-  persistence on the board — the fix is purely "read the stored line instantly."
-- [ ] Load-order issue — board display waits on the async `liveTargetPredictions`
-  query (`useTeamBuilderSimulation` ~line 512) → targets pop in one-by-one. Make
-  it read the immediate stored line (snapshot / `transfer_snapshot`) like the
-  targets tab, so it loads instantly.
+## 5. 🔧 IN PROGRESS — Target board = Phase B for targets (SUPERSEDES old display-only)
+- **DECISION (Trevor 2026-07-23): targets get the full Phase-B treatment, mirroring the
+  roster.** A target's toggles DO persist — to `target_board.transfer_snapshot` +
+  `target_board.production_notes` (the "transfer production notes"). The universal
+  per-program board reads ONE source (transfer_snapshot) so every team user sees the
+  same line, and it loads instantly (no per-target async wave).
+- **The model (exact mirror of the roster):**
+  - **Neutral** = `neutralPrediction` on the target row = an exact copy of the player's
+    program-scoped `player_predictions` line (team precomputed → global/returner fallback,
+    dev_agg=0). Immutable — never changes except when precomputes re-run.
+  - **Displayed** = `target_board.transfer_snapshot` = f(neutral, production_notes).
+  - **Toggle state** = `target_board.production_notes`.
+  - Every surface READS transfer_snapshot; nothing re-applies toggles on read.
+- **Toggle flow (AUTO-SAVE, no build/name needed):** toggle on the TB target row →
+  instant live-compute FROM neutral → **auto-save transfer_snapshot + production_notes to
+  target_board (debounced)** → row reverts to snapshot-only (clean read, zero live compute).
+  Recompute ALWAYS from `neutralPrediction`, never the adjusted snapshot → no double dev-agg.
+- **Add to roster:** copy transfer_snapshot → player_snapshot and production_notes verbatim
+  (exact replica) so the roster row === the board row (WAR/market/projected value carry over).
+- **Remove from board:** delete the target_board row (its transfer_snapshot + production_notes);
+  player page reverts to player_predictions.
+- **Surfaces to read transfer_snapshot (roster→player_snapshot, else→transfer_snapshot):**
+  TB target board, Targets-tab board, target player profile, GM target board, situation board.
+- **Build stages:**
+  - [ ] Stage 1 — capture `neutralPrediction` on every target-row path
+    (`addPlayerFromTargetSearch` pitcher/hitter/TWP paths + the sync pull); source = the
+    picked `player_predictions` row (e.g. TeamBuilder.tsx ~2647 `stored`).
+  - [ ] Stage 2 — load path reads DB `transfer_snapshot` + `production_notes` and applies the
+    saved toggle state (today the sync rebuilds neutral and ignores saved toggles).
+  - [ ] Stage 3 — debounced `saveTargetToggle` writes transfer_snapshot + production_notes to
+    target_board on any toggle; clears `_dirty`; updates local snapshot → snapshot-only read.
+  - [ ] Stage 4 — TWP dual-row + side-aware (twp_hitter/twp_pitcher) throughout.
+  - [ ] Kills the wave-load (§ was: board waited on async `liveTargetPredictions` ~line 512).
+- **⭐ Finalization "communication" (Trevor — broader, deferred):** when precomputes finalize,
+  `player_predictions` must propagate into (a) target `neutralPrediction`s and (b) default-build
+  `player_snapshot`s, so neutrals + default snapshots refresh instead of going stale. Design a
+  sync (precompute → neutral predictions + default build snapshots) as part of the finalization ritual.
 - [ ] TWP on the targets page view — verify pitcher/hitter markets show right
 - [ ] "NOT IN PORTAL" display bug
 
