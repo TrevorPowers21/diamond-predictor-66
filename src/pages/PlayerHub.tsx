@@ -208,11 +208,36 @@ export default function PlayerHub() {
   const isProgramPlayer = onLiveBuild === true;
   const resolving = gm.isLoading || (!!liveBuildId && membershipLoading);
 
+  // Target board: a non-rostered player who's on the program's target board is
+  // shown DISPLAY-ONLY, reading its stored transfer_snapshot — the SAME line the
+  // TB board + targets page read — never the live preview. RLS scopes the board to
+  // the program, so player_id alone is enough. Null → pure scouting (interactive).
+  const { data: targetSnap = null } = useQuery({
+    queryKey: ["player-hub-target-snapshot", playerId],
+    enabled: !!playerId && !isProgramPlayer,
+    queryFn: async () => {
+      const { data } = await (supabase as any).from("target_board")
+        .select("transfer_snapshot").eq("player_id", playerId).limit(1).maybeSingle();
+      return (data?.transfer_snapshot ?? null) as any;
+    },
+  });
+
   const dbName = dbPlayer ? [dbPlayer.first_name, dbPlayer.last_name].filter(Boolean).join(" ") : "";
   const name = (row?.name ?? dbName) || "Player";
   const position = row?.position ?? dbPlayer?.position ?? null;
   const classYr = row?.eligibility_class ?? row?.class_year ?? dbPlayer?.class_year ?? null;
   const isPitcher = isPitcherProfile(position, row?.is_pitcher ? "rhp" : null);
+  // For a board target: WAR/market from transfer_snapshot (owar / nil_valuation /
+  // twp_* field names), passed as overrides so the profile renders DISPLAY-ONLY.
+  const isTwp = !!dbPlayer?.is_twp;
+  const targetWar: number | null | undefined = targetSnap
+    ? (isPitcher ? (targetSnap.p_war ?? null) : (targetSnap.o_war ?? targetSnap.owar ?? null))
+    : undefined;
+  const targetMarket: number | null | undefined = targetSnap
+    ? (isTwp
+        ? (isPitcher ? (targetSnap.twp_pitcher_market_value ?? null) : (targetSnap.twp_hitter_market_value ?? null))
+        : (targetSnap.nil_valuation ?? null))
+    : undefined;
   const c = row ? playerComp(row) : null;
   const schMode = gm.budget?.scholarship_mode ?? "pct";
   const schDisplay = row?.scholarship_amount == null ? "—" : (schMode === "dollar" ? money(row.scholarship_amount) : `${Math.round(row.scholarship_amount)}%`);
@@ -353,8 +378,8 @@ export default function PlayerHub() {
     return (
       <Suspense fallback={<div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>}>
         {isPitcher
-          ? <PitcherProfile embedded idOverride={playerId} />
-          : <PlayerProfile embedded idOverride={playerId} />}
+          ? <PitcherProfile embedded idOverride={playerId} warOverride={targetWar} marketOverride={targetMarket} />
+          : <PlayerProfile embedded idOverride={playerId} warOverride={targetWar} marketOverride={targetMarket} />}
       </Suspense>
     );
   }
